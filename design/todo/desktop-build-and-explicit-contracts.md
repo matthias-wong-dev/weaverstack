@@ -214,7 +214,7 @@ query that shaped it.
 
 **C5. Delete.** `needs_spark` and its five declarations, `_crosses`,
 `_run_crossed`, `_crossed_result`, and `build_bundle/remote.py`. Neither
-`tests/test_public_api.py` nor `tests/test_remote_program_invariant.py` names
+`tests/test_public_api_invariant.py` nor `tests/test_remote_program_invariant.py` names
 `install_actions`, so it is not a pinned symbol.
 
 **C7. Decompose the state a build reads.** Install stopped crossing and `build`

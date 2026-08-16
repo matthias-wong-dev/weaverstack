@@ -33,7 +33,7 @@ through its alias.
 That leaves exactly one claim needing the published wheel, and it has its own
 file: the executor's *wait* for asynchronous discovery is guarded by
 ``context.spark is not None``, so running the action from here skips it. See
-`test_alias_discovery.py`.
+`test_alias_discovery_boundary.py`.
 """
 
 from __future__ import annotations
@@ -163,7 +163,7 @@ def run_from_here(
     The same `execute_install_action` an installation calls, with its frozen payload,
     given the capabilities a desktop caller injects rather than the ones a
     session acquires. That the session can acquire its own is a separate claim,
-    made once in `test_published_weaver.py`.
+    made once in `test_published_weaver_primitive.py`.
 
     **The Session is given, never built here.** This capacity permits one
     concurrent Livy session and the harness already holds it, so a Session that
@@ -295,7 +295,7 @@ def alias_estate(
     aliased = at["consumer"].qualify("DWG", "PortableCustomer")
     # Fabric discovers a shortcut asynchronously, and running the action from
     # here skipped the executor's own wait — so the read retries. That the
-    # *executor* waits is asserted in `test_alias_discovery.py`, where it can be.
+    # *executor* waits is asserted in `test_alias_discovery_boundary.py`, where it can be.
     seen = livy_session.run(
         "import time\n"
         "_deadline = time.monotonic() + 180\n"

@@ -1,7 +1,7 @@
 """Can a bundle actually execute, in its own order, against a real Lakehouse?
 
 Everything else about ordering is proven on paper. `test_item_plan.py` says the
-stages come out in the right order; `test_build_installer.py` says the installer
+stages come out in the right order; `test_build_installer_boundary.py` says the installer
 walks them in that order; `test_fixed_point.py` says a correct estate plans
 nothing. None of them can say the order is **viable** — that a view really can be
 created after its table, that a schema really exists by the time an object lands
@@ -15,11 +15,11 @@ than several with a little each.
 this about *physicality* and nothing else — no DML against the catalogue,
 no claims to reconcile, no publication to interpret. The catalogue's own round
 trip is a separate claim with its own tests
-(`test_item_catalogue_fabric.py`, `spark/boundary/test_catalogue_fidelity.py`).
+(`test_item_catalogue_fabric_boundary.py`, `spark/boundary/test_catalogue_fidelity.py`).
 A production bundle interleaves those stages; this deliberately does not, so read
 the pass as "the physical half installs in order", not "a whole build works".
 
-Distinct from `test_published_weaver.py::test_a_locally_generated_bundle_installs_inside_fabric`,
+Distinct from `test_published_weaver_primitive.py::test_a_locally_generated_bundle_installs_inside_fabric`,
 which installs a *Warehouse* bundle *with* its catalogue. The interesting order
 is here: a Warehouse install is a series of T-SQL scripts over one connection,
 while a Lakehouse install spans a schema, two ways of making a table, a view over

@@ -293,7 +293,7 @@ def test_an_unbound_consumer_keeps_its_stale_alias(estate):
 def test_a_second_build_over_an_unchanged_estate_plans_no_alias_action(estate):
     """An unchanged alias over an unchanged source must not be replaced.
 
-    This is the decision `test_cross_item_alias.py` spent a full
+    This is the decision `test_cross_item_alias_primitive.py` spent a full
     generate-and-install to observe. It is made from signatures and build datetimes before
     any pointer is touched, so it belongs here — what Fabric can still say is
     that the shortcut object itself was not disturbed.

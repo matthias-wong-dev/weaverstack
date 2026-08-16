@@ -568,7 +568,7 @@ class ConsoleScope(WorkspaceScope):
             if self._transport_store is None:
                 from ..fabric import OneLakeDfsClient
 
-                self._transport_store = OneLakeDfsClient()
+                self._transport_store = OneLakeDfsClient(telemetry=self.telemetry)
             return self._transport_store
 
     def _fabric_client(self):
@@ -577,7 +577,7 @@ class ConsoleScope(WorkspaceScope):
         # One client, carrying the Session's own renewing token source, so every
         # REST call in this Session shares one credential rather than shelling
         # out to the Azure CLI per operation.
-        return FabricClient(token=self.token_provider())
+        return FabricClient(token=self.token_provider(), telemetry=self.telemetry)
 
     def token_provider(self):
         from ..fabric.auth import FABRIC_SCOPE, TokenProvider

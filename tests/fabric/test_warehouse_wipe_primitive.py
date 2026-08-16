@@ -9,7 +9,7 @@ It used to submit the wipe into a session purely because *that* is where the
 installed package lived — which put a five-minute `weaver install` on the path to
 finding out whether the generated DROP statements were right. That the installed
 package can acquire a Warehouse connection from the session's own identity is a
-separate claim, made once in `test_published_weaver.py`.
+separate claim, made once in `test_published_weaver_primitive.py`.
 """
 
 from __future__ import annotations

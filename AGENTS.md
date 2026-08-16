@@ -296,7 +296,7 @@ old/new action terminology         build_uploaded_item_repository
 operation-local resource ownership
 ```
 
-`tests/test_fabric_only_invariant.py`, `tests/test_public_api.py` and
+`tests/test_fabric_only_invariant.py`, `tests/test_public_api_invariant.py` and
 `tests/test_remote_program_invariant.py` name them and fail if one comes back.
 
 Temporary compatibility while intermediate commits land is fine. Obsolete
@@ -372,7 +372,7 @@ step it belongs to (`step.observation`) rather than re-reading later.
 Split calls only where the *boundary between them* is the subject: before versus
 after a build or refresh, a failure stopping later work, a repository mutated
 between generation and installation, prune or wipe changing the estate. The
-protocol tests in `test_livy_import.py` show both halves of that judgement.
+protocol tests in `test_livy_import_primitive.py` show both halves of that judgement.
 
 The helpers live in `tests/support/observation.py`. Nothing hides the call: every
 submission is counted by `tests/fabric/livy_telemetry.py` and pytest prints a
@@ -443,7 +443,7 @@ real workspace in a way it never was on a fresh `tmp_path`.
 
 Weaver also has no opinion about data architecture: Folder, Delta and SQL are
 materialisation forms, not tiers. `T0`/`T1`/`T2` naming is house jargon and is
-rejected by `tests/test_neutrality.py`; widely-understood naming such as
+rejected by `tests/test_neutrality_invariant.py`; widely-understood naming such as
 bronze/silver/gold is fine where it aids a reader.
 
 ## Writing
@@ -524,5 +524,3 @@ python3.11 -m venv .venv
 `pip install weaverstack` installs the CLI and the Fabric transports. It does
 not install PySpark and needs no JDK: Fabric supplies Spark where authored
 runtime code executes, and a desktop reaches Spark through the Session.
-
-

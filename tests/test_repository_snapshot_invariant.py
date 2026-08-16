@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from test_item_repository import _estate
+from test_item_repository_declaration import _estate
 
 from weaver.build_bundle.workflow import (
     _snapshot_name,

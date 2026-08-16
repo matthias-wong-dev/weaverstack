@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from test_item_dependencies import _dependency_estate
-from test_item_repository import _estate, _table, _warehouse_table, _write
+from test_item_dependencies_declaration import _dependency_estate
+from test_item_repository_declaration import _estate, _table, _warehouse_table, _write
 
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId

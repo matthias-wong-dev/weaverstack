@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from test_item_repository import (
+from test_item_repository_declaration import (
     _estate,
     _folder,
     _table,

@@ -11,7 +11,7 @@ under test here. Only the setup needs Spark, and it imports no Weaver.
 
 Everything else about aliases, including shortcut creation, its target, the
 endpoint refresh and reading through the aliased name, is proven in
-`test_cross_item_alias.py`.
+`test_cross_item_alias_primitive.py`.
 """
 
 from __future__ import annotations

@@ -10,11 +10,20 @@ marker and build their own in ``tests/fabric``.
 from __future__ import annotations
 
 import sys as _sys
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from pathlib import Path as _Path
 
 import pytest
+from support.weaver_test import (
+    begin_test,
+    end_test,
+    event_snapshot,
+    observed_resources,
+    register_session,
+    registered_sessions,
+)
 
 # The narrow fixture constructors are shared by every layer — the core suite
 # and the Fabric one build their inputs the same way — so they are importable
@@ -52,6 +61,113 @@ def pytest_collection_modifyitems(items):
 
     if errors:
         raise pytest.UsageError("invalid Fabric test markers:\n" + "\n".join(errors))
+
+
+def pytest_runtest_setup(item):
+    """Make fixture-provided Sessions attributable before fixtures run."""
+
+    item._weaver_test_context = begin_test()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    """Compare a test declaration with external Session telemetry it caused."""
+
+    declaration = getattr(item.obj, "__weaver_test_declaration__", None)
+    before = event_snapshot()
+    yield
+    events = [
+        event
+        for session in registered_sessions()
+        for event in session.telemetry.events()[before.get(id(session), 0) :]
+    ]
+    item._weaver_telemetry_events = tuple(events)
+    if declaration is None:
+        return
+    observed = observed_resources(before)
+    if observed != declaration.resources:
+        unexpected = sorted(observed - declaration.resources)
+        unused = sorted(declaration.resources - observed)
+        parts = [
+            "Weaver test resource declaration did not match Session telemetry:",
+            f"declared: {sorted(declaration.resources)}",
+            f"observed: {sorted(observed)}",
+        ]
+        if unexpected:
+            parts.append(f"unexpected resource: {', '.join(unexpected)}")
+        if unused:
+            parts.append(f"declared but unused: {', '.join(unused)}")
+        raise AssertionError("\n".join(parts))
+
+
+def pytest_runtest_teardown(item):
+    """Release the ContextVar registry after fixture teardown has finished."""
+
+    end_test(item._weaver_test_context)
+
+
+@pytest.fixture(autouse=True)
+def register_created_sessions(monkeypatch):
+    """Register production Sessions created by a test without changing core."""
+
+    from weaver.sessions.base import Session
+
+    original = Session.__init__
+
+    def tracked(self, *args, **kwargs):
+        original(self, *args, **kwargs)
+        register_session(self)
+
+    monkeypatch.setattr(Session, "__init__", tracked)
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):
+    """Report declared topology and the external cost observed by Sessions."""
+
+    items = getattr(terminalreporter._session, "items", ())
+    declarations = [
+        declaration
+        for item in items
+        if (declaration := getattr(item.obj, "__weaver_test_declaration__", None))
+        is not None
+    ]
+    if declarations:
+        terminalreporter.write_sep("=", "Weaver tests")
+        for scope, count in sorted(Counter(one.scope for one in declarations).items()):
+            terminalreporter.write_line(f"{scope:<12} {count}")
+        terminalreporter.write_line("")
+        terminalreporter.write_line("Declared resources")
+        for resource, count in sorted(
+            Counter(resource for one in declarations for resource in one.resources).items()
+        ):
+            terminalreporter.write_line(f"  {resource:<10} {count} tests")
+
+    by_resource = defaultdict(lambda: [0, 0.0])
+    by_test = defaultdict(lambda: [0, 0.0, defaultdict(float)])
+    for item in items:
+        for event in getattr(item, "_weaver_telemetry_events", ()):
+            by_resource[event.resource][0] += 1
+            by_resource[event.resource][1] += event.seconds
+            by_test[item.nodeid][0] += 1
+            by_test[item.nodeid][1] += event.seconds
+            by_test[item.nodeid][2][event.resource] += event.seconds
+    if not by_resource:
+        return
+    terminalreporter.write_sep("=", "External resource telemetry")
+    terminalreporter.write_line("By resource")
+    for resource, (calls, seconds) in sorted(
+        by_resource.items(), key=lambda item: item[1][1], reverse=True
+    ):
+        terminalreporter.write_line(f"  {resource:<10} {calls:>4} operations {seconds:>8.1f}s")
+    terminalreporter.write_line("")
+    terminalreporter.write_line("Top tests by external time")
+    for nodeid, (_, seconds, resources) in sorted(
+        by_test.items(), key=lambda item: item[1][1], reverse=True
+    )[:12]:
+        detail = " ".join(
+            f"{resource}={cost:.1f}s" for resource, cost in sorted(resources.items())
+        )
+        terminalreporter.write_line(f"  {nodeid}: {seconds:.1f}s  {detail}")
 
 
 @pytest.fixture(autouse=True)

@@ -78,7 +78,7 @@ def captured(monkeypatch):
 
 @pytest.fixture
 def repository(tmp_path):
-    from test_item_repository import _schema, _table, _write
+    from test_item_repository_declaration import _schema, _table, _write
 
     root = tmp_path / "Estate"
     _write(root, "Lakehouse/Sales/schemas/DWG.yml", _schema("DWG"))

@@ -114,7 +114,7 @@ What earns `hosted` is needing the installed package. That covers tests whose
 subject *is* the wheel: that it acquires its own capabilities from the
 session's identity, that the Environment carries it, that it bootstraps its own
 catalogue, proven once per capability in
-`tests/fabric/test_published_weaver.py`. It also covers a decomposed operation
+`tests/fabric/test_published_weaver_primitive.py`. It also covers a decomposed operation
 that orchestrates from this checkout and imports the wheel on the far side,
 because the publish is what such a test costs whoever runs it.
 
@@ -196,7 +196,7 @@ cancels someone else's session.
 To run only the Warehouse SQL vertical and see its stage timings:
 
 ```bash
-.venv/bin/python -m pytest -m fabric -s tests/fabric/test_warehouse_wipe.py
+.venv/bin/python -m pytest -m fabric -s tests/fabric/test_warehouse_wipe_primitive.py
 ```
 
 ## What the tests do to your workspace
@@ -243,7 +243,7 @@ at `Tables/<schema>/<table>` and views bind by name.
 
 ## Cross-item aliases need two destinations
 
-`tests/fabric/test_cross_item_alias.py` builds two Lakehouse items in one bundle,
+`tests/fabric/test_cross_item_alias_primitive.py` builds two Lakehouse items in one bundle,
 where the consumer aliases a table the producer makes. It takes its own pair of
 disposable Lakehouses (`fabric_alias_lakehouses`) rather than the shared target,
 because a cross-item alias is the one thing a single destination cannot express.

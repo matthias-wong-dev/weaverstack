@@ -8,6 +8,7 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -54,11 +55,15 @@ class WarehouseFlusher:
         execute,
         key: FlusherKey,
         batch_rows: int = BATCH_ROWS,
+        capture_context=None,
+        use_context=None,
     ) -> None:
         self.table = table
         self.key = key
         self._execute = execute
         self._batch_rows = batch_rows
+        self._capture_context = capture_context
+        self._use_context = use_context
         self._queue: queue.Queue = queue.Queue()
         self._worker: threading.Thread | None = None
         self._lock = threading.Lock()
@@ -85,7 +90,8 @@ class WarehouseFlusher:
                 )
             self._pending += 1
             self._ensure_worker()
-            self._queue.put(dict(row))
+            context = self._capture_context() if self._capture_context is not None else None
+            self._queue.put(_QueuedRow(row, context))
 
     def flush(self, *, timeout: float = DRAIN_TIMEOUT) -> None:
         """Wait for every accepted row to be written, and surface any failure."""
@@ -162,17 +168,25 @@ class WarehouseFlusher:
         """
 
         batch: list[dict] = []
+        context = None
         while True:
             item = self._queue.get()
             if item is _STOP:
-                self._write(batch)
+                self._write(batch, context)
                 self._settle(len(batch))
                 return
-            batch.append(item)
-            if len(batch) >= self._batch_rows or self._queue.empty():
-                self._write(batch)
+            row, item_context = item, item.context
+            if batch and item_context != context:
+                self._write(batch, context)
                 self._settle(len(batch))
                 batch = []
+            context = item_context
+            batch.append(row)
+            if len(batch) >= self._batch_rows or self._queue.empty():
+                self._write(batch, context)
+                self._settle(len(batch))
+                batch = []
+                context = None
 
     def _settle(self, count: int) -> None:
         if not count:
@@ -180,7 +194,7 @@ class WarehouseFlusher:
         with self._lock:
             self._pending -= count
 
-    def _write(self, rows: list[dict]) -> None:
+    def _write(self, rows: list[dict], context=None) -> None:
         """One INSERT for a batch, in the order the rows were submitted.
 
         A failure is remembered and the rows are dropped rather than retried:
@@ -191,7 +205,13 @@ class WarehouseFlusher:
         if not rows:
             return
         try:
-            self._execute(self._insert(rows))
+            activation = (
+                self._use_context(context)
+                if self._use_context is not None and context is not None
+                else nullcontext()
+            )
+            with activation:
+                self._execute(self._insert(rows))
         except BaseException as exc:  # noqa: BLE001 - re-raised from flush/close
             if self._failure is None:
                 self._failure = exc
@@ -254,6 +274,14 @@ class _Stop:
 
 
 _STOP = _Stop()
+
+
+class _QueuedRow(dict):
+    """A row carrying the reporting context that caused it to be queued."""
+
+    def __init__(self, row: Mapping[str, Any], context) -> None:
+        super().__init__(row)
+        self.context = context
 
 
 __all__ = ["BATCH_ROWS", "FlushError", "FlusherKey", "WarehouseFlusher"]

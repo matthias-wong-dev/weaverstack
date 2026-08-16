@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from test_item_repository import _estate, _write
+from test_item_repository_declaration import _estate, _write
 
 from weaver.errors import DiscoveryError
 from weaver.locations import Location

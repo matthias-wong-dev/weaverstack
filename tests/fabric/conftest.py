@@ -34,6 +34,7 @@ from support.build_env import (
 )
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 from support.livy_telemetry import LEDGER, OUTSIDE_A_TEST, CountedLivySession
+from support.weaver_test import register_session
 
 from weaver.targets import ItemRef
 from weaver.workspaces import Workspace
@@ -513,7 +514,7 @@ def weaver_session(fabric_workspace, livy_session):
     from weaver.sessions import ConsoleSession
 
     with ConsoleSession(workspace=fabric_workspace, livy=livy_session) as session:
-        yield session
+        yield register_session(session)
         print(f"\n{session.telemetry.report()}")
 
 
@@ -529,7 +530,7 @@ def fresh_weaver_session(fabric_workspace):
     from weaver.sessions import ConsoleSession
 
     with ConsoleSession(workspace=fabric_workspace) as session:
-        yield session
+        yield register_session(session)
 
 
 # --- disposable Warehouse ----------------------------------------------------

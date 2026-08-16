@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from support.workspaces import WORKSPACE
-from test_item_dependencies import _dependency_estate
-from test_item_repository import _estate, _folder, _table, _write
+from test_item_dependencies_declaration import _dependency_estate
+from test_item_repository_declaration import _estate, _folder, _table, _write
 
 from weaver.build_bundle import (
     ItemBinding,

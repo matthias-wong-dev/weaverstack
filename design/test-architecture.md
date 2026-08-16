@@ -103,7 +103,7 @@ real estate cannot do.
 it equals what the fixture constructor produces. It is the strongest form of
 boundary claim, because it justifies every pure-Python assertion that uses the
 same constructor. `fabric/test_desktop_build_state_boundary.py` and
-`fabric/test_item_catalogue_fabric.py` are these, one per position.
+`fabric/test_item_catalogue_fabric_boundary.py` are these, one per position.
 
 ## What only Fabric has caught, and why
 

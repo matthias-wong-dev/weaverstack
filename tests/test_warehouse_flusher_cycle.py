@@ -12,6 +12,7 @@ from support.workspaces import given_workspace
 from weaver.catalogue.flusher import FlushError, WarehouseFlusher
 from weaver.catalogue.tables import LOG
 from weaver.errors import CommandError
+from weaver.sessions import ConsoleSession
 from weaver.sessions.testing import TestSession
 from weaver.targets import WarehouseTarget
 
@@ -89,6 +90,27 @@ def test_every_accepted_row_is_written():
     written = "\n".join(recorder.statements)
     for index in range(10):
         assert f"Table{index}" in written
+
+
+def test_a_worker_tds_event_keeps_the_context_that_queued_it():
+    with ConsoleSession(progress=False) as session:
+        def execute(statement):
+            with session.telemetry.external("tds", "execute"):
+                pass
+
+        flusher = a_flusher(
+            execute,
+            capture_context=session.telemetry.capture_context,
+            use_context=session.telemetry.use_context,
+        )
+        with session.task("Load"):
+            with session.step("Logging"):
+                flusher.submit(a_row())
+        flusher.flush()
+        flusher.close()
+
+    (event,) = session.telemetry.events()
+    assert (event.task, event.step, event.substep) == ("Load", "Logging", None)
 
 
 def test_rows_are_written_in_the_order_they_were_submitted():

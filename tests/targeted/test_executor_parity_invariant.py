@@ -8,7 +8,7 @@ checkout would prove the desktop branch while the wheel probes — which check
 AGENTS.md already states the rule: "an `if isinstance(workspace, …)` in core
 operation code means the abstraction is being broken; the fix belongs in the
 factories, or in the CLI that does the crossing." The split in
-`tests/fabric/test_published_weaver.py` makes it load-bearing in a new way, so it
+`tests/fabric/test_published_weaver_primitive.py` makes it load-bearing in a new way, so it
 is asserted here rather than trusted.
 """
 

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
-from test_item_dependencies import _dependency_estate
-from test_item_repository import _estate
+from test_item_dependencies_declaration import _dependency_estate
+from test_item_repository_declaration import _estate
 
 from weaver.catalogue.projection import (
     CatalogueProjection,

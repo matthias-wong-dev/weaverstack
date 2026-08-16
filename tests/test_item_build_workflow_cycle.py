@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import pytest
 from support.sessions import given_session
 from support.workspaces import WORKSPACE, given_resolver, given_workspace
-from test_item_repository import _estate
+from test_item_repository_declaration import _estate
 
 from weaver.build_bundle import (
     BuildState,

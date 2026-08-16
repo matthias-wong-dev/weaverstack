@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+from contextlib import nullcontext
 from typing import Any
 
 from ..errors import WeaverError
@@ -99,9 +100,11 @@ class FabricClient:
         api_base_url: str = FABRIC_API,
         token: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
+        telemetry=None,
     ) -> None:
         self.api_base_url = api_base_url.rstrip("/")
         self.timeout = timeout
+        self.telemetry = telemetry
         self._token_source = token_source(token, scope=FABRIC_SCOPE)
 
     @property
@@ -129,26 +132,32 @@ class FabricClient:
             if path.startswith("http")
             else f"{self.api_base_url}/{path.lstrip('/')}"
         )
-        try:
-            response = send(
-                method,
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.token}",
-                    "Content-Type": "application/json",
-                },
-                data=json.dumps(payload) if payload is not None else None,
-                timeout=self.timeout,
-            )
-        except requests.exceptions.RequestException as exc:
-            raise FabricError(f"{method} {url} could not be reached: {exc}") from exc
-        if response.status_code not in expected:
-            raise FabricError(
-                f"{method} {url} returned {response.status_code}: "
-                f"{response.text.strip()[:400] or 'no body'}",
-                status_code=response.status_code,
-            )
-        return response
+        observation = (
+            self.telemetry.external("rest", method.lower(), detail=path)
+            if self.telemetry is not None
+            else nullcontext()
+        )
+        with observation:
+            try:
+                response = send(
+                    method,
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self.token}",
+                        "Content-Type": "application/json",
+                    },
+                    data=json.dumps(payload) if payload is not None else None,
+                    timeout=self.timeout,
+                )
+            except requests.exceptions.RequestException as exc:
+                raise FabricError(f"{method} {url} could not be reached: {exc}") from exc
+            if response.status_code not in expected:
+                raise FabricError(
+                    f"{method} {url} returned {response.status_code}: "
+                    f"{response.text.strip()[:400] or 'no body'}",
+                    status_code=response.status_code,
+                )
+            return response
 
     def get_json(self, path: str) -> dict:
         response = self.request("GET", path, expected=(200,))
