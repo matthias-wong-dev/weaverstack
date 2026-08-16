@@ -73,15 +73,6 @@ class Measure:
         }
 
 
-def _resource_operation(name: str) -> tuple[str, str] | None:
-    """Map the established timing names onto the closed resource vocabulary."""
-
-    resource, separator, operation = name.partition(".")
-    if separator and resource in RESOURCES:
-        return resource, operation
-    return None
-
-
 class SessionTelemetry:
     """A Session-owned ledger of transport cost and semantic attribution.
 
@@ -135,21 +126,15 @@ class SessionTelemetry:
 
     @contextmanager
     def timing(self, name: str) -> Iterator[None]:
-        """Time one established ledger measure and its resource event, if any."""
+        """Time ordinary work without assigning it an external resource."""
 
-        crossing = _resource_operation(name)
-        if crossing is None:
-            started = time.monotonic()
-            try:
-                yield
-            except BaseException:
-                self.record(name, time.monotonic() - started, failed=True)
-                raise
-            self.record(name, time.monotonic() - started)
-            return
-        resource, operation = crossing
-        with self.external(resource, operation, measure=name):
+        started = time.monotonic()
+        try:
             yield
+        except BaseException:
+            self.record(name, time.monotonic() - started, failed=True)
+            raise
+        self.record(name, time.monotonic() - started)
 
     @contextmanager
     def external(

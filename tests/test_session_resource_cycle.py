@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from weaver.sessions import ConsoleSession
 from weaver.sessions.resources import Resource, ResourceError, ResourceState
 from weaver.sessions.telemetry import SessionTelemetry
 
@@ -173,6 +174,25 @@ def test_acquisition_is_timed_where_a_session_can_see_it(executor):
     resource.get()
 
     assert telemetry.measures["livy.acquire"].calls == 1
+
+
+def test_an_async_acquisition_keeps_the_context_that_started_it(executor):
+    telemetry = SessionTelemetry()
+    resource = Resource(
+        "livy",
+        lambda: "livy",
+        executor=executor,
+        telemetry=telemetry,
+        telemetry_resource="livy",
+    )
+    with ConsoleSession(telemetry=telemetry, executor=executor, progress=False) as session:
+        with session.task("Build"):
+            with session.step("Install"):
+                resource.get()
+
+    (event,) = telemetry.events()
+    assert (event.resource, event.operation) == ("livy", "acquire")
+    assert (event.task, event.step, event.substep) == ("Build", "Install", None)
 
 
 # --- leaving while something is still starting -------------------------------

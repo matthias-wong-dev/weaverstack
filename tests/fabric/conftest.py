@@ -519,6 +519,13 @@ def weaver_session(fabric_workspace, livy_session):
 
 
 @pytest.fixture
+def tracked_weaver_session(weaver_session):
+    """The shared Session, attributed to this test body."""
+
+    return register_session(weaver_session)
+
+
+@pytest.fixture
 def fresh_weaver_session(fabric_workspace):
     """A Session of its own, for a test whose claim *is* runtime isolation.
 

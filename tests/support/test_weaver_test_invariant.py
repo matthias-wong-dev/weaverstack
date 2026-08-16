@@ -13,7 +13,7 @@ def test_the_wrapper_exposes_its_declaration_and_generates_scope_markers():
         pass
 
     assert declared.__weaver_test_declaration__ == WeaverTestDeclaration(
-        position="remote", resources=frozenset({"tds"})
+        scope="remote", resources=frozenset({"tds"})
     )
     assert {mark.name for mark in getattr(declared, "pytestmark", ())} == {
         "fabric",
@@ -22,9 +22,8 @@ def test_the_wrapper_exposes_its_declaration_and_generates_scope_markers():
 
 
 def test_invalid_declarations_are_rejected():
-    with pytest.raises(ValueError, match="both remote and hosted"):
+    with pytest.raises(ValueError, match="one scope"):
         weaver_test(remote=True, hosted=True)
     with pytest.raises(ValueError, match="unknown Weaver test resource"):
         weaver_test(resources={"spark"})
-    with pytest.raises(ValueError, match="need remote=True or hosted=True"):
-        weaver_test(integration=True)
+    assert weaver_test(integration=True)

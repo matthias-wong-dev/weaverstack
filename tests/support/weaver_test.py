@@ -20,18 +20,8 @@ from weaver.sessions.telemetry import RESOURCES
 class WeaverTestDeclaration:
     """The claimed position and external resources for one test function."""
 
-    position: str = "core"
+    scope: str = "core"
     resources: frozenset[str] = frozenset()
-    integration: bool = False
-    provision: bool = False
-
-    @property
-    def scope(self) -> str:
-        if self.integration:
-            return "integration"
-        if self.provision:
-            return "provision"
-        return self.position
 
 
 def weaver_test(
@@ -44,31 +34,38 @@ def weaver_test(
 ) -> Callable:
     """Declare a test's Weaver position and necessary external resources."""
 
-    if remote and hosted:
-        raise ValueError("a Weaver test cannot be both remote and hosted")
-    position = "remote" if remote else "hosted" if hosted else "core"
-    if (integration or provision) and position == "core":
-        raise ValueError("integration and provision tests need remote=True or hosted=True")
+    selected = [
+        scope
+        for scope, enabled in (
+            ("remote", remote),
+            ("hosted", hosted),
+            ("integration", integration),
+            ("provision", provision),
+        )
+        if enabled
+    ]
+    if len(selected) > 1:
+        raise ValueError("a Weaver test has one scope")
+    scope = selected[0] if selected else "core"
     declared = frozenset(resources)
     unknown = declared - RESOURCES
     if unknown:
         raise ValueError(f"unknown Weaver test resource(s): {sorted(unknown)}")
     declaration = WeaverTestDeclaration(
-        position=position,
+        scope=scope,
         resources=declared,
-        integration=integration,
-        provision=provision,
     )
 
     def apply(function):
         setattr(function, "__weaver_test_declaration__", declaration)
         marked = function
-        if position != "core":
+        if scope != "core":
             marked = pytest.mark.fabric(marked)
-            marked = getattr(pytest.mark, position)(marked)
-        if integration:
+        if scope in {"remote", "hosted"}:
+            marked = getattr(pytest.mark, scope)(marked)
+        if scope == "integration":
             marked = pytest.mark.full_integration(marked)
-        if provision:
+        if scope == "provision":
             marked = pytest.mark.provision(marked)
         return marked
 
@@ -78,7 +75,6 @@ def weaver_test(
 _sessions: ContextVar[tuple[object, ...]] = ContextVar(
     "weaver_test_sessions", default=()
 )
-_known_sessions: list[object] = []
 
 
 def begin_test() -> object:
@@ -99,15 +95,13 @@ def register_session(session) -> object:
     current = _sessions.get()
     if session not in current:
         _sessions.set((*current, session))
-    if session not in _known_sessions:
-        _known_sessions.append(session)
     return session
 
 
 def registered_sessions() -> tuple[object, ...]:
     """The Sessions attributed to the active test body."""
 
-    return tuple(_known_sessions)
+    return _sessions.get()
 
 
 def observed_resources(before: dict[int, int]) -> frozenset[str]:

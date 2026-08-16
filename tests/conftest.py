@@ -21,7 +21,6 @@ from support.weaver_test import (
     end_test,
     event_snapshot,
     observed_resources,
-    register_session,
     registered_sessions,
 )
 
@@ -104,21 +103,6 @@ def pytest_runtest_teardown(item):
     """Release the ContextVar registry after fixture teardown has finished."""
 
     end_test(item._weaver_test_context)
-
-
-@pytest.fixture(autouse=True)
-def register_created_sessions(monkeypatch):
-    """Register production Sessions created by a test without changing core."""
-
-    from weaver.sessions.base import Session
-
-    original = Session.__init__
-
-    def tracked(self, *args, **kwargs):
-        original(self, *args, **kwargs)
-        register_session(self)
-
-    monkeypatch.setattr(Session, "__init__", tracked)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):

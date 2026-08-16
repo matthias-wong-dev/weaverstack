@@ -12,7 +12,7 @@ ownership without competing for a capacity's one Spark slot.
 from __future__ import annotations
 
 import pytest
-from support.weaver_test import weaver_test
+from support.weaver_test import register_session, weaver_test
 
 from weaver.errors import CommandError
 from weaver.fabric.resources import LAKEHOUSE
@@ -23,7 +23,7 @@ from weaver.targets import ItemRef
 @pytest.fixture
 def console(fabric_workspace):
     with ConsoleSession() as session:
-        yield session
+        yield register_session(session)
 
 
 @weaver_test(remote=True, resources={"rest"})

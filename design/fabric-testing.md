@@ -2,11 +2,33 @@
 
 ## Purpose
 
-This document explains the real-Fabric test environment, marker selection, and
-the evidence each test tier provides.
+This document explains the real-Fabric test environment and the evidence each
+test tier provides.
 
 These tests use a real workspace and running capacity. They are deselected by
 default and skip unless a workspace is configured.
+
+## Test declarations and telemetry
+
+`@weaver_test(...)` is the declaration for every Weaver test. It names one
+scope (`core`, `remote`, `hosted`, `integration`, or `provision`) and the
+external resources its claim needs. Pytest markers are generated from that
+declaration solely for selection.
+
+The resource vocabulary is closed: `tds`, `livy`, `onelake`, and `rest`.
+At the end of each test, the harness compares the declared set exactly with
+the resources recorded by the Sessions used in its body. A resource that was
+not declared, or a declared resource that was not used, fails the test.
+
+Session telemetry records each external crossing with its Task, Step, and
+Sub-step context. Resource work submitted to a worker retains the context that
+caused it. Session-scoped fixtures are reused, but only events produced during
+an individual test body are attributed to that test.
+
+`PYTEST_WORKSPACE` is the default permanent workspace used for real-resource
+tests. The terminal summary reports operations and elapsed time by resource and
+by test; use it to investigate unexpected crossings and expensive tests, not
+as a time budget.
 
 ## Once
 
@@ -100,8 +122,7 @@ pytest -m full_integration  # the Fabric lifecycle journey
 pytest -m provision         # Fabric creating and deleting items
 ```
 
-Every Fabric test carries `fabric` and exactly one of the two. `remote` versus
-`hosted` is about **whether a publish is required**, not about whether Livy is
+`remote` versus `hosted` is about **whether a publish is required**, not about whether Livy is
 involved and not about where the orchestration runs. Creating a OneLake shortcut
 is a REST call, refreshing an endpoint is another, wiping a Lakehouse is
 directory removal, and a Warehouse is reached over TDS, all of which work from
