@@ -11,11 +11,10 @@ OneLake. The session that seeds the fixture runs raw Spark and imports nothing.
 
 from __future__ import annotations
 
-import pytest
+from support.weaver_test import weaver_test
 from support.wipe_claims import assert_a_wipe_removes_every_table
 
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
-
+@weaver_test(remote=True)
 def test_a_wipe_removes_every_table(populated_fabric_lakehouse):
     assert_a_wipe_removes_every_table(populated_fabric_lakehouse)

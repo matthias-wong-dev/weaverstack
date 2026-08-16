@@ -8,9 +8,7 @@ thing that shows a notebook user could do the same.
 from __future__ import annotations
 
 import pytest
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
-
+from support.weaver_test import weaver_test
 
 # --- what the installed Environment provides ----------------------------------
 #
@@ -54,7 +52,6 @@ def installed_environment(livy_session):
         "    'columns': [c.name for c in doc.effective_schema],\n"
         "  },\n"
         "})\n",
-        label="observe environment",
     )
     # Kept from when this was four calls: a body that printed but emitted nothing
     # would otherwise fail the tests below as a `NoneType` subscript, which says
@@ -63,6 +60,7 @@ def installed_environment(livy_session):
     return result.payload
 
 
+@weaver_test(hosted=True)
 def test_weaver_imports_inside_a_fabric_session(installed_environment):
     """The claim: a Fabric session imports the installed Weaver and uses it.
 
@@ -77,6 +75,7 @@ def test_weaver_imports_inside_a_fabric_session(installed_environment):
     assert version["dist"]  # a real, non-empty version string
 
 
+@weaver_test(hosted=True)
 def test_the_environment_carries_weavers_dependencies(installed_environment):
     """mssql-python and the rest resolve inside the session, from the Environment.
 
@@ -91,6 +90,7 @@ def test_the_environment_carries_weavers_dependencies(installed_environment):
     ]
 
 
+@weaver_test(hosted=True)
 def test_the_core_public_surface_is_importable_there(installed_environment):
     assert installed_environment["surface"] == {
         # A folder target is the area, not a path within it: a folder object
@@ -102,6 +102,7 @@ def test_the_core_public_surface_is_importable_there(installed_environment):
     }
 
 
+@weaver_test(hosted=True)
 def test_the_weaver_contract_parses_there(installed_environment):
     """The heart of Weaver, running in Fabric rather than described to it."""
 

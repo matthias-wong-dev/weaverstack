@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
+from support.weaver_test import weaver_test
 
 _SCHEMA = """Schema ID: Sales
 Description: Sales objects for the item prune proof.
@@ -37,6 +35,7 @@ class Sales__Customer(Folder):
 '''
 
 
+@weaver_test(hosted=True)
 def test_installed_weaver_builds_and_catalogues_its_builtin_item(
     livy_session, fabric_workspace, fabric_target_lakehouse
 ):
@@ -99,7 +98,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "})\n"
     )
 
-    payload = livy_session.run(body, label="generate and install").payload
+    payload = livy_session.run(body).payload
     assert payload["status"] == "succeeded", payload["errors"]
     # Every catalogue table and `_.Log`, physically present in the Warehouse.
     assert payload["tables"] == payload["expected"]

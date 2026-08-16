@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from uuid import uuid4
 
-import pytest
+from support.weaver_test import weaver_test
 
 from weaver.catalogue.render import (
     VALUES_ROWS,
@@ -14,9 +14,8 @@ from weaver.catalogue.render import (
 )
 from weaver.catalogue.tables import REGISTRY
 
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
-
+@weaver_test(remote=True)
 def test_a_large_keep_relation_is_accepted_by_the_catalogue_warehouse(
     fabric_workspace,
 ):
@@ -74,14 +73,3 @@ def test_a_large_keep_relation_is_accepted_by_the_catalogue_warehouse(
                 executor.execute_script("drop schema if exists [_];")
         finally:
             executor.close()
-
-
-def test_the_catalogue_delete_primitive_spends_no_livy():
-    from support.livy_telemetry import LEDGER
-
-    mine = [
-        call
-        for call in LEDGER.calls
-        if "test_catalogue_delete_primitive" in call.nodeid
-    ]
-    assert mine == []

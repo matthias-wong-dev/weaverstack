@@ -10,11 +10,10 @@ cannot make. That body imports nothing.
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
+from support.weaver_test import weaver_test
 
 
+@weaver_test(remote=True)
 def test_a_wipe_clears_both_onelake_areas(
     livy_session, fabric_workspace, fabric_client, fabric_target_lakehouse
 ):
@@ -46,7 +45,6 @@ def test_a_wipe_clears_both_onelake_areas(
         f"spark.sql('CREATE TABLE IF NOT EXISTS {destination.qualify('Sales', 'Customer')} "
         "(Id string) USING delta')\n"
         "emit(True)\n",
-        label="seed",
     )
     store.make_directory(resolver.files_root(target) / "Sales" / "Customer")
 

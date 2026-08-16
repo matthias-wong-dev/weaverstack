@@ -16,18 +16,17 @@ endpoint refresh and reading through the aliased name, is proven in
 
 from __future__ import annotations
 
-import pytest
 from conftest import staged_repository_root
 from factories import FixtureCatalogue, alias_repository, item_bindings
+from support.weaver_test import weaver_test
 
 from weaver.targets import ItemRef
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 PRODUCER = "Lakehouse/DiscoveryProducer"
 CONSUMER = "Lakehouse/DiscoveryConsumer"
 
 
+@weaver_test(remote=True, resources={"livy", "rest"})
 def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
     fabric_workspace,
     fabric_client,
@@ -39,7 +38,12 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
 ):
     """The action reports how long it waited, which is the behaviour itself."""
 
-    from test_cross_item_alias import action_of, generate, run_from_here, upload
+    from test_cross_item_alias_primitive import (
+        action_of,
+        generate,
+        run_from_here,
+        upload,
+    )
 
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient

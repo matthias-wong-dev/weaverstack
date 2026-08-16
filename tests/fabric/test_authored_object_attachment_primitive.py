@@ -9,11 +9,10 @@ and it needs no built estate at all.
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
+from support.weaver_test import weaver_test
 
 
+@weaver_test(hosted=True)
 def test_an_object_resolves_the_lakehouse_the_session_attached(
     livy_session, fabric_workspace, fabric_target_lakehouse, fabric_client
 ):

@@ -30,16 +30,13 @@ from __future__ import annotations
 
 import pytest
 from support.build_envs import LOAD_ORCHESTRATION_WAREHOUSE_FIXTURE
+from support.weaver_test import weaver_test
 
-pytestmark = [
-    pytest.mark.fabric,
-    pytest.mark.hosted,
-    pytest.mark.parametrize(
-        "weaver_repo_fixture",
-        [LOAD_ORCHESTRATION_WAREHOUSE_FIXTURE],
-        indirect=True,
-    ),
-]
+pytestmark = pytest.mark.parametrize(
+    "weaver_repo_fixture",
+    [LOAD_ORCHESTRATION_WAREHOUSE_FIXTURE],
+    indirect=True,
+)
 
 CUSTOMER = "DWG.Customer"
 REPORT = "Rpt.CustomerReport"
@@ -109,6 +106,7 @@ def by_node(report) -> dict:
 # --- the plan, resolved and not executed --------------------------------------
 
 
+@weaver_test(hosted=True)
 def test_the_requested_targets_resolve_to_the_installed_physical_graph(orchestrated):
     """Catalogue in, physical graph out — with the repository playing no part."""
 
@@ -124,6 +122,7 @@ def test_the_requested_targets_resolve_to_the_installed_physical_graph(orchestra
     ]
 
 
+@weaver_test(hosted=True)
 def test_exactly_one_endpoint_refresh_stands_between_the_two_sides(orchestrated):
     env, seen = orchestrated
     dry = seen["dry"]
@@ -144,6 +143,7 @@ def test_exactly_one_endpoint_refresh_stands_between_the_two_sides(orchestrated)
     assert [customer, refresh] in [list(edge) for edge in dry["edges"]]
 
 
+@weaver_test(hosted=True)
 def test_every_node_resolves_to_its_exact_installed_primitive(orchestrated):
     env, seen = orchestrated
     nodes = by_node(seen["dry"])
@@ -178,6 +178,7 @@ def test_every_node_resolves_to_its_exact_installed_primitive(orchestrated):
 # --- and then executed --------------------------------------------------------
 
 
+@weaver_test(hosted=True)
 def test_the_executed_graph_is_the_one_the_dry_run_planned(orchestrated):
     _env, seen = orchestrated
 
@@ -188,6 +189,7 @@ def test_the_executed_graph_is_the_one_the_dry_run_planned(orchestrated):
     } == {node["node_id"]: node["dispatch_location"] for node in seen["dry"]["nodes"]}
 
 
+@weaver_test(hosted=True)
 def test_every_step_ran_in_topological_order_through_its_own_primitive(orchestrated):
     _env, seen = orchestrated
     real = seen["real"]
@@ -207,6 +209,7 @@ def test_every_step_ran_in_topological_order_through_its_own_primitive(orchestra
     assert started == sorted(started)
 
 
+@weaver_test(hosted=True)
 def test_the_warehouse_sees_the_delta_rows_the_lakehouse_load_wrote(orchestrated):
     """The whole point of the barrier, asserted through the target itself."""
 
@@ -222,6 +225,7 @@ def test_the_warehouse_sees_the_delta_rows_the_lakehouse_load_wrote(orchestrated
     assert [row["CustomerName"] for row in names] == ["Ada", "Grace", "Katherine"]
 
 
+@weaver_test(hosted=True)
 def test_the_upstream_delta_rows_exist_and_the_folder_materialised(orchestrated):
     env, seen = orchestrated
     real = by_node(seen["real"])
@@ -236,6 +240,7 @@ def test_the_upstream_delta_rows_exist_and_the_folder_materialised(orchestrated)
 # --- the evidence it left behind ----------------------------------------------
 
 
+@weaver_test(hosted=True)
 def test_the_real_run_wrote_one_coherent_workflow_into_the_log(orchestrated):
     """One row per settled node, correlated by the run's own Workflow ID.
 

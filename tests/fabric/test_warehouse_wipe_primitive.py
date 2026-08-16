@@ -5,11 +5,8 @@ an argument. So none of this needs a Livy session: the production implementation
 runs here, against the real Warehouse, on the connection this process already
 holds.
 
-It used to submit the wipe into a session purely because *that* is where the
-installed package lived — which put a five-minute `weaver install` on the path to
-finding out whether the generated DROP statements were right. That the installed
-package can acquire a Warehouse connection from the session's own identity is a
-separate claim, made once in `test_published_weaver_primitive.py`.
+The installed package acquiring a Warehouse connection from its session identity
+is a separate claim in `test_published_weaver_primitive.py`.
 """
 
 from __future__ import annotations
@@ -17,10 +14,8 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-import pytest
 from sql_support import CatalogObject, populate_warehouse, system_schemas, user_objects
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
+from support.weaver_test import weaver_test
 
 FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -39,6 +34,7 @@ EXPECTED_OBJECTS = {
 }
 
 
+@weaver_test(remote=True)
 def test_weaver_wipes_a_populated_warehouse(
     clean_disposable_warehouse,
     fabric_client,

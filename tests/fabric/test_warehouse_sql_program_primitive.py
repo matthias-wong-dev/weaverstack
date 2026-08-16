@@ -28,13 +28,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE
 from weaver.declaration.tsql_load import RESULT_PARAMETERS
 from weaver.runtime import LoadResult
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 SCHEMA = "DWG"
 
@@ -272,6 +271,7 @@ def complex_program(warehouse):
     _drop_object(warehouse, "ProgramComplex")
 
 
+@weaver_test(remote=True)
 def test_a_cte_join_and_nested_predicate_build_and_load(complex_program):
     """The gnarly shape, end to end: shape-only build, then a real load.
 
@@ -288,6 +288,7 @@ def test_a_cte_join_and_nested_predicate_build_and_load(complex_program):
     assert complex_program.contents == [("c1", "One", 15), ("c2", "Two", 20)]
 
 
+@weaver_test(remote=True)
 def test_the_build_infers_the_columns_the_staging_query_produces(complex_program):
     """Including the aggregate, which exists only in the outer SELECT."""
 
@@ -301,6 +302,7 @@ def test_the_build_infers_the_columns_the_staging_query_produces(complex_program
 # --- authored setup ------------------------------------------------------------
 
 
+@weaver_test(remote=True)
 def test_setup_runs_and_the_query_over_it_becomes_staging(warehouse):
     """``SELECT INTO #Working`` is working, not a result — in both executions."""
 
@@ -354,6 +356,7 @@ def noisy_program(warehouse):
     _drop_object(warehouse, "ProgramNoisy")
 
 
+@weaver_test(remote=True)
 def test_setup_that_returns_rows_does_not_become_the_load_result(noisy_program):
     """The reason the result is in the signature rather than in a result set.
 
@@ -369,6 +372,7 @@ def test_setup_that_returns_rows_does_not_become_the_load_result(noisy_program):
     assert noisy_program.contents == [("c1", "One"), ("c2", "Two")]
 
 
+@weaver_test(remote=True)
 def test_the_procedure_declares_its_result_as_optional_outputs(noisy_program):
     """Optional, so a person can still run it by hand without declaring any."""
 
@@ -436,6 +440,7 @@ def retired(retire_program):
     )
 
 
+@weaver_test(remote=True)
 def test_absence_does_not_delete_but_a_named_key_does(retired):
     """The whole contract, in one load.
 
@@ -453,6 +458,7 @@ def test_absence_does_not_delete_but_a_named_key_does(retired):
     assert retired.contents == [("c1", "Renamed"), ("c2", "Two")]
 
 
+@weaver_test(remote=True)
 def test_the_delete_working_table_is_cleaned_up_after_a_clean_run(retired):
     """It is working, and a run that rejected nothing leaves no evidence.
 
@@ -473,6 +479,7 @@ def unclaimed(retire_program):
     )
 
 
+@weaver_test(remote=True)
 def test_a_claim_for_a_key_that_is_not_there_deletes_nothing(unclaimed):
     """A delete is a report of what happened, not of what was asked for."""
 
@@ -499,6 +506,7 @@ def claimed_twice(retire_program):
     )
 
 
+@weaver_test(remote=True)
 def test_a_key_claimed_twice_is_one_deletion(claimed_twice):
     """The claim is normalised before it is counted or applied."""
 

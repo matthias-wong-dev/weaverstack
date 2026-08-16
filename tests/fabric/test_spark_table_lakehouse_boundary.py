@@ -28,10 +28,9 @@ from __future__ import annotations
 import pytest
 from support import spark_table_cases as cases
 from support.observation import observe_in_session
+from support.weaver_test import weaver_test
 
 from weaver.errors import InstallError
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 
 @pytest.fixture(scope="module")
@@ -117,16 +116,17 @@ def spark_table_estate(
         observation=observe_in_session(
             livy_session,
             queries=cases.describe_queries(destination),
-            label="observe spark_table",
         ),
     )
 
 
+@weaver_test(remote=True)
 @pytest.mark.parametrize("case", cases.BUILDING, ids=lambda case: case.name)
 def test_the_built_table_is_the_shape_its_query_declares(case, spark_table_estate):
     cases.assert_case_built(case, spark_table_estate.observation[case.name])
 
 
+@weaver_test(remote=True)
 def test_the_exact_case_table_is_readable_by_the_next_action(spark_table_estate):
     """Fabric folds a table identifier to lower case unless analysis is exact.
 
@@ -139,6 +139,7 @@ def test_the_exact_case_table_is_readable_by_the_next_action(spark_table_estate)
     assert spark_table_estate.observation[cases.EXACT_CASE_READER] == []
 
 
+@weaver_test(remote=True)
 def test_a_query_that_does_not_resolve_fails_naming_the_action(spark_table_estate):
     """The analysis failure moved from running the query to describing it."""
 

@@ -46,6 +46,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE
@@ -56,8 +57,6 @@ from weaver.runtime.load_contract import (
     REASON_DUPLICATE_PK,
     REJECTION_REASON,
 )
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 SCHEMA = "DWG"
 
@@ -300,12 +299,14 @@ def ordinary(estate):
     return SimpleNamespace(seeded=first, updated=second, shrunk=third)
 
 
+@weaver_test(remote=True)
 def test_the_generated_procedure_installs_and_is_callable(ordinary):
     """The two-phase installer ran: it read sys.columns and created the procedure."""
 
     assert ordinary.seeded.extra["procedures"] == [f"Load {SCHEMA}.{OBJECT}"]
 
 
+@weaver_test(remote=True)
 def test_the_load_generates_identities_without_being_given_them(ordinary):
     """The engine assigns them, so the load never names the column.
 
@@ -320,6 +321,7 @@ def test_the_load_generates_identities_without_being_given_them(ordinary):
 # --- the load semantics ------------------------------------------------------
 
 
+@weaver_test(remote=True)
 def test_the_load_inserts_the_rows_its_query_produced(ordinary):
     seeded = ordinary.seeded
 
@@ -328,6 +330,7 @@ def test_the_load_inserts_the_rows_its_query_produced(ordinary):
     assert seeded.contents == CLEAN
 
 
+@weaver_test(remote=True)
 def test_a_clean_run_tidies_its_intermediate_tables_away(ordinary):
     """They are evidence, and a run that rejected nothing produced none."""
 
@@ -335,6 +338,7 @@ def test_a_clean_run_tidies_its_intermediate_tables_away(ordinary):
     assert ordinary.seeded.extra["leftovers"] == 0
 
 
+@weaver_test(remote=True)
 def test_a_second_run_updates_only_what_changed(ordinary):
     updated = ordinary.updated
 
@@ -342,10 +346,12 @@ def test_a_second_run_updates_only_what_changed(ordinary):
     assert updated.contents == CHANGED
 
 
+@weaver_test(remote=True)
 def test_an_unchanged_row_keeps_its_original_update_time(ordinary):
     assert ordinary.updated.extra["audit"] == [("c1", 1), ("c2", 0)]
 
 
+@weaver_test(remote=True)
 def test_a_non_incremental_run_deletes_rows_the_source_stopped_producing(ordinary):
     """The source stopped producing c2, so the target stops holding it."""
 
@@ -370,6 +376,7 @@ def refused(estate):
     return Ran(result=None, contents=_contents(estate), extra={"raised": raised.value})
 
 
+@weaver_test(remote=True)
 def test_an_intolerant_run_with_rejects_raises_and_leaves_the_target_untouched(refused):
     """`exec [_].[Load S.N]` fails the way `.load()` does.
 
@@ -402,6 +409,7 @@ def tolerated(estate):
     )
 
 
+@weaver_test(remote=True)
 def test_a_tolerant_run_loads_the_valid_rows_and_still_reports_failure(tolerated):
     """Tolerating rejects changes what is written, never what is reported."""
 
@@ -411,6 +419,7 @@ def test_a_tolerant_run_loads_the_valid_rows_and_still_reports_failure(tolerated
     assert tolerated.contents == [("c1", "One"), ("c2", "Two"), ("c4", "A")]
 
 
+@weaver_test(remote=True)
 def test_the_rejected_rows_survive_with_their_reason(tolerated):
     """A count says something went wrong and nothing about what."""
 
@@ -455,6 +464,7 @@ def static_run(static_estate):
     )
 
 
+@weaver_test(remote=True)
 def test_a_static_warehouse_load_seeds_an_empty_target(static_run):
     seed = static_run.extra["seed"]
 
@@ -463,6 +473,7 @@ def test_a_static_warehouse_load_seeds_an_empty_target(static_run):
     assert static_run.extra["seeded_contents"] == CLEAN
 
 
+@weaver_test(remote=True)
 def test_a_second_static_warehouse_load_is_a_successful_no_op(static_run):
     """The source is changed between the runs and the target does not move.
 
@@ -483,6 +494,7 @@ def test_a_second_static_warehouse_load_is_a_successful_no_op(static_run):
     assert static_run.contents == CLEAN
 
 
+@weaver_test(remote=True)
 def test_a_static_no_op_leaves_no_intermediate_tables_behind(static_run):
     """It returned before staging, so there was never anything to tidy."""
 

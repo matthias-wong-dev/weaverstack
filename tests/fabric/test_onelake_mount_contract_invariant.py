@@ -24,9 +24,7 @@ found with a throwaway probe and should have been left behind as this.
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
+from support.weaver_test import weaver_test
 
 MOUNT_CONTRACT = r"""
 import notebookutils, os
@@ -54,6 +52,7 @@ emit(out)
 """
 
 
+@weaver_test(remote=True)
 def test_a_mount_makes_onelake_addressable_by_ordinary_python(
     livy_session, fabric_workspace_item, fabric_target_lakehouse
 ):
@@ -68,9 +67,7 @@ def test_a_mount_makes_onelake_addressable_by_ordinary_python(
     item = fabric_target_lakehouse
     root = f"abfss://{workspace.id}@onelake.dfs.fabric.microsoft.com/{item.id}"
 
-    seen = livy_session.run(
-        f"ROOT = {root!r}\n{MOUNT_CONTRACT}", label="mount contract"
-    ).payload
+    seen = livy_session.run(f"ROOT = {root!r}\n{MOUNT_CONTRACT}").payload
 
     # A POSIX path, so pathlib and open() work — which is what a Folder needs.
     assert seen["local_path"].startswith("/synfs/")
@@ -148,6 +145,7 @@ emit(out)
 """
 
 
+@weaver_test(remote=True)
 def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
     livy_session, fabric_workspace, fabric_client, fabric_target_lakehouse
 ):
@@ -175,9 +173,7 @@ def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
         f"RESET_ATTEMPTS = {RESET_ATTEMPTS!r}\nRESET_PAUSE = {RESET_PAUSE!r}\n"
     )
 
-    before = livy_session.run(
-        preamble + MOUNT_COHERENCE, label="mount, then stage"
-    ).payload
+    before = livy_session.run(preamble + MOUNT_COHERENCE).payload
     assert before["before"] == ["customers.csv"]
 
     # Outside the mount, and outside the session: the desktop's own transport.
@@ -187,9 +183,7 @@ def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
     staged = resolver.files_root(ItemRef(item.name)) / probe / "CustomerCsv_Staging"
     dfs.delete(staged, recursive=True)
 
-    after = livy_session.run(
-        preamble + MOUNT_AFTER_WIPE, label="reset through the surviving mount"
-    ).payload
+    after = livy_session.run(preamble + MOUNT_AFTER_WIPE).payload
 
     # The claim, and it is about the *outcome* rather than about any listing on
     # the way to it. Before the repair this was

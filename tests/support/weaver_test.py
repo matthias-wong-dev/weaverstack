@@ -24,6 +24,14 @@ class WeaverTestDeclaration:
     resources: frozenset[str] = frozenset()
 
 
+@dataclass(frozen=True)
+class SessionRegistration:
+    """A Session and its telemetry position when this test acquired it."""
+
+    session: object
+    start: int
+
+
 def weaver_test(
     *,
     remote: bool = False,
@@ -72,7 +80,7 @@ def weaver_test(
     return apply
 
 
-_sessions: ContextVar[tuple[object, ...]] = ContextVar(
+_sessions: ContextVar[tuple[SessionRegistration, ...]] = ContextVar(
     "weaver_test_sessions", default=()
 )
 
@@ -93,15 +101,27 @@ def register_session(session) -> object:
     """Register a fixture-provided Session with the active test, once."""
 
     current = _sessions.get()
-    if session not in current:
-        _sessions.set((*current, session))
+    if not any(entry.session is session for entry in current):
+        _sessions.set(
+            (*current, SessionRegistration(session, len(session.telemetry.events())))
+        )
     return session
 
 
 def registered_sessions() -> tuple[object, ...]:
     """The Sessions attributed to the active test body."""
 
-    return _sessions.get()
+    return tuple(entry.session for entry in _sessions.get())
+
+
+def setup_events(before: dict[int, int]) -> tuple[object, ...]:
+    """External events emitted by fixtures before the test body began."""
+
+    events = []
+    for entry in _sessions.get():
+        stop = before.get(id(entry.session), entry.start)
+        events.extend(entry.session.telemetry.events()[entry.start : stop])
+    return tuple(events)
 
 
 def observed_resources(before: dict[int, int]) -> frozenset[str]:
@@ -117,7 +137,8 @@ def event_snapshot() -> dict[int, int]:
     """The per-Session event positions at the start of a test body."""
 
     return {
-        id(session): len(session.telemetry.events()) for session in registered_sessions()
+        id(session): len(session.telemetry.events())
+        for session in registered_sessions()
     }
 
 
@@ -129,5 +150,6 @@ __all__ = [
     "observed_resources",
     "register_session",
     "registered_sessions",
+    "setup_events",
     "weaver_test",
 ]

@@ -16,16 +16,13 @@ from __future__ import annotations
 import pytest
 from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE
 from support.journey_claims import drive_across_items
+from support.weaver_test import weaver_test
 
-pytestmark = [
-    pytest.mark.fabric,
-    pytest.mark.hosted,
-    pytest.mark.full_integration,
-    pytest.mark.parametrize(
-        "weaver_repo_fixture", [CROSS_ITEM_JOURNEY_FIXTURE], indirect=True
-    ),
-]
+pytestmark = pytest.mark.parametrize(
+    "weaver_repo_fixture", [CROSS_ITEM_JOURNEY_FIXTURE], indirect=True
+)
 
 
+@weaver_test(integration=True)
 def test_a_lakehouse_and_the_warehouse_that_reports_on_it(fabric_cross_item_journey):
     drive_across_items(fabric_cross_item_journey)

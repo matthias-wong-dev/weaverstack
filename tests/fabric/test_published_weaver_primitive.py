@@ -34,15 +34,13 @@ from __future__ import annotations
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
-import pytest
 from conftest import staged_bundle, staged_bundle_source, staged_repository_root
 from factories import item_id, single_document_repository, warehouse_table
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle.executors.base import ResolvedTarget
 from weaver.build_bundle.prune import read_warehouse_inventory
 from weaver.targets import ItemRef
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 #: The Warehouse item the installation probe builds. Its own logical name, so it
 #: cannot collide with an estate another module is publishing under the same one.
@@ -80,6 +78,7 @@ def warehouse_target(warehouse) -> ResolvedTarget:
     )
 
 
+@weaver_test(hosted=True)
 def test_the_installed_package_imports_and_reports_a_version(
     livy_session, fabric_workspace
 ):
@@ -105,7 +104,6 @@ def test_the_installed_package_imports_and_reports_a_version(
         "import weaver\n"
         "from importlib.metadata import version\n"
         "emit({'attr': weaver.__version__, 'dist': version('weaverstack')})\n",
-        label="parity: import",
     ).payload
     assert payload["attr"] == payload["dist"]
 
@@ -140,6 +138,7 @@ def _wheel_version(filename: str) -> str:
     return filename.split("-")[1]
 
 
+@weaver_test(hosted=True)
 def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
     livy_session,
     fabric_workspace,
@@ -178,7 +177,6 @@ def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
         f"{clean_disposable_warehouse.item.name!r})))\n"
         "emit({'kind': type(resolver).__name__, 'root': root,\n"
         "      'endpoint': bool(endpoint)})\n",
-        label="parity: REST",
     ).payload
 
     # Named, so a regression to the desktop resolver would be loud rather than
@@ -188,6 +186,7 @@ def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
     assert payload["endpoint"], "the session could not reach REST on its own identity"
 
 
+@weaver_test(hosted=True)
 def test_a_sql_executor_is_acquired_from_the_session_and_runs(
     livy_session, fabric_workspace, clean_disposable_warehouse
 ):
@@ -214,13 +213,13 @@ def test_a_sql_executor_is_acquired_from_the_session_and_runs(
         "sql = session.sql_executor(ItemRef(bound.item_id))\n"
         "rows = sql.query('select 1 as n')\n"
         "emit({'acquired': sql is not None, 'n': rows[0]['n']})\n",
-        label="parity: SQL",
     ).payload
 
     assert payload["acquired"] is True
     assert payload["n"] == 1
 
 
+@weaver_test(hosted=True)
 def test_a_spark_executor_runs_one_action_in_the_session(
     livy_session, fabric_workspace, fabric_target_lakehouse, fabric_staging_lakehouse
 ):
@@ -273,7 +272,6 @@ def test_a_spark_executor_runs_one_action_in_the_session(
         "spark.sql('DROP SCHEMA IF EXISTS ' + "
         "target.destination.qualified_schema('Parity') + ' CASCADE')\n"
         "emit(seen)\n",
-        label="parity: Spark",
     ).payload
 
     assert payload["status"] == "succeeded", payload["error"]
@@ -282,6 +280,7 @@ def test_a_spark_executor_runs_one_action_in_the_session(
     assert payload["details"]["destination"]
 
 
+@weaver_test(hosted=True)
 def test_the_session_native_store_reads_back_what_it_wrote(
     livy_session, fabric_workspace, fabric_target_lakehouse, fabric_staging_lakehouse
 ):
@@ -317,7 +316,6 @@ def test_the_session_native_store_reads_back_what_it_wrote(
         "store.delete(root, recursive=True)\n"
         "seen['removed'] = not store.exists(root / 'probe.txt')\n"
         "emit(seen)\n",
-        label="parity: store",
     ).payload
 
     # Named so a regression to the desktop client would be obvious rather than
@@ -338,6 +336,7 @@ def test_the_session_native_store_reads_back_what_it_wrote(
 # a store and a resolver completes".
 
 
+@weaver_test(hosted=True)
 def test_a_locally_generated_bundle_installs_inside_fabric(
     tmp_path,
     fabric_workspace,
@@ -481,7 +480,6 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         "      'errors': {a.action_id: a.error_message\n"
         "                 for a in report.action_results() if a.error_type},\n"
         "      'tables': list(seen.tables), 'schemas': list(seen.schemas)})\n",
-        label="install in session",
     ).payload
 
     assert payload["status"] == "succeeded", payload["errors"]

@@ -30,16 +30,13 @@ from __future__ import annotations
 
 import pytest
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
+from support.weaver_test import weaver_test
 
 from weaver.load_report import LoadRunReport
 
-pytestmark = [
-    pytest.mark.fabric,
-    pytest.mark.hosted,
-    pytest.mark.parametrize(
-        "weaver_repo_fixture", [LAKEHOUSE_JOURNEY_FIXTURE], indirect=True
-    ),
-]
+pytestmark = pytest.mark.parametrize(
+    "weaver_repo_fixture", [LAKEHOUSE_JOURNEY_FIXTURE], indirect=True
+)
 
 
 @pytest.fixture(scope="module")
@@ -77,6 +74,7 @@ def _spent(before: dict, after: dict) -> dict:
     }
 
 
+@weaver_test(hosted=True)
 def test_a_desktop_runs_the_catalogue_graph_it_did_not_have_to_ship(loaded):
     """The decomposed path, end to end, against real installed primitives."""
 
@@ -87,6 +85,7 @@ def test_a_desktop_runs_the_catalogue_graph_it_did_not_have_to_ship(loaded):
     assert report.nodes
 
 
+@weaver_test(hosted=True)
 def test_every_python_node_shared_one_runtime_scope(loaded):
     """One scope per logical run, however many nodes it dispatched.
 
@@ -103,6 +102,7 @@ def test_every_python_node_shared_one_runtime_scope(loaded):
     )
 
 
+@weaver_test(hosted=True)
 def test_the_scope_is_closed_when_the_run_ends(loaded):
     """A scope left open is one the next run would inherit — and with it, the
     modules a rebuild has since replaced."""
@@ -112,6 +112,7 @@ def test_the_scope_is_closed_when_the_run_ends(loaded):
     assert spent.get("livy.close_scope") == 1
 
 
+@weaver_test(hosted=True)
 def test_the_run_does_not_stocktake_the_physical_estate(loaded):
     """The catalogue is trusted until a primitive is dispatched."""
 
@@ -122,6 +123,7 @@ def test_the_run_does_not_stocktake_the_physical_estate(loaded):
     assert "livy.read_catalogue" not in spent
 
 
+@weaver_test(hosted=True)
 def test_every_node_reports_where_it_was_dispatched(loaded):
     """Dispatch addresses were derived from the catalogue graph."""
 

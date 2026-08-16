@@ -3,8 +3,7 @@
 Every *decision* an alias involves is proven in pure Python
 (`tests/targeted/test_alias_planning.py`): whether one is planned, left alone,
 has its schema created anyway, waits for its producer, or is stale because the
-producer moved on. None of that needs a workspace, and it used to be bought with
-three full generate-and-installs.
+producer moved on. None of that needs a workspace.
 
 What only Fabric can answer is what happens when the plan *runs*:
 
@@ -43,10 +42,9 @@ from pathlib import Path
 import pytest
 from conftest import staged_bundle, staged_repository_root
 from factories import FixtureCatalogue, alias_repository
+from support.weaver_test import weaver_test
 
 from weaver.targets import ItemRef
-
-pytestmark = [pytest.mark.fabric, pytest.mark.remote]
 
 #: Logical names owned by this module alone. The catalogue is keyed by logical
 #: item, never by physical target, so two estates sharing a name share Registry
@@ -269,7 +267,6 @@ def alias_estate(
         f"spark.sql('CREATE SCHEMA IF NOT EXISTS {at['consumer'].qualified_schema('DWG')}')\n"
         f"spark.sql('CREATE TABLE IF NOT EXISTS {source} (CustomerId string) USING delta')\n"
         "emit(True)\n",
-        label="seed the source",
     )
 
     alias_result = run_from_here(
@@ -313,7 +310,6 @@ def alias_estate(
         f"_seen['source_in_consumer'] = spark.catalog.tableExists({at['consumer'].qualify('DWG', 'Customer')!r})\n"
         f"_seen['produced'] = spark.catalog.tableExists({source!r})\n"
         "emit(_seen)\n",
-        label="read back through the alias",
     ).payload
 
     return {
@@ -338,6 +334,7 @@ def alias_estate(
 # --- the shortcut Fabric actually made ----------------------------------------
 
 
+@weaver_test(remote=True)
 def test_the_alias_exists_as_a_onelake_shortcut(alias_estate, fabric_client):
     """Asked of the workspace, not of the plan: the shortcut is really there.
 
@@ -370,6 +367,7 @@ def test_the_alias_exists_as_a_onelake_shortcut(alias_estate, fabric_client):
     assert target.get("path") == f"Tables/DWG/{physical_source}"
 
 
+@weaver_test(remote=True)
 def test_the_consumer_reads_the_producers_table_through_its_own_name(alias_estate):
     """The claim an alias makes, checked where it has to hold.
 
@@ -386,6 +384,7 @@ def test_the_consumer_reads_the_producers_table_through_its_own_name(alias_estat
     assert seen["alias_rows"] == 0
 
 
+@weaver_test(remote=True)
 def test_the_producers_table_is_not_moved_or_duplicated(alias_estate):
     """An alias adds a name in the consumer; the object stays where it is."""
 
@@ -396,6 +395,7 @@ def test_the_producers_table_is_not_moved_or_duplicated(alias_estate):
     assert seen["source_in_consumer"] is False
 
 
+@weaver_test(remote=True)
 def test_the_consumers_endpoint_reports_the_aliased_table(alias_estate):
     """What the refresh is for: the SQL side sees what Spark just created."""
 
@@ -404,6 +404,7 @@ def test_the_consumers_endpoint_reports_the_aliased_table(alias_estate):
     assert "PortableCustomer" in seen["consumer_tables"]
 
 
+@weaver_test(remote=True)
 def test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real(alias_estate):
     """That the refresh is *planned* is pure Python. That it found a real
     endpoint and did work is not."""
@@ -416,6 +417,7 @@ def test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real(alias_estate
     assert details.get("sql_endpoint_id"), "the refresh found no endpoint"
 
 
+@weaver_test(remote=True)
 def test_the_shortcut_survives_a_build_that_does_not_touch_it(
     alias_estate, fabric_client
 ):
@@ -448,6 +450,7 @@ WAREHOUSE_PRODUCER = "Lakehouse/AliasHouseProducer"
 WAREHOUSE_CONSUMER = "Warehouse/AliasReporting"
 
 
+@weaver_test(remote=True, resources={"rest", "tds"})
 def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     fabric_workspace,
     fabric_client,
@@ -544,7 +547,6 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         "finally:\n"
         "    spark.conf.set('spark.sql.caseSensitive', previous)\n"
         "emit(True)\n",
-        label="seed the source",
     )
 
     # The producer's endpoint must catch up before the Warehouse can see the
@@ -592,7 +594,9 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     assert result.status == "succeeded", result.error_message
 
     # And the view really answers, over TDS from here.
-    rows = warehouse.executor.query(
-        "select count(*) as n from [DWG].[PortableCustomer]"
+    rows = weaver_session.query_tsql(
+        "select count(*) as n from [DWG].[PortableCustomer]",
+        target=warehouse.target,
+        workspace=fabric_workspace,
     )
-    assert rows[0]["n"] == 0
+    assert list(rows)[0]["n"] == 0

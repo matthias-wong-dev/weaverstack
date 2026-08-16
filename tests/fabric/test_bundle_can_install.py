@@ -31,7 +31,6 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-import pytest
 from conftest import staged_bundle, staged_bundle_source
 from factories import (
     FixtureInventory,
@@ -42,6 +41,7 @@ from factories import (
     single_document_repository,
     spark_view,
 )
+from support.weaver_test import weaver_test
 
 from weaver.build_bundle import (
     BuildPlan,
@@ -53,8 +53,6 @@ from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.incremental import BuildSelection, Impact
 from weaver.build_bundle.stages import enumerate_stages
 from weaver.declaration.metadata import DELTA_TARGET
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 ITEM = "Lakehouse/Sales"
 BUNDLE = "installorder"
@@ -177,6 +175,7 @@ def _load_identities(repository, item):
     }
 
 
+@weaver_test(hosted=True)
 def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
     tmp_path,
     fabric_workspace,
@@ -244,7 +243,6 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
         "      'tables': list(seen.tables), 'views': list(seen.views),\n"
         "      'schemas': list(seen.schemas), 'folders': list(seen.folders),\n"
         "      'files': list(seen.files)})\n",
-        label="install a whole bundle",
     ).payload
 
     # 1. It ran, which is the viability claim: every statement was acceptable to

@@ -33,7 +33,7 @@ boundaries covered by the writing uplift.
 | Document | Type | Use it for |
 | --- | --- | --- |
 | [Test architecture](test-architecture.md) | Testing | Which layer should prove a claim. |
-| [Fabric integration tests](fabric-testing.md) | Testing | Workspace setup, markers, and Fabric-specific behaviour. |
+| [Fabric integration tests](fabric-testing.md) | Testing | Workspace setup, declarations, telemetry, and Fabric-specific behaviour. |
 
 ## Historical notes
 

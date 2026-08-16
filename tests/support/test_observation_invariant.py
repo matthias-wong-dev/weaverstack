@@ -184,7 +184,7 @@ def test_a_session_that_emitted_no_payload_is_an_error_not_an_empty_result():
     """Silence from Fabric must not read as "the estate has nothing in it"."""
 
     class SilentSession:
-        def run(self, body, *, label=None):
+        def run(self, body):
             return type("Result", (), {"payload": None})()
 
     with pytest.raises(AssertionError, match="emitted no payload"):
@@ -198,11 +198,9 @@ def test_a_session_observation_is_one_submission_carrying_every_question():
     class RecordingSession:
         def __init__(self):
             self.bodies = []
-            self.labels = []
 
-        def run(self, body, *, label=None):
+        def run(self, body):
             self.bodies.append(body)
-            self.labels.append(label)
             spark = FakeSpark(answers={"SELECT 1": [{"n": 0}]}, schemas={"s"})
             return type("Result", (), {"payload": _run(body, spark)})()
 
@@ -212,9 +210,7 @@ def test_a_session_observation_is_one_submission_carrying_every_question():
         queries={"a": "SELECT 1"},
         schemas={"b": "s"},
         tables={"c": "s.t"},
-        label="observe install",
     )
 
     assert len(session.bodies) == 1, "an observation must be one round trip"
-    assert session.labels == ["observe install"]
     assert seen.scalar("a") == 0 and seen.schema("b") and not seen.table("c")

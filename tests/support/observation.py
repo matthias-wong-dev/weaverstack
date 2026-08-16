@@ -121,9 +121,7 @@ def observation_from(payload) -> Observation:
     )
 
 
-def observe_in_session(
-    session, *, queries=None, schemas=None, tables=None, label="observe"
-) -> Observation:
+def observe_in_session(session, *, queries=None, schemas=None, tables=None) -> Observation:
     """One Livy submission, one evidence payload — for a raw session.
 
     ``BuildEnv.observe`` is the same thing for a fixture that has a whole build
@@ -133,7 +131,5 @@ def observe_in_session(
     """
 
     return observation_from(
-        session.run(
-            observe_body(queries or {}, schemas or {}, tables or {}), label=label
-        ).payload
+        session.run(observe_body(queries or {}, schemas or {}, tables or {})).payload
     )

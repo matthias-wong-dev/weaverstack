@@ -1,9 +1,7 @@
 """One Session, one resolver, one answer per name — against a real workspace.
 
-The cache is only worth something if it survives the operation that filled it.
-Weaver used to build a resolver per operation, so every command re-asked the
-workspace what the same handful of names meant; a Session that owns one resolver
-for its lifetime is what makes the second question free.
+The cache must survive the operation that filled it. A Session owns one resolver
+for its lifetime, so the second question for the same typed name is free.
 
 Cheap on purpose: REST resolution only, no Livy session, so this proves the
 ownership without competing for a capacity's one Spark slot.

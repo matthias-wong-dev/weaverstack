@@ -33,7 +33,6 @@ from support.build_env import (
     _upload_tree,
 )
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
-from support.livy_telemetry import LEDGER, OUTSIDE_A_TEST, CountedLivySession
 from support.weaver_test import register_session
 
 from weaver.targets import ItemRef
@@ -57,41 +56,15 @@ WAREHOUSE_POLL_INTERVAL = 5.0
 def _timed_session_run(session, label: str, body: str):
     """Run one meaningful Fabric phase and leave a compact timing breadcrumb.
 
-    The label reaches the Livy ledger as well as the printed line, so the
-    end-of-run breakdown can say which *phase* the round trips went on rather
-    than only how many there were.
+    Labels remain a fixture-level timing aid; resource events come from the
+    production Livy boundary.
     """
 
     started = time.monotonic()
     try:
-        return session.run(body, label=label)
+        return session.run(body)
     finally:
         print(f"Fabric {label}: {time.monotonic() - started:.2f}s")
-
-
-# --- Livy accounting ---------------------------------------------------------
-#
-# Attribution is by whichever test is running when a statement is submitted.
-# Session-scoped fixture setup therefore lands on the first test that asked for
-# it, which is honest — that test is what paid for it — and the phase labels say
-# which part was fixture work.
-
-
-def pytest_runtest_logstart(nodeid, location):
-    LEDGER.nodeid = nodeid
-
-
-def pytest_runtest_logfinish(nodeid, location):
-    LEDGER.nodeid = OUTSIDE_A_TEST
-
-
-def pytest_terminal_summary(terminalreporter, exitstatus, config):
-    lines = LEDGER.report()
-    if not lines:
-        return
-    terminalreporter.write_sep("=", "Livy transport")
-    for line in lines:
-        terminalreporter.write_line(line)
 
 
 @pytest.fixture(scope="session")
@@ -160,8 +133,8 @@ FIXED_ITEMS = {
 
 
 #: Where the suite stages what it needs OneLake for, beneath a Lakehouse's
-#: Files. The catalogue used to hold both and cannot: it is a Warehouse, and has
-#: no Files area. Neither is product behaviour — a repository is a caller's own
+#: Files. The catalogue Warehouse has no Files area. Neither is product
+#: behaviour — a repository is a caller's own
 #: path and a bundle is kept only when a caller asks — so any Lakehouse will do,
 #: and the tests name one they already have.
 WEAVER_ITEMS_AREA = "weaver_items"
@@ -218,9 +191,8 @@ def _ensure_lakehouse(client, workspace, role: str):
     try:
         return find_item(workspace, name, item_type=LAKEHOUSE, client=client)
     except Exception:
-        # The product's own creation, deliberately: the harness used to carry a
-        # copy that passed enableSchemas, which is how create_lakehouse went on
-        # omitting it without anything noticing.
+        # Use the product path so the harness exercises the same schema-enabled
+        # creation contract as a normal caller.
         return create_lakehouse(workspace, name, client=client)
 
 
@@ -403,7 +375,7 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
 
 
 @pytest.fixture(scope="session")
-def livy_session(fabric_workspace, fabric_client):
+def livy_session(fabric_workspace, fabric_client, request):
     """One Spark session in Fabric with the Weaver Environment attached.
 
     Skips — rather than fails — when the Environment is missing or carries no
@@ -481,16 +453,11 @@ def livy_session(fabric_workspace, fabric_client):
             f"installed ({exc})"
         )
     startup = time.monotonic() - started
-    LEDGER.startup_seconds = startup
+    request.config._weaver_livy_startup_seconds = startup
     print(f"Fabric Livy session startup: {startup:.2f}s")
-
-    # Counted from here, not before: `start()` submits the bootstrap, which is
-    # part of standing the session up rather than a round trip a test chose to
-    # make. It is reported as startup so no one tries to optimise it away.
-    counted = CountedLivySession(session)
-    counted.weaver_startup_seconds = startup
+    session.weaver_startup_seconds = startup
     try:
-        yield counted
+        yield session
     finally:
         session.close()
 
@@ -500,9 +467,8 @@ def weaver_session(fabric_workspace, livy_session):
     """The suite's one :class:`~weaver.sessions.console.ConsoleSession`.
 
     The canonical Fabric fixture: one credential, one REST client, one resolver
-    with one item cache, one Livy session and one TDS connection per Warehouse,
-    for the whole run. Everything that used to acquire its own gets this
-    instead, which is where the suite's Fabric time goes back.
+    with one item cache, one Livy session and one TDS connection per Warehouse
+    for the whole run.
 
     The Livy session is **given**, not acquired. The suite already starts one —
     with the preflight and the skip semantics that belong to a harness rather
@@ -514,15 +480,25 @@ def weaver_session(fabric_workspace, livy_session):
     from weaver.sessions import ConsoleSession
 
     with ConsoleSession(workspace=fabric_workspace, livy=livy_session) as session:
-        yield register_session(session)
+        yield session
         print(f"\n{session.telemetry.report()}")
 
 
-@pytest.fixture
-def tracked_weaver_session(weaver_session):
-    """The shared Session, attributed to this test body."""
+@pytest.fixture(autouse=True)
+def register_requested_weaver_session(request):
+    """Attribute the shared Session whenever a test's fixture graph uses it."""
 
-    return register_session(weaver_session)
+    if "weaver_session" in request.fixturenames:
+        register_session(request.getfixturevalue("weaver_session"))
+
+
+@pytest.fixture
+def ready_warehouse_session(weaver_session, fabric_workspace, disposable_warehouse):
+    """The shared Session with its reusable Warehouse capability acquired."""
+
+    register_session(weaver_session)
+    weaver_session.sql_executor(disposable_warehouse.target, workspace=fabric_workspace)
+    return weaver_session
 
 
 @pytest.fixture
@@ -538,6 +514,23 @@ def fresh_weaver_session(fabric_workspace):
 
     with ConsoleSession(workspace=fabric_workspace) as session:
         yield register_session(session)
+
+
+@pytest.fixture
+def rest_session(fabric_workspace):
+    """A Session-owned REST client without acquiring a Spark capability."""
+
+    from weaver.sessions import ConsoleSession
+
+    with ConsoleSession(workspace=fabric_workspace, progress=False) as session:
+        yield register_session(session)
+
+
+@pytest.fixture
+def session_fabric_client(rest_session, fabric_workspace):
+    """The production Fabric client carrying this test's Session telemetry."""
+
+    return rest_session.resolver(fabric_workspace).client
 
 
 # --- disposable Warehouse ----------------------------------------------------
@@ -769,13 +762,7 @@ class WarehousePrimitiveEstate:
 
 @pytest.fixture(scope="session")
 def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
-    """Build the Warehouse primitive estate once for three claim modules.
-
-    These tests used to share a module-scoped estate in one mixed-claim module.
-    The naming architecture requires separate modules, but a filing decision
-    must not triple the real Fabric build. Session scope preserves the one-build
-    cost; the modules are named together and leave the declared estate intact.
-    """
+    """Build one Warehouse primitive estate shared by three claim modules."""
 
     from factories import (
         bound_target,
@@ -941,7 +928,7 @@ def populated_fabric_lakehouse(
         body = "\n".join(f"spark.sql({statement!r})" for statement in statements)
         # Raw Spark, no Weaver import: a session is needed to make a Delta table,
         # the installed package is not.
-        result = livy_session.run(f"{body}\nemit(True)\n", label="seed")
+        result = livy_session.run(f"{body}\nemit(True)\n")
         assert result.payload is True
 
         def wipe() -> tuple[str, ...]:
@@ -1189,18 +1176,18 @@ def _fabric_build_context(
 
     def query(sql: str) -> list:
         body = f"emit([row.asDict() for row in spark.sql({sql!r}).collect()])\n"
-        return session.run(body, label="query").payload
+        return session.run(body).payload
 
     def columns(table: str) -> list:
         body = (
             "emit([{'name': f.name, 'type': f.dataType.simpleString(), "
             f"'nullable': f.nullable}} for f in spark.table({table!r}).schema])\n"
         )
-        return session.run(body, label="query").payload
+        return session.run(body).payload
 
     def schema_exists(qualified: str) -> bool:
         body = f"emit(bool(spark.catalog.databaseExists({qualified!r})))\n"
-        return session.run(body, label="query").payload
+        return session.run(body).payload
 
     def run_python(body: str, *, label: str = "shared body"):
         """Run a shared body *in Fabric*, with the session's own resolver bound.
@@ -1243,7 +1230,7 @@ def _fabric_build_context(
             "(x int) USING delta",
         ]
         body = "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n"
-        session.run(body, label="seed")
+        session.run(body)
         files_root = resolver.files_root(target)
         store.write(files_root.join("Raw", "OldFolder", "stale.csv"), b"old\n")
         store.write(files_root.join("Legacy", "Stuff", "f.txt"), b"x\n")
@@ -1318,10 +1305,7 @@ def _empty_the_target(
         f"DROP SCHEMA IF EXISTS {destination.qualified_schema(schema)} CASCADE"
         for schema in _FABRIC_TARGET_SCHEMAS
     ]
-    session.run(
-        "".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n",
-        label="empty target",
-    )
+    session.run("".join(f"spark.sql({s!r})\n" for s in statements) + "emit(True)\n")
 
     from weaver.physical_wipe import wipe_lakehouse
 

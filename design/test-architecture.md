@@ -2,214 +2,182 @@
 
 ## Purpose
 
-This document explains how to select the cheapest test layer that can prove a
-claim, and what the more expensive Fabric layers add.
+Weaver tests state what they prove, where they run, and which external Fabric
+resources their claim needs. The same production Session telemetry used by
+Weaver validates those declarations.
 
-Where a claim belongs, and why. The organising rule is one sentence:
+The organising rule is:
 
-> **Prove a claim at the cheapest layer that can answer it, and use the
-> expensive layers only for what only they can answer.**
+> Prove a claim at the cheapest layer that can answer it, and use Fabric only
+> for behaviour that Fabric itself decides.
 
-The rest of this document applies that rule to the repository test suite.
+## One declaration model
 
-## The layers
+Every test function has one `@weaver_test(...)` declaration:
 
-| command | needs | collects | what it is for |
-|---|---|---|---|
-| `pytest` | nothing | ~2800 | contracts, rendering, planning, binding — the development loop |
-| `pytest -m "fabric and remote"` | a workspace | ~100 | one narrow question a real Fabric can answer, with nothing published |
-| `pytest -m "fabric and hosted"` | a workspace **and a published wheel** | ~40 | Weaver running *inside* Fabric, and a desktop that imports it there |
-| `pytest -m full_integration` | a workspace and a published wheel | 2 | composition only, one journey per position |
-| `pytest -m provision` | permission to create and delete items | 4 | Fabric's resource management, not Weaver's |
+```python
+@weaver_test()
+def test_a_plan_is_deterministic():
+    ...
 
-Markers are peers; none implies another. Each says *what a test needs*, so a
-selection is honest about its cost.
 
-The first two are the development loop, and **neither publishes anything** —
-that is the point. A five-minute `weaver install` between a
-developer and finding out a REST body was malformed is a five-minute penalty on
-every mistake.
+@weaver_test(remote=True, resources={"tds"})
+def test_a_warehouse_accepts_the_generated_statement():
+    ...
 
-## Directories describe cost and fixture family, never claim
+
+@weaver_test(integration=True, resources={"tds", "livy", "onelake"})
+def test_the_lifecycle_composes():
+    ...
+```
+
+The declaration stores one scope and one resource set. It is the source of
+truth for collection, selection, reporting, and resource validation. Pytest
+markers are generated from it and must not be written by hand.
+
+## Scopes
+
+| declaration | meaning | selection |
+|---|---|---|
+| `@weaver_test()` | pure Python; no tenant | `pytest` |
+| `@weaver_test(remote=True, ...)` | real Fabric, driven from this checkout; no published wheel | `pytest -m "fabric and remote"` |
+| `@weaver_test(hosted=True, ...)` | requires Weaver published in the Fabric Environment | `pytest -m "fabric and hosted"` |
+| `@weaver_test(integration=True, ...)` | a composed lifecycle journey | `pytest -m full_integration` |
+| `@weaver_test(provision=True, ...)` | creates or deletes Fabric items | `pytest -m provision` |
+
+Integration and provision are complete scopes. They do not also require a
+remote or hosted flag.
+
+The first question when placing a test is what its claim requires:
+
+- Pure Python proves declarations, parsing, rendering, planning, selection,
+  dispatch, reconciliation, and failure semantics.
+- Remote tests prove a narrow platform boundary from the desktop position.
+- Hosted tests prove behaviour that depends on the installed package running
+  in Fabric.
+- Integration proves that already-covered pieces compose.
+- Provision proves Fabric item lifecycle operations.
+
+## Resources
+
+Scope describes where the test sits. Resources describe the external
+boundaries needed by its claim. The vocabulary is closed:
+
+| resource | crossing |
+|---|---|
+| `tds` | Warehouse SQL execution over TDS |
+| `livy` | a Spark or Python submission through Livy |
+| `onelake` | OneLake DFS storage access from outside Fabric |
+| `rest` | Fabric control-plane REST operations |
+
+Ordinary timings are not resource events. Production boundaries call
+`Session.telemetry.external(...)` explicitly, so a timing name cannot
+accidentally become a resource declaration.
+
+For each test body, pytest compares the declared resources exactly with the
+resources emitted by its registered Sessions:
+
+```text
+declared resources == observed resources
+```
+
+An undeclared crossing and an unused declaration both fail. Add a resource only
+when it is necessary to prove the test's claim. A mismatch is evidence to
+investigate: the test may combine claims, a fixture may do unrelated work, or
+production may cross a boundary unnecessarily.
+
+## Shared Session acquisition
+
+The Fabric suite reuses one ConsoleSession, resolver/cache, Livy session, and
+one TDS connection per Warehouse. Reuse must not make declarations depend on
+test order.
+
+Fixture acquisition is measured separately from claim-body enforcement. For
+example, the first use of a Warehouse may resolve its item and SQL endpoint over
+REST and establish a TDS capability. A later TDS test declares `{"tds"}` when
+its claim performs only a query. It does not declare REST merely because shared
+setup populated the cache.
+
+Fixtures register Sessions explicitly. Pytest records an event offset after
+fixture setup and another after the test body. Setup events remain in terminal
+performance reporting; only body events participate in exact declaration
+matching. Repeated REST resolution for the same target on later tests is a
+Session caching defect, not a reason to widen declarations.
+
+## Semantic attribution
+
+Session telemetry combines the external resource boundary with the active
+reporting context:
+
+```text
+Task
+  Step
+    Sub-step
+      resource / operation / elapsed / failure
+```
+
+Callers establish Task, Step, and Sub-step. Low-level boundaries state only the
+resource and operation. Work submitted to Session-owned background threads
+captures the current telemetry context and restores it when the worker runs, so
+resource acquisition and Warehouse flushing retain the meaning that caused
+them.
+
+## Reporting
+
+At the end of a run, pytest reports:
+
+- test counts by declared scope;
+- counts of tests declaring each resource;
+- shared Livy startup time;
+- claim-body and fixture-setup cost by resource;
+- the tests with the most external elapsed time;
+- the most expensive Task / Step / Sub-step crossings;
+- declaration match and mismatch counts.
+
+Elapsed time is diagnostic, not a budget. Use the report to find unnecessary
+crossings, unexpectedly rich fixtures, and repeated remote work. One remote
+state transition should normally return one evidence payload, with assertions
+performed locally against that payload.
+
+## Repository layout and names
 
 ```text
 tests/
-  targeted/          pure Python, by seam — narrow fixture constructors live here
-  support/           shared harness: build env, observation, Livy ledger, claims
-  fabric/            a real workspace, and nothing that does not need one
+  targeted/   narrow pure-Python seam tests and fixture constructors
+  support/    shared declarations, observations, journeys, and harness helpers
+  fabric/     tests that require a real Fabric workspace
 ```
 
-Marker, directory, fixture and transport describe the same thing. That is not
-tidiness: a module under `tests/fabric` collects the Fabric conftest, and with it
-a workspace, a credential and a session, so a module placed there answers for
-that cost whatever its marker says.
+Test modules use `test_<subject>_<claim>.py`. The claim suffix is one of:
 
-`tests/support` holds what belongs to neither transport: the build environment a
-test drives, and the claims two transports both make. A module that spans both is
-a thin wrapper over a shared claim, not a parametrised module — a parametrised
-one can only be honest about one of its markers.
-
-## Modules name their claim
-
-`test_<subject>_<claim>.py`, where the claim is one of:
-
-| claim | the module proves |
+| claim | module purpose |
 |---|---|
-| `declaration` | what a contract accepts and refuses |
-| `render` | the exact text or payload something generates |
-| `binding` | logical intent bound to physical reality — planning, selection, dispatch |
-| `primitive` | one installed thing, run directly, with nothing orchestrating it |
-| `lifecycle` | a sequence of transitions, asserted at each one |
-| `invariant` | a property the estate must keep, enforced rather than trusted |
+| `declaration` | accepted and rejected contracts |
+| `representation` | exact values or rendered output |
+| `boundary` | behaviour at a stable collaborator or platform boundary |
+| `install` | installation of a generated artefact |
+| `primitive` | one executable primitive |
+| `cycle` | related state transitions |
+| `invariant` | a property mechanically kept true |
+| `journey` | composed end-to-end behaviour |
 
-`tests/test_test_architecture_invariant.py` holds the suite to it. Legacy modules
-are grandfathered *individually and classified*, so an exception cannot appear
-because somebody added a file; renaming one removes its entry.
+`tests/test_test_architecture_invariant.py` enforces names, declarations,
+generated markers, the closed resource vocabulary, valid scope combinations,
+and removal of superseded machinery.
 
-## Choosing a layer
+## Adding a test
 
-Ask what would have to be true for the cheaper layer to be unable to answer.
+1. Write the claim as one sentence and choose the cheapest scope that can prove
+   it.
+2. Name the module for its subject and claim type.
+3. Add `@weaver_test(...)` with that one scope.
+4. Use an existing Session fixture and ordinary Weaver behaviour.
+5. Run the test and inspect observed telemetry before declaring resources.
+6. Investigate every mismatch rather than broadening the declaration by
+   default.
+7. For Fabric work, use the fixed `PYTEST_WORKSPACE` estate and consolidate
+   observations of one remote state into one payload.
 
-**Pure Python** answers anything that is a decision: which action is emitted,
-what SQL is rendered, what a signature covers, what a status means, which
-primitive is dispatched. A fake at the boundary is not a compromise here — it is
-what lets the case be one nobody could arrange in a real estate, like a procedure
-that must be called exactly once, or a frame that refuses to be collected.
-
-**Local Spark** answers what only an engine can: does Delta actually do this,
-does the catalogue read back into the object a fixture builds, does a deployed
-module import and run. Its job after the logic is proven above is *fidelity* —
-does a real read produce the same object a fixture constructs.
-
-**Fabric** answers what only the platform decides. Not "does the feature work" —
-that is settled below — but "does this engine accept this, and mean what we
-assumed". Every Fabric test should be reducible to a sentence of that shape.
-
-**The journey** proves composition and nothing else. It should rarely be where a
-defect is found first: syntax, selection, planning, rendering, execution and
-reconciliation are all meant to be proven beneath it.
-
-## Two claim shapes worth naming
-
-**Claims about what the code does not do.** These cannot be made by observing a
-correct outcome, because a correct outcome is what both the right and the wrong
-implementation produce. They need a collaborator that *refuses*: a frame whose
-`collect()` raises proves a suppressed run never materialised a row; a counting
-executor proves a procedure was executed once rather than twice. Both live in
-pure Python, because inventing an uncooperative collaborator is exactly what a
-real estate cannot do.
-
-**Round-trip pairing.** Build from a repository, read the state back, and assert
-it equals what the fixture constructor produces. It is the strongest form of
-boundary claim, because it justifies every pure-Python assertion that uses the
-same constructor. `fabric/test_desktop_build_state_boundary.py` and
-`fabric/test_item_catalogue_fabric_boundary.py` are these, one per position.
-
-## What only Fabric has caught, and why
-
-Each one names a *shape* of gap rather than a bug.
-
-**A Warehouse prune dropping the `_` schema it had just created.** Every pure
-caller of `item_prune_stage` used a *Lakehouse* estate, and the two sides are not
-symmetric: a Lakehouse's generated `_` is a folder document and reaches the
-keep-set through the ordinary path, while a Warehouse's `_` is a schema no
-document declares. The defect could only exist on the side nothing covered.
-
-> **An asymmetry between the two physical sides is where a Lakehouse-only
-> fixture stops being representative.** Prune, schemas and inventory all behave
-> differently across that line.
-
-It was reachable because the keep-set's load half arrived as a *defaulted*
-argument — production passed it, a direct caller did not. The fixed-point test
-does not catch it and never could: the planner passed the argument correctly, and
-the bug lived in the default on a path only a direct caller took.
-
-> **A seam with a destructive default cannot be covered from above.** A defaulted
-> argument is two contracts, and a composed test proves only the one the
-> composition uses. Either the default goes, or the seam is tested directly on
-> every shape it accepts.
-
-**A `pathlib.Path` wrapped around an `abfss://` URL.** Correct locally, where the
-value is a directory; silently wrong in Fabric, where `Path` collapses `abfss://`
-to `abfss:/`. Nothing caught it because no test had ever *run* those objects'
-`read()`.
-
-> **A fixture written to be parsed is not a fixture proven to execute**, and the
-> two look identical until something executes one.
-
-**A control item that could not see its own folders.** `read_lakehouse_inventory`
-excluded the whole Files area for `_weaver`, which stopped being true the moment
-Weaver declared a folder there — and an artefact the inventory cannot
-observe is disproved by every reconciliation, so the build recreated it forever.
-
-**A mount that outlived what was done to OneLake behind it.** A wipe over DFS is
-not necessarily visible through a cached `synfs` mount. Nothing local can see
-this: storage there *is* a filesystem, there is no mount, and there is one view
-of it.
-
-> "The same code runs either side" says nothing about the *storage* underneath.
-
-**A `snapshot=` keyword in a Livy body.** A string sent to a session, executing
-only against the installed wheel — no pure test could run it and no import check
-could see it. The one category where `-m "fabric and hosted"` is the first
-possible sight of the defect, and the reason to grep test *bodies* after a
-signature change rather than trust a mechanical rewrite.
-
-## The action checklist
-
-```bash
-pytest --collect-only -q tests/targeted/test_action_checklist.py
-```
-
-lists every action Weaver can perform against a target and the test that executes
-it, one `[<kind>-<test>]` per line. Test names carry both halves —
-`test_<kind>_action_<what it proves>` — so the list reads as a checklist without
-giving up the claim. `test_action_checklist.py` holds the estate to it: every kind
-the product defines is either covered, naming its test, or deferred with a reason.
-
-## Adding an artefact: what fails, and in what order
-
-The suite is arranged so a new artefact type is caught by a *sequence* of tests,
-each naming a different thing left undone.
-
-| what is missing | what fails |
-|---|---|
-| the catalogue does not register it | `test_catalogue_from_repository_has_all_artefacts` |
-| a build emits no action for it | `test_converges_from_nothing_to_the_declared_estate` |
-| an action is emitted but declares no effect | `test_every_action_that_touches_a_target_is_declared` |
-| the effect is declared but no action performs it | `test_every_declared_change_names_an_action_that_runs` |
-| the inventory cannot see it | `test_inventory_fidelity.py`, and every claim about it becomes vacuous |
-
-The order matters as much as the coverage: the first failure names the artefact,
-not a symptom several layers downstream. See
-[how-to-add-an-artefact.md](how-to-add-an-artefact.md).
-
-## Fabric economics
-
-A Livy call is an architectural decision, not an implementation detail. One
-submission costs seconds; the statements inside it cost almost nothing.
-
-> A remote state transition produces **one** evidence payload. Assertions stay
-> local.
-
-Gather every question about one moment into one body, submit it once, assert
-against what comes back — see `tests/support/observation.py`. Split calls only
-where the *boundary between them* is the subject: before versus after a
-transition, a failure stopping later work, prune changing the estate.
-
-**No test asserts a Livy call count.** A number that has to be edited whenever a
-probe legitimately changes teaches the suite to raise the budget rather than ask
-why; `tests/fabric/livy_telemetry.py` prints a breakdown at the end of a run and
-puts a regression in front of whoever caused it.
-
-## Conventions
-
-- Take the narrowest fixture that can answer the question. Reaching for a richer
-  one is the smell `tests/targeted/factories.py` exists to remove.
-- Assert the *transition*, immediately, not the final state. A journey mutates a
-  live estate, so evidence read later is evidence about a different estate than
-  the one the assertion names.
-- A claim proven at one layer is not re-proven at another. Two copies are free to
-  disagree, and the slower one is the one nobody runs.
-- Pure-Python tests must not request Spark fixtures; Spark tests must not request
-  Fabric fixtures. Currently a convention, not enforced.
+The architecture invariant makes this declaration model repository-wide. A new
+test without the wrapper, a handwritten managed marker, an unknown resource, or
+retired declaration machinery fails the core suite.

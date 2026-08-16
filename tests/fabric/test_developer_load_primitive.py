@@ -33,10 +33,7 @@ runs without a publish.
 
 from __future__ import annotations
 
-import pytest
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
-
+from support.weaver_test import weaver_test
 
 #: Everything asked of the installed estate, in one round trip. It imports from
 #: the deployed tree the way the deployed tree is meant to be imported, loads the
@@ -95,6 +92,7 @@ emit(results)
 """
 
 
+@weaver_test(hosted=True)
 def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_estate):
     """Import the object the installer deployed, call ``.load()``, and be done.
 
@@ -128,6 +126,7 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_e
     assert seen["published"], "the folder load published nothing"
 
 
+@weaver_test(hosted=True)
 def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(
     fabric_lakehouse_estate,
 ):

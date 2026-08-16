@@ -374,67 +374,40 @@ after a build or refresh, a failure stopping later work, a repository mutated
 between generation and installation, prune or wipe changing the estate. The
 protocol tests in `test_livy_import_primitive.py` show both halves of that judgement.
 
-The helpers live in `tests/support/observation.py`. Nothing hides the call: every
-submission is counted by `tests/fabric/livy_telemetry.py` and pytest prints a
-breakdown at the end of the run.
+The helpers live in `tests/support/observation.py`. Session telemetry reports
+the real external crossings and elapsed time without imposing a call-count or
+time budget.
 
-```text
-================================ Livy transport ================================
-Livy calls: 31
-Livy elapsed: 124.8s (plus 62.0s session startup)
+### Test declarations
 
-By phase:
-  generate and install: 12 calls / 84.1s
-  observe install: 1 calls / 4.2s
-...
-```
-
-No test asserts a call count. A number that has to be edited whenever a probe
-legitimately changes teaches the suite to raise the budget rather than ask why;
-the summary already puts a regression in front of whoever caused it.
-
-### Markers
-
-Each marker is opted into by name, and none implies another.
+Every test function uses `@weaver_test(...)`. The declaration holds one scope
+and the external resources necessary for the test's claim. It generates pytest
+markers for selection; managed markers are never written by hand.
 
 ```bash
 pytest                      # pure Python, no JVM and no tenant
-pytest -m fabric            # every test against a real Fabric workspace
 pytest -m "fabric and remote" # no published wheel needed
 pytest -m "fabric and hosted" # needs the wheel published to the Environment
-pytest -m full_integration  # the lifecycle journeys, one per position
+pytest -m full_integration  # composed lifecycle journeys
 pytest -m provision         # Fabric item lifecycle
 ```
 
-Every marker says *what a test needs*:
+The scope is one of core, remote, hosted, integration, or provision.
+Integration and provision require no additional position flag. Resources are a
+separate closed vocabulary: `tds`, `livy`, `onelake`, and `rest`.
 
-| marker | needs |
-|---|---|
-| `fabric` | a workspace; carried by every Fabric test |
-| `remote` | a workspace, and no published wheel |
-| `hosted` | a workspace **and** the wheel published to the Environment |
-| `full_integration` | a composed lifecycle journey |
-| `provision` | creates and deletes Fabric items |
+Pytest compares declared resources exactly with claim-body events from the
+test's registered Sessions. Fixture acquisition is reported separately, so the
+first TDS capability may resolve an endpoint over REST without making every TDS
+test declare REST. A repeated lookup for the same cached target is a defect.
 
-`remote` and `hosted` are the distinction that keeps the loop legible, and they
-say whether a published wheel is required. Not whether Livy is involved, and not
-where the orchestration runs: a decomposed desktop operation orchestrates here
-*and* imports the wheel on the far side, so it is `hosted`. A Spark body that
-does not import Weaver needs a session, not a published package, which is why
-starting a Livy session asserts neither: `LivySession.ensure_weaver` is called
-by the crossing that submits a program, and by nothing else. Creating a shortcut,
-refreshing an endpoint and wiping a Lakehouse are all REST or storage, so they
-run from the checkout against the real workspace and stay `remote`.
+Session telemetry carries Task, Step, and Sub-step attribution. Session-owned
+asynchronous work captures that semantic context when it is submitted and
+restores it when the worker crosses the resource boundary.
 
-Position is worth recording, but it belongs in a test's docstring. A marker says
-what a run costs, and the cost of `hosted` is a five-minute publish.
-
-`full_integration` is the lifecycle journeys alone — one per position, since
-composing is a claim about a position and not a claim a position can borrow.
-A journey is the most expensive thing in the suite and should **rarely be where
-a defect is found for the first time**: syntax, selection, planning, action
-rendering, execution and reconciliation are all meant to be proven below it.
-Making them run by exception keeps the routine Fabric run about components.
+A journey is the most expensive scope and should rarely be where a defect is
+found first: syntax, selection, planning, action rendering, execution and
+reconciliation are all meant to be proven below it.
 
 Isolation therefore comes from **emptying** an item rather than from having a new
 one. That is not a weaker guarantee, but it is a different one, so the cleaning

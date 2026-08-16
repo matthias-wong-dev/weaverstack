@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import pytest
+from support.weaver_test import weaver_test
 
 import weaver
-
-pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
 NEIGHBOUR_SCHEMA = "Finance"
 NEIGHBOUR_TABLE = "Ledger"
@@ -67,6 +66,7 @@ def _objects(sql, schema: str) -> set[str]:
     return {str(row["TABLE_NAME"]) for row in rows}
 
 
+@weaver_test(hosted=True, resources={"livy", "onelake", "rest", "tds"})
 def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
     neighbour,
     weaver_session,
@@ -111,6 +111,7 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
     assert certified[0]["n"] > 0
 
 
+@weaver_test(hosted=True)
 def test_the_catalogue_warehouse_holds_both_schemas(neighbour):
     schemas = {
         str(row["SCHEMA_NAME"])

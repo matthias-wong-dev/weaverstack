@@ -28,4 +28,31 @@ def test_invalid_declarations_are_rejected():
         weaver_test(remote=True, hosted=True)
     with pytest.raises(ValueError, match="unknown Weaver test resource"):
         weaver_test(resources={"spark"})
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    ("flag", "scope", "markers"),
+    [
+        ("remote", "remote", {"fabric", "remote"}),
+        ("hosted", "hosted", {"fabric", "hosted"}),
+        ("integration", "integration", {"fabric", "full_integration"}),
+        ("provision", "provision", {"fabric", "provision"}),
+    ],
+)
+def test_each_scope_is_one_declaration_with_matching_selection_markers(
+    flag, scope, markers
+):
+    def candidate():
+        pass
+
+    declared = weaver_test(**{flag: True})(candidate)
+
+    assert declared.__weaver_test_declaration__.scope == scope
+    assert {mark.name for mark in declared.pytestmark} == markers
+
+
+@weaver_test()
+def test_integration_and_provision_need_no_position_dimension():
     assert weaver_test(integration=True)
+    assert weaver_test(provision=True)
