@@ -107,13 +107,9 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
     assert reports["load"].workflow_id == reports["test"].workflow_id
     assert reports["load"].workflow_id
     weaver_session.flush()
-    composed = _log_rows(
-        weaver_session, fabric_workspace, reports["load"].workflow_id
-    )
+    composed = _log_rows(weaver_session, fabric_workspace, reports["load"].workflow_id)
     assert {row["Task type"] for row in composed} == {"load", "test"}
-    assert {row["Workflow ID"] for row in composed} == {
-        reports["load"].workflow_id
-    }
+    assert {row["Workflow ID"] for row in composed} == {reports["load"].workflow_id}
 
 
 def _assert_evidence(session, workspace, report, task_type: str) -> None:

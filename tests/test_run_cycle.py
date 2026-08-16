@@ -752,9 +752,9 @@ def test_run_evidence_uses_the_nodes_structured_identity():
 
     from weaver.run.evidence import RunLog
 
-    result = runner(
-        nodes=[node("a", logical_id=_Logical("Sales.Customer"))]
-    ).run(dispatch=controlled({"a": Outcome()}))
+    result = runner(nodes=[node("a", logical_id=_Logical("Sales.Customer"))]).run(
+        dispatch=controlled({"a": Outcome()})
+    )
     settled = replace(
         result.nodes[0],
         physical_target="display text is not identity",

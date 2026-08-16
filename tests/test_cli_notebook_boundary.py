@@ -51,13 +51,15 @@ def test_notebook_run_uses_one_configured_lakehouse(monkeypatch):
     monkeypatch.setattr(CLI_MAIN, "_fabric_cli_workspace", lambda args: workspace)
     monkeypatch.setattr(
         "weaver.fabric.notebooks.run_notebook",
-        lambda *args, **kwargs: seen.append(kwargs)
-        or SimpleNamespace(
-            notebook="Refresh",
-            status="Completed",
-            job_url="job",
-            exit_value=None,
-            succeeded=True,
+        lambda *args, **kwargs: (
+            seen.append(kwargs)
+            or SimpleNamespace(
+                notebook="Refresh",
+                status="Completed",
+                job_url="job",
+                exit_value=None,
+                succeeded=True,
+            )
         ),
     )
 
