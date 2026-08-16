@@ -181,6 +181,27 @@ def test_read_staging_cleanup_tolerates_prior_removal(export):
     export._clear_read_staging()
 
 
+def test_a_failed_standalone_read_keeps_staging_until_the_next_read(export):
+    export.files = {"partial.csv": "half a download"}
+    export.fail_in_read = True
+
+    with pytest.raises(RuntimeError, match="source was unreachable"):
+        export.read()
+
+    (first,) = Sales__Export.seen
+    assert (first.path / "partial.csv").read_text(encoding="utf-8") == "half a download"
+
+    export.fail_in_read = False
+    export.files = {}
+    second = export.read()
+
+    assert second is not first
+    assert second.path != first.path
+    assert not first.path.exists()
+    assert second.path.is_dir()
+    export._clear_read_staging()
+
+
 def test_read_staging_cleanup_and_destructor_leave_no_directory(export):
     staging = export.staging_folder()
     export._clear_read_staging()
@@ -238,6 +259,40 @@ def test_returning_another_staging_folder_of_the_same_path_is_refused(export):
 
     with pytest.raises(LoadError, match="rather than the folder"):
         export.load()
+
+
+def test_an_explicit_folder_delete_is_applied_through_the_load_runtime(tmp_path):
+    class Sales__Export(Folder):
+        files: dict = {}
+        deletes = ()
+
+        def _document(self):
+            from weaver.declaration.metadata import PYTHON, parse_document
+
+            return parse_document(
+                MODULE_DOC.replace("Incremental: false", "Incremental: true").strip(),
+                language=PYTHON,
+            )
+
+        def read(self):
+            staging = self.staging_folder()
+            for name, text in self.files.items():
+                (staging.path / name).write_text(text, encoding="utf-8")
+            return staging, self.deletes
+
+    export = Sales__Export(
+        object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
+    )
+    export.files = {"keep.csv": "keep", "remove.csv": "remove"}
+    export.load()
+
+    export.files = {}
+    export.deletes = ("remove.csv",)
+    result = export.load()
+
+    assert result.rows_deleted == 1
+    assert (export.path() / "keep.csv").exists()
+    assert not (export.path() / "remove.csv").exists()
 
 
 # --- reset --------------------------------------------------------------------

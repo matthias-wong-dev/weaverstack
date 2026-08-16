@@ -144,6 +144,8 @@ class Folder(WeaverObject):
         if authored_read is None:
             return
 
+        # Authors override read(), so this is the boundary that also covers a
+        # direct obj.read() call without changing that public API.
         @wraps(authored_read)
         def read_with_staging(self, *args, **read_kwargs):
             self._clear_read_staging()
