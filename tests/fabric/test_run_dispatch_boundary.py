@@ -63,6 +63,7 @@ def thin(
     fabric_client,
     weaver_session,
     fabric_empty_lakehouse,
+    fabric_initialise_catalogue,
     tmp_path_factory,
 ):
     """The trivial artefacts, deployed into a real Lakehouse over OneLake.
@@ -75,6 +76,7 @@ def thin(
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
     fabric_empty_lakehouse(LAKEHOUSE)
+    fabric_initialise_catalogue()
 
     estate = thin_estate(
         tmp_path_factory.mktemp("thin"),

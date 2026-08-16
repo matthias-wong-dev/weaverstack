@@ -1,18 +1,6 @@
-"""Asynchronous append to one Warehouse table.
+"""Asynchronous batch append to a Warehouse table.
 
-A run settles a node, records what happened, and carries on. Waiting for a TDS
-round trip per settled node would put the catalogue's write latency inside the
-load's critical path, so rows are queued and written in batches by one worker.
-
-The durability this gives up is stated rather than hidden:
-
-    ``_.Log`` is operational evidence, not transactional authority for
-    installed catalogue state.
-
-Normal Session completion is the barrier. A Session flushes and closes every
-flusher it handed out, so a run that returned has its rows in the Warehouse. A
-hard crash may lose the tail, and that is accepted for evidence in a way it
-would never be for the Registry.
+Rows are queued to one worker. Session close is the durability barrier.
 """
 
 from __future__ import annotations
@@ -44,18 +32,12 @@ class FlushError(WeaverError):
 
 @dataclass(frozen=True)
 class FlusherKey:
-    """What makes two requests the same write stream.
-
-    Enough of it that two callers cannot accidentally share one: the same table
-    in two Warehouses is two streams, and so is the same table reached through
-    two workspaces.
-    """
+    """Identity of one Warehouse write stream."""
 
     workspace: str
     warehouse: str
     schema: str
     table: str
-    mode: str = "append"
 
 
 class WarehouseFlusher:
@@ -81,13 +63,7 @@ class WarehouseFlusher:
         self._worker: threading.Thread | None = None
         self._lock = threading.Lock()
         self._accepting = True
-        #: The first failure the worker met, re-raised by flush and close. Kept
-        #: rather than logged: a caller that never hears about it would read an
-        #: empty table as an empty run.
         self._failure: BaseException | None = None
-        self._submitted = 0
-        self._written = 0
-        #: Rows accepted but not yet settled by the worker.
         self._pending = 0
 
     # --- the contract ---------------------------------------------------------
@@ -107,7 +83,6 @@ class WarehouseFlusher:
                 raise FlushError(
                     f"{self.table.qualified} is closed and accepts no more rows"
                 )
-            self._submitted += 1
             self._pending += 1
             self._ensure_worker()
             self._queue.put(dict(row))
@@ -153,22 +128,13 @@ class WarehouseFlusher:
             self._raise_any_failure()
             return
         worker.join(timeout=timeout)
+        if worker.is_alive():
+            raise FlushError(
+                f"{self.table.qualified} worker did not stop after {timeout:g}s; "
+                f"{self._pending} row(s) remain pending"
+            )
         self._worker = None
         self._raise_any_failure()
-
-    # --- state a caller may ask about ----------------------------------------
-
-    @property
-    def submitted(self) -> int:
-        return self._submitted
-
-    @property
-    def written(self) -> int:
-        return self._written
-
-    @property
-    def failure(self) -> BaseException | None:
-        return self._failure
 
     # --- the worker -----------------------------------------------------------
 
@@ -229,8 +195,6 @@ class WarehouseFlusher:
         except BaseException as exc:  # noqa: BLE001 - re-raised from flush/close
             if self._failure is None:
                 self._failure = exc
-        else:
-            self._written += len(rows)
 
     def _insert(self, rows: list[dict]) -> str:
         """One INSERT carrying the batch, audit columns supplied here.

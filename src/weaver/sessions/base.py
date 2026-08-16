@@ -134,6 +134,7 @@ class Session(ABC):
         #: opening a Session must not start a worker or a TDS connection, and
         #: most Sessions never append a row.
         self._flushers: dict = {}
+        self._workflow_id: str | None = None
         self._closed = False
         #: Between the start of `close` and the Session actually closing. The
         #: flushers are still writing through it, so it is not closed, but it
@@ -169,6 +170,21 @@ class Session(ABC):
                 "one in a workspace configuration file."
             )
         return resolved
+
+    @property
+    def workflow_id(self) -> str | None:
+        return self._workflow_id
+
+    @contextmanager
+    def workflow(self, workflow_id: str) -> Iterator[str]:
+        """Share one correlation identity across a composed sequence."""
+
+        previous = self._workflow_id
+        self._workflow_id = workflow_id
+        try:
+            yield workflow_id
+        finally:
+            self._workflow_id = previous
 
     def position(self, workspace: Workspace | None = None) -> str:
         """Where this Session's data engineering happens, as a named value.
@@ -558,7 +574,6 @@ class Session(ABC):
             # point would hold rows nobody waits for.
             self._draining = True
             flushers = list(self._flushers.values())
-            self._flushers.clear()
         failures = []
         for flusher in flushers:
             try:
@@ -566,7 +581,13 @@ class Session(ABC):
             except Exception as exc:  # noqa: BLE001 - re-raised once, below
                 failures.append(exc)
 
+        if failures:
+            with self._scope_lock:
+                self._draining = False
+            raise failures[0]
+
         with self._scope_lock:
+            self._flushers.clear()
             self._closed = True
             scopes = list(self._scopes.values())
             self._scopes.clear()
@@ -574,8 +595,6 @@ class Session(ABC):
             scope.close()
         if self._owns_executor:
             self._executor.shutdown(wait=False)
-        if failures:
-            raise failures[0]
 
 
 class WorkspaceScope:

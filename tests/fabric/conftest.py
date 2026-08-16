@@ -664,7 +664,9 @@ def disposable_warehouse(fabric_workspace_item, fabric_client, fabric_workspace)
 
 
 @pytest.fixture(scope="session")
-def fabric_empty_lakehouse(fabric_workspace, fabric_client, livy_session):
+def fabric_empty_lakehouse(
+    fabric_workspace, fabric_client, livy_session, weaver_session
+):
     """Empty one fixed Lakehouse, leaving it as though nothing had been built.
 
     Reusing items makes residue possible in a way disposable ones never allowed,
@@ -683,6 +685,7 @@ def fabric_empty_lakehouse(fabric_workspace, fabric_client, livy_session):
     store = OneLakeDfsClient()
 
     def empty(name: str) -> None:
+        weaver_session.flush()
         target = ItemRef(name)
         _empty_the_target(
             livy_session,
@@ -693,6 +696,30 @@ def fabric_empty_lakehouse(fabric_workspace, fabric_client, livy_session):
         )
 
     return empty
+
+
+@pytest.fixture(scope="session")
+def fabric_initialise_catalogue(fabric_workspace, weaver_session):
+    """Build the package-owned catalogue Item after a fixture reset."""
+
+    from weaver.fabric import OneLakeDfsClient
+    from weaver.initialise import initialise_catalogue
+
+    def initialise():
+        result = initialise_catalogue(
+            catalogue=fabric_workspace.catalogue_item,
+            workspace=fabric_workspace,
+            store=OneLakeDfsClient(),
+            session=weaver_session,
+        )
+        assert result.succeeded, [
+            (action.action_id, action.error_message)
+            for action in result.report.action_results()
+            if action.status == "failed"
+        ]
+        return result
+
+    return initialise
 
 
 @pytest.fixture(scope="module")
@@ -966,6 +993,7 @@ def _fabric_build_context(
     session,
     weaver_repo_fixture,
     warehouse=None,
+    before_reset=None,
 ):
     """A build environment run entirely inside Fabric over Livy.
 
@@ -1016,6 +1044,8 @@ def _fabric_build_context(
     repository_root = resolver.files_root(staging).join(*repository_relative)
 
     destination = resolver.spark_destination(target)
+    if before_reset is not None:
+        before_reset()
     _empty_the_target(
         session,
         store,
@@ -1328,6 +1358,7 @@ def fabric_build_env(
     fabric_target_lakehouse,
     fabric_staging_lakehouse,
     livy_session,
+    weaver_session,
     weaver_repo_fixture,
 ):
     """One Fabric build environment per test, over the run's catalogue,
@@ -1342,6 +1373,7 @@ def fabric_build_env(
         fabric_staging_lakehouse,
         livy_session,
         weaver_repo_fixture,
+        before_reset=weaver_session.flush,
     ) as env:
         yield env
 
@@ -1600,6 +1632,7 @@ def fabric_lakehouse_journey(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
+        before_reset=request.getfixturevalue("weaver_session").flush,
     ) as env:
         yield Journey(env, "lakehouse")
 
@@ -1625,6 +1658,7 @@ def fabric_cross_item_journey(request, weaver_repo_fixture):
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
         warehouse=warehouse,
+        before_reset=request.getfixturevalue("weaver_session").flush,
     ) as env:
         env.warehouse = warehouse
         yield Journey(env, "cross-item")
@@ -1642,6 +1676,7 @@ def fabric_lakehouse_estate(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
+        before_reset=request.getfixturevalue("weaver_session").flush,
     ) as env:
         yield _install_estate(env)
 
@@ -1670,6 +1705,7 @@ def fabric_mixed_estate(request, weaver_repo_fixture):
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
         warehouse=warehouse,
+        before_reset=request.getfixturevalue("weaver_session").flush,
     ) as env:
         env.warehouse = warehouse
         yield _install_estate(env)

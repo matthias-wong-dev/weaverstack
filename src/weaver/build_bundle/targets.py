@@ -257,6 +257,8 @@ class ItemBindings:
     entries: tuple[ItemBinding, ...]
 
     def __post_init__(self) -> None:
+        from ..catalogue.builtin import BUILTIN_ITEM
+
         seen: set[WeaverItemId] = set()
         physical: set[tuple[str, str]] = set()
         for binding in self.entries:
@@ -265,6 +267,8 @@ class ItemBindings:
                     f"logical item is bound more than once: {binding.item}"
                 )
             seen.add(binding.item)
+            if binding.item == BUILTIN_ITEM:
+                continue
             target = binding.target
             key = (target.physical_kind, target.item.name)
             if key in physical:

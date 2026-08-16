@@ -1,30 +1,14 @@
-"""The fixed shape of every catalogue table, declared once.
+"""The physical contract of the Weaver catalogue's ``_`` schema.
 
-These definitions are the single authority on what the catalogue is: the
-tables, their ordered columns, their types, and the key that identifies a row.
-The built-in Weaver document that materialises them, the reader, the projection
-and the rendered DML all read them from here, so no downstream list can drift.
+Catalogue rows belong to a logical Item, keyed first by ``item_type`` and
+``item_name``. ``Installation`` maps that Item to its current physical target;
+the target name is an attribute, not identity. The package-owned ``_weaver``
+Item may share its Warehouse with ordinary Items because their logical scopes
+remain distinct.
 
-Installation scope is part of the key. Every table is keyed on
-``repository`` and ``target_type`` before anything else, because the same
-repository is installed independently into its Lakehouse and its Warehouse and
-the same ``Schema.Object`` legitimately exists in both:
-
-.. code-block:: text
-
-    SalesRepo | lakehouse | Sales | Customer
-    SalesRepo | warehouse | Sales | Customer
-
-Those are two rows, and a Lakehouse build must not touch the second: with the
-scope in the identity, no comparison or delete can span both.
-
-The physical target's name is never identity. A repository has at most one
-current installation per target type, so rebinding it updates
-:data:`INSTALLATION`'s ``target_name`` rather than inserting a second row.
-
-Every table carries ``signature``, the source hash of whatever the row projects,
-which incremental planning compares to decide what changed. Weaver's audit
-columns are appended by the ordinary build and so are not declared here.
+Dictionary and Registry rows add object identity within the Item scope. Their
+signatures drive incremental comparison. The ordinary build appends Weaver's
+audit columns to every table.
 """
 
 from __future__ import annotations
@@ -44,16 +28,7 @@ CATALOGUE_SCHEMA = "_"
 #: ordinary managed objects rather than infrastructure exempt from the lifecycle.
 OBJECT_TYPES = ("folder", "table", "view", "file", "stored_procedure")
 
-#: What an object is *for*. A ``data`` object holds or shapes rows; a ``load``
-#: object does the work that fills one, and is installed by an item's load layer;
-#: a ``test`` or ``assumption`` object is the runnable form of a validation.
-#:
-#: The role is the answer, and the physical shape is not. A file and a stored
-#: procedure used to mean "load artefact" because they were the only two things
-#: a load layer installed — and that stopped being true the moment a Test
-#: compiled to a module and a procedure of its own. So planning asks what an
-#: artefact is *for*, never what shape it has, which is what keeps a Test out of
-#: the load DAG.
+#: What an object is for, independent of its physical shape.
 ROLE_DATA = "data"
 ROLE_LOAD = "load"
 ROLE_TEST = "test"
@@ -135,20 +110,8 @@ def public_column_name(name: str) -> str:
     return " ".join([first, *words[1:]])
 
 
-#: When the Registry row was last published — one value shared by every row a
-#: completed build writes, so two rows can be ordered against each other.
-#:
-#: Registry publication is Weaver's completion boundary: a row is written last,
-#: after everything the object needed succeeded. So "when was this published"
-#: *is* "when was this last built", and comparing two rows answers the one
-#: question a cross-item build cannot answer from signatures alone — has this
-#: alias's source been rebuilt since the alias was made? A signature cannot say
-#: that, because reloading a source changes no declaration.
-#:
-#: It advances only when the row is inserted. Every rebuild goes through an
-#: insert — a rebuilt object has its Registry claim removed before any physical
-#: work — so an object that was not rebuilt keeps the datetime it had, even if
-#: some other column of its row changed.
+#: Registry publication time. Rebuilt rows are deleted before work and inserted
+#: after success; unchanged rows retain their value.
 BUILD_DATETIME = "build_datetime"
 
 #: Weaver's audit columns, as internal keys. They are not business columns — the
@@ -163,24 +126,13 @@ AUDIT_INSERT_COLUMN, AUDIT_UPDATE_COLUMN, AUDIT_DELETE_COLUMN = AUDIT_COLUMN_NAM
 
 @dataclass(frozen=True)
 class CatalogueColumn:
-    """One column of a catalogue table.
-
-    ``name`` is the internal snake-case key every Python layer uses. ``public``
-    is how the ``_`` schema spells it, and is derived unless the public
-    vocabulary differs from the internal concept.
-    """
+    """One internal column and its public Warehouse representation."""
 
     name: str
     type: str = STRING
-    #: Key and scope columns are not null because they are identity. A row that
-    #: could not say which installation it belonged to would be unusable.
     not_null: bool = False
     description: str = ""
-    #: Supplied by the installer when the row is written, rather than projected
-    #: from the declaration — so it is created and described like any other
-    #: column, but never appears in a projected row and never takes part in the
-    #: comparison that decides whether a row changed. See
-    #: :data:`BUILD_DATETIME`, the only one.
+    #: Supplied at publication rather than by catalogue projection.
     published: bool = False
     #: The public spelling, when derivation would not produce it.
     public: str | None = None
@@ -225,14 +177,22 @@ class CatalogueColumn:
         return value
 
 
+def _column(qualified: str, columns, name: str) -> CatalogueColumn:
+    for column in columns:
+        if column.name == name:
+            return column
+    raise KeyError(f"{qualified} has no column {name!r}")
+
+
+def _public_name(qualified: str, columns, name: str) -> str:
+    if name in AUDIT_COLUMN_NAMES:
+        return public_column_name(name)
+    return _column(qualified, columns, name).public_name
+
+
 @dataclass(frozen=True)
 class CatalogueTable:
-    """One catalogue table's fixed representation.
-
-    ``columns`` are the business columns in their declared order, ``signature``
-    last. ``key`` names the columns that identify a row; they always lead, and
-    always begin with the installation scope.
-    """
+    """One reconciled catalogue table."""
 
     name: str
     description: str
@@ -302,17 +262,12 @@ class CatalogueTable:
         return self.column_names + self.published_column_names + AUDIT_COLUMN_NAMES
 
     def column(self, name: str) -> CatalogueColumn:
-        for column in self.columns:
-            if column.name == name:
-                return column
-        raise KeyError(f"{self.qualified} has no column {name!r}")
+        return _column(self.qualified, self.columns, name)
 
     def public_name_of(self, name: str) -> str:
         """The public spelling of one column, audit columns included."""
 
-        if name in AUDIT_COLUMN_NAMES:
-            return public_column_name(name)
-        return self.column(name).public_name
+        return _public_name(self.qualified, self.columns, name)
 
     @property
     def public_columns(self) -> tuple[str, ...]:
@@ -424,10 +379,8 @@ def _behaviour() -> tuple[CatalogueColumn, ...]:
 INSTALLATION = CatalogueTable(
     name="Installation",
     description=(
-        "One row per repository installation — a repository against one physical "
-        "target type. The bound item's name is an attribute, never identity: "
-        "rebinding to a different Lakehouse updates this row rather than adding "
-        "a second installation."
+        "One row per logical Item, recording its current physical target and the "
+        "Weaver version and source signature that installed it."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME),
     columns=(
@@ -442,7 +395,7 @@ INSTALLATION = CatalogueTable(
             not_null=True,
             description="The Weaver version that last reconciled this installation.",
         ),
-        _signature("the repository as a whole"),
+        _signature("the Item declaration"),
     ),
 )
 
@@ -857,18 +810,7 @@ RESULT_VOCABULARY = {
 
 @dataclass(frozen=True)
 class EvidenceTable:
-    """A Weaver-owned ``_`` table that records what happened rather than what is
-    installed.
-
-    It carries no signature, is keyed on a surrogate rather than on installation
-    scope, and is append-oriented — so it shares the public-name machinery with
-    :class:`CatalogueTable` but none of its reconciliation invariants.
-
-    Weaver's audit trio is appended by the ordinary build, as it is to every
-    table Weaver creates. Only ``row_insert_datetime`` carries meaning for an
-    append-oriented table; the other two are inert here and are not written
-    twice for having a name.
-    """
+    """An append-oriented Weaver-owned table outside reconciliation."""
 
     name: str
     description: str
@@ -891,15 +833,10 @@ class EvidenceTable:
         return self.column_names + AUDIT_COLUMN_NAMES
 
     def column(self, name: str) -> CatalogueColumn:
-        for column in self.columns:
-            if column.name == name:
-                return column
-        raise KeyError(f"{self.qualified} has no column {name!r}")
+        return _column(self.qualified, self.columns, name)
 
     def public_name_of(self, name: str) -> str:
-        if name in AUDIT_COLUMN_NAMES:
-            return public_column_name(name)
-        return self.column(name).public_name
+        return _public_name(self.qualified, self.columns, name)
 
     @property
     def public_columns(self) -> tuple[str, ...]:

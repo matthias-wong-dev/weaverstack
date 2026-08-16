@@ -1,28 +1,9 @@
-"""The whole lifecycle, driven from the desktop through one Session.
-
-Every part of the desktop position is proven on its own elsewhere: the state a
-build plans against is read over Spark SQL and storage
-(`test_desktop_build_state_boundary.py`), a run dispatches each primitive into
-the Fabric session (`test_run_dispatch_boundary.py`), a validation does the same
-(`test_validation_dispatch_boundary.py`), and one Session serves several
-commands (`test_session_reuse_cycle.py`).
-
-What none of them says is that the four operations *compose* — that a build
-leaves an estate a load can run, that a load leaves rows a test can reconcile,
-and that one Session carries all of it. That is what a user does, and it is what
-this asserts, in the order it happens, against a real workspace.
-
-The estate is the cross-item journey's, under logical names of its own. The
-catalogue is keyed by logical item, so sharing names with the in-Fabric journey
-would make each estate look to the catalogue like a rebuild of the other.
-
-The Session is the suite's. A capacity commonly permits one Livy session, so a
-journey that opened its own would queue behind the fixture's; what is asserted
-about the Session is that one of them serves the whole sequence, which is true
-of a borrowed one.
-"""
+"""The desktop lifecycle through one Session and its persisted evidence."""
 
 from __future__ import annotations
+
+import importlib
+from types import SimpleNamespace
 
 import pytest
 from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE, DESKTOP_JOURNEY_NAMES
@@ -34,8 +15,6 @@ pytestmark = [pytest.mark.fabric, pytest.mark.hosted, pytest.mark.full_integrati
 
 @pytest.fixture(scope="module")
 def desktop_estate(tmp_path_factory):
-    """The journey's documents, under this journey's own item names."""
-
     return CROSS_ITEM_JOURNEY_FIXTURE.renamed(
         tmp_path_factory.mktemp("desktop-journey"), DESKTOP_JOURNEY_NAMES
     )
@@ -47,21 +26,14 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
     fabric_workspace,
     fabric_target_lakehouse,
     disposable_warehouse,
+    monkeypatch,
+    tmp_path,
 ):
-    """Four operations, in order, each asserted where it happened.
-
-    One test rather than four sharing a fixture: the sequence mutates a live
-    estate, so a later operation can repair what an earlier one broke and an
-    assertion read afterwards would be about a different estate than the one it
-    names.
-    """
+    """Wipe, build, load and test against a real workspace."""
 
     lakehouse = f"Lakehouse/{fabric_target_lakehouse.name}"
     warehouse = f"Warehouse/{disposable_warehouse.item.name}"
 
-    # From empty, so the build's own certification decides everything after it.
-    # The catalogue stays: it is shared with every other
-    # module, and this journey's claims on it go with `unbind_from`.
     weaver.wipe(
         [lakehouse, warehouse],
         unbind_from=fabric_workspace.catalogue,
@@ -84,5 +56,104 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
     totals = tested.totals()
     assert totals["failed"] == 0, tested.to_mapping()
     assert totals["invalid"] == 0, tested.to_mapping()
-    # A journey that validated nothing would satisfy the two assertions above.
     assert totals["passed"], tested.to_mapping()
+
+    weaver_session.flush()
+    _assert_evidence(weaver_session, fabric_workspace, loaded, "load")
+    _assert_evidence(weaver_session, fabric_workspace, tested, "test")
+
+    cli = importlib.import_module("weaver_cli.main")
+    reports = {}
+    run_load = cli._run_load
+    run_test = cli._run_test
+
+    def capture_load(*args, **kwargs):
+        reports["load"] = run_load(*args, **kwargs)
+        return reports["load"]
+
+    def capture_test(*args, **kwargs):
+        reports["test"] = run_test(*args, **kwargs)
+        return reports["test"]
+
+    monkeypatch.setattr(cli, "_run_load", capture_load)
+    monkeypatch.setattr(cli, "_run_test", capture_test)
+
+    composition = tmp_path / "compose.yml"
+    composition.write_text(
+        "compose:\n"
+        "  verify:\n"
+        f"    - weaver load {lakehouse} {warehouse}\n"
+        f"    - weaver test {lakehouse} {warehouse}\n",
+        encoding="utf-8",
+    )
+    from weaver_cli.compose import run_composition
+
+    status = run_composition(
+        SimpleNamespace(
+            name="verify",
+            file=str(composition),
+            session=weaver_session,
+            yes=True,
+            timings=False,
+            workspace=None,
+            workspace_type=None,
+            workspace_config=None,
+            catalogue=None,
+            environment=None,
+        )
+    )
+
+    assert status == 0
+    assert reports["load"].workflow_id == reports["test"].workflow_id
+    assert reports["load"].workflow_id
+    weaver_session.flush()
+    composed = _log_rows(
+        weaver_session, fabric_workspace, reports["load"].workflow_id
+    )
+    assert {row["Task type"] for row in composed} == {"load", "test"}
+    assert {row["Workflow ID"] for row in composed} == {
+        reports["load"].workflow_id
+    }
+
+
+def _assert_evidence(session, workspace, report, task_type: str) -> None:
+    assert report.workflow_id
+    rows = _log_rows(session, workspace, report.workflow_id)
+    assert len(rows) == len(report.nodes)
+    assert {row["Workflow ID"] for row in rows} == {report.workflow_id}
+    assert {row["Task type"] for row in rows} == {task_type}
+    assert all(row["Log SK"] for row in rows)
+
+    actual = {
+        (
+            row["Target type"],
+            row["Target name"],
+            row["Schema name"],
+            row["Object name"],
+            row["Result"],
+        )
+        for row in rows
+    }
+    expected = {(*_node_identity(node), "Succeeded") for node in report.nodes}
+    assert actual == expected
+
+
+def _log_rows(session, workspace, workflow_id: str) -> list[dict]:
+    from weaver.catalogue.connection import catalogue_connection
+
+    rows = catalogue_connection(session, workspace).rows(
+        "select [Log SK], [Workflow ID], [Task type], [Target type], "
+        "[Target name], [Schema name], [Object name], [Result] "
+        "from [_].[Log] "
+        f"where [Workflow ID] = N'{workflow_id}'"
+    )
+    return [dict(row) for row in rows]
+
+
+def _node_identity(node) -> tuple[str | None, str | None, str | None, str | None]:
+    target_type, _, target_name = str(node.physical_target).partition("/")
+    logical = str(node.logical_id or "").rsplit("/", 1)[-1]
+    schema, separator, object_name = logical.rpartition(".")
+    if not separator:
+        schema, object_name = None, logical or None
+    return target_type or None, target_name or None, schema or None, object_name

@@ -1,10 +1,4 @@
-"""What the Warehouse flusher promises a caller who does not wait.
-
-Asynchronous logging is only safe if the contract is exact: a row a caller
-handed over is either written or reported as unwritten, and a Session that
-closed normally has written everything it accepted. Every claim below is one
-sentence of that contract.
-"""
+"""Asynchronous Warehouse append and its Session durability barrier."""
 
 from __future__ import annotations
 
@@ -23,8 +17,6 @@ from weaver.targets import WarehouseTarget
 
 
 class Recorder:
-    """Stands in for the Warehouse, and records the statements it was given."""
-
     def __init__(self, fail: Exception | None = None) -> None:
         self.statements: list[str] = []
         self.fail = fail
@@ -73,14 +65,11 @@ def a_flusher(execute, **kwargs) -> WarehouseFlusher:
 
 
 def test_submit_does_not_wait_for_the_warehouse():
-    """The whole reason the flusher exists: a settled node does not block."""
-
     recorder = Recorder()
     recorder.block = True
     flusher = a_flusher(recorder)
 
     flusher.submit(a_row())
-    # The worker is inside the write and is not coming back yet.
     assert recorder.started.wait(timeout=5)
     assert recorder.statements == []
 
@@ -98,7 +87,6 @@ def test_every_accepted_row_is_written():
     flusher.close()
 
     written = "\n".join(recorder.statements)
-    assert flusher.written == 10
     for index in range(10):
         assert f"Table{index}" in written
 
@@ -117,8 +105,6 @@ def test_rows_are_written_in_the_order_they_were_submitted():
 
 
 def test_rows_may_batch_into_one_statement():
-    """One INSERT per batch, not one per row — the cost this design is about."""
-
     recorder = Recorder()
     recorder.block = True
     flusher = a_flusher(recorder, batch_rows=5)
@@ -129,7 +115,6 @@ def test_rows_may_batch_into_one_statement():
     flusher.close()
 
     assert len(recorder.statements) < 5
-    assert flusher.written == 5
 
 
 def test_a_row_reaches_the_public_column_names():
@@ -143,7 +128,6 @@ def test_a_row_reaches_the_public_column_names():
     assert "[Workflow ID]" in statement
     assert "[Log SK]" in statement
     assert "[Row insert datetime]" in statement
-    # And the frozen public vocabulary, not the internal spelling.
     assert "N'Succeeded'" in statement
     assert "succeeded" not in statement
 
@@ -152,8 +136,6 @@ def test_a_row_reaches_the_public_column_names():
 
 
 def test_a_background_failure_is_surfaced_by_flush():
-    """A run must never read an empty table as an empty run."""
-
     flusher = a_flusher(Recorder(fail=RuntimeError("the warehouse said no")))
 
     flusher.submit(a_row())
@@ -198,8 +180,6 @@ def _session():
 
 
 def test_opening_a_session_creates_no_flusher():
-    """Most Sessions never log; none should pay a worker or a connection for it."""
-
     with _session() as session:
         assert session._flushers == {}
 
@@ -222,8 +202,6 @@ def test_two_warehouses_are_two_streams():
 
 
 def test_session_close_writes_every_accepted_row():
-    """Normal completion is the durability barrier the design promises."""
-
     session = _session()
     flusher = session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
     for index in range(4):
@@ -231,19 +209,12 @@ def test_session_close_writes_every_accepted_row():
 
     session.close()
 
-    assert flusher.written == 4
-    assert flusher.submitted == 4
+    written = "\n".join(session.tsql)
+    for index in range(4):
+        assert f"Table{index}" in written
 
 
 def test_the_final_flush_happens_while_the_session_can_still_write():
-    """The order in `Session.close` *is* the durability guarantee.
-
-    A flusher writes through the Session, and a closed Session refuses to hand
-    out a scope. So marking the Session closed before draining would fail
-    exactly the writes the barrier exists to complete — and only when the worker
-    is still behind, which is to say only under load.
-    """
-
     written_while_open: list[bool] = []
     session = _session()
     holding = threading.Event()
@@ -251,20 +222,14 @@ def test_the_final_flush_happens_while_the_session_can_still_write():
     flusher = session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
 
     def write(_statement: str) -> None:
-        # Held until `close` is under way, so the write lands *during* the
-        # barrier rather than before it — which is the only moment the ordering
-        # is observable, and the moment a busy run is always in.
         holding.set()
         release.wait(timeout=5)
-        # What a real Session does here is ask for a scope, which a closed one
-        # refuses. Recorded rather than raised so a failure names the cause.
         written_while_open.append(not session.closed)
 
     flusher._execute = write
     flusher.submit(a_row())
     assert holding.wait(timeout=5), "the worker never reached the write"
 
-    # Let go a moment after close has begun.
     threading.Timer(0.2, release.set).start()
     session.close()
 
@@ -290,10 +255,47 @@ def test_session_close_surfaces_a_background_failure():
     with pytest.raises(FlushError, match="the warehouse said no"):
         session.close()
 
+    assert not session.closed
+
+
+def test_close_reports_a_worker_that_did_not_stop():
+    recorder = Recorder()
+    recorder.block = True
+    flusher = a_flusher(recorder)
+    flusher.submit(a_row())
+    assert recorder.started.wait(timeout=5)
+    worker = flusher._worker
+
+    with pytest.raises(FlushError, match="worker did not stop"):
+        flusher.close(timeout=0.1)
+
+    assert flusher._worker is worker
+    assert worker is not None and worker.is_alive()
+    recorder.release.set()
+    flusher.close()
+
+
+def test_a_flusher_timeout_stops_session_teardown():
+    recorder = Recorder()
+    recorder.block = True
+    session = _session()
+    flusher = session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
+    flusher._execute = recorder
+    flusher.submit(a_row())
+    assert recorder.started.wait(timeout=5)
+    close = flusher.close
+    flusher.close = lambda: close(timeout=0.1)
+
+    with pytest.raises(FlushError, match="worker did not stop"):
+        session.close()
+
+    assert not session.closed
+    recorder.release.set()
+    flusher.close = close
+    session.close()
+
 
 def test_a_flusher_writes_through_the_session(monkeypatch):
-    """The statement reaches the Session's own T-SQL capability, not a new one."""
-
     seen: list[tuple[str, object]] = []
     session = _session()
     monkeypatch.setattr(
@@ -312,8 +314,6 @@ def test_a_flusher_writes_through_the_session(monkeypatch):
 
 
 def test_a_slow_worker_does_not_hang_a_flush_for_ever():
-    """A wedged connection must not hold a finished run open indefinitely."""
-
     recorder = Recorder()
     recorder.block = True
     flusher = a_flusher(recorder)
@@ -332,8 +332,6 @@ def test_a_slow_worker_does_not_hang_a_flush_for_ever():
 
 
 class GatedQueue(queue.Queue):
-    """A queue that holds one row's ``put`` open, to catch a submit in flight."""
-
     def __init__(self) -> None:
         super().__init__()
         self.gate_on: str | None = None
@@ -348,14 +346,6 @@ class GatedQueue(queue.Queue):
 
 
 def test_a_row_accepted_before_close_is_written_even_if_close_overtakes_it():
-    """Accepting a row and queueing it is one step, or the row can be lost.
-
-    A flusher is shared by every caller appending to one table, so a submit can
-    be in flight when another thread closes the Session. If the stop sentinel
-    can be queued between the two, the worker stops before reaching the row and
-    ``close`` returns reporting nothing wrong.
-    """
-
     recorder = Recorder()
     flusher = a_flusher(recorder)
     gated = GatedQueue()
@@ -376,26 +366,22 @@ def test_a_row_accepted_before_close_is_written_even_if_close_overtakes_it():
     late.join(timeout=5)
     closing.join(timeout=5)
 
-    assert flusher.submitted == 2
-    assert flusher.written == 2, "a row the flusher accepted never reached the table"
+    written = "\n".join(recorder.statements)
+    assert "First" in written
+    assert "Second" in written
 
 
 def test_a_stream_opened_while_the_session_is_closing_is_refused():
-    """A flusher created after the drain began would never be drained.
-
-    `close` takes the flushers it knows about and waits for them. One handed
-    out after that would hold rows nobody waits for, and the Session would
-    return having lost them without saying so.
-    """
-
     session = _session()
     started = threading.Event()
     release = threading.Event()
+    written = []
     flusher = session.flusher(LOG, warehouse=WarehouseTarget.parse("Weaver"))
 
     def write(_statement: str) -> None:
         started.set()
         release.wait(timeout=5)
+        written.append(True)
 
     flusher._execute = write
     flusher.submit(a_row())
@@ -410,4 +396,16 @@ def test_a_stream_opened_while_the_session_is_closing_is_refused():
 
     release.set()
     closing.join(timeout=5)
-    assert flusher.written == 1
+    assert written == [True]
+
+
+def test_run_logs_inherit_the_session_workflow():
+    from weaver.run import open_run_log
+
+    with _session() as session:
+        with session.workflow("compose-1"):
+            load = open_run_log(session, task_type="load")
+            test = open_run_log(session, task_type="test")
+
+    assert load.workflow_id == "compose-1"
+    assert test.workflow_id == "compose-1"

@@ -132,9 +132,7 @@ def initialise_catalogue(
     authored item, and the built-in ``Warehouse/_weaver`` that every build
     injects is therefore the whole of what it builds.
 
-    Ordinary builds do not call this. They inject the same item and bind it the
-    same way, so calling it first would build the catalogue twice — see
-    :mod:`weaver.operations`, which used to.
+    Ordinary builds inject and bind the same Item directly.
 
     An empty source directory is the input because the built-in item is composed
     into a *parsed* repository rather than authored into one: there is nothing

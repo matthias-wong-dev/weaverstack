@@ -1,16 +1,4 @@
-"""The Weaver catalogue sharing a Warehouse with somebody else's schemas.
-
-``catalogue="Warehouse/Curated"`` is a supported arrangement, not a workaround:
-Weaver owns the ``_`` schema of its host and nothing else there. That the
-*rendered statements* stay inside ``_`` is asserted without a tenant, in
-``tests/test_shared_catalogue_host_invariant.py``. What needs a real Warehouse is
-the other half — that a build reconciling ``_`` against a live estate leaves a
-neighbour's schema, table and view exactly where they were.
-
-The suite's catalogue Warehouse is the host. Seeding a neighbour into it is the
-faithful test: the objects sit in the same database as ``_``, and a reconciliation
-that reached too far would take them.
-"""
+"""The catalogue shares a Warehouse without touching user-owned schemas."""
 
 from __future__ import annotations
 
@@ -20,8 +8,6 @@ import weaver
 
 pytestmark = [pytest.mark.fabric, pytest.mark.hosted]
 
-#: A neighbour's schema in the catalogue's Warehouse. Neutral, and nothing to do
-#: with Weaver — which is the point.
 NEIGHBOUR_SCHEMA = "Finance"
 NEIGHBOUR_TABLE = "Ledger"
 NEIGHBOUR_VIEW = "OpenLedger"
@@ -89,12 +75,7 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
     fabric_empty_lakehouse,
     tmp_path_factory,
 ):
-    """One build against a shared catalogue host, and the neighbour survives it.
-
-    A build reconciles ``_`` — it deletes obsolete rows, merges current ones and
-    creates any catalogue table that is missing. All of that runs in the same
-    Warehouse the neighbour is in.
-    """
+    """Catalogue reconciliation leaves a neighbouring schema unchanged."""
 
     from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE, DESKTOP_JOURNEY_NAMES
 
@@ -103,8 +84,6 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
         "the neighbour was not seeded, so this would pass for the wrong reason"
     )
 
-    # The target is shared and permanent, so a previous module's estate is
-    # still in it. Emptied on the way in, as every other build context does.
     fabric_empty_lakehouse(fabric_target_lakehouse.name)
 
     estate = CROSS_ITEM_JOURNEY_FIXTURE.renamed(
@@ -120,14 +99,12 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
         (failure.action_id, failure.message) for failure in built.errors
     ]
 
-    # The neighbour's objects, its rows and its view are all still there.
     assert _objects(neighbour, NEIGHBOUR_SCHEMA) == before
     rows = neighbour.query(
         f"select count(*) as n from [{NEIGHBOUR_SCHEMA}].[{NEIGHBOUR_VIEW}]"
     )
     assert rows[0]["n"] == 2
 
-    # And Weaver's own schema is there beside it, holding what it certified.
     certified = neighbour.query(
         "select count(*) as n from [_].[Registry] where [Item name] = N'Stock'"
     )
@@ -135,8 +112,6 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
 
 
 def test_the_catalogue_warehouse_holds_both_schemas(neighbour):
-    """The arrangement itself: `_` and a user's schema, in one Warehouse."""
-
     schemas = {
         str(row["SCHEMA_NAME"])
         for row in neighbour.query(

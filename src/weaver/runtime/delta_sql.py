@@ -8,10 +8,6 @@ is a silent data defect — a row that is never updated, a blank key admitted, a
 table that cannot hold a column name with a space in it — so each is written
 once, explained once, and tested once.
 
-They were previously kept beside the generated Spark SQL load program, which no
-longer exists: a Spark-SQL-authored table now compiles into a deployed
-``SparkSqlTable`` module and loads through the ordinary Delta path. What
-survived that removal is what was never really about generation.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Observed catalogue and target inventories used to plan a run.
+"""Observed catalogue and target inventories for run planning.
 
 RunState is read at an operation boundary and then used as an immutable planning
 input by Runner.

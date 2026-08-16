@@ -367,15 +367,14 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
     from weaver.fabric.notebooks import run_notebook
 
     workspace = _fabric_cli_workspace(args)
-    # The item name, not the typed configuration value: `run_notebook` resolves
-    # this as a Lakehouse display name, and `Warehouse/Weaver` is not one.
-    lakehouse = args.lakehouse or (
-        workspace.catalogue_item.name if workspace.catalogue else None
-    )
+    configured_lakehouses = tuple(workspace.lakehouses)
+    lakehouse = args.lakehouse
+    if lakehouse is None and len(configured_lakehouses) == 1:
+        lakehouse = configured_lakehouses[0]
     if not lakehouse:
         raise CommandError(
             "A Lakehouse is required to run this notebook. "
-            "Use --lakehouse or configure a Lakehouse for this workspace."
+            "Use --lakehouse or configure exactly one Lakehouse for this workspace."
         )
     if not workspace.environment:
         raise CommandError(

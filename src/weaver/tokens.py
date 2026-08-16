@@ -3,9 +3,7 @@
 Object and schema names are rendered when the bundle is generated, so the only
 substitution left is the instant an installation published its Registry.
 
-At the package root because both engines need it: the catalogue's T-SQL carries
-the token and a Lakehouse's Spark SQL does too. It lived under ``spark`` when
-the catalogue was Delta and only Spark wrote it.
+Both catalogue T-SQL and Lakehouse Spark SQL carry the token.
 """
 
 from __future__ import annotations

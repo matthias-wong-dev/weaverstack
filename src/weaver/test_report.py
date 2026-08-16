@@ -94,11 +94,7 @@ class ValidationNodeReport:
             "finished_at": self.finished_at,
         }
         if self.result is not None:
-            # A validation that could not be evaluated carries a dispatch
-            # failure rather than a validation result, and a dispatch failure
-            # answers with a row rather than a mapping. Both are serialisable,
-            # so the report says what happened either way — an invalid node
-            # used to crash the serialiser instead.
+            # Dispatch failures expose a row; validation results expose a mapping.
             shape = getattr(self.result, "to_mapping", None) or self.result.as_row
             mapping.update(shape())
         return mapping

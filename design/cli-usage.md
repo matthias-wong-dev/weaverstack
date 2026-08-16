@@ -412,5 +412,5 @@ weaver fabric capacity status  --resource-group <rg> --capacity-name <capacity>
 weaver fabric capacity suspend --resource-group <rg> --capacity-name <capacity>
 
 weaver fabric notebook push ./notebooks/Refresh.py --workspace "Analytics"
-weaver fabric notebook run Refresh --workspace "Analytics"
+weaver fabric notebook run Refresh --workspace "Analytics" --lakehouse "Sales"
 ```

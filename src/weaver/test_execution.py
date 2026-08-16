@@ -17,7 +17,7 @@ from .runtime.test_compare import ACTUAL, EXPECTED, SIDE_COLUMN
 from .runtime.validation_result import AssumptionResult, TestResult
 from .test_plan import InstalledValidation
 
-#: Runtime primitives used to dispatch installed validations.
+#: Runtime primitives for installed validations.
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_VALIDATION = "python_validation"
 

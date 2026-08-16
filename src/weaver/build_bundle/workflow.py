@@ -551,14 +551,7 @@ def read_target_inventories(
     workspace=None,
     sql_by_item=None,
 ) -> dict:
-    """Read every selected physical target before planning begins.
-
-    A boundary read: physical target to :class:`TargetInventory`, once, so that
-    everything above it decides against a snapshot rather than against state
-    that is still moving. Its capabilities come from the Session, which owns
-    them and closes them — this used to open a TDS connection per Warehouse and
-    close it again, which a build following a wipe paid for twice.
-    """
+    """Read every selected physical target into one planning snapshot."""
 
     supplied_sql = sql_by_item or {}
     workspace = workspace if workspace is not None else session.workspace

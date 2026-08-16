@@ -13,6 +13,7 @@ in one Session, and stops when one of them fails.
 from __future__ import annotations
 
 import io
+from contextlib import nullcontext
 
 import pytest
 
@@ -32,6 +33,13 @@ compose:
   dev:
     - weaver wipe Lakehouse/Sales Warehouse/Reporting
     - weaver build ./repository --bind Lakehouse/Sales=Sales
+    - weaver load Warehouse/Reporting
+    - weaver test Warehouse/Reporting
+"""
+
+RUNS = """\
+compose:
+  verify:
     - weaver load Warehouse/Reporting
     - weaver test Warehouse/Reporting
 """
@@ -60,6 +68,7 @@ def recorded(monkeypatch):
     parser = build_parser()
 
     def record(parsed):
+        parsed.workflow_id = getattr(parsed.session, "workflow_id", None)
         calls.append(parsed)
         return getattr(record, "status", 0)
 
@@ -296,8 +305,6 @@ def test_every_command_runs_in_order_with_its_arguments(
 
 
 def test_one_session_serves_the_whole_sequence(tmp_path, recorded, confirmed):
-    """The reason to compose at all: four commands, one warm Session."""
-
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
@@ -306,6 +313,19 @@ def test_one_session_serves_the_whole_sequence(tmp_path, recorded, confirmed):
     sessions = {id(parsed.session) for parsed in calls}
     assert len(sessions) == 1
     assert all(parsed.session is not None for parsed in calls)
+
+
+def test_one_workflow_id_correlates_the_whole_composition(
+    tmp_path, recorded, confirmed
+):
+    calls, parser_factory, _ = recorded
+    path = _write(tmp_path, RUNS)
+
+    run_composition(_Args("verify", file=str(path)), parser_factory=parser_factory)
+
+    assert [parsed.command for parsed in calls] == ["load", "test"]
+    assert len({parsed.workflow_id for parsed in calls}) == 1
+    assert calls[0].workflow_id
 
 
 def test_a_composition_inside_a_session_joins_the_one_already_open(
@@ -405,6 +425,9 @@ def test_a_composition_warms_the_union_before_the_first_command(
     class Warmed:
         closed = False
 
+        def workflow(self, _workflow_id):
+            return nullcontext()
+
         def prepare(self, required, *, workspace=None):
             prepared.append(set(required))
             return type("W", (), {"started": ()})()
@@ -428,6 +451,9 @@ def test_a_composition_with_no_workspace_warms_nothing(tmp_path, recorded, confi
 
     class Watched:
         closed = False
+
+        def workflow(self, _workflow_id):
+            return nullcontext()
 
         def prepare(self, required, *, workspace=None):
             prepared.append(required)

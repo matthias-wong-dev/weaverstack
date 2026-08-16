@@ -447,7 +447,14 @@ def plan_item_build(
 
 def _catalogue_target(binding: WarehouseBinding, targets):
     physical = binding.to_bound_target()
-    for target in targets:
-        if target.kind == physical.kind and target.item_id == physical.item_id:
+    matching = tuple(
+        target
+        for target in targets
+        if target.kind == physical.kind and target.item_id == physical.item_id
+    )
+    for target in matching:
+        if target.logical_item_name == "_weaver":
             return target
+    if matching:
+        return matching[0]
     return replace(physical, id=f"control-{physical.id}")

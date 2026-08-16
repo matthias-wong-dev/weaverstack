@@ -634,8 +634,8 @@ class ConsoleScope(WorkspaceScope):
     def check_published_version(self, warn) -> None:
         """Compare this checkout's Weaver with the one published in the workspace.
 
-        The two are independently versioned halves of one deployment and drift
-        the moment either moves. A difference warns and names the fix rather
+        The two are independently versioned halves of one deployment and can
+        drift. A difference warns and names the fix rather
         than refusing, because it is usually harmless.
 
         Asked once per workspace context, on the first crossing: a warning

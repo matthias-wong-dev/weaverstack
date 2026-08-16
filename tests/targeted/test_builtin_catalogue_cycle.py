@@ -1,19 +1,4 @@
-"""The catalogue is built by the ordinary build, and by nothing else.
-
-Weaver's own catalogue tables are Weaver objects. That claim is only worth
-making if it is *load-bearing*: if the catalogue could also be created by a
-privileged path that ran first, the ordinary path would never be exercised on an
-empty estate and the claim would be decorative.
-
-Build used to run a whole nested build before its own — `_ensure_control_plane`
-called `initialise_catalogue`, which read state, planned and installed a
-bundle of its own, before the real build read anything. So every build built the
-catalogue twice, and the second build's plan was never the one that created it.
-
-These tests hold the seam shut from both sides: the ordinary planner really does
-create the catalogue from nothing, and no build path reaches a second
-initialisation lifecycle to do it for them.
-"""
+"""The ordinary build owns the package catalogue Item lifecycle."""
 
 from __future__ import annotations
 
@@ -30,6 +15,8 @@ from support.sessions import given_session
 from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
 from weaver.build_bundle import (
+    ItemBinding,
+    ItemBindings,
     WarehouseBinding,
     build_item_repository,
     effective_item_bindings,
@@ -145,6 +132,22 @@ def test_the_builtin_item_is_bound_to_the_catalogue_warehouse_automatically():
     binding = bindings.by_item[BUILTIN]
     assert isinstance(binding.target, WarehouseBinding)
     assert binding.target.warehouse.name == "Weaver"
+
+
+def test_the_catalogue_warehouse_can_also_host_an_authored_item():
+    curated = ItemBinding(
+        WeaverItemId.parse("Warehouse/Curated"),
+        WarehouseBinding(ItemRef("Curated"), workspace_name=WORKSPACE),
+    )
+
+    bindings = effective_item_bindings(
+        ItemBindings((curated,)),
+        control_item=ItemRef("Curated"),
+        workspace_name=WORKSPACE,
+    )
+
+    assert bindings.by_item[BUILTIN].target.item == curated.target.item
+    assert set(bindings.by_item) == {BUILTIN, curated.item}
 
 
 # --- and the ordinary planner creates the catalogue from nothing --------------

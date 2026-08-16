@@ -179,7 +179,7 @@ _KIND_KEYS = {
     ASSUMPTION: _VALIDATION_KEYS,
 }
 
-# Retired keys, refused with the migration rather than as "unknown".
+# Specific guidance for recognised but unsupported keys.
 _RETIRED_KEYS = {
     "Auto delete": (
         "Auto delete is no longer supported. Use Incremental with the inverse value:\n"

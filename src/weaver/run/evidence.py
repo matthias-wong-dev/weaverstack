@@ -68,15 +68,16 @@ class RunLog:
         self.flusher.submit(self.row(node))
 
     def row(self, node) -> dict:
-        """The ``_.Log`` row one settled node produces.
+        """The ``_.Log`` row one settled node produces."""
 
-        Physical identity, deliberately: the target the work touched and the
-        object it touched there. Which logical item declared it is a question
-        the catalogue answers, and duplicating it here would let the two drift.
-        """
-
-        target_type, _, target_name = str(node.physical_target).partition("/")
-        schema, name = _object_parts(node.logical_id)
+        target_type = getattr(node, "target_type", None)
+        target_name = getattr(node, "target_name", None)
+        if target_type is None and target_name is None:
+            target_type, _, target_name = str(node.physical_target).partition("/")
+        schema = getattr(node, "schema_name", None)
+        name = getattr(node, "object_name", None)
+        if schema is None and name is None:
+            schema, name = _object_parts(node.logical_id)
         started = _instant(node.started_at)
         completed = _instant(node.finished_at)
         return {
@@ -176,7 +177,7 @@ def open_run_log(session, *, workspace=None, task_type: str, workflow_id=None):
         raise RunError("writing run evidence needs a Workspace with a catalogue")
     catalogue = WarehouseTarget(warehouse=workspace.catalogue_item)
     return RunLog(
-        workflow_id=workflow_id or new_workflow_id(),
+        workflow_id=workflow_id or session.workflow_id or new_workflow_id(),
         task_type=task_type,
         flusher=session.flusher(LOG, warehouse=catalogue, workspace=workspace),
     )

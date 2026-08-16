@@ -1,9 +1,4 @@
-"""Generate the built-in ``Warehouse/_weaver`` catalogue declaration item.
-
-The item is composed into parsed repositories and built through ordinary planner
-and installer paths. Its definitions are rendered from catalogue table metadata,
-in the public spelling the ``_`` schema publishes.
-"""
+"""Generate the built-in ``Warehouse/_weaver`` declaration Item."""
 
 from __future__ import annotations
 
@@ -19,16 +14,11 @@ from .tables import (
     CatalogueTable,
 )
 
-#: The reserved item Weaver generates and manages inside the declaration.
-#: A Warehouse: the catalogue is reached over TDS, and nothing about reading or
-#: writing it needs a Spark session.
+#: The reserved Item that owns the catalogue declaration.
 BUILTIN_ITEM = WeaverItemId(WAREHOUSE, "_weaver")
 ITEM_ROOT = str(BUILTIN_ITEM)
 SCHEMA_PATH = f"{ITEM_ROOT}/schemas/{CATALOGUE_SCHEMA}.yml"
 
-#: One sentence, the same on every table, saying where the rows come from. It is
-#: not boilerplate: "never loaded" is the fact that makes ``Static: true``
-#: correct, and a reader of any one file should be told it.
 LINEAGE = (
     "Projected from validated Weaver document declarations by Weaver's own build, and "
     "maintained only by the catalogue DML a build appends. Never populated by a "
@@ -51,25 +41,13 @@ _WIDTH = 76
 
 
 def _escaped(text: str) -> str:
-    """Metadata text with dollars escaped.
-
-    A ``$`` opens a ``$Schema.Object`` reference, and several catalogue columns are
-    described in terms of one — ``description_reference`` holds "the
-    $Schema.Object the description was copied from". Written raw, that would parse
-    as a reference and be refused, so it is escaped the way Weaver document specifies.
-    """
+    """Escape dollars that metadata would parse as object references."""
 
     return text.replace("$", "$$")
 
 
 def _folded(key: str, text: str, *, indent: int = 0) -> str:
-    """A YAML folded block, so prose can wrap without becoming multi-line text.
-
-    ``>-`` folds newlines into spaces and strips the trailing one, which keeps the
-    parsed value a single sentence however it is laid out in the file. Used
-    uniformly rather than only when needed: a plain scalar is fine until a
-    description happens to contain a colon, and this removes the class of problem.
-    """
+    """Render wrapped prose as one YAML scalar."""
 
     pad = " " * indent
     body = textwrap.fill(
@@ -93,12 +71,7 @@ def render_schema_file() -> str:
 
 
 def _body(table: CatalogueTable) -> str:
-    """A query that declares the shape and returns no rows.
-
-    ``where 1 = 0`` with no ``FROM`` is valid T-SQL, and is what lets a build
-    create the table without reading anything: the engine resolves the query's
-    shape, and resolving a shape reads no rows.
-    """
+    """A T-SQL query that declares the shape and returns no rows."""
 
     def line(column: CatalogueColumn, first: bool) -> str:
         lead = "select" if first else "     ,"
@@ -151,12 +124,7 @@ def render_source(table: CatalogueTable) -> str:
 
 
 def render_log_source() -> str:
-    """The ``_.Log`` declaration — operational evidence, not installed state.
-
-    Declared as an ordinary table so normal build, inventory and prune own its
-    lifecycle. Nothing reconciles its rows: they are appended by a run and never
-    projected from a declaration, which is what ``Static: true`` records.
-    """
+    """The ordinary Weaver-built ``_.Log`` table declaration."""
 
     sections = [
         f"Table ID: {LOG.qualified}",

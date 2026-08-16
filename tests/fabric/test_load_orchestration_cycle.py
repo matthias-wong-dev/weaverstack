@@ -56,12 +56,15 @@ from weaver.sessions.host import use_or_create_session
 
 requested = ["Lakehouse/{lakehouse}", "Warehouse/{warehouse}"]
 
-dry = weaver.load(requested, dry_run=True, fault_tolerant=False)
-real = weaver.load(requested, dry_run=False, fault_tolerant=False)
+with use_or_create_session(None, workspace=workspace) as session:
+    dry = weaver.load(
+        requested, dry_run=True, fault_tolerant=False, session=session
+    )
+    real = weaver.load(
+        requested, dry_run=False, fault_tolerant=False, session=session
+    )
 
-# The rows this run appended, read back from the catalogue Warehouse. Read in
-# the same body as the run: `_.Log` is written asynchronously and the barrier is
-# the Session closing, so a reader in another crossing could see a partial tail.
+# Session close is the evidence durability barrier.
 with use_or_create_session(None, workspace=workspace) as session:
     from weaver.catalogue.connection import catalogue_connection
 

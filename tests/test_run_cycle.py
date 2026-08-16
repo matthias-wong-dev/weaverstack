@@ -1,15 +1,4 @@
-"""The Runner's state machine, exhaustively and in milliseconds.
-
-Every claim here is about orchestration — readiness, blocking, fail-fast,
-aggregation, dry run — and none of it needs an engine. The graph is built from a
-Python Catalogue, the estate is a Python inventory, and dispatch returns whatever
-the test says it returns.
-
-That is the point of the seam. These claims used to be reached by authoring a
-repository, running a real build, publishing a physical catalogue, installing
-runtime artefacts and running a real load — nine estate builds to ask nine
-questions about ordering, none of which the estate answered.
-"""
+"""The Runner state machine without an execution engine."""
 
 from __future__ import annotations
 
@@ -758,11 +747,36 @@ def test_a_node_with_nothing_logical_to_name_keeps_its_id():
     assert node_label(node) == "a"
 
 
-class _Logical:
-    """Enough of a logical id to be named: it carries a qualified object."""
+def test_run_evidence_uses_the_nodes_structured_identity():
+    from dataclasses import replace
 
+    from weaver.run.evidence import RunLog
+
+    result = runner(
+        nodes=[node("a", logical_id=_Logical("Sales.Customer"))]
+    ).run(dispatch=controlled({"a": Outcome()}))
+    settled = replace(
+        result.nodes[0],
+        physical_target="display text is not identity",
+        logical_id="neither is this",
+    )
+
+    row = RunLog("workflow", "load", flusher=None).row(settled)
+
+    assert row["target_type"] == "Lakehouse"
+    assert row["target_name"] == "Sales_LH"
+    assert row["schema_name"] == "Sales"
+    assert row["object_name"] == "Customer"
+
+
+class _Logical:
     def __init__(self, qualified):
-        self.object_id = type("ObjectId", (), {"qualified": qualified})()
+        schema, object_name = qualified.split(".", 1)
+        self.object_id = type(
+            "ObjectId",
+            (),
+            {"qualified": qualified, "schema": schema, "object": object_name},
+        )()
 
     def __str__(self):
         return self.object_id.qualified
