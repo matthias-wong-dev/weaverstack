@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING
 import pytest
 from factories import (
     installed_catalogue,
-    installed_inventories,
     load_estate,
     load_estate_bindings,
 )
@@ -32,9 +31,6 @@ from support.workspaces import given_workspace
 from weaver.fabric.resolution import FabricResolver
 from weaver.load_plan import ENDPOINT_REFRESH, PhysicalTargetRef
 from weaver.load_report import (
-    BLOCKED,
-    INVALID,
-    TASK_INVALID,
     TASK_SUCCEEDED,
     VALIDATED,
 )
@@ -73,15 +69,9 @@ class Forbidden:
 
 @dataclass
 class Prepared:
-    """State a test already has, and the Session a run reaches engines through.
-
-    Not an architectural object. The Session's store refuses every write, so a
-    dry run that opened a task log is caught by the thing it tried to write
-    through — a stronger claim than a flag nobody checks.
-    """
+    """Catalogue state and a Session whose store refuses writes."""
 
     catalogue: Lakehouse / object
-    inventories: dict
     workspace: object
     session: object
 
@@ -110,7 +100,6 @@ def session(tmp_path):
 
     return Prepared(
         catalogue=installed_catalogue(repository, bindings),
-        inventories=installed_inventories(repository, bindings),
         workspace=workspace,
         session=given_session(
             workspace=workspace, resolver=Refreshing(workspace), store=Refuses()
@@ -122,10 +111,7 @@ def dry_run(session, *targets, names=(), fault_tolerant=False):
     return run_load(
         session.session,
         workspace=session.workspace,
-        state=RunState(
-            catalogue=session.catalogue,
-            target_inventories=session.inventories,
-        ),
+        state=RunState(catalogue=session.catalogue),
         requested=targets or (RAW, REPORTING),
         names=names,
         fault_tolerant=fault_tolerant,
@@ -281,72 +267,14 @@ def test_load_dry_run_appends_nothing_to_the_log(session, tmp_path):
     ]
 
 
-# --- and what it reports when the estate is wrong -----------------------------
-
-
-def test_load_dry_run_reports_missing_primitives(session):
-    from dataclasses import replace
-
-    session.inventories = {
-        **session.inventories,
-        "Warehouse/Reporting_WH": replace(
-            session.inventories["Warehouse/Reporting_WH"], procedures=()
-        ),
-    }
-
-    report = dry_run(session)
-
-    assert report.by_node[SUMMARY].status == INVALID
-    assert report.status == TASK_INVALID
-    assert [message.code for message in report.by_node[SUMMARY].messages] == [
-        "dispatch_location_missing"
-    ]
-
-
 def test_a_dry_run_never_reports_an_execution_status(session):
     """A validated node has not run, and no word for a thing that ran fits it."""
 
-    from dataclasses import replace
-
     from weaver.load_report import SUCCEEDED, VALIDATION_STATUSES
-
-    raw = session.inventories["Lakehouse/Raw_LH"]
-    session.inventories = {
-        **session.inventories,
-        "Lakehouse/Raw_LH": replace(
-            raw,
-            files=tuple(
-                name for name in raw.files if not name.endswith("Sales__Order.py")
-            ),
-        ),
-    }
 
     report = dry_run(session)
 
     statuses = {node.status for node in report.nodes}
     assert statuses <= set(VALIDATION_STATUSES)
     assert SUCCEEDED not in statuses
-    assert len(statuses) > 1
-
-
-def test_load_dry_run_blocks_descendants_of_invalid_nodes(session):
-    from dataclasses import replace
-
-    raw = session.inventories["Lakehouse/Raw_LH"]
-    session.inventories = {
-        **session.inventories,
-        "Lakehouse/Raw_LH": replace(
-            raw,
-            files=tuple(
-                name for name in raw.files if not name.endswith("Sales__Order.py")
-            ),
-        ),
-    }
-
-    report = dry_run(session)
-
-    assert report.by_node[ORDER].status == INVALID
-    assert report.by_node[DAILY].status == BLOCKED
-    assert report.by_node[SUMMARY].status == BLOCKED
-    assert report.by_node[EXPORT].status == VALIDATED
-    assert report.status == TASK_INVALID
+    assert statuses == {VALIDATED}

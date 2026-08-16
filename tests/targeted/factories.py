@@ -463,37 +463,6 @@ class FixtureInventory(TargetInventory):
         )
 
 
-def installed_inventories(repository, bindings: ItemBindings) -> dict:
-    """Each bound physical target's inventory, keyed as a load run addresses it.
-
-    The key is the target's public spelling — ``Lakehouse/Raw_LH`` — because that
-    is what a caller wrote and what a report prints. A second vocabulary between
-    the request and the answer is exactly what the shared target grammar exists
-    to remove.
-    """
-
-    from weaver.load_plan import PhysicalTargetRef
-
-    made = {}
-    for binding in bindings.entries:
-        lakehouse = isinstance(binding.target, LakehouseBinding)
-        name = (
-            binding.target.lakehouse.name
-            if lakehouse
-            else binding.target.warehouse.name
-        )
-        target = PhysicalTargetRef("lakehouse" if lakehouse else "warehouse", name)
-        made[str(target)] = FixtureInventory.from_repository(
-            repository,
-            item=binding.item,
-            target_kind=DELTA_TARGET if lakehouse else SQL_TARGET,
-            target_id=binding.to_bound_target().id,
-            kind=target.kind,
-            target_name=name,
-        )
-    return made
-
-
 def bound_target(
     *,
     id: str = "target-1",

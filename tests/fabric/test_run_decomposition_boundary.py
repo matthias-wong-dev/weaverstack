@@ -1,15 +1,13 @@
 """A desktop-driven run against a real estate, and the scope it holds open.
 
-This replaces the transport test that used to submit one program calling
-``weaver.load`` on the far side. There is no such program any more: the desktop
-reads the estate, builds the graph here, and dispatches each node to whatever
-can run it. So what is worth proving in Fabric changed with it.
+The desktop reads the catalogue, builds the graph here, and dispatches each node
+to whatever can run it.
 
 Three claims, and none of them can be made anywhere else:
 
 .. code-block:: text
 
-    the decomposed path runs at all      against a real installed estate
+    the decomposed path runs at all      against real installed primitives
     one scope serves every Python node   open_scope once, dispatch many
     the scope is closed at the end       close_scope once, whatever happened
 
@@ -79,8 +77,8 @@ def _spent(before: dict, after: dict) -> dict:
     }
 
 
-def test_a_desktop_runs_the_estate_it_did_not_have_to_ship(loaded):
-    """The decomposed path, end to end, against a real installed estate."""
+def test_a_desktop_runs_the_catalogue_graph_it_did_not_have_to_ship(loaded):
+    """The decomposed path, end to end, against real installed primitives."""
 
     report, _ = loaded
 
@@ -114,26 +112,18 @@ def test_the_scope_is_closed_when_the_run_ends(loaded):
     assert spent.get("livy.close_scope") == 1
 
 
-def test_the_run_read_the_estate_rather_than_shipping_itself(loaded):
-    """What the decomposition removed. The estate is read; the run is not shipped.
-
-    The read is Spark SQL now rather than a program, so what says it happened is
-    the statements — and what says the run stayed here is that no program named
-    a load.
-    """
+def test_the_run_does_not_stocktake_the_physical_estate(loaded):
+    """The catalogue is trusted until a primitive is dispatched."""
 
     _, spent = loaded
 
-    # One Spark read, not none: a Lakehouse's views live only in the Spark
-    # catalogue. The estate's *catalogue* is a Warehouse and does not come this
-    # way at all, which is why this is no longer more than one.
-    assert spent.get("livy.spark_sql", 0) >= 1
+    assert spent.get("livy.spark_sql", 0) == 0
     assert "livy.load" not in spent
     assert "livy.read_catalogue" not in spent
 
 
 def test_every_node_reports_where_it_was_dispatched(loaded):
-    """Resolution happened here, against the estate that was read across."""
+    """Dispatch addresses were derived from the catalogue graph."""
 
     report, _ = loaded
 

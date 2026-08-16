@@ -98,8 +98,7 @@ def run_test(
     resolution and capability acquisition differ between positions, and none of
     them changes the orchestration.
 
-    ``state`` is the same preflight snapshot :func:`weaver.operations.load.run_load` takes,
-    so a caller that has already read the estate is not made to read it twice.
+    ``state`` lets a caller provide an already-read catalogue snapshot.
     """
 
     started = datetime.now(timezone.utc)

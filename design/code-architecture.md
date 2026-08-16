@@ -23,30 +23,17 @@ The rest of this document identifies the handoffs between those responsibilities
 ## The shape
 
 ```text
-   authored files            physical estate
-        │                          │
-        ▼                          ▼
- WeaverRepository            BuildState / RunState        ← read once, at a boundary
-        │                          │
-        └───────────┬──────────────┘
-                    ▼
-              Builder / Runner                             ← pure Python decisions
-                    │
-                    ▼
-        BuildBundle / RunGraph                             ← the handoff: a decision, written down
-                    │
-                    ▼
-          Installer / dispatch                             ← does what the decision says
-                    │
-                    ▼
-                 Session                                   ← the only thing that touches Fabric
-                    │
-        ┌───────┬───┴────┬────────┐
-       TDS   OneLake    Livy     REST
+ WeaverRepository + BuildState  →  Builder  →  BuildBundle
+
+    Catalogue + RunRequest      →  Runner   →   RunGraph
+
+           BuildBundle / RunGraph  →  Installer / dispatch  →  Session
+                                                                  │
+                                                  TDS | OneLake | Livy | REST
 ```
 
-Read from the top: two kinds of input arrive, a decision is made, the decision
-is written down, and only then does anything physical happen.
+Builders reconcile authored files with physical state. Runners trust the
+installed catalogue and let dispatch report physical failures.
 
 A `BuildBundle` describes everything a build intends to do. It can be printed,
 compared, serialised, or used in a test before physical work begins.
@@ -153,7 +140,7 @@ The handoff points, roughly in the order you meet them.
 | `TargetInventory` | what a physical target actually holds right now |
 | `BuildState` | `Catalogue` + inventories, as one snapshot the Builder is handed |
 | `BuildBundle` | the plan: sequences → batches → `InstallAction`s, plus frozen payloads |
-| `RunState` | the same pair, for a run |
+| `RunState` | the catalogue snapshot handed to a run |
 | `RunGraph` | the selected nodes and their edges |
 | `RunResult` / reports | what happened, per node, per action |
 

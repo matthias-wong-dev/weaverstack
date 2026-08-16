@@ -32,7 +32,6 @@ from typing import TYPE_CHECKING
 import pytest
 from factories import (
     installed_catalogue,
-    installed_inventories,
     load_estate,
     load_estate_bindings,
 )
@@ -83,15 +82,9 @@ class Unused:
 
 @dataclass
 class Prepared:
-    """State a test already has, plus the Session the run reaches engines through.
-
-    Not an architectural object. The state is the handover a caller supplies and
-    the Session is the real one; ``log_root`` is where the boundary will write,
-    derived the same way the boundary derives it rather than chosen here.
-    """
+    """Catalogue state and the Session a run reaches engines through."""
 
     catalogue: Lakehouse / object
-    inventories: dict
     workspace: object
     session: object
 
@@ -119,7 +112,6 @@ def session(tmp_path):
     store = FilesystemStore()
     return Prepared(
         catalogue=installed_catalogue(repository, bindings),
-        inventories=installed_inventories(repository, bindings),
         workspace=workspace,
         session=given_session(workspace=workspace, resolver=resolver, store=store),
     )
@@ -153,10 +145,7 @@ def _run(session, *, fault_tolerant=False, targets=(RAW, REPORTING)):
     return run_load(
         session.session,
         workspace=session.workspace,
-        state=RunState(
-            catalogue=session.catalogue,
-            target_inventories=session.inventories,
-        ),
+        state=RunState(catalogue=session.catalogue),
         requested=targets,
         fault_tolerant=fault_tolerant,
         dry_run=False,

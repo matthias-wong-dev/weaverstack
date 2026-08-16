@@ -80,8 +80,6 @@ PRIMITIVE_FAILURE = "primitive_failure"
 DISPATCH_EXCEPTION = "dispatch_exception"
 #: The installed primitive could not be located.
 DISPATCH_LOCATION_MISSING = "dispatch_location_missing"
-#: The physical target this node runs against is not there.
-TARGET_MISSING = "target_missing"
 #: A deployed Python module could not be imported, or carries no expected class.
 MODULE_IMPORT_FAILURE = "module_import_failure"
 #: A primitive returned something that does not report whether it succeeded.

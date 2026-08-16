@@ -14,10 +14,10 @@ Seven modules, and each is a step of that line rather than a fragment of one:
 
 .. code-block:: text
 
-    state       the estate as it was, and how a caller reads one
+    state       the installed catalogue snapshot
     graph       what the catalogue says runs, and in what order
     runner      what runs next — and what a run was asked for
-    resolution  which installed primitive a node means
+    resolution  the dispatch address a catalogue node names
     dispatch    the one place a run crosses into a real engine
     outcome     what a primitive's answer means, raised or returned
     result      what happened: the contract, the messages, the statuses
@@ -37,7 +37,7 @@ from .result import (
     run_status,
 )
 from .runner import LOAD, TEST, Runner, RunRequest
-from .state import RunState, read_run_state
+from .state import RunState
 
 __all__ = [
     "LOAD",
@@ -58,6 +58,5 @@ __all__ = [
     "RunLog",
     "new_workflow_id",
     "open_run_log",
-    "read_run_state",
     "run_status",
 ]

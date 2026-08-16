@@ -9,7 +9,6 @@ from weaver.run.graph import RunGraph, RunNode
 from weaver.run.result import (
     BLOCKED,
     FAILED,
-    INVALID,
     PENDING,
     RUN_FAILED,
     RUN_PARTIALLY_SUCCEEDED,
@@ -94,37 +93,12 @@ def node(node_id: str, **kwargs) -> RunNode:
     )
 
 
-def runner(
-    *, nodes, edges=(), present=(str(SALES),), installed=True, **policy
-) -> Runner:
-    """A Runner over a stated graph and a stated estate. No engine anywhere.
+def runner(*, nodes, edges=(), **policy) -> Runner:
+    """A Runner over a stated graph. No engine anywhere."""
 
-    The inventory holds exactly what the nodes name, so resolution passes for a
-    reason rather than by not looking. ``installed=False`` states the other
-    case: a graph that is right about an estate that is not.
-    """
-
-    from weaver.build_bundle.prune import TargetInventory
     from weaver.catalogue.state import Catalogue
 
-    files = (
-        tuple(
-            f"{one.primitive_object.schema}/{one.primitive_object.object}"
-            for one in nodes
-            if one.primitive_object is not None
-        )
-        if installed
-        else ()
-    )
-    state = RunState(
-        catalogue=Catalogue(rows={}),
-        target_inventories={
-            name: TargetInventory(
-                target_id=name, kind="lakehouse", target_name=name, files=files
-            )
-            for name in present
-        },
-    )
+    state = RunState(catalogue=Catalogue(rows={}))
     made = Runner(state, RunRequest.load([SALES], **policy))
     made._graph = RunGraph(nodes=tuple(nodes), edges=tuple(edges), requested=(SALES,))
     return made
@@ -266,31 +240,17 @@ def test_fault_tolerance_does_not_run_what_the_failure_blocked():
     assert result.by_node["c"].status == SUCCEEDED
 
 
-# --- the estate the graph was planned against ---------------------------------
+# --- resolution and dispatch --------------------------------------------------
 
 
-def test_a_target_that_is_not_there_fails_the_node_it_would_have_run():
-    """A right graph against a missing estate is a different fault from a wrong one."""
+def test_physical_failure_is_reported_by_dispatch_not_preflight():
+    dispatch = controlled({"a": FileNotFoundError("deployed module is missing")})
 
-    made = runner(nodes=[node("a", target=Target("Gone_LH"))], present=())
+    result = runner(nodes=[node("a", target=Target("Gone_LH"))]).run(dispatch=dispatch)
 
-    result = made.run(dispatch=controlled({}))
-
-    assert result.by_node["a"].status == INVALID, "nothing ran, so nothing failed"
-    assert result.by_node["a"].messages[0].code == "target_missing"
-    assert not result.by_node["a"].executed
-
-
-def test_an_artefact_that_was_never_installed_fails_before_it_is_dispatched():
-    """The other half of the distinction: the target is there, the module is not."""
-
-    dispatch = controlled({})
-
-    result = runner(nodes=[node("a")], installed=False).run(dispatch=dispatch)
-
-    assert result.by_node["a"].status == INVALID
-    assert result.by_node["a"].messages[0].code == "dispatch_location_missing"
-    assert dispatch.seen == [], "nothing was dispatched at a missing artefact"
+    assert dispatch.seen == ["a"]
+    assert result.by_node["a"].status == FAILED
+    assert result.by_node["a"].executed
 
 
 def test_a_refresh_this_host_cannot_do_is_skipped_rather_than_failed():
@@ -309,16 +269,13 @@ def test_a_refresh_this_host_cannot_do_is_skipped_rather_than_failed():
     assert result.succeeded
 
 
-def test_resolution_reads_the_snapshot_and_never_the_estate():
-    """No session is given, so anything reaching for one would fail loudly."""
+def test_resolution_derives_dispatch_metadata_without_physical_state():
 
     made = runner(nodes=[node("a")])
 
     resolved = made.resolve(made.graph.nodes[0])
 
     assert resolved.valid
-    assert resolved.target_present
-    assert resolved.primitive_present
     assert resolved.expected_class == "a", "derived from the filename, not by importing"
 
 
@@ -411,13 +368,7 @@ def test_a_run_needs_no_storage_to_be_correct():
     assert result.succeeded
 
 
-def test_a_dry_run_still_says_what_could_not_run():
-    """ "Everything validated except what depends on the one thing that did not."
-
-    A dry run that reported only "validated" for a node whose upstream is
-    missing would answer the question a dry run exists to ask incorrectly.
-    """
-
+def test_a_dry_run_validates_the_catalogue_graph_without_physical_checks():
     made = runner(
         nodes=[node("a", target=Target("Gone_LH")), node("b")],
         edges=[("a", "b")],
@@ -426,10 +377,8 @@ def test_a_dry_run_still_says_what_could_not_run():
 
     result = made.run(dispatch=controlled({}))
 
-    assert result.by_node["a"].status == INVALID
-    assert result.by_node["b"].status == BLOCKED
-    assert result.by_node["b"].messages[0].code == "dependency_blocked"
-    assert "did not validate" in result.by_node["b"].messages[0].message
+    assert result.by_node["a"].status == VALIDATED
+    assert result.by_node["b"].status == VALIDATED
     assert not any(one.executed for one in result.nodes)
 
 
@@ -502,7 +451,6 @@ def test_a_request_hands_over_every_field_that_changes_behaviour():
     handed = request.to_mapping()
 
     assert set(handed) == {field.name for field in fields(RunRequest)}
-    assert handed["verifies_estate"] is False
 
 
 def test_a_node_result_hands_over_what_a_reader_needs_to_tell_outcomes_apart():
@@ -527,25 +475,13 @@ def test_a_result_does_not_claim_to_know_where_evidence_was_written():
 
 
 def test_a_run_state_round_trips_through_its_mapping():
-    from weaver.build_bundle.prune import TargetInventory
     from weaver.catalogue.state import Catalogue
 
-    state = RunState(
-        catalogue=Catalogue(rows={}),
-        target_inventories={
-            str(SALES): TargetInventory(
-                target_id="t",
-                kind="lakehouse",
-                target_name="Sales_LH",
-                files=("_/Load/a.py",),
-            )
-        },
-    )
+    state = RunState(catalogue=Catalogue(rows={}))
 
     returned = RunState.from_mapping(state.to_mapping())
 
-    assert returned.target_inventories[str(SALES)].files == ("_/Load/a.py",)
-    assert returned.inventory(SALES) is not None
+    assert returned == state
 
 
 # --- what a run must not swallow ---------------------------------------------
