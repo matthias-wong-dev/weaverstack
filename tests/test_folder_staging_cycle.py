@@ -72,7 +72,7 @@ class Sales__Export(Folder):
             (staging.path / name).write_text(text, encoding="utf-8")
         if self.fail_in_read:
             raise RuntimeError("the source was unreachable")
-        return (self.returns if self.returns is not None else staging), []
+        return self.returns if self.returns is not None else staging
 
 
 @pytest.fixture
@@ -138,6 +138,74 @@ def test_no_run_identifier_appears_in_the_staging_path(export):
     export.load()
 
     assert _staging(export) == first
+
+
+# --- read-time staging -------------------------------------------------------
+
+
+def test_read_issues_temporary_staging_outside_a_load(export):
+    staging = export.staging_folder()
+
+    assert staging.path.is_dir()
+    assert staging.path != export.path()
+    export._clear_read_staging()
+
+
+def test_read_reuses_one_temporary_staging_folder(export):
+    first = export.staging_folder()
+    second = export.staging_folder()
+
+    assert first is second
+    export._clear_read_staging()
+
+
+def test_next_read_removes_previous_temporary_staging(export):
+    first = export.read()
+    (first.path / "old.csv").write_text("old", encoding="utf-8")
+
+    second = export.read()
+
+    assert second is not first
+    assert not first.path.exists()
+    assert second.path.is_dir()
+    export._clear_read_staging()
+
+
+def test_read_staging_cleanup_tolerates_prior_removal(export):
+    first = export.read()
+    first.path.rmdir()
+
+    second = export.read()
+
+    assert second.path.is_dir()
+    export._clear_read_staging()
+
+
+def test_read_staging_cleanup_and_destructor_leave_no_directory(export):
+    staging = export.staging_folder()
+    export._clear_read_staging()
+
+    assert not staging.path.exists()
+
+    staging = export.staging_folder()
+    export.__del__()
+
+    assert not staging.path.exists()
+
+
+def test_load_issued_staging_wins_over_read_temporary_staging(export):
+    from weaver.runtime.folder_load import new_staging_folder, remove_staging
+
+    issued = new_staging_folder(export.path(), export._staging_path())
+    export._issued_staging = issued
+    try:
+        assert export.staging_folder() is issued
+        assert export._read_staging is None
+        export._clear_read_staging()
+        assert issued.path.exists()
+    finally:
+        export._issued_staging = None
+        remove_staging(issued.path)
 
 
 # --- what read() must return --------------------------------------------------
@@ -253,8 +321,10 @@ def test_staging_survives_an_intolerant_rejection(export):
 def test_the_issued_reference_is_cleared_after_a_successful_load(export):
     export.load()
 
-    with pytest.raises(LoadError, match="only available while a load is running"):
-        export.staging_folder()
+    staging = export.staging_folder()
+
+    assert staging.path.is_dir()
+    export._clear_read_staging()
 
 
 def test_the_issued_reference_is_cleared_after_a_failed_load(export):
@@ -263,8 +333,10 @@ def test_the_issued_reference_is_cleared_after_a_failed_load(export):
     with pytest.raises(RuntimeError):
         export.load()
 
-    with pytest.raises(LoadError, match="only available while a load is running"):
-        export.staging_folder()
+    staging = export.staging_folder()
+
+    assert staging.path.is_dir()
+    export._clear_read_staging()
 
 
 def test_a_second_load_is_never_handed_the_first_ones_directory(export):

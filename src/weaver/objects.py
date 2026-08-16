@@ -5,6 +5,7 @@ Objects receive a Spark session, resolved Lakehouse destination, and identity.
 
 from __future__ import annotations
 
+from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -88,6 +89,13 @@ class WeaverObject:
     def read(self):
         raise NotImplementedError(f"{type(self).__name__} must implement read()")
 
+    def _read_result(self):
+        """Run ``read()`` and return its normalised load result."""
+
+        from .runtime.load_contract import normalise_read_result
+
+        return normalise_read_result(self.read())
+
     # --- the load contract, read from this module's own docstring ----------
 
     def _document(self):
@@ -116,13 +124,32 @@ class WeaverObject:
 class Folder(WeaverObject):
     """Files materialised into a Lakehouse Files directory.
 
-    ``read()`` writes into this object's staging directory and returns
-    ``(staging_folder, files_to_delete)``.
+    ``read()`` writes into this object's staging directory and returns it.
+    When an incremental folder needs explicit deletes, it returns
+    ``(staging_folder, files_to_delete)`` instead.
 
     Its location has two spellings, and neither converts to the other by string
     surgery: :meth:`path` is a :class:`pathlib.Path` for ordinary Python,
     :meth:`spark_path` the ``abfss://`` string an engine needs.
     """
+
+    def __init__(self, spark: Any, *, lakehouse: Lakehouse | None = None) -> None:
+        super().__init__(spark, lakehouse=lakehouse)
+        self._issued_staging = None
+        self._read_staging = None
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        authored_read = cls.__dict__.get("read")
+        if authored_read is None:
+            return
+
+        @wraps(authored_read)
+        def read_with_staging(self, *args, **read_kwargs):
+            self._clear_read_staging()
+            return authored_read(self, *args, **read_kwargs)
+
+        cls.read = read_with_staging
 
     def path(self) -> Path:
         """This folder's materialised location, as *Python* addresses it::
@@ -148,24 +175,47 @@ class Folder(WeaverObject):
         return self.lakehouse.folder_spark_path(*self.identity)
 
     def staging_folder(self) -> "StagingFolder":
-        """The staging directory Weaver issued for this load.
+        """The staging directory available to this ``read()``.
 
-        Called from ``read()``, and the same object throughout one load. Staging
-        is a fixed sibling named ``<destination>_Staging`` rather than a per-run
-        directory, so a failed load leaves exactly one to look at.
-
-        Outside a load there is nothing to issue, and asking fails rather than
-        naming a directory nobody reset.
+        A load receives its fixed sibling staging directory. A standalone
+        ``read()`` receives a temporary directory, reused until the next
+        read on this object.
         """
 
         issued = getattr(self, "_issued_staging", None)
-        if issued is None:
-            raise LoadError(
-                f"{type(self).__name__}.staging_folder() is only available while "
-                f"a load is running. Call it from read(), or run "
-                f"{type(self).__name__}(spark).load()."
-            )
-        return issued
+        if issued is not None:
+            return issued
+        staging = getattr(self, "_read_staging", None)
+        if staging is None:
+            import tempfile
+
+            from .runtime.folder_load import StagingFolder
+
+            staging = StagingFolder(path=Path(tempfile.mkdtemp(prefix="weaver-")))
+            self._read_staging = staging
+        return staging
+
+    def _clear_read_staging(self) -> None:
+        """Remove the temporary staging directory from a previous read."""
+
+        staging = getattr(self, "_read_staging", None)
+        if staging is None:
+            return
+        try:
+            if staging.path.exists():
+                import shutil
+
+                shutil.rmtree(staging.path)
+        finally:
+            self._read_staging = None
+
+    def __del__(self) -> None:
+        """Best-effort cleanup for staging a caller did not consume."""
+
+        try:
+            self._clear_read_staging()
+        except Exception:
+            pass
 
     def _staging_path(self) -> Path:
         """Where staging goes: the destination's own path, with a suffix.
@@ -208,7 +258,7 @@ class Folder(WeaverObject):
         issued = new_staging_folder(self.path(), self._staging_path())
         self._issued_staging = issued
         try:
-            staged, deletes = _load_pair(self, self.read())
+            staged, deletes = self._read_result()
             if staged is not issued:
                 raise LoadError(
                     f"{type(self).__name__}.read() returned "
@@ -233,7 +283,8 @@ class Folder(WeaverObject):
 class Table(WeaverObject):
     """Rows materialised into a Delta table or a Warehouse table.
 
-    ``read()`` returns ``(upserts, deletes)``.
+    ``read()`` returns upserts. When an incremental table needs explicit
+    deletes, it returns ``(upserts, deletes)`` instead.
     """
 
     def dataframe(self) -> Any:
@@ -287,7 +338,7 @@ class Table(WeaverObject):
 
         # Staging: unvalidated, unreconciled, nothing yet classified as new or
         # changed.
-        staged, deletes = _load_pair(self, self.read())
+        staged, deletes = self._read_result()
         return load_table(
             self.spark,
             contract=contract,
@@ -559,22 +610,6 @@ class SparkSqlAssumption(_SparkSqlValidation, Assumption):
         return read_spark_sql_assumption(
             self.spark, sql=self.sql, what=type(self).__name__
         )
-
-
-def _load_pair(obj, returned):
-    """Unpack what ``read()`` returned, naming the object if it is not a pair.
-
-    Checked here so an author who returned a single frame is told that, rather
-    than meeting a tuple-unpacking failure several frames deeper.
-    """
-
-    if not isinstance(returned, tuple) or len(returned) != 2:
-        raise LoadError(
-            f"{type(obj).__name__}.read() returned {type(returned).__name__}, "
-            "not a pair. A Table returns (staging, deletes); a Folder returns "
-            "(staging_folder, files_to_delete)."
-        )
-    return returned
 
 
 def _identity(class_name: str) -> tuple[str, str]:
