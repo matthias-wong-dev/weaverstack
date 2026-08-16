@@ -191,7 +191,7 @@ def test_the_delete_spares_the_rows_the_build_still_claims(repository):
         if line.startswith("DELETE FROM")
     )
 
-    assert "NOT (" in delete
+    assert "NOT EXISTS (" in delete
     assert "'Customer'" in delete
 
 

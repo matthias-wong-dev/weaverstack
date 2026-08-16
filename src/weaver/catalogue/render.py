@@ -198,11 +198,11 @@ def _public(table: CatalogueTable, name: str) -> str:
     return identifier(table.public_name_of(name))
 
 
-#: How many rows one ``MERGE`` carries. A T-SQL table value constructor accepts
-#: at most a thousand rows, and a catalogue table passes that without the estate
-#: being large — a thousand described columns is an ordinary repository. So the
-#: rows are chunked, and the chunk is the engine's limit rather than a guess.
-MERGE_ROWS = 1000
+#: How many rows one table value constructor carries. T-SQL accepts at most a
+#: thousand, and a catalogue table passes that without the estate being large —
+#: a thousand described columns is an ordinary repository. So the rows are
+#: chunked, and the chunk is the engine's limit rather than a guess.
+VALUES_ROWS = 1000
 
 
 def render_merge(
@@ -226,7 +226,7 @@ def render_merge(
     only be a row whose projection changed while the object was left alone.
     Dating such a row to this build would say it was rebuilt when it was not.
 
-    Above :data:`MERGE_ROWS` the result is several ``MERGE`` statements rather
+    Above :data:`VALUES_ROWS` the result is several ``MERGE`` statements rather
     than one. They are returned together because they are one decision and one
     action; T-SQL is content with several statements in a batch, and each is
     idempotent, so the split changes nothing a reader has to know about.
@@ -238,10 +238,10 @@ def render_merge(
     _check_scope(table, rows, scope)
     _check_unique_keys(table, rows)
 
-    if len(rows) > MERGE_ROWS:
+    if len(rows) > VALUES_ROWS:
         chunks = [
-            rows[start : start + MERGE_ROWS]
-            for start in range(0, len(rows), MERGE_ROWS)
+            rows[start : start + VALUES_ROWS]
+            for start in range(0, len(rows), VALUES_ROWS)
         ]
         return "".join(_merge_statement(table, chunk, scope=scope) for chunk in chunks)
     return _merge_statement(table, rows, scope=scope)
@@ -367,9 +367,15 @@ def render_delete_obsolete(
     row per scope, so a predicate over no columns beyond the scope would delete
     the very row about to be merged.
 
-    The predicate is a disjunction of key equalities rather than a tuple ``IN``,
-    so it renders identically on any engine and keeps the scope at the front of
-    the statement.
+    The rows the build keeps are a *relation* rather than a predicate. A
+    disjunction of key equalities grows a term per row per key column, and
+    ColumnDictionary holds a row per column of every object: five hundred
+    objects of fifteen columns reach the engine's expression limit. A table
+    value constructor grows in rows only, so the comparison is written once.
+
+    Unlike :func:`render_merge`, this cannot be split into several statements —
+    each part would delete what the others keep — so the constructor's
+    thousand-row cap is met with ``UNION ALL`` inside the one statement.
     """
 
     rows = sorted_rows(table, rows)
@@ -390,25 +396,64 @@ def render_delete_obsolete(
     # delete identifies rows by the whole key, scope columns included.
     identity = table.key if isinstance(scope, InstallationScopes) else beyond
 
-    keep = "\n           OR ".join(
-        "("
-        + " AND ".join(
-            _same(
-                _public(table, name),
-                typed_literal(row.get(name), table.column(name)),
-            )
-            for name in identity
+    # The target is named in full rather than aliased: a DELETE that aliases its
+    # target needs T-SQL's second FROM clause, and the qualified name correlates
+    # without it.
+    matched = "\n                     AND ".join(
+        _same(
+            f"keep.{_public(table, name)}",
+            f"{qualified_name(table)}.{_public(table, name)}",
         )
-        + ")"
-        for row in rows
+        for name in identity
     )
     return (
         f"DELETE FROM {qualified_name(table)}\n"
         f" WHERE {scope.predicate}\n"
-        f"   AND NOT (\n"
-        f"              {keep}\n"
-        f"           )\n"
+        f"   AND NOT EXISTS (\n"
+        f"           SELECT 1\n"
+        f"             FROM (\n"
+        f"                  {_keep_relation(table, rows, identity)}\n"
+        f"                  ) AS keep\n"
+        f"            WHERE {matched}\n"
+        f"       )\n"
     )
+
+
+def _keep_relation(
+    table: CatalogueTable, rows: Sequence[Row], identity: Sequence[str]
+) -> str:
+    """The rows a build still claims, as one relation.
+
+    The casts sit outside the constructor for the reason they do in
+    :func:`_source_relation`: a column of all nulls would otherwise take
+    whatever type the engine inferred, and here the branches must agree as well
+    as match the target.
+    """
+
+    raw = [f"c{index}" for index, _name in enumerate(identity)]
+    projected = ", ".join(
+        f"CAST({identifier(raw[index])} AS {table.column(name).warehouse_type})"
+        f" AS {_public(table, name)}"
+        for index, name in enumerate(identity)
+    )
+    names = ", ".join(identifier(name) for name in raw)
+    branches = []
+    for start in range(0, len(rows), VALUES_ROWS):
+        tuples = ",\n                              ".join(
+            "("
+            + ", ".join(
+                typed_literal(row.get(name), table.column(name)) for name in identity
+            )
+            + ")"
+            for row in rows[start : start + VALUES_ROWS]
+        )
+        branches.append(
+            f"SELECT {projected}\n"
+            f"                    FROM (VALUES\n"
+            f"                              {tuples}\n"
+            f"                         ) AS keep_values({names})"
+        )
+    return "\n                  UNION ALL\n                  ".join(branches)
 
 
 def render_delete_scope(

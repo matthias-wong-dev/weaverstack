@@ -416,9 +416,9 @@ def test_an_obsolete_delete_keeps_exactly_the_rows_projected():
         scope=LAKEHOUSE_SCOPE,
     )
 
-    assert "AND NOT (" in statement
-    assert "[Object name] = N'Alpha'" in statement
-    assert "[Object name] = N'Beta'" in statement
+    assert "AND NOT EXISTS (" in statement
+    assert "(N'Sales', N'Alpha')" in statement
+    assert "(N'Sales', N'Beta')" in statement
 
 
 def test_an_installation_that_projects_nothing_still_deletes_its_rows():
@@ -431,7 +431,7 @@ def test_an_installation_that_projects_nothing_still_deletes_its_rows():
     statement = render_delete_obsolete(REGISTRY, [], scope=LAKEHOUSE_SCOPE)
 
     assert statement.strip().endswith("N'Raw'")
-    assert "NOT (" not in statement
+    assert "NOT EXISTS" not in statement
 
 
 def test_the_scope_predicate_leads_so_a_reviewer_sees_it_first():
@@ -609,15 +609,15 @@ def test_a_three_part_external_dependency_renders_as_a_row_that_says_so():
     assert "NULL" in values
 
 
-# --- more rows than one statement can carry ----------------------------------
+# --- more rows than one value constructor can carry --------------------------
 
 
 def test_a_thousand_rows_still_render_one_statement():
     """The engine's limit, and one below it is still one MERGE."""
 
-    from weaver.catalogue.render import MERGE_ROWS
+    from weaver.catalogue.render import VALUES_ROWS
 
-    rows = [registry_row(f"Object{index:05d}") for index in range(MERGE_ROWS)]
+    rows = [registry_row(f"Object{index:05d}") for index in range(VALUES_ROWS)]
     statement = render_merge(REGISTRY, rows, scope=LAKEHOUSE_SCOPE)
 
     assert statement.count("MERGE INTO") == 1
@@ -631,29 +631,53 @@ def test_more_rows_than_the_constructor_takes_are_split():
     than left to fail at install against a real Warehouse.
     """
 
-    from weaver.catalogue.render import MERGE_ROWS
+    from weaver.catalogue.render import VALUES_ROWS
 
-    rows = [registry_row(f"Object{index:05d}") for index in range(MERGE_ROWS + 1)]
+    rows = [registry_row(f"Object{index:05d}") for index in range(VALUES_ROWS + 1)]
     statement = render_merge(REGISTRY, rows, scope=LAKEHOUSE_SCOPE)
 
     assert statement.count("MERGE INTO") == 2
     # Every row is still there, and no chunk carries more than the limit.
-    for index in range(MERGE_ROWS + 1):
+    for index in range(VALUES_ROWS + 1):
         assert f"Object{index:05d}" in statement
     for chunk in statement.split("MERGE INTO")[1:]:
         values = chunk.split("FROM (VALUES")[1].split("AS source_values")[0]
-        assert values.count("N'Lakehouse'") <= MERGE_ROWS
+        assert values.count("N'Lakehouse'") <= VALUES_ROWS
 
 
 def test_the_split_keeps_key_order_across_chunks():
     """Determinism survives chunking: a bundle's identity is its bytes."""
 
-    from weaver.catalogue.render import MERGE_ROWS
+    from weaver.catalogue.render import VALUES_ROWS
 
-    rows = [registry_row(f"Object{index:05d}") for index in range(MERGE_ROWS + 50)]
+    rows = [registry_row(f"Object{index:05d}") for index in range(VALUES_ROWS + 50)]
     statement = render_merge(REGISTRY, list(reversed(rows)), scope=LAKEHOUSE_SCOPE)
 
     positions = [
-        statement.index(f"Object{index:05d}") for index in range(MERGE_ROWS + 50)
+        statement.index(f"Object{index:05d}") for index in range(VALUES_ROWS + 50)
     ]
     assert positions == sorted(positions)
+
+
+def test_an_obsolete_delete_keeps_more_rows_than_one_constructor_can_carry():
+    """The keep relation stays one delete while its constructors are bounded.
+
+    Splitting the delete itself would be destructive: each statement would
+    remove the rows retained by the other chunks. ``UNION ALL`` makes the
+    chunks one relation and keeps the comparison expression constant-sized.
+    """
+
+    from weaver.catalogue.render import VALUES_ROWS
+
+    rows = [registry_row(f"Object{index:05d}") for index in range(VALUES_ROWS + 1)]
+    statement = render_delete_obsolete(REGISTRY, rows, scope=LAKEHOUSE_SCOPE)
+
+    assert statement.count("DELETE FROM") == 1
+    assert statement.count("FROM (VALUES") == 2
+    assert statement.count("UNION ALL") == 1
+    assert statement.count("keep.[Object name] =") == 1
+    for index in range(VALUES_ROWS + 1):
+        assert f"Object{index:05d}" in statement
+    for constructor in statement.split("FROM (VALUES")[1:]:
+        values = constructor.split(") AS keep_values")[0]
+        assert values.count("N'Sales'") <= VALUES_ROWS
