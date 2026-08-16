@@ -146,9 +146,7 @@ def run_composition(
             print("Composition cancelled.")
             return 0
 
-    from .shell import _default_workspace
-
-    workspace = _default_workspace(args)
+    workspace = _composition_workspace(args, parsed_commands)
     with use_or_create_session(
         getattr(args, "session", None), workspace=workspace
     ) as session:
@@ -163,6 +161,33 @@ def run_composition(
                 from .shell import _report_spending
 
                 _report_spending(session)
+
+
+def _composition_workspace(args, parsed_commands):
+    """The one Workspace named by the composition or its commands."""
+
+    from .main import _resolve_workspace
+    from .shell import _default_workspace
+
+    workspaces = []
+    outer = _default_workspace(args)
+    if outer is not None:
+        workspaces.append(outer)
+    for parsed in parsed_commands:
+        try:
+            workspace = _resolve_workspace(parsed)
+        except WeaverError:
+            continue
+        if workspace not in workspaces:
+            workspaces.append(workspace)
+    if not workspaces:
+        return None
+    if len(workspaces) > 1:
+        raise CommandError(
+            "a composition runs in one Workspace; its commands name different "
+            "workspace configurations"
+        )
+    return workspaces[0]
 
 
 def _warm_for(session, parsed_commands, *, workspace) -> None:

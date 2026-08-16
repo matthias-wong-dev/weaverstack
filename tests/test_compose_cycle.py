@@ -13,7 +13,7 @@ in one Session, and stops when one of them fails.
 from __future__ import annotations
 
 import io
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 
 import pytest
 
@@ -326,6 +326,53 @@ def test_one_workflow_id_correlates_the_whole_composition(
     assert [parsed.command for parsed in calls] == ["load", "test"]
     assert len({parsed.workflow_id for parsed in calls}) == 1
     assert calls[0].workflow_id
+
+
+def test_commands_can_supply_the_composition_workspace(
+    tmp_path, recorded, confirmed, monkeypatch
+):
+    calls, parser_factory, _ = recorded
+    config = tmp_path / "workspace.yml"
+    config.write_text(
+        "workspace: Sales Dev\ncatalogue: Warehouse/Weaver\n", encoding="utf-8"
+    )
+    path = _write(
+        tmp_path,
+        "compose:\n"
+        "  dev:\n"
+        f'    - wipe Lakehouse/Sales --workspace-config "{config}"\n'
+        f'    - load Lakehouse/Sales --workspace-config "{config}"\n',
+    )
+    opened = []
+
+    class Session:
+        closed = False
+
+        def __init__(self, workspace):
+            self.workspace = workspace
+
+        def workflow(self, _workflow_id):
+            return nullcontext()
+
+        def prepare(self, required, *, workspace=None):
+            return type("W", (), {"started": ()})()
+
+    @contextmanager
+    def use_session(session, *, workspace=None):
+        opened.append(workspace)
+        yield Session(workspace)
+
+    monkeypatch.setattr("weaver.sessions.host.use_or_create_session", use_session)
+
+    assert (
+        run_composition(
+            _Args("dev", file=str(path), yes=True), parser_factory=parser_factory
+        )
+        == 0
+    )
+    assert len(opened) == 1
+    assert opened[0].workspace == "Sales Dev"
+    assert all(call.session.workspace == opened[0] for call in calls)
 
 
 def test_a_composition_inside_a_session_joins_the_one_already_open(
