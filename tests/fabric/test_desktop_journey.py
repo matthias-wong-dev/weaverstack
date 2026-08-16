@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-from types import SimpleNamespace
-
 import pytest
 from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE, DESKTOP_JOURNEY_NAMES
 
@@ -26,7 +23,6 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
     fabric_workspace,
     fabric_target_lakehouse,
     disposable_warehouse,
-    monkeypatch,
     tmp_path,
 ):
     """Wipe, build, load and test against a real workspace."""
@@ -62,22 +58,6 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
     _assert_evidence(weaver_session, fabric_workspace, loaded, "load")
     _assert_evidence(weaver_session, fabric_workspace, tested, "test")
 
-    cli = importlib.import_module("weaver_cli.main")
-    reports = {}
-    run_load = cli._run_load
-    run_test = cli._run_test
-
-    def capture_load(*args, **kwargs):
-        reports["load"] = run_load(*args, **kwargs)
-        return reports["load"]
-
-    def capture_test(*args, **kwargs):
-        reports["test"] = run_test(*args, **kwargs)
-        return reports["test"]
-
-    monkeypatch.setattr(cli, "_run_load", capture_load)
-    monkeypatch.setattr(cli, "_run_test", capture_test)
-
     composition = tmp_path / "compose.yml"
     composition.write_text(
         "compose:\n"
@@ -86,30 +66,27 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
         f"    - weaver test {lakehouse} {warehouse}\n",
         encoding="utf-8",
     )
+    previous_workflows = set(_workflow_task_types(weaver_session, fabric_workspace))
+
     from weaver_cli.compose import run_composition
+    from weaver_cli.main import build_parser
 
-    status = run_composition(
-        SimpleNamespace(
-            name="verify",
-            file=str(composition),
-            session=weaver_session,
-            yes=True,
-            timings=False,
-            workspace=None,
-            workspace_type=None,
-            workspace_config=None,
-            catalogue=None,
-            environment=None,
-        )
+    command = build_parser().parse_args(
+        ["compose", "verify", "--file", str(composition), "--yes"]
     )
+    command.session = weaver_session
 
-    assert status == 0
-    assert reports["load"].workflow_id == reports["test"].workflow_id
-    assert reports["load"].workflow_id
-    weaver_session.flush()
-    composed = _log_rows(weaver_session, fabric_workspace, reports["load"].workflow_id)
-    assert {row["Task type"] for row in composed} == {"load", "test"}
-    assert {row["Workflow ID"] for row in composed} == {reports["load"].workflow_id}
+    assert run_composition(command) == 0
+    workflows = _workflow_task_types(weaver_session, fabric_workspace)
+    composed = {
+        workflow_id: task_types
+        for workflow_id, task_types in workflows.items()
+        if workflow_id not in previous_workflows
+    }
+    assert len(composed) == 1, composed
+    workflow_id, task_types = next(iter(composed.items()))
+    assert workflow_id
+    assert task_types == {"load", "test"}
 
 
 def _assert_evidence(session, workspace, report, task_type: str) -> None:
@@ -144,6 +121,19 @@ def _log_rows(session, workspace, workflow_id: str) -> list[dict]:
         f"where [Workflow ID] = N'{workflow_id}'"
     )
     return [dict(row) for row in rows]
+
+
+def _workflow_task_types(session, workspace) -> dict[str, set[str]]:
+    from weaver.catalogue.connection import catalogue_connection
+
+    rows = catalogue_connection(session, workspace).rows(
+        "select [Workflow ID], [Task type] from [_].[Log] "
+        "where [Task type] in (N'load', N'test')"
+    )
+    workflows: dict[str, set[str]] = {}
+    for row in rows:
+        workflows.setdefault(str(row["Workflow ID"]), set()).add(row["Task type"])
+    return workflows
 
 
 def _node_identity(node) -> tuple[str | None, str | None, str | None, str | None]:
