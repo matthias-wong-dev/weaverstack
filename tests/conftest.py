@@ -231,22 +231,3 @@ def desktop_credential(monkeypatch):
 
     monkeypatch.setattr("weaver.fabric.auth.credential", lambda *a, **k: _Credential())
     return _Credential()
-
-
-@pytest.fixture
-def no_target_preflight(monkeypatch):
-    """Skip the CLI's desktop check that each named target exists.
-
-    It resolves every target over REST before the operation runs. A test about
-    what the CLI parses and renders is not about that crossing, so it is
-    stubbed rather than made. ``weaver_cli.main`` is also the name of the entry
-    point function, so the module is imported rather than reached by string.
-    """
-
-    import importlib
-
-    monkeypatch.setattr(
-        importlib.import_module("weaver_cli.main"),
-        "_refuse_absent_targets",
-        lambda *_a, **_k: None,
-    )

@@ -20,13 +20,11 @@ of the boundary is what was submitted and what was made of the answer.
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
 
 import weaver
-from weaver.build_bundle.prune import TargetInventory
 from weaver.errors import CommandError, LoadError
 from weaver.load_report import (
     FAILED,
@@ -66,15 +64,6 @@ def recorded(monkeypatch, desktop_credential):
         return _report()
 
     monkeypatch.setattr(weaver, "load", fake_load)
-    # The desktop preflight resolves each named target over REST before the
-    # operation runs. What this file claims is what the CLI parses and hands
-    # on, so the crossing is stubbed rather than made. `weaver_cli.main` is
-    # also the entry point function's name, so the module is imported.
-    monkeypatch.setattr(
-        importlib.import_module("weaver_cli.main"),
-        "_refuse_absent_targets",
-        lambda *_a, **_k: None,
-    )
     return calls
 
 
@@ -264,7 +253,7 @@ def test_json_renders_the_whole_report(recorded, capsys):
 
 
 def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
-    monkeypatch, capsys, desktop_credential, no_target_preflight
+    monkeypatch, capsys, desktop_credential
 ):
     """Tolerance returns a report; a report of failure is still a failure.
 
@@ -285,7 +274,7 @@ def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
 
 
 def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
-    monkeypatch, capsys, desktop_credential, no_target_preflight
+    monkeypatch, capsys, desktop_credential
 ):
     partial = _report(status=TASK_FAILED, node_status=FAILED, workflow_id="0f8b2c1d")
 
@@ -310,7 +299,7 @@ def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
 
 
 def test_a_command_error_from_the_api_becomes_a_non_zero_exit(
-    monkeypatch, capsys, desktop_credential, no_target_preflight
+    monkeypatch, capsys, desktop_credential
 ):
     def raising(targets, **kwargs):
         raise CommandError("load needs a Weaver catalogue")
@@ -523,26 +512,6 @@ def livy(monkeypatch):
     monkeypatch.setattr(
         ConsoleSession, "execute_tsql", lambda self, statement, **kwargs: None
     )
-    # What each target physically holds is a storage-and-Spark question, and
-    # these tests are about the crossing and the order things happen in. The
-    # inventory is answered rather than stood up, so a fake resolver does not
-    # have to grow a OneLake.
-    import weaver.run.state as _state
-
-    monkeypatch.setattr(
-        _state,
-        "read_target_inventories",
-        lambda targets, **kwargs: {
-            str(target): TargetInventory(
-                target_id=target.name,
-                kind=target.kind,
-                target_name=target.name,
-                tables=("Sales.Customer",),
-                files=("_/Load/Sales__Customer.py",),
-            )
-            for target in targets
-        },
-    )
     monkeypatch.setattr(_cli_module(), "_prefer_desktop_credential", lambda: None)
     return _FakeLivy
 
@@ -599,132 +568,10 @@ def test_the_command_module_contains_no_orchestration_of_its_own():
     assert [name for name in forbidden if name in source] == []
 
 
-# --- the cheap guard in front of the session ----------------------------------
-#
-# Starting a Livy session costs tens of seconds and a capacity's only session
-# slot. Resolving a name over REST costs one call. So a request that can already
-# be rejected is rejected before any of that is spent.
-
-
-def test_the_requested_targets_are_resolved_before_a_session_is_opened(livy, capsys):
-    main(_fabric())
-
-    assert _FakeResolver.asked == [("Sales", "Lakehouse")]
-    assert livy.submitted, "the session should still have been used"
-
-
-def test_a_target_that_does_not_exist_is_refused_without_opening_a_session(
-    livy, capsys
-):
-    """Nothing is spent on a request already known to be bad."""
-
+def test_a_missing_physical_target_is_left_to_dispatch(livy):
     _FakeResolver.present = set()
 
-    exit_code = main(_fabric())
-    captured = capsys.readouterr()
+    main(_fabric())
 
-    assert exit_code == 1
-    assert "Lakehouse/Sales was not found" in captured.err
-    assert "Lakehouse/Sales" in captured.err
-    assert livy.submitted == [], "no session should have been started"
-
-
-def test_every_requested_target_is_checked_not_only_the_first(livy, capsys):
-    _FakeResolver.present = {"Sales"}
-
-    exit_code = main(
-        [
-            "load",
-            "Lakehouse/Sales",
-            "Warehouse/Reporting",
-            "--workspace",
-            "My Workspace",
-            "--catalogue",
-            "Warehouse/Weaver",
-            "--environment",
-            "weaver",
-        ]
-    )
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "Warehouse/Reporting" in captured.err
-    assert ("Reporting", "Warehouse") in _FakeResolver.asked
-    assert livy.submitted == []
-
-
-def test_a_lakehouse_and_a_warehouse_are_resolved_by_their_own_types(livy):
-    """Identity is workspace + type + name, so a bare name is never asked
-    "what are you?" — and a Lakehouse and its SQL endpoint share a name."""
-
-    main(
-        [
-            "load",
-            "Lakehouse/Sales",
-            "Warehouse/Reporting",
-            "--workspace",
-            "My Workspace",
-            "--catalogue",
-            "Warehouse/Weaver",
-            "--environment",
-            "weaver",
-        ]
-    )
-
-    assert _FakeResolver.asked == [
-        ("Sales", "Lakehouse"),
-        ("Reporting", "Warehouse"),
-    ]
-
-
-def test_a_resolver_failure_that_is_not_a_missing_item_keeps_its_own_diagnosis(
-    livy, capsys
-):
-    """ "Your Lakehouse is gone" is a bad answer to "your token expired"."""
-
-    from weaver.errors import CommandError
-
-    def expired(self, item, *, item_type):
-        raise CommandError("the credential could not be refreshed")
-
-    _FakeResolver.resolve = expired
-
-    try:
-        exit_code = main(_fabric())
-        captured = capsys.readouterr()
-
-        assert exit_code == 1
-        assert "credential could not be refreshed" in captured.err
-        assert "no such item" not in captured.err
-    finally:
-        del _FakeResolver.resolve
-
-
-def test_the_guard_reads_no_catalogue_and_builds_no_graph():
-    """It checks exactly what the user typed, and nothing that needs the estate.
-
-    The catalogue, the graph, upstream discovery and inventories all live on the
-    far side of the boundary; reaching for any of them here would be doing the
-    remote run's work in the wrong place — and before a session exists to do it
-    in.
-    """
-
-    import ast
-    import inspect
-
-    # The body only. The docstring explains what is deliberately *not* reached,
-    # so scanning it would flag the very sentence that promises the rule.
-    tree = ast.parse(inspect.getsource(_cli_module()._refuse_absent_targets).strip())
-    body = tree.body[0].body
-    if isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
-        body = body[1:]
-    source = "\n".join(ast.dump(node) for node in body)
-
-    for reached_too_far in (
-        "read_catalogue",
-        "InstalledEstate",
-        "load_dag",
-        "inventory",
-        "LivySession",
-    ):
-        assert reached_too_far not in source
+    assert livy.submitted
+    assert _FakeResolver.asked == []

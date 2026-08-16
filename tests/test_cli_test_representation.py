@@ -12,7 +12,6 @@ The verdict is the exit code and the evidence is the output, which is what makes
 
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
@@ -60,16 +59,6 @@ def captured(monkeypatch, desktop_credential):
         return seen.get("report", report)
 
     monkeypatch.setattr(weaver, "test", fake)
-    # The desktop preflight resolves each named target over REST before the
-    # operation runs. What this file claims is what the CLI *parses* and hands
-    # on, so the crossing is stubbed rather than made.
-    # `weaver_cli.main` is also the name of the entry point function, so the
-    # module is imported rather than reached by dotted string.
-    monkeypatch.setattr(
-        importlib.import_module("weaver_cli.main"),
-        "_refuse_absent_targets",
-        lambda *_a, **_k: None,
-    )
     return seen
 
 

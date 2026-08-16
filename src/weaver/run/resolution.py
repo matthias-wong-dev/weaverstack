@@ -1,8 +1,4 @@
-"""Resolve runnable nodes against an observed RunState.
-
-Resolution uses the supplied snapshot and does not access Fabric or resolve
-physical dispatch paths.
-"""
+"""Derive a runnable node's dispatch address from the catalogue graph."""
 
 from __future__ import annotations
 
@@ -11,7 +7,6 @@ from dataclasses import dataclass
 from .result import (
     DISPATCH_LOCATION_MISSING,
     MODULE_IMPORT_FAILURE,
-    TARGET_MISSING,
     error,
     warning,
 )
@@ -38,30 +33,12 @@ ENDPOINT_SUFFIX = "sql_endpoint"
 
 @dataclass(frozen=True)
 class Resolved:
-    """One node, and whether what it needs is actually there.
-
-    ``target_present`` and ``primitive_present`` are separate answers because
-    they are separate failures: a Warehouse that has been wiped and a procedure
-    that was never generated both stop this node, and telling a reader which one
-    it was is the whole value of resolving ahead of dispatching.
-    """
+    """One node with the address and metadata needed for dispatch."""
 
     node: object
-    target_present: bool = False
-    primitive_present: bool = False
-    #: The class a deployed Python module must define, for the two Python kinds.
     expected_class: str | None = None
-    #: What this node would reach for, named the way the estate names it. A
-    #: *logical* address, not a path: the path is the resolver's business and is
-    #: needed only at dispatch, but a reader of a dry run still wants to know
-    #: which procedure or which module a node means.
     dispatch_location: str | None = None
-    #: Typed findings, not sentences. A reader — and a task log — asks what
-    #: *kind* of thing went wrong, and "target_missing" survives rewording in a
-    #: way that a message does not.
     messages: tuple = ()
-    #: A capability this host does not have, so the node is omitted rather than
-    #: failed. Only an endpoint refresh where there is no endpoint.
     unsupported: bool = False
 
     @property
@@ -73,29 +50,13 @@ class Resolved:
         return not any(one.severity == SEVERITY_ERROR for one in self.messages)
 
 
-def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
-    """Whether this node's target and primitive are present in the snapshot.
+def resolve(node, *, can_refresh: bool = True) -> Resolved:
+    """Derive dispatch metadata without reading the physical target."""
 
-    ``can_refresh`` is the one host capability resolution needs, and it is
-    passed in rather than discovered: only the caller knows whether the target
-    it is resolving against has an endpoint to refresh.
-    """
-
-    inventory = state.inventory(node.physical_target)
     if node.primitive_kind == ENDPOINT_REFRESH:
-        return _refresh(node, inventory, can_refresh=can_refresh)
+        return _refresh(node, can_refresh=can_refresh)
 
     messages: list = []
-    if inventory is None:
-        messages.append(
-            error(
-                TARGET_MISSING,
-                f"{node.physical_target} is not present, so {node.node_id} has "
-                "nowhere to run",
-                source=SOURCE,
-            )
-        )
-
     expected_class = None
     if node.primitive_kind in PYTHON_KINDS:
         expected_class = _module_class(node)
@@ -118,66 +79,18 @@ def resolve(node, state, *, can_refresh: bool = True) -> Resolved:
             )
         )
 
-    # A node that names a primitive must have it installed; a node that names
-    # none has nothing here to check. The distinction matters because the kinds
-    # differ: a load node always names the artefact it would run, and a node
-    # whose primitive is addressed by identity rather than by a physical object
-    # is not thereby unresolvable.
-    primitive_present = (
-        _holds(inventory, node.primitive_object)
-        if node.primitive_object is not None
-        else inventory is not None
-    )
-    if (
-        inventory is not None
-        and node.primitive_object is not None
-        and not primitive_present
-    ):
-        messages.append(
-            error(
-                DISPATCH_LOCATION_MISSING,
-                f"{node.node_id} would dispatch {node.primitive_object}, which "
-                f"is not installed in {node.physical_target}",
-                source=SOURCE,
-            )
-        )
-    if (
-        inventory is not None
-        and node.physical_object is not None
-        and not _holds(inventory, node.physical_object)
-    ):
-        messages.append(
-            error(
-                TARGET_MISSING,
-                f"{node.physical_target} does not hold {node.physical_object}, "
-                "which this node loads into",
-                source=SOURCE,
-            )
-        )
-
     return Resolved(
         node=node,
-        target_present=inventory is not None,
-        primitive_present=primitive_present,
         expected_class=expected_class,
         dispatch_location=_where(node),
         messages=tuple(messages),
     )
 
 
-def _refresh(node, inventory, *, can_refresh: bool) -> Resolved:
+def _refresh(node, *, can_refresh: bool) -> Resolved:
     """A barrier resolves to a capability, and its absence is not a failure."""
 
     messages: list = []
-    if inventory is None:
-        messages.append(
-            error(
-                TARGET_MISSING,
-                f"{node.physical_target} is not present, so its SQL endpoint "
-                "cannot be refreshed",
-                source=SOURCE,
-            )
-        )
     if not can_refresh:
         messages.append(
             warning(
@@ -189,8 +102,6 @@ def _refresh(node, inventory, *, can_refresh: bool) -> Resolved:
         )
     return Resolved(
         node=node,
-        target_present=inventory is not None,
-        primitive_present=can_refresh,
         dispatch_location=f"{node.physical_target}/{ENDPOINT_SUFFIX}",
         messages=tuple(messages),
         unsupported=not can_refresh,
@@ -220,20 +131,6 @@ def _where(node) -> str | None:
             f"{node.primitive_object.object}"
         )
     return None
-
-
-def _holds(inventory, reference) -> bool:
-    """Whether the observed target holds this object.
-
-    A node with no reference to check is not thereby satisfied: the reference is
-    how a node says what it needs, and its absence is a node that cannot say.
-    """
-
-    if inventory is None or reference is None:
-        return False
-    return inventory.has_object(
-        reference.schema, reference.object, reference.object_type
-    )
 
 
 def _module_class(node) -> str | None:

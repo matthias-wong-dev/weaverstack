@@ -76,8 +76,6 @@ class RunRequest:
     fault_tolerant: bool = False
     #: Plan, resolve and report without dispatching anything.
     dry_run: bool = False
-    #: Whether resolution requires the target and primitive before dispatch.
-    verifies_estate: bool = True
 
     def __post_init__(self) -> None:
         from ..errors import CommandError
@@ -101,7 +99,6 @@ class RunRequest:
 
     @classmethod
     def test(cls, targets: Sequence, **policy) -> "RunRequest":
-        policy.setdefault("verifies_estate", False)
         return cls(kind=TEST, targets=tuple(targets), **policy)
 
     @property
@@ -123,8 +120,6 @@ class RunRequest:
             "file": self.file,
             "fault_tolerant": self.fault_tolerant,
             "dry_run": self.dry_run,
-            # Preserve resolution policy across process boundaries.
-            "verifies_estate": self.verifies_estate,
         }
 
 
@@ -183,14 +178,11 @@ class Runner:
         return tuple(self._events)
 
     def resolve(self, node):
-        """Resolve the node against the observed state."""
+        """Derive the node's dispatch address from the graph."""
 
-        from .resolution import Resolved, resolve
+        from .resolution import resolve
 
-        if not self.request.verifies_estate:
-            # Test-file runs do not read the installed estate.
-            return Resolved(node=node, target_present=True, primitive_present=True)
-        return resolve(node, self.state, can_refresh=self.can_refresh)
+        return resolve(node, can_refresh=self.can_refresh)
 
     def runtime_scope(self, session=None):
         """This run's deployed-module scope, held unopened until something imports.

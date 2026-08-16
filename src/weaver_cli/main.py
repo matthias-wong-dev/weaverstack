@@ -771,84 +771,17 @@ def _run_load(
     dry_run: bool,
     session=None,
 ):
-    """One load, decided here and dispatched where each primitive lives.
-
-    `weaver.load` reads the estate through Session capabilities, builds the
-    graph here and dispatches each node to whatever can run it — TDS for a
-    Warehouse procedure, the run's remote scope for a deployed Python module —
-    so a desktop and a notebook differ only in what the Session answers.
-
-    What this module still owns is the *preflight*: rejecting a mistyped target
-    over one REST call, before anything expensive is acquired.
-    """
+    """Run one load through the selected Session."""
 
     from weaver.sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=workspace) as opened:
-        if not opened.executes_here(workspace):
-            _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.load(
             list(targets),
             names=names,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
             session=opened,
-        )
-
-
-def _refuse_absent_targets(workspace, targets, *, session=None) -> None:
-    """Check the requested items exist, over REST, before Spark is needed.
-
-    A guard bought cheaply and spent well. Starting a Livy session costs tens of
-    seconds and a capacity's only session slot; resolving a name over REST costs
-    one call. So a request that can already be rejected — a mistyped
-    ``Lakehouse/Rwa``, a Warehouse somebody deleted — is rejected before any of
-    that is spent.
-
-    Asked through the Session where there is one, so the answer joins the item
-    cache every later command reads. Resolving these names against a resolver of
-    this function's own would authenticate again and cache into an object thrown
-    away one line later — paying the cost of the lookup and keeping none of it.
-
-    Deliberately *only* that. The catalogue is not read, no graph is built, no
-    upstream target is discovered and no inventory is fetched: those need the
-    estate, the estate is inside Fabric, and asking about them here would be
-    doing the remote run's work on the wrong side of the boundary. What is
-    checked is exactly what the user typed.
-
-    A genuine not-found is the missing-target error. Anything else — an expired
-    credential, an unreachable tenant, a name that matches two items — keeps its
-    own diagnosis, because "your Lakehouse is gone" is a bad answer to "your
-    token expired".
-    """
-
-    from weaver.errors import CommandError
-    from weaver.fabric import FabricResolver, ItemNotFoundError
-    from weaver.targets import (
-        parse_physical_target,
-        physical_item,
-        physical_kind,
-    )
-
-    if session is not None:
-
-        def resolve(item, *, item_type):
-            return session.resolve_item(item, item_type=item_type, workspace=workspace)
-    else:
-        resolve = FabricResolver(workspace).resolve
-
-    absent = []
-    for value in targets:
-        target = parse_physical_target(value, what="load target", error=CommandError)
-        item_type = physical_kind(target)
-        try:
-            resolve(physical_item(target), item_type=item_type)
-        except ItemNotFoundError:
-            # Preserve the requested spelling so the developer can identify a typo.
-            absent.append(value)
-    if absent:
-        raise CommandError(
-            f"{', '.join(absent)} was not found in workspace {workspace.workspace!r}."
         )
 
 
@@ -930,8 +863,6 @@ def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
     from weaver.sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=workspace) as opened:
-        if not opened.executes_here(workspace):
-            _refuse_absent_targets(workspace, targets, session=opened)
         return weaver.test(
             list(targets),
             name=name,

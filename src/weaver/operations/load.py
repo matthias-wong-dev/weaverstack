@@ -15,7 +15,6 @@ from ..load_plan import (
     ENDPOINT_REFRESH,
     InstalledEstate,
     PhysicalTargetRef,
-    load_dag,
 )
 from ..load_report import (
     BLOCKED,
@@ -116,21 +115,7 @@ def run_load(
     fault_tolerant: bool = False,
     dry_run: bool = False,
 ) -> LoadRunReport:
-    """The whole orchestration path, over a Session.
-
-    Reads the estate once, at a boundary, and hands the Runner a snapshot:
-
-    .. code-block:: text
-
-        physical catalogue + targets  →  RunState  →  Runner  →  RunResult
-
-    When a node runs is the Runner's. What is left here is the load operation's
-    own business: reading the estate, writing the evidence, and rendering the
-    result in the shape a load's readers expect.
-
-    ``state`` is the handover, supplied by a caller that already holds a
-    snapshot. Omitted, this reads one.
-    """
+    """Run the catalogue graph through a Session."""
 
     from ..run import (
         Runner,
@@ -140,7 +125,7 @@ def run_load(
         dispatch_primitive,
         open_run_log,
     )
-    from ..run.state import read_installed_catalogue, read_target_inventories
+    from ..run.state import read_installed_catalogue
 
     started = datetime.now(timezone.utc)
     with session.step("Read catalogue"):
@@ -154,18 +139,7 @@ def run_load(
 
     with session.step("Build run graph"):
         if state is None:
-            # Only the targets the graph touches, which planning it first is
-            # what makes knowable. Read once here, so everything below decides
-            # against a snapshot rather than moving state.
-            planned = load_dag(estate, targets=requested, names=names)
-            state = RunState(
-                catalogue=catalogue,
-                target_inventories=read_target_inventories(
-                    tuple(node.physical_target for node in planned.nodes),
-                    session=session,
-                    workspace=workspace,
-                ),
-            )
+            state = RunState(catalogue=catalogue)
         runner = Runner(
             state,
             RunRequest.load(
@@ -274,19 +248,6 @@ def _raise_for_failure(report: LoadRunReport) -> None:
     )
 
 
-# --- preflight ----------------------------------------------------------------
-#
-# One check, about the catalogue: nobody ever built into this target, so there
-# is no estate to load. Almost always a typo, and reporting it as "no work to
-# do" would look like success.
-#
-# Whether the physical item still exists is not asked here. That check saves a
-# desktop the cost of starting a Livy session for a request already known to be
-# bad, so it belongs in the CLI before the session — see
-# ``weaver_cli.main._refuse_absent_targets``. An item the workspace no longer
-# holds still fails here: reading its inventory raises, carrying the cause.
-
-
 def _refuse_uninstalled_targets(estate: InstalledEstate, requested) -> None:
     """Refuse a requested target the installed estate has never heard of."""
 
@@ -306,40 +267,6 @@ def _step_type(report: LoadNodeReport) -> str:
     """The broad kind a step file's name carries: a load, or a refresh."""
 
     return "refresh" if report.primitive_kind == ENDPOINT_REFRESH else "load"
-
-
-def _plan_document(graph, state, requested, names, dry_run: bool) -> dict:
-    """Record the requested load task and its resolved execution plan."""
-
-    from .. import __version__
-    from ..run.resolution import resolve
-
-    ordered = graph.order()
-    resolutions = {node.node_id: resolve(node, state) for node in ordered}
-    return {
-        "weaver_version": __version__,
-        "requested": [str(target) for target in requested],
-        "selection": list(names),
-        "mode": "dry_run" if dry_run else "execute",
-        "order": [node.node_id for node in ordered],
-        "edges": [list(edge) for edge in graph.edges],
-        "nodes": [
-            {
-                "node_id": node.node_id,
-                "logical_id": str(node.logical_id) if node.logical_id else None,
-                "physical_target": str(node.physical_target),
-                "physical_object": str(node.physical_object)
-                if node.physical_object
-                else None,
-                "primitive_kind": node.primitive_kind,
-                "dispatch_location": resolutions[node.node_id].dispatch_location,
-                "target_exists": resolutions[node.node_id].target_present,
-                "primitive_exists": resolutions[node.node_id].primitive_present,
-            }
-            for node in ordered
-        ],
-        "messages": [message.to_mapping() for message in graph.messages],
-    }
 
 
 def _completion_document(report: LoadRunReport, timings=()) -> dict:

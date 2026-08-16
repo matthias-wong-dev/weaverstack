@@ -47,7 +47,6 @@ from typing import Any
 
 from factories import (
     installed_catalogue,
-    installed_inventories,
     item_bindings,
     item_id,
     lakehouse_table,
@@ -323,10 +322,7 @@ def thin_estate(
             executes_here=True,
         ),
         workspace=workspace,
-        state=RunState(
-            catalogue=installed_catalogue(repository, bindings),
-            target_inventories=installed_inventories(repository, bindings),
-        ),
+        state=RunState(catalogue=installed_catalogue(repository, bindings)),
         target=target,
         root=root,
         nodes={
