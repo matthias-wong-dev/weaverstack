@@ -145,14 +145,17 @@ def action_of(plan, kind: str):
 
 
 def run_from_here(
-    action, bundle, *, workspace, resolver, store, batch_target, sql=None, session=None
+    action, bundle, *, workspace, store, batch_target, sql=None, session=None
 ):
     """Execute one real action against real Fabric, from this process.
 
-    The same `execute_install_action` an installation calls, with its frozen payload,
-    given the capabilities a desktop caller injects rather than the ones a
-    session acquires. That the session can acquire its own is a separate claim,
-    made once in `test_published_weaver_primitive.py`.
+    The same `execute_install_action` an installation calls, with its frozen
+    payload. The resolver is the Session's own, so a REST crossing the action
+    makes — creating a OneLake shortcut, refreshing an endpoint — is Session
+    telemetry rather than a harness-owned client outside it. `store` remains a
+    caller-supplied capability: it reads the bundle payload from wherever the
+    caller staged it, and a desktop caller has no session identity to acquire
+    one from.
 
     **The Session is given, never built here.** This capacity permits one
     concurrent Livy session and the harness already holds it, so a Session that
@@ -187,7 +190,7 @@ def run_from_here(
             # asking what shape its query has.
             spark_sql=installer.spark_sql(),
             spark_sql_batch=installer.spark_sql_batch(),
-            resolver=resolver,
+            resolver=installer.resolver,
             store=store,
             target=resolved[batch_target],
             targets=resolved,
@@ -266,7 +269,6 @@ def alias_estate(
         alias_action,
         bundle,
         workspace=fabric_workspace,
-        resolver=resolver,
         store=store,
         batch_target=batch.target_id,
         session=weaver_session,
@@ -276,7 +278,6 @@ def alias_estate(
         refresh_action,
         bundle,
         workspace=fabric_workspace,
-        resolver=resolver,
         store=store,
         batch_target=batch.target_id,
         session=weaver_session,
@@ -569,7 +570,6 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         refresh_action,
         bundle,
         workspace=fabric_workspace,
-        resolver=resolver,
         store=store,
         batch_target=refresh_batch.target_id,
         session=weaver_session,
@@ -579,7 +579,6 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         alias_action,
         bundle,
         workspace=fabric_workspace,
-        resolver=resolver,
         store=store,
         batch_target=batch.target_id,
         sql=warehouse.executor,
