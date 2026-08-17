@@ -15,18 +15,15 @@ from weaver.catalogue.render import (
 from weaver.catalogue.tables import REGISTRY
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_a_large_keep_relation_is_accepted_by_the_catalogue_warehouse(
-    fabric_workspace,
+    session_catalogue_sql,
 ):
     """More than one constructor remains one safe, executable delete.
 
     The random scope has no catalogue rows, so the statement is compiled and
     executed by Fabric without changing an installation another test owns.
     """
-
-    from weaver.fabric import FabricResolver, desktop_sql_executor
-    from weaver.targets import WarehouseTarget
 
     token = uuid4().hex
     scope = InstallationScope("Lakehouse", f"weavertest-delete-{token}")
@@ -43,10 +40,7 @@ def test_a_large_keep_relation_is_accepted_by_the_catalogue_warehouse(
     statement = render_delete_obsolete(table, rows, scope=scope)
     assert statement is not None
 
-    target = WarehouseTarget(warehouse=fabric_workspace.catalogue_item)
-    executor = desktop_sql_executor(
-        target, fabric_workspace, resolver=FabricResolver(fabric_workspace)
-    )
+    executor = session_catalogue_sql
     created_schema = False
     created_table = False
     try:
@@ -66,10 +60,7 @@ def test_a_large_keep_relation_is_accepted_by_the_catalogue_warehouse(
         created_table = True
         executor.execute_script(statement)
     finally:
-        try:
-            if created_table:
-                executor.execute_script(f"drop table if exists [_].[{table.name}];")
-            if created_schema:
-                executor.execute_script("drop schema if exists [_];")
-        finally:
-            executor.close()
+        if created_table:
+            executor.execute_script(f"drop table if exists [_].[{table.name}];")
+        if created_schema:
+            executor.execute_script("drop schema if exists [_];")

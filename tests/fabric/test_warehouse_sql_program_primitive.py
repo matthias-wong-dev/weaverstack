@@ -231,48 +231,41 @@ def _contents(executor, name: str, columns: str = "[Customer id], [Customer name
 # --- a complex staging query ---------------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def complex_program(warehouse):
-    """The gnarly shape installed once, loaded once, and read while it stands.
-
-    Two claims are about it — what the load produced, and what shape the build
-    inferred — and installing a two-phase procedure twice to ask them
-    separately is the expensive half of both.
-    """
-
+def _complex_program(warehouse):
     _install(warehouse, "ProgramComplex", COMPLEX)
-    _rows(
-        warehouse,
-        "ProgramCustomer",
-        "[Customer id], [Customer name], [Active]",
-        [("c1", "One", 1), ("c2", "Two", 1), ("c3", "Gone", 0)],
-    )
-    _rows(
-        warehouse,
-        "ProgramOrder",
-        "[Customer id], [Amount]",
-        [("c1", 10), ("c1", 5), ("c2", 20), ("c3", 100)],
-    )
+    try:
+        _rows(
+            warehouse,
+            "ProgramCustomer",
+            "[Customer id], [Customer name], [Active]",
+            [("c1", "One", 1), ("c2", "Two", 1), ("c3", "Gone", 0)],
+        )
+        _rows(
+            warehouse,
+            "ProgramOrder",
+            "[Customer id], [Amount]",
+            [("c1", 10), ("c1", 5), ("c2", 20), ("c3", 100)],
+        )
+        result = _load(warehouse, "ProgramComplex")
+        contents = _contents(
+            warehouse, "ProgramComplex", "[Customer id], [Customer name], [Total]"
+        )
+        columns = warehouse.query(
+            "select name from sys.columns "
+            f"where [object_id] = object_id(N'{SCHEMA}.ProgramComplex') "
+            "order by column_id;"
+        )
+        return SimpleNamespace(
+            result=result,
+            contents=contents,
+            columns=[str(row["name"]) for row in columns],
+        )
+    finally:
+        _drop_object(warehouse, "ProgramComplex")
 
-    result = _load(warehouse, "ProgramComplex")
-    contents = _contents(
-        warehouse, "ProgramComplex", "[Customer id], [Customer name], [Total]"
-    )
-    columns = warehouse.query(
-        "select name from sys.columns "
-        f"where [object_id] = object_id(N'{SCHEMA}.ProgramComplex') "
-        "order by column_id;"
-    )
-    yield SimpleNamespace(
-        result=result,
-        contents=contents,
-        columns=[str(row["name"]) for row in columns],
-    )
-    _drop_object(warehouse, "ProgramComplex")
 
-
-@weaver_test(remote=True)
-def test_a_cte_join_and_nested_predicate_build_and_load(complex_program):
+@weaver_test(remote=True, resources={"tds"})
+def test_a_cte_join_and_nested_predicate_builds_with_its_inferred_shape(warehouse):
     """The gnarly shape, end to end: shape-only build, then a real load.
 
     The build has to guard the CTE's SELECT, the outer SELECT and the one inside
@@ -280,18 +273,13 @@ def test_a_cte_join_and_nested_predicate_build_and_load(complex_program):
     still producing a table the load's generated procedure can fill.
     """
 
+    complex_program = _complex_program(warehouse)
     assert complex_program.result.succeeded is True
     assert (
         complex_program.result.rows_read,
         complex_program.result.rows_inserted,
     ) == (2, 2)
     assert complex_program.contents == [("c1", "One", 15), ("c2", "Two", 20)]
-
-
-@weaver_test(remote=True)
-def test_the_build_infers_the_columns_the_staging_query_produces(complex_program):
-    """Including the aggregate, which exists only in the outer SELECT."""
-
     assert complex_program.columns[:3] == [
         "Customer id",
         "Customer name",
@@ -302,7 +290,7 @@ def test_the_build_infers_the_columns_the_staging_query_produces(complex_program
 # --- authored setup ------------------------------------------------------------
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_setup_runs_and_the_query_over_it_becomes_staging(warehouse):
     """``SELECT INTO #Working`` is working, not a result — in both executions."""
 
@@ -323,41 +311,35 @@ def test_setup_runs_and_the_query_over_it_becomes_staging(warehouse):
     _drop_object(warehouse, "ProgramWorking")
 
 
-@pytest.fixture(scope="module")
-def noisy_program(warehouse):
-    """The noisy-setup object installed once, with both claims read from it."""
-
+def _noisy_program(warehouse):
     _install(warehouse, "ProgramNoisy", NOISY_SETUP)
-    _rows(
-        warehouse,
-        "ProgramCustomer",
-        "[Customer id], [Customer name], [Active]",
-        [("c1", "One", 1), ("c2", "Two", 1), ("c3", "Gone", 0)],
-    )
-
-    result = _load(warehouse, "ProgramNoisy")
-    contents = _contents(warehouse, "ProgramNoisy")
-    parameters = warehouse.query(
-        "select p.name as parameter, p.is_output as is_output "
-        "from sys.parameters as p "
-        # Bracketed: the procedure's own name contains a dot, so unquoted it
-        # would parse as a three-part name and resolve to nothing.
-        f"where p.[object_id] = object_id(N'[_].[Load {SCHEMA}.ProgramNoisy]') "
-        "order by p.parameter_id;"
-    )
-    # Run by hand, declaring nothing — which is what "optional" has to mean.
-    warehouse.execute_script(f"exec [_].[Load {SCHEMA}.ProgramNoisy];")
-
-    yield SimpleNamespace(
-        result=result,
-        contents=contents,
-        outputs={str(row["parameter"]) for row in parameters if row["is_output"]},
-    )
-    _drop_object(warehouse, "ProgramNoisy")
+    try:
+        _rows(
+            warehouse,
+            "ProgramCustomer",
+            "[Customer id], [Customer name], [Active]",
+            [("c1", "One", 1), ("c2", "Two", 1), ("c3", "Gone", 0)],
+        )
+        result = _load(warehouse, "ProgramNoisy")
+        contents = _contents(warehouse, "ProgramNoisy")
+        parameters = warehouse.query(
+            "select p.name as parameter, p.is_output as is_output "
+            "from sys.parameters as p "
+            f"where p.[object_id] = object_id(N'[_].[Load {SCHEMA}.ProgramNoisy]') "
+            "order by p.parameter_id;"
+        )
+        warehouse.execute_script(f"exec [_].[Load {SCHEMA}.ProgramNoisy];")
+        return SimpleNamespace(
+            result=result,
+            contents=contents,
+            outputs={str(row["parameter"]) for row in parameters if row["is_output"]},
+        )
+    finally:
+        _drop_object(warehouse, "ProgramNoisy")
 
 
-@weaver_test(remote=True)
-def test_setup_that_returns_rows_does_not_become_the_load_result(noisy_program):
+@weaver_test(remote=True, resources={"tds"})
+def test_noisy_setup_keeps_the_load_result_in_optional_outputs(warehouse):
     """The reason the result is in the signature rather than in a result set.
 
     This body's setup returns a row that looks exactly like a load result and
@@ -365,17 +347,12 @@ def test_setup_that_returns_rows_does_not_become_the_load_result(noisy_program):
     would report 4000 rows read; a caller reading named outputs cannot.
     """
 
+    noisy_program = _noisy_program(warehouse)
     result = noisy_program.result
 
     assert result.succeeded is True, result.error_message
     assert (result.rows_read, result.rows_inserted) == (2, 2)
     assert noisy_program.contents == [("c1", "One"), ("c2", "Two")]
-
-
-@weaver_test(remote=True)
-def test_the_procedure_declares_its_result_as_optional_outputs(noisy_program):
-    """Optional, so a person can still run it by hand without declaring any."""
-
     assert noisy_program.outputs == {f"@{name}" for name, _type in RESULT_PARAMETERS}
 
 
@@ -421,10 +398,7 @@ def _retired(warehouse, *, source, retirement):
     return _load(warehouse, "ProgramRetire")
 
 
-@pytest.fixture(scope="module")
-def retired(retire_program):
-    """A named key retired, and the working table looked for straight after."""
-
+def _retired_evidence(retire_program):
     result = _retired(
         retire_program,
         source=[("c1", "Renamed", 1), ("c2", "Two", 0), ("c3", "Three", 0)],
@@ -440,8 +414,8 @@ def retired(retire_program):
     )
 
 
-@weaver_test(remote=True)
-def test_absence_does_not_delete_but_a_named_key_does(retired):
+@weaver_test(remote=True, resources={"tds"})
+def test_absence_does_not_delete_but_a_named_key_does(retire_program):
     """The whole contract, in one load.
 
     The staging query returns only c1, so c2 is absent — and absence from an
@@ -449,6 +423,7 @@ def test_absence_does_not_delete_but_a_named_key_does(retired):
     named by the delete query, and that is what removes it.
     """
 
+    retired = _retired_evidence(retire_program)
     assert retired.result.succeeded is True, retired.result.error_message
     assert (
         retired.result.rows_read,
@@ -456,60 +431,34 @@ def test_absence_does_not_delete_but_a_named_key_does(retired):
         retired.result.rows_deleted,
     ) == (1, 1, 1)
     assert retired.contents == [("c1", "Renamed"), ("c2", "Two")]
-
-
-@weaver_test(remote=True)
-def test_the_delete_working_table_is_cleaned_up_after_a_clean_run(retired):
-    """It is working, and a run that rejected nothing leaves no evidence.
-
-    Asked of the retirement above rather than of a run of its own: any clean
-    run answers it, and this one is already clean.
-    """
-
     assert retired.remaining is None
 
 
-@pytest.fixture(scope="module")
-def unclaimed(retire_program):
-    """A retirement naming a key the target does not hold."""
-
-    result = _retired(retire_program, source=[("c1", "One", 1)], retirement=[("c99",)])
-    return SimpleNamespace(
-        result=result, contents=_contents(retire_program, "ProgramRetire")
-    )
-
-
-@weaver_test(remote=True)
-def test_a_claim_for_a_key_that_is_not_there_deletes_nothing(unclaimed):
+@weaver_test(remote=True, resources={"tds"})
+def test_a_claim_for_a_key_that_is_not_there_deletes_nothing(retire_program):
     """A delete is a report of what happened, not of what was asked for."""
 
-    assert unclaimed.result.succeeded is True, unclaimed.result.error_message
-    assert unclaimed.result.rows_deleted == 0
-    assert unclaimed.contents == [
+    result = _retired(retire_program, source=[("c1", "One", 1)], retirement=[("c99",)])
+    contents = _contents(retire_program, "ProgramRetire")
+    assert result.succeeded is True, result.error_message
+    assert result.rows_deleted == 0
+    assert contents == [
         ("c1", "One"),
         ("c2", "Two"),
         ("c3", "Three"),
     ]
 
 
-@pytest.fixture(scope="module")
-def claimed_twice(retire_program):
-    """One key named four times, twice by name and twice by nothing at all."""
+@weaver_test(remote=True, resources={"tds"})
+def test_a_key_claimed_twice_is_one_deletion(retire_program):
+    """The claim is normalised before it is counted or applied."""
 
     result = _retired(
         retire_program,
         source=[("c1", "One", 1)],
         retirement=[("c3",), ("c3",), (None,), ("   ",)],
     )
-    return SimpleNamespace(
-        result=result, contents=_contents(retire_program, "ProgramRetire")
-    )
-
-
-@weaver_test(remote=True)
-def test_a_key_claimed_twice_is_one_deletion(claimed_twice):
-    """The claim is normalised before it is counted or applied."""
-
-    assert claimed_twice.result.succeeded is True, claimed_twice.result.error_message
-    assert claimed_twice.result.rows_deleted == 1
-    assert claimed_twice.contents == [("c1", "One"), ("c2", "Two")]
+    contents = _contents(retire_program, "ProgramRetire")
+    assert result.succeeded is True, result.error_message
+    assert result.rows_deleted == 1
+    assert contents == [("c1", "One"), ("c2", "Two")]

@@ -242,8 +242,7 @@ class Ran:
 # --- what only Fabric can answer ---------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def ordinary(estate):
+def _ordinary(estate):
     """The ordinary life of a loaded table: seed it, change it, shrink it.
 
     One chain rather than three, because each step's *base* is the step before
@@ -299,62 +298,25 @@ def ordinary(estate):
     return SimpleNamespace(seeded=first, updated=second, shrunk=third)
 
 
-@weaver_test(remote=True)
-def test_the_generated_procedure_installs_and_is_callable(ordinary):
-    """The two-phase installer ran: it read sys.columns and created the procedure."""
+@weaver_test(remote=True, resources={"tds"})
+def test_the_ordinary_load_lifecycle(estate):
+    """Install, seed, update and shrink through the generated procedure."""
 
-    assert ordinary.seeded.extra["procedures"] == [f"Load {SCHEMA}.{OBJECT}"]
-
-
-@weaver_test(remote=True)
-def test_the_load_generates_identities_without_being_given_them(ordinary):
-    """The engine assigns them, so the load never names the column.
-
-    The values are Fabric's to choose — not 1, 2, 3, and not consecutive — so
-    what is asserted is that every row got a distinct one.
-    """
-
-    assert ordinary.seeded.extra["rows"] == 2
-    assert ordinary.seeded.extra["distinct_keys"] == 2
-
-
-# --- the load semantics ------------------------------------------------------
-
-
-@weaver_test(remote=True)
-def test_the_load_inserts_the_rows_its_query_produced(ordinary):
+    ordinary = _ordinary(estate)
     seeded = ordinary.seeded
 
+    assert seeded.extra["procedures"] == [f"Load {SCHEMA}.{OBJECT}"]
+    assert seeded.extra["rows"] == 2
+    assert seeded.extra["distinct_keys"] == 2
     assert seeded.result.succeeded is True
     assert (seeded.result.rows_read, seeded.result.rows_inserted) == (2, 2)
     assert seeded.contents == CLEAN
-
-
-@weaver_test(remote=True)
-def test_a_clean_run_tidies_its_intermediate_tables_away(ordinary):
-    """They are evidence, and a run that rejected nothing produced none."""
-
     assert ordinary.seeded.result.succeeded is True
     assert ordinary.seeded.extra["leftovers"] == 0
-
-
-@weaver_test(remote=True)
-def test_a_second_run_updates_only_what_changed(ordinary):
     updated = ordinary.updated
-
     assert (updated.result.rows_inserted, updated.result.rows_updated) == (0, 1)
     assert updated.contents == CHANGED
-
-
-@weaver_test(remote=True)
-def test_an_unchanged_row_keeps_its_original_update_time(ordinary):
     assert ordinary.updated.extra["audit"] == [("c1", 1), ("c2", 0)]
-
-
-@weaver_test(remote=True)
-def test_a_non_incremental_run_deletes_rows_the_source_stopped_producing(ordinary):
-    """The source stopped producing c2, so the target stops holding it."""
-
     assert ordinary.shrunk.result.rows_deleted == 1
     assert ordinary.shrunk.contents == SHRUNK
 
@@ -362,8 +324,7 @@ def test_a_non_incremental_run_deletes_rows_the_source_stopped_producing(ordinar
 # --- rejection and fault tolerance -------------------------------------------
 
 
-@pytest.fixture(scope="module")
-def refused(estate):
+def _refused(estate):
     """A clean load, then an intolerant one over a source that rejects."""
 
     _reset(estate)
@@ -376,20 +337,20 @@ def refused(estate):
     return Ran(result=None, contents=_contents(estate), extra={"raised": raised.value})
 
 
-@weaver_test(remote=True)
-def test_an_intolerant_run_with_rejects_raises_and_leaves_the_target_untouched(refused):
+@weaver_test(remote=True, resources={"tds"})
+def test_an_intolerant_run_with_rejects_raises_and_leaves_the_target_untouched(estate):
     """`exec [_].[Load S.N]` fails the way `.load()` does.
 
     The procedure throws rather than returning a row saying `succeeded = 0`, so
     a caller does not have to special-case which primitive it is driving.
     """
 
+    refused = _refused(estate)
     assert "rows were rejected" in str(refused.extra["raised"])
     assert refused.contents == CLEAN
 
 
-@pytest.fixture(scope="module")
-def tolerated(estate):
+def _tolerated(estate):
     """One tolerant load over a rejecting source, and the evidence it kept."""
 
     _reset(estate)
@@ -409,26 +370,15 @@ def tolerated(estate):
     )
 
 
-@weaver_test(remote=True)
-def test_a_tolerant_run_loads_the_valid_rows_and_still_reports_failure(tolerated):
+@weaver_test(remote=True, resources={"tds"})
+def test_a_tolerant_run_preserves_valid_rows_and_rejection_evidence(estate):
     """Tolerating rejects changes what is written, never what is reported."""
 
+    tolerated = _tolerated(estate)
     assert tolerated.result.succeeded is False
     assert tolerated.result.rows_rejected == 3
     assert tolerated.result.rows_inserted == 3
     assert tolerated.contents == [("c1", "One"), ("c2", "Two"), ("c4", "A")]
-
-
-@weaver_test(remote=True)
-def test_the_rejected_rows_survive_with_their_reason(tolerated):
-    """A count says something went wrong and nothing about what."""
-
-    # Tolerated, not refused — and that distinction is a finding rather than a
-    # convenience. Fabric's DDL is transactional, so the `throw` an intolerant
-    # run raises rolls the batch back and takes the reject table with it. On the
-    # Warehouse the evidence therefore survives only the tolerant path, which
-    # sits awkwardly beside the plan's "preserve the rejection evidence" and is
-    # reported rather than worked around here.
     assert tolerated.extra["reasons"] == {REASON_BLANK_PK, REASON_DUPLICATE_PK}
 
 
@@ -442,8 +392,7 @@ def test_the_rejected_rows_survive_with_their_reason(tolerated):
 # that needs an engine.
 
 
-@pytest.fixture(scope="module")
-def static_run(static_estate):
+def _static_run(static_estate):
     """A static load into an empty target, then a second over a changed source."""
 
     _reset(static_estate)
@@ -464,25 +413,15 @@ def static_run(static_estate):
     )
 
 
-@weaver_test(remote=True)
-def test_a_static_warehouse_load_seeds_an_empty_target(static_run):
+@weaver_test(remote=True, resources={"tds"})
+def test_the_static_warehouse_load_seeds_once_and_then_is_a_no_op(static_estate):
+    static_run = _static_run(static_estate)
     seed = static_run.extra["seed"]
 
     assert seed.succeeded is True
     assert seed.rows_inserted == 2
     assert static_run.extra["seeded_contents"] == CLEAN
-
-
-@weaver_test(remote=True)
-def test_a_second_static_warehouse_load_is_a_successful_no_op(static_run):
-    """The source is changed between the runs and the target does not move.
-
-    Which is the whole claim: the procedure returned without reading its query,
-    so what the source now says never reached staging.
-    """
-
     result = static_run.result
-
     assert result.succeeded is True
     assert (
         result.rows_read,
@@ -492,10 +431,4 @@ def test_a_second_static_warehouse_load_is_a_successful_no_op(static_run):
         result.rows_rejected,
     ) == (0, 0, 0, 0, 0)
     assert static_run.contents == CLEAN
-
-
-@weaver_test(remote=True)
-def test_a_static_no_op_leaves_no_intermediate_tables_behind(static_run):
-    """It returned before staging, so there was never anything to tidy."""
-
     assert static_run.extra["leftovers"] == 0

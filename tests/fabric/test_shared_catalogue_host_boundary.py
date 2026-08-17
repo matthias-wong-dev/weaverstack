@@ -42,20 +42,10 @@ def neighbour(catalogue_sql):
 
 
 @pytest.fixture
-def catalogue_sql(fabric_workspace):
+def catalogue_sql(session_catalogue_sql):
     """TDS against the Warehouse the catalogue lives in."""
 
-    from weaver.fabric import FabricResolver, desktop_sql_executor
-    from weaver.targets import WarehouseTarget
-
-    target = WarehouseTarget(warehouse=fabric_workspace.catalogue_item)
-    executor = desktop_sql_executor(
-        target, fabric_workspace, resolver=FabricResolver(fabric_workspace)
-    )
-    try:
-        yield executor
-    finally:
-        executor.close()
+    return session_catalogue_sql
 
 
 def _objects(sql, schema: str) -> set[str]:
@@ -111,7 +101,7 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
     assert certified[0]["n"] > 0
 
 
-@weaver_test(hosted=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_the_catalogue_warehouse_holds_both_schemas(neighbour):
     schemas = {
         str(row["SCHEMA_NAME"])

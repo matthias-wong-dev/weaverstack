@@ -108,8 +108,7 @@ class NotebookSession(Session):
         parameters: Sequence[Any] | None = None,
     ) -> None:
         executor = self.scope(workspace).sql_for(target)
-        with self.telemetry.external("tds", "execute"):
-            executor.execute(statement, parameters or ())
+        executor.execute(statement, parameters or ())
 
     def query_tsql(
         self,
@@ -120,8 +119,7 @@ class NotebookSession(Session):
         parameters: Sequence[Any] | None = None,
     ) -> Any:
         executor = self.scope(workspace).sql_for(target)
-        with self.telemetry.external("tds", "query"):
-            return executor.query(statement, parameters or ())
+        return executor.query(statement, parameters or ())
 
     def sql_executor(self, target: Any, *, workspace: Workspace | None = None):
         return self.scope(workspace).sql_for(target)
@@ -175,8 +173,12 @@ class NotebookScope(WorkspaceScope):
 
     def _acquire_sql(self, warehouse):
         from ..fabric.sql import fabric_sql_executor
+        from .sql import SessionSqlExecutor
 
-        return fabric_sql_executor(warehouse, self.workspace, resolver=self.resolver)
+        return SessionSqlExecutor(
+            fabric_sql_executor(warehouse, self.workspace, resolver=self.resolver),
+            self.telemetry,
+        )
 
 
 __all__ = ["NotebookScope", "NotebookSession"]

@@ -7,7 +7,10 @@ table" until the alias action learned to wait for a real read to succeed.
 The wait runs where the Installer runs. Creating the shortcut is a REST call and
 the wait asks Spark a question through ``context.spark_sql``, so a desktop
 install performs both without a session of its own, and that is the arrangement
-under test here. Only the setup needs Spark, and it imports no Weaver.
+under test here. Both crossings run through the registered Session, so they
+show up in its telemetry; the estate the action needs — the repository, the
+generated bundle and the producer's table — is arranged in a fixture and never
+claimed to be either.
 
 Everything else about aliases, including shortcut creation, its target, the
 endpoint refresh and reading through the aliased name, is proven in
@@ -16,6 +19,7 @@ endpoint refresh and reading through the aliased name, is proven in
 
 from __future__ import annotations
 
+import pytest
 from conftest import staged_repository_root
 from factories import FixtureCatalogue, alias_repository, item_bindings
 from support.weaver_test import weaver_test
@@ -26,24 +30,24 @@ PRODUCER = "Lakehouse/DiscoveryProducer"
 CONSUMER = "Lakehouse/DiscoveryConsumer"
 
 
-@weaver_test(remote=True, resources={"livy", "rest"})
-def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
+@pytest.fixture
+def discovery_estate(
     fabric_workspace,
     fabric_client,
     fabric_alias_lakehouses,
     fabric_staging_lakehouse,
     livy_session,
-    weaver_session,
+    session_catalogue_sql,
     tmp_path_factory,
 ):
-    """The action reports how long it waited, which is the behaviour itself."""
+    """The generated bundle and a producer table for the alias to point at.
 
-    from test_cross_item_alias_primitive import (
-        action_of,
-        generate,
-        run_from_here,
-        upload,
-    )
+    Arrangement only: the repository, the bundle and the producer's table are
+    built over raw harness capabilities and plain Spark, none of it imports
+    Weaver, and none of it is the claim under test.
+    """
+
+    from test_cross_item_alias_primitive import action_of, generate, upload
 
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
@@ -70,6 +74,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
         ),
         name="aliasdiscovery",
         staging=producer.name,
+        catalogue_sql=session_catalogue_sql,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
 
@@ -100,13 +105,30 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
         "emit({'ready': True})\n"
     )
 
+    return {
+        "bundle": bundle,
+        "batch": batch,
+        "alias_action": alias_action,
+        "store": store,
+    }
+
+
+@weaver_test(remote=True, resources={"livy", "rest"})
+def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
+    fabric_workspace,
+    weaver_session,
+    discovery_estate,
+):
+    """The action reports how long it waited, which is the behaviour itself."""
+
+    from test_cross_item_alias_primitive import run_from_here
+
     result = run_from_here(
-        alias_action,
-        bundle,
+        discovery_estate["alias_action"],
+        discovery_estate["bundle"],
         workspace=fabric_workspace,
-        resolver=resolver,
-        store=store,
-        batch_target=batch.target_id,
+        store=discovery_estate["store"],
+        batch_target=discovery_estate["batch"].target_id,
         session=weaver_session,
     )
 

@@ -74,6 +74,7 @@ def generate(
     catalogue,
     name,
     staging,
+    catalogue_sql,
     sql=None,
 ):
     """One bundle, planned on the desktop. Pure Python; no session, no Livy.
@@ -94,8 +95,6 @@ def generate(
         read_warehouse_inventory,
     )
     from weaver.build_bundle.targets import WAREHOUSE_TARGET
-    from weaver.fabric import desktop_sql_executor
-    from weaver.targets import WarehouseTarget
 
     bindings = effective_item_bindings(
         bindings,
@@ -105,26 +104,18 @@ def generate(
     # The catalogue is a Warehouse and is bound implicitly, so a Lakehouse-only
     # estate now has a Warehouse inventory to read. It is its own connection:
     # the estate's Warehouse, where there is one, is a different database.
-    catalogue_sql = desktop_sql_executor(
-        WarehouseTarget(warehouse=workspace.catalogue_item),
-        workspace,
-        resolver=resolver,
-    )
     inventories = {}
-    try:
-        for binding in bindings.entries:
-            bound = binding.to_bound_target()
-            if bound.kind != WAREHOUSE_TARGET:
-                inventories[binding.item] = read_lakehouse_inventory(
-                    bound, resolver=resolver, store=store
-                )
-                continue
-            reading = (
-                catalogue_sql if bound.item_id == workspace.catalogue_item.name else sql
+    for binding in bindings.entries:
+        bound = binding.to_bound_target()
+        if bound.kind != WAREHOUSE_TARGET:
+            inventories[binding.item] = read_lakehouse_inventory(
+                bound, resolver=resolver, store=store
             )
-            inventories[binding.item] = read_warehouse_inventory(bound, sql=reading)
-    finally:
-        catalogue_sql.close()
+            continue
+        reading = (
+            catalogue_sql if bound.item_id == workspace.catalogue_item.name else sql
+        )
+        inventories[binding.item] = read_warehouse_inventory(bound, sql=reading)
     return generate_item_build_bundle(
         repository,
         bindings=bindings,
@@ -154,14 +145,17 @@ def action_of(plan, kind: str):
 
 
 def run_from_here(
-    action, bundle, *, workspace, resolver, store, batch_target, sql=None, session=None
+    action, bundle, *, workspace, store, batch_target, sql=None, session=None
 ):
     """Execute one real action against real Fabric, from this process.
 
-    The same `execute_install_action` an installation calls, with its frozen payload,
-    given the capabilities a desktop caller injects rather than the ones a
-    session acquires. That the session can acquire its own is a separate claim,
-    made once in `test_published_weaver_primitive.py`.
+    The same `execute_install_action` an installation calls, with its frozen
+    payload. The resolver is the Session's own, so a REST crossing the action
+    makes — creating a OneLake shortcut, refreshing an endpoint — is Session
+    telemetry rather than a harness-owned client outside it. `store` remains a
+    caller-supplied capability: it reads the bundle payload from wherever the
+    caller staged it, and a desktop caller has no session identity to acquire
+    one from.
 
     **The Session is given, never built here.** This capacity permits one
     concurrent Livy session and the harness already holds it, so a Session that
@@ -196,7 +190,7 @@ def run_from_here(
             # asking what shape its query has.
             spark_sql=installer.spark_sql(),
             spark_sql_batch=installer.spark_sql_batch(),
-            resolver=resolver,
+            resolver=installer.resolver,
             store=store,
             target=resolved[batch_target],
             targets=resolved,
@@ -217,6 +211,7 @@ def alias_estate(
     fabric_staging_lakehouse,
     livy_session,
     weaver_session,
+    session_catalogue_sql,
     tmp_path_factory,
 ):
     """The alias action, run from here against real Fabric."""
@@ -249,6 +244,7 @@ def alias_estate(
         ),
         name="aliasaction",
         staging=fabric_staging_lakehouse.name,
+        catalogue_sql=session_catalogue_sql,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
     _refresh_batch, refresh_action = action_of(bundle.plan, "refresh_sql_endpoint")
@@ -273,7 +269,6 @@ def alias_estate(
         alias_action,
         bundle,
         workspace=fabric_workspace,
-        resolver=resolver,
         store=store,
         batch_target=batch.target_id,
         session=weaver_session,
@@ -283,7 +278,6 @@ def alias_estate(
         refresh_action,
         bundle,
         workspace=fabric_workspace,
-        resolver=resolver,
         store=store,
         batch_target=batch.target_id,
         session=weaver_session,
@@ -459,6 +453,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     clean_disposable_warehouse,
     livy_session,
     weaver_session,
+    session_catalogue_sql,
     tmp_path_factory,
 ):
     """The other alias form, and the one that leans hardest on the endpoint.
@@ -507,6 +502,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         ),
         name="whalias",
         staging=fabric_staging_lakehouse.name,
+        catalogue_sql=session_catalogue_sql,
         sql=warehouse.executor,
     )
     batch, alias_action = action_of(bundle.plan, "create_alias")
@@ -574,7 +570,6 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         refresh_action,
         bundle,
         workspace=fabric_workspace,
-        resolver=resolver,
         store=store,
         batch_target=refresh_batch.target_id,
         session=weaver_session,
@@ -584,7 +579,6 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         alias_action,
         bundle,
         workspace=fabric_workspace,
-        resolver=resolver,
         store=store,
         batch_target=batch.target_id,
         sql=warehouse.executor,

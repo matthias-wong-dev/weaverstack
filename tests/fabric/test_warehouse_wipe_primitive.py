@@ -34,7 +34,7 @@ EXPECTED_OBJECTS = {
 }
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_weaver_wipes_a_populated_warehouse(
     clean_disposable_warehouse,
     fabric_client,

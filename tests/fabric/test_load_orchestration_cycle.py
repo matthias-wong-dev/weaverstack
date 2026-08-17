@@ -209,8 +209,10 @@ def test_every_step_ran_in_topological_order_through_its_own_primitive(orchestra
     assert started == sorted(started)
 
 
-@weaver_test(hosted=True)
-def test_the_warehouse_sees_the_delta_rows_the_lakehouse_load_wrote(orchestrated):
+@weaver_test(hosted=True, resources={"tds"})
+def test_the_warehouse_sees_the_delta_rows_the_lakehouse_load_wrote(
+    orchestrated, warehouse_session
+):
     """The whole point of the barrier, asserted through the target itself."""
 
     env, _seen = orchestrated

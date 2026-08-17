@@ -68,6 +68,12 @@ Use ordinary Weaver behaviour in telemetry tests. A test that calls
 Livy and retained its semantic attribution. Manually opening a telemetry event
 does not prove the production path.
 
+Warehouse primitives take their executor from `Session.sql_executor()`. The
+returned capability records every TDS query, script and procedure call. Direct
+`desktop_sql_executor()` construction belongs only to harness readiness or
+reset work outside a test claim; test modules are mechanically prevented from
+using it.
+
 ## Shared Session and attribution
 
 One pytest run reuses:

@@ -154,7 +154,7 @@ def _counts(executor, procedure: str, *, kind: str = "Test", suppress: int = 1):
 # --- what only Fabric can answer ----------------------------------------------
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_the_generated_procedures_install(estate):
     """`select … into #temp` inside a procedure is the engine's call, not ours."""
 
@@ -166,7 +166,7 @@ def test_the_generated_procedures_install(estate):
     assert {str(row["name"]) for row in rows} == set(PROCEDURES)
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_a_passing_test_reports_zero_both_ways(estate):
     _sides(estate, [(1, 100), (2, 200)], [(1, 100), (2, 200)])
 
@@ -176,7 +176,7 @@ def test_a_passing_test_reports_zero_both_ways(estate):
     assert result["unexpected_count"] == 0
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_the_output_parameters_carry_the_two_counts(estate):
     _sides(estate, [(1, 100), (2, 200)], [(1, 110), (3, 300)])
 
@@ -186,7 +186,7 @@ def test_the_output_parameters_carry_the_two_counts(estate):
     assert result["unexpected_count"] == 2
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_a_changed_row_counts_twice(estate):
     """The physical counting the design settles on, proved on the engine."""
 
@@ -198,7 +198,7 @@ def test_a_changed_row_counts_twice(estate):
     assert result["unexpected_count"] == 1
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_suppression_transfers_no_diagnostic_rows(estate):
     _sides(estate, [(1, 100)], [(1, 110)])
 
@@ -212,7 +212,7 @@ def test_suppression_transfers_no_diagnostic_rows(estate):
     assert sets.outputs["missing_count"] == 1
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_one_execution_returns_diagnostics_and_counts(estate):
     """Running a Test twice would compare data that could change in between."""
 
@@ -239,7 +239,7 @@ def test_one_execution_returns_diagnostics_and_counts(estate):
     assert len(paired) == 1
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_an_unkeyed_test_pairs_nothing(estate):
     _sides(estate, [(1, 100)], [(1, 110)])
 
@@ -253,7 +253,7 @@ def test_an_unkeyed_test_pairs_nothing(estate):
     assert len(keys) == 2 and len(set(keys)) == 2
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_an_assumption_counts_and_returns_its_violations(estate):
     _rows(estate, "ValidationActual", [(1, 100), (2, -5), (3, 0)])
 
@@ -267,7 +267,7 @@ def test_an_assumption_counts_and_returns_its_violations(estate):
     assert sorted(row["OrderId"] for row in sets.result_sets[0]) == [2, 3]
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_an_assumption_holding_reports_zero(estate):
     _rows(estate, "ValidationActual", [(1, 100)])
 
@@ -278,7 +278,7 @@ def test_an_assumption_holding_reports_zero(estate):
     assert result["violation_count"] == 0
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_a_duplicate_key_is_an_error_rather_than_evidence(estate):
     """The engine has to surface the throw as something a caller can read."""
 
@@ -288,7 +288,7 @@ def test_a_duplicate_key_is_an_error_rather_than_evidence(estate):
         _counts(estate, f"Test {SCHEMA}.OrdersReconcile")
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_a_null_key_is_an_error_rather_than_evidence(estate):
     _sides(estate, [(None, 100)], [(1, 100)])
 
@@ -296,7 +296,7 @@ def test_a_null_key_is_an_error_rather_than_evidence(estate):
         _counts(estate, f"Test {SCHEMA}.OrdersReconcile")
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_mismatched_shapes_are_reported_as_a_contract_failure(estate):
     """`tempdb.sys.columns` has to answer for a session temp table here."""
 
@@ -306,7 +306,7 @@ def test_mismatched_shapes_are_reported_as_a_contract_failure(estate):
         _counts(estate, f"Test {SCHEMA}.OrdersMismatched")
 
 
-@weaver_test(remote=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_the_procedure_leaves_no_working_tables_behind(estate):
     _sides(estate, [(1, 100)], [(1, 110)])
     _counts(estate, f"Test {SCHEMA}.OrdersReconcile")
