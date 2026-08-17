@@ -68,6 +68,13 @@ class _Managed:
     folders: frozenset[str]
     tables: frozenset[str]
     views: frozenset[str]
+    #: Object names a *document* declares, whatever kind it declares them as. A
+    #: document installed under the other kind is a kind change, removed by the
+    #: item's managed drop, which reads the installed type from the Registry, so
+    #: prune spares the name. Alias destinations are held out: nothing drops one,
+    #: so an alias whose name is installed as the other kind is still prune's to
+    #: remove.
+    declared_objects: frozenset[str]
 
 
 @dataclass(frozen=True)
@@ -387,9 +394,16 @@ def render_inventory_prune(
 
     actions: list[InstallAction] = []
     changes: list[TargetChange] = []
+
+    # A name is spared when the keep-set wants it as this kind, and also when a
+    # document declares it as the other one. See :class:`_Managed`.
+    def spared(qualified: str, same_kind) -> bool:
+        folded = qualified.casefold()
+        return folded in same_kind or folded in managed.declared_objects
+
     if target.kind == "warehouse":
         for qualified in inventory.views:
-            if qualified.casefold() not in managed.views:
+            if not spared(qualified, managed.views):
                 schema, name = qualified.split(".", 1)
                 actions.append(
                     _drop_action(
@@ -405,7 +419,7 @@ def render_inventory_prune(
                 )
                 changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
         for qualified in inventory.tables:
-            if qualified.casefold() not in managed.tables:
+            if not spared(qualified, managed.tables):
                 schema, name = qualified.split(".", 1)
                 actions.append(
                     _drop_action(
@@ -443,9 +457,8 @@ def render_inventory_prune(
         }
         for qualified in inventory.views:
             schema, name = qualified.split(".", 1)
-            if (
-                schema.casefold() not in orphan_schemas
-                and qualified.casefold() not in managed.views
+            if schema.casefold() not in orphan_schemas and not spared(
+                qualified, managed.views
             ):
                 actions.append(
                     _drop_action(
@@ -460,9 +473,8 @@ def render_inventory_prune(
                 changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
         for qualified in inventory.tables:
             schema, name = qualified.split(".", 1)
-            if (
-                schema.casefold() not in orphan_schemas
-                and qualified.casefold() not in managed.tables
+            if schema.casefold() not in orphan_schemas and not spared(
+                qualified, managed.tables
             ):
                 actions.append(
                     _drop_action(
@@ -539,6 +551,9 @@ def managed_sets(
     folders = {
         d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET
     }
+    # Taken before the aliases join, because these are the names a managed drop
+    # can remove by their registered type. See :class:`_Managed`.
+    declared_objects = tables | views
     for destination in alias_destinations:
         qualified = destination.object_id.qualified
         if destination.is_files:
@@ -559,6 +574,7 @@ def managed_sets(
         folders=frozenset(name.lower() for name in folders),
         tables=frozenset(name.lower() for name in tables),
         views=frozenset(name.lower() for name in views),
+        declared_objects=frozenset(name.lower() for name in declared_objects),
     )
 
 

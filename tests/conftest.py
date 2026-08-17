@@ -129,9 +129,17 @@ def pytest_runtest_call(item):
 
 
 def pytest_runtest_teardown(item):
-    """Release the ContextVar registry after fixture teardown has finished."""
+    """Release the ContextVar registry after fixture teardown has finished.
 
-    end_test(item._weaver_test_context)
+    A test skipped during setup never started one: the skipping plugin runs
+    before this conftest's setup hook and raises, so there is no token to
+    release. Teardown still runs, and raising here would leave pytest's setup
+    state unfinished for the next module.
+    """
+
+    token = getattr(item, "_weaver_test_context", None)
+    if token is not None:
+        end_test(token)
 
 
 def pytest_terminal_summary(terminalreporter, exitstatus, config):

@@ -24,13 +24,31 @@ from support.weaver_test import weaver_test
 from weaver.build_bundle.prune import _Managed, render_inventory_prune
 
 
-def keep(*, tables=(), views=(), folders=(), schemas=(), folder_schemas=()):
+def keep(
+    *,
+    tables=(),
+    views=(),
+    folders=(),
+    schemas=(),
+    folder_schemas=(),
+    declared_objects=None,
+):
+    """The keep-set, with the document-declared names defaulting to all of them.
+
+    ``declared_objects`` is stated only where the difference is the subject: an
+    alias destination is in ``tables`` or ``views`` and *not* here, because no
+    managed drop can remove one.
+    """
+
     return _Managed(
         schemas=frozenset(schemas),
         folder_schemas=frozenset(folder_schemas),
         folders=frozenset(folders),
         tables=frozenset(tables),
         views=frozenset(views),
+        declared_objects=frozenset(
+            set(tables) | set(views) if declared_objects is None else declared_objects
+        ),
     )
 
 
@@ -70,6 +88,33 @@ def test_an_empty_inventory_prunes_nothing_rather_than_everything():
 
     actions, _ = prune(
         target_inventory(), keep(schemas={"dwg"}, tables={"dwg.customer"})
+    )
+
+    assert actions == ()
+
+
+@weaver_test()
+def test_an_object_declared_under_a_new_kind_is_spared_for_the_managed_drop():
+    """A view the item now declares as a table is a kind change, not an orphan.
+
+    The managed drop reads the installed type from the Registry and removes it
+    strictly, so a prune of the same name would leave that drop with nothing to
+    remove and fail the install.
+    """
+
+    actions, _ = prune(
+        target_inventory(schemas=("DWG",), views=("DWG.Customer",)),
+        keep(schemas={"dwg"}, tables={"dwg.customer"}),
+    )
+
+    assert actions == ()
+
+
+@weaver_test()
+def test_a_table_the_item_now_declares_as_a_view_is_spared_the_same_way():
+    actions, _ = prune(
+        target_inventory(schemas=("DWG",), tables=("DWG.Customer",)),
+        keep(schemas={"dwg"}, views={"dwg.customer"}),
     )
 
     assert actions == ()
@@ -183,6 +228,24 @@ def test_a_warehouse_prune_is_t_sql():
     (action,) = actions
     assert action.executor == "tsql"
     assert payloads[action.payload].decode().startswith("drop table if exists")
+
+
+@weaver_test()
+def test_an_alias_destination_installed_as_the_other_kind_is_still_dropped():
+    """The limit of the kind-change rule, and why it names *documents*.
+
+    A Warehouse alias is materialised by `create or alter view`, which cannot
+    replace a table, and no managed drop covers an alias. So a table standing
+    where the alias belongs is removed here or the install fails on it.
+    """
+
+    actions, _ = prune(
+        target_inventory(schemas=("DWG",), tables=("DWG.PortableCustomer",)),
+        keep(schemas={"dwg"}, views={"dwg.portablecustomer"}, declared_objects=()),
+        target=warehouse(),
+    )
+
+    assert kinds(actions) == ["prune_table"]
 
 
 @weaver_test()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,7 @@ from weaver.build_bundle.models import (
     DROP_FOLDER,
     DROP_TABLE,
     PRUNE_FOLDER,
+    PRUNE_TABLE,
     BuildPlan,
 )
 from weaver.build_bundle.prune import TargetInventory
@@ -479,6 +481,50 @@ def test_an_alias_whose_destination_is_gone_is_remade(tmp_path):
     bundle = _alias_bundle(
         tmp_path, repository, rows=reconciled.catalogue.rows, alias_installed=False
     )
+    assert len(_alias_actions(bundle)) == 1
+
+
+@weaver_test()
+def test_an_alias_destination_installed_as_a_table_is_pruned(tmp_path):
+    """The keep-set wants this name, and prune removes it anyway.
+
+    A Warehouse alias is remade by `create or alter view`, which cannot replace
+    a table, and no managed drop covers an alias destination. So a table
+    standing at the alias's name has to go before the alias stage runs.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    inventories = _alias_inventories(repository, alias_installed=False)
+    reporting = WeaverItemId.parse("Warehouse/Reporting")
+    inventories[reporting] = replace(
+        inventories[reporting],
+        tables=inventories[reporting].tables + ("Sales.PortableCustomer",),
+    )
+    reconciled = reconcile_catalogue_state(
+        Catalogue(
+            rows=_alias_catalogue(repository),
+            present_tables=frozenset({REGISTRY.name}),
+        ),
+        inventories=inventories,
+    )
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=_alias_bindings(),
+        output=Location(str(tmp_path / "bundle")),
+        store=FilesystemStore(),
+        target_inventories=inventories,
+        catalogue=reconciled.catalogue,
+        catalogue_binding=WarehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
+    )
+    pruned = [
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == PRUNE_TABLE and "PortableCustomer" in action.id
+    ]
+
+    assert len(pruned) == 1
     assert len(_alias_actions(bundle)) == 1
 
 
