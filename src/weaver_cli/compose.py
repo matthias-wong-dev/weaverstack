@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import shlex
 import sys
 from pathlib import Path
 
 from weaver.errors import CommandError, WeaverError
 from weaver.sessions.requirements import union
+
+from .commandline import command_words
 
 #: Default composition file in the current directory.
 DEFAULT_FILE = "compose.yml"
@@ -22,9 +23,6 @@ NOT_IN_A_COMPOSITION = {
     "compose": "a composition cannot run another composition",
     "doctor": "run it from a shell; it reports on this machine, not a workspace",
 }
-
-#: Shell syntax that is not valid in a composition entry.
-SHELL_CHARACTERS = ("|", ">", "<", "&", ";", "$", "`", "\n")
 
 
 def load_composition(name: str, *, file: str | None = None) -> tuple[list[str], Path]:
@@ -72,48 +70,14 @@ def _one_entry(entry, *, path: Path, name: str) -> str:
     return text
 
 
-def command_words(entry: str) -> list[str]:
-    """Parse one composition entry into Weaver command arguments."""
+def composition_words(entry: str) -> list[str]:
+    """The arguments one composition entry means.
 
-    for character in SHELL_CHARACTERS:
-        if character in entry:
-            raise CommandError(
-                f"{entry!r} is not a Weaver command: a composition runs Weaver "
-                "commands, not shell lines"
-            )
-    try:
-        words = shlex.split(entry)
-    except ValueError as exc:
-        raise CommandError(f"{entry!r}: {exc}") from exc
-    if not words:
-        raise CommandError("a composition entry cannot be empty")
-    # A composition runs Weaver commands, so the program name is what a reader
-    # already knows. Accepted either way, because a line copied from a terminal
-    # keeps it.
-    rest = words[1:] if words[0] == "weaver" else words
-    if not rest:
-        raise CommandError(f"{entry!r} names no command")
-    refusal = NOT_IN_A_COMPOSITION.get(rest[0])
-    if refusal is not None:
-        raise CommandError(f"{entry!r}: {refusal}")
-    known = weaver_commands()
-    if rest[0] not in known:
-        raise CommandError(
-            f"{entry!r} is not a Weaver command: {rest[0]!r} is not one of "
-            + ", ".join(sorted(known))
-        )
-    return rest
+    The leading ``weaver`` is optional here, because a composition holds
+    nothing else and a line written for the file need not repeat it.
+    """
 
-
-def weaver_commands() -> frozenset[str]:
-    """Every command name the parser accepts at the top level."""
-
-    from .main import build_parser
-
-    for action in build_parser()._subparsers._group_actions:
-        if action.choices:
-            return frozenset(action.choices)
-    return frozenset()
+    return command_words(entry, excluded=NOT_IN_A_COMPOSITION)
 
 
 def run_composition(
@@ -208,7 +172,7 @@ def _warm_for(session, parsed_commands, *, workspace) -> None:
 def _parse(parser: argparse.ArgumentParser, entry: str) -> argparse.Namespace:
     """One entry, through the CLI's own parser."""
 
-    words = command_words(entry)
+    words = composition_words(entry)
     try:
         parsed = parser.parse_args(words)
     except SystemExit as exc:
@@ -268,4 +232,4 @@ def _stopped(number: int, entry: str) -> int:
     return 1
 
 
-__all__ = ["command_words", "load_composition", "run_composition"]
+__all__ = ["composition_words", "load_composition", "run_composition"]
