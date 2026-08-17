@@ -2,25 +2,32 @@
 
 ``weaver session`` and ``weaver compose`` both take command lines a person
 typed or pasted, so they read them the same way: ``shlex`` quoting, an optional
-or required leading ``weaver``, and the command names the top-level parser
-actually accepts. A line copied from a terminal, a composition file or the
-documentation means the same thing in all three places.
+or required leading ``weaver``, and the few commands the context cannot run.
+A line copied from a terminal, a composition file or the documentation means
+the same thing in all three places.
+
+What a line *means* is argparse's answer, not this module's. Nothing here
+decides whether a command exists or whether its options are valid; the words go
+to the CLI's own parser, so ``weaver --help`` and ``weaver --version`` behave at
+a prompt as they do in a terminal.
 """
 
 from __future__ import annotations
 
 import argparse
 import shlex
-from typing import Iterable, Mapping
+from typing import Mapping
 
 from weaver.errors import CommandError
 
 #: The program name a command line may carry.
 PROGRAM = "weaver"
 
-#: Shell syntax a Weaver command line does not carry. Weaver commands are run
-#: by the CLI's own handlers, so there is no shell to interpret these.
-SHELL_CHARACTERS = ("|", ">", "<", "&", ";", "$", "`", "\n")
+#: Shell operators a Weaver command line does not carry. Weaver commands are
+#: run by the CLI's own handlers, so there is no shell to interpret these —
+#: but only outside quoting, where they would be operators. Quoted, they are
+#: ordinary characters in an argument such as "Research & Development".
+SHELL_OPERATORS = ("|", ">", "<", "&", ";", "$", "`")
 
 
 def command_names(parser: argparse.ArgumentParser) -> frozenset[str]:
@@ -32,36 +39,28 @@ def command_names(parser: argparse.ArgumentParser) -> frozenset[str]:
     return frozenset()
 
 
-def weaver_commands() -> frozenset[str]:
-    """Every command name the Weaver CLI accepts at the top level."""
-
-    from .main import build_parser
-
-    return command_names(build_parser())
-
-
 def command_words(
     line: str,
     *,
-    known: Iterable[str] | None = None,
     require_program: bool = False,
     excluded: Mapping[str, str] | None = None,
 ) -> list[str]:
     """The arguments one written Weaver command line means.
 
-    ``known`` is the set of command names to accept, defaulting to the CLI's
-    own. ``require_program`` demands the leading ``weaver``; without it the
-    program name is optional. ``excluded`` maps a command name to the reason it
-    cannot run in this context.
+    ``require_program`` demands the leading ``weaver``; without it the program
+    name is optional. ``excluded`` maps a command name to the reason it cannot
+    run in this context.
     """
 
     text = line.strip()
-    for character in SHELL_CHARACTERS:
-        if character in text:
-            raise CommandError(
-                f"{text!r} is not a Weaver command line. Shell syntax such as "
-                "|, >, && and $ is not accepted."
-            )
+    if "\n" in text:
+        raise CommandError("a Weaver command line is one line")
+    operator = _unquoted_operator(text)
+    if operator is not None:
+        raise CommandError(
+            f"{text!r} is not a Weaver command line. Shell syntax such as "
+            f"{operator} is not accepted; quote it to pass it as an argument."
+        )
     try:
         words = shlex.split(text)
     except ValueError as exc:
@@ -69,38 +68,50 @@ def command_words(
     if not words:
         raise CommandError("a Weaver command line cannot be empty")
 
-    accepted = frozenset(known) if known is not None else weaver_commands()
     if words[0] == PROGRAM:
         rest = words[1:]
-        if not rest:
-            raise CommandError(f"{text!r} names no command")
     elif require_program:
-        if words[0] in accepted:
-            raise CommandError(
-                f"Commands start with `{PROGRAM}`. Write: {PROGRAM} {text}"
-            )
-        raise CommandError(_not_a_command(words[0], accepted))
+        raise CommandError(f"Commands start with `{PROGRAM}`. Write: {PROGRAM} {text}")
     else:
         rest = words
+    if not rest:
+        raise CommandError(f"{text!r} names no command")
 
     refusal = (excluded or {}).get(rest[0])
     if refusal is not None:
         raise CommandError(f"{rest[0]}: {refusal}")
-    if rest[0] not in accepted:
-        raise CommandError(_not_a_command(rest[0], accepted))
     return rest
 
 
-def _not_a_command(word: str, accepted: frozenset[str]) -> str:
-    return f"{word!r} is not a Weaver command. Available: " + ", ".join(
-        sorted(accepted)
-    )
+def _unquoted_operator(text: str) -> str | None:
+    """The first shell operator standing outside quoting, where it would be one.
+
+    Quoting follows :mod:`shlex` in POSIX mode, which is what splits the line
+    afterwards: either quote character opens a quoted run, and a backslash
+    escapes the next character outside single quotes.
+    """
+
+    quote = ""
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character == "\\" and quote != "'":
+            index += 2
+            continue
+        if quote:
+            if character == quote:
+                quote = ""
+        elif character in "\"'":
+            quote = character
+        elif character in SHELL_OPERATORS:
+            return character
+        index += 1
+    return None
 
 
 __all__ = [
     "PROGRAM",
-    "SHELL_CHARACTERS",
+    "SHELL_OPERATORS",
     "command_names",
     "command_words",
-    "weaver_commands",
 ]

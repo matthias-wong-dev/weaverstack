@@ -212,6 +212,23 @@ def test_a_bare_command_in_a_pasted_block_stops_it(recorded, capsys):
 
 
 @weaver_test()
+def test_a_help_line_in_a_pasted_block_does_not_stop_it(recorded, capsys):
+    """`--help` is an answer rather than a failure, so the block carries on."""
+
+    calls, parser, _, history = recorded
+    keys = (
+        pasted("weaver build --help", "weaver load Lakehouse/Landing") + f"exit{ENTER}"
+    )
+
+    with ConsoleSession() as session:
+        with driven(keys, session=session, parser=parser, history=history):
+            pass
+
+    assert [parsed.command for parsed in calls] == ["load"]
+    assert "usage: weaver build" in capsys.readouterr().out
+
+
+@weaver_test()
 def test_the_prompt_survives_a_failed_block_and_takes_the_next_one(recorded):
     calls, parser, handler, history = recorded
     handler.status = lambda parsed: 1 if len(calls) == 1 else 0

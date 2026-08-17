@@ -74,7 +74,6 @@ def run_shell(
 def _loop(session, parser, console) -> int:
     """Read an entry, run it, settle the terminal, ask again."""
 
-    known = command_names(parser)
     while True:
         try:
             entry = console.read()
@@ -87,7 +86,7 @@ def _loop(session, parser, console) -> int:
 
         if entry is None:
             return 0
-        outcome = _run_entry(session, parser, entry, known=known)
+        outcome = _run_entry(session, parser, entry)
         # The shell owns the transition from output back to the prompt: the
         # renderer's transient line is taken down here rather than by whichever
         # command drew it.
@@ -98,7 +97,7 @@ def _loop(session, parser, console) -> int:
             return 0
 
 
-def _run_entry(session, parser, entry: str, *, known) -> _Outcome:
+def _run_entry(session, parser, entry: str) -> _Outcome:
     """Run every command line in one prompt entry, in order.
 
     A pasted block is several complete Weaver commands, one per line, and a
@@ -118,12 +117,7 @@ def _run_entry(session, parser, entry: str, *, known) -> _Outcome:
             ran = True
             continue
         try:
-            words = command_words(
-                text,
-                known=known,
-                require_program=True,
-                excluded=NOT_IN_A_SESSION,
-            )
+            words = command_words(text, require_program=True, excluded=NOT_IN_A_SESSION)
         except CommandError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return _Outcome(ran=True)
@@ -138,10 +132,12 @@ def _run_one(session, parser, words: list[str]) -> bool:
 
     try:
         parsed = parser.parse_args(words)
-    except SystemExit:
-        # argparse has already printed what was wrong with the line. A usage
-        # error is not a reason to throw away a Livy session.
-        return False
+    except SystemExit as leaving:
+        # argparse has answered the line itself: `--help` and `--version` print
+        # and exit zero, a usage error prints and exits non-zero. Either way it
+        # has said what it needed to, and neither is a reason to throw away a
+        # Livy session.
+        return not leaving.code
 
     handler = getattr(parsed, "handler", None)
     if handler is None:

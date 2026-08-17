@@ -148,15 +148,34 @@ def test_a_bare_command_says_how_to_write_it(recorded, capsys):
 
 
 @weaver_test()
-def test_a_word_that_is_not_a_command_lists_the_ones_that_are(recorded, capsys):
+def test_a_word_that_is_not_a_command_is_rejected_by_the_parser(recorded, capsys):
+    """The prompt does not re-derive argparse's answer; it lets argparse give it."""
+
     seen, factory = recorded
 
-    _run("frobnicate\nexit\n", factory)
+    _run("weaver frobnicate\nweaver build .\nexit\n", factory)
 
     reported = capsys.readouterr().err
-    assert "not a Weaver command" in reported
-    assert "build" in reported
-    assert seen == []
+    assert "invalid choice" in reported, "argparse said what was wrong"
+    assert len(seen) == 1, "and the good command still ran"
+
+
+@pytest.mark.parametrize(
+    "line, answer",
+    [("weaver --help", "usage:"), ("weaver --version", "weaverstack")],
+)
+@weaver_test()
+def test_a_top_level_option_behaves_as_it_does_in_a_terminal(
+    line, answer, every_command, capsys
+):
+    """`weaver --help` and `weaver --version` are ordinary CLI invocations."""
+
+    calls, factory = every_command
+
+    assert _run(f"{line}\nexit\n", factory) == 0
+
+    assert answer in capsys.readouterr().out
+    assert calls == [], "the option was the whole command"
 
 
 @weaver_test()
@@ -166,6 +185,17 @@ def test_quoted_arguments_survive_the_prompt(every_command):
     _run('weaver build . --workspace "35 South Data"\nexit\n', factory)
 
     assert calls[0].workspace == "35 South Data"
+
+
+@weaver_test()
+def test_a_quoted_shell_character_is_part_of_a_workspace_name(every_command):
+    """`Research & Development` is a workspace name, not a shell operator."""
+
+    calls, factory = every_command
+
+    _run('weaver build . --workspace "Research & Development"\nexit\n', factory)
+
+    assert calls[0].workspace == "Research & Development"
 
 
 @weaver_test()
