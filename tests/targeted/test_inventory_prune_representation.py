@@ -24,13 +24,31 @@ from support.weaver_test import weaver_test
 from weaver.build_bundle.prune import _Managed, render_inventory_prune
 
 
-def keep(*, tables=(), views=(), folders=(), schemas=(), folder_schemas=()):
+def keep(
+    *,
+    tables=(),
+    views=(),
+    folders=(),
+    schemas=(),
+    folder_schemas=(),
+    declared_objects=None,
+):
+    """The keep-set, with the document-declared names defaulting to all of them.
+
+    ``declared_objects`` is stated only where the difference is the subject: an
+    alias destination is in ``tables`` or ``views`` and *not* here, because no
+    managed drop can remove one.
+    """
+
     return _Managed(
         schemas=frozenset(schemas),
         folder_schemas=frozenset(folder_schemas),
         folders=frozenset(folders),
         tables=frozenset(tables),
         views=frozenset(views),
+        declared_objects=frozenset(
+            set(tables) | set(views) if declared_objects is None else declared_objects
+        ),
     )
 
 
@@ -210,6 +228,24 @@ def test_a_warehouse_prune_is_t_sql():
     (action,) = actions
     assert action.executor == "tsql"
     assert payloads[action.payload].decode().startswith("drop table if exists")
+
+
+@weaver_test()
+def test_an_alias_destination_installed_as_the_other_kind_is_still_dropped():
+    """The limit of the kind-change rule, and why it names *documents*.
+
+    A Warehouse alias is materialised by `create or alter view`, which cannot
+    replace a table, and no managed drop covers an alias. So a table standing
+    where the alias belongs is removed here or the install fails on it.
+    """
+
+    actions, _ = prune(
+        target_inventory(schemas=("DWG",), tables=("DWG.PortableCustomer",)),
+        keep(schemas={"dwg"}, views={"dwg.portablecustomer"}, declared_objects=()),
+        target=warehouse(),
+    )
+
+    assert kinds(actions) == ["prune_table"]
 
 
 @weaver_test()

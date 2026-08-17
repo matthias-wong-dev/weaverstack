@@ -182,9 +182,7 @@ def _installed_state(repository):
             for identity, source in documents
             if not identity.is_files and source.kind == VIEW
         ),
-        files=tuple(
-            artefact.target_path for artefact in artefacts if artefact.is_file
-        ),
+        files=tuple(artefact.target_path for artefact in artefacts if artefact.is_file),
         procedures=tuple(
             artefact.identity.object_id.qualified
             for artefact in artefacts
