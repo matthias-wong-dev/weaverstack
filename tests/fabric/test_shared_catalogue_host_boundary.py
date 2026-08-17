@@ -101,7 +101,7 @@ def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
     assert certified[0]["n"] > 0
 
 
-@weaver_test(hosted=True)
+@weaver_test(remote=True, resources={"tds"})
 def test_the_catalogue_warehouse_holds_both_schemas(neighbour):
     schemas = {
         str(row["SCHEMA_NAME"])
