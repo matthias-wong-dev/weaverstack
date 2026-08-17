@@ -19,7 +19,7 @@ import time
 import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -724,16 +724,46 @@ def fabric_initialise_catalogue(fabric_workspace, weaver_session):
 
 
 @pytest.fixture(scope="module")
-def clean_disposable_warehouse(disposable_warehouse):
+def clean_disposable_warehouse(session_disposable_warehouse):
     from weaver.physical_wipe import wipe_sql_target
 
     wipe_sql_target(
-        disposable_warehouse.target,
-        disposable_warehouse.workspace,
-        sql=disposable_warehouse.executor,
+        session_disposable_warehouse.target,
+        session_disposable_warehouse.workspace,
+        sql=session_disposable_warehouse.executor,
     )
 
-    yield disposable_warehouse
+    yield session_disposable_warehouse
+
+
+@pytest.fixture(scope="session")
+def warehouse_session(fabric_workspace):
+    """One desktop Session for Warehouse-only primitives, without Livy."""
+
+    from weaver.sessions import ConsoleSession
+
+    with ConsoleSession(workspace=fabric_workspace, progress=False) as session:
+        yield register_session(session)
+
+
+@pytest.fixture(scope="session")
+def session_disposable_warehouse(disposable_warehouse, warehouse_session):
+    """The fixed Warehouse reached through the suite's TDS Session."""
+
+    executor = warehouse_session.sql_executor(
+        disposable_warehouse.target, workspace=disposable_warehouse.workspace
+    )
+    return replace(disposable_warehouse, executor=executor)
+
+
+@pytest.fixture(scope="session")
+def session_catalogue_sql(fabric_workspace, warehouse_session):
+    """The catalogue Warehouse capability, acquired before a test claim runs."""
+
+    from weaver.targets import WarehouseTarget
+
+    target = WarehouseTarget(warehouse=fabric_workspace.catalogue_item)
+    return warehouse_session.sql_executor(target, workspace=fabric_workspace)
 
 
 @dataclass(frozen=True)
@@ -761,7 +791,7 @@ class WarehousePrimitiveEstate:
 
 
 @pytest.fixture(scope="session")
-def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
+def warehouse_primitive_estate(session_disposable_warehouse, tmp_path_factory):
     """Build one Warehouse primitive estate shared by three claim modules."""
 
     from factories import (
@@ -782,20 +812,17 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
     from weaver.physical_wipe import wipe_sql_target
     from weaver.targets import ItemRef
 
-    wipe_sql_target(
-        disposable_warehouse.target,
-        disposable_warehouse.workspace,
-        sql=disposable_warehouse.executor,
-    )
+    warehouse = session_disposable_warehouse
+    wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
     target = ResolvedTarget(
         bound=bound_target(
             id="target-1",
             kind="warehouse",
-            item_id=disposable_warehouse.item.name,
+            item_id=warehouse.item.name,
             logical_item_name="Reporting",
             logical_item_type="Warehouse",
         ),
-        lakehouse=ItemRef(disposable_warehouse.item.name),
+        lakehouse=ItemRef(warehouse.item.name),
         location=None,
     )
 
@@ -812,7 +839,7 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
                 else target_inventory(
                     target_id="target-1",
                     kind="warehouse",
-                    target_name=disposable_warehouse.item.name,
+                    target_name=warehouse.item.name,
                 )
             ),
             target_by_item={identity: target.bound},
@@ -828,7 +855,7 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
             resolver=None,
             store=None,
             target=target,
-            sql=disposable_warehouse.executor,
+            sql=warehouse.executor,
             targets={target.bound.id: target},
         )
         results = []
@@ -879,7 +906,7 @@ def warehouse_primitive_estate(disposable_warehouse, tmp_path_factory):
     assert not failures, failures
 
     return WarehousePrimitiveEstate(
-        warehouse=disposable_warehouse,
+        warehouse=warehouse,
         repository=repository,
         run=run,
         target=target,

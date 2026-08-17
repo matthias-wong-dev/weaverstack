@@ -408,8 +408,7 @@ class ConsoleSession(Session):
         parameters: Sequence[Any] | None = None,
     ) -> None:
         executor = self.scope(workspace).sql_for(target)
-        with self.telemetry.external("tds", "execute"):
-            executor.execute(statement, parameters or ())
+        executor.execute(statement, parameters or ())
 
     def query_tsql(
         self,
@@ -420,8 +419,7 @@ class ConsoleSession(Session):
         parameters: Sequence[Any] | None = None,
     ) -> Any:
         executor = self.scope(workspace).sql_for(target)
-        with self.telemetry.external("tds", "query"):
-            return executor.query(statement, parameters or ())
+        return executor.query(statement, parameters or ())
 
     def sql_executor(self, target: Any, *, workspace: Workspace | None = None):
         """The reused TDS capability for one Warehouse.
@@ -745,14 +743,18 @@ class ConsoleScope(WorkspaceScope):
 
     def _acquire_sql(self, warehouse: WarehouseTarget):
         from ..fabric import desktop_sql_executor
+        from .sql import SessionSqlExecutor
 
         if self._credential is None:
             self.token_provider()
-        return desktop_sql_executor(
-            warehouse,
-            self.workspace,
-            credential=self._credential,
-            resolver=self.resolver,
+        return SessionSqlExecutor(
+            desktop_sql_executor(
+                warehouse,
+                self.workspace,
+                credential=self._credential,
+                resolver=self.resolver,
+            ),
+            self.telemetry,
         )
 
 

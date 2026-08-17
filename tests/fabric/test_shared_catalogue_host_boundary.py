@@ -42,20 +42,10 @@ def neighbour(catalogue_sql):
 
 
 @pytest.fixture
-def catalogue_sql(fabric_workspace):
+def catalogue_sql(session_catalogue_sql):
     """TDS against the Warehouse the catalogue lives in."""
 
-    from weaver.fabric import FabricResolver, desktop_sql_executor
-    from weaver.targets import WarehouseTarget
-
-    target = WarehouseTarget(warehouse=fabric_workspace.catalogue_item)
-    executor = desktop_sql_executor(
-        target, fabric_workspace, resolver=FabricResolver(fabric_workspace)
-    )
-    try:
-        yield executor
-    finally:
-        executor.close()
+    return session_catalogue_sql
 
 
 def _objects(sql, schema: str) -> set[str]:

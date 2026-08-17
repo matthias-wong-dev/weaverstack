@@ -129,3 +129,32 @@ def test_superseded_test_declaration_machinery_is_absent():
     root_harness = (TESTS / "conftest.py").read_text()
     assert "_known_sessions" not in harness + root_harness
     assert "Session.__init__" not in harness + root_harness
+
+
+@weaver_test()
+def test_fabric_claims_get_tds_from_a_session():
+    offenders = []
+    for path in sorted((TESTS / "fabric").glob("test_*.py")):
+        tree = ast.parse(path.read_text())
+        imported_names = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name == "desktop_sql_executor"
+        }
+        if any(
+            isinstance(node, ast.Call)
+            and (
+                isinstance(node.func, ast.Name)
+                and node.func.id in imported_names
+                or isinstance(node.func, ast.Attribute)
+                and node.func.attr == "desktop_sql_executor"
+            )
+            for node in ast.walk(tree)
+        ):
+            offenders.append(path.relative_to(ROOT))
+    assert not offenders, (
+        "Fabric test claims must use Session.sql_executor() so TDS telemetry is "
+        f"observable: {offenders}"
+    )

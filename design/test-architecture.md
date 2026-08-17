@@ -88,6 +88,11 @@ Ordinary timings are not resource events. Production boundaries call
 `Session.telemetry.external(...)` explicitly, so a timing name cannot
 accidentally become a resource declaration.
 
+Warehouse work obtained with `Session.sql_executor()` remains Session-owned:
+queries, scripts, result-set reads and procedure calls all emit TDS events.
+Fabric test claims do not construct a desktop SQL executor directly, because
+that connection has no active test Session to receive its telemetry.
+
 For each test body, pytest compares the declared resources exactly with the
 resources emitted by its registered Sessions:
 

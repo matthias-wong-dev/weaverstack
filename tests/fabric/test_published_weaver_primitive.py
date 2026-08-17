@@ -336,7 +336,7 @@ def test_the_session_native_store_reads_back_what_it_wrote(
 # a store and a resolver completes".
 
 
-@weaver_test(hosted=True)
+@weaver_test(hosted=True, resources={"tds"})
 def test_a_locally_generated_bundle_installs_inside_fabric(
     tmp_path,
     fabric_workspace,
@@ -344,6 +344,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     fabric_staging_lakehouse,
     clean_disposable_warehouse,
     livy_session,
+    session_catalogue_sql,
 ):
     """Weaver installing a Warehouse from inside a session, on its own identity.
 
@@ -421,20 +422,9 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
             # inventory would be a lie rather than a simplification — its
             # tables are already there, and claiming otherwise makes the planner
             # emit creates the session then rejects.
-            from weaver.fabric import desktop_sql_executor
-            from weaver.targets import WarehouseTarget
-
-            catalogue_sql = desktop_sql_executor(
-                WarehouseTarget(warehouse=fabric_workspace.catalogue_item),
-                fabric_workspace,
-                resolver=resolver,
+            inventories[binding.item] = read_warehouse_inventory(
+                bound, sql=session_catalogue_sql
             )
-            try:
-                inventories[binding.item] = read_warehouse_inventory(
-                    bound, sql=catalogue_sql
-                )
-            finally:
-                catalogue_sql.close()
     generate_item_build_bundle(
         repository,
         bindings=bindings,

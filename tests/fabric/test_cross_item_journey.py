@@ -23,6 +23,8 @@ pytestmark = pytest.mark.parametrize(
 )
 
 
-@weaver_test(integration=True)
-def test_a_lakehouse_and_the_warehouse_that_reports_on_it(fabric_cross_item_journey):
+@weaver_test(integration=True, resources={"tds"})
+def test_a_lakehouse_and_the_warehouse_that_reports_on_it(
+    fabric_cross_item_journey, warehouse_session
+):
     drive_across_items(fabric_cross_item_journey)
