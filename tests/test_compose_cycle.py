@@ -19,7 +19,12 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
-from weaver_cli.compose import command_words, load_composition, run_composition
+from weaver_cli.compose import (
+    _parse,
+    composition_words,
+    load_composition,
+    run_composition,
+)
 from weaver_cli.main import build_parser
 
 
@@ -127,7 +132,10 @@ def test_an_empty_composition_is_refused(tmp_path):
 
 @weaver_test()
 def test_an_entry_is_a_weaver_command_line():
-    assert command_words("weaver load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
+    assert composition_words("weaver load Lakehouse/Sales") == [
+        "load",
+        "Lakehouse/Sales",
+    ]
 
 
 @weaver_test()
@@ -138,23 +146,14 @@ def test_the_weaver_prefix_is_optional():
     line written for the file need not.
     """
 
-    assert command_words("load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
-
-
-@weaver_test()
-def test_an_entry_that_names_no_weaver_command_says_which_ones_exist():
-    with pytest.raises(CommandError) as raised:
-        command_words("rm -rf /")
-
-    assert "not a Weaver command" in str(raised.value)
-    assert "build" in str(raised.value)
+    assert composition_words("load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
 
 
 @weaver_test()
 def test_quoted_arguments_survive_exactly():
     """A workspace with a space in it is ordinary, and must not become two."""
 
-    words = command_words('weaver build . --workspace-config "my config.yml"')
+    words = composition_words('weaver build . --workspace-config "my config.yml"')
 
     assert words == ["build", ".", "--workspace-config", "my config.yml"]
 
@@ -162,8 +161,6 @@ def test_quoted_arguments_survive_exactly():
 @pytest.mark.parametrize(
     "entry",
     [
-        "rm -rf /",
-        "python -c 'print(1)'",
         "weaver load Lakehouse/Sales | tee log",
         "weaver load Lakehouse/Sales && weaver test Lakehouse/Sales",
         "weaver load Lakehouse/Sales > out.txt",
@@ -176,14 +173,27 @@ def test_anything_shell_shaped_is_refused(entry):
     """A composition runs Weaver commands. It is not a place to put a script."""
 
     with pytest.raises(CommandError):
-        command_words(entry)
+        composition_words(entry)
+
+
+@pytest.mark.parametrize("entry", ["rm -rf /", "python -c 'print(1)'"])
+@weaver_test()
+def test_an_entry_naming_another_program_is_refused_by_the_parser(entry, recorded):
+    """Whether a word is a command is argparse's answer, so it gives it."""
+
+    _, parser_factory, _ = recorded
+
+    with pytest.raises(CommandError) as raised:
+        _parse(parser_factory(), entry)
+
+    assert "not a valid Weaver command" in str(raised.value)
 
 
 @pytest.mark.parametrize("command", ["session", "compose", "doctor"])
 @weaver_test()
 def test_the_commands_a_composition_cannot_contain(command):
     with pytest.raises(CommandError) as raised:
-        command_words(f"weaver {command} dev")
+        composition_words(f"weaver {command} dev")
 
     assert "cannot" in str(raised.value) or "shell" in str(raised.value)
 

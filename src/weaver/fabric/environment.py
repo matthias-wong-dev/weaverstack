@@ -83,9 +83,9 @@ def environment_dependencies(root: Path | None = None) -> list[str]:
 #: Packages a desktop needs to reach Fabric, and Fabric itself never imports.
 #: They are ordinary runtime dependencies — `pip install weaverstack` gives you
 #: a working CLI — but installing them *into* a Fabric Environment would ship
-#: an HTTP stack, a build frontend and a readline shim to a Spark image that
-#: has no use for any of them.
-DESKTOP_ONLY = frozenset({"azure-identity", "requests", "build", "pyreadline3"})
+#: an HTTP stack, a build frontend and a terminal line editor to a Spark image
+#: that has no use for any of them.
+DESKTOP_ONLY = frozenset({"azure-identity", "requests", "build", "prompt_toolkit"})
 
 
 def missing_from_environment(root: Path | None = None) -> list[str]:

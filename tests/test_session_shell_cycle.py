@@ -4,6 +4,10 @@ The claim is about what survives between commands, so these tests drive the
 shell with a scripted stdin and watch what the handlers receive. No workspace is
 resolved and nothing physical is acquired: the Session's job here is to *be* the
 same object each time, and to still be usable after a command has failed.
+
+Commands are written as they are everywhere else — ``weaver build .`` — because
+the session runs the ordinary CLI, not a dialect of it. The terminal behaviour
+of the prompt itself is proved in ``test_session_terminal_boundary``.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ from support.workspaces import given_workspace
 
 from weaver.errors import BuildError
 from weaver.sessions import ConsoleSession
-from weaver_cli.main import _resolve_workspace, _with_command_overrides
+from weaver_cli.main import _resolve_workspace, _with_command_overrides, handle_compose
 from weaver_cli.shell import run_shell
 
 
@@ -66,7 +70,7 @@ def _run(script: str, factory, workspace=None, environment="weaver") -> int:
 def test_every_command_runs_in_the_same_session(recorded):
     seen, factory = recorded
 
-    _run("build .\nbuild .\nexit\n", factory)
+    _run("weaver build .\nweaver build .\nexit\n", factory)
 
     assert len(seen) == 2
     assert seen[0].session is seen[1].session
@@ -77,7 +81,7 @@ def test_every_command_runs_in_the_same_session(recorded):
 def test_the_session_closes_when_the_shell_leaves(recorded):
     seen, factory = recorded
 
-    _run("build .\nexit\n", factory)
+    _run("weaver build .\nexit\n", factory)
 
     assert seen[0].session.closed
 
@@ -86,8 +90,198 @@ def test_the_session_closes_when_the_shell_leaves(recorded):
 def test_end_of_input_leaves_as_cleanly_as_exit(recorded):
     seen, factory = recorded
 
-    assert _run("build .\n", factory) == 0
+    assert _run("weaver build .\n", factory) == 0
     assert seen[0].session.closed
+
+
+# --- the command language is the CLI's -----------------------------------------
+
+
+@pytest.fixture
+def every_command(monkeypatch):
+    """The real parser, with every handler replaced by one that records."""
+
+    from weaver_cli.main import build_parser
+
+    calls: list = []
+    parser = build_parser()
+
+    def record(parsed):
+        calls.append(parsed)
+        return 0
+
+    for action in parser._subparsers._group_actions[0].choices.values():
+        action.set_defaults(handler=record)
+    return calls, (lambda: parser)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "weaver build . --bind Lakehouse/Sales=Sales",
+        "weaver load Lakehouse/Sales Warehouse/Reporting",
+        "weaver test Warehouse/Reporting",
+        "weaver wipe Lakehouse/Sales --yes",
+    ],
+)
+@weaver_test()
+def test_an_ordinary_weaver_command_line_runs_unchanged(line, every_command):
+    """The acceptance criterion: a line copied from a terminal is the line here."""
+
+    calls, factory = every_command
+
+    _run(f"{line}\nexit\n", factory)
+
+    assert len(calls) == 1, "the pasted command line ran"
+    assert calls[0].command == line.split()[1]
+
+
+@weaver_test()
+def test_a_bare_command_says_how_to_write_it(recorded, capsys):
+    seen, factory = recorded
+
+    _run("build .\nweaver build .\nexit\n", factory)
+
+    reported = capsys.readouterr().err
+    assert "weaver build ." in reported, "the message shows the line to write"
+    assert len(seen) == 1, "only the canonical spelling ran"
+
+
+@weaver_test()
+def test_a_word_that_is_not_a_command_is_rejected_by_the_parser(recorded, capsys):
+    """The prompt does not re-derive argparse's answer; it lets argparse give it."""
+
+    seen, factory = recorded
+
+    _run("weaver frobnicate\nweaver build .\nexit\n", factory)
+
+    reported = capsys.readouterr().err
+    assert "invalid choice" in reported, "argparse said what was wrong"
+    assert len(seen) == 1, "and the good command still ran"
+
+
+@pytest.mark.parametrize(
+    "line, answer",
+    [("weaver --help", "usage:"), ("weaver --version", "weaverstack")],
+)
+@weaver_test()
+def test_a_top_level_option_behaves_as_it_does_in_a_terminal(
+    line, answer, every_command, capsys
+):
+    """`weaver --help` and `weaver --version` are ordinary CLI invocations."""
+
+    calls, factory = every_command
+
+    assert _run(f"{line}\nexit\n", factory) == 0
+
+    assert answer in capsys.readouterr().out
+    assert calls == [], "the option was the whole command"
+
+
+@weaver_test()
+def test_quoted_arguments_survive_the_prompt(every_command):
+    calls, factory = every_command
+
+    _run('weaver build . --workspace "35 South Data"\nexit\n', factory)
+
+    assert calls[0].workspace == "35 South Data"
+
+
+@pytest.mark.parametrize(
+    "line, repository",
+    [
+        (r"weaver build C:\Users\Matthias\repo", r"C:\Users\Matthias\repo"),
+        (
+            r'weaver build "C:\Users\Matthias Wong\repo"',
+            r"C:\Users\Matthias Wong\repo",
+        ),
+    ],
+)
+@weaver_test()
+def test_a_windows_path_reaches_the_handler_intact(line, repository, every_command):
+    """The line a reader copies out of PowerShell is the line that runs."""
+
+    calls, factory = every_command
+
+    _run(f"{line}\nexit\n", factory)
+
+    assert calls[0].repository == repository
+
+
+@weaver_test()
+def test_a_quoted_shell_character_is_part_of_a_workspace_name(every_command):
+    """`Research & Development` is a workspace name, not a shell operator."""
+
+    calls, factory = every_command
+
+    _run('weaver build . --workspace "Research & Development"\nexit\n', factory)
+
+    assert calls[0].workspace == "Research & Development"
+
+
+@weaver_test()
+def test_the_available_commands_come_from_the_parser(recorded, capsys):
+    """No hand-written list: what the session offers is what the parser has."""
+
+    from weaver_cli.main import build_parser
+    from weaver_cli.shell import NOT_IN_A_SESSION, _available
+
+    expected = sorted(
+        set(build_parser()._subparsers._group_actions[0].choices)
+        - set(NOT_IN_A_SESSION)
+    )
+
+    assert _available(build_parser()) == ", ".join(expected)
+    assert "compose" in expected, "a composition runs from inside a session"
+
+
+# --- a composition run from the prompt ---------------------------------------
+
+
+COMPOSITION = """\
+compose:
+  dev:
+    - weaver build ./repository --bind Lakehouse/Sales=Sales
+    - weaver load Warehouse/Reporting
+"""
+
+
+@weaver_test()
+def test_a_composition_runs_from_the_prompt_in_the_session_already_open(
+    tmp_path, every_command, monkeypatch
+):
+    """`weaver compose` is an ordinary command, and joins the open Session."""
+
+    from importlib import import_module
+
+    from weaver.sessions import host
+
+    # `weaver_cli.main` the module, not the `main` function the package exports.
+    cli = import_module("weaver_cli.main")
+    calls, factory = every_command
+    path = tmp_path / "compose.yml"
+    path.write_text(COMPOSITION, encoding="utf-8")
+
+    opened = []
+    monkeypatch.setattr(
+        host, "session_for", lambda workspace, **kwargs: opened.append(workspace)
+    )
+
+    # `compose` keeps its own handler; the commands it names are recorded.
+    parser = factory()
+    parser._subparsers._group_actions[0].choices["compose"].set_defaults(
+        handler=handle_compose
+    )
+    monkeypatch.setattr(cli, "build_parser", lambda: parser)
+    _run(
+        f'weaver compose dev --file "{path.as_posix()}" --yes\nexit\n',
+        lambda: parser,
+    )
+
+    assert [parsed.command for parsed in calls] == ["build", "load"]
+    assert len({id(parsed.session) for parsed in calls}) == 1
+    assert isinstance(calls[0].session, ConsoleSession)
+    assert opened == [], "the composition opened no second Session"
 
 
 # --- an ordinary failure is not the end of the session -----------------------
@@ -97,7 +291,7 @@ def test_end_of_input_leaves_as_cleanly_as_exit(recorded):
 def test_a_command_that_fails_does_not_discard_the_session(recorded, capsys):
     seen, factory = recorded
 
-    _run("build . --fail\nbuild .\nexit\n", factory)
+    _run("weaver build . --fail\nweaver build .\nexit\n", factory)
 
     assert len(seen) == 2, "the second command ran after the first failed"
     assert seen[0].session is seen[1].session, "and in the same session"
@@ -108,7 +302,7 @@ def test_a_command_that_fails_does_not_discard_the_session(recorded, capsys):
 def test_a_usage_error_does_not_discard_the_session(recorded, capsys):
     seen, factory = recorded
 
-    _run("nonsense --wat\nbuild .\nexit\n", factory)
+    _run("weaver build --wat\nweaver build .\nexit\n", factory)
 
     assert len(seen) == 1, "the good command still ran"
 
@@ -117,17 +311,65 @@ def test_a_usage_error_does_not_discard_the_session(recorded, capsys):
 def test_an_unparseable_line_is_reported_and_survived(recorded, capsys):
     seen, factory = recorded
 
-    _run("build 'unterminated\nbuild .\nexit\n", factory)
+    _run("weaver build 'unterminated\nweaver build .\nexit\n", factory)
 
     assert len(seen) == 1
     assert "error:" in capsys.readouterr().err
 
 
 @weaver_test()
+def test_an_unexpected_defect_does_not_discard_the_session(capsys):
+    """A command that raises something nobody planned for still leaves a prompt."""
+
+    seen = []
+
+    def handler(args):
+        seen.append(args)
+        if len(seen) == 1:
+            raise ZeroDivisionError("a defect, not a Weaver error")
+        return 0
+
+    def factory():
+        parser = argparse.ArgumentParser(prog="weaver")
+        commands = parser.add_subparsers(dest="command")
+        one = commands.add_parser("build")
+        one.add_argument("repository", nargs="?")
+        one.set_defaults(handler=handler)
+        return parser
+
+    assert _run("weaver build .\nweaver build .\nexit\n", factory) == 0
+    assert len(seen) == 2
+    assert "ZeroDivisionError" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_an_interrupted_command_leaves_the_session_usable(capsys):
+    seen = []
+
+    def handler(args):
+        seen.append(args)
+        if len(seen) == 1:
+            raise KeyboardInterrupt
+        return 0
+
+    def factory():
+        parser = argparse.ArgumentParser(prog="weaver")
+        commands = parser.add_subparsers(dest="command")
+        one = commands.add_parser("build")
+        one.add_argument("repository", nargs="?")
+        one.set_defaults(handler=handler)
+        return parser
+
+    assert _run("weaver build .\nweaver build .\nexit\n", factory) == 0
+    assert len(seen) == 2
+    assert "interrupted" in capsys.readouterr().err
+
+
+@weaver_test()
 def test_a_session_cannot_be_started_inside_a_session(recorded, capsys):
     seen, factory = recorded
 
-    _run("session\nexit\n", factory)
+    _run("weaver session\nexit\n", factory)
 
     assert seen == []
     assert "already in a session" in capsys.readouterr().err
@@ -137,7 +379,7 @@ def test_a_session_cannot_be_started_inside_a_session(recorded, capsys):
 def test_blank_lines_and_comments_are_not_commands(recorded):
     seen, factory = recorded
 
-    _run("\n   \n# a note\nbuild .\nexit\n", factory)
+    _run("\n   \n# a note\nweaver build .\nexit\n", factory)
 
     assert len(seen) == 1
 
@@ -157,6 +399,16 @@ def test_the_banner_names_what_is_actually_starting(recorded, capsys):
 
     assert "Fabric credential" in printed
     assert "Spark session (Livy)" in printed
+
+
+@weaver_test()
+def test_the_banner_lists_the_parser_s_commands(recorded, capsys):
+    """The recorded parser has one command, so the banner has one command."""
+
+    printed = _banner_for("A_Workspace", recorded, capsys)
+
+    assert "Available: build." in printed
+    assert "start with `weaver`" in printed
 
 
 @weaver_test()
@@ -182,77 +434,6 @@ def test_a_session_with_no_workspace_claims_to_start_nothing(recorded, capsys):
 
     assert "No default workspace" in printed
     assert "Starting:" not in printed
-
-
-# --- the prompt is a prompt --------------------------------------------------
-
-
-@weaver_test()
-def test_the_prompt_has_line_editing_and_history(monkeypatch, tmp_path, recorded):
-    """``input()`` is line-edited only if readline has been imported.
-
-    The import *is* the mechanism, and nothing else in Weaver imports it — which
-    is why the up arrow answered with an escape sequence instead of the last
-    command.
-    """
-
-    import sys
-
-    from weaver_cli import shell
-
-    monkeypatch.setenv(shell.HISTORY_ENV, str(tmp_path / "history"))
-    _, factory = recorded
-
-    _run("build .\nexit\n", factory)
-
-    assert "readline" in sys.modules
-
-
-@weaver_test()
-def test_history_is_kept_where_the_environment_says(monkeypatch, tmp_path, recorded):
-    from weaver_cli import shell
-
-    wanted = tmp_path / "elsewhere" / "history"
-    monkeypatch.setenv(shell.HISTORY_ENV, str(wanted))
-    _, factory = recorded
-
-    _run("build .\nexit\n", factory)
-
-    assert wanted.exists(), "the session wrote its history where it was told"
-
-
-@weaver_test()
-def test_a_platform_without_readline_still_gets_a_session(monkeypatch, recorded):
-    """Every part of line editing is best-effort; none of it gates a session."""
-
-    import builtins
-
-    real_import = builtins.__import__
-
-    def refuse(name, *args, **kwargs):
-        if name == "readline":
-            raise ImportError("no readline here")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", refuse)
-    seen, factory = recorded
-
-    assert _run("build .\nexit\n", factory) == 0
-    assert len(seen) == 1
-
-
-@weaver_test()
-def test_an_unwritable_history_location_does_not_fail_the_session(
-    monkeypatch, tmp_path, recorded
-):
-    from weaver_cli import shell
-
-    blocked = tmp_path / "a-file"
-    blocked.write_text("not a directory")
-    monkeypatch.setenv(shell.HISTORY_ENV, str(blocked / "history"))
-    _, factory = recorded
-
-    assert _run("build .\nexit\n", factory) == 0
 
 
 # --- workspace inheritance ---------------------------------------------------

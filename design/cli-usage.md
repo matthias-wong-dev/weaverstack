@@ -62,18 +62,47 @@ weaver session --workspace "Weaver Example" --environment weaver
 
 ```text
 Weaver · Weaver Example
-Starting resources in the background...
-Commands are the ordinary CLI commands. `exit` to leave.
+Starting: Fabric credential, Spark session (Livy)
 
-weaver> wipe Lakehouse/Sales Warehouse/Reporting --yes
-weaver> build . --bind Lakehouse/Sales=Sales
-weaver> load Lakehouse/Sales Warehouse/Reporting
-weaver> test Lakehouse/Sales
+Available: build, compose, fabric, install, load, test, wipe.
+Commands start with `weaver`, as they do in a terminal. `help` for options, `exit` to leave.
+
+weaver> weaver wipe Lakehouse/Sales Warehouse/Reporting --yes
+weaver> weaver build . --bind Lakehouse/Sales=Sales
+weaver> weaver load Lakehouse/Sales Warehouse/Reporting
+weaver> weaver test Lakehouse/Sales
+weaver> weaver compose all
 weaver> exit
 ```
 
-The commands are the ordinary CLI commands, parsed by the same parser — there
-is no second grammar to learn or to keep correct.
+**A session command is a Weaver command line.** It is written the way it is
+written in a terminal, in `compose.yml` and in this document, parsed by the
+same parser and run by the same handlers. A line copied from any of them runs
+here unchanged, and what the session adds is underneath: one Session, held
+open, so a credential, item resolution and Livy are paid for once rather than
+per command. The commands offered are the CLI's own, less `session` itself, so
+`weaver --help` and `weaver --version` answer here as they do in a terminal.
+
+**Quoting holds a value together; nothing escapes.** `--workspace "Research &
+Development"` is one workspace name, and a backslash is an ordinary character
+wherever it appears, so `weaver build C:\Users\Matthias\repo` reaches the
+command with that path. An argument containing a space is quoted rather than
+escaped. Outside quoting, `|`, `>`, `<`, `&`, `;`, `$` and a backtick are
+refused, because a Weaver command line is not run by a shell.
+
+**Several complete commands can be pasted at once**, one per line:
+
+```text
+weaver build ./repository --bind Lakehouse/Sales=Sales
+weaver load Lakehouse/Sales Warehouse/Reporting
+weaver test Lakehouse/Sales
+```
+
+They run in order in the one session. Blank lines and lines beginning with `#`
+are skipped, quoting is preserved, and a failure stops the rest of the block —
+the commands after a failed build were written expecting it to have succeeded.
+The prompt returns either way. A pasted block is a batch of Weaver commands and
+nothing more: no pipes, no redirection, no `&&`, no variables.
 
 **A workspace is not required to start.** `weaver session` on its own is valid;
 each command then names its own workspace, and the session keeps one set of
@@ -96,6 +125,12 @@ one, which matters on a capacity that permits exactly one.
 
 **An ordinary failure keeps the session.** A build that fails, a Spark error, a
 typo: the command reports and the prompt returns with the resources still up.
+`Ctrl-C` abandons what is being typed, or interrupts the command that is
+running, and leaves the session and its resources where they were.
+
+The prompt has editing, history and arrow keys, and each new prompt begins on a
+line of its own — the shell takes down the live progress line before drawing
+it, so output and prompt never share a line.
 
 ## Progress and timings
 
@@ -242,15 +277,17 @@ agreed to four commands, being asked about the first of them is not a second
 safeguard. Without a terminal to ask, nothing runs unless `--yes` said so
 already; `--yes` carries the same authority to each command in the sequence.
 
-**Entries are ordinary Weaver command lines**, parsed by the same parser and run
-by the same handlers, so an option means here what it means at a prompt. The
+**Entries are ordinary Weaver command lines**, read by the same function the
+session prompt reads a typed line with, parsed by the same parser and run by
+the same handlers, so an option means here what it means at a prompt. The
 leading `weaver` is optional, because a composition holds nothing else. Nothing
 shell-shaped is accepted — no pipes, no redirection, no `&&`, no variables, no
 other executables — and neither is `session`, `doctor` or a nested `compose`.
 
 **One Session runs the whole sequence**, which is the point: authentication,
-item resolution and Livy are paid for once rather than four times. Run inside
-`weaver session`, the composition joins the Session already open.
+item resolution and Livy are paid for once rather than four times. Typed at a
+`weaver session` prompt as `weaver compose dev`, it joins the Session already
+open rather than acquiring a second set of resources.
 
 It is not a workflow engine, and is not meant to become one: no conditionals,
 no parallelism, no variables, no retries, no project-root discovery. Commands

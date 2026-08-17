@@ -1,21 +1,25 @@
-"""Interactive CLI session that reuses one ConsoleSession.
+"""Interactive Weaver session: ordinary CLI commands, one ConsoleSession.
 
-Commands use the standard CLI parser and handlers while sharing session resources.
+Commands are written exactly as they are in a terminal, in ``compose.yml`` and
+in the documentation — ``weaver build .`` — and are parsed by the top-level CLI
+parser and run by its handlers. What the session adds is the Session underneath
+them, held open so a credential, item resolution and Livy are paid for once.
 """
 
 from __future__ import annotations
 
 import argparse
-import shlex
 import sys
+from dataclasses import dataclass
 
-from weaver.errors import WeaverError
+from weaver.errors import CommandError, WeaverError
+
+from .commandline import PROGRAM, command_names, command_words
 
 PROMPT = "weaver> "
 
 #: Optional history-file override.
 HISTORY_ENV = "WEAVER_SESSION_HISTORY"
-HISTORY_LIMIT = 1000
 
 #: Commands unavailable from an interactive session.
 NOT_IN_A_SESSION = {
@@ -27,7 +31,21 @@ EXITS = {"exit", "quit"}
 HELP = {"help", "?"}
 
 
-def run_shell(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> int:
+@dataclass(frozen=True)
+class _Outcome:
+    """What one prompt entry did: whether it ran, and whether it said to leave."""
+
+    ran: bool = False
+    leave: bool = False
+
+
+def run_shell(
+    args: argparse.Namespace,
+    *,
+    parser_factory=None,
+    stdin=None,
+    console=None,
+) -> int:
     """Hold one :class:`~weaver.sessions.console.ConsoleSession` open for a REPL."""
 
     from weaver.sessions import ConsoleSession
@@ -39,76 +57,105 @@ def run_shell(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> i
     parser = parser_factory()
 
     workspace = _default_workspace(args)
-    history = _enable_line_editing()
     with ConsoleSession(workspace=workspace) as session:
-        _banner(workspace)
+        _banner(workspace, parser)
         if workspace is not None:
             # Start reusable resources while the prompt remains available.
-            _report_warm_up(session.warm())
+            _report_warm_up(session.warm(), parser)
+        reader = console if console is not None else _console(stdin or sys.stdin)
         try:
-            return _loop(session, parser, stdin=stdin or sys.stdin)
+            return _loop(session, parser, reader)
         finally:
-            _save_history(history)
+            reader.close()
             if getattr(args, "timings", False):
                 _report_spending(session)
 
 
-def _loop(session, parser, *, stdin) -> int:
+def _loop(session, parser, console) -> int:
+    """Read an entry, run it, settle the terminal, ask again."""
+
     while True:
         try:
-            line = _read(stdin)
+            entry = console.read()
         except KeyboardInterrupt:
-            print()
+            # Ctrl-C abandons what was being typed and asks again.
             continue
         except EOFError:
             print()
             return 0
 
-        if line is None:
+        if entry is None:
             return 0
-        words = _words(line)
-        if words is None:
-            continue
-        if not words:
-            continue
-        if words[0] in EXITS:
+        outcome = _run_entry(session, parser, entry)
+        # The shell owns the transition from output back to the prompt: the
+        # renderer's transient line is taken down here rather than by whichever
+        # command drew it.
+        session.stop_presenting()
+        if outcome.ran:
+            console.settle()
+        if outcome.leave:
             return 0
-        if words[0] in HELP:
+
+
+def _run_entry(session, parser, entry: str) -> _Outcome:
+    """Run every command line in one prompt entry, in order.
+
+    A pasted block is several complete Weaver commands, one per line, and a
+    failure stops the rest of it: the commands after a failed build were
+    written expecting it to have succeeded.
+    """
+
+    ran = False
+    for line in entry.splitlines():
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        if text in EXITS:
+            return _Outcome(ran=ran, leave=True)
+        if text in HELP:
             parser.print_help()
+            ran = True
             continue
-        refusal = NOT_IN_A_SESSION.get(words[0])
-        if refusal is not None:
-            print(f"error: {words[0]}: {refusal}", file=sys.stderr)
-            continue
+        try:
+            words = command_words(text, require_program=True, excluded=NOT_IN_A_SESSION)
+        except CommandError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return _Outcome(ran=True)
+        ran = True
+        if not _run_one(session, parser, words):
+            return _Outcome(ran=True)
+    return _Outcome(ran=ran)
 
-        _run_one(session, parser, words)
 
-
-def _run_one(session, parser, words: list[str]) -> None:
-    """One command, whose failure the session outlives."""
+def _run_one(session, parser, words: list[str]) -> bool:
+    """One command, whose failure the session outlives. True when it succeeded."""
 
     try:
         parsed = parser.parse_args(words)
-    except SystemExit:
-        # argparse has already printed what was wrong with the line. A usage
-        # error is not a reason to throw away a Livy session.
-        return
+    except SystemExit as leaving:
+        # argparse has answered the line itself: `--help` and `--version` print
+        # and exit zero, a usage error prints and exits non-zero. Either way it
+        # has said what it needed to, and neither is a reason to throw away a
+        # Livy session.
+        return not leaving.code
 
     handler = getattr(parsed, "handler", None)
     if handler is None:
         parser.print_help()
-        return
+        return True
 
     parsed.session = session
     _prepare_for(session, parsed)
     try:
-        handler(parsed)
+        return not handler(parsed)
     except WeaverError as exc:
         print(f"error: {exc}", file=sys.stderr)
     except KeyboardInterrupt:
+        # Interrupting a command leaves the session and its resources up.
         print("\ninterrupted", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 - the prompt outlives a defect too
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+    return False
 
 
 def _prepare_for(session, parsed) -> None:
@@ -126,32 +173,77 @@ def _prepare_for(session, parsed) -> None:
         pass
 
 
-def _enable_line_editing():
-    """Give the prompt arrow keys, editing and history, and return where to save.
+# --- where commands are read from --------------------------------------------
 
-    ``input()`` is line-edited only if :mod:`readline` has been imported — the
-    import is the whole mechanism, which is why a prompt without it answers the
-    up arrow with ``^[[A`` instead of the last command. Nothing else in Weaver
-    imports it, so nothing else was enabling it.
 
-    Every part of this is best-effort. A platform without readline, a home
-    directory that is read-only, a corrupt history file: none of them is a
-    reason to refuse to start a session.
+def _console(stream):
+    """The reader for this input: a terminal prompt, or a scripted stream."""
+
+    if stream is sys.stdin and _isatty(stream):
+        return Prompt()
+    return ScriptedInput(stream)
+
+
+def _isatty(stream) -> bool:
+    try:
+        return bool(stream.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
+class Prompt:
+    """A terminal prompt with editing, history and bracketed paste.
+
+    ``prompt_toolkit`` owns the line editor, so a pasted block arrives as one
+    entry with its newlines intact, and the prompt is redrawn by a renderer
+    that knows where the cursor is.
     """
 
-    try:
-        import readline
-    except ImportError:  # a platform without it still gets a working prompt
-        return None
+    def __init__(self, *, input=None, output=None, history_path=None) -> None:
+        from prompt_toolkit.history import FileHistory, InMemoryHistory
+        from prompt_toolkit.shortcuts import PromptSession
 
-    path = _history_path()
-    if path is not None:
-        try:
-            readline.read_history_file(str(path))
-        except (OSError, ValueError):
-            pass  # no history yet, or none that can be read
-    readline.set_history_length(HISTORY_LIMIT)
-    return path
+        path = history_path if history_path is not None else _history_path()
+        history = InMemoryHistory()
+        if path is not None:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                history = FileHistory(str(path))
+            except OSError:
+                pass  # a read-only home is not a reason to refuse a session
+        self._session = PromptSession(history=history, input=input, output=output)
+        self._stream = getattr(output, "stdout", None) or sys.stdout
+
+    def read(self) -> str | None:
+        return self._session.prompt(PROMPT)
+
+    def settle(self) -> None:
+        """Leave the cursor at the start of a blank line before the next prompt."""
+
+        print(file=self._stream, flush=True)
+
+    def close(self) -> None:
+        pass
+
+
+class ScriptedInput:
+    """Commands from a stream that is not a terminal, one line per entry."""
+
+    def __init__(self, stream) -> None:
+        self._stream = stream
+
+    def read(self) -> str | None:
+        line = self._stream.readline()
+        if not line:
+            return None
+        print(f"{PROMPT}{line.rstrip()}")
+        return line
+
+    def settle(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
 
 
 def _history_path():
@@ -167,37 +259,7 @@ def _history_path():
         return None
 
 
-def _save_history(path) -> None:
-    if path is None:
-        return
-    try:
-        import readline
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-        readline.write_history_file(str(path))
-    except (ImportError, OSError, ValueError):
-        pass  # the session is over; failing to remember it is not a failure
-
-
-def _read(stdin) -> str | None:
-    if stdin is sys.stdin and stdin.isatty():
-        return input(PROMPT)
-    line = stdin.readline()
-    if not line:
-        return None
-    print(f"{PROMPT}{line.rstrip()}")
-    return line
-
-
-def _words(line: str) -> list[str] | None:
-    text = line.strip()
-    if not text or text.startswith("#"):
-        return []
-    try:
-        return shlex.split(text)
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return None
+# --- what the session says about itself --------------------------------------
 
 
 def _default_workspace(args: argparse.Namespace):
@@ -211,11 +273,25 @@ def _default_workspace(args: argparse.Namespace):
         return None
 
 
-def _banner(workspace) -> None:
+def _available(parser) -> str:
+    """The commands this session accepts, from the parser rather than a list."""
+
+    return ", ".join(sorted(command_names(parser) - set(NOT_IN_A_SESSION)))
+
+
+def _usage(parser) -> str:
+    return (
+        f"Available: {_available(parser)}.\n"
+        f"Commands start with `{PROGRAM}`, as they do in a terminal. "
+        "`help` for options, `exit` to leave.\n"
+    )
+
+
+def _banner(workspace, parser) -> None:
     if workspace is None:
         print("Weaver · No default workspace")
         print("Use --workspace on each command.")
-        print("\nCommands: wipe, build, load, test. Type `exit` to leave.\n")
+        print(f"\n{_usage(parser)}")
         return
     print(f"Weaver · {workspace.workspace}")
 
@@ -226,14 +302,14 @@ def _report_spending(session) -> None:
     print("\n" + session.telemetry.report(), file=sys.stderr)
 
 
-def _report_warm_up(warm) -> None:
+def _report_warm_up(warm, parser) -> None:
     """Report session resources that are starting or unavailable."""
 
     if warm.started:
         print(f"Starting: {', '.join(warm.started)}")
     for resource, reason in warm.skipped:
         print(f"Not started: {resource} — {reason}")
-    print("\nCommands: wipe, build, load, test. Type `exit` to leave.\n")
+    print(f"\n{_usage(parser)}")
 
 
-__all__ = ["run_shell"]
+__all__ = ["Prompt", "ScriptedInput", "run_shell"]
