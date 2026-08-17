@@ -80,7 +80,15 @@ written in a terminal, in `compose.yml` and in this document, parsed by the
 same parser and run by the same handlers. A line copied from any of them runs
 here unchanged, and what the session adds is underneath: one Session, held
 open, so a credential, item resolution and Livy are paid for once rather than
-per command. The commands offered are the CLI's own, less `session` itself.
+per command. The commands offered are the CLI's own, less `session` itself, so
+`weaver --help` and `weaver --version` answer here as they do in a terminal.
+
+**Quoting holds a value together; nothing escapes.** `--workspace "Research &
+Development"` is one workspace name, and a backslash is an ordinary character
+wherever it appears, so `weaver build C:\Users\Matthias\repo` reaches the
+command with that path. An argument containing a space is quoted rather than
+escaped. Outside quoting, `|`, `>`, `<`, `&`, `;`, `$` and a backtick are
+refused, because a Weaver command line is not run by a shell.
 
 **Several complete commands can be pasted at once**, one per line:
 

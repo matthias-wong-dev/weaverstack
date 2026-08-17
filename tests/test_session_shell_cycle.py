@@ -187,6 +187,27 @@ def test_quoted_arguments_survive_the_prompt(every_command):
     assert calls[0].workspace == "35 South Data"
 
 
+@pytest.mark.parametrize(
+    "line, repository",
+    [
+        (r"weaver build C:\Users\Matthias\repo", r"C:\Users\Matthias\repo"),
+        (
+            r'weaver build "C:\Users\Matthias Wong\repo"',
+            r"C:\Users\Matthias Wong\repo",
+        ),
+    ],
+)
+@weaver_test()
+def test_a_windows_path_reaches_the_handler_intact(line, repository, every_command):
+    """The line a reader copies out of PowerShell is the line that runs."""
+
+    calls, factory = every_command
+
+    _run(f"{line}\nexit\n", factory)
+
+    assert calls[0].repository == repository
+
+
 @weaver_test()
 def test_a_quoted_shell_character_is_part_of_a_workspace_name(every_command):
     """`Research & Development` is a workspace name, not a shell operator."""

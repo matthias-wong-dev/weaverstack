@@ -62,7 +62,7 @@ def command_words(
             f"{operator} is not accepted; quote it to pass it as an argument."
         )
     try:
-        words = shlex.split(text)
+        words = _split(text)
     except ValueError as exc:
         raise CommandError(f"{text!r}: {exc}") from exc
     if not words:
@@ -83,21 +83,33 @@ def command_words(
     return rest
 
 
+def _split(text: str) -> list[str]:
+    """Split a command line into arguments, keeping every backslash.
+
+    :func:`shlex.split` reads a backslash as an escape, which eats the
+    separators of an ordinary Windows path — ``C:\\Users\\repo`` arrives as
+    ``C:Usersrepo``, so a line copied from PowerShell does not reach argparse
+    intact. Quoting is what a command line uses to hold a value together and is
+    kept exactly as it was; escaping is not, so a backslash is an ordinary
+    character wherever it appears.
+    """
+
+    lexer = shlex.shlex(text, posix=True)
+    lexer.whitespace_split = True
+    lexer.commenters = ""
+    lexer.escape = ""
+    return list(lexer)
+
+
 def _unquoted_operator(text: str) -> str | None:
     """The first shell operator standing outside quoting, where it would be one.
 
-    Quoting follows :mod:`shlex` in POSIX mode, which is what splits the line
-    afterwards: either quote character opens a quoted run, and a backslash
-    escapes the next character outside single quotes.
+    Quoting follows :func:`_split`, which reads the line afterwards: either
+    quote character opens a quoted run, and nothing escapes.
     """
 
     quote = ""
-    index = 0
-    while index < len(text):
-        character = text[index]
-        if character == "\\" and quote != "'":
-            index += 2
-            continue
+    for character in text:
         if quote:
             if character == quote:
                 quote = ""
@@ -105,7 +117,6 @@ def _unquoted_operator(text: str) -> str | None:
             quote = character
         elif character in SHELL_OPERATORS:
             return character
-        index += 1
     return None
 
 

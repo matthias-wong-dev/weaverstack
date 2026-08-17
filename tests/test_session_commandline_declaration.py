@@ -47,6 +47,51 @@ def test_invalid_shell_quoting_is_refused():
         command_words("weaver build 'unterminated")
 
 
+# --- backslashes ---------------------------------------------------------------
+
+
+@weaver_test()
+def test_an_unquoted_windows_path_survives():
+    """A line copied from PowerShell reaches the parser with its path intact."""
+
+    assert command_words(r"weaver build C:\Users\Matthias\repo") == [
+        "build",
+        r"C:\Users\Matthias\repo",
+    ]
+
+
+@weaver_test()
+def test_a_quoted_windows_path_survives():
+    assert command_words(r'weaver build "C:\Users\Matthias Wong\repo"') == [
+        "build",
+        r"C:\Users\Matthias Wong\repo",
+    ]
+
+
+@weaver_test()
+def test_a_single_quoted_windows_path_survives():
+    assert command_words(r"weaver build 'C:\Users\Matthias Wong\repo'") == [
+        "build",
+        r"C:\Users\Matthias Wong\repo",
+    ]
+
+
+@weaver_test()
+def test_a_unc_path_keeps_both_leading_separators():
+    assert command_words(r"weaver build \\server\share\repo") == [
+        "build",
+        r"\\server\share\repo",
+    ]
+
+
+@weaver_test()
+def test_a_posix_path_is_unaffected():
+    assert command_words("weaver build /srv/weaver/repo") == [
+        "build",
+        "/srv/weaver/repo",
+    ]
+
+
 @pytest.mark.parametrize(
     "line",
     [
