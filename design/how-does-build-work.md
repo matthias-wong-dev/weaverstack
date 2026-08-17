@@ -414,9 +414,15 @@ claims are dropped before its physical prune action. An orphan has no claims to
 remove. Prune drops retain `IF EXISTS` because their contract is idempotent
 reconciliation of undesired state.
 
+Prune compares names rather than names and kinds. An object the item declares as
+a table and the target still holds as a view is a kind change, and the managed
+drop below removes it by its installed type.
+
 A managed drop removes a desired, installed object only because incremental
 selection chose it for rebuild. Its catalogue claims are deleted first, then its
-physical object is dropped strictly. Dependants drop before dependencies.
+physical object is dropped strictly. Dependants drop before dependencies. The
+type comes from the Registry, so a declaration that changed from a view to a
+table drops the view that is installed and builds the table that is declared.
 
 ## 11. Bundle generation
 

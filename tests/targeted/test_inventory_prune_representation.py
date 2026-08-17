@@ -76,6 +76,33 @@ def test_an_empty_inventory_prunes_nothing_rather_than_everything():
 
 
 @weaver_test()
+def test_an_object_declared_under_a_new_kind_is_spared_for_the_managed_drop():
+    """A view the item now declares as a table is a kind change, not an orphan.
+
+    The managed drop reads the installed type from the Registry and removes it
+    strictly, so a prune of the same name would leave that drop with nothing to
+    remove and fail the install.
+    """
+
+    actions, _ = prune(
+        target_inventory(schemas=("DWG",), views=("DWG.Customer",)),
+        keep(schemas={"dwg"}, tables={"dwg.customer"}),
+    )
+
+    assert actions == ()
+
+
+@weaver_test()
+def test_a_table_the_item_now_declares_as_a_view_is_spared_the_same_way():
+    actions, _ = prune(
+        target_inventory(schemas=("DWG",), tables=("DWG.Customer",)),
+        keep(schemas={"dwg"}, views={"dwg.customer"}),
+    )
+
+    assert actions == ()
+
+
+@weaver_test()
 def test_the_comparison_folds_case():
     """The physical name's case is the workspace's to choose, so a keep-set that
     compared exactly would delete the very object it meant to spare."""

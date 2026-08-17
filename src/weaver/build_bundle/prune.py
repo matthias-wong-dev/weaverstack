@@ -69,6 +69,17 @@ class _Managed:
     tables: frozenset[str]
     views: frozenset[str]
 
+    @property
+    def objects(self) -> frozenset[str]:
+        """Every declared object name, whatever kind it is declared as.
+
+        A name the item declares as a table and the target still holds as a view
+        is a kind change. The managed drop reads the installed type from the
+        Registry and removes it strictly, so prune leaves the name alone.
+        """
+
+        return self.tables | self.views
+
 
 @dataclass(frozen=True)
 class TargetInventory:
@@ -387,9 +398,12 @@ def render_inventory_prune(
 
     actions: list[InstallAction] = []
     changes: list[TargetChange] = []
+    # Membership is by name rather than by name and kind, so an object whose
+    # declared kind changed is left to the item's managed drop. See
+    # :attr:`_Managed.objects`.
     if target.kind == "warehouse":
         for qualified in inventory.views:
-            if qualified.casefold() not in managed.views:
+            if qualified.casefold() not in managed.objects:
                 schema, name = qualified.split(".", 1)
                 actions.append(
                     _drop_action(
@@ -405,7 +419,7 @@ def render_inventory_prune(
                 )
                 changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
         for qualified in inventory.tables:
-            if qualified.casefold() not in managed.tables:
+            if qualified.casefold() not in managed.objects:
                 schema, name = qualified.split(".", 1)
                 actions.append(
                     _drop_action(
@@ -445,7 +459,7 @@ def render_inventory_prune(
             schema, name = qualified.split(".", 1)
             if (
                 schema.casefold() not in orphan_schemas
-                and qualified.casefold() not in managed.views
+                and qualified.casefold() not in managed.objects
             ):
                 actions.append(
                     _drop_action(
@@ -462,7 +476,7 @@ def render_inventory_prune(
             schema, name = qualified.split(".", 1)
             if (
                 schema.casefold() not in orphan_schemas
-                and qualified.casefold() not in managed.tables
+                and qualified.casefold() not in managed.objects
             ):
                 actions.append(
                     _drop_action(
