@@ -11,17 +11,17 @@ Where they differ semantically, one of them is wrong.
 ## The state machine
 
 ```text
-raw _Staging                     the authored output, business columns only
+raw staging                      the authored output, business columns only
       ↓
-discover every refusal           one statement, into _Reject
+discover every refusal           one statement
       ↓
 the rejection gate               fault_tolerant decides whether to continue
       ↓
-purge the refused rows           _Staging becomes the clean incoming state
+purge the refused rows           staging becomes the clean incoming state
       ↓
-_Delete                          from clean staging, or the explicit claim
+the delete set                   from clean staging, or the explicit claim
       ↓
-_Upsert                          new and signature-changed rows, nothing else
+the upsert set                   new and signature-changed rows, nothing else
       ↓
 merge uniqueness                 incremental with unique keys only
       ↓
@@ -31,11 +31,13 @@ delete, update, insert
 ```
 
 Every gate is reached before anything is written, so refusing is a decision not
-to start rather than an unwind.
+to start rather than an unwind. Each phase is *settled* before the next reads it:
+that is what lets a gate read the size of a change before a row moves, and it is
+a property of the model rather than of any way of storing one.
 
 ## Two refusals, and they are different in kind
 
-A **bad incoming row** is recoverable. It goes to `_Reject` with the reason, and
+A **bad incoming row** is recoverable. It is refused with the reason, and
 `fault_tolerant` decides whether the surviving rows load or the whole load stops.
 Four reasons, shared by both engines
 (`weaver.runtime.load_contract`):
@@ -92,9 +94,10 @@ narrowed by joining; it is narrowed by not running unless a duplicate was found.
 It is ordered by the row signature, so the row it keeps is the row discovery kept.
 
 **Delta** cannot delete through a ranked expression at all, so it assembles the
-survivors from the same chain discovery ran and overwrites staging with them.
-Through a table rather than straight from staging: overwriting a table from a read
-of itself is not something Spark guarantees.
+survivors from the same chain discovery ran, and that relation becomes clean
+staging from there on. Nothing is deleted and nothing is overwritten: the raw
+relation is superseded rather than edited, and it is released once the survivors
+are settled and its evidence written.
 
 ## The delete set
 
@@ -178,7 +181,7 @@ One question:
 
 A holder gives up its value in exactly two ways. The load deletes it, or the load
 moves it off that value — which includes moving to a null, because a null claims
-nothing. Being in `_Upsert` is not one of them: a row may be changing another
+nothing. Being in the upsert set is not one of them: a row may be changing another
 column entirely and keeping the value it has.
 
 So these pass:
@@ -202,19 +205,67 @@ application, no closure to compute, and no fixed point to iterate towards: the
 proposed target state is either valid under the declared keys or it is not.
 
 One case the plan behind this work listed cannot actually arise. A holder that is
-in `_Upsert` while keeping the value a claimant wants means both rows carry that
-value in staging, which incoming uniqueness refuses first. The predicate still
-distinguishes the two, because that is what lets a genuine swap through.
+in the upsert set while keeping the value a claimant wants means both rows carry
+that value in staging, which incoming uniqueness refuses first. The predicate
+still distinguishes the two, because that is what lets a genuine swap through.
 
-## The working artefacts
+## Working state, and the physical strategies that differ
 
-`_Staging`, `_Reject`, `_Delete` and `_Upsert`, in the object's own schema beside
-it. A run that refused nothing drops them; a run that refused rows keeps them all,
-because the reject table alone does not explain itself. A run that stopped at a
-gate never reaches the cleanup, so its tables stand too.
+The model needs each phase *settled* before the next one reads it. It does not say
+that a phase has to be a table, and the two engines answer that differently
+because their engines make different things cheap.
 
-There is no affected-key table, no loser table per constraint, no participant
-table and no merge-conflict recovery table. Constraint-specific expressions are
+**Warehouse** uses physical working tables, `_Staging`, `_Reject`, `_Delete` and
+`_Upsert` in the object's own schema, because they are its native execution
+state. A procedure has nowhere else to put a settled relation, the purge deletes
+from staging in stages, and a T-SQL batch cannot hold a relation across
+statements any other way.
+
+**Delta/Spark** uses persisted Spark relations. Each phase is one statement whose
+result is cached and named by a temporary view, so the next phase reads exactly
+the rows this one settled. Nothing durable is written, and every relation is
+released in a `finally`: on a clean load, on a refusal at any gate, and on an
+unexpected failure.
+
+A Delta table per phase was execution machinery rather than a requirement of the
+model. Each cost a write, a transaction-log commit, a metadata refresh and a drop,
+for state nothing outside the load ever read, and the fixed cost dominated
+entirely at the row counts a typical load moves.
+
+Being persisted rather than durable is a real difference, and it is bounded. A
+lost cache is recomputed from the source, not lost, and by the time the target is
+being mutated staging is no longer read: the delete and upsert relations are
+settled and counted before the first write. The one path that does write staging
+to Delta is the unkeyed wholesale replace, because it empties the target before
+inserting, so it is the only phase whose source could be read after the table it
+may depend on is gone.
+
+## Diagnostic evidence
+
+Separate from execution state, and that is the distinction the Delta path makes
+explicit: a durable artefact exists only when an outcome has something to
+troubleshoot.
+
+```text
+_Staging   what did the source propose?
+_Reject    what did Weaver refuse, and why?
+_Delete    what was Weaver proposing to remove?
+```
+
+A clean load writes none of them. A run that refused rows writes staging and the
+rejects, because the rejects alone do not explain themselves. A run that stopped
+at the stability gate or at merge uniqueness writes what it was proposing. Each is
+written once, and staging is written before the purge supersedes it.
+
+Stale evidence from an earlier faulted run is dropped before a new run for that
+object writes any of its own, so what stands afterwards describes the run that
+just finished. Attempted rather than looked up: a missing table is the ordinary
+case, and reading an inventory to avoid asking for a drop that does nothing would
+cost more than the drop.
+
+There is no upsert artefact, no affected-key table, no loser table per constraint,
+no participant table and no merge-conflict recovery table. What Weaver was going
+to write is answerable from staging and the delete set; the rest are
 implementation mechanics, not artefacts.
 
 ## Where it is proved
@@ -223,6 +274,14 @@ Rendering and contract claims run on every commit
 (`tests/targeted/test_load_representation.py`,
 `test_load_contract_declaration.py`, `test_row_signature_representation.py`).
 
+What the Delta path *submits* also runs on every commit, against a double that
+records statements and answers cardinalities
+(`tests/targeted/test_delta_load_execution_boundary.py`): that a clean load writes
+no working tables, that a phase which decided on no rows submits no mutation for
+it, that the relations are released whatever happened, and that evidence appears
+only for an outcome that owes one. It evaluates nothing, so what a statement
+*means* is not asked there.
+
 Behaviour needs an engine, and both are exercised against a real tenant:
 `tests/fabric/test_warehouse_load_primitive.py` and
 `tests/fabric/test_delta_table_load_primitive.py` run the same matrix, claim for
@@ -230,6 +289,6 @@ claim. If they disagree the model has diverged.
 
 Large-scale performance is manual and lives outside the suite. The benchmark work
 behind this design established that narrow grouped scans beat global staging
-windows, that a large target join is cheap in Fabric Warehouse, that helper-table
-materialisation has a real fixed cost, and that `_Upsert` is the useful
-materialisation boundary. None of that belongs in a CI threshold.
+windows, that a large target join is cheap in Fabric Warehouse, and that the
+Delta path's durable working tables cost more than the reconciliation they were
+carrying. None of that belongs in a CI threshold.

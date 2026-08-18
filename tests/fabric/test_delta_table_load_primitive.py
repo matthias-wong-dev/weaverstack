@@ -163,6 +163,35 @@ def stamps(object_name):
     return {row["Customer id"]: [row["inserted"], row["updated"]] for row in frame.collect()}
 
 
+def artefacts(object_name):
+    """Which durable working tables stand beside the object right now.
+
+    Evidence is meant to exist only for an outcome that owes one, so the absence
+    is as much a claim as the presence.
+    """
+
+    return sorted(
+        suffix
+        for suffix in ("_Staging", "_Reject", "_Delete", "_Upsert", "_StagingKeep")
+        if spark.catalog.tableExists(destination.qualify(SCHEMA, object_name + suffix))
+    )
+
+
+def held():
+    """Temporary views and cached relations the load left in the session.
+
+    A load holds every phase in Spark while it runs and gives them back in a
+    finally, so after one returns there must be nothing of its own left.
+    """
+
+    views = [
+        view.name
+        for view in spark.catalog.listTables()
+        if view.isTemporary and view.name.startswith("weaver_")
+    ]
+    return sorted(views)
+
+
 def reasons(object_name):
     """Pairs rather than a mapping: a refused row's key may be the missing part."""
 
@@ -205,17 +234,24 @@ seen = {}
 seen["intolerant"] = run(contract, REFUSABLE)
 seen["intolerant_contents"] = contents(OBJECT)
 seen["intolerant_reasons"] = reasons(OBJECT)
+seen["intolerant_artefacts"] = artefacts(OBJECT)
+seen["intolerant_held"] = held()
 
 # The same source, tolerated: the survivors load.
 seen["tolerated"] = run(contract, REFUSABLE, fault_tolerant=True)
 seen["tolerated_contents"] = contents(OBJECT)
 seen["tolerated_signatures"] = signatures(OBJECT)
+seen["tolerated_artefacts"] = artefacts(OBJECT)
 
 # The accepted rows, restaged as they were loaded. An unchanged source is one
-# equality test per row and no work at all.
+# equality test per row and no work at all. A clean load also leaves nothing
+# physical behind, including the evidence the run before it wrote.
 accepted = contents(OBJECT)
 seen["unchanged"] = run(contract, accepted)
 seen["unchanged_signatures"] = signatures(OBJECT)
+seen["unchanged_stamps"] = stamps(OBJECT)
+seen["unchanged_artefacts"] = artefacts(OBJECT)
+seen["unchanged_held"] = held()
 
 changed = [
     [row[0], "Renamed" if row[0] == "c1" else row[1], *row[2:]] for row in accepted
@@ -223,6 +259,7 @@ changed = [
 seen["updated"] = run(contract, changed)
 seen["updated_contents"] = contents(OBJECT)
 seen["updated_signatures"] = signatures(OBJECT)
+seen["updated_artefacts"] = artefacts(OBJECT)
 
 emit(seen)
 """
@@ -244,6 +281,8 @@ SEED = [
     ["c5", "Five", "e@x.test", 10, "E"],
 ]
 seen["seed"] = run(contract, SEED, deletes=[])
+seen["seed_artefacts"] = artefacts(OBJECT)
+seen["seed_held"] = held()
 
 # The proposals a holder really does free its value for: a two-way swap, a
 # holder moving its own composite tuple, and a claim on a value whose holder
@@ -308,6 +347,10 @@ seen["tolerated_conflict"] = run(
 )
 seen["after_conflicts"] = contents(OBJECT)
 seen["before_conflicts"] = before
+# A refusal that never reached a row still owes an explanation of what it was
+# proposing, and still gives back everything it was holding.
+seen["conflict_artefacts"] = artefacts(OBJECT)
+seen["conflict_held"] = held()
 
 emit(seen)
 """
@@ -328,7 +371,7 @@ def test_the_delta_keyed_load_refuses_incoming_rows_and_loads_the_survivors(
         _header_literal() + CONSTRAINED_BODY, label="delta keyed refusals"
     )
 
-    # Intolerant: nothing written, and the reject table left as the evidence.
+    # Intolerant: nothing written, and the evidence left to explain why.
     assert "rows were rejected" in seen["intolerant"]["raised"]
     assert seen["intolerant_contents"] == []
     assert seen["intolerant_reasons"] == [
@@ -338,6 +381,15 @@ def test_the_delta_keyed_load_refuses_incoming_rows_and_loads_the_survivors(
         ["c7", "duplicate_unique_key: Region id, External ref"],
         ["c3", "null_column: Customer name"],
     ]
+
+    # What the source proposed and what was refused, and nothing else: the load
+    # stopped at the gate, so it had no delete set to propose.
+    assert seen["intolerant_artefacts"] == ["_Reject", "_Staging"]
+    assert seen["intolerant_held"] == []
+
+    # Tolerated: the same evidence, and the delete set it settled on. Nothing was
+    # there to retire, so there is no delete table to read.
+    assert seen["tolerated_artefacts"] == ["_Reject", "_Staging"]
 
     # Tolerated: one row per refusal refused, and the survivors loaded.
     tolerated = seen["tolerated"]["result"]
@@ -371,6 +423,11 @@ def test_the_delta_keyed_load_refuses_incoming_rows_and_loads_the_survivors(
     ) == (0, 0, 0, 0)
     assert seen["unchanged_signatures"] == signatures
 
+    # And it leaves nothing physical, including the evidence the tolerated run
+    # before it wrote: every phase was a relation held in Spark and given back.
+    assert seen["unchanged_artefacts"] == []
+    assert seen["unchanged_held"] == []
+
     # A changed row is updated, and its signature moves with it. Nobody else's.
     after = seen["updated_signatures"]
     assert seen["updated"]["result"]["rows_updated"] == 1
@@ -380,6 +437,7 @@ def test_the_delta_keyed_load_refuses_incoming_rows_and_loads_the_survivors(
     assert {k: v for k, v in after.items() if k != "c1"} == {
         k: v for k, v in signatures.items() if k != "c1"
     }
+    assert seen["updated_artefacts"] == []
 
 
 @weaver_test(hosted=True)
@@ -398,6 +456,9 @@ def test_the_delta_keyed_load_refuses_a_target_its_changes_would_invalidate(
     )
 
     assert seen["seed"]["result"]["rows_inserted"] == 5
+    # A clean incremental load, so nothing physical stands and nothing is held.
+    assert seen["seed_artefacts"] == []
+    assert seen["seed_held"] == []
 
     allowed = {row[0]: row for row in seen["allowed_contents"]}
     assert seen["allowed"]["result"]["succeeded"] is True
@@ -437,3 +498,8 @@ def test_the_delta_keyed_load_refuses_a_target_its_changes_would_invalidate(
         assert "declared unique key" in (seen[case]["raised"] or ""), case
     assert seen["after_conflicts"] == seen["before_conflicts"]
     assert {row[0]: row[1] for row in seen["after_conflicts"]}["c2"] == "Two"
+
+    # The refusal never reached a row, and it still says what it was proposing.
+    # No delete table: every claim in these loads was empty.
+    assert seen["conflict_artefacts"] == ["_Staging"]
+    assert seen["conflict_held"] == []

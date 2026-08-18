@@ -7,15 +7,18 @@ languages reconcile through one implementation.
 
 The first value is *staging*: unvalidated, with nothing yet rejected or
 classified. It goes through the same phases the Warehouse procedure runs — raw
-staging, every refusal discovered into ``_Reject``, the rejection gate, the purge
-that makes staging the clean incoming state, ``_Delete``, an ``_Upsert`` of new
-and changed rows only, merge uniqueness, the stability gate, then the target.
+staging, every refusal discovered, the rejection gate, the purge that makes
+staging the clean incoming state, the delete set, an upsert set of new and
+changed rows only, merge uniqueness, the stability gate, then the target.
 What each phase means, and where the two engines differ physically, is
 ``design/keyed-load.md``.
 
-The intermediate tables are real — ``<Schema>.<Object>_Staging``, ``_Reject``,
-``_Delete`` and ``_Upsert`` — so a failed run can be inspected afterwards.
-Temporary views vanish with the session that made them.
+Each phase's result is a **persisted Spark relation** named by a temporary view,
+not a Delta table. The reconciliation needs the phases to be settled before the
+target moves and needs to read their sizes; it does not need them to outlive the
+session, and a Delta table per phase costs a write, a commit and a drop for
+state nothing else ever reads. Durable Delta artefacts are written only when a
+load ends with something to troubleshoot; see ``_keep_evidence``.
 
 ``Incremental`` chooses the delete driver, and there is only ever one. An
 incremental source is a window on the truth, so absence proves nothing and the
@@ -26,8 +29,9 @@ against a number the load never intended to delete.
 
 Written in SQL rather than the DataFrame API because
 ``tests/test_core_boundary.py`` forbids importing ``pyspark`` or ``delta``
-anywhere in ``weaver``. ``fault_tolerant`` is Weaver's own addition: an
-intolerant run returns before any target mutation.
+anywhere in ``weaver``: every phase is a statement, and what is held is the
+statement's result. ``fault_tolerant`` is Weaver's own addition: an intolerant
+run returns before any target mutation.
 """
 
 from __future__ import annotations
@@ -56,21 +60,16 @@ from .load_contract import (
 )
 from .load_result import LoadResult
 
-#: The suffixes of the four artefacts, matching the Warehouse so one vocabulary
-#: describes a load whichever engine ran it.
+#: The suffixes of the durable artefacts a faulted load leaves behind, matching
+#: the Warehouse so one vocabulary describes a load whichever engine ran it.
+#: These are evidence, not execution state: what did the source propose, what did
+#: Weaver refuse and why, and what was it proposing to remove.
 STAGING_SUFFIX = "_Staging"
-UPSERT_SUFFIX = "_Upsert"
 REJECT_SUFFIX = "_Reject"
-
-#: The keys a load will remove, settled before it removes any.
 DELETE_SUFFIX = "_Delete"
 
-#: Where the purge assembles the clean incoming state before it replaces staging
-#: with it. Not an artefact: it exists inside one statement pair and is dropped.
-KEEP_SUFFIX = "_StagingKeep"
-
 #: Columns a working relation carries. Weaver's, and named so: they sit beside
-#: the author's own columns in a real table.
+#: the author's own columns wherever one is written out as evidence.
 RANK_COLUMN = "__weaver_rank"
 WORKING_SIGNATURE_COLUMN = "__weaver_signature"
 SURVIVOR_COLUMN = "__weaver_survivor"
@@ -136,60 +135,138 @@ def load_table(
         for key, suffix in (
             ("target", ""),
             ("staging", STAGING_SUFFIX),
-            ("upsert", UPSERT_SUFFIX),
             ("reject", REJECT_SUFFIX),
             ("delete", DELETE_SUFFIX),
-            ("keep", KEEP_SUFFIX),
         )
     }
     columns, types = _business_columns(spark, names["target"])
     _require_columns(staging_frame, contract, columns)
     deletes = _delete_driver(contract, deletes)
 
-    # Every run starts from nothing a previous run left. Otherwise a clean load
-    # leaves the last run's reject table standing, and it reads as evidence about
-    # the run that just succeeded.
-    _clear(spark, names)
+    # Evidence an earlier faulted run left, dropped before this run can write any
+    # of its own. Otherwise the last failure's reject table stands beside a load
+    # that has just succeeded and reads as evidence about it.
+    _drop_evidence(spark, names)
 
-    _materialise_staging(spark, names, staging_frame, columns)
-    rows_read = _count(spark, names["staging"])
+    held: list = []
+    try:
+        return _reconcile(
+            spark,
+            held,
+            names=names,
+            contract=contract,
+            columns=columns,
+            types=types,
+            staging_frame=staging_frame,
+            deletes=deletes,
+            fault_tolerant=fault_tolerant,
+            ignore_stability_threshold=ignore_stability_threshold,
+        )
+    finally:
+        # Every exit: a clean load, a refusal at any gate, an unexpected failure.
+        _release(spark, held)
+
+
+def _reconcile(
+    spark,
+    held,
+    *,
+    names,
+    contract: LoadContract,
+    columns,
+    types,
+    staging_frame,
+    deletes,
+    fault_tolerant: bool,
+    ignore_stability_threshold: bool,
+) -> LoadResult:
+    """The state machine, top to bottom, one phase per step.
+
+    Each derivation hands back a relation and the name later phases read it by.
+    Nothing is written to the target until every gate has passed, and the durable
+    artefacts are written only where an outcome owes an explanation.
+    """
+
+    kept: set = set()
+
+    def keep(**relations) -> None:
+        _keep_evidence(spark, names, kept, **relations)
+
+    source = _register(spark, held, staging_frame, names["target"], "source")
+    staging, staging_view = _hold(
+        spark,
+        held,
+        f"SELECT {qualified('s', columns)} FROM {source} AS s",
+        names["target"],
+        "staging",
+    )
+    # Both the metric and the force that materialises staging for the phases after
+    # it, so the authored source is evaluated exactly once.
+    rows_read = staging.count()
 
     if contract.replaces_wholesale:
-        return _full_replace(spark, names, columns, rows_read)
+        return _full_replace(spark, names, staging_view, columns, rows_read)
 
     signature = row_signature("s", _comparison_columns(contract, columns), types)
-    rows_rejected = _discover_rejects(spark, names, contract, columns, signature)
-    if rows_rejected and not fault_tolerant:
-        # Nothing has been written, so refusing is a decision not to start
-        # rather than an unwind — and the reject table is the evidence.
-        raise LoadError(
-            f"{contract.qualified}: {INTOLERANT_MESSAGE}",
-            result=LoadResult.failure(
-                INTOLERANT_MESSAGE, rows_read=rows_read, rows_rejected=rows_rejected
-            ),
-        )
+    rejects, reject_view = _discover_rejects(
+        spark, held, staging_view, contract, columns, signature
+    )
+    rows_rejected = rejects.count()
     if rows_rejected:
-        _purge_staging(spark, names, contract, columns, signature)
+        # However this ends, it owes an explanation: it either stops here or loads
+        # the survivors and reports what it left out. Written before the purge,
+        # which supersedes the relation that says what the source proposed.
+        keep(staging=staging_view, reject=reject_view)
+        if not fault_tolerant:
+            # Nothing has been written, so refusing is a decision not to start
+            # rather than an unwind.
+            raise LoadError(
+                f"{contract.qualified}: {INTOLERANT_MESSAGE}",
+                result=LoadResult.failure(
+                    INTOLERANT_MESSAGE,
+                    rows_read=rows_read,
+                    rows_rejected=rows_rejected,
+                ),
+            )
+        staging_view = _purge_staging(
+            spark, held, staging_view, contract, columns, signature
+        )
 
-    _derive_deletes(spark, names, contract, deletes)
-    _derive_upserts(spark, names, contract, columns, signature)
-    if contract.checks_merge_uniqueness:
-        _require_merge_uniqueness(spark, names, contract, deletes is not None)
+    deleting, delete_view = _derive_deletes(
+        spark, held, names, staging_view, contract, deletes
+    )
+    delete_count = deleting.count()
 
-    # Everything the load is about to do, counted before it does any of it —
-    # which is the whole reason the change set is a table.
-    target_before = _count(spark, names["target"])
+    upsert_view = _derive_upserts(
+        spark, held, names, staging_view, contract, columns, signature
+    )
+    inserted, updated = _upsert_counts(spark, upsert_view)
+
+    if contract.checks_merge_uniqueness and _merge_conflicts(
+        spark, names, upsert_view, delete_view, contract, has_claim=deletes is not None
+    ):
+        keep(staging=staging_view, delete=delete_view if delete_count else None)
+        # Fatal whatever fault_tolerant says: that governs recoverable problems
+        # with incoming rows, and this is the target's own validity.
+        raise LoadError(
+            f"{contract.qualified}: {MERGE_CONFLICT_MESSAGE}",
+            result=LoadResult.failure(MERGE_CONFLICT_MESSAGE),
+        )
+
+    # Everything the load is about to do, settled before it does any of it, which
+    # is the whole reason the change set is derived rather than applied directly.
     breach = None
     if not ignore_stability_threshold:
         breach = contract.breaches(
-            target_rows=target_before,
-            deleting=_count(spark, names["delete"]),
-            updating=_count(spark, names["upsert"], where=f"`{IS_NEW_COLUMN}` = 0"),
+            target_rows=_count(spark, names["target"]),
+            deleting=delete_count,
+            updating=updated,
         )
     if breach:
         # A breach never writes. Tolerating one would be tolerating exactly the
         # change the threshold was declared to prevent, so what fault_tolerant
         # decides here is only whether the refusal is raised or returned.
+        keep(staging=staging_view, delete=delete_view if delete_count else None)
         refused = LoadResult.failure(
             BREACH_MESSAGE.format(reason=breach),
             rows_read=rows_read,
@@ -199,51 +276,37 @@ def load_table(
             raise LoadError(f"{contract.qualified}: {breach}", result=refused)
         return refused
 
-    _apply_deletes(spark, names, contract)
-    inserted, updated = _apply_upserts(spark, names, contract, columns)
-
-    # What the target actually lost, from its own cardinality. The delete driver
-    # says what the load *intended*; this says what happened, and the two differ
-    # whenever a key named for deletion was not there to begin with.
-    deleted = target_before + inserted - _count(spark, names["target"])
+    # Nothing is submitted for a phase that decided on no rows: a zero-row merge
+    # is a Delta commit and a scan for work that does not exist.
+    if delete_count:
+        _apply_deletes(spark, names, delete_view, contract)
+    if inserted or updated:
+        _apply_upserts(spark, names, upsert_view, contract, columns, inserted, updated)
 
     result = LoadResult(
         succeeded=True,
         rows_read=rows_read,
         rows_inserted=inserted,
         rows_updated=updated,
-        rows_deleted=deleted,
+        # What the target lost is what the driver settled on. The delete set is
+        # already narrowed to keys the target holds, and it is disjoint from the
+        # upsert set, since deletes are the keys clean staging no longer carries
+        # and upserts come from clean staging, so every key in it is one row gone.
+        rows_deleted=delete_count,
         rows_rejected=rows_rejected,
     )
     if rows_rejected:
-        # The artefacts stay: a run that refused rows is one someone will want
-        # to look at, and the reject table alone does not explain itself.
+        keep(delete=delete_view if delete_count else None)
         return result.rejected(f"{rows_rejected} {TOLERATED_MESSAGE}")
-    _clear(spark, names)
     return result
 
 
 # --- phases ------------------------------------------------------------------
 
 
-def _materialise_staging(spark, names, frame, columns) -> None:
-    """Put what ``read()`` produced into a real table, exactly as it produced it.
-
-    Business columns and nothing else. Materialised first, so the authored query
-    runs exactly once and a source that fails does so before the target is
-    touched.
-    """
-
-    view = _register(spark, frame, names["target"], "staged")
-    spark.sql(
-        f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS "
-        f"SELECT {qualified('s', columns)} FROM {view} AS s"
-    )
-
-
 def _discover_rejects(
-    spark, names, contract: LoadContract, columns, signature: str
-) -> int:
+    spark, held, staging_view, contract: LoadContract, columns, signature
+):
     """Everything this load refuses, in one statement.
 
     One statement because the stages are sequential and the chain says so
@@ -254,53 +317,43 @@ def _discover_rejects(
     over rows already known to sit in a duplicate primary key group.
     """
 
-    chain, rejects = _validation_chain(names, contract, columns, signature)
+    chain, rejects = _validation_chain(staging_view, contract, columns, signature)
     union = "\nUNION ALL\n".join(f"SELECT * FROM {name}" for name in rejects)
-    spark.sql(
-        f"CREATE TABLE {names['reject']} USING delta {COLUMN_MAPPING} AS\n"
-        f"WITH {chain}\n{union}"
-    )
-    count = _count(spark, names["reject"])
-    if not count:
-        # Nothing was refused, so there is no evidence to keep and an empty table
-        # standing next to the object would only invite the wrong conclusion.
-        spark.sql(f"DROP TABLE IF EXISTS {names['reject']}")
-    return count
+    return _hold(spark, held, f"WITH {chain}\n{union}", staging_view, "reject")
 
 
 def _purge_staging(
-    spark, names, contract: LoadContract, columns, signature: str
-) -> None:
-    """Replace staging with the rows the refusals left.
+    spark, held, staging_view, contract: LoadContract, columns, signature
+) -> str:
+    """The rows the refusals left, as the clean incoming state from here on.
 
-    One overwrite from the same chain discovery ran, rather than a delete per
-    stage, because Delta cannot delete through a ranked expression — and rows
-    sharing a primary key may be identical in every column, so no predicate can
-    tell one of them from the other. Assembling the survivors and overwriting is
-    also what makes the purge agree with discovery by construction.
+    Assembled from the same chain discovery ran, so what survives and what was
+    refused cannot disagree, which matters most where the choice is arbitrary, as
+    it is inside a duplicate primary key group. There is no predicate that would
+    do instead: rows sharing a primary key may be identical in every column.
 
-    Only ever reached when something was refused, so an ordinary load performs no
-    staging write at all.
+    Only ever reached when something was refused, so an ordinary load derives
+    staging once. The relation this supersedes is given back once the survivors
+    are materialised, its evidence already written.
     """
 
-    chain, _rejects = _validation_chain(names, contract, columns, signature)
-    spark.sql(f"DROP TABLE IF EXISTS {names['keep']}")
-    spark.sql(
-        f"CREATE TABLE {names['keep']} USING delta {COLUMN_MAPPING} AS\n"
+    chain, _rejects = _validation_chain(staging_view, contract, columns, signature)
+    clean, clean_view = _hold(
+        spark,
+        held,
         f"WITH {chain}\n"
-        f"SELECT {qualified('s', columns)} FROM {_surviving_relation(contract)} AS s"
+        f"SELECT {qualified('s', columns)} "
+        f"FROM {_surviving_relation(contract)} AS s",
+        staging_view,
+        "clean",
     )
-    # Through a table rather than straight from staging: overwriting a table from
-    # a read of itself is not something Spark guarantees.
-    spark.sql(
-        f"INSERT OVERWRITE TABLE {names['staging']} "
-        f"SELECT {qualified('k', columns)} FROM {names['keep']} AS k"
-    )
-    spark.sql(f"DROP TABLE IF EXISTS {names['keep']}")
+    clean.count()
+    _give_back_one(spark, held, staging_view)
+    return clean_view
 
 
 def _validation_chain(
-    names, contract: LoadContract, columns, signature: str
+    staging_view, contract: LoadContract, columns, signature: str
 ) -> tuple[str, list[str]]:
     """The common table expressions both discovery and the purge read.
 
@@ -315,12 +368,12 @@ def _validation_chain(
         (
             "weaver_null_reject",
             f"SELECT {named}, {_violation_reason(contract)} AS `{REJECTION_REASON}`\n"
-            f"FROM {names['staging']} AS s WHERE {violation}",
+            f"FROM {staging_view} AS s WHERE {violation}",
         ),
         (
             "weaver_valid",
             f"SELECT {named}, {signature} AS `{WORKING_SIGNATURE_COLUMN}`\n"
-            f"FROM {names['staging']} AS s WHERE NOT ({violation})",
+            f"FROM {staging_view} AS s WHERE NOT ({violation})",
         ),
         (
             "weaver_duplicate_key",
@@ -470,34 +523,59 @@ def _violation_reason(contract: LoadContract, alias: str = "s") -> str:
 
 
 def _derive_upserts(
-    spark, names, contract: LoadContract, columns, signature: str
-) -> None:
-    """Record what this load has decided to change, before it changes anything.
+    spark, held, names, staging_view, contract: LoadContract, columns, signature
+) -> str:
+    """What this load has decided to change, before it changes anything.
 
     New rows, and rows whose stored signature no longer matches what staging
-    proposes. A table rather than a subquery, so the decision is inspectable
-    afterwards and the stability check can read the size of the change before a
-    row moves.
+    proposes. Settled as its own relation rather than left as a subquery, so the
+    size of the change can be read before a row moves and the two mutations act
+    on exactly the rows that were classified.
+
+    Only the name comes back. Both its cardinalities come from one grouped
+    statement over it rather than from counting the relation twice.
     """
 
     stored = delta_signature_name()
     missing = f"t.`{contract.primary_key[0]}` IS NULL"
-    spark.sql(
-        f"CREATE TABLE {names['upsert']} USING delta {COLUMN_MAPPING} AS\n"
+    _frame, view = _hold(
+        spark,
+        held,
         f"WITH weaver_proposed AS (\n"
         f"    SELECT {qualified('s', columns)}, {signature} AS `{stored}`\n"
-        f"    FROM {names['staging']} AS s\n"
+        f"    FROM {staging_view} AS s\n"
         f")\n"
         f"SELECT {qualified('q', columns)}, q.`{stored}`,\n"
         f"  CASE WHEN {missing} THEN 1 ELSE 0 END AS `{IS_NEW_COLUMN}`\n"
         f"FROM weaver_proposed AS q\n"
         f"LEFT JOIN {names['target']} AS t "
         f"ON {key_join('q', 't', contract.primary_key)}\n"
-        f"WHERE {missing} OR q.`{stored}` <> t.`{stored}`"
+        f"WHERE {missing} OR q.`{stored}` <> t.`{stored}`",
+        staging_view,
+        "upsert",
     )
+    return view
 
 
-def _require_merge_uniqueness(spark, names, contract: LoadContract, has_claim) -> None:
+def _upsert_counts(spark, upsert_view: str) -> tuple[int, int]:
+    """How many rows the target does not hold, and how many of its rows changed.
+
+    One pass rather than two counts. Membership of the upsert set already means
+    new or changed, so the flag partitions it and grouping answers both, and the
+    same action materialises the relation both mutations then read.
+    """
+
+    rows = spark.sql(
+        f"SELECT `{IS_NEW_COLUMN}` AS flag, count(*) AS n "
+        f"FROM {upsert_view} GROUP BY `{IS_NEW_COLUMN}`"
+    ).collect()
+    counts = {int(row["flag"]): int(row["n"]) for row in rows}
+    return counts.get(1, 0), counts.get(0, 0)
+
+
+def _merge_conflicts(
+    spark, names, upsert_view, delete_view, contract: LoadContract, *, has_claim: bool
+) -> int:
     """The one question an incremental load with unique keys has to ask.
 
     If every surviving delete and upsert were applied, would a declared unique key
@@ -515,52 +593,57 @@ def _require_merge_uniqueness(spark, names, contract: LoadContract, has_claim) -
     """
 
     branches = [
-        _conflict_branch(names, contract, unique_key, has_claim)
+        _conflict_branch(
+            names, upsert_view, delete_view, contract, unique_key, has_claim
+        )
         for unique_key in contract.unique_keys
     ]
     union = "\nUNION ALL\n".join(branches)
-    conflicts = int(
+    return int(
         spark.sql(
             f"SELECT count(*) AS n FROM (\n{union}\n) AS weaver_merge_conflict"
         ).collect()[0]["n"]
     )
-    if conflicts:
-        # Fatal whatever fault_tolerant says: that governs recoverable problems
-        # with incoming rows, and this is the target's own validity.
-        raise LoadError(
-            f"{contract.qualified}: {MERGE_CONFLICT_MESSAGE}",
-            result=LoadResult.failure(MERGE_CONFLICT_MESSAGE),
-        )
 
 
-def _conflict_branch(names, contract: LoadContract, unique_key, has_claim: bool) -> str:
+def _conflict_branch(
+    names, upsert_view, delete_view, contract: LoadContract, unique_key, has_claim: bool
+) -> str:
     differs = " OR ".join(f"holder.`{c}` <> u.`{c}`" for c in contract.primary_key)
     vacated = [
-        f"AND NOT EXISTS (SELECT 1 FROM {names['upsert']} AS moving\n"
+        f"AND NOT EXISTS (SELECT 1 FROM {upsert_view} AS moving\n"
         f"    WHERE {key_join('moving', 'holder', contract.primary_key)}\n"
         f"      AND ({moves_off(unique_key)}))"
     ]
     if has_claim:
         vacated.insert(
             0,
-            f"AND NOT EXISTS (SELECT 1 FROM {names['delete']} AS d\n"
+            f"AND NOT EXISTS (SELECT 1 FROM {delete_view} AS d\n"
             f"    WHERE {key_join('d', 'holder', contract.primary_key)})",
         )
     return (
         f"SELECT {qualified('u', contract.primary_key)}\n"
-        f"FROM {names['upsert']} AS u\n"
+        f"FROM {upsert_view} AS u\n"
         f"JOIN {names['target']} AS holder\n"
         f"    ON {key_join('holder', 'u', unique_key)} AND ({differs})\n"
         f"WHERE {participates(unique_key, 'u')}\n" + "\n".join(vacated)
     )
 
 
-def _apply_upserts(spark, names, contract: LoadContract, columns) -> tuple[int, int]:
+def _apply_upserts(
+    spark,
+    names,
+    upsert_view,
+    contract: LoadContract,
+    columns,
+    inserted: int,
+    updated: int,
+) -> None:
     """Insert the new rows, then update the changed ones.
 
-    Two statements over the one materialised set, as the Warehouse does, so both
-    counts describe exactly the rows the writes touched. Both carry the signature
-    the upsert set already computed.
+    Two statements over the one settled relation, as the Warehouse does, so both
+    writes touch exactly the rows that were counted. Both carry the signature the
+    upsert set already computed, and neither is submitted with nothing to do.
     """
 
     audit = delta_audit_names()
@@ -568,16 +651,13 @@ def _apply_upserts(spark, names, contract: LoadContract, columns) -> tuple[int, 
     written = [*columns, stored]
     insert_columns = qualified("", written)
     audit_columns = qualified("", audit)
-    inserted = _count(spark, names["upsert"], where=f"`{IS_NEW_COLUMN}` = 1")
     if inserted:
         spark.sql(
             f"INSERT INTO {names['target']} ({insert_columns}, {audit_columns})\n"
             f"SELECT {insert_columns}, current_timestamp(), current_timestamp(), "
             f"{live_delete_literal()}\n"
-            f"FROM {names['upsert']} WHERE `{IS_NEW_COLUMN}` = 1"
+            f"FROM {upsert_view} WHERE `{IS_NEW_COLUMN}` = 1"
         )
-
-    updated = _count(spark, names["upsert"], where=f"`{IS_NEW_COLUMN}` = 0")
     if updated:
         sets = [
             f"t.`{c}` = u.`{c}`" for c in written if c not in contract.primary_key
@@ -590,11 +670,10 @@ def _apply_upserts(spark, names, contract: LoadContract, columns) -> tuple[int, 
         # applies the change it recorded.
         spark.sql(
             f"MERGE INTO {names['target']} AS t\n"
-            f"USING (SELECT * FROM {names['upsert']} WHERE `{IS_NEW_COLUMN}` = 0) AS u\n"
+            f"USING (SELECT * FROM {upsert_view} WHERE `{IS_NEW_COLUMN}` = 0) AS u\n"
             f"   ON {key_join('u', 't', contract.primary_key)}\n"
             f"WHEN MATCHED THEN UPDATE SET {', '.join(sets)}"
         )
-    return inserted, updated
 
 
 def _delete_driver(contract: LoadContract, deletes):
@@ -618,12 +697,11 @@ def _delete_driver(contract: LoadContract, deletes):
     return None
 
 
-def _derive_deletes(spark, names, contract: LoadContract, deletes) -> None:
-    """Materialise the keys this load will remove, before it removes any.
+def _derive_deletes(spark, held, names, staging_view, contract: LoadContract, deletes):
+    """The keys this load will remove, settled before it removes any.
 
-    One relation from one driver, settled before anything is removed: a number
-    obtained by deleting would be a report rather than a check, and the guard
-    exists to decide not to delete.
+    One relation from one driver: a number obtained by deleting would be a report
+    rather than a check, and the guard exists to decide not to delete.
 
     A non-incremental load reads staging *after* the purge, so a target row whose
     only staged proposal was refused is retired by the same rule as any other
@@ -632,61 +710,68 @@ def _derive_deletes(spark, names, contract: LoadContract, deletes) -> None:
 
     keys = qualified("", contract.primary_key)
     target_keys = qualified("t", contract.primary_key)
-    spark.sql(f"DROP TABLE IF EXISTS {names['delete']}")
-    if contract.incremental:
-        source = (
-            f"SELECT DISTINCT {keys} FROM "
-            f"{_register(spark, deletes, names['target'], 'delete_keys')}"
-            if deletes is not None
-            else f"SELECT {keys} FROM {names['target']} WHERE false"
-        )
-        # Only keys the target actually holds: a delete for a row that was never
-        # there is not a deletion, and counting it would make the guard protect
-        # against work the load was never going to do.
-        #
-        # And only keys clean staging no longer carries. A key the source still
-        # produces is not retired, whether or not its row changed, so the claim
-        # gives it up and the row is loaded normally — which keeps its insert time
-        # and leaves an unchanged row alone.
-        spark.sql(
-            f"CREATE TABLE {names['delete']} USING delta {COLUMN_MAPPING} AS\n"
-            f"SELECT {target_keys}\n"
-            f"FROM {names['target']} AS t JOIN ({source}) AS d "
-            f"ON {key_join('d', 't', contract.primary_key)}\n"
-            f"WHERE NOT EXISTS (SELECT 1 FROM {names['staging']} AS s "
-            f"WHERE {key_join('s', 't', contract.primary_key)})"
-        )
-        return
-
-    spark.sql(
-        f"CREATE TABLE {names['delete']} USING delta {COLUMN_MAPPING} AS\n"
-        f"SELECT {target_keys}\n"
-        f"FROM {names['target']} AS t\n"
-        f"WHERE NOT EXISTS (SELECT 1 FROM {names['staging']} AS s "
+    absent = (
+        f"WHERE NOT EXISTS (SELECT 1 FROM {staging_view} AS s "
         f"WHERE {key_join('s', 't', contract.primary_key)})"
+    )
+    if not contract.incremental:
+        return _hold(
+            spark,
+            held,
+            f"SELECT {target_keys}\nFROM {names['target']} AS t\n{absent}",
+            staging_view,
+            "delete",
+        )
+
+    if deletes is None:
+        source = f"SELECT {keys} FROM {names['target']} WHERE false"
+    else:
+        claimed = _register(spark, held, deletes, names["target"], "delete_keys")
+        source = f"SELECT DISTINCT {keys} FROM {claimed}"
+    # Only keys the target actually holds: a delete for a row that was never there
+    # is not a deletion, and counting it would make the guard protect against work
+    # the load was never going to do.
+    #
+    # And only keys clean staging no longer carries. A key the source still
+    # produces is not retired, whether or not its row changed, so the claim gives
+    # it up and the row is loaded normally, which keeps its insert time and
+    # leaves an unchanged row alone.
+    return _hold(
+        spark,
+        held,
+        f"SELECT {target_keys}\n"
+        f"FROM {names['target']} AS t JOIN ({source}) AS d "
+        f"ON {key_join('d', 't', contract.primary_key)}\n{absent}",
+        staging_view,
+        "delete",
     )
 
 
-def _apply_deletes(spark, names, contract) -> None:
+def _apply_deletes(spark, names, delete_view, contract) -> None:
     """Remove exactly the keys the driver settled on."""
 
     spark.sql(
-        f"MERGE INTO {names['target']} AS t USING {names['delete']} AS d "
+        f"MERGE INTO {names['target']} AS t USING {delete_view} AS d "
         f"ON {key_join('d', 't', contract.primary_key)} WHEN MATCHED THEN DELETE"
     )
 
 
-def _full_replace(spark, names, columns, rows_read: int) -> LoadResult:
+def _full_replace(spark, names, staging_view, columns, rows_read: int) -> LoadResult:
     """No key, so no row can be matched: the target's contents become these.
 
-    Staging is materialised first and the target emptied afterwards, which is
-    why staging is a table: clearing the target and then evaluating the source
-    would leave nothing behind if it failed.
+    The one path that writes staging to Delta on its way through, and the reason
+    is that it empties the target first. A persisted relation is recomputed from
+    its source if its cache is lost, and this is the only phase where that source
+    could be read after the target it may depend on has been emptied.
     """
 
     audit = delta_audit_names()
     named = qualified("", columns)
     audit_columns = qualified("", audit)
+    spark.sql(
+        f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS "
+        f"SELECT {named} FROM {staging_view}"
+    )
     rows_deleted = _count(spark, names["target"])
     spark.sql(f"DELETE FROM {names['target']}")
     spark.sql(
@@ -694,7 +779,7 @@ def _full_replace(spark, names, columns, rows_read: int) -> LoadResult:
         f"SELECT {named}, current_timestamp(), current_timestamp(), "
         f"{live_delete_literal()} FROM {names['staging']}"
     )
-    _clear(spark, names)
+    spark.sql(f"DROP TABLE IF EXISTS {names['staging']}")
     return LoadResult(
         succeeded=True,
         rows_read=rows_read,
@@ -703,22 +788,131 @@ def _full_replace(spark, names, columns, rows_read: int) -> LoadResult:
     )
 
 
+# --- what a load keeps, and what it gives back -------------------------------
+
+
+def _hold(spark, held, sql: str, target: str, role: str):
+    """Run one statement, keep its result in Spark, and name it for the next phase.
+
+    A persisted relation, not a table. Every phase after this one reads it by the
+    view name, the caller forces it with the count it wanted anyway, and nothing
+    outside the load ever needs it. Registered under the object's own name, so two
+    loads in one session cannot read each other's phases.
+    """
+
+    frame = spark.sql(sql).persist()
+    view = "weaver_" + role + "_" + _clean(target)
+    frame.createOrReplaceTempView(view)
+    held.append((frame, view))
+    return frame, view
+
+
+def _register(spark, held, frame, target: str, role: str) -> str:
+    """A temporary view over a frame the caller made, so SQL can name it.
+
+    ``read()``'s own output and an explicit delete claim arrive as frames rather
+    than statements. Nothing is persisted here: what is held is the relation
+    derived from it.
+    """
+
+    view = "weaver_" + role + "_" + _clean(target)
+    frame.createOrReplaceTempView(view)
+    held.append((None, view))
+    return view
+
+
+def _give_back_one(spark, held, view: str) -> None:
+    """Release one relation early, once no later phase will read it."""
+
+    for index, (frame, name) in enumerate(held):
+        if name == view:
+            held.pop(index)
+            _give_back(spark, frame, name)
+            return
+
+
+def _release(spark, held) -> None:
+    """Release everything this load kept in Spark, however it ended.
+
+    Reached on a clean load, on a refusal at any gate, and on an unexpected
+    failure. An evicted cache would be recomputed rather than lost, so what this
+    prevents is a finished load holding executor memory.
+    """
+
+    while held:
+        frame, view = held.pop()
+        _give_back(spark, frame, view)
+
+
+def _give_back(spark, frame, view: str) -> None:
+    """Unpersist one relation and drop its view, and never mask the real outcome.
+
+    Cleanup runs while an exception may be on its way out. A failure to release
+    something is not the failure worth reporting, and stopping here would leave
+    the rest of the load's relations held.
+    """
+
+    if frame is not None:
+        try:
+            frame.unpersist()
+        except Exception:  # noqa: BLE001 - see above
+            pass
+    try:
+        spark.catalog.dropTempView(view)
+    except Exception:  # noqa: BLE001 - see above
+        pass
+
+
+# --- evidence ----------------------------------------------------------------
+
+
+def _drop_evidence(spark, names) -> None:
+    """Remove what an earlier faulted run left, before this run writes any.
+
+    Attempted rather than looked up. A missing table is the ordinary case, and an
+    inventory read to avoid asking for a drop that does nothing would cost more
+    than the drop.
+    """
+
+    for role in ("reject", "delete", "staging"):
+        spark.sql(f"DROP TABLE IF EXISTS {names[role]}")
+
+
+def _keep_evidence(spark, names, kept: set, **relations) -> None:
+    """Write the relations a reader will want as Delta tables beside the object.
+
+    Only for an outcome with something to troubleshoot, which is what separates
+    evidence from execution state:
+
+    .. code-block:: text
+
+        _Staging   what did the source propose?
+        _Reject    what did Weaver refuse, and why?
+        _Delete    what was Weaver proposing to remove?
+
+    Each is written once. A load can pass more than one gate that owes evidence,
+    and the relation holding what the source proposed is released as soon as the
+    purge supersedes it.
+    """
+
+    for role, view in relations.items():
+        if view is None or role in kept:
+            continue
+        kept.add(role)
+        spark.sql(
+            f"CREATE TABLE {names[role]} USING delta {COLUMN_MAPPING} AS "
+            f"SELECT * FROM {view}"
+        )
+
+
 # --- helpers -----------------------------------------------------------------
-
-
-def _clear(spark, names) -> None:
-    """Drop the working tables, newest dependency first."""
-
-    for key in ("upsert", "reject", "delete", "keep", "staging"):
-        spark.sql(f"DROP TABLE IF EXISTS {names[key]}")
 
 
 def _count(spark, relation: str, *, where: str | None = None) -> int:
     """How many rows. Unfiltered, Delta answers this from its transaction log.
 
     So the target's own count is affordable — the ``sys.partitions`` equivalent
-    rather than a scan. A filtered count does read, so the filtered ones here
-    are over the upsert set, never the target.
+    rather than a scan.
     """
 
     clause = f" WHERE {where}" if where else ""
@@ -786,19 +980,6 @@ def _require_columns(frame, contract: LoadContract, columns) -> None:
             f"{', '.join(repr(name) for name in key_missing)} are not in the "
             "staged frame, so no row can be matched"
         )
-
-
-def _register(spark, frame, target: str, role: str) -> str:
-    """A temporary view over one frame, so SQL can name it.
-
-    A temp view names an in-flight ``DataFrame`` for a single statement. No
-    phase's result lives in one; those are tables, because they outlive the
-    session.
-    """
-
-    name = "weaver_" + role + "_" + _clean(target)
-    frame.createOrReplaceTempView(name)
-    return name
 
 
 def _clean(name: str) -> str:
