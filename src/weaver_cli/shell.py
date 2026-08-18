@@ -159,15 +159,25 @@ def _run_one(session, parser, words: list[str]) -> bool:
 
 
 def _prepare_for(session, parsed) -> None:
-    """Start resources declared by a command before it runs."""
+    """Start resources declared by a command before it runs.
 
-    from .main import _resolve_workspace, command_requirements
+    The Lakehouses the command names go in first, because Fabric attaches a
+    Spark session to one and a warm-up that had none to attach to would be
+    skipped.
+    """
+
+    from .main import _resolve_workspace, command_lakehouses, command_requirements
 
     required = command_requirements(parsed)
     if not required:
         return
     try:
-        session.prepare(required, workspace=_resolve_workspace(parsed))
+        workspace = _resolve_workspace(parsed)
+        session.offer_spark_home(command_lakehouses(parsed), workspace=workspace)
+        # A resource the command wants and this workspace cannot start is
+        # reported here, where the reader can still act on it before the command
+        # fails for the same reason further in.
+        _report_skipped(session.prepare(required, workspace=workspace))
     except WeaverError:
         # Let the command report its own workspace error.
         pass
@@ -307,9 +317,15 @@ def _report_warm_up(warm, parser) -> None:
 
     if warm.started:
         print(f"Starting: {', '.join(warm.started)}")
-    for resource, reason in warm.skipped:
-        print(f"Not started: {resource} — {reason}")
+    _report_skipped(warm)
     print(f"\n{_usage(parser)}")
+
+
+def _report_skipped(warm) -> None:
+    """Name any resource that could not start, and why."""
+
+    for resource, reason in warm.skipped:
+        print(f"Not started: {resource} - {reason}")
 
 
 __all__ = ["Prompt", "ScriptedInput", "run_shell"]

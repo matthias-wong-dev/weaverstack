@@ -93,6 +93,17 @@ class PhysicalTargetRef:
         return self.kind == LAKEHOUSE_TARGET
 
 
+def lakehouse_names(targets) -> tuple[str, ...]:
+    """The Lakehouse names among some :class:`PhysicalTargetRef`, in order given.
+
+    What a Livy session needs a Lakehouse for is somewhere to attach, so which
+    of them is picked does not matter: every generated statement names its own
+    target in full.
+    """
+
+    return tuple(target.name for target in targets if target.is_lakehouse)
+
+
 @dataclass(frozen=True)
 class PhysicalObjectRef:
     """One installed object, addressed as its physical target holds it.
@@ -976,6 +987,7 @@ __all__ = [
     "PhysicalTargetRef",
     "WAREHOUSE_PROCEDURE",
     "WAREHOUSE_TARGET",
+    "lakehouse_names",
     "load_dag",
     "primitive_candidates",
 ]

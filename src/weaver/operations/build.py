@@ -146,6 +146,9 @@ def build(
         validate_build_request(prepared.repository, bindings, catalogue_binding=control)
         _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
+            # Fabric attaches a Spark session to a Lakehouse, so a host that
+            # crosses needs one of the Lakehouses this build is actually for.
+            opened.offer_spark_home(_bound_lakehouses(bindings))
             arguments = dict(
                 repository=prepared.repository,
                 source_store=prepared.store,
@@ -156,6 +159,18 @@ def build(
             )
             with opened.task("Build", resolved_workspace.workspace):
                 return _run_build(resolved_workspace, session=opened, **arguments)
+
+
+def _bound_lakehouses(bindings) -> tuple[str, ...]:
+    """The physical Lakehouse names this build is bound to, in binding order."""
+
+    from ..declaration.model import LAKEHOUSE
+
+    return tuple(
+        binding.target.item.name
+        for binding in bindings.entries
+        if binding.target.physical_kind == LAKEHOUSE
+    )
 
 
 def _preflight(workspace: Workspace, bindings, *, session) -> None:

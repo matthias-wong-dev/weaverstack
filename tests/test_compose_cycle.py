@@ -384,6 +384,9 @@ def test_commands_can_supply_the_composition_workspace(
         def workflow(self, _workflow_id):
             return nullcontext()
 
+        def offer_spark_home(self, lakehouses, *, workspace=None):
+            pass
+
         def prepare(self, required, *, workspace=None):
             return type("W", (), {"started": ()})()
 
@@ -504,11 +507,19 @@ def test_a_composition_warms_the_union_before_the_first_command(
 
     monkeypatch.setattr("weaver_cli.shell._default_workspace", lambda args: object())
 
+    offered = []
+
     class Warmed:
         closed = False
 
+        def using(self, _workspace):
+            return nullcontext()
+
         def workflow(self, _workflow_id):
             return nullcontext()
+
+        def offer_spark_home(self, lakehouses, *, workspace=None):
+            offered.append(tuple(lakehouses))
 
         def prepare(self, required, *, workspace=None):
             prepared.append(set(required))
@@ -521,6 +532,10 @@ def test_a_composition_warms_the_union_before_the_first_command(
     (required,) = prepared
     # wipe and build declare the lot; load and test add nothing new here.
     assert required == {AUTH, RESOLVER, ONELAKE, LIVY, TDS}
+
+    # And the Lakehouse Spark can attach to, gathered across the whole sequence
+    # rather than left to whichever command needs Spark first.
+    assert offered == [("Sales",)]
 
 
 @weaver_test()
@@ -535,8 +550,14 @@ def test_a_composition_with_no_workspace_warms_nothing(tmp_path, recorded, confi
     class Watched:
         closed = False
 
+        def using(self, _workspace):
+            return nullcontext()
+
         def workflow(self, _workflow_id):
             return nullcontext()
+
+        def offer_spark_home(self, lakehouses, *, workspace=None):
+            raise AssertionError("a composition with no workspace offered a Lakehouse")
 
         def prepare(self, required, *, workspace=None):
             prepared.append(required)

@@ -171,6 +171,19 @@ class Session(ABC):
             )
         return resolved
 
+    def offer_spark_home(
+        self, lakehouses, *, workspace: Workspace | None = None
+    ) -> None:
+        """Name Lakehouses a Spark session may attach to for this work.
+
+        Called by an operation with the physical Lakehouses it was actually
+        asked for. A host that already runs where Spark is has nothing to
+        attach and ignores it; a host that crosses needs one, because Fabric
+        creates a Livy session against a Lakehouse.
+        """
+
+        self.scope(workspace).offer_spark_home(lakehouses)
+
     @property
     def workflow_id(self) -> str | None:
         return self._workflow_id
@@ -623,10 +636,41 @@ class WorkspaceScope:
         self._resolver = resolver
         self._store = store
         self._resources: list[Resource] = []
+        #: Lakehouses offered as somewhere a Spark session could attach. A
+        #: transport detail rather than a destination; see
+        #: :meth:`offer_spark_home`.
+        self._offered_spark_homes: set[str] = set()
         # Reentrant: acquiring a resource asks this scope for the resolver that
         # names it, and a scope that deadlocked on its own bookkeeping would do
         # so only under the concurrency this Session exists to allow.
         self._lock = threading.RLock()
+
+    def offer_spark_home(self, lakehouses) -> None:
+        """Note Lakehouses a Spark session may attach to, if this host needs one.
+
+        Fabric creates a Livy session *against* a Lakehouse, so a host that
+        crosses needs the id of one. Which one does not affect where work lands:
+        every generated statement names its own target in full.
+        """
+
+        names = {str(name) for name in lakehouses or () if name}
+        if not names:
+            return
+        with self._lock:
+            self._offered_spark_homes |= names
+
+    @property
+    def spark_home(self) -> str | None:
+        """The offered Lakehouse to attach a Spark session to, where one was.
+
+        A plain name, the first by name, so a scope answers the same way twice.
+        None means nothing was offered, and the caller falls back to the
+        workspace's own.
+        """
+
+        with self._lock:
+            offered = sorted(self._offered_spark_homes)
+        return offered[0] if offered else None
 
     # --- resolution ---------------------------------------------------------
 

@@ -52,8 +52,8 @@ expanded form, including per-target execution settings.
 
 ## Session
 
-A one-shot command pays for a credential, item resolution and — for anything
-touching Spark — a Livy session, and then throws all three away. Four commands
+A one-shot command pays for a credential, item resolution and, for anything
+touching Spark, a Livy session, and then throws all three away. Four commands
 pay four times. `weaver session` pays once:
 
 ```bash
@@ -62,7 +62,7 @@ weaver session --workspace "Weaver Example" --environment weaver
 
 ```text
 Weaver · Weaver Example
-Starting: Fabric credential, Spark session (Livy)
+Starting: Fabric credential
 
 Available: build, compose, fabric, install, load, test, wipe.
 Commands start with `weaver`, as they do in a terminal. `help` for options, `exit` to leave.
@@ -119,9 +119,20 @@ picked up from whichever command ran last would mean the next command silently
 borrowing another workspace's Environment.
 
 **The prompt does not wait for Fabric.** Where a workspace is known at startup,
-the credential and the Livy session are acquired in the background; the first
-command that needs Spark waits on that startup rather than beginning a second
-one, which matters on a capacity that permits exactly one.
+the credential is acquired in the background, and each command starts what it
+declared before it runs. The first command that needs Spark waits on that
+startup rather than beginning a second one, which matters on a capacity that
+permits exactly one.
+
+**Spark starts with the first command that needs it.** Opening a session warms
+the credential every command needs, and nothing else: a Livy session costs a
+minute and a capacity's only slot, and Fabric attaches one to a Lakehouse, which
+before a command is typed there is none of. So a Warehouse-only sequence starts
+no Spark session at all, the first command naming a Lakehouse starts one against
+one of the Lakehouses it was asked for, and later commands in the same workspace
+share it. The Lakehouse is where the session lives rather than where work lands:
+every generated statement names its own target in full, so a workspace
+configuring no `lakehouses` builds into one perfectly well.
 
 **An ordinary failure keeps the session.** A build that fails, a Spark error, a
 typo: the command reports and the prompt returns with the resources still up.
@@ -215,6 +226,14 @@ and no remote runtime scope.
 `weaver compose` takes the union of every parsed command's requirements and
 warms that once, so a sequence ending in a load does not wait for Spark at the
 end of the build in front of it.
+
+A command that declares `livy` also names the physical Lakehouses it is for,
+read from the same arguments, because Fabric creates a Livy session against a
+Lakehouse and puts its id in the Livy URL. The first of them is where the
+session lives. It is not where work lands: every generated statement names its
+own target in full, so which one is picked does not matter, and a workspace
+configuring no `lakehouses` needs none added to build into one. A command that
+names no Lakehouse declares no `livy` and starts no session.
 
 ## Wiping a whole estate
 

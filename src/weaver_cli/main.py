@@ -32,6 +32,18 @@ COMPOSE_DEFAULT_FILE = "compose.yml"
 # nothing below treats a declaration as permission to acquire.
 
 
+def _target_kind_and_name(value) -> tuple[str, str]:
+    """One ``Kind/Name`` target token, split without validating either half.
+
+    Deliberately tolerant. This reads arguments before the command runs, so a
+    malformed target has to reach the command that reports it properly rather
+    than failing here.
+    """
+
+    kind, _, name = str(value).partition("/")
+    return kind.strip().lower(), name.strip()
+
+
 def _target_requirements(targets) -> set[str]:
     """What the named physical targets imply, by their type alone."""
 
@@ -39,7 +51,7 @@ def _target_requirements(targets) -> set[str]:
 
     wanted: set[str] = set()
     for value in targets or ():
-        kind = str(value).split("/", 1)[0].strip().lower()
+        kind, _name = _target_kind_and_name(value)
         if kind.startswith("warehouse"):
             wanted.add(TDS)
         else:
@@ -100,6 +112,35 @@ def command_requirements(parsed) -> frozenset[str]:
 
     declares = getattr(parsed, "requires", None)
     return frozenset(declares(parsed)) if declares is not None else frozenset()
+
+
+def _target_lakehouses(targets) -> tuple[str, ...]:
+    """The Lakehouse names among some target tokens, in the order given."""
+
+    names = []
+    for value in targets or ():
+        kind, name = _target_kind_and_name(value)
+        if kind.startswith("lakehouse") and name:
+            names.append(name)
+    return tuple(names)
+
+
+def command_lakehouses(parsed) -> tuple[str, ...]:
+    """The physical Lakehouses one parsed command names.
+
+    Fabric creates a Livy session against a Lakehouse, so warming Spark for a
+    command needs one of the Lakehouses that command is for. Read from the same
+    arguments its requirements are read from, so the two cannot disagree about
+    which targets a command has.
+    """
+
+    tokens = [
+        # `PHYSICAL[=LOGICAL]`, and the physical half names the kind.
+        str(value).split("=", 1)[0]
+        for value in getattr(parsed, "item_bindings", None) or ()
+    ]
+    tokens += [str(value) for value in getattr(parsed, "targets", None) or ()]
+    return _target_lakehouses(tokens)
 
 
 def build_parser() -> argparse.ArgumentParser:
