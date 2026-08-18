@@ -532,7 +532,9 @@ def _require_merge_uniqueness(spark, names, contract: LoadContract, has_claim) -
     ]
     union = "\nUNION ALL\n".join(branches)
     conflicts = int(
-        spark.sql(f"SELECT count(*) AS n FROM (\n{union}\n)").collect()[0]["n"]
+        spark.sql(
+            f"SELECT count(*) AS n FROM (\n{union}\n) AS weaver_merge_conflict"
+        ).collect()[0]["n"]
     )
     if conflicts:
         # Fatal whatever fault_tolerant says: that governs recoverable problems

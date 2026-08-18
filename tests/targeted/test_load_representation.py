@@ -19,6 +19,7 @@ ordinary ``Table.load()``, proved once for both authoring languages.
 from __future__ import annotations
 
 import pytest
+from support.generated_load import procedure as _procedure
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
@@ -80,28 +81,6 @@ def _spark(source: str = SPARK_TABLE):
 
 def _no_key(source: str) -> str:
     return source.replace("Primary key: Customer id\n\n", "")
-
-
-#: Where the installer embeds the procedure it assembles.
-_PROCEDURE_OPENS = "set @weaver_proc_sql = N'"
-
-
-def _procedure(payload: str) -> str:
-    """The procedure the installer will create, as the Warehouse will see it.
-
-    The installer carries it as a SQL literal, so every quote in it is doubled.
-    Reading it back undoubled is what lets a claim about the generated procedure
-    be written the way the procedure is written.
-    """
-
-    start = payload.index(_PROCEDURE_OPENS) + len(_PROCEDURE_OPENS)
-    at = start
-    while True:
-        at = payload.index("'", at)
-        if payload[at + 1] != "'":
-            break
-        at += 2
-    return payload[start:at].replace("''", "'")
 
 
 # --- what owns a generated load ----------------------------------------------
