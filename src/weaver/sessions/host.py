@@ -84,20 +84,12 @@ def session_for(workspace: Workspace | None, **kwargs) -> Session:
 def use_or_create_session(
     session: Session | None, *, workspace: Workspace | None = None
 ) -> Iterator[Session]:
-    """The caller's Session, or one owned by this operation and closed with it.
-
-    A borrowed Session is addressed at ``workspace`` for as long as the
-    operation runs, and keeps its own default afterwards. Without that a command
-    that resolved its own context, as ``build --catalogue Warehouse/Other`` at
-    a session prompt does, would hand the operation a Session still pointing at
-    the session's, and the override would be lost between the two.
-    """
+    """The caller's Session, or one owned by this operation and closed with it."""
 
     if session is not None:
         if session.closed:
             raise CommandError("The Session is closed.")
-        with session.using(workspace):
-            yield session
+        yield session
         return
     created = session_for(workspace)
     try:

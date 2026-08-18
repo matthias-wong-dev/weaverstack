@@ -12,7 +12,6 @@ choice at all.
 from __future__ import annotations
 
 import json
-from contextlib import contextmanager
 from importlib import import_module
 
 import pytest
@@ -153,9 +152,3 @@ class _RecordingSession:
 
     def step(self, name, detail=None):
         return self._frame("step", name)
-
-    @contextmanager
-    def using(self, workspace):
-        """Borrowed for one operation. This one has no context to override."""
-
-        yield self

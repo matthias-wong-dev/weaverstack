@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import os
-from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -245,12 +244,6 @@ class _Session:
 
     def close(self):
         self.closed = True
-
-    @contextmanager
-    def using(self, workspace):
-        """Borrowed for one operation. This one has no context to override."""
-
-        yield self
 
 
 @weaver_test()

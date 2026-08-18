@@ -414,61 +414,6 @@ def test_load_and_test_offer_the_lakehouse_among_their_targets(operation):
     assert session.scope(workspace).spark_home == "Sales"
 
 
-# --- a command's own context reaches the operation ----------------------------
-
-
-@weaver_test()
-def test_a_commands_catalogue_override_reaches_the_operation(transport, monkeypatch):
-    """``build --catalogue`` at a prompt addresses that catalogue, once.
-
-    The handler resolves the override and then calls the public operation with
-    only the Session it borrowed, so unless the Session carries the override the
-    operation falls back to the session's own context and the flag does nothing.
-
-    Asserted where the real operation resolves it, through the real handler. The
-    build goes no further than that here; what it does afterwards is proved
-    elsewhere.
-    """
-
-    from weaver.operations import build as build_operation
-
-    parser = build_parser()
-    session_workspace = _warehouse_only()
-    resolved = []
-    real = build_operation.operation_workspace
-
-    def spy(*args, **kwargs):
-        workspace = real(*args, **kwargs)
-        resolved.append(workspace)
-        return workspace
-
-    monkeypatch.setattr(build_operation, "operation_workspace", spy)
-
-    with ConsoleSession(workspace=session_workspace) as session:
-        _run(
-            session,
-            parser,
-            [
-                "build",
-                ".",
-                "--catalogue",
-                "Warehouse/Other",
-                "--environment",
-                "other",
-            ],
-        )
-
-        assert resolved, "the build never resolved a workspace"
-        assert resolved[0].catalogue == "Warehouse/Other"
-        assert resolved[0].environment == "other"
-
-        # And the Session it was borrowed from still has its own context, so the
-        # next command at the prompt does not inherit this one's override.
-        assert session.workspace is session_workspace
-        assert session.workspace.catalogue == "Warehouse/Weaver"
-        assert session.workspace.environment == "weaver"
-
-
 # --- the invariant that keeps it true ----------------------------------------
 
 

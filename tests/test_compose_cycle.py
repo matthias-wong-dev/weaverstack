@@ -512,9 +512,6 @@ def test_a_composition_warms_the_union_before_the_first_command(
     class Warmed:
         closed = False
 
-        def using(self, _workspace):
-            return nullcontext()
-
         def workflow(self, _workflow_id):
             return nullcontext()
 
@@ -549,9 +546,6 @@ def test_a_composition_with_no_workspace_warms_nothing(tmp_path, recorded, confi
 
     class Watched:
         closed = False
-
-        def using(self, _workspace):
-            return nullcontext()
 
         def workflow(self, _workflow_id):
             return nullcontext()
