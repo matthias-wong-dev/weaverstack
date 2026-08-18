@@ -1,21 +1,18 @@
+/*-- What this load will refuse, established before anything is changed --*/
+
+-- The reject table takes its shape from staging, so it holds the refused row
+-- itself rather than a key someone then has to go and look up.
 create table $reject_table as
 select
     __STAGING_SELECT_COLUMNS__
-  , case
-        when $staging_blank_predicate then cast('$blank_reason' as varchar(100))
-        else cast('$duplicate_reason' as varchar(100))
-    end as [$rejection_reason]
+  , cast(N'' as varchar($reason_width)) as [$rejection_reason]
 from $staging_table as s
-where $staging_blank_predicate
-   or s.[$rank_column] > 1;
+where 1 = 0;
+
+$reject_discovery
 
 select @weaver_rows_rejected = count(*) from $reject_table;
-
-delete s
-from $staging_table as s
-where $staging_blank_predicate
-   or s.[$rank_column] > 1;
-
+$duplicate_key_count
 -- Intolerant of rejects: the target is left exactly as it was. Nothing has been
 -- written yet, so refusing here is a decision not to start rather than an
 -- unwind — and the reject table survives as the evidence.
@@ -26,26 +23,39 @@ where $staging_blank_predicate
 if @weaver_rows_rejected > 0 and @fault_tolerant = 0
     throw 51020, '$intolerant_message', 1;
 
+/*-- Staging becomes the accepted incoming state --*/
+
+$staging_purge
+
+/*-- The rows this load will remove --*/
+
+$delete_derivation
+
+/*-- The rows this load will write: new and changed, and nothing else --*/
+
 create table $upsert_table as
 select
-    __STAGING_SELECT_COLUMNS__
-  , case when $target_missing_predicate then cast(1 as int) else cast(0 as int) end as [_Is new row]
-from $staging_table as s
-left join $target_table as t on $staging_target_join
+    __QUERY_SELECT_COLUMNS__
+  , q.[$signature_column]
+  , case when $target_missing_predicate then cast(1 as int) else cast(0 as int) end as [$is_new_column]
+from (
+    select
+        __STAGING_SELECT_COLUMNS__
+      , $signature_expression as [$signature_column]
+    from $staging_table as s
+) as q
+left join $target_table as t on $query_target_join
 where
     $target_missing_predicate
-    or exists (
-        select __STAGING_EXCEPT_COLUMNS__
-        except
-        select __TARGET_EXCEPT_COLUMNS__
-    );
+    or q.[$signature_column] <> t.[$signature_column];
 
+$merge_uniqueness
 -- Everything this load is about to do, counted before it does any of it. A
 -- breach with @fault_tolerant = 0 leaves the target exactly as it was, so
 -- refusing is a decision not to start rather than an unwind.
 select @weaver_target_rows = count(*) from $target_table;
 set @weaver_target_before = @weaver_target_rows;
-select @weaver_prospective_updates = count(*) from $upsert_table where [_Is new row] = 0;
+select @weaver_prospective_updates = count(*) from $upsert_table where [$is_new_column] = 0;
 $prospective_deletes
 
 if @ignore_stability_threshold = 0 and @weaver_target_rows > 0
@@ -74,32 +84,36 @@ $breach_result_assignment
     end;
 end;
 
-insert into $target_table (
-    __SOURCE_COLUMNS__
-  , [Row insert datetime]
-  , [Row update datetime]
-  , [Row delete datetime]
-)
-select
-    __UPSERT_SELECT_COLUMNS__
-  , @weaver_load_datetime
-  , @weaver_load_datetime
-  , @weaver_live_datetime
-from $upsert_table as u
-where u.[_Is new row] = 1;
+/*-- The target, once every gate has passed --*/
 
-set @weaver_rows_inserted = @@rowcount;
+$missing_reconciliation
 
 update c
 set
     __UPDATE_SET_COLUMNS__
 from $target_table as c
 inner join $upsert_table as u on $target_upsert_join
-where u.[_Is new row] = 0;
+where u.[$is_new_column] = 0;
 
 set @weaver_rows_updated = @@rowcount;
 
-$missing_reconciliation
+insert into $target_table (
+    __SOURCE_COLUMNS__
+  , [$signature_column]
+  , [Row insert datetime]
+  , [Row update datetime]
+  , [Row delete datetime]
+)
+select
+    __UPSERT_SELECT_COLUMNS__
+  , u.[$signature_column]
+  , @weaver_load_datetime
+  , @weaver_load_datetime
+  , @weaver_live_datetime
+from $upsert_table as u
+where u.[$is_new_column] = 1;
+
+set @weaver_rows_inserted = @@rowcount;
 
 if @weaver_rows_rejected > 0 and @weaver_error is null
     set @weaver_error = cast(@weaver_rows_rejected as varchar(20))

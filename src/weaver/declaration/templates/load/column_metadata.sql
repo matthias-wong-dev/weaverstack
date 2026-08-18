@@ -23,12 +23,8 @@ select
         case when row_ordinal = 1 then N's.' + quotename(name) else char(10) + N'      , s.' + quotename(name) end,
         N''
     ) within group (order by column_id)
-  , @weaver_staging_except_columns = string_agg(
-        case when row_ordinal = 1 then N's.' + quotename(name) else char(10) + N'          , s.' + quotename(name) end,
-        N''
-    ) within group (order by column_id)
-  , @weaver_target_except_columns = string_agg(
-        case when row_ordinal = 1 then N't.' + quotename(name) else char(10) + N'          , t.' + quotename(name) end,
+  , @weaver_query_select_columns = string_agg(
+        case when row_ordinal = 1 then N'q.' + quotename(name) else char(10) + N'      , q.' + quotename(name) end,
         N''
     ) within group (order by column_id)
   , @weaver_upsert_select_columns = string_agg(
@@ -36,5 +32,7 @@ select
         N''
     ) within group (order by column_id)
 from source_columns;
+
+$signature_payload_select
 
 $update_select

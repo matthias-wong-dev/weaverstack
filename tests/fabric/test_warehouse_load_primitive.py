@@ -160,7 +160,7 @@ def _drop(estate: Estate) -> None:
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
             f"drop table [{SCHEMA}].[{name}{suffix}];"
-            for suffix in ("_Reject", "_Upsert", "_Staging", "")
+            for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging", "")
         )
         + f"\nif object_id(N'{SCHEMA}.{estate.raw}', N'U') is not null "
         f"drop table [{SCHEMA}].[{estate.raw}];"
@@ -184,7 +184,7 @@ def _reset(estate: Estate) -> None:
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
             f"drop table [{SCHEMA}].[{name}{suffix}];"
-            for suffix in ("_Reject", "_Upsert", "_Staging")
+            for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging")
         )
     )
 

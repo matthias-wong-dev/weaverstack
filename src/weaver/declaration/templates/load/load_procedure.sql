@@ -17,6 +17,8 @@ begin
     declare @weaver_rows_updated bigint = 0;
     declare @weaver_rows_deleted bigint = 0;
     declare @weaver_rows_rejected bigint = 0;
+    declare @weaver_duplicate_keys bigint = 0;
+    declare @weaver_merge_conflicts bigint = 0;
     declare @weaver_error varchar(4000) = null;
     declare @weaver_target_rows bigint = 0;
     declare @weaver_prospective_deletes bigint = 0;
