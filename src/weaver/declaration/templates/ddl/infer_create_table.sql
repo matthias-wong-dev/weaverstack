@@ -63,7 +63,7 @@ $identity_column_sql    select
     select 1000002, N'[Row update datetime] datetime2(6) not null'
     union all
     select 1000003, N'[Row delete datetime] datetime2(6) not null'
-)
+$signature_column_sql)
 select
     @weaver_create_sql = (
         select

@@ -151,7 +151,7 @@ def project_item_catalogue(
 
     for identity, source in zip(retained, documents):
         common = _identity(scope, identity)
-        signature = source.effective_signature
+        signature = source.physical_signature
         rows[REGISTRY.name].append(
             {
                 **common,

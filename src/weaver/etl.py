@@ -42,7 +42,7 @@ from .declaration.model import (
     WeaverItemId,
     WeaverRepository,
 )
-from .declaration.source import content_hash
+from .declaration.source import content_hash, salted_signature
 from .errors import BuildError
 
 #: Where generated infrastructure lives, in both physical forms. The Warehouse
@@ -256,7 +256,7 @@ def item_validation_artefacts(
             RuntimeArtefact(
                 identity=validation_artefact_id(item, kind, identity.object_id),
                 object_type=object_type,
-                signature=_salted(source.effective_signature, template_version),
+                signature=salted_signature(source.effective_signature, template_version),
                 payload=None if generated is None else generated.payload,
                 role=role,
                 origin=identity,
@@ -297,7 +297,7 @@ def _warehouse_artefacts(
             RuntimeArtefact(
                 identity=load_procedure_id(item, identity.object_id),
                 object_type=generated.object_type,
-                signature=_salted(
+                signature=salted_signature(
                     source.effective_signature, generated.template_version
                 ),
                 payload=generated.payload,
@@ -355,7 +355,7 @@ def _lakehouse_artefacts(
                     # orchestration stop caring which language it was authored in.
                     _deployed_module_relative(relative, identity.object_id),
                     payload=None if generated is None else generated.payload,
-                    signature=_salted(source.effective_signature, template_version),
+                    signature=salted_signature(source.effective_signature, template_version),
                     origin=identity,
                     source_path=source.relative_path,
                 )
@@ -523,7 +523,7 @@ def validation_module_path(kind: str, source: ObjectId) -> str:
     return f"{VALIDATION_FOLDER[kind]}/{deployed_module_name(source)}"
 
 
-def _salted(signature: str, version: int) -> str:
+def salted_signature(signature: str, version: int) -> str:
     """A generated artefact's signature: what it is rendered from, and by what.
 
     Both halves are needed: the document alone leaves every generated body

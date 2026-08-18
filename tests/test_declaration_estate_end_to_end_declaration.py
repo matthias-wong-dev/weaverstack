@@ -99,10 +99,11 @@ def test_a_python_table_carries_its_full_contract(authored):
     assert document.not_null == ("Order id", "Order date")
     assert document.comparison_columns == ("Last modified",)
     assert document.lineage.reference.object_id.qualified == "Sales.OrderExport"
-    assert [column.name for column in document.effective_schema][-3:] == [
+    assert [column.name for column in document.effective_schema][-4:] == [
         "row_insert_datetime",
         "row_update_datetime",
         "row_delete_datetime",
+        "row_signature",
     ]
 
 

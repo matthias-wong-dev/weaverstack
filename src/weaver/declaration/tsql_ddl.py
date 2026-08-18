@@ -188,8 +188,10 @@ def _render_inferred_create(
         "ddl/infer_create_table",
         temp_object_literal=temp_literal,
         metadata_validation_sql=_render_metadata_validation(document, temp_literal),
-        identity_guard_sql=_render_identity_guard(identity, temp_literal),
+        identity_guard_sql=_render_identity_guard(identity, temp_literal)
+        + _render_internal_guard(document.signature_column, temp_literal),
         identity_column_sql=_render_identity_union(identity),
+        signature_column_sql=_render_signature_union(document.signature_column),
         first_ordinal="0" if identity else "1",
         primary_key_columns_cte=_render_primary_key_cte(document.primary_key),
         not_null_columns_cte=_render_name_only_cte(document.not_null),
@@ -215,6 +217,21 @@ def _render_identity_union(column) -> str:
     )
 
 
+def _render_signature_union(column) -> str:
+    """A trailing ``all_columns`` entry for the row-signature column.
+
+    Ordinal 1000004, after the audit columns the template names directly, so a
+    keyed table's physical shape is business columns then Weaver's own.
+    """
+
+    if column is None:
+        return ""
+    return (
+        "    union all\n"
+        f"    select 1000004, {_sql_literal(_column_definition(column))}\n"
+    )
+
+
 def _render_identity_guard(column, temp_literal: str) -> str:
     """Refuse an inferred query that already produces the identity column's name.
 
@@ -224,6 +241,21 @@ def _render_identity_guard(column, temp_literal: str) -> str:
 
     if column is None:
         return ""
+    return _render_internal_guard(
+        column, temp_literal, what=f"Identity {column.name}"
+    )
+
+
+def _render_internal_guard(column, temp_literal: str, what: str | None = None) -> str:
+    """Refuse an inferred query that produces one of Weaver's own column names.
+
+    Two same-named columns would otherwise reach the create. Checked
+    case-insensitively, like Spark.
+    """
+
+    if column is None:
+        return ""
+    subject = what or f"{column.name} is Weaver's own column and"
     return (
         "if exists (\n"
         "    select 1 from tempdb.sys.columns\n"
@@ -231,7 +263,7 @@ def _render_identity_guard(column, temp_literal: str) -> str:
         f"        and lower(name) = lower({_sql_literal(column.name)})\n"
         ")\n"
         "begin\n"
-        f"    throw 51006, {_sql_literal(f'Identity {column.name} collides with a query column')}, 1;\n"
+        f"    throw 51006, {_sql_literal(f'{subject} collides with a query column')}, 1;\n"
         "end;\n"
     )
 
