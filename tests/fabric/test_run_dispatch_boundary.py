@@ -179,7 +179,7 @@ def test_tolerated_rejections_are_reported_without_failing_the_node(tolerated):
     assert node.result.rows_inserted == 2
 
 
-@weaver_test(hosted=True, resources={"livy"})
+@weaver_test(hosted=True, resources={"livy", "tds"})
 def test_an_intolerant_run_raises_and_names_the_node_that_stopped_it(thin):
     """The other half: intolerance raises rather than returning a report.
 
@@ -188,10 +188,6 @@ def test_an_intolerant_run_raises_and_names_the_node_that_stopped_it(thin):
     report with the tolerant case. The failure names the node and carries what
     the primitive said, because a run that stopped without saying where is a
     run nobody can act on.
-
-    Livy only. The run opens a log, but a desktop Session appends through a
-    flusher on a worker thread, so no TDS write happens inside this body. The
-    test below is where the rows are waited for and read.
     """
 
     with pytest.raises(LoadError) as raised:
@@ -200,6 +196,12 @@ def test_an_intolerant_run_raises_and_names_the_node_that_stopped_it(thin):
     said = str(raised.value)
     assert "Thin." in said, f"the failure named no node: {said}"
     assert "reported failure" in said or "rejected" in said
+
+    # The run submitted a log row, and a desktop Session appends through a
+    # flusher on a worker thread. Waited for here rather than left to land
+    # whenever the worker gets to it, so the TDS write this run causes is inside
+    # the body that caused it and the declaration above is not a race.
+    thin.session.flush()
 
 
 def _said(node) -> str:
