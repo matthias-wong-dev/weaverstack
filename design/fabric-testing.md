@@ -167,6 +167,17 @@ Publish again when Weaver Python changes. A Livy session can run Spark SQL
 without the installed package; only operations that import Weaver require the
 Environment.
 
+That includes the estate a hosted test builds for itself. `fabric_lakehouse_estate`
+installs its bundle in the session, so a change to *generation* — the DDL a table
+is created with, the catalogue DML a build publishes — reaches a hosted test only
+after a republish. A hosted failure that looks like the change had no effect is
+usually a stale wheel.
+
+A structural change to a table declaring `Prohibit rebuild: true` needs one further
+step: reconciliation will not replace it, so an installed one keeps its old shape
+until it is dropped. Weaver's own catalogue tables are the ones this applies to,
+and dropping the `_` schema's tables is enough — the next build recreates them.
+
 ## Running the strata
 
 ```bash
