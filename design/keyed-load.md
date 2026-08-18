@@ -96,6 +96,27 @@ survivors from the same chain discovery ran and overwrites staging with them.
 Through a table rather than straight from staging: overwriting a table from a read
 of itself is not something Spark guarantees.
 
+## The delete set
+
+Non-incremental, it is the target keys clean staging no longer carries — read
+after the purge, so a target row whose only staged proposal was refused is retired
+by the same rule as any other absence, and no later repair pass is needed.
+
+Incremental, it is the object's explicit claim, narrowed twice. First to keys the
+target actually holds, because a delete for a row that was never there is not a
+deletion and counting it would make the stability guard protect against work the
+load was never going to do. Then, once staging is clean, to keys the source no
+longer produces.
+
+That second narrowing is what settles a key that is both claimed and staged. The
+source still producing a row means the row stays, whether or not it changed — so
+the claim gives the key up and the row is loaded as an ordinary upsert. Deleting
+and re-inserting it would reach the same contents, but it would reset the row's
+insert time and rewrite a row that may not have changed at all.
+
+Narrowed after the purge, so a staged row that was refused does not protect the
+key it named.
+
 ## The row signature
 
 A keyed target carries one internal column holding a SHA-256 digest of the row's

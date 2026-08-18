@@ -824,6 +824,52 @@ def test_a_holder_gives_up_a_unique_value_by_leaving_or_by_moving(merge_estate):
 
 
 @weaver_test(remote=True, resources={"tds"})
+def test_a_key_the_source_still_produces_is_not_retired(merge_estate):
+    """The claim gives it up, and the row is loaded as an ordinary update.
+
+    c2 is claimed and staged changed; c3 is claimed and staged unchanged. Neither
+    is deleted, c2 is updated, and c3 is left alone — so its insert and update
+    times both survive, which deleting and re-inserting would not have preserved.
+    """
+
+    _seed_merge(merge_estate)
+    before = merge_estate.executor.query(
+        f"select [Customer id], [Row insert datetime] as inserted, "
+        f"[Row update datetime] as updated from [{SCHEMA}].[{MERGE_OBJECT}] "
+        "order by [Customer id];"
+    )
+    stamps = {
+        str(row["Customer id"]): (row["inserted"], row["updated"]) for row in before
+    }
+
+    _wide_rows(
+        merge_estate,
+        [
+            ("c2", "Renamed", "b@x.test", 10, "B"),  # claimed, and changed
+            ("c3", "Three", "c@x.test", 10, "C"),  # claimed, and unchanged
+        ],
+        retire=["c2", "c3", "c4"],  # c4 is claimed and not staged, so it goes
+    )
+    result = _load(merge_estate, fault_tolerant=False)
+    contents = _by_key(_wide_contents(merge_estate))
+    after = merge_estate.executor.query(
+        f"select [Customer id], [Row insert datetime] as inserted, "
+        f"[Row update datetime] as updated from [{SCHEMA}].[{MERGE_OBJECT}] "
+        "order by [Customer id];"
+    )
+    now = {str(row["Customer id"]): (row["inserted"], row["updated"]) for row in after}
+
+    assert result.succeeded is True
+    assert (result.rows_deleted, result.rows_inserted, result.rows_updated) == (1, 0, 1)
+    assert "c4" not in contents
+    assert contents["c2"][1] == "Renamed"
+    assert contents["c3"][1] == "Three"
+    # The changed row keeps the time it was inserted; the unchanged row is untouched.
+    assert now["c2"][0] == stamps["c2"][0]
+    assert now["c3"] == stamps["c3"]
+
+
+@weaver_test(remote=True, resources={"tds"})
 def test_a_holder_moving_to_a_null_frees_its_value(merge_estate):
     """A null claims nothing, so a holder that takes one has given the value up.
 

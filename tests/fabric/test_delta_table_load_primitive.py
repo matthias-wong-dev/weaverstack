@@ -151,6 +151,18 @@ def signatures(object_name):
     return {row["Customer id"]: row["sig"] for row in frame.collect()}
 
 
+def stamps(object_name):
+    """Each row's audit times, so a load that should not have touched it shows."""
+
+    insert, update, _delete = delta_audit_names()
+    frame = spark.sql(
+        f"SELECT `Customer id`, CAST(`{insert}` AS STRING) AS inserted, "
+        f"CAST(`{update}` AS STRING) AS updated "
+        f"FROM {destination.qualify(SCHEMA, object_name)}"
+    )
+    return {row["Customer id"]: [row["inserted"], row["updated"]] for row in frame.collect()}
+
+
 def reasons(object_name):
     """Pairs rather than a mapping: a refused row's key may be the missing part."""
 
@@ -256,25 +268,43 @@ seen["null_move"] = run(
 )
 seen["null_move_contents"] = contents(OBJECT)
 
-before = contents(OBJECT)
-# A value nobody is giving up. c2's rename is valid on its own and must not be
-# applied anyway: the load either describes a valid target or does not run.
-seen["untouched_holder"] = run(
+# Claimed and staged at once: the claim gives the key up, so the row is loaded as
+# an ordinary update rather than deleted and re-inserted. c4 is claimed and not
+# staged, so it does go.
+seen["stamps_before"] = stamps(OBJECT)
+seen["claimed_and_staged"] = run(
     contract,
-    [["c1", "One", "e@x.test", 10, "A"], ["c2", "Renamed", "a@x.test", 10, "B"]],
-    deletes=[],
+    [
+        ["c1", "Renamed", "c@x.test", 10, "A"],  # claimed, and changed
+        ["c4", "Four", "d@x.test", 10, "E"],  # claimed, and unchanged
+    ],
+    deletes=["c1", "c4", "c2"],  # c2 is claimed and not staged, so it goes
 )
-# The same question, asked of the composite key.
+seen["claimed_and_staged_contents"] = contents(OBJECT)
+seen["stamps_after"] = stamps(OBJECT)
+
+# Back to the seed, because the allowed loads above changed the target and every
+# conflict below is stated against the seed's holders. The aborts then need no
+# reseeding between them, which is itself one of the claims.
+seen["reseed"] = run(contract, SEED, deletes=[])
+before = contents(OBJECT)
+
+# A value nobody is giving up: c3 holds c@x.test and is not in this load at all.
+# c2's rename is valid on its own and must not be applied anyway — the load either
+# describes a valid target or does not run.
+UNTOUCHED_HOLDER = [
+    ["c1", "One", "c@x.test", 10, "A"],
+    ["c2", "Renamed", "b@x.test", 10, "B"],
+]
+seen["untouched_holder"] = run(contract, UNTOUCHED_HOLDER, deletes=[])
+# The same question, asked of the composite key: c2 holds (10, B).
 seen["composite_holder"] = run(
-    contract, [["c1", "One", "c@x.test", 10, "B"]], deletes=[]
+    contract, [["c1", "One", "a@x.test", 10, "B"]], deletes=[]
 )
 # Tolerating a bad incoming row is one thing; tolerating a target that is not
 # valid under its own declaration is not what fault_tolerant offers.
 seen["tolerated_conflict"] = run(
-    contract,
-    [["c1", "One", "e@x.test", 10, "A"], ["c2", "Renamed", "a@x.test", 10, "B"]],
-    deletes=[],
-    fault_tolerant=True,
+    contract, UNTOUCHED_HOLDER, deletes=[], fault_tolerant=True
 )
 seen["after_conflicts"] = contents(OBJECT)
 seen["before_conflicts"] = before
@@ -383,6 +413,26 @@ def test_the_delta_keyed_load_refuses_a_target_its_changes_would_invalidate(
     assert moved["c1"][2] == "c@x.test"
     assert moved["c3"][2] is None
 
+    # A key the source still produces is not retired: the claim gives it up and the
+    # row is loaded normally, which is what keeps its insert time and leaves an
+    # unchanged row alone. A key claimed and not staged still goes.
+    claimed = seen["claimed_and_staged"]["result"]
+    now = {row[0]: row for row in seen["claimed_and_staged_contents"]}
+    before_stamps = seen["stamps_before"]
+    after_stamps = seen["stamps_after"]
+    assert claimed["succeeded"] is True
+    assert (
+        claimed["rows_deleted"],
+        claimed["rows_inserted"],
+        claimed["rows_updated"],
+    ) == (1, 0, 1)
+    assert "c2" not in now
+    assert now["c1"][1] == "Renamed"
+    assert now["c4"][1] == "Four"
+    assert after_stamps["c1"][0] == before_stamps["c1"][0]
+    assert after_stamps["c4"] == before_stamps["c4"]
+
+    assert seen["reseed"]["result"]["succeeded"] is True
     for case in ("untouched_holder", "composite_holder", "tolerated_conflict"):
         assert "declared unique key" in (seen[case]["raised"] or ""), case
     assert seen["after_conflicts"] == seen["before_conflicts"]

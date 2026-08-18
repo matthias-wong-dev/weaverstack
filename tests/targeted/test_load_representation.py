@@ -603,6 +603,35 @@ def test_the_upsert_set_holds_new_and_changed_rows_and_no_others():
 
 
 @weaver_test()
+def test_a_key_the_source_still_produces_is_not_retired():
+    """The delete claim gives it up rather than the load deleting the row.
+
+    A key can be both claimed and staged. Deleting and re-inserting it would work,
+    but it would also reset the row's insert time and rewrite a row that may not
+    have changed at all. Narrowing the claim leaves the row to the ordinary upsert,
+    which is what preserves both.
+
+    Narrowed after the purge, so a staged row that was refused does not protect the
+    key it named.
+    """
+
+    body = _body(_constrained_source(incremental=True))
+    purge = body.index("delete from [Sales].[Customer_Staging]")
+    narrow = body.index("delete d\n    from [Sales].[Customer_Delete] as d")
+    upsert = body.index("create table [Sales].[Customer_Upsert] as")
+
+    assert purge < narrow < upsert
+    assert "select 1 from [Sales].[Customer_Staging] as s where" in body
+
+
+@weaver_test()
+def test_a_non_incremental_load_has_no_claim_to_narrow():
+    """Its delete set is already the keys clean staging no longer carries."""
+
+    assert "delete d\n    from [Sales].[Customer_Delete] as d" not in _body()
+
+
+@weaver_test()
 def test_a_table_declaring_no_load_procedure_generates_none():
     """Something other than Weaver populates it, so there is nothing to install.
 

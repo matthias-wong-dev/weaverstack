@@ -29,7 +29,7 @@ from support.generated_load import procedure
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
-from weaver.declaration.metadata import PYTHON, parse_document
+from weaver.declaration.metadata import PYTHON, SPARK_SQL, parse_document
 from weaver.declaration.model import WAREHOUSE
 from weaver.runtime.delta_sql import NULL_MARKER, row_signature
 from weaver.runtime.load_contract import LoadContract
@@ -151,6 +151,46 @@ def test_a_declared_comparison_subset_is_what_gets_hashed():
     assert "`Opened`" in delta
     assert "`Customer name`" not in delta
     assert "`Active`" not in delta
+
+
+@weaver_test()
+def test_an_inferred_table_takes_its_comparison_set_from_the_target():
+    """A Spark SQL table may infer its schema, and then the contract has no list.
+
+    Left at that, every row would sign identically and no change would ever be
+    detected. The runtime falls back to the target's own business columns, which is
+    the rule the Warehouse installer applies against ``sys.columns``.
+    """
+
+    from weaver.runtime.table_load import _comparison_columns
+
+    inferred = LoadContract.from_document(
+        parse_document(
+            "Table ID: Sales.Customer\n\nDescription: x\n\nLineage: y\n\n"
+            "Dependencies: []\n\nPrimary key: Customer id\n",
+            language=SPARK_SQL,
+        )
+    )
+    physical = ("Customer id", "Customer name", "Amount")
+
+    assert inferred.comparison_columns == ()
+    assert _comparison_columns(inferred, physical) == ("Customer name", "Amount")
+
+
+@weaver_test()
+def test_a_declared_comparison_set_is_not_overridden_by_the_target():
+    from weaver.runtime.table_load import _comparison_columns
+
+    contract = _contract(
+        HEADER.replace(
+            "Primary key: Customer id",
+            "Primary key: Customer id\n\nComparison columns: Amount",
+        )
+    )
+
+    assert _comparison_columns(
+        contract, ("Customer id", "Customer name", "Amount")
+    ) == ("Amount",)
 
 
 @weaver_test()

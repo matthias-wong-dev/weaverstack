@@ -805,9 +805,17 @@ def _delete_derivation(
     """
 
     if claims_deletes:
+        join = _join("s", "d", contract.primary_key)
         return (
             "-- Named by the author's second query, narrowed to keys the target\n"
-            "-- holds."
+            "-- holds. Narrowed again here, now that staging is clean: a key the\n"
+            "-- source still produces is not retired, whether or not its row\n"
+            "-- changed, so the claim gives it up and the row is loaded normally.\n"
+            f"delete d\n"
+            f"from {names['delete']} as d\n"
+            f"where exists (\n"
+            f"    select 1 from {names['staging']} as s where {join}\n"
+            f");"
         )
     if not contract.deletes_absent_rows:
         return "-- Incremental, and no delete query: absence retires nothing."

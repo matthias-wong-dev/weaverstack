@@ -157,7 +157,7 @@ def load_table(
     if contract.replaces_wholesale:
         return _full_replace(spark, names, columns, rows_read)
 
-    signature = row_signature("s", contract.comparison_columns, types)
+    signature = row_signature("s", _comparison_columns(contract, columns), types)
     rows_rejected = _discover_rejects(spark, names, contract, columns, signature)
     if rows_rejected and not fault_tolerant:
         # Nothing has been written, so refusing is a decision not to start
@@ -643,11 +643,18 @@ def _derive_deletes(spark, names, contract: LoadContract, deletes) -> None:
         # Only keys the target actually holds: a delete for a row that was never
         # there is not a deletion, and counting it would make the guard protect
         # against work the load was never going to do.
+        #
+        # And only keys clean staging no longer carries. A key the source still
+        # produces is not retired, whether or not its row changed, so the claim
+        # gives it up and the row is loaded normally — which keeps its insert time
+        # and leaves an unchanged row alone.
         spark.sql(
             f"CREATE TABLE {names['delete']} USING delta {COLUMN_MAPPING} AS\n"
             f"SELECT {target_keys}\n"
             f"FROM {names['target']} AS t JOIN ({source}) AS d "
-            f"ON {key_join('d', 't', contract.primary_key)}"
+            f"ON {key_join('d', 't', contract.primary_key)}\n"
+            f"WHERE NOT EXISTS (SELECT 1 FROM {names['staging']} AS s "
+            f"WHERE {key_join('s', 't', contract.primary_key)})"
         )
         return
 
@@ -718,6 +725,22 @@ def _count(spark, relation: str, *, where: str | None = None) -> int:
     return int(
         spark.sql(f"SELECT count(*) AS n FROM {relation}{clause}").collect()[0]["n"]
     )
+
+
+def _comparison_columns(contract: LoadContract, columns) -> tuple[str, ...]:
+    """Which columns decide whether a matched row changed.
+
+    What the declaration named, and otherwise every business column except the
+    key — read from the target, because a Spark SQL table may infer its schema and
+    then the contract has no column list to default from. Left empty, every row
+    would sign identically and no change would ever be detected.
+
+    The same rule the Warehouse installer applies against ``sys.columns``.
+    """
+
+    if contract.comparison_columns:
+        return contract.comparison_columns
+    return tuple(column for column in columns if column not in contract.primary_key)
 
 
 def _business_columns(spark, target: str) -> tuple[tuple[str, ...], dict[str, str]]:
