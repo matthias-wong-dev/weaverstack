@@ -171,6 +171,28 @@ class Session(ABC):
             )
         return resolved
 
+    @contextmanager
+    def using(self, workspace: Workspace | None) -> Iterator["Session"]:
+        """This Session with ``workspace`` as its default, for one operation.
+
+        A borrowed Session carries the context it was opened with, and an
+        operation may be addressed at another one, as ``build --catalogue
+        Warehouse/Other`` typed at a session prompt is. For as long as this is
+        held, the operation and everything it calls resolve against
+        ``workspace``; afterwards the Session's own default is back. Resources
+        stay cached per workspace context, so the two share what they can.
+        """
+
+        if workspace is None or workspace == self._default_workspace:
+            yield self
+            return
+        previous = self._default_workspace
+        self._default_workspace = workspace
+        try:
+            yield self
+        finally:
+            self._default_workspace = previous
+
     def offer_spark_home(
         self, lakehouses, *, workspace: Workspace | None = None
     ) -> None:

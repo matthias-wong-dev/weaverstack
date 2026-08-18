@@ -95,6 +95,13 @@ the Lakehouse is where the session lives, while every generated statement names
 its own target in full. Nothing above the transport reads it, and a host that
 already runs where Spark is ignores it.
 
+A borrowed Session carries a default workspace, and an operation may be
+addressed at another one. `Session.using(workspace)` holds that context for one
+operation and restores the Session's own afterwards, which is how a command's
+`--catalogue` or `--environment` reaches the operation without becoming the
+session's default. `use_or_create_session` applies it, so every operation gets
+the behaviour from one place.
+
 ### Builder
 
 ```text
