@@ -29,7 +29,6 @@ exactly the artefacts it changed and leaves deployed Python untouched.
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
@@ -256,7 +255,9 @@ def item_validation_artefacts(
             RuntimeArtefact(
                 identity=validation_artefact_id(item, kind, identity.object_id),
                 object_type=object_type,
-                signature=salted_signature(source.effective_signature, template_version),
+                signature=salted_signature(
+                    source.effective_signature, template_version
+                ),
                 payload=None if generated is None else generated.payload,
                 role=role,
                 origin=identity,
@@ -355,7 +356,9 @@ def _lakehouse_artefacts(
                     # orchestration stop caring which language it was authored in.
                     _deployed_module_relative(relative, identity.object_id),
                     payload=None if generated is None else generated.payload,
-                    signature=salted_signature(source.effective_signature, template_version),
+                    signature=salted_signature(
+                        source.effective_signature, template_version
+                    ),
                     origin=identity,
                     source_path=source.relative_path,
                 )
@@ -521,21 +524,6 @@ def validation_module_path(kind: str, source: ObjectId) -> str:
     from .declaration.spark_sql_module import deployed_module_name
 
     return f"{VALIDATION_FOLDER[kind]}/{deployed_module_name(source)}"
-
-
-def salted_signature(signature: str, version: int) -> str:
-    """A generated artefact's signature: what it is rendered from, and by what.
-
-    Both halves are needed: the document alone leaves every generated body
-    stale after the generator changes, and the version alone rebuilds the estate
-    whenever anything is edited.
-    """
-
-    digest = hashlib.sha256()
-    digest.update(signature.encode("ascii"))
-    digest.update(b"\0")
-    digest.update(str(version).encode("ascii"))
-    return digest.hexdigest()
 
 
 def _deployed_module_relative(relative: str, object_id: ObjectId) -> str:

@@ -539,7 +539,7 @@ def test_folders_have_no_audit_columns():
 
 @weaver_test()
 def test_a_keyed_table_carries_a_row_signature_column():
-    """Spelled and typed for the representation, and never null.
+    """Spelled and typed for the representation.
 
     A Warehouse keeps the digest as bytes; Spark's ``sha2`` returns hex text, so
     Delta keeps that. The two are never compared with each other.
@@ -548,12 +548,20 @@ def test_a_keyed_table_carries_a_row_signature_column():
     delta = parse(TABLE_YAML).signature_column
     warehouse = parse(TABLE_YAML, language=SQL).signature_column
 
-    assert (delta.name, delta.type, delta.not_null) == ("row_signature", "string", True)
-    assert (warehouse.name, warehouse.type, warehouse.not_null) == (
-        "Row signature",
-        "varbinary(32)",
-        True,
-    )
+    assert (delta.name, delta.type) == ("row_signature", "string")
+    assert (warehouse.name, warehouse.type) == ("Row signature", "varbinary(32)")
+
+
+@weaver_test()
+def test_the_row_signature_column_is_nullable():
+    """Not every keyed table's rows come from a keyed load.
+
+    Weaver's own catalogue tables declare a key and are written by the catalogue's
+    DML, which has no signature to write. Declaring the column not null refused
+    those writes outright.
+    """
+
+    assert parse(TABLE_YAML).signature_column.not_null is False
 
 
 @weaver_test()

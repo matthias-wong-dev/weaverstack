@@ -489,9 +489,7 @@ def _reject_discovery(names: dict, contract: LoadContract) -> str:
 def _reject_projection(reason: str) -> str:
     """One refused row, and why: the staged row itself plus the reason."""
 
-    return (
-        f"    __STAGING_SELECT_COLUMNS__\n  , {reason} as {_quote(REJECTION_REASON)}"
-    )
+    return f"    __STAGING_SELECT_COLUMNS__\n  , {reason} as {_quote(REJECTION_REASON)}"
 
 
 def _reason_literal(reason: str) -> str:
@@ -520,7 +518,9 @@ def _unique_key_ctes(
     """
 
     reason = duplicate_unique_reason(unique_key)
-    participates = " and ".join(f"s.{_quote(column)} is not null" for column in unique_key)
+    participates = " and ".join(
+        f"s.{_quote(column)} is not null" for column in unique_key
+    )
     bare_participates = " and ".join(
         f"{_quote(column)} is not null" for column in unique_key
     )
@@ -686,12 +686,7 @@ def _staging_purge(names: dict, contract: LoadContract) -> str:
         for unique_key in contract.unique_keys
     )
     body = "\n\n".join(steps)
-    return (
-        f"if @weaver_rows_rejected > 0\n"
-        f"begin\n"
-        f"{_indent(body, 4)}\n"
-        f"end;"
-    )
+    return f"if @weaver_rows_rejected > 0\nbegin\n{_indent(body, 4)}\nend;"
 
 
 def _ranked_purge(names: dict, contract: LoadContract) -> str:
@@ -726,7 +721,9 @@ def _unique_key_purge(
     """
 
     key_columns = _bare_columns(unique_key)
-    participates = " and ".join(f"{_quote(column)} is not null" for column in unique_key)
+    participates = " and ".join(
+        f"{_quote(column)} is not null" for column in unique_key
+    )
     if len(contract.primary_key) == 1:
         key = _quote(contract.primary_key[0])
         loser = (
@@ -813,9 +810,7 @@ def _delete_derivation(
             "-- holds."
         )
     if not contract.deletes_absent_rows:
-        return (
-            "-- Incremental, and no delete query: absence retires nothing."
-        )
+        return "-- Incremental, and no delete query: absence retires nothing."
     keys = ", ".join(f"t.{_quote(column)}" for column in contract.primary_key)
     join = _join("s", "t", contract.primary_key)
     return (
@@ -845,9 +840,7 @@ def _reconciliation(names: dict, contract: LoadContract, claims_deletes: bool) -
     """Remove the target rows this load retires — a physical delete."""
 
     if not _has_delete_relation(contract, claims_deletes):
-        return (
-            "-- Incremental, and no delete query: absence retires nothing."
-        )
+        return "-- Incremental, and no delete query: absence retires nothing."
     join = _join("d", "c", contract.primary_key)
     return (
         f"delete c\n"
@@ -1021,9 +1014,7 @@ def _signature_payload_select(
     """
 
     if not contract.primary_key:
-        return (
-            "-- No primary key, so no row is compared and there is no signature."
-        )
+        return "-- No primary key, so no row is compared and there is no signature."
     if contract.comparison_columns:
         names_in = ", ".join(
             _sql_literal(column.lower()) for column in contract.comparison_columns
@@ -1032,7 +1023,9 @@ def _signature_payload_select(
     else:
         # No declared comparison set and no declared schema: every business
         # column except the key, which is what a declared schema's default is.
-        keys = ", ".join(_sql_literal(column.lower()) for column in contract.primary_key)
+        keys = ", ".join(
+            _sql_literal(column.lower()) for column in contract.primary_key
+        )
         comparison_filter = f"lower(c.name) not in ({keys})"
 
     cases = "\n".join(
@@ -1063,7 +1056,9 @@ def _signature_payload_select(
         "select\n"
         "    @weaver_signature_payload = string_agg(\n"
         "        char(10) + N'        + case when s.' + quotename(name)\n"
-        "            + N' is null then N''" + _NULL_MARKER + "'' else concat(cast(datalength('\n"
+        "            + N' is null then N''"
+        + _NULL_MARKER
+        + "'' else concat(cast(datalength('\n"
         "            + canonical_text + N') as varchar(20)), N'':'', '\n"
         "            + canonical_text + N') end',\n"
         "        N''\n"

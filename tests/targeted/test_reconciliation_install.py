@@ -282,9 +282,12 @@ def _keyed_and_unkeyed(tmp_path):
     unkeyed = keyed.replace("Primary key: CustomerId\n", "")
     repository = single_document_repository(
         tmp_path,
-        documents={"DWG__Customer.py": keyed, "DWG__Event.py": unkeyed.replace(
-            "DWG.Customer", "DWG.Event"
-        ).replace("DWG__Customer", "DWG__Event")},
+        documents={
+            "DWG__Customer.py": keyed,
+            "DWG__Event.py": unkeyed.replace("DWG.Customer", "DWG.Event").replace(
+                "DWG__Customer", "DWG__Event"
+            ),
+        },
     )
     documents = repository.source_documents
     return (

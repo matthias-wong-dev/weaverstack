@@ -241,9 +241,7 @@ def _render_identity_guard(column, temp_literal: str) -> str:
 
     if column is None:
         return ""
-    return _render_internal_guard(
-        column, temp_literal, what=f"Identity {column.name}"
-    )
+    return _render_internal_guard(column, temp_literal, what=f"Identity {column.name}")
 
 
 def _render_internal_guard(column, temp_literal: str, what: str | None = None) -> str:

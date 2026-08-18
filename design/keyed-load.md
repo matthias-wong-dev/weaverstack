@@ -126,6 +126,12 @@ Warehouse payload is assembled at install time rather than by the generator,
 because it names each column's physical type and an inferred table's types are
 settled by the build.
 
+The column is nullable, because not every keyed table's rows come from a keyed
+load: Weaver's own catalogue tables declare a key and are written by the
+catalogue's DML, which has no signature to write. So a load treats an absent
+stored signature as a row it has not seen and refreshes it — comparing with it
+would answer unknown and skip the row for good.
+
 The column is physical, so introducing or changing it has to rebuild the tables
 that carry it. `SourceDocument.physical_signature` salts a keyed table's source
 hash with `KEYED_TABLE_VERSION`, and the desired catalogue and incremental

@@ -356,9 +356,7 @@ def _validation_chain(
 
     source = "weaver_unique_key"
     for index, unique_key in enumerate(contract.unique_keys, start=1):
-        ctes.extend(
-            _unique_key_ctes(contract, unique_key, index, source, columns)
-        )
+        ctes.extend(_unique_key_ctes(contract, unique_key, index, source, columns))
         rejects.append(f"weaver_unique_{index}_reject")
         source = f"weaver_unique_{index}_survivor"
 
@@ -495,7 +493,10 @@ def _derive_upserts(
         f"FROM weaver_proposed AS q\n"
         f"LEFT JOIN {names['target']} AS t "
         f"ON {key_join('q', 't', contract.primary_key)}\n"
-        f"WHERE {missing} OR q.`{stored}` <> t.`{stored}`"
+        # An absent stored signature is a row this load has not seen, so it is
+        # refreshed. Comparing with it would answer unknown and skip the row.
+        f"WHERE {missing} OR t.`{stored}` IS NULL "
+        f"OR q.`{stored}` <> t.`{stored}`"
     )
 
 
@@ -536,9 +537,7 @@ def _require_merge_uniqueness(spark, names, contract: LoadContract, has_claim) -
 
 
 def _conflict_branch(names, contract: LoadContract, unique_key, has_claim: bool) -> str:
-    differs = " OR ".join(
-        f"holder.`{c}` <> u.`{c}`" for c in contract.primary_key
-    )
+    differs = " OR ".join(f"holder.`{c}` <> u.`{c}`" for c in contract.primary_key)
     vacated = [
         f"AND NOT EXISTS (SELECT 1 FROM {names['upsert']} AS moving\n"
         f"    WHERE {key_join('moving', 'holder', contract.primary_key)}\n"
@@ -735,7 +734,8 @@ def _business_columns(spark, target: str) -> tuple[tuple[str, ...], dict[str, st
 
     reserved = {*delta_audit_names(), delta_signature_name()}
     fields = [
-        field for field in spark.table(target).schema.fields
+        field
+        for field in spark.table(target).schema.fields
         if field.name not in reserved
     ]
     names = tuple(field.name for field in fields)

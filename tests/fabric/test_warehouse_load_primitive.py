@@ -434,8 +434,6 @@ def test_the_static_warehouse_load_seeds_once_and_then_is_a_no_op(static_estate)
     assert static_run.extra["leftovers"] == 0
 
 
-
-
 # --- declared constraints, executed ------------------------------------------
 #
 # Nullability and uniqueness are declarations, and what they mean is what the
@@ -474,6 +472,7 @@ def _wide_source(object_name: str, *, incremental: bool) -> str:
     )
     if incremental:
         body += f";\n\nselect [Customer id] from [{SCHEMA}].[{object_name}Retire]"
+    policy = "\nIncremental: true\n" if incremental else ""
     return f"""/*
 Table ID: {SCHEMA}.{object_name}
 
@@ -489,7 +488,7 @@ Not null:
 Unique keys:
   - Email
   - Region id, External ref
-{"\nIncremental: true\n" if incremental else ""}
+{policy}
 Schema:
   Customer id: varchar(50)
   Customer name: varchar(200)

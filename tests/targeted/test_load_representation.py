@@ -127,7 +127,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (9, "b16353e6188e7249f54db5a6779fbda38e3c391cb39071f2d38d9a19da12dff9"),
+    "tsql": (9, "90da0c9a720025aa089d91e3714206949ba88896afa27e07f079141fac29debe"),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 
@@ -599,6 +599,18 @@ def test_the_upsert_set_holds_new_and_changed_rows_and_no_others():
     assert "_AffectedPK" not in body
     assert "#Loser" not in body
     assert "[_Is change]" not in body
+
+
+@weaver_test()
+def test_a_target_row_with_no_stored_signature_is_refreshed():
+    """Not every keyed table's rows come from a keyed load.
+
+    Weaver's own catalogue tables declare a key and are written by the catalogue's
+    DML, so the column is nullable. Comparing with an absent signature answers
+    unknown, which would skip the row for good rather than refresh it.
+    """
+
+    assert "or t.[Row signature] is null" in _body()
 
 
 # --- would the proposed changes leave a valid target? --------------------------

@@ -183,7 +183,7 @@ REFUSABLE = [
 CONSTRAINED_BODY = (
     PREAMBLE
     + REFUSABLE
-    + '''
+    + """
 OBJECT = "DeltaConstrained"
 contract = contract_for(OBJECT, False)
 arrange(OBJECT)
@@ -213,12 +213,12 @@ seen["updated_contents"] = contents(OBJECT)
 seen["updated_signatures"] = signatures(OBJECT)
 
 emit(seen)
-'''
+"""
 )
 
 MERGE_BODY = (
     PREAMBLE
-    + '''
+    + """
 OBJECT = "DeltaMerge"
 contract = contract_for(OBJECT, True)
 arrange(OBJECT)
@@ -280,7 +280,7 @@ seen["after_conflicts"] = contents(OBJECT)
 seen["before_conflicts"] = before
 
 emit(seen)
-'''
+"""
 )
 
 

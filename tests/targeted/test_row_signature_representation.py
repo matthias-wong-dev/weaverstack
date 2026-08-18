@@ -71,13 +71,15 @@ def _delta(header: str = HEADER) -> str:
     return row_signature("s", contract.comparison_columns, TYPES)
 
 
-WAREHOUSE_TABLE = f"""/*
+WAREHOUSE_TABLE = (
+    f"""/*
 {HEADER}*/
 select 1
-""".replace("Customer id: string", "Customer id: varchar(50)").replace(
-    "Customer name: string", "Customer name: varchar(200)"
-).replace("boolean", "bit").replace("binary", "varbinary(32)").replace(
-    "timestamp", "datetime2(6)"
+""".replace("Customer id: string", "Customer id: varchar(50)")
+    .replace("Customer name: string", "Customer name: varchar(200)")
+    .replace("boolean", "bit")
+    .replace("binary", "varbinary(32)")
+    .replace("timestamp", "datetime2(6)")
 )
 
 
@@ -121,9 +123,7 @@ def test_the_key_is_not_hashed():
     """A matched row has equal keys by definition, so it says nothing."""
 
     assert "`Customer id`" not in _delta()
-    assert (
-        "and lower(c.name) not in (N'customer id')" in _warehouse_installer()
-    )
+    assert "and lower(c.name) not in (N'customer id')" in _warehouse_installer()
 
 
 @weaver_test()
@@ -202,7 +202,9 @@ def test_the_columns_are_written_in_a_settled_order():
     """The payload is ordered, so two columns cannot swap contributions."""
 
     delta = _delta()
-    positions = [delta.index(f"`{column}`") for column in _contract().comparison_columns]
+    positions = [
+        delta.index(f"`{column}`") for column in _contract().comparison_columns
+    ]
 
     assert positions == sorted(positions)
     assert "within group (order by column_id)" in _warehouse_installer()
@@ -232,9 +234,7 @@ def test_the_warehouse_names_a_style_for_every_ambiguous_type():
     assert "when 'date' then N'convert(varchar(10), __COLUMN__, 23)'" in installer
     assert "when 'datetime2' then N'convert(varchar(27), __COLUMN__, 126)'" in installer
     assert "when 'bit' then N'cast(cast(__COLUMN__ as int) as varchar(1))'" in installer
-    assert (
-        "when 'varbinary' then N'convert(varchar(max), __COLUMN__, 2)'" in installer
-    )
+    assert "when 'varbinary' then N'convert(varchar(max), __COLUMN__, 2)'" in installer
 
 
 @weaver_test()

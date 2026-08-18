@@ -566,9 +566,12 @@ class WeaverDocument:
         return Column(
             name=signature_column_name(self.language),
             type=_SIGNATURE_TYPES[self.language],
-            # A keyed load computes it for every row it writes, so there is no
-            # valid absent state.
-            not_null=True,
+            # Nullable, because not every keyed table's rows come from a keyed
+            # load. Weaver's own catalogue tables declare a key and are written by
+            # the catalogue's DML, which has no signature to write. A load treats
+            # an absent signature as a row it has not seen, so such a row is
+            # refreshed rather than silently skipped.
+            not_null=False,
         )
 
     @property
