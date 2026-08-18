@@ -4,24 +4,13 @@ The build payload installs a procedure that derives target columns from
 ``sys.columns``. Procedure result counts use output parameters, and rejected
 rows remain in the reject table for inspection.
 
-A keyed load runs one state machine, and the generated procedure shows it in
-order::
-
-    raw _Staging
-      → discover every incoming refusal, into _Reject
-      → the rejection gate
-      → purge the accepted refusals, so _Staging is the clean incoming state
-      → _Delete, from clean staging or from the authored claim
-      → _Upsert, new and signature-changed rows only
-      → the merge-uniqueness check, for an incremental load with unique keys
-      → the stability gate
-      → delete, update, insert
-
-The two refusals are different in kind and that difference is the shape of the
-whole thing. A bad incoming row is recoverable: it goes to ``_Reject``, and if
-the object tolerates it the surviving rows load. A set of proposed changes that
-would leave a declared unique key held by two rows is not: the load stops before
-it writes anything.
+A keyed load runs one state machine and the generated procedure shows it in
+order: raw staging, every refusal discovered into ``_Reject``, the rejection
+gate, the purge that makes staging the clean incoming state, ``_Delete``, an
+``_Upsert`` of new and changed rows only, merge uniqueness, the stability gate,
+then the target. What each phase means, and why, is
+``design/keyed-load.md``; the Delta half of it is
+:mod:`weaver.runtime.table_load`.
 """
 
 from __future__ import annotations

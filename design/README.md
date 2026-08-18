@@ -17,6 +17,7 @@ boundaries covered by the writing uplift.
 | [Build philosophy](build-philosophy.md) | Contract | Invariants that build planning and installation must preserve. |
 | [Central catalogue](catalogue.md) | Architecture | Catalogue ownership, tables, reconciliation, and certification. |
 | [Validation](validation.md) | Architecture | Tests, Assumptions, runtime artefacts, and result handling. |
+| [The keyed table load](keyed-load.md) | Architecture | Reconciliation for a table with a primary key, in both engines. |
 | [Warehouse SQL execution](sql-execution.md) | Contract | SQL execution across desktop and Fabric positions. |
 
 ## Repository and command use

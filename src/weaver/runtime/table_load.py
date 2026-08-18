@@ -6,22 +6,12 @@ target. A generated ``SparkSqlTable`` enters here too, so both authoring
 languages reconcile through one implementation.
 
 The first value is *staging*: unvalidated, with nothing yet rejected or
-classified. It goes through the same phases the Warehouse procedure runs::
-
-    raw _Staging
-      → discover every incoming refusal, into _Reject
-      → the rejection gate
-      → purge the accepted refusals, so _Staging is the clean incoming state
-      → _Delete, from clean staging or from the explicit claim
-      → _Upsert, new and signature-changed rows only
-      → the merge-uniqueness check, for an incremental load with unique keys
-      → the stability gate
-      → delete, update, insert
-
-The two refusals are different in kind. A bad incoming row is recoverable: it
-goes to ``_Reject``, and if the object tolerates it the surviving rows load. A
-set of proposed changes that would leave a declared unique key held by two rows
-is not: the load stops before it writes anything.
+classified. It goes through the same phases the Warehouse procedure runs — raw
+staging, every refusal discovered into ``_Reject``, the rejection gate, the purge
+that makes staging the clean incoming state, ``_Delete``, an ``_Upsert`` of new
+and changed rows only, merge uniqueness, the stability gate, then the target.
+What each phase means, and where the two engines differ physically, is
+``design/keyed-load.md``.
 
 The intermediate tables are real — ``<Schema>.<Object>_Staging``, ``_Reject``,
 ``_Delete`` and ``_Upsert`` — so a failed run can be inspected afterwards.
