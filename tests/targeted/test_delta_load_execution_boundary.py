@@ -87,6 +87,14 @@ class _Frame:
         return self.collect()[:n]
 
 
+class _Boom(RuntimeError):
+    """A failure the load has no outcome for. An engine error, not a refusal."""
+
+
+class _EvidenceRefused(RuntimeError):
+    """The durable write a failure attempts, failing in its turn."""
+
+
 @dataclass
 class _Spark:
     """A session that records what it was asked to run.
@@ -97,6 +105,13 @@ class _Spark:
     """
 
     counts: dict = field(default_factory=dict)
+    #: A statement carrying this text fails, standing for an engine error the
+    #: load has no outcome for. Raised before the statement is recorded, so what
+    #: was recorded is what the session actually ran.
+    fail_on: str | None = None
+    #: Every durable write fails, which is how the evidence a failure leaves is
+    #: made to fail in its turn.
+    fail_creates: bool = False
     statements: list = field(default_factory=list)
     counted: list = field(default_factory=list)
     persisted: list = field(default_factory=list)
@@ -111,6 +126,10 @@ class _Spark:
         return _Table(TARGET_COLUMNS)
 
     def sql(self, text: str) -> _Frame:
+        if self.fail_on is not None and self.fail_on in text:
+            raise _Boom(f"the engine failed on: {text.splitlines()[0]}")
+        if self.fail_creates and text.startswith("CREATE TABLE"):
+            raise _EvidenceRefused("the evidence could not be written")
         self.statements.append(text)
         return _Frame(self, text)
 
@@ -255,6 +274,28 @@ def _refused(counts, *, contract=None, staged=None, match=None, **kwargs):
             **kwargs,
         )
     return spark
+
+
+def _failed(
+    counts, *, fail_on, fail_creates=False, contract=None, staged=None, **kwargs
+):
+    """One load stopped by an engine failure, returning the session that ran it."""
+
+    spark = _Spark(counts=counts, fail_on=fail_on, fail_creates=fail_creates)
+    with pytest.raises(_Boom):
+        load_table(
+            spark,
+            contract=contract or _contract(),
+            lakehouse=_Lakehouse(),
+            staging_frame=staged or _Staged(),
+            **kwargs,
+        )
+    return spark
+
+
+#: Where a failure is injected, by the phase whose statement carries the text.
+AT_UPSERT = "weaver_proposed"
+AT_DELETE_MUTATION = "WHEN MATCHED THEN DELETE"
 
 
 #: A load with rows to read, nothing refused and nothing to change.
@@ -505,3 +546,110 @@ def test_a_merge_conflict_leaves_staging_and_what_it_would_have_removed():
     assert spark.created == ["Customer_Staging", "Customer_Delete"]
     assert spark.mutations == []
     assert spark.leaked == []
+
+
+# --- evidence a failure with no outcome of its own leaves ---------------------
+
+
+@weaver_test()
+def test_a_failure_after_staging_settles_leaves_what_the_source_proposed():
+    """An engine error is not a refusal, and the load still owes an explanation.
+
+    Staging has been materialised, so the proposal can be read afterwards even
+    though no gate decided anything about it.
+    """
+
+    spark = _failed(dict(NO_OP, delete=0), fail_on=AT_UPSERT)
+
+    assert spark.created == ["Customer_Staging"]
+    assert spark.mutations == []
+
+
+@weaver_test()
+def test_the_staging_evidence_a_failure_leaves_is_the_raw_proposal():
+    """Raw staging, which is what the question ``_Staging`` answers."""
+
+    spark = _failed(dict(NO_OP, delete=0), fail_on=AT_UPSERT)
+
+    written = [one for one in spark.statements if one.startswith("CREATE TABLE")]
+    assert len(written) == 1
+    assert "FROM weaver_staging_" in written[0]
+
+
+@weaver_test()
+def test_a_failure_after_the_deletes_are_derived_leaves_them_too():
+    """Settled before anything moved, so it is what the load was proposing."""
+
+    spark = _failed(BUSY, fail_on=AT_UPSERT)
+
+    assert spark.created == ["Customer_Staging", "Customer_Delete"]
+
+
+@weaver_test()
+def test_a_failure_partway_through_the_target_leaves_the_same_evidence():
+    """The deletes went in and the upserts did not, which is what to look at."""
+
+    spark = _failed(BUSY, fail_on=AT_DELETE_MUTATION)
+
+    assert spark.created == ["Customer_Staging", "Customer_Delete"]
+
+
+@weaver_test()
+def test_a_failure_after_a_tolerated_rejection_keeps_the_rejects_it_wrote():
+    """The gate's own evidence stands, and the failure adds what it settled since.
+
+    ``_Staging`` is still the raw proposal the gate wrote, not the survivors the
+    purge left, and it is written once.
+    """
+
+    spark = _failed(
+        dict(BUSY, reject=2, clean=1), fail_on=AT_UPSERT, fault_tolerant=True
+    )
+
+    assert spark.created == ["Customer_Staging", "Customer_Reject", "Customer_Delete"]
+    staging = next(
+        one
+        for one in spark.statements
+        if one.startswith("CREATE TABLE") and "Customer_Staging`" in one
+    )
+    assert "FROM weaver_staging_" in staging
+
+
+@weaver_test()
+def test_a_failure_never_leaves_the_upsert_set():
+    """Evidence describes what was proposed, and the upsert set is work."""
+
+    spark = _failed(BUSY, fail_on=AT_DELETE_MUTATION)
+
+    assert not any("_Upsert" in one for one in spark.statements)
+
+
+@weaver_test()
+def test_evidence_that_cannot_be_written_does_not_replace_the_failure():
+    """The engine error is the one worth reporting, so the write is attempted only.
+
+    ``_failed`` asserts the type: an evidence failure reaching the caller would
+    be reported instead of the reason the load stopped.
+    """
+
+    spark = _failed(BUSY, fail_on=AT_UPSERT, fail_creates=True)
+
+    assert spark.created == []
+
+
+@weaver_test()
+def test_a_failed_load_gives_every_relation_back():
+    """Release is in a finally, and the evidence write runs before it."""
+
+    spark = _failed(BUSY, fail_on=AT_UPSERT)
+
+    assert spark.leaked == []
+    assert set(spark.unpersisted) == {frame.view for frame in spark.persisted}
+
+
+@weaver_test()
+def test_a_failed_load_whose_evidence_failed_gives_every_relation_back():
+    spark = _failed(BUSY, fail_on=AT_UPSERT, fail_creates=True)
+
+    assert spark.leaked == []
+    assert set(spark.unpersisted) == {frame.view for frame in spark.persisted}

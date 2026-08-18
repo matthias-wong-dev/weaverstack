@@ -18,7 +18,8 @@ not a Delta table. The reconciliation needs the phases to be settled before the
 target moves and needs to read their sizes; it does not need them to outlive the
 session, and a Delta table per phase costs a write, a commit and a drop for
 state nothing else ever reads. Durable Delta artefacts are written only when a
-load ends with something to troubleshoot; see ``_keep_evidence``.
+load ends with something to troubleshoot, whether a refusal at a gate or a
+failure Weaver has no outcome for; see ``_keep_evidence``.
 
 ``Incremental`` chooses the delete driver, and there is only ever one. An
 incremental source is a window on the truth, so absence proves nothing and the
@@ -149,10 +150,17 @@ def load_table(
     _drop_evidence(spark, names)
 
     held: list = []
+    # What the load has settled so far, and which of it has already been written
+    # out. A failure with no outcome of its own reads them from here rather than
+    # working the state machine out a second time.
+    kept: set = set()
+    evidence: dict = {}
     try:
         return _reconcile(
             spark,
             held,
+            kept=kept,
+            evidence=evidence,
             names=names,
             contract=contract,
             columns=columns,
@@ -162,6 +170,12 @@ def load_table(
             fault_tolerant=fault_tolerant,
             ignore_stability_threshold=ignore_stability_threshold,
         )
+    except Exception:
+        # An outcome Weaver did not classify, so the relations it had settled are
+        # all there is to read afterwards. Written here, and the original failure
+        # goes out unchanged.
+        _keep_unclassified_evidence(spark, names, kept, evidence)
+        raise
     finally:
         # Every exit: a clean load, a refusal at any gate, an unexpected failure.
         _release(spark, held)
@@ -171,6 +185,8 @@ def _reconcile(
     spark,
     held,
     *,
+    kept: set,
+    evidence: dict,
     names,
     contract: LoadContract,
     columns,
@@ -185,9 +201,11 @@ def _reconcile(
     Each derivation hands back a relation and the name later phases read it by.
     Nothing is written to the target until every gate has passed, and the durable
     artefacts are written only where an outcome owes an explanation.
-    """
 
-    kept: set = set()
+    ``kept`` records what has been written out and ``evidence`` the relations a
+    reader would want if this run stopped here. Both belong to the caller, which
+    is where a failure with no outcome of its own reads them.
+    """
 
     def keep(**relations) -> None:
         _keep_evidence(spark, names, kept, **relations)
@@ -203,6 +221,10 @@ def _reconcile(
     # Both the metric and the force that materialises staging for the phases after
     # it, so the authored source is evaluated exactly once.
     rows_read = staging.count()
+    # Settled, so a failure from here on has something to leave behind. Recorded
+    # as the raw proposal rather than as whatever supersedes it, because what
+    # ``_Staging`` answers is what the source proposed.
+    evidence["staging"] = staging_view
 
     if contract.replaces_wholesale:
         return _full_replace(spark, names, staging_view, columns, rows_read)
@@ -213,6 +235,7 @@ def _reconcile(
     )
     rows_rejected = rejects.count()
     if rows_rejected:
+        evidence["reject"] = reject_view
         # However this ends, it owes an explanation: it either stops here or loads
         # the survivors and reports what it left out. Written before the purge,
         # which supersedes the relation that says what the source proposed.
@@ -236,6 +259,8 @@ def _reconcile(
         spark, held, names, staging_view, contract, deletes
     )
     delete_count = deleting.count()
+    if delete_count:
+        evidence["delete"] = delete_view
 
     upsert_view = _derive_upserts(
         spark, held, names, staging_view, contract, columns, signature
@@ -903,6 +928,25 @@ def _keep_evidence(spark, names, kept: set, **relations) -> None:
             f"CREATE TABLE {names[role]} USING delta {COLUMN_MAPPING} AS "
             f"SELECT * FROM {view}"
         )
+
+
+def _keep_unclassified_evidence(spark, names, kept: set, evidence: dict) -> None:
+    """Write what a load had settled when an unclassified failure ended it.
+
+    The same three artefacts a refusal leaves, and never the upsert set, which
+    describes work rather than a proposal. A relation already written stays as it
+    was written.
+
+    The failure on its way out is the one worth reporting, so each write is
+    attempted on its own: one that cannot be made is left out and the others are
+    still tried.
+    """
+
+    for role, view in evidence.items():
+        try:
+            _keep_evidence(spark, names, kept, **{role: view})
+        except Exception:  # noqa: BLE001 - see above
+            pass
 
 
 # --- helpers -----------------------------------------------------------------

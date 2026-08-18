@@ -257,6 +257,15 @@ rejects, because the rejects alone do not explain themselves. A run that stopped
 at the stability gate or at merge uniqueness writes what it was proposing. Each is
 written once, and staging is written before the purge supersedes it.
 
+A run can also end in a failure Weaver has no outcome for: an engine error while
+it was reconciling or writing the target. The load tracks the relations it has
+settled as it goes, and on that exit it writes whichever of them are not already
+written: staging once it is materialised, the rejects and the delete set where
+they exist, and never the upsert set, which describes work rather than a
+proposal. The failure on its way out is the one worth reporting, so a write that
+cannot be made is left out and the original error is raised unchanged. The
+relations are released afterwards as they are on every other exit.
+
 Stale evidence from an earlier faulted run is dropped before a new run for that
 object writes any of its own, so what stands afterwards describes the run that
 just finished. Attempted rather than looked up: a missing table is the ordinary
@@ -279,8 +288,9 @@ records statements and answers cardinalities
 (`tests/targeted/test_delta_load_execution_boundary.py`): that a clean load writes
 no working tables, that a phase which decided on no rows submits no mutation for
 it, that the relations are released whatever happened, and that evidence appears
-only for an outcome that owes one. It evaluates nothing, so what a statement
-*means* is not asked there.
+only for an outcome that owes one, including an injected engine failure, whose
+evidence and release are asserted there too. It evaluates nothing, so what a
+statement *means* is not asked there.
 
 Behaviour needs an engine, and both are exercised against a real tenant:
 `tests/fabric/test_warehouse_load_primitive.py` and
