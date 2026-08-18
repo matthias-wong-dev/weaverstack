@@ -1,7 +1,6 @@
 /*-- What this load will refuse, established before anything is changed --*/
 
--- The reject table takes its shape from staging, so it holds the refused row
--- itself rather than a key someone then has to go and look up.
+-- Shaped from staging, so it holds the refused row itself.
 create table $reject_table as
 select
     __STAGING_SELECT_COLUMNS__
@@ -13,13 +12,7 @@ $reject_discovery
 
 select @weaver_rows_rejected = count(*) from $reject_table;
 $duplicate_key_count
--- Intolerant of rejects: the target is left exactly as it was. Nothing has been
--- written yet, so refusing here is a decision not to start rather than an
--- unwind — and the reject table survives as the evidence.
---
--- Raised rather than returned, so `exec [_].[Load S.N]` fails the same way
--- `.load()` does. A primitive that returned a quiet row where its sibling
--- raised would make every caller special-case which one it was talking to.
+-- Nothing is written yet, so the target is left as it was.
 if @weaver_rows_rejected > 0 and @fault_tolerant = 0
     throw 51020, '$intolerant_message', 1;
 
@@ -50,9 +43,7 @@ where
     or q.[$signature_column] <> t.[$signature_column];
 
 $merge_uniqueness
--- Everything this load is about to do, counted before it does any of it. A
--- breach with @fault_tolerant = 0 leaves the target exactly as it was, so
--- refusing is a decision not to start rather than an unwind.
+-- Counted before anything is written.
 select @weaver_target_rows = count(*) from $target_table;
 set @weaver_target_before = @weaver_target_rows;
 select @weaver_prospective_updates = count(*) from $upsert_table where [$is_new_column] = 0;
@@ -70,10 +61,7 @@ begin
             + ' rows is over the $update_threshold% threshold of '
             + cast(@weaver_target_rows as varchar(20));
 
-    -- A breach never writes. Tolerating exactly the change the threshold was
-    -- declared to prevent would defeat the guard, so @fault_tolerant decides
-    -- only whether the refusal is raised or returned. Permitting it is what
-    -- @ignore_stability_threshold is for.
+    -- A breach never writes. @ignore_stability_threshold is how to permit one.
     if @weaver_error is not null
     begin
         set @weaver_error = @weaver_error + '; the target was not modified';

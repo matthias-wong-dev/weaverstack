@@ -148,7 +148,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (9, "6a8e6613673676827ba8d01458a9f2864b0c1e2d66345f31ccd6f479fde5daed"),
+    "tsql": (9, "b16353e6188e7249f54db5a6779fbda38e3c391cb39071f2d38d9a19da12dff9"),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 
@@ -333,7 +333,7 @@ def test_an_incremental_load_deletes_nothing():
     payload = _warehouse(_incremental(WAREHOUSE_TABLE)).create_load().payload.decode()
 
     assert "delete c\n" not in payload
-    assert "not a retirement" in payload
+    assert "absence retires nothing" in payload
 
 
 # --- the keyed state machine ---------------------------------------------------

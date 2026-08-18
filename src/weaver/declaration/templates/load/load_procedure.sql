@@ -1,7 +1,4 @@
--- The load's result is in the signature, not in a result set. Authored setup
--- may run EXEC or sp_executesql that returns rows of its own, and a caller
--- reading "the result set this procedure produced" would then be reading
--- somebody else's. Optional outputs cannot be confused with anything.
+-- The load's result is in the output parameters, not in a result set.
 create or alter procedure $load_procedure
     @fault_tolerant bit = 0
   , @ignore_stability_threshold bit = 0
@@ -39,9 +36,8 @@ $load_body
 
 $end_artifact_cleanup
 
-    -- What the target actually lost, from its own cardinality. The delete
-    -- driver says what the load intended; this says what happened, and the two
-    -- differ whenever a key named for deletion was not there to begin with.
+    -- What the target actually lost, from its own cardinality rather than from
+    -- what the load intended to remove.
     select @weaver_rows_deleted =
         @weaver_target_before + @weaver_rows_inserted - count(*)
     from $target_table;

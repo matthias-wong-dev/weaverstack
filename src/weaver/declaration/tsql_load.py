@@ -250,9 +250,8 @@ def _static_gate(names: dict, contract: LoadContract) -> str:
         return "-- Not static: this object is loaded on every run."
     seeded = _result_assignment(succeeded="cast(1 as bit)")
     return (
-        "-- Static: seeded once, into an empty target. Already populated means\n"
-        "-- the load has nothing to do, and reports a successful load of nothing\n"
-        "-- rather than repeating work or being skipped from outside.\n"
+        "-- Static: seeded once. A populated target reports a successful load of\n"
+        "-- nothing.\n"
         f"if exists (select 1 from {names['target']})\n"
         "begin\n"
         f"{_indent(seeded, 4)}\n"
@@ -821,13 +820,12 @@ def _delete_derivation(
 
     if claims_deletes:
         return (
-            "-- The author's second query already named these, narrowed to keys\n"
-            "-- the target holds."
+            "-- Named by the author's second query, narrowed to keys the target\n"
+            "-- holds."
         )
     if not contract.deletes_absent_rows:
         return (
-            "-- Incremental, and no delete query. Absence from the source is\n"
-            "-- not a retirement, so nothing is deleted."
+            "-- Incremental, and no delete query: absence retires nothing."
         )
     keys = ", ".join(f"t.{_quote(column)}" for column in contract.primary_key)
     join = _join("s", "t", contract.primary_key)
@@ -849,8 +847,7 @@ def _prospective_deletes(
     if not _has_delete_relation(contract, claims_deletes):
         return "-- Incremental: nothing is deleted, so there is nothing to count."
     return (
-        "-- The delete table holds only keys the target has, so its size is the\n"
-        "-- number of rows that will really go.\n"
+        "-- Only keys the target holds, so this is what will really go.\n"
         f"select @weaver_prospective_deletes = count(*) from {names['delete']};"
     )
 
@@ -860,8 +857,7 @@ def _reconciliation(names: dict, contract: LoadContract, claims_deletes: bool) -
 
     if not _has_delete_relation(contract, claims_deletes):
         return (
-            "-- Incremental, and no delete query. Absence from the source is\n"
-            "-- not a retirement, so nothing is deleted."
+            "-- Incremental, and no delete query: absence retires nothing."
         )
     join = _join("d", "c", contract.primary_key)
     return (
@@ -904,8 +900,7 @@ def _merge_uniqueness(names: dict, contract: LoadContract, has_delete: bool) -> 
     return (
         f"select @weaver_merge_conflicts = count(*)\n"
         f"from (\n{union}\n) as weaver_merge_conflict;\n\n"
-        f"-- Fatal whatever @fault_tolerant says. That governs recoverable\n"
-        f"-- problems with incoming rows; this is the target's own validity.\n"
+        f"-- Fatal whatever @fault_tolerant says: that governs incoming rows.\n"
         f"if @weaver_merge_conflicts > 0\n"
         f"    throw 51022, '{_escape_literal(MERGE_CONFLICT_MESSAGE)}', 1;\n"
     )
@@ -928,7 +923,7 @@ def _merge_conflict_branch(
     vacated = []
     if has_delete:
         vacated.append(
-            f"          /* The holder is not going away. */\n"
+            f"          /* not leaving */\n"
             f"          and not exists (\n"
             f"              select 1 from {names['delete']} as d\n"
             f"              where {_join('d', 'holder', contract.primary_key)}\n"
@@ -940,7 +935,7 @@ def _merge_conflict_branch(
         for column in unique_key
     )
     vacated.append(
-        f"          /* The holder is not moving off this value. */\n"
+        f"          /* not moving off this value */\n"
         f"          and not exists (\n"
         f"              select 1 from {names['upsert']} as moving\n"
         f"              where {_join('moving', 'holder', contract.primary_key)}\n"
@@ -1038,8 +1033,7 @@ def _signature_payload_select(
 
     if not contract.primary_key:
         return (
-            "-- No primary key, so no row is ever compared with a stored one and\n"
-            "-- there is no signature to take."
+            "-- No primary key, so no row is compared and there is no signature."
         )
     if contract.comparison_columns:
         names_in = ", ".join(
