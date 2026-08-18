@@ -28,6 +28,7 @@ from weaver.declaration.load import (
     PROCEDURE_OBJECT,
     SPARK_LOAD_VERSION,
     TSQL_LOAD_VERSION,
+    has_generated_load,
 )
 from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
 from weaver.runtime.load_contract import REASON_BLANK_PK, REASON_DUPLICATE_PK
@@ -127,7 +128,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (9, "90da0c9a720025aa089d91e3714206949ba88896afa27e07f079141fac29debe"),
+    "tsql": (9, "b16353e6188e7249f54db5a6779fbda38e3c391cb39071f2d38d9a19da12dff9"),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 
@@ -602,15 +603,24 @@ def test_the_upsert_set_holds_new_and_changed_rows_and_no_others():
 
 
 @weaver_test()
-def test_a_target_row_with_no_stored_signature_is_refreshed():
-    """Not every keyed table's rows come from a keyed load.
+def test_a_table_declaring_no_load_procedure_generates_none():
+    """Something other than Weaver populates it, so there is nothing to install.
 
-    Weaver's own catalogue tables declare a key and are written by the catalogue's
-    DML, so the column is nullable. Comparing with an absent signature answers
-    unknown, which would skip the row for good rather than refresh it.
+    Weaver's own catalogue tables are the reason: written by the catalogue's DML,
+    so a load and the row signature that serves one are both dead weight — and
+    ``Prohibit rebuild: true`` meant an installed table could never acquire the
+    column anyway.
     """
 
-    assert "or t.[Row signature] is null" in _body()
+    source = WAREHOUSE_TABLE.replace(
+        "Primary key: Customer id",
+        "Primary key: Customer id\n\nHas load procedure: false",
+    )
+    document = _warehouse(source)
+
+    assert has_generated_load(document) is False
+    assert document.document.signature_column is None
+    assert "[Row signature]" not in document.create_ddl().content
 
 
 # --- would the proposed changes leave a valid target? --------------------------

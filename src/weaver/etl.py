@@ -289,9 +289,15 @@ def _warehouse_artefacts(
 ) -> tuple[RuntimeArtefact, ...]:
     """One generated load procedure per Warehouse table."""
 
+    from .declaration.load import has_generated_load
+
     artefacts = []
     for identity, source in sorted(repository.source_documents.items(), key=_by_text):
         if identity.item != item or source.kind != TABLE:
+            continue
+        # A table declaring `Has load procedure: false` is populated by something
+        # other than Weaver, so there is no procedure to install for it.
+        if not has_generated_load(source):
             continue
         generated = source.create_load()
         artefacts.append(
@@ -339,8 +345,11 @@ def _lakehouse_artefacts(
                 )
             )
         elif source.language == SPARK_SQL and source.kind == TABLE:
-            from .declaration.load import load_identity
+            from .declaration.load import has_generated_load, load_identity
 
+            # Populated by something other than Weaver, so nothing is deployed.
+            if not has_generated_load(source):
+                continue
             _object_type, template_version = load_identity(source)
             generated = (
                 source.create_load(destination=destination)

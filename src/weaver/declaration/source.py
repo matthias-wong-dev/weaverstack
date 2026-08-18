@@ -254,7 +254,7 @@ class SourceDocument:
 
         from .ddl import KEYED_TABLE_VERSION
 
-        if self.kind != TABLE or not self.document.has_primary_key:
+        if self.document.signature_column is None:
             return self.effective_signature
         return salted_signature(self.effective_signature, KEYED_TABLE_VERSION)
 

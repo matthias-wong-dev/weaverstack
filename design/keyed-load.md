@@ -126,16 +126,19 @@ Warehouse payload is assembled at install time rather than by the generator,
 because it names each column's physical type and an inferred table's types are
 settled by the build.
 
-The column is nullable, because not every keyed table's rows come from a keyed
-load: Weaver's own catalogue tables declare a key and are written by the
-catalogue's DML, which has no signature to write. So a load treats an absent
-stored signature as a row it has not seen and refreshes it — comparing with it
-would answer unknown and skip the row for good.
+Not every keyed table has a load. `Has load procedure: false` says something other
+than Weaver populates this one, and such a table gets neither a load artefact nor
+a signature column, because both exist to serve a load it does not have. Weaver's
+own catalogue tables declare it: they hold a primary key and are written by the
+catalogue's DML. Giving them a signature column made every catalogue publication
+fail on a not-null violation, and `Prohibit rebuild: true` meant an installed one
+could never acquire the column anyway.
 
 The column is physical, so introducing or changing it has to rebuild the tables
-that carry it. `SourceDocument.physical_signature` salts a keyed table's source
-hash with `KEYED_TABLE_VERSION`, and the desired catalogue and incremental
-selection read the same value. An unkeyed table gains nothing and is not rebuilt.
+that carry it. `SourceDocument.physical_signature` salts the source hash with
+`KEYED_TABLE_VERSION` for exactly the tables that carry the column, and the
+desired catalogue and incremental selection read the same value. A table with no
+signature column gains nothing and is not rebuilt.
 
 ## Merge uniqueness
 

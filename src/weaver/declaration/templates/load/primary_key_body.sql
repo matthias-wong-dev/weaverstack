@@ -40,9 +40,6 @@ from (
 left join $target_table as t on $query_target_join
 where
     $target_missing_predicate
-    -- An absent stored signature is a row this load has not seen, so it is
-    -- refreshed. Comparing with it would answer unknown and skip the row.
-    or t.[$signature_column] is null
     or q.[$signature_column] <> t.[$signature_column];
 
 $merge_uniqueness

@@ -553,15 +553,26 @@ def test_a_keyed_table_carries_a_row_signature_column():
 
 
 @weaver_test()
-def test_the_row_signature_column_is_nullable():
-    """Not every keyed table's rows come from a keyed load.
+def test_the_row_signature_column_is_not_null():
+    """A load computes it for every row it writes, so there is no absent state."""
 
-    Weaver's own catalogue tables declare a key and are written by the catalogue's
-    DML, which has no signature to write. Declaring the column not null refused
-    those writes outright.
+    assert parse(TABLE_YAML).signature_column.not_null is True
+
+
+@weaver_test()
+def test_a_table_with_no_load_carries_no_row_signature():
+    """The signature serves a load, so a table without one has nothing to keep.
+
+    Weaver's own catalogue tables are written by the catalogue's DML. Giving them
+    the column made every catalogue publication fail on a not-null violation, and
+    ``Prohibit rebuild: true`` meant an installed one could never acquire it.
     """
 
-    assert parse(TABLE_YAML).signature_column.not_null is False
+    source = TABLE_YAML + "\nHas load procedure: false\n"
+
+    assert parse(source).signature_column is None
+    assert parse(source).has_load_procedure is False
+    assert parse(TABLE_YAML).has_load_procedure is True
 
 
 @weaver_test()

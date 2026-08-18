@@ -103,6 +103,14 @@ DELETE_THRESHOLD = "Delete percentage threshold"
 UPDATE_THRESHOLD = "Update percentage threshold"
 STABILITY_ROWS = "Stability row threshold"
 
+#: Whether Weaver installs a load for this table. True unless declared otherwise.
+#:
+#: A table declaring ``false`` is one something other than a load populates —
+#: Weaver's own catalogue tables are written by the catalogue's DML. It gets no
+#: load artefact and no row-signature column, because both exist to serve a load
+#: it does not have.
+HAS_LOAD_PROCEDURE = "Has load procedure"
+
 #: Deliberately not zero. A load that has never been run against a populated
 #: table has nothing to compare with, and a first load inserts everything — so
 #: the defaults protect an established table without standing in the way of one
@@ -161,6 +169,7 @@ _KIND_KEYS = {
         "Identity",
         "Comparison columns",
         "Incremental",
+        HAS_LOAD_PROCEDURE,
         DELETE_THRESHOLD,
         UPDATE_THRESHOLD,
         STABILITY_ROWS,
@@ -491,6 +500,9 @@ class WeaverDocument:
     stability_rows: int = DEFAULT_STABILITY_ROWS
     file_keys: tuple[str, ...] = ()
     is_incremental: bool = False
+    #: Whether Weaver installs a load for this table. False for a table something
+    #: other than a load populates, which then also carries no row signature.
+    has_load_procedure: bool = True
     prohibit_rebuild: bool = False
     static: bool = False
     warehouse_alias: ObjectId | None = None
@@ -554,24 +566,27 @@ class WeaverDocument:
 
     @property
     def signature_column(self) -> Column | None:
-        """The row-signature column, on a keyed table.
+        """The row-signature column, on a keyed table that a load populates.
 
         Weaver's own column, so it stands outside the business schema and no
-        query produces it. An unkeyed table has none: its load replaces the
-        target wholesale, so no row is ever compared with a stored one.
+        query produces it.
+
+        Two tables have none. An unkeyed one, because its load replaces the
+        target wholesale and no row is ever compared with a stored one. And one
+        declaring ``Has load procedure: false``, because the signature exists to
+        serve a load it does not have.
         """
 
         if self.kind != TABLE or not self.has_primary_key:
             return None
+        if not self.has_load_procedure:
+            return None
         return Column(
             name=signature_column_name(self.language),
             type=_SIGNATURE_TYPES[self.language],
-            # Nullable, because not every keyed table's rows come from a keyed
-            # load. Weaver's own catalogue tables declare a key and are written by
-            # the catalogue's DML, which has no signature to write. A load treats
-            # an absent signature as a row it has not seen, so such a row is
-            # refreshed rather than silently skipped.
-            not_null=False,
+            # A load computes it for every row it writes, so there is no valid
+            # absent state on a table a load populates.
+            not_null=True,
         )
 
     @property
@@ -737,6 +752,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     is_incremental = _parse_flag_with_default(
         loaded, "Incremental", default=kind == FOLDER
     )
+    has_load_procedure = _parse_flag_with_default(
+        loaded, HAS_LOAD_PROCEDURE, default=True
+    )
 
     declared_columns = _parse_schema(loaded.get("Schema"))
     if kind == TABLE and language == PYTHON and not declared_columns:
@@ -813,6 +831,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         stability_rows=stability_rows,
         file_keys=file_keys,
         is_incremental=is_incremental,
+        has_load_procedure=has_load_procedure,
         prohibit_rebuild=prohibit_rebuild,
         static=static,
         warehouse_alias=warehouse_alias,

@@ -493,10 +493,7 @@ def _derive_upserts(
         f"FROM weaver_proposed AS q\n"
         f"LEFT JOIN {names['target']} AS t "
         f"ON {key_join('q', 't', contract.primary_key)}\n"
-        # An absent stored signature is a row this load has not seen, so it is
-        # refreshed. Comparing with it would answer unknown and skip the row.
-        f"WHERE {missing} OR t.`{stored}` IS NULL "
-        f"OR q.`{stored}` <> t.`{stored}`"
+        f"WHERE {missing} OR q.`{stored}` <> t.`{stored}`"
     )
 
 

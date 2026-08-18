@@ -97,6 +97,9 @@ def render_source(table: CatalogueTable) -> str:
         "Dependencies: []",
         "Static: true",
         "Prohibit rebuild: true",
+        # Written by the catalogue's own DML, never by a load. So there is no load
+        # to install and no row signature to keep for one.
+        "Has load procedure: false",
         # The key is declared as the primary key, so the catalogue's own tables
         # describe themselves: Weaver document makes key columns not null, and the projection
         # records the key in the catalogue like any other object's.
@@ -133,6 +136,7 @@ def render_log_source() -> str:
         "Dependencies: []",
         "Static: true",
         "Prohibit rebuild: true",
+        "Has load procedure: false",
         f"Primary key: {LOG.public_name_of('log_sk')}",
         "Not null:\n"
         + "\n".join(
