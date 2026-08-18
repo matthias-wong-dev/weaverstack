@@ -108,7 +108,10 @@ STABILITY_ROWS = "Stability row threshold"
 #: A table declaring ``false`` is one something other than a load populates —
 #: Weaver's own catalogue tables are written by the catalogue's DML. It gets no
 #: load artefact and no row-signature column, because both exist to serve a load
-#: it does not have.
+#: it does not have, so what it declares is a structure.
+#:
+#: SQL and Spark SQL can both declare one. A Python table cannot: its authored
+#: module is the load, so there is no separate artefact to decline.
 HAS_LOAD_PROCEDURE = "Has load procedure"
 
 #: Deliberately not zero. A load that has never been run against a populated
@@ -801,6 +804,15 @@ def parse_document(text: str, *, language: str) -> SesDocument:
             raise MetadataError(
                 "Comparison columns require a Primary key — they drive upsert comparison, "
                 "which only happens when rows can be matched"
+            )
+        # A Python table's authored module *is* its load, so there is no separate
+        # artefact to decline. Declaring a table only something else populates
+        # means declaring its structure, which SQL and Spark SQL can both do.
+        if language == PYTHON and not has_load_procedure:
+            raise MetadataError(
+                f"{HAS_LOAD_PROCEDURE}: false is not supported for a Python "
+                "table, because the authored module is its load. Declare the "
+                "table in SQL or Spark SQL."
             )
     schema = _apply_column_details(
         declared_columns, column_notes, primary_key, declared_not_null

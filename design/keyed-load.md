@@ -149,11 +149,15 @@ settled by the build.
 
 Not every keyed table has a load. `Has load procedure: false` says something other
 than Weaver populates this one, and such a table gets neither a load artefact nor
-a signature column, because both exist to serve a load it does not have. Weaver's
-own catalogue tables declare it: they hold a primary key and are written by the
-catalogue's DML. Giving them a signature column made every catalogue publication
-fail on a not-null violation, and `Prohibit rebuild: true` meant an installed one
-could never acquire the column anyway.
+a signature column, because both exist to serve a load it does not have — what it
+declares is a structure. Weaver's own catalogue tables declare it: they hold a
+primary key and are written by the catalogue's DML. Giving them a signature column
+made every catalogue publication fail on a not-null violation, and `Prohibit
+rebuild: true` meant an installed one could never acquire the column anyway.
+
+SQL and Spark SQL can both declare a structure that way. A Python table cannot,
+and says so: its authored module is the load, so there is no separate artefact to
+decline.
 
 The column is physical, so introducing or changing it has to rebuild the tables
 that carry it. `SourceDocument.physical_signature` salts the source hash with

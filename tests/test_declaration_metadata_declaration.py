@@ -570,9 +570,26 @@ def test_a_table_with_no_load_carries_no_row_signature():
 
     source = TABLE_YAML + "\nHas load procedure: false\n"
 
-    assert parse(source).signature_column is None
-    assert parse(source).has_load_procedure is False
+    assert parse(source, language=SQL).signature_column is None
+    assert parse(source, language=SQL).has_load_procedure is False
     assert parse(TABLE_YAML).has_load_procedure is True
+
+
+@weaver_test()
+def test_a_python_table_cannot_decline_a_load():
+    """Its authored module is the load, so there is no separate artefact to refuse.
+
+    Declaring a table something else populates means declaring a structure, and
+    both SQL representations can do that.
+    """
+
+    source = TABLE_YAML + "\nHas load procedure: false\n"
+
+    with pytest.raises(MetadataError, match="not supported for a Python table"):
+        parse(source)
+    assert parse(source, language=SQL).has_load_procedure is False
+    spark_sql = source + "\nDependencies: []\n"
+    assert parse(spark_sql, language=SPARK_SQL).has_load_procedure is False
 
 
 @weaver_test()
