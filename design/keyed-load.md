@@ -289,6 +289,20 @@ claim. If they disagree the model has diverged.
 
 Large-scale performance is manual and lives outside the suite. The benchmark work
 behind this design established that narrow grouped scans beat global staging
-windows, that a large target join is cheap in Fabric Warehouse, and that the
-Delta path's durable working tables cost more than the reconciliation they were
-carrying. None of that belongs in a CI threshold.
+windows and that a large target join is cheap in Fabric Warehouse. None of that
+belongs in a CI threshold.
+
+What the suite's own external-resource telemetry showed when the Delta path moved
+off durable working tables, on the desktop journey's three keyed loads of three
+rows each:
+
+| | before | after |
+|---|---|---|
+| `DWG.NamedCustomer` | 95.5s | 21.6s |
+| `DWG.Order` | 86.3s | 24.6s |
+| `DWG.Customer` | 67.6s | 21.2s |
+| the journey's Livy time | 317.6s | 127.8s |
+
+Livy submission counts are identical, which is the point: the cost was inside one
+submission, in the writes and commits that carried state nobody read. Treat these
+as implementation evidence. Fabric timing is noisy and nothing here is asserted.

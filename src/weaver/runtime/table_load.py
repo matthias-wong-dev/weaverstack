@@ -209,7 +209,7 @@ def _reconcile(
 
     signature = row_signature("s", _comparison_columns(contract, columns), types)
     rejects, reject_view = _discover_rejects(
-        spark, held, staging_view, contract, columns, signature
+        spark, held, names["target"], staging_view, contract, columns, signature
     )
     rows_rejected = rejects.count()
     if rows_rejected:
@@ -229,7 +229,7 @@ def _reconcile(
                 ),
             )
         staging_view = _purge_staging(
-            spark, held, staging_view, contract, columns, signature
+            spark, held, names["target"], staging_view, contract, columns, signature
         )
 
     deleting, delete_view = _derive_deletes(
@@ -305,7 +305,7 @@ def _reconcile(
 
 
 def _discover_rejects(
-    spark, held, staging_view, contract: LoadContract, columns, signature
+    spark, held, target, staging_view, contract: LoadContract, columns, signature
 ):
     """Everything this load refuses, in one statement.
 
@@ -319,11 +319,11 @@ def _discover_rejects(
 
     chain, rejects = _validation_chain(staging_view, contract, columns, signature)
     union = "\nUNION ALL\n".join(f"SELECT * FROM {name}" for name in rejects)
-    return _hold(spark, held, f"WITH {chain}\n{union}", staging_view, "reject")
+    return _hold(spark, held, f"WITH {chain}\n{union}", target, "reject")
 
 
 def _purge_staging(
-    spark, held, staging_view, contract: LoadContract, columns, signature
+    spark, held, target, staging_view, contract: LoadContract, columns, signature
 ) -> str:
     """The rows the refusals left, as the clean incoming state from here on.
 
@@ -344,7 +344,7 @@ def _purge_staging(
         f"WITH {chain}\n"
         f"SELECT {qualified('s', columns)} "
         f"FROM {_surviving_relation(contract)} AS s",
-        staging_view,
+        target,
         "clean",
     )
     clean.count()
@@ -551,7 +551,7 @@ def _derive_upserts(
         f"LEFT JOIN {names['target']} AS t "
         f"ON {key_join('q', 't', contract.primary_key)}\n"
         f"WHERE {missing} OR q.`{stored}` <> t.`{stored}`",
-        staging_view,
+        names["target"],
         "upsert",
     )
     return view
@@ -719,7 +719,7 @@ def _derive_deletes(spark, held, names, staging_view, contract: LoadContract, de
             spark,
             held,
             f"SELECT {target_keys}\nFROM {names['target']} AS t\n{absent}",
-            staging_view,
+            names["target"],
             "delete",
         )
 
@@ -742,7 +742,7 @@ def _derive_deletes(spark, held, names, staging_view, contract: LoadContract, de
         f"SELECT {target_keys}\n"
         f"FROM {names['target']} AS t JOIN ({source}) AS d "
         f"ON {key_join('d', 't', contract.primary_key)}\n{absent}",
-        staging_view,
+        names["target"],
         "delete",
     )
 
