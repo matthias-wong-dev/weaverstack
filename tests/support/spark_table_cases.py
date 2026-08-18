@@ -20,18 +20,25 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from weaver.runtime.delta_sql import delta_audit_names, delta_signature_name
+
 #: The schema every case builds into.
 SCHEMA = "SparkTable"
 
 #: Weaver's audit columns, in the Delta spelling and the order a build appends
 #: them.
-AUDIT_COLUMNS = [
-    ["row_insert_datetime", "timestamp", True],
-    ["row_update_datetime", "timestamp", True],
-    ["row_delete_datetime", "timestamp", True],
-]
+AUDIT_COLUMNS = [[name, "timestamp", True] for name in delta_audit_names()]
 
 AUDIT_NAMES = tuple(name for name, _type, _not_null in AUDIT_COLUMNS)
+
+#: Weaver's remaining own columns, after the audit ones. Every case here is
+#: keyed, so each carries the row signature: the same entry
+#: :func:`weaver.declaration.ddl.spark_table_payload` freezes.
+INTERNAL_COLUMNS = [[delta_signature_name(), "string", True]]
+
+INTERNAL_NAMES = AUDIT_NAMES + tuple(
+    name for name, _type, _not_null in INTERNAL_COLUMNS
+)
 
 
 @dataclass(frozen=True)
@@ -75,6 +82,7 @@ class TableCase:
             "source_query": self.addressed_query(destination),
             "references": [list(pair) for pair in self.references],
             "audit_columns": AUDIT_COLUMNS,
+            "internal_columns": INTERNAL_COLUMNS,
             "column_mapping": True,
         }
         return (json.dumps(instruction, indent=2, sort_keys=True) + "\n").encode(
@@ -249,10 +257,10 @@ def described_types(rows) -> dict:
 
 
 def assert_case_built(case: TableCase, rows) -> None:
-    """The built table is exactly the query's columns, then the audit columns."""
+    """The built table is the query's columns, then the audit ones, then the signature."""
 
     types = described_types(rows)
-    business = [name for name in types if name not in AUDIT_NAMES]
+    business = [name for name in types if name not in INTERNAL_NAMES]
 
     assert business == list(case.expected), (
         f"{case.name} carries {business}, and its query declares {list(case.expected)}"
@@ -261,5 +269,5 @@ def assert_case_built(case: TableCase, rows) -> None:
         assert types[name] == expected, (
             f"{case.name}.{name} was built as {types[name]!r}, not {expected!r}"
         )
-    for name in AUDIT_NAMES:
-        assert name in types, f"{case.name} is missing the audit column {name}"
+    for name in INTERNAL_NAMES:
+        assert name in types, f"{case.name} is missing Weaver's column {name}"
