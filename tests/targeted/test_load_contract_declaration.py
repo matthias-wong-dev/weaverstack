@@ -139,6 +139,123 @@ def test_an_incremental_load_never_deletes():
     assert contract.deletes_absent_rows is False
 
 
+# --- uniqueness and nullability ---------------------------------------------
+
+
+@weaver_test()
+def test_unique_keys_are_optional():
+    """Most tables declare none, and the load must generate no machinery for them."""
+
+    contract = LoadContract.from_document(_document(TABLE_HEADER))
+
+    assert contract.unique_keys == ()
+    assert contract.checks_merge_uniqueness is False
+
+
+@weaver_test()
+def test_unique_keys_reach_the_runtime_in_declaration_order():
+    """Order is contract, not presentation.
+
+    A row rejected by an earlier key does not go on to choose the survivor of a
+    later one, so which key came first decides which rows survive.
+    """
+
+    contract = LoadContract.from_document(
+        _document(
+            TABLE_HEADER
+            + "\nUnique keys:\n  - Customer name\n  - Amount, Customer name\n"
+        )
+    )
+
+    assert contract.unique_keys == (
+        ("Customer name",),
+        ("Amount", "Customer name"),
+    )
+
+
+@weaver_test()
+def test_a_composite_unique_key_keeps_its_column_order():
+    contract = LoadContract.from_document(
+        _document(TABLE_HEADER + "\nUnique keys:\n  - Amount, Customer name\n")
+    )
+
+    assert contract.unique_keys == (("Amount", "Customer name"),)
+
+
+@weaver_test()
+def test_only_declared_not_null_columns_reach_the_runtime():
+    """A business column is nullable unless the declaration says otherwise.
+
+    The primary key is stronger than not-null and is validated separately, so it
+    is not repeated here — counting it twice would let one blank key inflate the
+    rejection threshold.
+    """
+
+    contract = LoadContract.from_document(
+        _document(TABLE_HEADER + "\nNot null:\n  - Customer name\n")
+    )
+
+    assert contract.not_null_columns == ("Customer name",)
+    assert "Amount" not in contract.not_null_columns
+    assert "Customer id" not in contract.not_null_columns
+
+
+@weaver_test()
+def test_a_table_declaring_nothing_not_null_has_no_null_columns_to_check():
+    contract = LoadContract.from_document(_document(TABLE_HEADER))
+
+    assert contract.not_null_columns == ()
+
+
+@weaver_test()
+def test_merge_uniqueness_is_checked_only_when_incremental_and_unique():
+    """The one place a load can refuse outright rather than reject rows.
+
+    A non-incremental load leaves the target equal to clean staging, which has
+    already been made unique, so it has nothing to ask.
+    """
+
+    unique = "\nUnique keys:\n  - Customer name\n"
+    incremental = "\nIncremental: true\n"
+
+    def contract(extra: str):
+        return LoadContract.from_document(_document(TABLE_HEADER + extra))
+
+    assert contract(unique + incremental).checks_merge_uniqueness is True
+    assert contract(unique).checks_merge_uniqueness is False
+    assert contract(incremental).checks_merge_uniqueness is False
+
+
+@weaver_test()
+def test_an_unkeyed_table_carries_no_uniqueness_machinery():
+    """Full replacement is unchanged by this work."""
+
+    header = TABLE_HEADER.replace("Primary key: Customer id\n", "")
+    contract = LoadContract.from_document(
+        _document(header + "\nUnique keys:\n  - Customer name\n")
+    )
+
+    assert contract.replaces_wholesale is True
+    assert contract.unique_keys == (("Customer name",),)
+    assert contract.checks_merge_uniqueness is False
+
+
+@weaver_test()
+def test_the_reject_vocabulary_names_the_column_or_key_that_refused_a_row():
+    """A table may declare several unique keys, so "duplicate" alone is not enough."""
+
+    from weaver.runtime.load_contract import (
+        duplicate_unique_reason,
+        null_column_reason,
+    )
+
+    assert null_column_reason("Customer name") == "null_column: Customer name"
+    assert (
+        duplicate_unique_reason(("Region id", "External ref"))
+        == "duplicate_unique_key: Region id, External ref"
+    )
+
+
 @weaver_test()
 def test_a_folder_contract_carries_its_file_key_and_policy():
     header = """
