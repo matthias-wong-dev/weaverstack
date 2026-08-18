@@ -505,10 +505,11 @@ def test_declared_schema_stays_exactly_what_was_written():
 @weaver_test()
 def test_the_effective_schema_adds_the_audit_columns():
     document = parse(TABLE_YAML)
-    assert [column.name for column in document.effective_schema][-3:] == [
+    assert [column.name for column in document.effective_schema][-4:] == [
         "row_insert_datetime",
         "row_update_datetime",
         "row_delete_datetime",
+        "row_signature",
     ]
 
 
@@ -531,6 +532,71 @@ def test_every_audit_column_is_not_null():
 @weaver_test()
 def test_folders_have_no_audit_columns():
     assert parse(FOLDER_YAML).audit_columns == ()
+
+
+# --- the row signature column ----------------------------------------------
+
+
+@weaver_test()
+def test_a_keyed_table_carries_a_row_signature_column():
+    """Spelled and typed for the representation, and never null.
+
+    A Warehouse keeps the digest as bytes; Spark's ``sha2`` returns hex text, so
+    Delta keeps that. The two are never compared with each other.
+    """
+
+    delta = parse(TABLE_YAML).signature_column
+    warehouse = parse(TABLE_YAML, language=SQL).signature_column
+
+    assert (delta.name, delta.type, delta.not_null) == ("row_signature", "string", True)
+    assert (warehouse.name, warehouse.type, warehouse.not_null) == (
+        "Row signature",
+        "varbinary(32)",
+        True,
+    )
+
+
+@weaver_test()
+def test_an_unkeyed_table_carries_no_row_signature_column():
+    """Its load replaces the target wholesale, so no row is ever compared."""
+
+    document = parse(TABLE_YAML.replace("Primary key: Order id\n\n", ""), language=SQL)
+
+    assert document.signature_column is None
+    assert document.internal_columns == document.audit_columns
+
+
+@weaver_test()
+def test_a_folder_carries_no_row_signature_column():
+    assert parse(FOLDER_YAML).signature_column is None
+
+
+@weaver_test()
+def test_the_row_signature_column_is_not_a_business_or_comparison_column():
+    """Weaver's own column: no query produces it and no change is measured by it."""
+
+    document = parse(TABLE_YAML)
+
+    assert "row_signature" not in [column.name for column in document.schema]
+    assert "row_signature" not in document.comparison_columns
+    assert "row_signature" not in document.not_null
+
+
+@weaver_test()
+def test_a_declaration_cannot_name_the_row_signature_column():
+    for spelling in ("Row signature", "row_signature", "ROW SIGNATURE"):
+        source = TABLE_YAML.replace("  Amount: decimal(18,2)", f"  {spelling}: string")
+        with pytest.raises(MetadataError, match="reserved for Weaver's row signature"):
+            parse(source)
+
+
+@weaver_test()
+def test_an_identity_cannot_name_the_row_signature_column():
+    source = TABLE_YAML.replace(
+        "Primary key: Order id", "Primary key: Order id\n\nIdentity: Row signature"
+    )
+    with pytest.raises(MetadataError, match="row signature column name"):
+        parse(source, language=SQL)
 
 
 # --- schema declaration by representation ----------------------------------

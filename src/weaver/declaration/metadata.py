@@ -231,6 +231,38 @@ _AUDIT_TYPES = {PYTHON: "timestamp", SPARK_SQL: "timestamp", SQL: "datetime2(6)"
 #: absence — which makes "as at" one range predicate instead of a null check.
 AUDIT_LIVE_DELETE_DATETIME = "9999-12-31 23:59:59.999999"
 
+#: The row signature is a SHA-256 digest of a row's comparison columns, kept on
+#: the row so a later load can tell a changed row from an unchanged one by one
+#: equality test. Only a keyed table carries it: an unkeyed load replaces its
+#: target wholesale and never compares a row with anything.
+SIGNATURE_COLUMN = "Row signature"
+
+#: The signature's physical type follows the representation. A Warehouse stores
+#: the digest as bytes; Spark's ``sha2`` returns the hex text, so Delta stores
+#: that. The two engines are not required to agree byte for byte — a signature is
+#: only ever compared with another signature from the same table.
+_SIGNATURE_TYPES = {PYTHON: "string", SPARK_SQL: "string", SQL: "varbinary(32)"}
+
+
+def signature_column_name(language: str) -> str:
+    """The physical spelling of the row-signature column for a representation.
+
+    Delta gets lower snake case (``row_signature``), a Warehouse the spaced form
+    (``Row signature``) — the same rule the audit columns follow.
+    """
+
+    if language in DELTA_LANGUAGES:
+        return SIGNATURE_COLUMN.replace(" ", "_").lower()
+    return SIGNATURE_COLUMN
+
+
+#: Every spelling of the signature column an author might reach for, folded for
+#: comparison, so a declaration cannot collide with the column Weaver adds.
+_RESERVED_SIGNATURE_NAMES = frozenset(
+    spelling.lower()
+    for spelling in (SIGNATURE_COLUMN, SIGNATURE_COLUMN.replace(" ", "_"))
+)
+
 #: The identity column is a surrogate the *engine* generates: build declares it
 #: ``bigint identity not null`` and the Warehouse assigns a value to every
 #: inserted row. It is Weaver's column, so it is not part of the declared
@@ -521,15 +553,41 @@ class WeaverDocument:
         )
 
     @property
+    def signature_column(self) -> Column | None:
+        """The row-signature column, on a keyed table.
+
+        Weaver's own column, so it stands outside the business schema and no
+        query produces it. An unkeyed table has none: its load replaces the
+        target wholesale, so no row is ever compared with a stored one.
+        """
+
+        if self.kind != TABLE or not self.has_primary_key:
+            return None
+        return Column(
+            name=signature_column_name(self.language),
+            type=_SIGNATURE_TYPES[self.language],
+            # A keyed load computes it for every row it writes, so there is no
+            # valid absent state.
+            not_null=True,
+        )
+
+    @property
+    def internal_columns(self) -> tuple[Column, ...]:
+        """The columns Weaver appends to a table: audit, then the signature."""
+
+        signature = (self.signature_column,) if self.signature_column else ()
+        return self.audit_columns + signature
+
+    @property
     def effective_schema(self) -> tuple[Column, ...]:
-        """The full physical shape of a declared table: identity, business, audit.
+        """The full physical shape of a declared table: identity, business, internal.
 
         ``schema`` stays what the author wrote; this is what gets materialised,
-        with the identity column leading and the audit columns trailing.
+        with the identity column leading and Weaver's own columns trailing.
         """
 
         identity = (self.identity_column,) if self.identity_column else ()
-        return identity + self.schema + self.audit_columns
+        return identity + self.schema + self.internal_columns
 
     @property
     def not_null(self) -> tuple[str, ...]:
@@ -1446,11 +1504,25 @@ def _validate_columns(
             "these column names are reserved for Weaver's audit columns: "
             + ", ".join(colliding)
         )
+    signature_colliding = [
+        column.name
+        for column in declared_columns
+        if column.name.lower() in _RESERVED_SIGNATURE_NAMES
+    ]
+    if signature_colliding:
+        raise MetadataError(
+            "these column names are reserved for Weaver's row signature column: "
+            + ", ".join(signature_colliding)
+        )
     # Identity is a Weaver-managed surrogate column, so it must not clash with the
     # audit columns it sits beside.
     if identity is not None and identity.lower() in _RESERVED_AUDIT_NAMES:
         raise MetadataError(
             f"Identity {identity} collides with a Weaver audit column name"
+        )
+    if identity is not None and identity.lower() in _RESERVED_SIGNATURE_NAMES:
+        raise MetadataError(
+            f"Identity {identity} collides with Weaver's row signature column name"
         )
     # The primary key must not be the identity column: the engine assigns it on
     # insert, so a source never produces it and a load matching on it would
