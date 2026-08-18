@@ -10,8 +10,8 @@ a change the declaration excluded, or misses one it did not.
 
 *How* each value is written must be unambiguous. A concatenation cannot
 distinguish a null from an empty string, or two values from one value containing
-whatever separator was chosen — and both mistakes are silent: the row simply
-never updates.
+whatever separator was chosen — and both mistakes are silent: the row never
+updates.
 
 The two engines are asserted side by side because they are required to agree on
 those properties and required *not* to agree on the bytes. A Warehouse hashes to

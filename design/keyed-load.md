@@ -108,7 +108,7 @@ the declaration named fewer. Not the audit columns, which move on every write, a
 not the signature itself.
 
 *How* each value is written has to be unambiguous, because both ways of getting it
-wrong are silent — the row simply never updates. Each value enters the payload as
+wrong are silent — the row never updates. Each value enters the payload as
 its length, a colon, and its canonical text; a null enters as `~`, which no
 present value can produce because a present value always begins with a digit. So
 a null, an empty string, and text containing whatever separator was chosen are all
