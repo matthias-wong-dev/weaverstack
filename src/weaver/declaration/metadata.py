@@ -103,6 +103,17 @@ DELETE_THRESHOLD = "Delete percentage threshold"
 UPDATE_THRESHOLD = "Update percentage threshold"
 STABILITY_ROWS = "Stability row threshold"
 
+#: Whether Weaver installs a load for this table. True unless declared otherwise.
+#:
+#: A table declaring ``false`` is one something other than a load populates —
+#: Weaver's own catalogue tables are written by the catalogue's DML. It gets no
+#: load artefact and no row-signature column, because both exist to serve a load
+#: it does not have, so what it declares is a structure.
+#:
+#: SQL and Spark SQL can both declare one. A Python table cannot: its authored
+#: module is the load, so there is no separate artefact to decline.
+HAS_LOAD_PROCEDURE = "Has load procedure"
+
 #: Deliberately not zero. A load that has never been run against a populated
 #: table has nothing to compare with, and a first load inserts everything — so
 #: the defaults protect an established table without standing in the way of one
@@ -161,6 +172,7 @@ _KIND_KEYS = {
         "Identity",
         "Comparison columns",
         "Incremental",
+        HAS_LOAD_PROCEDURE,
         DELETE_THRESHOLD,
         UPDATE_THRESHOLD,
         STABILITY_ROWS,
@@ -230,6 +242,38 @@ _AUDIT_TYPES = {PYTHON: "timestamp", SPARK_SQL: "timestamp", SQL: "datetime2(6)"
 #: physically not null, so a live row carries a sentinel maximum rather than an
 #: absence — which makes "as at" one range predicate instead of a null check.
 AUDIT_LIVE_DELETE_DATETIME = "9999-12-31 23:59:59.999999"
+
+#: The row signature is a SHA-256 digest of a row's comparison columns, kept on
+#: the row so a later load can tell a changed row from an unchanged one by one
+#: equality test. Only a keyed table carries it: an unkeyed load replaces its
+#: target wholesale and never compares a row with anything.
+SIGNATURE_COLUMN = "Row signature"
+
+#: The signature's physical type follows the representation. A Warehouse stores
+#: the digest as bytes; Spark's ``sha2`` returns the hex text, so Delta stores
+#: that. The two engines are not required to agree byte for byte — a signature is
+#: only ever compared with another signature from the same table.
+_SIGNATURE_TYPES = {PYTHON: "string", SPARK_SQL: "string", SQL: "varbinary(32)"}
+
+
+def signature_column_name(language: str) -> str:
+    """The physical spelling of the row-signature column for a representation.
+
+    Delta gets lower snake case (``row_signature``), a Warehouse the spaced form
+    (``Row signature``) — the same rule the audit columns follow.
+    """
+
+    if language in DELTA_LANGUAGES:
+        return SIGNATURE_COLUMN.replace(" ", "_").lower()
+    return SIGNATURE_COLUMN
+
+
+#: Every spelling of the signature column an author might reach for, folded for
+#: comparison, so a declaration cannot collide with the column Weaver adds.
+_RESERVED_SIGNATURE_NAMES = frozenset(
+    spelling.lower()
+    for spelling in (SIGNATURE_COLUMN, SIGNATURE_COLUMN.replace(" ", "_"))
+)
 
 #: The identity column is a surrogate the *engine* generates: build declares it
 #: ``bigint identity not null`` and the Warehouse assigns a value to every
@@ -459,6 +503,9 @@ class WeaverDocument:
     stability_rows: int = DEFAULT_STABILITY_ROWS
     file_keys: tuple[str, ...] = ()
     is_incremental: bool = False
+    #: Whether Weaver installs a load for this table. False for a table something
+    #: other than a load populates, which then also carries no row signature.
+    has_load_procedure: bool = True
     prohibit_rebuild: bool = False
     static: bool = False
     warehouse_alias: ObjectId | None = None
@@ -521,15 +568,47 @@ class WeaverDocument:
         )
 
     @property
+    def signature_column(self) -> Column | None:
+        """The row-signature column, on a keyed table that a load populates.
+
+        Weaver's own column, so it stands outside the business schema and no
+        query produces it.
+
+        Two tables have none. An unkeyed one, because its load replaces the
+        target wholesale and no row is ever compared with a stored one. And one
+        declaring ``Has load procedure: false``, because the signature exists to
+        serve a load it does not have.
+        """
+
+        if self.kind != TABLE or not self.has_primary_key:
+            return None
+        if not self.has_load_procedure:
+            return None
+        return Column(
+            name=signature_column_name(self.language),
+            type=_SIGNATURE_TYPES[self.language],
+            # A load computes it for every row it writes, so there is no valid
+            # absent state on a table a load populates.
+            not_null=True,
+        )
+
+    @property
+    def internal_columns(self) -> tuple[Column, ...]:
+        """The columns Weaver appends to a table: audit, then the signature."""
+
+        signature = (self.signature_column,) if self.signature_column else ()
+        return self.audit_columns + signature
+
+    @property
     def effective_schema(self) -> tuple[Column, ...]:
-        """The full physical shape of a declared table: identity, business, audit.
+        """The full physical shape of a declared table: identity, business, internal.
 
         ``schema`` stays what the author wrote; this is what gets materialised,
-        with the identity column leading and the audit columns trailing.
+        with the identity column leading and Weaver's own columns trailing.
         """
 
         identity = (self.identity_column,) if self.identity_column else ()
-        return identity + self.schema + self.audit_columns
+        return identity + self.schema + self.internal_columns
 
     @property
     def not_null(self) -> tuple[str, ...]:
@@ -676,6 +755,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     is_incremental = _parse_flag_with_default(
         loaded, "Incremental", default=kind == FOLDER
     )
+    has_load_procedure = _parse_flag_with_default(
+        loaded, HAS_LOAD_PROCEDURE, default=True
+    )
 
     declared_columns = _parse_schema(loaded.get("Schema"))
     if kind == TABLE and language == PYTHON and not declared_columns:
@@ -723,6 +805,15 @@ def parse_document(text: str, *, language: str) -> SesDocument:
                 "Comparison columns require a Primary key — they drive upsert comparison, "
                 "which only happens when rows can be matched"
             )
+        # A Python table's authored module *is* its load, so there is no separate
+        # artefact to decline. Declaring a table only something else populates
+        # means declaring its structure, which SQL and Spark SQL can both do.
+        if language == PYTHON and not has_load_procedure:
+            raise MetadataError(
+                f"{HAS_LOAD_PROCEDURE}: false is not supported for a Python "
+                "table, because the authored module is its load. Declare the "
+                "table in SQL or Spark SQL."
+            )
     schema = _apply_column_details(
         declared_columns, column_notes, primary_key, declared_not_null
     )
@@ -752,6 +843,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         stability_rows=stability_rows,
         file_keys=file_keys,
         is_incremental=is_incremental,
+        has_load_procedure=has_load_procedure,
         prohibit_rebuild=prohibit_rebuild,
         static=static,
         warehouse_alias=warehouse_alias,
@@ -1446,11 +1538,25 @@ def _validate_columns(
             "these column names are reserved for Weaver's audit columns: "
             + ", ".join(colliding)
         )
+    signature_colliding = [
+        column.name
+        for column in declared_columns
+        if column.name.lower() in _RESERVED_SIGNATURE_NAMES
+    ]
+    if signature_colliding:
+        raise MetadataError(
+            "these column names are reserved for Weaver's row signature column: "
+            + ", ".join(signature_colliding)
+        )
     # Identity is a Weaver-managed surrogate column, so it must not clash with the
     # audit columns it sits beside.
     if identity is not None and identity.lower() in _RESERVED_AUDIT_NAMES:
         raise MetadataError(
             f"Identity {identity} collides with a Weaver audit column name"
+        )
+    if identity is not None and identity.lower() in _RESERVED_SIGNATURE_NAMES:
+        raise MetadataError(
+            f"Identity {identity} collides with Weaver's row signature column name"
         )
     # The primary key must not be the identity column: the engine assigns it on
     # insert, so a source never produces it and a load matching on it would

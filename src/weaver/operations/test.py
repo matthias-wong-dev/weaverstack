@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Sequence
 
 from ..errors import CommandError, ValidationError
-from ..load_plan import PhysicalTargetRef
+from ..load_plan import PhysicalTargetRef, lakehouse_names
 from ..targets import parse_physical_target
 from ..test_report import (
     FAILED,
@@ -67,6 +67,9 @@ def test(
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved) as opened:
+        # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
+        # needs one of the Lakehouses this run is actually for.
+        opened.offer_spark_home(lakehouse_names(refs))
         with opened.task(
             "Test (dry run)" if dry_run else "Test", ", ".join(map(str, refs))
         ):

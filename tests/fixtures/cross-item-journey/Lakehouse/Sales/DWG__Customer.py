@@ -38,4 +38,4 @@ class DWG__Customer(Table):
         )
         # No explicit deletes: the drop is the whole truth, so absence from it is
         # what retires a row.
-        return shaped, None
+        return shaped

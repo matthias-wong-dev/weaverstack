@@ -23,6 +23,15 @@ if TYPE_CHECKING:
 #: payload's identity column: a Delta table no longer has one to carry.
 BUILD_FORMAT_VERSION = 2
 
+#: The version of the physical shape Weaver gives a *keyed* table, salted into
+#: :attr:`~weaver.declaration.source.SourceDocument.physical_signature`. It is
+#: what makes a change to that shape rebuild the tables it changed even though no
+#: authored source moved. Version 1 added the row-signature column.
+#:
+#: Keyed only, so an unkeyed table — which gains nothing — is not rebuilt for a
+#: change it does not carry.
+KEYED_TABLE_VERSION = 1
+
 #: The executor a concrete Spark statement runs through. It names a runtime
 #: dispatch key, not an engine — a Fabric Spark session and a local one both use
 #: ``spark_sql``.
@@ -166,6 +175,13 @@ def _spark_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
         "source_query": address_managed_references(query, destination),
         "references": [list(pair) for pair in metadata_column_references(ses)],
         "audit_columns": [_column_entry(column) for column in ses.audit_columns],
+        # Weaver's other own columns, after the audit ones. Empty unless the
+        # table is keyed, which is the only kind that carries a row signature.
+        "internal_columns": [
+            _column_entry(column)
+            for column in ses.internal_columns
+            if column not in ses.audit_columns
+        ],
         "column_mapping": True,
     }
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"

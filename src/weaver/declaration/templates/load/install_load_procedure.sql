@@ -4,10 +4,10 @@ set nocount on;
 declare @weaver_proc_sql nvarchar(max);
 declare @weaver_source_columns nvarchar(max);
 declare @weaver_staging_select_columns nvarchar(max);
-declare @weaver_staging_except_columns nvarchar(max);
-declare @weaver_target_except_columns nvarchar(max);
+declare @weaver_query_select_columns nvarchar(max);
 declare @weaver_upsert_select_columns nvarchar(max);
 declare @weaver_update_set_columns nvarchar(max);
+declare @weaver_signature_payload nvarchar(max);
 
 $column_metadata_sql
 
@@ -19,9 +19,9 @@ end;
 set @weaver_proc_sql = $procedure_template_sql_literal;
 set @weaver_proc_sql = replace(@weaver_proc_sql, N'__SOURCE_COLUMNS__', @weaver_source_columns);
 set @weaver_proc_sql = replace(@weaver_proc_sql, N'__STAGING_SELECT_COLUMNS__', @weaver_staging_select_columns);
-set @weaver_proc_sql = replace(@weaver_proc_sql, N'__STAGING_EXCEPT_COLUMNS__', @weaver_staging_except_columns);
-set @weaver_proc_sql = replace(@weaver_proc_sql, N'__TARGET_EXCEPT_COLUMNS__', @weaver_target_except_columns);
+set @weaver_proc_sql = replace(@weaver_proc_sql, N'__QUERY_SELECT_COLUMNS__', @weaver_query_select_columns);
 set @weaver_proc_sql = replace(@weaver_proc_sql, N'__UPSERT_SELECT_COLUMNS__', @weaver_upsert_select_columns);
 set @weaver_proc_sql = replace(@weaver_proc_sql, N'__UPDATE_SET_COLUMNS__', @weaver_update_set_columns);
+set @weaver_proc_sql = replace(@weaver_proc_sql, N'__SIGNATURE_PAYLOAD__', coalesce(@weaver_signature_payload, N''));
 
 exec sys.sp_executesql @weaver_proc_sql;

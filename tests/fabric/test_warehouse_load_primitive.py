@@ -160,7 +160,7 @@ def _drop(estate: Estate) -> None:
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
             f"drop table [{SCHEMA}].[{name}{suffix}];"
-            for suffix in ("_Reject", "_Upsert", "_Staging", "")
+            for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging", "")
         )
         + f"\nif object_id(N'{SCHEMA}.{estate.raw}', N'U') is not null "
         f"drop table [{SCHEMA}].[{estate.raw}];"
@@ -184,7 +184,7 @@ def _reset(estate: Estate) -> None:
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
             f"drop table [{SCHEMA}].[{name}{suffix}];"
-            for suffix in ("_Reject", "_Upsert", "_Staging")
+            for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging")
         )
     )
 
@@ -432,3 +432,518 @@ def test_the_static_warehouse_load_seeds_once_and_then_is_a_no_op(static_estate)
     ) == (0, 0, 0, 0, 0)
     assert static_run.contents == CLEAN
     assert static_run.extra["leftovers"] == 0
+
+
+# --- declared constraints, executed ------------------------------------------
+#
+# Nullability and uniqueness are declarations, and what they mean is what the
+# engine does with the generated procedure. Two more estates, because the two
+# subjects are genuinely different: one is about refusing incoming rows and
+# recovering, the other about refusing to write at all.
+#
+# One test per sequence, as above, with every claim about that sequence in it.
+# The sequence is the expensive part and the claims are free.
+
+#: Declared nullable and unique, non-incremental: the recoverable refusals.
+CONSTRAINED_OBJECT = "LoadConstrained"
+
+#: Declared unique and incremental: the one refusal that is not recoverable.
+MERGE_OBJECT = "LoadMerge"
+
+WIDE_COLUMNS = ("Customer id", "Customer name", "Email", "Region id", "External ref")
+
+WIDE_RAW_DDL = (
+    "[Customer id] varchar(50) null, [Customer name] varchar(200) null, "
+    "[Email] varchar(100) null, [Region id] int null, [External ref] varchar(30) null"
+)
+
+
+def _wide_source(object_name: str, *, incremental: bool) -> str:
+    """One object declaring a key, a required column and two unique keys.
+
+    The second unique key is composite, and ``Email`` is left nullable, so the
+    same declaration covers a null that does not claim a value and a tuple that
+    does.
+    """
+
+    body = (
+        "select [Customer id], [Customer name], [Email], [Region id], [External ref] "
+        f"from [{SCHEMA}].[{object_name}Raw]"
+    )
+    if incremental:
+        body += f";\n\nselect [Customer id] from [{SCHEMA}].[{object_name}Retire]"
+    policy = "\nIncremental: true\n" if incremental else ""
+    return f"""/*
+Table ID: {SCHEMA}.{object_name}
+
+Description: Customers.
+
+Lineage: The sales system.
+
+Primary key: Customer id
+
+Not null:
+  - Customer name
+
+Unique keys:
+  - Email
+  - Region id, External ref
+{policy}
+Schema:
+  Customer id: varchar(50)
+  Customer name: varchar(200)
+  Email: varchar(100)
+  Region id: int
+  External ref: varchar(30)
+*/
+{body}
+"""
+
+
+@dataclass(frozen=True)
+class WideEstate(Estate):
+    """A wide estate, and whether it also has a table of keys to retire."""
+
+    retires: bool = False
+
+    @property
+    def retire(self) -> str:
+        return f"{self.object_name}Retire"
+
+
+def _install_wide(executor, object_name: str, *, incremental: bool) -> WideEstate:
+    document = read_source_document(
+        f"{SCHEMA}.{object_name}.sql",
+        _wide_source(object_name, incremental=incremental).encode("utf-8"),
+        WAREHOUSE,
+    )
+    executor.execute_script(
+        f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
+        "if schema_id(N'_') is null exec('create schema [_]');"
+    )
+    estate = WideEstate(executor, object_name, retires=incremental)
+    _drop_wide(estate)
+    executor.execute_script(f"create table [{SCHEMA}].[{estate.raw}] ({WIDE_RAW_DDL});")
+    if incremental:
+        executor.execute_script(
+            f"create table [{SCHEMA}].[{estate.retire}] "
+            "([Customer id] varchar(50) null);"
+        )
+    executor.execute_script(document.create_ddl().content)
+    executor.execute_script(document.create_load().payload.decode("utf-8"))
+    return estate
+
+
+def _drop_wide(estate: WideEstate) -> None:
+    name = estate.object_name
+    statements = [f"drop procedure if exists [_].[Load {SCHEMA}.{name}];"]
+    statements += [
+        f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
+        f"drop table [{SCHEMA}].[{name}{suffix}];"
+        for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging", "", "Raw", "Retire")
+    ]
+    estate.executor.execute_script("\n".join(statements))
+
+
+def _reset_wide(estate: WideEstate) -> None:
+    name = estate.object_name
+    statements = [
+        f"delete from [{SCHEMA}].[{name}];",
+        f"delete from [{SCHEMA}].[{estate.raw}];",
+    ]
+    if estate.retires:
+        statements.append(f"delete from [{SCHEMA}].[{estate.retire}];")
+    statements += [
+        f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
+        f"drop table [{SCHEMA}].[{name}{suffix}];"
+        for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging")
+    ]
+    estate.executor.execute_script("\n".join(statements))
+
+
+def _literal(value) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, int):
+        return str(value)
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _wide_rows(estate: WideEstate, rows, *, retire=()) -> None:
+    columns = ", ".join(f"[{column}]" for column in WIDE_COLUMNS)
+    statements = [f"delete from [{SCHEMA}].[{estate.raw}];"]
+    if estate.retires:
+        statements.append(f"delete from [{SCHEMA}].[{estate.retire}];")
+    if rows:
+        values = ", ".join(
+            "(" + ", ".join(_literal(value) for value in row) + ")" for row in rows
+        )
+        statements.append(
+            f"insert into [{SCHEMA}].[{estate.raw}] ({columns}) values {values};"
+        )
+    if retire:
+        keys = ", ".join(f"({_literal(key)})" for key in retire)
+        statements.append(
+            f"insert into [{SCHEMA}].[{estate.retire}] ([Customer id]) values {keys};"
+        )
+    estate.executor.execute_script("\n".join(statements))
+
+
+def _wide_contents(estate: WideEstate):
+    rows = estate.executor.query(
+        f"select [Customer id], [Customer name], [Email], [Region id], "
+        f"[External ref] from [{SCHEMA}].[{estate.object_name}] "
+        "order by [Customer id];"
+    )
+    return [tuple(row[column] for column in WIDE_COLUMNS) for row in rows]
+
+
+def _by_key(rows) -> dict:
+    return {row[0]: row for row in rows}
+
+
+def _signatures(estate: WideEstate) -> dict:
+    rows = estate.executor.query(
+        f"select [Customer id], [Row signature] from "
+        f"[{SCHEMA}].[{estate.object_name}] order by [Customer id];"
+    )
+    return {str(row["Customer id"]): bytes(row["Row signature"]) for row in rows}
+
+
+def _reject_reasons(estate: WideEstate) -> dict:
+    rows = estate.executor.query(
+        f"select [Customer id], [{REJECTION_REASON}] from "
+        f"[{SCHEMA}].[{estate.object_name}_Reject];"
+    )
+    return {
+        (None if row["Customer id"] is None else str(row["Customer id"])): str(
+            row[REJECTION_REASON]
+        )
+        for row in rows
+    }
+
+
+@pytest.fixture(scope="module")
+def constrained_estate(clean_disposable_warehouse):
+    built = _install_wide(
+        clean_disposable_warehouse.executor, CONSTRAINED_OBJECT, incremental=False
+    )
+    yield built
+    _drop_wide(built)
+
+
+@pytest.fixture(scope="module")
+def merge_estate(clean_disposable_warehouse):
+    built = _install_wide(
+        clean_disposable_warehouse.executor, MERGE_OBJECT, incremental=True
+    )
+    yield built
+    _drop_wide(built)
+
+
+# --- recoverable refusals -----------------------------------------------------
+
+#: Every recoverable refusal the declaration can produce, and the rows that
+#: survive them. One load, because they are discovered in one statement and the
+#: claim worth making is which rows came out the other side.
+REFUSABLE = [
+    ("c1", "One", "a@x.test", 10, "A"),  # clean
+    (None, "NoKey", "b@x.test", 10, "B"),  # the key is not a key
+    ("c3", None, "c@x.test", 10, "C"),  # a declared not-null column left empty
+    ("c4", "Four", "d@x.test", 10, "D"),  # clean, and duplicated below
+    ("c4", "FourAgain", "e@x.test", 10, "E"),  # one of the two c4 rows goes
+    ("c6", "Six", "a@x.test", 10, "F"),  # claims c1's Email
+    ("c7", "Seven", "g@x.test", 10, "A"),  # claims c1's Region id + External ref
+    ("c8", "Eight", None, 10, "H"),  # Email is nullable
+    ("c9", "Nine", None, 10, "I"),  # so two nulls are not a collision
+]
+
+#: What survives every refusal above.
+SURVIVING_KEYS = ["c1", "c4", "c8", "c9"]
+
+
+def _constrained_run(estate):
+    """One tolerant load over every refusal, then two more over clean sources.
+
+    Chained, because the second load's subject is the state the first left: an
+    unchanged source must write nothing, and a changed one must write exactly what
+    changed. Re-seeding between them would buy a load to reach a state the
+    previous load had already produced.
+    """
+
+    _reset_wide(estate)
+
+    _wide_rows(estate, REFUSABLE)
+    refused = _load(estate, fault_tolerant=True)
+    first = Ran(
+        result=refused,
+        contents=_wide_contents(estate),
+        extra={
+            "reasons": _reject_reasons(estate),
+            "signatures": _signatures(estate),
+        },
+    )
+
+    # The accepted rows, restaged exactly as they were loaded. An unchanged source
+    # must produce no work at all, which is what the stored signature is for.
+    accepted = first.contents
+    _wide_rows(estate, accepted)
+    unchanged = _load(estate, fault_tolerant=False)
+    second = Ran(
+        result=unchanged,
+        contents=_wide_contents(estate),
+        extra={"signatures": _signatures(estate), "leftovers": _leftovers(estate)},
+    )
+
+    changed = [
+        (row[0], "Renamed" if row[0] == "c1" else row[1], *row[2:]) for row in accepted
+    ]
+    _wide_rows(estate, changed)
+    updated = _load(estate, fault_tolerant=False)
+    third = Ran(
+        result=updated,
+        contents=_wide_contents(estate),
+        extra={"signatures": _signatures(estate)},
+    )
+
+    return SimpleNamespace(refused=first, unchanged=second, updated=third)
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_declared_constraints_refuse_rows_and_the_survivors_load(constrained_estate):
+    """Each declared refusal, the rows it leaves, and what a signature then buys.
+
+    Which row of a duplicate group survives is arbitrary and the declaration does
+    not order them, so what is asserted is that one did and that the result is
+    valid under every declared key.
+    """
+
+    run = _constrained_run(constrained_estate)
+    refused, unchanged, updated = run.refused, run.unchanged, run.updated
+
+    # One row, one reason. A row wrong twice over is still one row refused.
+    assert refused.extra["reasons"] == {
+        None: REASON_BLANK_PK,
+        "c3": "null_column: Customer name",
+        "c4": REASON_DUPLICATE_PK,
+        "c6": "duplicate_unique_key: Email",
+        "c7": "duplicate_unique_key: Region id, External ref",
+    }
+    assert refused.result.rows_rejected == 5
+    assert refused.result.rows_inserted == 4
+    assert [row[0] for row in refused.contents] == SURVIVING_KEYS
+
+    # The target is valid under both declared keys, and a null claims neither.
+    emails = [row[2] for row in refused.contents if row[2] is not None]
+    tuples = [(row[3], row[4]) for row in refused.contents]
+    assert len(emails) == len(set(emails))
+    assert len(tuples) == len(set(tuples))
+    assert [row[0] for row in refused.contents if row[2] is None] == ["c8", "c9"]
+
+    # Every loaded row carries a signature of its own.
+    signatures = refused.extra["signatures"]
+    assert sorted(signatures) == SURVIVING_KEYS
+    assert all(signatures.values())
+    assert len(set(signatures.values())) == len(signatures)
+
+    # An unchanged source is one equality test per row, and no work.
+    assert unchanged.result.succeeded is True
+    assert (
+        unchanged.result.rows_inserted,
+        unchanged.result.rows_updated,
+        unchanged.result.rows_deleted,
+        unchanged.result.rows_rejected,
+    ) == (0, 0, 0, 0)
+    assert unchanged.extra["signatures"] == signatures
+    assert unchanged.extra["leftovers"] == 0
+
+    # A changed row is updated, and its signature moves with it. Nobody else's does.
+    after = updated.extra["signatures"]
+    assert (updated.result.rows_updated, updated.result.rows_inserted) == (1, 0)
+    assert _by_key(updated.contents)["c1"][1] == "Renamed"
+    assert after["c1"] != signatures["c1"]
+    assert {key: after[key] for key in after if key != "c1"} == {
+        key: signatures[key] for key in signatures if key != "c1"
+    }
+
+
+# --- the refusal that is not recoverable --------------------------------------
+#
+# An incremental load changes part of a target it cannot see the rest of, so the
+# rows it proposes may each be fine while the state they would leave is not. That
+# is not a row to reject: it is a load not to run.
+
+#: The target these sequences start from, reached by an incremental load because
+#: every other state here is too.
+SEED = [
+    ("c1", "One", "a@x.test", 10, "A"),
+    ("c2", "Two", "b@x.test", 10, "B"),
+    ("c3", "Three", "c@x.test", 10, "C"),
+    ("c4", "Four", "d@x.test", 10, "D"),
+    ("c5", "Five", "e@x.test", 10, "E"),
+]
+
+
+def _seed_merge(estate):
+    _reset_wide(estate)
+    _wide_rows(estate, SEED)
+    return _load(estate, fault_tolerant=False)
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_holder_gives_up_a_unique_value_by_leaving_or_by_moving(merge_estate):
+    """The three proposals a holder really does free its value for.
+
+    A two-way swap, a holder moving its own composite tuple, and a claim on a
+    value whose holder this same load retires. All three describe a valid final
+    state, and a check that only asked "is this value held?" would refuse every
+    one of them.
+    """
+
+    _seed_merge(merge_estate)
+    _wide_rows(
+        merge_estate,
+        [
+            ("c1", "One", "b@x.test", 10, "A"),  # swaps Email with c2
+            ("c2", "Two", "a@x.test", 10, "B"),  # the other half of the swap
+            ("c3", "Three", "c@x.test", 10, "Z"),  # moves its own composite tuple
+            ("c4", "Four", "d@x.test", 10, "E"),  # claims c5's tuple; c5 is retired
+        ],
+        retire=["c5"],
+    )
+    result = _load(merge_estate, fault_tolerant=False)
+    contents = _by_key(_wide_contents(merge_estate))
+
+    assert result.succeeded is True
+    assert result.rows_deleted == 1
+    assert contents["c1"][2] == "b@x.test"
+    assert contents["c2"][2] == "a@x.test"
+    assert (contents["c3"][3], contents["c3"][4]) == (10, "Z")
+    assert (contents["c4"][3], contents["c4"][4]) == (10, "E")
+    assert "c5" not in contents
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_key_the_source_still_produces_is_not_retired(merge_estate):
+    """The claim gives it up, and the row is loaded as an ordinary update.
+
+    c2 is claimed and staged changed; c3 is claimed and staged unchanged. Neither
+    is deleted, c2 is updated, and c3 is left alone — so its insert and update
+    times both survive, which deleting and re-inserting would not have preserved.
+    """
+
+    _seed_merge(merge_estate)
+    before = merge_estate.executor.query(
+        f"select [Customer id], [Row insert datetime] as inserted, "
+        f"[Row update datetime] as updated from [{SCHEMA}].[{MERGE_OBJECT}] "
+        "order by [Customer id];"
+    )
+    stamps = {
+        str(row["Customer id"]): (row["inserted"], row["updated"]) for row in before
+    }
+
+    _wide_rows(
+        merge_estate,
+        [
+            ("c2", "Renamed", "b@x.test", 10, "B"),  # claimed, and changed
+            ("c3", "Three", "c@x.test", 10, "C"),  # claimed, and unchanged
+        ],
+        retire=["c2", "c3", "c4"],  # c4 is claimed and not staged, so it goes
+    )
+    result = _load(merge_estate, fault_tolerant=False)
+    contents = _by_key(_wide_contents(merge_estate))
+    after = merge_estate.executor.query(
+        f"select [Customer id], [Row insert datetime] as inserted, "
+        f"[Row update datetime] as updated from [{SCHEMA}].[{MERGE_OBJECT}] "
+        "order by [Customer id];"
+    )
+    now = {str(row["Customer id"]): (row["inserted"], row["updated"]) for row in after}
+
+    assert result.succeeded is True
+    assert (result.rows_deleted, result.rows_inserted, result.rows_updated) == (1, 0, 1)
+    assert "c4" not in contents
+    assert contents["c2"][1] == "Renamed"
+    assert contents["c3"][1] == "Three"
+    # The changed row keeps the time it was inserted; the unchanged row is untouched.
+    assert now["c2"][0] == stamps["c2"][0]
+    assert now["c3"] == stamps["c3"]
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_holder_moving_to_a_null_frees_its_value(merge_estate):
+    """A null claims nothing, so a holder that takes one has given the value up.
+
+    The case a plain inequality would get wrong: comparing the holder's proposed
+    value with its current one answers unknown when the proposal is null, and the
+    claim would be refused for a value nobody holds any more.
+    """
+
+    _seed_merge(merge_estate)
+    _wide_rows(
+        merge_estate,
+        [
+            ("c1", "One", "c@x.test", 10, "A"),  # claims c3's Email
+            ("c3", "Three", None, 10, "C"),  # c3 takes a null instead
+        ],
+    )
+    result = _load(merge_estate, fault_tolerant=False)
+    contents = _by_key(_wide_contents(merge_estate))
+
+    assert result.succeeded is True
+    assert contents["c1"][2] == "c@x.test"
+    assert contents["c3"][2] is None
+
+
+#: Proposals that do not describe a valid target. Each is run over the same
+#: seeded state, which an abort leaves untouched — so nothing has to be re-seeded
+#: between them, and that fact is itself one of the claims.
+CONFLICTS = {
+    # A value nobody is giving up. c2's rename is valid on its own and must not be
+    # applied anyway: the load either describes a valid target or does not run.
+    "untouched holder": [
+        ("c1", "One", "c@x.test", 10, "A"),
+        ("c2", "Renamed", "b@x.test", 10, "B"),
+    ],
+    # The same question, asked of the composite key.
+    "composite holder untouched": [
+        ("c1", "One", "a@x.test", 10, "B"),
+    ],
+}
+
+# A holder that is in the upsert set while keeping the value a claimant wants is
+# not among these, and cannot be: both rows would then carry that value in
+# staging, which incoming uniqueness refuses before the merge check is reached.
+# The generated predicate still has to distinguish the two, because that is what
+# lets a genuine swap or move through — asserted in
+# ``tests/targeted/test_load_representation.py``.
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_proposal_that_would_leave_a_key_conflicted_stops_the_load(merge_estate):
+    """And leaves the target exactly as it was, including the valid changes.
+
+    Fatal whatever ``fault_tolerant`` says: that governs recoverable problems with
+    incoming rows, and a target that is not valid under its own declaration is not
+    one of those.
+    """
+
+    _seed_merge(merge_estate)
+    seeded = _wide_contents(merge_estate)
+    refusals = {}
+
+    for label, rows in CONFLICTS.items():
+        _wide_rows(merge_estate, rows)
+        with pytest.raises(Exception) as raised:
+            _load(merge_estate, fault_tolerant=False)
+        refusals[label] = str(raised.value)
+
+    _wide_rows(merge_estate, CONFLICTS["untouched holder"])
+    with pytest.raises(Exception) as tolerated:
+        _load(merge_estate, fault_tolerant=True)
+    refusals["tolerated"] = str(tolerated.value)
+
+    assert set(refusals) == {*CONFLICTS, "tolerated"}
+    for label, message in refusals.items():
+        assert "declared unique key" in message, label
+    assert _wide_contents(merge_estate) == seeded
+    assert _by_key(seeded)["c2"][1] == "Two"

@@ -197,6 +197,12 @@ def test_an_intolerant_run_raises_and_names_the_node_that_stopped_it(thin):
     assert "Thin." in said, f"the failure named no node: {said}"
     assert "reported failure" in said or "rejected" in said
 
+    # The run submitted a log row, and a desktop Session appends through a
+    # flusher on a worker thread. Waited for here rather than left to land
+    # whenever the worker gets to it, so the TDS write this run causes is inside
+    # the body that caused it and the declaration above is not a race.
+    thin.session.flush()
+
 
 def _said(node) -> str:
     """Everything one node reported, as one string to look in."""

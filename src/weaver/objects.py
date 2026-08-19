@@ -285,8 +285,17 @@ class Folder(WeaverObject):
 class Table(WeaverObject):
     """Rows materialised into a Delta table or a Warehouse table.
 
-    ``read()`` returns upserts. When an incremental table needs explicit
-    deletes, it returns ``(upserts, deletes)`` instead.
+    ``read()`` returns staging::
+
+        return rows
+
+    An incremental table may return an explicit delete claim beside it, because
+    a window on the truth cannot retire a row by not carrying it::
+
+        return rows, retired
+
+    A non-incremental source is the whole truth, so a row's absence from it is
+    what retires the row and there is nothing a second value could say.
     """
 
     def dataframe(self) -> Any:
@@ -299,6 +308,30 @@ class Table(WeaverObject):
         return self.spark.read.format("delta").load(
             self.lakehouse.table_path(*self.identity)
         )
+
+    def _staged(self, contract) -> tuple[Any, Any]:
+        """What ``read()`` staged, and the delete claim it was allowed to make.
+
+        A non-incremental table returns staging on its own, and is refused on the
+        shape of what it returned rather than on what the second value holds: no
+        Spark job runs to establish that a frame was empty, and an author reading
+        the message is told what to write instead.
+
+        :func:`weaver.runtime.table_load._delete_driver` holds the same rule at
+        the other end, for rows that reach a load without passing through here.
+        """
+
+        from .runtime.load_contract import normalise_read_result
+
+        returned = self.read()
+        if not contract.incremental and isinstance(returned, tuple):
+            raise LoadError(
+                f"{contract.qualified}: a non-incremental table returns staging "
+                "on its own. The source is the whole truth, so a row's absence "
+                "from it is what retires the row. Return the staging frame, or "
+                "declare Incremental: true."
+            )
+        return normalise_read_result(returned)
 
     def empty_dataframe(self) -> Any:
         """This table's shape with no rows — an incremental load's no-op result.
@@ -340,7 +373,7 @@ class Table(WeaverObject):
 
         # Staging: unvalidated, unreconciled, nothing yet classified as new or
         # changed.
-        staged, deletes = self._read_result()
+        staged, deletes = self._staged(contract)
         return load_table(
             self.spark,
             contract=contract,
@@ -394,7 +427,11 @@ class SparkSqlTable(Table):
         return parse_document(module_metadata_text(module), language=SPARK_SQL)
 
     def read(self):
-        """Run the embedded program and return ``(staging, deletes)``."""
+        """Run the embedded program and return what it staged.
+
+        The same shapes an authored ``read()`` returns: staging on its own, and
+        for an incremental table naming keys to delete, the two together.
+        """
 
         from .runtime.load_contract import LoadContract
         from .runtime.spark_sql_table import read_spark_sql

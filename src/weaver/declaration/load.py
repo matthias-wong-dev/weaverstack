@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 #: Signature salts for generated load output. Increment the corresponding value
 #: whenever that generator changes.
-TSQL_LOAD_VERSION = 8
+TSQL_LOAD_VERSION = 9
 SPARK_LOAD_VERSION = 9
 
 #: What object a generated load installs, in the catalogue's vocabulary. A
@@ -90,8 +90,15 @@ def load_identity(document: "SourceDocument") -> tuple[str, int]:
 
 
 def has_generated_load(document: "SourceDocument") -> bool:
-    """Whether this source's load is generated rather than deployed verbatim."""
+    """Whether this source's load is generated rather than deployed verbatim.
 
+    A table declaring ``Has load procedure: false`` has no load at all: something
+    other than Weaver populates it, so there is nothing to generate and nothing to
+    install.
+    """
+
+    if not document.document.has_load_procedure:
+        return False
     return document.kind == TABLE and document.language in (SQL, SPARK_SQL)
 
 

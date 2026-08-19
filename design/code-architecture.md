@@ -88,6 +88,22 @@ Commands declare the capabilities they may need. Preparation starts them in the
 background, but a capability is acquired only when an executor uses it. A run
 that declares `livy` and performs only T-SQL does not open a Spark session.
 
+A Livy session is created against a Lakehouse, so a command that may want Spark
+also offers the physical Lakehouses it was asked for, through
+`Session.offer_spark_home`. That is a transport requirement and nothing more:
+the Lakehouse is where the session lives, while every generated statement names
+its own target in full. Nothing above the transport reads it, and a host that
+already runs where Spark is ignores it.
+
+A Session holds one Fabric workspace for its whole life, and an operation given a
+borrowed one resolves that workspace as its base. A command's own configuration
+travels beside the Session as *names*: `operation_workspace` applies `catalogue`
+and `environment` on top of the base it found, so `load --catalogue
+Warehouse/Curated` at a session prompt reads that catalogue without anything
+about the Session changing. `weaver_cli` passes what its command line settled on,
+and refuses a command naming a workspace other than the Session's rather than
+resolving one it cannot run in.
+
 ### Builder
 
 ```text

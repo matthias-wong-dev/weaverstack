@@ -10,6 +10,8 @@ from __future__ import annotations
 import pytest
 from support.weaver_test import weaver_test
 
+from weaver.runtime.delta_sql import delta_audit_names, delta_signature_name
+
 # --- what the installed Environment provides ----------------------------------
 #
 # One round trip, not four. These are four claims about *one static thing* — the
@@ -109,9 +111,10 @@ def test_the_weaver_contract_parses_there(installed_environment):
     document = installed_environment["document"]
 
     assert document["id"] == "Sales.Order"
+    # The declaration is keyed and takes Weaver's load, so it carries the row
+    # signature after the audit columns, spelled as the build spells it.
     assert document["columns"] == [
         "Order id",
-        "row_insert_datetime",
-        "row_update_datetime",
-        "row_delete_datetime",
+        *delta_audit_names(),
+        delta_signature_name(),
     ]

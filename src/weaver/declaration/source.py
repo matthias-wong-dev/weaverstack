@@ -64,6 +64,21 @@ def content_hash(data: bytes) -> str:
     return hashlib.sha256(data.replace(b"\r\n", b"\n")).hexdigest()
 
 
+def salted_signature(signature: str, version: int) -> str:
+    """A signature over what something is rendered from, and by what.
+
+    Both halves are needed: the document alone leaves everything Weaver generates
+    stale after the generator changes, and the version alone rebuilds the estate
+    whenever anything is edited.
+    """
+
+    digest = hashlib.sha256()
+    digest.update(signature.encode("ascii"))
+    digest.update(b"\0")
+    digest.update(str(version).encode("ascii"))
+    return digest.hexdigest()
+
+
 def sql_dialect_for_item_type(item_type: str) -> str:
     """The SQL a ``.sql`` file speaks inside an item of this type.
 
@@ -223,6 +238,25 @@ class SourceDocument:
         """The exact authored implementation this physical object represents."""
 
         return self.build_signature or self.source_hash
+
+    @property
+    def physical_signature(self) -> str:
+        """What the *installed structure* represents: the source, and its shape.
+
+        Almost always the authored implementation alone. A keyed table is the
+        exception: Weaver gives it a row-signature column of its own, so a change
+        to that shape must rebuild the table even though nothing authored moved.
+        :data:`~weaver.declaration.ddl.KEYED_TABLE_VERSION` carries it.
+
+        Read by the desired catalogue and by incremental selection, which compare
+        the two ends of the same value.
+        """
+
+        from .ddl import KEYED_TABLE_VERSION
+
+        if self.document.signature_column is None:
+            return self.effective_signature
+        return salted_signature(self.effective_signature, KEYED_TABLE_VERSION)
 
     @property
     def node_id(self) -> str:

@@ -16,10 +16,12 @@ from __future__ import annotations
 import pytest
 from support.weaver_test import weaver_test
 
+from weaver import Lakehouse, SparkSqlTable
 from weaver.declaration.metadata import ObjectId
 from weaver.errors import LoadError
 from weaver.runtime.load_contract import LoadContract
 from weaver.runtime.spark_sql_table import read_spark_sql
+from weaver.spark import FabricSparkTarget
 
 KEY = ("Customer id",)
 
@@ -93,18 +95,23 @@ def test_statements_are_submitted_without_their_separators():
 
 @weaver_test()
 def test_one_query_stages_and_claims_no_deletes():
+    """The frame on its own, which is the shape every table returns.
+
+    Not a pair with nothing in the second half: a non-incremental table may
+    return no such thing, and inventing one would be a claim the program never
+    made and a Spark job run to establish that it was empty.
+    """
+
     session = _Session()
 
-    staging, deletes = read_spark_sql(
+    staged = read_spark_sql(
         session,
         sql="create or replace temporary view v as select 1;\nselect * from v;",
         contract=_contract(),
     )
 
-    assert staging.statement == "select * from v"
-    # None rather than an empty frame: the program made no claim about deletes,
-    # and load_table already knows what that means for both kinds of table.
-    assert deletes is None
+    assert not isinstance(staged, tuple)
+    assert staged.statement == "select * from v"
 
 
 @weaver_test()
@@ -219,3 +226,64 @@ def test_a_delete_query_naming_the_key_in_another_order_is_accepted():
     )
 
     assert deletes.columns == ["Order id", "Customer id"]
+
+
+# --- and what the ordinary Table.load() makes of it ---------------------------
+
+#: The one place the extraction meets the load. What each half does is proved
+#: on its own above and against Python-authored tables; that the shape one hands
+#: over is the shape the other accepts is proved nowhere else, and a single-query
+#: program returning a pair was refused by the contract for months without a core
+#: test seeing it.
+HEADER = """Table ID: Sales.Summary
+
+Description: One row per order.
+
+Lineage: Sales.Order
+
+Primary key: Customer id
+
+Dependencies: []
+
+Schema:
+  Customer id: string
+"""
+
+#: The generated module is the header as its docstring, with the body attached.
+PROGRAM = "select `Customer id` from sales;"
+
+LAKEHOUSE = Lakehouse(
+    name="Sales_LH",
+    spark_root="abfss://ws@onelake.dfs.fabric.microsoft.com/lh",
+    destination=FabricSparkTarget(workspace="Weaver", lakehouse="Sales_LH"),
+)
+
+
+@weaver_test()
+def test_a_single_query_table_reaches_the_load_as_staging_alone(monkeypatch):
+    """The generated module returns what a non-incremental table may return."""
+
+    import weaver.runtime.table_load as table_load
+    from weaver.runtime.load_result import LoadResult
+
+    class Sales__Summary(SparkSqlTable):
+        sql = PROGRAM
+
+        def _document(self):
+            from weaver.declaration.metadata import SPARK_SQL, parse_document
+
+            return parse_document(HEADER, language=SPARK_SQL)
+
+    seen = {}
+
+    def load_table(*_args, **kwargs):
+        seen.update(kwargs)
+        return LoadResult(succeeded=True)
+
+    monkeypatch.setattr(table_load, "load_table", load_table)
+
+    result = Sales__Summary(_Session(), lakehouse=LAKEHOUSE).load()
+
+    assert result.succeeded, "the load never reached the runtime"
+    assert seen["deletes"] is None
+    assert seen["staging_frame"].statement == "select `Customer id` from sales"

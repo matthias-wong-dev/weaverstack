@@ -21,4 +21,4 @@ from weaver import Table
 class DWG__Customer(Table):
     def read(self):
         # Build creates structure; load moves data. This is never called by build.
-        return [], []
+        return []

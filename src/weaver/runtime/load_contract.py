@@ -29,6 +29,13 @@ class LoadContract:
 
     object_id: ObjectId
     primary_key: tuple[str, ...] = ()
+    #: The declared unique keys, in declaration order, each a column tuple. Order
+    #: matters: a row rejected by an earlier key does not choose the survivor of a
+    #: later one, so the sequence is part of what the load means.
+    unique_keys: tuple[tuple[str, ...], ...] = ()
+    #: Columns a row must supply a value for. The primary key is stronger than
+    #: this and validated separately, so it is not repeated here.
+    not_null_columns: tuple[str, ...] = ()
     comparison_columns: tuple[str, ...] = ()
     identity_column: str | None = None
     incremental: bool = False
@@ -53,6 +60,41 @@ class LoadContract:
         """Return whether a keyed full load deletes rows absent from the source."""
 
         return bool(self.primary_key) and not self.incremental
+
+    @property
+    def checks_merge_uniqueness(self) -> bool:
+        """Whether a load must ask what its proposed changes would leave behind.
+
+        Only an incremental keyed load with unique keys. A non-incremental load
+        reconciles the whole target against clean staging, so the target it
+        leaves *is* staging and staging has already been made unique; an
+        incremental load changes part of a target it cannot see the rest of.
+        """
+
+        return bool(self.primary_key) and self.incremental and bool(self.unique_keys)
+
+    def may_breach(self, *, deleting: int, updating: int) -> bool:
+        """Whether these settled counts could breach a threshold at all.
+
+        Reading the target's size is work of its own, and :meth:`breaches` needs
+        it. It cannot report a breach for a target smaller than
+        ``stability_rows``, and the larger the target the
+        larger a count has to be to reach a given percentage of it, so a count
+        that would not breach a target of exactly ``stability_rows`` cannot
+        breach any target the gate applies to. That is answerable from the
+        counts alone, and where it says no the size is never asked for.
+
+        The comparison is the one :meth:`breaches` makes, moved across the
+        division and held at the smallest target it can act on. It decides only
+        whether to ask; what a breach *is* stays there.
+        """
+
+        if self.replaces_wholesale:
+            return False
+        return (
+            deleting * 100 > self.delete_threshold * self.stability_rows
+            or updating * 100 > self.update_threshold * self.stability_rows
+        )
 
     def breaches(self, *, target_rows: int, deleting: int, updating: int) -> str | None:
         """Return a stability-threshold breach, or ``None``."""
@@ -87,6 +129,8 @@ class LoadContract:
         return cls(
             object_id=document.object_id,
             primary_key=document.primary_key,
+            unique_keys=document.unique_keys,
+            not_null_columns=document.declared_not_null,
             comparison_columns=document.comparison_columns,
             identity_column=document.identity,
             incremental=document.is_incremental,
@@ -169,12 +213,40 @@ def normalise_read_result(returned):
     return returned
 
 
-#: Rejection reasons shared by Warehouse and Delta load results.
+#: Rejection reasons shared by Warehouse and Delta load results. A reject table
+#: is read by people, so a Warehouse reject and a Delta reject for the same
+#: problem say the same thing.
+#:
+#: All four describe a *recoverable* problem with one incoming row. A load that
+#: would leave the target itself invalid is a different matter and fails outright
+#: — see :attr:`LoadContract.checks_merge_uniqueness`.
 REASON_BLANK_PK = "blank_primary_key"
 REASON_DUPLICATE_PK = "duplicate_primary_key"
+REASON_NULL_COLUMN = "null_column"
+REASON_DUPLICATE_UNIQUE = "duplicate_unique_key"
 
 #: The column a reject table carries the reason in.
 REJECTION_REASON = "_reject_reason"
+
+#: How wide that column is. Wide enough for the longest reason plus the columns
+#: it names, so a composite key's reason is not truncated into ambiguity.
+REJECTION_REASON_WIDTH = 1000
+
+
+def null_column_reason(column: str) -> str:
+    """Why one row was refused: it left a declared not-null column empty."""
+
+    return f"{REASON_NULL_COLUMN}: {column}"
+
+
+def duplicate_unique_reason(columns) -> str:
+    """Why one row was refused: another incoming row already holds this key.
+
+    Names the columns, because a table may declare several unique keys and
+    "duplicate" alone would not say which one the row lost.
+    """
+
+    return f"{REASON_DUPLICATE_UNIQUE}: {', '.join(columns)}"
 
 
 def delta_audit_columns() -> tuple[str, str, str]:
@@ -191,6 +263,8 @@ __all__ = [
     "LoadContract",
     "delta_audit_columns",
     "document_for_module",
+    "duplicate_unique_reason",
     "module_metadata_text",
     "normalise_read_result",
+    "null_column_reason",
 ]

@@ -135,9 +135,10 @@ class WorkspaceLivySession:
 def _spark_home(workspace):
     """The Lakehouse a Spark session attaches to, from the workspace's own.
 
-    The first configured one, by name, so a workspace answers the same way
-    twice. Which it is does not affect where work lands — every generated
-    statement names its Lakehouse — so a stable answer is all that is wanted.
+    The fallback for a caller that named none. The first configured one, by
+    name, so a workspace answers the same way twice. Which it is does not affect
+    where work lands, because every generated statement names its Lakehouse, so
+    a stable answer is all that is wanted.
     """
 
     from ..errors import CommandError
@@ -146,9 +147,10 @@ def _spark_home(workspace):
     configured = sorted(getattr(workspace, "lakehouses", ()) or ())
     if not configured:
         raise CommandError(
-            "starting a Spark session needs a Lakehouse to attach to, and this "
-            "Workspace configures none. Add the Lakehouse the work is for to "
-            "`lakehouses`, or do the work in a Warehouse, which needs no Spark."
+            "starting a Spark session needs a Lakehouse to attach to, and none "
+            "was named. Give the operation a Lakehouse target, or add one to "
+            "`lakehouses` in workspace configuration. Warehouse-only work needs "
+            "no Spark session."
         )
     return ItemRef(configured[0])
 
@@ -303,10 +305,10 @@ class LivySession:
         where work lands: every statement Weaver generates names the Lakehouse
         it is about, in full. The attachment is a home, not a destination.
 
-        The home is named — by the caller, or by the workspace's own configured
-        Lakehouses. A workspace that configures none is doing Warehouse-only
-        work and has no reason to start Spark at all, which is what the error
-        says.
+        The home is named by the caller, from the physical Lakehouses the
+        operation was actually asked for, and falls back to the workspace's own
+        configured Lakehouses. An operation that names neither is Warehouse-only
+        and has no reason to start Spark at all, which is what the error says.
 
         The workspace's ``environment`` is attached where it names one, so a
         body that imports Weaver finds what ``weaver install`` published.

@@ -23,4 +23,4 @@ class Sales__Customer(Table):
         rows = self.spark.read.csv(source, header=True)
         # No explicit deletes: the extract is the whole truth, so a row's absence
         # from it is what retires it.
-        return rows, None
+        return rows

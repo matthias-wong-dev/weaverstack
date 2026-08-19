@@ -17,8 +17,8 @@ what a real Lakehouse builds are held to one set of expectations:
   read by the next action in the same installation;
 * a query naming a column that is not there fails as an ``InstallError`` naming
   the action and carrying Spark's message;
-* the built table holds the query's columns and Weaver's audit columns, and
-  nothing else.
+* the built table holds the query's columns, Weaver's audit columns and, since
+  every case is keyed, the row signature, and nothing else.
 
 The estate is built once and observed once, at the end.
 """

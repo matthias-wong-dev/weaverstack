@@ -141,7 +141,15 @@ class _Resource:
         self.started += 1
 
 
-def _scope(monkeypatch):
+def _scope(monkeypatch, *, environment="weaver", lakehouses=("Sales",)):
+    """A ConsoleScope with its two expensive resources counted rather than real.
+
+    ``lakehouses`` is what a command offered as somewhere Spark could attach,
+    which is what the real path supplies from the targets it was asked for.
+    """
+
+    import threading
+
     from weaver.sessions.console import ConsoleScope
     from weaver.workspaces import Workspace
 
@@ -151,11 +159,14 @@ def _scope(monkeypatch):
     )
     scope = ConsoleScope.__new__(ConsoleScope)
     scope.workspace = Workspace(
-        workspace="W", catalogue="Warehouse/Weaver", environment="weaver"
+        workspace="W", catalogue="Warehouse/Weaver", environment=environment
     )
     scope.auth = _Resource()
     scope.livy = _Resource()
     scope.local_spark = None
+    scope._lock = threading.RLock()
+    scope._offered_spark_homes = set()
+    scope.offer_spark_home(lakehouses)
     return scope
 
 
@@ -179,6 +190,23 @@ def test_preparing_for_spark_starts_it(monkeypatch):
 
 
 @weaver_test()
+def test_spark_is_not_started_with_no_lakehouse_to_attach_it_to(monkeypatch):
+    """Fabric creates a Livy session against a Lakehouse, so one is needed.
+
+    A command that named none has nothing to attach, and a speculative start
+    would fail in the warm-up rather than where the command could say why.
+    """
+
+    scope = _scope(monkeypatch, lakehouses=())
+
+    warm = scope.warm({AUTH, LIVY})
+
+    assert scope.livy.started == 0
+    assert [name for name, _reason in warm.skipped] == ["Spark session (Livy)"]
+    assert "Lakehouse" in warm.skipped[0][1]
+
+
+@weaver_test()
 def test_declaring_nothing_expensive_starts_nothing_expensive(monkeypatch):
     scope = _scope(monkeypatch)
 
@@ -189,16 +217,17 @@ def test_declaring_nothing_expensive_starts_nothing_expensive(monkeypatch):
 
 
 @weaver_test()
-def test_an_undeclared_warm_up_still_starts_everything(monkeypatch):
+def test_an_undeclared_warm_up_starts_only_the_reusable_resources(monkeypatch):
     """`weaver session` warms before any command is typed, so it has nothing to
-    go on and wants the lot."""
+    go on: it takes the credential, which every command needs, and leaves Spark
+    to the first command that says it wants it."""
 
     scope = _scope(monkeypatch)
 
     scope.warm()
 
     assert scope.auth.started == 1
-    assert scope.livy.started == 1
+    assert scope.livy.started == 0
 
 
 # --- a Warehouse-only build asks for no Spark --------------------------------

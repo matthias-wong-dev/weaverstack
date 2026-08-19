@@ -19,6 +19,7 @@ from factories import (
     FixtureInventory,
     document_id,
     lakehouse_table,
+    registered_document,
     registry_row,
     single_document_repository,
     target_inventory,
@@ -269,3 +270,92 @@ def test_a_generated_procedure_is_reconciled_against_the_procedures_read():
 
     assert held.stale_claims == ()
     assert gone.stale_objects == (str(identity),)
+
+
+# --- the shape Weaver gives a table, versioned ---------------------------------
+
+
+def _keyed_and_unkeyed(tmp_path):
+    """One keyed table and one unkeyed, read as documents."""
+
+    keyed = lakehouse_table("DWG.Customer")
+    unkeyed = keyed.replace("Primary key: CustomerId\n", "")
+    repository = single_document_repository(
+        tmp_path,
+        documents={
+            "DWG__Customer.py": keyed,
+            "DWG__Event.py": unkeyed.replace("DWG.Customer", "DWG.Event").replace(
+                "DWG__Customer", "DWG__Event"
+            ),
+        },
+    )
+    documents = repository.source_documents
+    return (
+        documents[document_id("DWG.Customer")],
+        documents[document_id("DWG.Event")],
+    )
+
+
+@weaver_test()
+def test_a_keyed_table_is_signed_by_its_shape_as_well_as_its_source(tmp_path):
+    """So a change to the shape Weaver gives it rebuilds it.
+
+    The row-signature column is not in the authored source, so signing a keyed
+    table by the source alone would leave every installed one standing at the old
+    shape — and the load reading a column that is not there.
+    """
+
+    keyed, _unkeyed = _keyed_and_unkeyed(tmp_path)
+
+    assert keyed.physical_signature != keyed.effective_signature
+
+
+@weaver_test()
+def test_an_unkeyed_table_is_signed_by_its_source_alone(tmp_path):
+    """It gains no signature column, so it is not rebuilt for one."""
+
+    _keyed, unkeyed = _keyed_and_unkeyed(tmp_path)
+
+    assert unkeyed.physical_signature == unkeyed.effective_signature
+
+
+@weaver_test()
+def test_a_keyed_table_whose_shape_version_moves_is_selected_for_rebuild(tmp_path):
+    """The mechanism, exercised through selection rather than described.
+
+    An installed row signed the way the previous shape version signed it is a
+    change, and the walk carries it exactly as an edited source would.
+    """
+
+    from weaver.build_bundle.incremental import declared_signatures, determine_impact
+    from weaver.declaration.ddl import KEYED_TABLE_VERSION
+    from weaver.declaration.source import salted_signature
+
+    keyed, _unkeyed = _keyed_and_unkeyed(tmp_path)
+    identity = keyed.logical_id
+    repository = single_document_repository(
+        tmp_path, documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")}
+    )
+    selected = {document_id("DWG.Customer")}
+
+    def impact(signature: str):
+        return determine_impact(
+            repository,
+            {
+                document_id("DWG.Customer"): registered_document(
+                    identity, signature=signature
+                )
+            },
+            selected=selected,
+        )
+
+    declared = declared_signatures(repository, selected)
+    at_another_version = salted_signature(
+        keyed.effective_signature, KEYED_TABLE_VERSION + 1
+    )
+
+    assert impact(declared[document_id("DWG.Customer")]).changed == ()
+    # An installed table at the shape before the column existed, and one at any
+    # other shape version, are both changes the walk carries.
+    assert impact(keyed.effective_signature).changed == (document_id("DWG.Customer"),)
+    assert impact(at_another_version).changed == (document_id("DWG.Customer"),)

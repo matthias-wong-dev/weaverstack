@@ -15,6 +15,7 @@ from ..load_plan import (
     ENDPOINT_REFRESH,
     InstalledEstate,
     PhysicalTargetRef,
+    lakehouse_names,
 )
 from ..load_report import (
     BLOCKED,
@@ -91,14 +92,19 @@ def load(
 
     from ..sessions.host import use_or_create_session
 
+    refs = tuple(PhysicalTargetRef.of(target) for target in requested)
+
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
+        # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
+        # needs one of the Lakehouses this load is actually for.
+        opened.offer_spark_home(lakehouse_names(refs))
         with opened.task(
             "Load (dry run)" if dry_run else "Load", ", ".join(map(str, requested))
         ):
             return run_load(
                 opened,
                 workspace=resolved_workspace,
-                requested=tuple(PhysicalTargetRef.of(target) for target in requested),
+                requested=refs,
                 names=selected_names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,

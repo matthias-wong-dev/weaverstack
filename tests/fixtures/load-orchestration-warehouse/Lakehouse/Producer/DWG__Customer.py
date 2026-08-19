@@ -27,4 +27,4 @@ class DWG__Customer(Table):
             "cast(CustomerId as int) as CustomerId",
             "CustomerName as CustomerName",
         )
-        return shaped, None
+        return shaped

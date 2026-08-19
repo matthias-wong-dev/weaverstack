@@ -155,15 +155,26 @@ def _composition_workspace(args, parsed_commands):
 
 
 def _warm_for(session, parsed_commands, *, workspace) -> None:
-    """Start resources required by a composition before its first command."""
+    """Start resources required by a composition before its first command.
 
-    from .main import command_requirements
+    The whole sequence is known, so the Lakehouses go in as one set: Fabric
+    attaches a Spark session to a Lakehouse, and a sequence whose Spark work is
+    at the end should not wait for a session to start there.
+    """
+
+    from .main import command_lakehouses, command_requirements
 
     if workspace is None:
         return
     required = union(*(command_requirements(parsed) for parsed in parsed_commands))
     if not required:
         return
+    lakehouses = []
+    for parsed in parsed_commands:
+        for name in command_lakehouses(parsed):
+            if name not in lakehouses:
+                lakehouses.append(name)
+    session.offer_spark_home(lakehouses, workspace=workspace)
     warm = session.prepare(required, workspace=workspace)
     if warm.started:
         print(f"Starting: {', '.join(warm.started)}\n")

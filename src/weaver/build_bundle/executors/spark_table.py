@@ -10,7 +10,8 @@ payload is a JSON instruction rather than finished SQL
    (:func:`weaver.declaration.columns.validate_build_columns`);
 3. choose the physical business columns — declared types when declared, the
    query's otherwise;
-4. append Weaver's audit columns;
+4. append Weaver's own columns — the audit columns, and a keyed table's row
+   signature;
 5. create the table with strict ``CREATE TABLE``.
 
 Only 1 and 5 reach Spark. ``DESCRIBE QUERY`` returns the output columns in order
@@ -26,7 +27,12 @@ import json
 from typing import Any
 
 from ...declaration.columns import validate_build_columns
-from ...declaration.metadata import AUDIT_COLUMNS, PYTHON, audit_column_name
+from ...declaration.metadata import (
+    AUDIT_COLUMNS,
+    PYTHON,
+    audit_column_name,
+    signature_column_name,
+)
 from ...errors import InstallError
 from ..models import InstallAction
 from .base import InstallationContext
@@ -34,6 +40,11 @@ from .base import InstallationContext
 #: Reserved audit names, in the Delta (underscored) spelling, for collision
 #: detection against an inferred query's own output columns.
 _AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_COLUMNS}
+
+#: The row signature, in the same spelling and for the same check. A keyed
+#: table's load writes it, so a query producing a column of that name would
+#: reach the create twice over.
+_SIGNATURE_NAME = signature_column_name(PYTHON).lower()
 
 
 class SparkTableExecutor:
@@ -95,7 +106,11 @@ class SparkTableExecutor:
         business = self._physical_columns(
             qualified, business_columns, declared, query_types, references
         )
-        physical = business + [tuple(entry) for entry in instruction["audit_columns"]]
+        physical = (
+            business
+            + [tuple(entry) for entry in instruction["audit_columns"]]
+            + [tuple(entry) for entry in instruction.get("internal_columns") or ()]
+        )
 
         statement = _create_table_sql(
             qualified,
@@ -171,6 +186,14 @@ class SparkTableExecutor:
             raise InstallError(
                 f"{qualified}: the query produces column(s) reserved for Weaver's "
                 "audit columns: " + ", ".join(collisions)
+            )
+        signature = [
+            name for name in business_columns if name.lower() == _SIGNATURE_NAME
+        ]
+        if signature:
+            raise InstallError(
+                f"{qualified}: the query produces column(s) reserved for Weaver's "
+                "row signature column: " + ", ".join(signature)
             )
 
         if declared is not None:

@@ -395,10 +395,17 @@ def _banner_for(workspace, recorded, capsys, environment="weaver") -> str:
 
 @weaver_test()
 def test_the_banner_names_what_is_actually_starting(recorded, capsys):
+    """Opening a session warms the credential, and nothing a command must ask for.
+
+    A Livy session costs a minute and a capacity's only slot, and Fabric attaches
+    one to a Lakehouse. Before a command is typed there is no Lakehouse to attach
+    to and no way to know Spark is wanted at all, so it waits.
+    """
+
     printed = _banner_for("A_Workspace", recorded, capsys)
 
     assert "Fabric credential" in printed
-    assert "Spark session (Livy)" in printed
+    assert "Spark session (Livy)" not in printed
 
 
 @weaver_test()
@@ -411,18 +418,107 @@ def test_the_banner_lists_the_parser_s_commands(recorded, capsys):
     assert "start with `weaver`" in printed
 
 
-@weaver_test()
-def test_a_workspace_with_no_environment_is_told_why_livy_is_not_starting(
-    recorded, capsys
-):
-    """The rule is right; announcing work it then declines is not.
+class _Preparing:
+    """A Session that records what a command asked it to get ready."""
 
-    Livy genuinely cannot start against a workspace that names no Environment,
-    and warming it would replace the first command's clear message with a stale
-    warm-up failure. What the prompt owes the reader is the reason.
+    def __init__(self, skipped=()):
+        self.offered = None
+        self.required = None
+        self._skipped = tuple(skipped)
+
+    def offer_spark_home(self, lakehouses, *, workspace=None):
+        self.offered = tuple(lakehouses)
+
+    def prepare(self, required, *, workspace=None):
+        from weaver.sessions.console import WarmUp
+
+        self.required = set(required)
+        return WarmUp(started=("Fabric credential",), skipped=self._skipped)
+
+
+def _prepared(session, *words) -> None:
+    """One real command line, through the real parser and the shell's own hook."""
+
+    from weaver_cli.main import build_parser
+    from weaver_cli.shell import _prepare_for
+
+    _prepare_for(session, build_parser().parse_args(list(words)))
+
+
+@weaver_test()
+def test_a_lakehouse_command_offers_the_lakehouse_it_was_bound_to(recorded):
+    """Fabric attaches a Spark session to a Lakehouse, and the command has one.
+
+    The physical half of a binding, not workspace configuration: this workspace
+    configures no Lakehouses at all and the build still has somewhere to attach.
     """
 
-    printed = _banner_for("A_Workspace", recorded, capsys, environment=None)
+    from weaver.sessions.requirements import LIVY
+
+    session = _Preparing()
+    _prepared(
+        session,
+        "build",
+        ".",
+        "--bind",
+        "Lakehouse/Sales=Sales",
+        "--workspace",
+        "A_Workspace",
+    )
+
+    assert session.offered == ("Sales",)
+    assert LIVY in session.required
+
+
+@weaver_test()
+def test_a_warehouse_only_command_offers_no_lakehouse_and_wants_no_spark(recorded):
+    """A Warehouse-only build writes T-SQL, so it neither needs nor asks for Spark."""
+
+    from weaver.sessions.requirements import LIVY
+
+    session = _Preparing()
+    _prepared(
+        session,
+        "build",
+        ".",
+        "--bind",
+        "Warehouse/Reporting=Analysis",
+        "--workspace",
+        "A_Workspace",
+    )
+
+    assert session.offered == ()
+    assert LIVY not in session.required
+
+
+@weaver_test()
+def test_a_command_wanting_spark_is_told_why_livy_is_not_starting(recorded, capsys):
+    """The rule is right; announcing work it then declines is not.
+
+    Livy genuinely cannot start against a workspace that names no Environment.
+    The reason is owed to the reader at the point something wants Spark, which is
+    the first command that names a Lakehouse rather than the banner.
+    """
+
+    session = _Preparing(
+        skipped=(
+            (
+                "Spark session (Livy)",
+                "this workspace names no Environment - pass --environment",
+            ),
+        )
+    )
+    _prepared(
+        session,
+        "build",
+        ".",
+        "--bind",
+        "Lakehouse/Sales=Sales",
+        "--workspace",
+        "A_Workspace",
+    )
+
+    printed = capsys.readouterr().out
 
     assert "Not started: Spark session (Livy)" in printed
     assert "--environment" in printed
@@ -470,11 +566,33 @@ def test_a_command_may_override_the_control_lakehouse_it_inherits():
 
 
 @weaver_test()
-def test_a_command_naming_its_own_workspace_does_not_inherit():
-    with ConsoleSession(workspace=_workspace("First_Workspace")) as session:
-        resolved = _resolve_workspace(_args(session, workspace="Second_Workspace"))
+def test_a_command_naming_the_sessions_own_workspace_is_accepted():
+    """Saying what is already true, so the session's workspace is the base."""
 
-        assert resolved.workspace == "Second_Workspace"
+    with ConsoleSession(workspace=_workspace(catalogue="Warehouse/Weaver")) as session:
+        resolved = _resolve_workspace(
+            _args(session, workspace="Demo", catalogue="Warehouse/Other")
+        )
+
+        assert resolved.workspace == "Demo"
+        assert resolved.catalogue == "Warehouse/Other"
+
+
+@weaver_test()
+def test_a_command_naming_another_workspace_is_refused():
+    """One Session is one Fabric workspace, and it stays the one it opened on.
+
+    Refused rather than resolved and then ignored, which is what a command that
+    addressed another workspace through a borrowed Session would be.
+    """
+
+    from weaver.errors import CommandError
+
+    with ConsoleSession(workspace=_workspace("First_Workspace")) as session:
+        with pytest.raises(CommandError, match="Second_Workspace"):
+            _resolve_workspace(_args(session, workspace="Second_Workspace"))
+
+        assert session.workspace.workspace == "First_Workspace"
 
 
 @weaver_test()

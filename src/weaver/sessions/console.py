@@ -306,10 +306,11 @@ class ConsoleSession(Session):
     # --- readiness ----------------------------------------------------------
 
     def warm(self, workspace: Workspace | None = None) -> "WarmUp":
-        """Begin acquiring everything this context could want, without waiting.
+        """Begin acquiring what every command needs, without waiting.
 
-        The prompt returns at once and the first command needing Spark waits on
-        the startup already running. Nothing here fails a caller: a warm-up that
+        The credential, and nothing a command has to ask for: opening a session
+        does not yet know whether Spark is wanted, or which Lakehouse a Livy
+        session would attach to. Nothing here fails a caller, and a warm-up that
         cannot complete is reported by whichever command needs the resource.
         """
 
@@ -497,38 +498,50 @@ class ConsoleScope(WorkspaceScope):
         Speculative throughout: a failure here leaves the resource unstarted and
         the real attempt reports in its own terms.
 
-        Livy is warmed only where it can start — a workspace naming no
-        Environment cannot have a session created against it — and a skipped
-        resource comes back with the reason.
+        No declaration means the resources every command needs whatever it turns
+        out to be, which is the credential. Spark is asked for by name: a Livy
+        session costs a minute and a capacity's only slot, and a Warehouse-only
+        command never submits one.
+
+        Livy is warmed only where it can start: a workspace naming no
+        Environment cannot have a session created against it, and Fabric needs a
+        Lakehouse to attach one to. A skipped resource comes back with the
+        reason.
         """
 
         from .requirements import AUTH, LIVY
 
         started: list[str] = []
         skipped: list[tuple[str, str]] = []
-        # No declaration means "whatever this context has", which is what
-        # `weaver session` wants when it starts before any command is typed.
-        wanted = None if required is None else set(required)
+        # None is "the reusable ones", not "everything": see above.
+        wanted = {AUTH} if required is None else set(required)
 
-        def asked(name: str) -> bool:
-            return wanted is None or name in wanted
-
-        if self.auth is not None and asked(AUTH):
+        if self.auth is not None and AUTH in wanted:
             self.auth.start(speculative=True)
             started.append("Fabric credential")
-        if self.livy is not None and asked(LIVY):
-            if getattr(self.workspace, "environment", None):
+        if self.livy is not None and LIVY in wanted:
+            reason = self._livy_cannot_start()
+            if reason is None:
                 self.livy.start(speculative=True)
                 started.append("Spark session (Livy)")
             else:
-                skipped.append(
-                    (
-                        "Spark session (Livy)",
-                        "this workspace names no Environment — pass "
-                        "--environment, or set one in workspace configuration",
-                    )
-                )
+                skipped.append(("Spark session (Livy)", reason))
         return WarmUp(started=tuple(started), skipped=tuple(skipped))
+
+    def _livy_cannot_start(self) -> str | None:
+        """Why a Spark session could not be started yet, or None when it can."""
+
+        if not getattr(self.workspace, "environment", None):
+            return (
+                "this workspace names no Environment. Pass --environment, or set "
+                "one in workspace configuration."
+            )
+        if self.spark_home is None and not getattr(self.workspace, "lakehouses", None):
+            return (
+                "Fabric attaches a Spark session to a Lakehouse, and none has "
+                "been named. Give the command a Lakehouse target."
+            )
+        return None
 
     # --- resolution ---------------------------------------------------------
 
@@ -612,6 +625,7 @@ class ConsoleScope(WorkspaceScope):
             self.workspace,
             resolver=self.resolver,
             token=self.token_provider(),
+            lakehouse=self.spark_home,
         )
         session.start()
         return session

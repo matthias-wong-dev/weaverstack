@@ -36,6 +36,7 @@ import hashlib
 from dataclasses import replace
 
 from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
+from weaver.runtime.delta_sql import delta_audit_names, delta_signature_name
 from weaver.targets import FolderTarget
 
 #: `full_integration` is this file's *only* selector — it carries neither `spark`
@@ -44,7 +45,11 @@ from weaver.targets import FolderTarget
 #: thing in the suite and should rarely be where a component defect is found
 #: first, so it is run by exception (`pytest -m full_integration`) rather than
 #: paid for on every transport run. Both transports run when it is asked for.
-AUDIT = {"row_insert_datetime", "row_update_datetime", "row_delete_datetime"}
+AUDIT = set(delta_audit_names())
+
+#: Weaver's own columns on a keyed table its load populates: the audit columns
+#: and the row signature. Every table in this estate is one.
+INTERNAL = AUDIT | {delta_signature_name()}
 
 #: Action kinds that are catalogue bookkeeping rather than work on the estate. A
 #: build with nothing to do still writes the catalogue and closes the endpoint.
@@ -233,7 +238,7 @@ def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> No
         if not name.startswith("#")
     }
     assert {"customerid", "customername", "isactive"} <= columns
-    assert AUDIT <= columns
+    assert INTERNAL <= columns
 
     # A name alone cannot say which Lakehouse answered, so the storage is asked.
     # Case-insensitively and not by exact path: the physical name is the
@@ -302,7 +307,9 @@ def _assert_authored_objects_reach_the_build(env) -> None:
     assert reached["ids"] == ["DWG.Order", "DWG.Customer", "Raw.CustomerCsv"]
     assert reached["table_path"] == reached["resolved_table_path"]
     assert reached["order_rows"] == 0
-    assert set(reached["order_columns"]) == {"orderid", "customerid", "amount"} | AUDIT
+    assert (
+        set(reached["order_columns"]) == {"orderid", "customerid", "amount"} | INTERNAL
+    )
     assert reached["customer_rows"] == 0
     assert (
         set(reached["customer_columns"])
@@ -311,7 +318,7 @@ def _assert_authored_objects_reach_the_build(env) -> None:
             "customername",
             "isactive",
         }
-        | AUDIT
+        | INTERNAL
     )
     assert reached["empty_columns"] == reached["order_columns"]
 

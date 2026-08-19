@@ -32,4 +32,4 @@ class DWG__Customer(Table):
             "CustomerName as CustomerName",
             "cast(IsActive as boolean) as IsActive",
         )
-        return shaped, []
+        return shaped

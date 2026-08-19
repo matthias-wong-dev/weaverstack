@@ -164,6 +164,10 @@ def declared_signatures(
     :attr:`~weaver.declaration.model.RepositoryAlias.signature`). A load artefact
     by what it is rendered from: a deployed module by its own bytes, a generated
     body by its document plus the generator's version (see :mod:`weaver.etl`).
+
+    A document's own signature is its
+    :attr:`~weaver.declaration.source.SourceDocument.physical_signature`, which
+    carries the version of the shape Weaver gives it as well as the source.
     """
 
     from ..etl import artefacts_by_identity, runtime_artefacts
@@ -181,7 +185,7 @@ def declared_signatures(
         else:
             signatures[identity] = repository.source_documents[
                 identity
-            ].effective_signature
+            ].physical_signature
     return signatures
 
 

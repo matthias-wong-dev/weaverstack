@@ -206,6 +206,52 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused_by_the_session
         )
 
 
+# --- where a Spark session would attach ---------------------------------------
+#
+# Fabric creates a Livy session *against* a Lakehouse, so a host that crosses
+# needs the id of one. It comes from the bindings the build was given, which is
+# why a workspace configuring no Lakehouses can still build into one.
+
+
+@weaver_test()
+def test_a_build_offers_the_lakehouse_it_was_bound_to(repository, captured):
+    """No configured Lakehouses, and the build still says where Spark could live."""
+
+    from weaver.sessions.testing import TestSession
+
+    workspace = Workspace(workspace="Demo", catalogue="Warehouse/Weaver")
+    session = TestSession(workspace=workspace)
+
+    with pytest.raises(Halt):
+        _build(repository, session=session)
+
+    assert not workspace.lakehouses
+    assert session.scope(workspace).spark_home == "Sales_LH"
+
+
+@weaver_test()
+def test_a_warehouse_only_build_offers_none(captured, tmp_path):
+    """Nothing to attach, and nothing that wants attaching."""
+
+    from test_item_repository_declaration import _schema, _write
+
+    from weaver.sessions.testing import TestSession
+
+    root = tmp_path / "Reporting"
+    _write(root, "Warehouse/Reporting/schemas/DWG.yml", _schema("DWG"))
+    workspace = Workspace(workspace="Demo", catalogue="Warehouse/Weaver")
+    session = TestSession(workspace=workspace)
+
+    with pytest.raises(Halt):
+        weaver.build(
+            str(root),
+            bind="Warehouse/Reporting_WH=Reporting",
+            session=session,
+        )
+
+    assert session.scope(workspace).spark_home is None
+
+
 # --- the Livy session is never reached by a build that cannot succeed ----------
 
 

@@ -82,6 +82,7 @@ def connect(
         return connector(
             build_connection_string(endpoint),
             timeout=timeout,
+            autocommit=True,
             **dict(authentication.connection_arguments()),
         )
     except SqlConnectionError:

@@ -116,3 +116,74 @@ def test_the_catalogue_is_named_typed_wherever_an_example_names_one():
                 wrong.append(f"{path.relative_to(ROOT).as_posix()}: {stripped}")
 
     assert not wrong, wrong
+
+
+# --- what an authored table returns -------------------------------------------
+
+#: Where authored objects live outside `src`: the examples a reader copies, and
+#: the fixture repositories the Fabric journeys build and load.
+AUTHORED_ROOTS = (EXAMPLES, ROOT / "tests" / "fixtures")
+
+
+def _authored_tables():
+    """Every ``Table`` subclass in the tree, with its ``read()`` and its document.
+
+    Read rather than imported: a fixture module imports its siblings by package
+    path and expects a Lakehouse, so parsing is what makes the whole tree
+    answerable at all.
+    """
+
+    for root in AUTHORED_ROOTS:
+        for path in sorted(root.rglob("*.py")):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except (SyntaxError, UnicodeDecodeError):  # pragma: no cover - unused
+                continue
+            document = ast.get_docstring(tree) or ""
+            for node in tree.body:
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                if not any(
+                    isinstance(base, ast.Name) and base.id == "Table"
+                    for base in node.bases
+                ):
+                    continue
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name == "read":
+                        yield path, node.name, document, item
+
+
+def _returns_a_pair(function) -> bool:
+    return any(
+        isinstance(node, ast.Return) and isinstance(node.value, ast.Tuple)
+        for node in ast.walk(function)
+    )
+
+
+@weaver_test()
+def test_there_are_authored_tables_to_check():
+    """Guards the claim below from passing because it found nothing."""
+
+    assert len(list(_authored_tables())) >= 5
+
+
+@weaver_test()
+def test_no_non_incremental_table_returns_a_delete_claim():
+    """A non-incremental source is the whole truth, so it stages and no more.
+
+    The rule is enforced at run time, which means a fixture or an example that
+    breaks it fails inside a Fabric journey rather than here. Both spellings of
+    the mistake have been made: an empty second frame, and a literal ``None``
+    beside the staging one. This reads the tree, so neither survives a commit.
+    """
+
+    offenders = [
+        f"{path.relative_to(ROOT)}: {name}"
+        for path, name, document, function in _authored_tables()
+        if _returns_a_pair(function) and "incremental: true" not in document.lower()
+    ]
+
+    assert not offenders, (
+        "these tables return a delete claim their declaration does not permit; "
+        f"return the staging frame on its own: {offenders}"
+    )
