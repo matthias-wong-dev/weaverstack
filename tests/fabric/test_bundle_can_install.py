@@ -179,7 +179,7 @@ def _load_identities(repository, item):
 def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
     tmp_path,
     fabric_workspace,
-    fabric_alias_lakehouses,
+    fabric_shortcut_lakehouses,
     fabric_staging_lakehouse,
     fabric_empty_lakehouse,
     livy_session,
@@ -199,7 +199,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
 
     resolver = FabricResolver(fabric_workspace)
     store = OneLakeDfsClient()
-    lakehouse = fabric_alias_lakehouses["producer"]
+    lakehouse = fabric_shortcut_lakehouses["producer"]
     fabric_empty_lakehouse(lakehouse.name)
 
     repository = estate_repository(tmp_path / "repo")

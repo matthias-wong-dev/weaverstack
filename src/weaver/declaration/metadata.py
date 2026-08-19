@@ -506,8 +506,8 @@ class WeaverDocument:
     has_load_procedure: bool = True
     prohibit_rebuild: bool = False
     static: bool = False
-    warehouse_shortcut: ObjectId | None = None
-    lakehouse_shortcut: ObjectId | None = None
+    warehouse_alias: ObjectId | None = None
+    lakehouse_alias: ObjectId | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -816,9 +816,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         declared_columns, column_notes, primary_key, declared_not_null
     )
 
-    warehouse_shortcut, lakehouse_shortcut = _parse_shortcuts(
-        loaded, language, kind, object_id
-    )
+    warehouse_alias, lakehouse_alias = _parse_aliases(loaded, language, kind, object_id)
 
     return SesDocument(
         kind=kind,
@@ -846,8 +844,8 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         has_load_procedure=has_load_procedure,
         prohibit_rebuild=prohibit_rebuild,
         static=static,
-        warehouse_shortcut=warehouse_shortcut,
-        lakehouse_shortcut=lakehouse_shortcut,
+        warehouse_alias=warehouse_alias,
+        lakehouse_alias=lakehouse_alias,
         raw=dict(loaded),
     )
 
@@ -1084,7 +1082,7 @@ def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]
     return tuple(seen)
 
 
-def _parse_shortcuts(
+def _parse_aliases(
     raw: dict[str, Any], language: str, kind: str, object_id: ObjectId
 ) -> tuple[ObjectId | None, ObjectId | None]:
     """The cross-engine shortcuts this object publishes, checked for eligibility.
@@ -1097,10 +1095,10 @@ def _parse_shortcuts(
     """
 
     target = target_kind_for(language, kind)
-    warehouse_shortcut = _parse_shortcut(raw.get(WAREHOUSE_ALIAS), WAREHOUSE_ALIAS)
-    lakehouse_shortcut = _parse_shortcut(raw.get(LAKEHOUSE_ALIAS), LAKEHOUSE_ALIAS)
+    warehouse_alias = _parse_shortcut(raw.get(WAREHOUSE_ALIAS), WAREHOUSE_ALIAS)
+    lakehouse_alias = _parse_shortcut(raw.get(LAKEHOUSE_ALIAS), LAKEHOUSE_ALIAS)
 
-    if warehouse_shortcut is not None and target != DELTA_TARGET:
+    if warehouse_alias is not None and target != DELTA_TARGET:
         raise MetadataError(
             f"{WAREHOUSE_ALIAS} publishes a Lakehouse object into the Warehouse, so it "
             f"belongs on a Delta table or Spark view, not on {object_id.qualified} "
@@ -1110,7 +1108,7 @@ def _parse_shortcuts(
                 else "(a Folder is not published across engines)"
             )
         )
-    if lakehouse_shortcut is not None and target != SQL_TARGET:
+    if lakehouse_alias is not None and target != SQL_TARGET:
         raise MetadataError(
             f"{LAKEHOUSE_ALIAS} publishes a Warehouse object into the Lakehouse, so it "
             f"belongs on a SQL table or view, not on {object_id.qualified} "
@@ -1120,7 +1118,7 @@ def _parse_shortcuts(
                 else "(a Folder is not published across engines)"
             )
         )
-    return warehouse_shortcut, lakehouse_shortcut
+    return warehouse_alias, lakehouse_alias
 
 
 def _parse_shortcut(value: Any, key: str) -> ObjectId | None:

@@ -762,28 +762,29 @@ SHORTCUT = CatalogueTable(
         "was declared, so where a logical target is physically installed stays "
         "Installation's answer."
     ),
-    # Keyed by the authored name rather than by the destination pair, because a
-    # schema shortcut presents a namespace and so names no object, and a merge
-    # key cannot be null. The name is what the author wrote and what a program
-    # imports, so it identifies the declaration exactly.
-    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "shortcut_name"),
+    # Keyed by the shortcut's own id, because a schema shortcut presents a
+    # namespace and so names no object, and a merge key cannot be null.
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "shortcut_id"),
     columns=(
         *_scope(),
         CatalogueColumn(
-            "shortcut_name",
+            "shortcut_id",
             not_null=True,
-            description="The name the declaration was written under.",
-        ),
-        CatalogueColumn(
-            "destination_schema_name",
-            not_null=True,
-            description="The schema the declaring item presents the shortcut in.",
-        ),
-        CatalogueColumn(
-            "destination_object_name",
             description=(
-                "The name the declaring item presents. Null for a schema "
-                "shortcut, which presents a namespace rather than an object."
+                "The shortcut as its author declared it: 'Sales.Customer' for a "
+                "table or folder, 'Reference' for a schema."
+            ),
+        ),
+        CatalogueColumn(
+            "schema_name",
+            not_null=True,
+            description="The schema this item presents the shortcut in.",
+        ),
+        CatalogueColumn(
+            "object_name",
+            description=(
+                "The object this item presents. Null for a schema shortcut, "
+                "which presents a namespace rather than an object."
             ),
         ),
         CatalogueColumn(
@@ -816,7 +817,9 @@ SHORTCUT = CatalogueTable(
             "target_object_name",
             description=(
                 "The object the target names. Null where it names a schema or a "
-                "path rather than an object."
+                "path rather than an object. For a logical target these four "
+                "target columns give the producer's identity whole, so a reader "
+                "rebuilds it without joining Installation or splitting an id."
             ),
         ),
         CatalogueColumn(

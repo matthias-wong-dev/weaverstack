@@ -72,14 +72,14 @@ def key_join(left: str, right: str, columns) -> str:
     return " AND ".join(f"{left}.`{c}` = {right}.`{c}`" for c in columns)
 
 
-def qualified(shortcut: str, columns) -> str:
+def qualified(alias: str, columns) -> str:
     """A column list, qualified by one relation."""
 
-    prefix = f"{shortcut}." if shortcut else ""
+    prefix = f"{alias}." if alias else ""
     return ", ".join(f"{prefix}`{c}`" for c in columns)
 
 
-def row_signature(shortcut: str, columns, types) -> str:
+def row_signature(alias: str, columns, types) -> str:
     """The digest of one row's comparison state, as Spark spells it.
 
     ``sha2`` returns the hex text rather than bytes, which is what a Delta keyed
@@ -92,7 +92,7 @@ def row_signature(shortcut: str, columns, types) -> str:
     then signs identically, which is what "nothing to compare" means.
     """
 
-    prefix = f"{shortcut}." if shortcut else ""
+    prefix = f"{alias}." if alias else ""
     pieces = []
     for column in columns:
         reference = f"{prefix}`{column}`"
@@ -106,18 +106,18 @@ def row_signature(shortcut: str, columns, types) -> str:
     return f"sha2({payload}, 256)"
 
 
-def blank_key_predicate(columns, shortcut: str = "s") -> str:
+def blank_key_predicate(columns, alias: str = "s") -> str:
     """A key column that is null, empty or only spaces is not a key.
 
     Blank is rejected alongside null deliberately: a key of whitespace matches
     nothing a human would call a match, and letting it through would create a
     row nobody can find again.
 
-    ``shortcut`` is empty when the predicate is applied to a frame rather than
+    ``alias`` is empty when the predicate is applied to a frame rather than
     inside a join, where there is no relation to qualify.
     """
 
-    prefix = f"{shortcut}." if shortcut else ""
+    prefix = f"{alias}." if alias else ""
     predicates = [
         f"nullif(trim(CAST({prefix}`{c}` AS STRING)), '') IS NULL" for c in columns
     ]
@@ -126,7 +126,7 @@ def blank_key_predicate(columns, shortcut: str = "s") -> str:
     return "(" + " OR ".join(predicates) + ")"
 
 
-def violation_predicate(contract: LoadContract, shortcut: str = "s") -> str:
+def violation_predicate(contract: LoadContract, alias: str = "s") -> str:
     """A row that cannot be loaded whatever else is true of it.
 
     An unusable primary key, and a declared not-null column left empty. Only
@@ -134,20 +134,20 @@ def violation_predicate(contract: LoadContract, shortcut: str = "s") -> str:
     otherwise.
     """
 
-    prefix = f"{shortcut}." if shortcut else ""
-    predicates = [blank_key_predicate(contract.primary_key, shortcut)]
+    prefix = f"{alias}." if alias else ""
+    predicates = [blank_key_predicate(contract.primary_key, alias)]
     predicates += [f"{prefix}`{c}` IS NULL" for c in contract.not_null_columns]
     return " OR ".join(predicates)
 
 
-def participates(columns, shortcut: str = "s") -> str:
+def participates(columns, alias: str = "s") -> str:
     """A row takes part in a unique key only when its whole tuple is present.
 
     A null is not a value, so two rows carrying one are not two rows claiming the
     same thing — and ``GROUP BY`` would put them in one group.
     """
 
-    prefix = f"{shortcut}." if shortcut else ""
+    prefix = f"{alias}." if alias else ""
     return " AND ".join(f"{prefix}`{c}` IS NOT NULL" for c in columns)
 
 

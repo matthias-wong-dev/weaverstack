@@ -39,7 +39,7 @@ from .prune import (
     read_warehouse_inventory,
 )
 from .report import InstallationReport
-from .shortcut_sources import read_shortcut_sources
+from .shortcut_sources import physical_shortcuts, read_shortcut_sources
 from .shortcuts import ResolvedShortcutSource
 from .targets import (
     WAREHOUSE_TARGET,
@@ -213,16 +213,7 @@ def read_build_state(
             required=tuple(required_catalogue_items),
         )
     sources = {}
-    # Only the items this build binds. A physical target Weaver cannot reach is
-    # a fault in the item that declares it, and an item nobody is building has
-    # no business failing someone else's build.
-    physical = tuple(
-        declaration
-        for declaration in shortcuts
-        if not declaration.is_logical
-        and not declaration.is_view
-        and declaration.owner in bindings.by_item
-    )
+    physical = physical_shortcuts(shortcuts, bindings=bindings)
     if physical:
         with session.step("Resolve physical shortcut targets"):
             sources = read_shortcut_sources(

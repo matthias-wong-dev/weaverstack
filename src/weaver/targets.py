@@ -17,7 +17,7 @@ Weaver names things the way SQL does::
 
 Level 4 is the only level written down in Workspace configuration. A level-3
 item is unique within its workspace, so it is named directly rather than
-shortcuted — but unique is not invariant, so those names are always supplied at the
+aliased — but unique is not invariant, so those names are always supplied at the
 call site and never inferred.
 
 Levels 2 and 1 come from the object's own metadata (``Schema.Object``) and do

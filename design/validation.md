@@ -415,6 +415,6 @@ large and may carry sensitive business data. Task logs persist counts.
 `weaver load --include-test` is designed but not built. Embedding validation in
 the load DAG touches working load orchestration, and the requirement is
 emphatically not "run all tests at the end" — validation nodes have to sit in
-the real physical graph behind their dependencies, including alias and
+the real physical graph behind their dependencies, including shortcut and
 endpoint-refresh barriers. It is deferred so that everything above it can land
 without risk to `weaver load`.

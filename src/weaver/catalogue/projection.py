@@ -319,10 +319,12 @@ def project_item_catalogue(
         rows[SHORTCUT.name].append(
             {
                 **_scope(scope),
-                "shortcut_name": declaration.name,
-                "destination_schema_name": declaration.schema,
+                # The declaration as written, which is also the key, and the
+                # same schema/object pair Registry names an object by.
+                "shortcut_id": declaration.shortcut_id,
+                "schema_name": declaration.schema,
                 # A schema shortcut presents a namespace, so it names no object.
-                "destination_object_name": (
+                "object_name": (
                     None
                     if declaration.is_schema
                     else declaration.destination.object_id.object

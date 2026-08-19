@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import pytest
 from factories import (
-    alias_repository,
     bound_target,
     document_id,
     item_id,
     registered_document,
+    shortcut_repository,
     target_inventory,
 )
 from support.weaver_test import weaver_test
@@ -46,7 +46,7 @@ VIEW = "Lakehouse/Curated/DWG.CustomerName"
 
 @pytest.fixture
 def estate(tmp_path):
-    return alias_repository(tmp_path / "repo")
+    return shortcut_repository(tmp_path / "repo")
 
 
 def targets():
@@ -56,7 +56,7 @@ def targets():
     }
 
 
-def plan_aliases(repository, *, selected=(SHORTCUT,)):
+def plan_shortcuts(repository, *, selected=(SHORTCUT,)):
     by_item = targets()
     return plan_item_shortcuts(
         repository,
@@ -72,7 +72,7 @@ def plan_aliases(repository, *, selected=(SHORTCUT,)):
 
 @weaver_test()
 def test_a_selected_shortcut_is_planned_as_one_action(estate):
-    planned = plan_aliases(estate)
+    planned = plan_shortcuts(estate)
 
     assert planned.stage is not None
     kinds = [action.kind for batch in planned.stage.batches for action in batch.actions]
@@ -88,7 +88,7 @@ def test_an_unselected_shortcut_is_left_alone(estate):
     would destroy a working pointer for nothing.
     """
 
-    planned = plan_aliases(estate, selected=())
+    planned = plan_shortcuts(estate, selected=())
 
     assert planned.stage is None
 
@@ -102,7 +102,7 @@ def test_a_retained_shortcut_still_reports_its_schema(estate):
     would leave the retained ones homeless.
     """
 
-    planned = plan_aliases(estate, selected=())
+    planned = plan_shortcuts(estate, selected=())
 
     assert planned.schemas == ("DWG",)
 

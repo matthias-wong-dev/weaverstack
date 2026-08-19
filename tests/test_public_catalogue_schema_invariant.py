@@ -157,9 +157,9 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
     "Shortcut": (
         "Item type",
         "Item name",
-        "Shortcut name",
-        "Destination schema name",
-        "Destination object name",
+        "Shortcut ID",
+        "Schema name",
+        "Object name",
         "Shortcut type",
         "Target type",
         "Target item type",

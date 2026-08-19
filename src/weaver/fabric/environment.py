@@ -259,7 +259,7 @@ def library_wheels(libraries: dict) -> list[str]:
     return list(custom)
 
 
-#: Backwards-compatible shortcut — reads wheels out of a staging or published body.
+#: Backwards-compatible alias — reads wheels out of a staging or published body.
 staged_wheels = library_wheels
 
 

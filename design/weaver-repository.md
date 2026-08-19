@@ -168,7 +168,7 @@ refused. Removing the shortcut itself is safe and is the only thing Weaver ever
 does to one.
 
 Build materialises a Lakehouse declaration as a OneLake shortcut and a Warehouse
-one as a view. See [how build works](how-does-build-work.md#4a-aliases).
+one as a view. See [how build works](how-does-build-work.md#4a-shortcuts).
 
 The built-in `Warehouse/_weaver` item is generated and managed by Weaver inside
 the parsed repository in memory. It declares the catalogue tables and is never
@@ -219,8 +219,8 @@ Flat repositories are not inferred. Discovery fails with concrete instructions:
 - move Folder documents to `Lakehouse/<item>/Files/`;
 - replace `_schemas/` with each owning item's `schemas/`;
 - move Python helpers to `Lakehouse/<item>/lib/`;
-- replace document-local aliases with `shortcuts.py` in a Lakehouse item and
-  `shortcuts.yml` in a Warehouse one;
+- replace document-local alias headers with `shortcuts.py` in a Lakehouse item
+  and `shortcuts.yml` in a Warehouse one;
 - drop the `.spark.sql` suffix — a document in a Lakehouse item is already
   Spark SQL.
 

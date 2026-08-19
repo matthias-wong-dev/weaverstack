@@ -279,11 +279,11 @@ def test_a_dependency_records_the_reference_exactly_as_authored():
 
 
 @weaver_test()
-def test_a_shortcut_is_keyed_by_the_name_it_was_declared_under():
-    """The authored name identifies the declaration, and a schema shortcut has
-    no destination object for a merge key to use."""
+def test_a_shortcut_is_keyed_by_its_own_id():
+    """The shortcut's own id identifies it, and a schema shortcut has no object
+    for a merge key to use."""
 
-    assert SHORTCUT.key == ("item_type", "item_name", "shortcut_name")
+    assert SHORTCUT.key == ("item_type", "item_name", "shortcut_id")
     assert SHORTCUT.column_names[-6:-1] == (
         "target_item_type",
         "target_item_name",

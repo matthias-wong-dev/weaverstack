@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import pytest
 from conftest import staged_repository_root
-from factories import FixtureCatalogue, alias_repository, item_bindings
+from factories import FixtureCatalogue, item_bindings, shortcut_repository
 from support.weaver_test import weaver_test
 
 from weaver.targets import ItemRef
@@ -34,7 +34,7 @@ CONSUMER = "Lakehouse/DiscoveryConsumer"
 def discovery_estate(
     fabric_workspace,
     fabric_client,
-    fabric_alias_lakehouses,
+    fabric_shortcut_lakehouses,
     fabric_staging_lakehouse,
     livy_session,
     session_catalogue_sql,
@@ -54,11 +54,11 @@ def discovery_estate(
 
     resolver = FabricResolver(fabric_workspace, client=fabric_client)
     store = OneLakeDfsClient()
-    producer = fabric_alias_lakehouses["producer"]
-    consumer = fabric_alias_lakehouses["consumer"]
+    producer = fabric_shortcut_lakehouses["producer"]
+    consumer = fabric_shortcut_lakehouses["consumer"]
 
     root = tmp_path_factory.mktemp("discovery-repo")
-    alias_repository(root, producer=PRODUCER, consumer=CONSUMER)
+    shortcut_repository(root, producer=PRODUCER, consumer=CONSUMER)
     staged = staged_repository_root(resolver, fabric_staging_lakehouse.name)
     upload(store, staged, root)
     repository = parse_item_repository(staged, store=store)
@@ -76,7 +76,7 @@ def discovery_estate(
         staging=producer.name,
         catalogue_sql=session_catalogue_sql,
     )
-    batch, alias_action = action_of(bundle.plan, "create_shortcut")
+    batch, shortcut_action = action_of(bundle.plan, "create_shortcut")
 
     at = {
         role: resolver.spark_destination(ItemRef(item.name))
@@ -108,7 +108,7 @@ def discovery_estate(
     return {
         "bundle": bundle,
         "batch": batch,
-        "alias_action": alias_action,
+        "shortcut_action": shortcut_action,
         "store": store,
     }
 
@@ -124,7 +124,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
     from test_cross_item_shortcut_primitive import run_from_here
 
     result = run_from_here(
-        discovery_estate["alias_action"],
+        discovery_estate["shortcut_action"],
         discovery_estate["bundle"],
         workspace=fabric_workspace,
         store=discovery_estate["store"],

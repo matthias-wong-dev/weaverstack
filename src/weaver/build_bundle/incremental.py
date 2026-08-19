@@ -165,7 +165,7 @@ def declared_signatures(
     """What each selected node's Registry signature should be, from the source.
 
     Three kinds of node are selectable, signed differently. A document is signed
-    by its source file. An shortcut destination by the pair it declares — this
+    by its source file. A shortcut destination by the pair it declares — this
     destination, that source (see
     :attr:`~weaver.declaration.model.RepositoryShortcut.signature`). A load artefact
     by what it is rendered from: a deployed module by its own bytes, a generated
@@ -290,7 +290,7 @@ def select_build(
     impact = determine_impact(
         repository, registered, selected=selected, stale_shortcuts=stale_shortcuts
     )
-    # An shortcut destination has no source document and therefore no
+    # A shortcut destination has no source document and therefore no
     # ``prohibit_rebuild``: nothing an author writes can forbid replacing a
     # pointer, because replacing one destroys nothing.
     prohibited = {

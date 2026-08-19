@@ -522,9 +522,22 @@ class ShortcutDeclaration:
 
     @property
     def schema(self) -> str:
-        """The schema this shortcut occupies in the destination item."""
+        """The schema this shortcut occupies in the item that declares it."""
 
         return self.name if self.is_schema else self.destination.object_id.schema
+
+    @property
+    def shortcut_id(self) -> str:
+        """The shortcut as its author declared it, in this item's own terms.
+
+        ``Sales.Customer`` for a table or a folder, ``Reference`` for a schema.
+        The authored symbol spells the same thing with ``__`` because a Python
+        name cannot carry a dot.
+        """
+
+        if self.is_schema:
+            return self.name
+        return self.destination.object_id.qualified
 
     @property
     def target_item(self) -> WeaverItemId:

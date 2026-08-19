@@ -204,11 +204,11 @@ def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
     be answered without knowing what it was bound to. So it is not answered.
     """
 
-    from factories import alias_repository
+    from factories import shortcut_repository
 
     from weaver.catalogue.tables import SHORTCUT
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     consumer = item_id("Lakehouse/Curated")
     alias = document_id("Lakehouse/Curated/DWG.PortableCustomer")
 
@@ -220,9 +220,9 @@ def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
 
 @weaver_test()
 def test_binding_certifies_the_alias_as_what_it_physically_is(tmp_path):
-    from factories import alias_repository
+    from factories import shortcut_repository
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
     alias = document_id("Lakehouse/Curated/DWG.PortableCustomer")
     kinds = {producer: "lakehouse", consumer: "lakehouse"}
@@ -255,9 +255,9 @@ def test_an_item_that_is_not_bound_is_not_published(tmp_path):
     stating its kind. An item left out is simply out of scope.
     """
 
-    from factories import alias_repository
+    from factories import shortcut_repository
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
 
     logical = Catalogue.from_repository(repository)
@@ -284,9 +284,9 @@ def test_several_items_project_into_one_catalogue(tmp_path):
     that invites are exactly what the item scope exists to prevent.
     """
 
-    from factories import alias_repository
+    from factories import shortcut_repository
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
 
     catalogue = retaining(
@@ -311,9 +311,9 @@ def test_an_items_rows_carry_its_own_scope(tmp_path):
     item's installation.
     """
 
-    from factories import alias_repository
+    from factories import shortcut_repository
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     consumer = item_id("Lakehouse/Curated")
 
     catalogue = retaining(

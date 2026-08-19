@@ -289,13 +289,14 @@ def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
             artefact.identity
             for artefact in item_runtime_artefacts(repository, item=item)
         )
-        # An alias destination is certified by the build that made it, and it has
-        # to be here: it is the name the consuming item reads through, so an
-        # estate without it has a dependency pointing at nothing.
+        # A shortcut destination is certified by the build that made it, and it
+        # has to be here: it is the name the consuming item reads through, so an
+        # estate without it has a dependency pointing at nothing. Every kind,
+        # because a physical shortcut is installed here exactly as a logical one.
         identities.update(
-            alias.destination
-            for alias in repository.logical_shortcuts
-            if alias.destination.item == item
+            declaration.destination
+            for declaration in repository.shortcuts
+            if declaration.owner == item
         )
         target_kinds[item] = (
             "warehouse" if item.item_type == "Warehouse" else "lakehouse"
@@ -651,13 +652,9 @@ def logical_shortcuts(consumer: str, **references: str) -> tuple[str, str]:
         f"{consumer}/shortcuts.py",
         "from weaver import Shortcut\n\n" + declarations + "\n",
     )
-    return (
-        f"{consumer}/shortcuts.py",
-        "from weaver import Shortcut\n\n" + declarations + "\n",
-    )
 
 
-def alias_repository(
+def shortcut_repository(
     root: Path,
     *,
     producer: str = "Lakehouse/Raw",

@@ -33,13 +33,15 @@ def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"
     retained = [
         identity for identity in repository.source_documents if identity.item == item
     ]
+    # Every declaration, not only the logical ones: a physical shortcut is
+    # installed here exactly as a logical one is.
     retained.extend(
-        alias.destination
-        for alias in repository.logical_shortcuts
-        if alias.destination.item == item
+        declaration.destination
+        for declaration in repository.shortcuts
+        if declaration.owner == item
     )
-    # The projection is now source-only. Alias certification and the Installation
-    # row are composed on top, exactly as publication composes them — so this
+    # The projection is source-only. Shortcut certification and the Installation
+    # row are composed on top, exactly as publication composes them, so this
     # helper still yields the whole picture these tests assert against.
     projection = project_item_catalogue(repository, item=item, retained=retained)
     rows = dict(projection.rows)
@@ -162,9 +164,9 @@ def test_shortcut_rows_reproduce_what_was_declared(tmp_path):
 
     assert row[SCOPE_ITEM_TYPE] == "Warehouse"
     assert row[SCOPE_ITEM_NAME] == "Reporting"
-    assert row["shortcut_name"] == "Sales__PortableCustomer"
-    assert row["destination_schema_name"] == "Sales"
-    assert row["destination_object_name"] == "PortableCustomer"
+    assert row["shortcut_id"] == "Sales.PortableCustomer"
+    assert row["schema_name"] == "Sales"
+    assert row["object_name"] == "PortableCustomer"
     assert row["shortcut_type"] == "view"
     assert row["target_type"] == "logical"
     assert row["target_item_type"] == "Lakehouse"
@@ -504,3 +506,154 @@ def test_an_introduced_table_does_not_excuse_a_genuinely_damaged_catalogue():
     assert "TableDictionary" in message
     # And it does not accuse the reader of having lost the new table too.
     assert "TestDictionary" not in message.split("missing while")[0]
+
+
+# --- shortcuts of every kind ---------------------------------------------------
+#
+# A physical shortcut and a schema shortcut are registered and described exactly
+# as a logical one is. Each of these was a real defect that the full Fabric
+# journey found first, which it should not have had to.
+
+
+def _shortcut_estate(tmp_path):
+    """One Lakehouse declaring a shortcut of every kind, physical and logical."""
+
+    from test_item_repository_declaration import _schema, _table, _write
+
+    root = tmp_path / "shortcuts"
+    _write(root, "Lakehouse/Raw/schemas/Sales.yml", _schema("Sales"))
+    _write(root, "Lakehouse/Raw/Sales__Customer.py", _table("Sales.Customer"))
+    _write(root, "Lakehouse/Curated/schemas/Sales.yml", _schema("Sales"))
+    _write(
+        root,
+        "Lakehouse/Curated/shortcuts.py",
+        "from weaver import Shortcut\n\n"
+        "Sales__Landed = Shortcut(\n"
+        '    shortcut_type="table",\n'
+        '    target_type="logical",\n'
+        '    target="Lakehouse/Raw/Sales.Customer",\n)\n\n'
+        "Sales__External = Shortcut(\n"
+        '    shortcut_type="table",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/Reference/Ref.Customer",\n'
+        '    workspace="Shared Data",\n)\n\n'
+        "Sales__Incoming = Shortcut(\n"
+        '    shortcut_type="folder",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/Landing/Files/Incoming/Daily",\n'
+        '    workspace="Shared Data",\n)\n\n'
+        "Reference = Shortcut(\n"
+        '    shortcut_type="schema",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/Reference/Ref",\n'
+        '    workspace="Shared Data",\n)\n',
+    )
+    return parse_item_repository(Location(str(root)))
+
+
+def _shortcut_rows(tmp_path):
+    repository = _shortcut_estate(tmp_path)
+    projection = _project(repository, "Lakehouse/Curated", "Curated_Dev")
+    return repository, {
+        row["shortcut_id"]: row for row in projection.for_table(SHORTCUT)
+    }
+
+
+@weaver_test()
+def test_a_physical_shortcut_is_registered_like_any_other(tmp_path):
+    """It is installed here exactly as a logical one is.
+
+    Without a Registry row it is uncertified, so the next build prunes it and a
+    load refuses the name as not installed.
+    """
+
+    repository = _shortcut_estate(tmp_path)
+    projection = _project(
+        repository, "Lakehouse/Curated", "Curated_Dev", target_kind="lakehouse"
+    )
+    registered = {
+        (row["schema_name"], row["object_name"]): row
+        for row in projection.for_table(REGISTRY)
+    }
+
+    assert registered[("Sales", "External")]["object_type"] == "table"
+    assert registered[("Sales", "External")]["object_role"] == "shortcut"
+    # A folder is catalogued under Files/<schema>, as a declared one is.
+    assert registered[("Files/Sales", "Incoming")]["object_type"] == "folder"
+    # A schema shortcut is registered as the schema it presents.
+    assert registered[("Reference", "Reference")]["object_type"] == "schema"
+    assert registered[("Reference", "Reference")]["object_role"] == "shortcut"
+
+
+@weaver_test()
+def test_a_schema_shortcut_is_not_a_schema_the_item_owns(tmp_path):
+    """Its namespace belongs to the item it points at.
+
+    Reported as a schema in use, the item would claim a namespace it does not
+    own and a build would try to create it.
+    """
+
+    repository = _shortcut_estate(tmp_path)
+    projection = _project(repository, "Lakehouse/Curated", "Curated_Dev")
+    in_use = {row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)}
+
+    assert "Sales" in in_use
+    assert "Reference" not in in_use
+
+
+@weaver_test()
+def test_a_shortcut_row_names_the_shortcut_the_way_registry_does(tmp_path):
+    """``Shortcut ID`` keys it; ``Schema``/``Object`` are the reader's identity.
+
+    So a reader joins Registry and Shortcut without splitting an id.
+    """
+
+    _repository, rows = _shortcut_rows(tmp_path)
+
+    assert rows["Sales.Landed"]["schema_name"] == "Sales"
+    assert rows["Sales.Landed"]["object_name"] == "Landed"
+    assert rows["Sales.Incoming"]["object_name"] == "Incoming"
+    # A schema shortcut presents a namespace, so it names no object.
+    assert rows["Reference"]["schema_name"] == "Reference"
+    assert rows["Reference"]["object_name"] is None
+
+
+@weaver_test()
+def test_a_logical_target_is_stored_whole_for_a_reader_to_rebuild(tmp_path):
+    """The producer's identity, without Installation and without parsing.
+
+    ``Lakehouse/Raw/Sales.Customer`` comes straight out of the four target
+    columns, which is what lets the estate DAG be reconstructed from the
+    catalogue alone.
+    """
+
+    _repository, rows = _shortcut_rows(tmp_path)
+    row = rows["Sales.Landed"]
+
+    assert row["target_type"] == "logical"
+    rebuilt = (
+        f"{row['target_item_type']}/{row['target_item_name']}/"
+        f"{row['target_schema_name']}.{row['target_object_name']}"
+    )
+    assert rebuilt == "Lakehouse/Raw/Sales.Customer"
+    # A logical target is bound, so where it lands stays Installation's answer.
+    assert row["target_workspace_name"] is None
+
+
+@weaver_test()
+def test_a_physical_target_names_the_fabric_item_and_its_workspace(tmp_path):
+    """It has no logical producer, so nothing here pretends it does."""
+
+    _repository, rows = _shortcut_rows(tmp_path)
+
+    external = rows["Sales.External"]
+    assert external["target_type"] == "physical"
+    assert external["target_item_name"] == "Reference"
+    assert external["target_schema_name"] == "Ref"
+    assert external["target_object_name"] == "Customer"
+    assert external["target_workspace_name"] == "Shared Data"
+
+    # A target that names a path or a namespace names no object.
+    assert rows["Reference"]["target_object_name"] is None
+    assert rows["Sales.Incoming"]["target_object_name"] is None
+    assert rows["Sales.Incoming"]["target_schema_name"] == "Incoming/Daily"

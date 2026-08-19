@@ -21,6 +21,27 @@ from .shortcuts import ResolvedShortcutSource
 TABLES_AREA = "Tables"
 
 
+def physical_shortcuts(shortcuts, *, bindings):
+    """The declarations a build has to resolve an address for.
+
+    Only the items this build binds. A physical target Weaver cannot reach is a
+    fault in the item that declares it, and an item nobody is building has no
+    business failing someone else's build.
+
+    Separate from :func:`read_shortcut_sources` so every caller that assembles
+    build state applies one rule. ``tests/fabric`` builds its own state in the
+    session and would otherwise drift from what :func:`read_build_state` does.
+    """
+
+    return tuple(
+        declaration
+        for declaration in shortcuts
+        if not declaration.is_logical
+        and not declaration.is_view
+        and declaration.owner in bindings.by_item
+    )
+
+
 def read_shortcut_sources(
     shortcuts,
     *,

@@ -143,7 +143,7 @@ def _check_key(frame: Any, *, side: str, key: tuple[str, ...], what: str) -> Non
     if not key:
         return
 
-    blank = frame.where(blank_key_predicate(key, shortcut="")).take(1)
+    blank = frame.where(blank_key_predicate(key, alias="")).take(1)
     if blank:
         raise ValidationError(
             f"{what}: the declared Primary key ({', '.join(key)}) is null or "

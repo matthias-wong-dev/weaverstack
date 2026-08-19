@@ -343,7 +343,7 @@ EARLIER = datetime(2026, 7, 30, 9, 0, 0)
 LATER = datetime(2026, 7, 31, 9, 0, 0)
 
 
-def _alias_bindings():
+def _shortcut_bindings():
     """The producer and the consumer that aliases it, both bound."""
 
     from weaver.build_bundle import WarehouseBinding
@@ -362,7 +362,7 @@ def _alias_bindings():
     )
 
 
-def _alias_inventories(repository, *, alias_installed=True):
+def _shortcut_inventories(repository, *, shortcut_installed=True):
     """Both targets as they stand, with the alias view present or absent.
 
     The alias destination is an ordinary view in the Warehouse's inventory —
@@ -371,7 +371,7 @@ def _alias_inventories(repository, *, alias_installed=True):
     """
 
     inventories = {}
-    for binding in _alias_bindings().entries:
+    for binding in _shortcut_bindings().entries:
         target = binding.to_bound_target()
         item = binding.item
         objects = [
@@ -381,7 +381,7 @@ def _alias_inventories(repository, *, alias_installed=True):
         ]
         views = list(objects) if target.kind == "warehouse" else []
         tables = [] if target.kind == "warehouse" else list(objects)
-        if alias_installed and item == WeaverItemId.parse("Warehouse/Reporting"):
+        if shortcut_installed and item == WeaverItemId.parse("Warehouse/Reporting"):
             views.append("Sales.PortableCustomer")
         inventories[item] = TargetInventory(
             target_id=target.id,
@@ -394,21 +394,23 @@ def _alias_inventories(repository, *, alias_installed=True):
     return inventories
 
 
-def _alias_catalogue(repository):
+def _shortcut_catalogue(repository):
     rows = {}
     for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
         rows.update(_catalogue(repository, item_text).rows)
     return rows
 
 
-def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bundle"):
+def _shortcut_bundle(
+    tmp_path, repository, *, rows, shortcut_installed=True, name="bundle"
+):
     return generate_item_build_bundle(
         repository,
-        bindings=_alias_bindings(),
+        bindings=_shortcut_bindings(),
         output=Location(str(tmp_path / name)),
         store=FilesystemStore(),
-        target_inventories=_alias_inventories(
-            repository, alias_installed=alias_installed
+        target_inventories=_shortcut_inventories(
+            repository, shortcut_installed=shortcut_installed
         ),
         catalogue=Catalogue(rows),
         catalogue_binding=WarehouseBinding(
@@ -417,7 +419,7 @@ def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bun
     )
 
 
-def _alias_actions(bundle):
+def _shortcut_actions(bundle):
     return [
         action
         for _sequence, _batch, action in bundle.plan.actions()
@@ -436,9 +438,11 @@ def test_an_unchanged_shortcut_is_not_replaced(tmp_path):
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    bundle = _alias_bundle(tmp_path, repository, rows=_alias_catalogue(repository))
+    bundle = _shortcut_bundle(
+        tmp_path, repository, rows=_shortcut_catalogue(repository)
+    )
 
-    assert _alias_actions(bundle) == []
+    assert _shortcut_actions(bundle) == []
 
 
 @weaver_test()
@@ -447,16 +451,16 @@ def test_a_repointed_alias_is_replaced(tmp_path):
 
     root = _dependency_estate(tmp_path)
     _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
-    installed = _alias_catalogue(_repository(root))
+    installed = _shortcut_catalogue(_repository(root))
     _write(
         root,
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
     )
     repository = _repository(root)
-    bundle = _alias_bundle(tmp_path, repository, rows=installed)
+    bundle = _shortcut_bundle(tmp_path, repository, rows=installed)
 
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
 
 
 @weaver_test()
@@ -469,19 +473,19 @@ def test_an_alias_whose_destination_is_gone_is_remade(tmp_path):
 
     repository = _repository(_dependency_estate(tmp_path))
     state = Catalogue(
-        rows=_alias_catalogue(repository),
+        rows=_shortcut_catalogue(repository),
         present_tables=frozenset({REGISTRY.name}),
     )
     reconciled = reconcile_catalogue_state(
-        state, inventories=_alias_inventories(repository, alias_installed=False)
+        state, inventories=_shortcut_inventories(repository, shortcut_installed=False)
     )
 
     assert ALIAS_DESTINATION in reconciled.stale_objects
 
-    bundle = _alias_bundle(
-        tmp_path, repository, rows=reconciled.catalogue.rows, alias_installed=False
+    bundle = _shortcut_bundle(
+        tmp_path, repository, rows=reconciled.catalogue.rows, shortcut_installed=False
     )
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
 
 
 @weaver_test()
@@ -494,7 +498,7 @@ def test_an_alias_destination_installed_as_a_table_is_pruned(tmp_path):
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    inventories = _alias_inventories(repository, alias_installed=False)
+    inventories = _shortcut_inventories(repository, shortcut_installed=False)
     reporting = WeaverItemId.parse("Warehouse/Reporting")
     inventories[reporting] = replace(
         inventories[reporting],
@@ -502,14 +506,14 @@ def test_an_alias_destination_installed_as_a_table_is_pruned(tmp_path):
     )
     reconciled = reconcile_catalogue_state(
         Catalogue(
-            rows=_alias_catalogue(repository),
+            rows=_shortcut_catalogue(repository),
             present_tables=frozenset({REGISTRY.name}),
         ),
         inventories=inventories,
     )
     bundle = generate_item_build_bundle(
         repository,
-        bindings=_alias_bindings(),
+        bindings=_shortcut_bindings(),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
         target_inventories=inventories,
@@ -525,7 +529,7 @@ def test_an_alias_destination_installed_as_a_table_is_pruned(tmp_path):
     ]
 
     assert len(pruned) == 1
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
 
 
 @weaver_test()
@@ -539,7 +543,7 @@ def test_a_shortcut_is_never_dropped_by_the_document_pipeline(tmp_path):
 
     root = _dependency_estate(tmp_path)
     _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
-    installed = _alias_catalogue(_repository(root))
+    installed = _shortcut_catalogue(_repository(root))
     _write(
         root,
         "Warehouse/Reporting/shortcuts.yml",
@@ -548,9 +552,9 @@ def test_a_shortcut_is_never_dropped_by_the_document_pipeline(tmp_path):
         "Lakehouse/Curated/Sales.Archive\n",
     )
     repository = _repository(root)
-    bundle = _alias_bundle(tmp_path, repository, rows=installed)
+    bundle = _shortcut_bundle(tmp_path, repository, rows=installed)
 
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
     assert all(
         action.resource_node_id != ALIAS_DESTINATION
         for _sequence, _batch, action in bundle.plan.actions()
@@ -612,7 +616,7 @@ def test_an_alias_is_stale_when_its_unbound_source_was_published_later(tmp_path)
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
@@ -629,7 +633,7 @@ def test_a_stale_alias_carries_its_consumers_with_it(tmp_path):
     there is no separate cross-item descendant handling."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
@@ -645,7 +649,7 @@ def test_a_shortcut_published_after_its_target_is_left_alone(tmp_path):
     """The ordinary case, and the one that has to stay cheap."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", LATER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", EARLIER)
 
@@ -660,7 +664,7 @@ def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
     the estate. Both rows read as null, and null is not newer than null."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    registered = Catalogue(_alias_catalogue(repository)).registered
+    registered = Catalogue(_shortcut_catalogue(repository)).registered
 
     assert all(document.build_datetime is None for document in registered.values())
     assert (
@@ -684,7 +688,7 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
     both = {
@@ -703,7 +707,7 @@ def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
     touched and its alias stays stale until the consumer is next built."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
@@ -723,13 +727,13 @@ def test_a_stale_alias_is_replaced_by_the_alias_executor(tmp_path):
     physical action, and reaches it as an alias action rather than a drop."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
-    bundle = _alias_bundle(tmp_path, repository, rows=rows)
+    bundle = _shortcut_bundle(tmp_path, repository, rows=rows)
 
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
 
 
 @weaver_test()
@@ -740,9 +744,9 @@ def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
     planner."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
-    first = _alias_bundle(tmp_path, repository, rows=rows, name="first")
-    second = _alias_bundle(tmp_path, repository, rows=rows, name="second")
+    rows = _shortcut_catalogue(repository)
+    first = _shortcut_bundle(tmp_path, repository, rows=rows, name="first")
+    second = _shortcut_bundle(tmp_path, repository, rows=rows, name="second")
 
     assert first.plan.bundle_id == second.plan.bundle_id
 
@@ -751,7 +755,7 @@ def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
 def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     store = FilesystemStore()
-    bundle = _alias_bundle(tmp_path, repository, rows={})
+    bundle = _shortcut_bundle(tmp_path, repository, rows={})
     registry = next(
         action
         for _sequence, _batch, action in bundle.plan.actions()

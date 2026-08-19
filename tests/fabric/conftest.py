@@ -285,11 +285,11 @@ def fabric_target_lakehouse(fabric_workspace_item, fabric_client):
 #: producer's table would be unchanged, incremental selection would correctly emit
 #: no work and no endpoint refresh for it, and the ordering that test is about would
 #: not be in the plan at all. Cheaper to give it its own than to weaken the test.
-ALIAS_LAKEHOUSE_ROLES = ("producer", "consumer", "warehouse_producer")
+SHORTCUT_LAKEHOUSE_ROLES = ("producer", "consumer", "warehouse_producer")
 
 
 @pytest.fixture(scope="session")
-def fabric_alias_lakehouses(fabric_workspace_item, fabric_client):
+def fabric_shortcut_lakehouses(fabric_workspace_item, fabric_client):
     """The fixed Lakehouses a cross-item alias run needs, by role.
 
     A producer and a consumer, because a cross-item alias is the one thing a
@@ -1170,7 +1170,8 @@ def _fabric_build_context(
             "from weaver.sessions import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
-            "from weaver.build_bundle.shortcut_sources import read_shortcut_sources\n"
+            "from weaver.build_bundle.shortcut_sources import ("
+            "physical_shortcuts, read_shortcut_sources)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1189,13 +1190,12 @@ def _fabric_build_context(
             "reconciled = read_reconciled_catalogue("
             "bindings, inventories=inventories, session=session, "
             "repository=repository)\n"
-            # Where a physical shortcut points is resolved while the estate is
-            # readable, as `read_build_state` does for a build assembled by the
-            # product rather than by this harness.
+            # Through the same seam `read_build_state` uses, so which
+            # declarations are resolved is decided in one place. This harness
+            # assembles its own build state, and anything it re-derives here
+            # would silently drift from the product.
             "shortcut_sources = read_shortcut_sources(\n"
-            "    [d for d in repository.shortcuts\n"
-            "     if not d.is_logical and not d.is_view\n"
-            "     and d.owner in bindings.by_item],\n"
+            "    physical_shortcuts(repository.shortcuts, bindings=bindings),\n"
             "    resolver=resolver, store=store)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
@@ -1523,7 +1523,8 @@ def _warehouse_build_env(
             "from weaver.sessions import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
-            "from weaver.build_bundle.shortcut_sources import read_shortcut_sources\n"
+            "from weaver.build_bundle.shortcut_sources import ("
+            "physical_shortcuts, read_shortcut_sources)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1542,13 +1543,12 @@ def _warehouse_build_env(
             "reconciled = read_reconciled_catalogue("
             "bindings, inventories=inventories, session=session, "
             "repository=repository)\n"
-            # Where a physical shortcut points is resolved while the estate is
-            # readable, as `read_build_state` does for a build assembled by the
-            # product rather than by this harness.
+            # Through the same seam `read_build_state` uses, so which
+            # declarations are resolved is decided in one place. This harness
+            # assembles its own build state, and anything it re-derives here
+            # would silently drift from the product.
             "shortcut_sources = read_shortcut_sources(\n"
-            "    [d for d in repository.shortcuts\n"
-            "     if not d.is_logical and not d.is_view\n"
-            "     and d.owner in bindings.by_item],\n"
+            "    physical_shortcuts(repository.shortcuts, bindings=bindings),\n"
             "    resolver=resolver, store=store)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"

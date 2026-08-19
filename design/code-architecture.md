@@ -212,7 +212,7 @@ performing it means:
 write_file            → OneLake        (the deployed Python tree; the bulk)
 build_procedure       → TDS
 refresh_sql_endpoint  → REST
-create_schema, build_table, build_view, alias
+create_schema, build_table, build_view, shortcut
                       → Session Spark SQL
 ```
 

@@ -6,7 +6,7 @@ This document defines the authoritative central catalogue: its ownership,
 records, reconciliation, and certification behaviour.
 
 The catalogue scopes installations by `(item_type, item_name)`, projects each
-item's own `alias.yml`, and builds generated `Warehouse/_weaver` through the
+item's own shortcut declarations, and builds generated `Warehouse/_weaver` through the
 ordinary planner.
 
 For every successfully built object, the catalogue records the metadata declared
@@ -97,6 +97,35 @@ declares none of them.
 The contents of a schema shortcut get no rows at all. They belong to the item the
 shortcut points at, and they can change without a build.
 
+`_.Shortcut` answers two questions, and keeps them apart.
+
+**What the shortcut is, in the item that declares it.** `Shortcut ID` is the
+declaration as its author wrote it and is the row's key, because a schema
+shortcut names no object and a merge key cannot be null. `Schema` and `Object`
+are the same decomposed pair `_.Registry` names an object by, so the two tables
+join without anything having to split an id.
+
+| | Shortcut ID | Schema | Object |
+|---|---|---|---|
+| table | `Sales.Customer` | `Sales` | `Customer` |
+| folder | `Sales.Incoming` | `Sales` | `Incoming` |
+| schema | `Reference` | `Reference` | NULL |
+
+**What it points at.** `Target type` is `Logical` or `Physical`. For a logical
+target the four target columns give the producer's identity whole:
+
+| Target type | Target item type | Target item name | Target schema | Target object |
+|---|---|---|---|---|
+| Logical | Lakehouse | Sales | Sales | Customer |
+
+so a reader rebuilds `Lakehouse/Sales/Sales.Customer` from the row alone, with no
+join to Installation, no parsing, and no knowledge of a Fabric workspace or item
+id. That is what lets the estate DAG be reconstructed from the catalogue.
+
+A physical target names the Fabric item itself, and `Target workspace` is set
+when it is in another workspace. It has no logical producer, so nothing in the
+row pretends otherwise.
+
 ### Why some tables look sparse
 
 `_.ColumnDictionary` contains described columns rather than a physical column
@@ -167,7 +196,7 @@ publishable = for_targets(certified, repository, ids, kinds)
 
 `from_repository` takes no selection or binding and represents the declared
 source. `retaining` limits Registry rows to objects the build successfully
-materialised. `for_targets` adds target bindings for alias destinations, whose
+materialised. `for_targets` adds target bindings for shortcut destinations, whose
 physical type differs between Warehouses and Lakehouses.
 
 Publication is then a diff:
@@ -221,8 +250,8 @@ update every row on every build because the value changes for each publication.
 The Installation signature is item-scoped. The repository signature represents
 the complete source used for planning, while object rows retain individual source
 signatures. This allows an incremental planner to distinguish a change to
-`Lakehouse/Raw` from the state of `Warehouse/Reporting`. An alias contributes to
-the signature of its consuming item's `alias.yml`.
+`Lakehouse/Raw` from the state of `Warehouse/Reporting`. A shortcut contributes
+to the signature of the item that declares it.
 
 ## Removing things
 
@@ -241,7 +270,7 @@ outside the build path.
 Reconciliation repairs catalogue rows only for the items read by the build.
 
 `catalogue_items_for_build` returns the bound items plus the source items of any
-alias they consume. `read_build_state` reads the catalogue for exactly those, so
+shortcut they consume. `read_build_state` reads the catalogue for exactly those, so
 `reconcile_catalogue_state` only ever walks rows belonging to them. An item the
 build did not bind is never read, never compared against an inventory, and never
 healed — because its claims may be perfectly true about a Lakehouse this build

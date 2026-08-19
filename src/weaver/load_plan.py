@@ -339,14 +339,12 @@ def _shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
         for row in tables.get(SHORTCUT.name, ()):
             if str(row.get("target_type") or "").casefold() != "logical":
                 continue
-            destination_object = str(row.get("destination_object_name") or "")
+            object_name = str(row.get("object_name") or "")
             target_object = str(row.get("target_object_name") or "")
-            if not destination_object or not target_object:
+            if not object_name or not target_object:
                 continue
             destination = _document_id(
-                item,
-                str(row.get("destination_schema_name") or ""),
-                destination_object,
+                item, str(row.get("schema_name") or ""), object_name
             )
             target_item = WeaverItemId(
                 str(row.get("target_item_type") or ""),

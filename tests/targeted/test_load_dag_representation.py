@@ -617,3 +617,114 @@ def test_load_dag_ignores_a_fully_qualified_physical_read():
 
     assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Sales.Order",)
     assert [message.code for message in dag.messages] == ["dependency_external"]
+
+
+# --- reconstructing what a shortcut import named -------------------------------
+#
+# The catalogue records a dependency as its author wrote it, so load resolution
+# has to turn `shortcuts.<Name>` back into the object it named. Neither of these
+# is Fabric behaviour: both are decisions about what an installed name means.
+
+
+def _shortcut_estate(root):
+    """One item importing each kind of shortcut it declares."""
+
+    from factories import _write, lakehouse_table, schema_document
+
+    item = "Lakehouse/Curated"
+    _write(root, f"{item}/schemas/Sales.yml", schema_document("Sales"))
+    _write(
+        root,
+        f"{item}/shortcuts.py",
+        "from weaver import Shortcut\n\n"
+        "Sales__External = Shortcut(\n"
+        '    shortcut_type="table",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/Reference/Ref.Customer",\n'
+        '    workspace="Shared Data",\n)\n\n'
+        "Sales__Incoming = Shortcut(\n"
+        '    shortcut_type="folder",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/Landing/Files/Incoming",\n'
+        '    workspace="Shared Data",\n)\n\n'
+        "Reference = Shortcut(\n"
+        '    shortcut_type="schema",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/Reference/Ref",\n'
+        '    workspace="Shared Data",\n)\n',
+    )
+    _write(
+        root,
+        f"{item}/Sales__Report.py",
+        lakehouse_table("Sales.Report").replace(
+            "from weaver import Table",
+            "from shortcuts import Reference, Sales__External, Sales__Incoming\n\n"
+            "from weaver import Table",
+        ),
+    )
+    return item
+
+
+def _resolved_producers(tmp_path):
+    """What each written shortcut import resolves to, against the estate."""
+
+    from factories import installed_catalogue, item_bindings
+
+    from weaver.declaration import parse_item_repository
+    from weaver.locations import Location
+
+    root = tmp_path / "shortcut-estate"
+    item = _shortcut_estate(root)
+    repository = parse_item_repository(Location(str(root)))
+    bindings = item_bindings((item, "Curated_LH"))
+    estate = InstalledEstate.from_catalogue(installed_catalogue(repository, bindings))
+
+    consumer = WeaverDocumentId.parse(f"{item}/Sales.Report")
+    dag = load_dag(estate, targets=(PhysicalTargetRef("lakehouse", "Curated_LH"),))
+    return estate, consumer, dag
+
+
+@weaver_test()
+def test_a_folder_shortcut_import_resolves_beneath_files(tmp_path):
+    """A shortcut import says nothing about which area its destination is in.
+
+    Resolved as a table, a folder shortcut is not an installed object and the
+    load refuses a name that is plainly there.
+    """
+
+    estate, _consumer, _dag = _resolved_producers(tmp_path)
+
+    assert (
+        WeaverDocumentId.parse("Lakehouse/Curated/Files/Sales.Incoming")
+        in estate.objects
+    )
+    assert (
+        WeaverDocumentId.parse("Lakehouse/Curated/Sales.Incoming") not in estate.objects
+    )
+
+
+@weaver_test()
+def test_a_schema_shortcut_import_resolves_to_the_namespace_it_presents(tmp_path):
+    """``shortcuts.Reference`` carries no ``Schema__Object`` separator.
+
+    Without being recognised as an import at all it resolved to nothing, and the
+    load refused a dependency the author had written correctly.
+    """
+
+    from weaver.load_plan import _is_python_module_reference, _python_module_identity
+
+    item = WeaverItemId.parse("Lakehouse/Curated")
+
+    assert _is_python_module_reference("shortcuts.Reference")
+    assert _python_module_identity(item, "shortcuts.Reference") == (
+        WeaverDocumentId.parse("Lakehouse/Curated/Reference.Reference")
+    )
+
+
+@weaver_test()
+def test_a_program_importing_shortcuts_still_loads(tmp_path):
+    """The composition: every kind resolves, so the item has a load DAG."""
+
+    _estate, consumer, dag = _resolved_producers(tmp_path)
+
+    assert any(node.logical_id == consumer for node in dag.nodes)

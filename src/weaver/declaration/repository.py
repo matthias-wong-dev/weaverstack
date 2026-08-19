@@ -350,10 +350,7 @@ def parse_item_repository(
             store.read(root.join(*relative.split("/"))),
             item.item_type,
         )
-        if (
-            source.warehouse_shortcut is not None
-            or source.lakehouse_shortcut is not None
-        ):
+        if source.warehouse_alias is not None or source.lakehouse_alias is not None:
             raise DiscoveryError(
                 f"{relative}: document-local Warehouse shortcut/Lakehouse shortcut "
                 f"headers have been replaced. Declare shortcuts in "

@@ -326,3 +326,30 @@ def test_validate_rejects_an_action_targeting_an_omitted_node():
     bad = replace(plan, sequences=(replace(plan.sequences[0], batches=(batch,)),))
     with pytest.raises(BuildError, match="omitted node"):
         _validate(bad)
+
+
+@weaver_test()
+def test_a_schema_shortcuts_identity_survives_the_manifest():
+    """Almost everything a build installs is a document. A schema shortcut is not.
+
+    It presents a namespace rather than an object, so its identity is a
+    ``WeaverSchemaId``, and a selection that could not read one back would fail
+    the moment a bundle carrying it was reloaded.
+    """
+
+    from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
+
+    schema = WeaverSchemaId.parse("Lakehouse/Curated/Reference")
+    table = WeaverDocumentId.parse("Lakehouse/Curated/Sales.Landed")
+    folder = WeaverDocumentId.parse("Lakehouse/Curated/Files/Sales.Incoming")
+    selection = BuildSelection(
+        impact=Impact(new=(schema, table), changed=(folder,), impacted_descendants=()),
+        prohibited=(),
+        selected_for_drop=(),
+        selected_for_build=(schema, table, folder),
+    )
+
+    restored = BuildSelection.from_mapping(selection.to_mapping())
+
+    assert restored == selection
+    assert restored.impact.new[0] == schema
