@@ -76,9 +76,9 @@ class LoadContract:
     def may_breach(self, *, deleting: int, updating: int) -> bool:
         """Whether these settled counts could breach a threshold at all.
 
-        Reading the target's size costs an action on Delta and a scan on the
-        Warehouse, and :meth:`breaches` needs it. It cannot report a breach for a
-        target smaller than ``stability_rows``, and the larger the target the
+        Reading the target's size is work of its own, and :meth:`breaches` needs
+        it. It cannot report a breach for a target smaller than
+        ``stability_rows``, and the larger the target the
         larger a count has to be to reach a given percentage of it, so a count
         that would not breach a target of exactly ``stability_rows`` cannot
         breach any target the gate applies to. That is answerable from the
