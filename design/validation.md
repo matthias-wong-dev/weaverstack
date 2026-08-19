@@ -227,6 +227,16 @@ projected with `*`, since Weaver does not know a Test's columns, so a
 key, each side is numbered within itself and the actual side is offset past
 `@missing_count`.
 
+**Working tables are dropped at both ends of a run.** The body drops each temp
+table it names before it captures anything and again once the counts and the
+diagnostics are out, so a connection is left as it was found. The closing drops
+are what the direct `--file` batch relies on, having no procedure invocation to
+be scoped to; an installed procedure is also released by the engine when the
+invocation ends. A run that threw is the case neither covers: a guard stops
+before the closing drops, so its tables stay in that connection's session, named
+for the validation that made them, until the opening drops of the next run on
+that connection remove them.
+
 **One body, two wrappers.** The installed procedure and the direct `--file`
 batch share the rendered body exactly — the batch declares the same locals and
 projects them at the end. Two renderers would be two contracts, and the promise

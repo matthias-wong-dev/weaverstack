@@ -20,12 +20,17 @@ diverged.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE
-from weaver.declaration.tsql_validation import RESULT_PARAMETERS
+from weaver.declaration.tsql_validation import (
+    RESULT_PARAMETERS,
+    generate_tsql_validation_batch,
+)
 from weaver.declaration.validation import generate_validation
 
 SCHEMA = "DWG"
@@ -136,6 +141,25 @@ def _rows(executor, table: str, rows) -> None:
         executor.execute_script(
             f"insert into [{SCHEMA}].[{table}] ([OrderId], [Amount]) values {values};"
         )
+
+
+def _working_tables(sql: str) -> tuple[str, ...]:
+    """The temp tables a generated validation names, read from its own SQL.
+
+    Taken from the generated text rather than listed here, so a working table
+    added to the generator is checked without the test being told about it.
+    """
+
+    return tuple(sorted(set(re.findall(r"#weaver_[A-Za-z0-9_]+", sql))))
+
+
+def _probe(names: tuple[str, ...]) -> str:
+    """A row per working table, saying whether it exists in this session."""
+
+    return "\nunion all\n".join(
+        f"select N'{name}' as [name], object_id('tempdb..{name}') as [id]"
+        for name in names
+    )
 
 
 def _sides(executor, expected, actual) -> None:
@@ -308,12 +332,46 @@ def test_mismatched_shapes_are_reported_as_a_contract_failure(estate):
 
 @weaver_test(remote=True, resources={"tds"})
 def test_the_procedure_leaves_no_working_tables_behind(estate):
-    _sides(estate, [(1, 100)], [(1, 110)])
-    _counts(estate, f"Test {SCHEMA}.OrdersReconcile")
+    """The run and the check share one batch, so they share one session.
 
-    rows = estate.query(
-        "select count(*) as n from tempdb.sys.objects "
-        "where name like N'#weaver%' and type = N'U';"
+    A working table belongs to the connection that made it, and the guard tests
+    above abandon theirs by design: a throw leaves them for the next run in that
+    session to drop. Counting every ``#weaver`` table in ``tempdb`` would read
+    that residue, and residue from any other connection to the Warehouse, as
+    this run's.
+    """
+
+    _sides(estate, [(1, 100)], [(1, 110)])
+    document = _document(TEST_SOURCE)
+    names = _working_tables(generate_validation(document).payload.decode("utf-8"))
+
+    sets = estate.query_result_sets(
+        "declare @missing bigint, @unexpected bigint;\n"
+        f"exec [_].[Test {SCHEMA}.OrdersReconcile]\n"
+        "    @missing_count = @missing output\n"
+        "  , @unexpected_count = @unexpected output\n"
+        "  , @suppress_result_set = 1;\n"
+        f"{_probe(names)};"
     )
 
-    assert int(rows[0]["n"]) == 0
+    assert {str(row["name"]): row["id"] for row in sets[-1]} == dict.fromkeys(names)
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_direct_run_leaves_no_working_tables_behind(estate):
+    """The batch form has no procedure to scope its temp tables to.
+
+    ``weaver test --file`` runs the same body on the caller's own connection,
+    where a working table lives until something drops it, so here the body's own
+    drops are what keeps the promise that a file run installs nothing and leaves
+    nothing.
+    """
+
+    _sides(estate, [(1, 100)], [(1, 110)])
+    document = _document(TEST_SOURCE)
+    batch = generate_tsql_validation_batch(document.document, document.sql_body)
+    names = _working_tables(batch)
+
+    sets = estate.query_result_sets(f"{batch}\n{_probe(names)};")
+
+    assert {str(row["name"]): row["id"] for row in sets[-1]} == dict.fromkeys(names)
