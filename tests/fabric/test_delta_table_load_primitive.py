@@ -89,7 +89,15 @@ def arrange(object_name):
 
     qualified = destination.qualify(SCHEMA, object_name)
     spark.sql(destination.destination.create_schema_statement(SCHEMA))
-    for suffix in ("_Upsert", "_Reject", "_Delete", "_StagingKeep", "_Staging", ""):
+    for suffix in (
+        "_Upsert",
+        "_Change",
+        "_Reject",
+        "_Delete",
+        "_StagingKeep",
+        "_Staging",
+        "",
+    ):
         spark.sql(
             f"DROP TABLE IF EXISTS {destination.qualify(SCHEMA, object_name + suffix)}"
         )
@@ -172,7 +180,14 @@ def artefacts(object_name):
 
     return sorted(
         suffix
-        for suffix in ("_Staging", "_Reject", "_Delete", "_Upsert", "_StagingKeep")
+        for suffix in (
+            "_Staging",
+            "_Reject",
+            "_Delete",
+            "_Upsert",
+            "_Change",
+            "_StagingKeep",
+        )
         if spark.catalog.tableExists(destination.qualify(SCHEMA, object_name + suffix))
     )
 
@@ -352,6 +367,20 @@ seen["before_conflicts"] = before
 seen["conflict_artefacts"] = artefacts(OBJECT)
 seen["conflict_held"] = held()
 
+# No claim at all, which is a different thing from an empty one: absence from an
+# incremental source proves nothing, so there is nothing to retire and no delete
+# relation is derived. The uniqueness question is still asked, and answered with
+# no claim to read, so a holder frees its value only by moving off it.
+seen["reseed_again"] = run(contract, SEED)
+seen["no_claim"] = run(
+    contract, [["c1", "One", "a@x.test", 10, "A"], ["c6", "Six", "f@x.test", 10, "F"]]
+)
+seen["no_claim_contents"] = contents(OBJECT)
+seen["no_claim_artefacts"] = artefacts(OBJECT)
+seen["no_claim_held"] = held()
+# And with no claim, a value only an untouched holder could free is a conflict.
+seen["no_claim_conflict"] = run(contract, UNTOUCHED_HOLDER)
+
 emit(seen)
 """
 )
@@ -503,3 +532,23 @@ def test_the_delta_keyed_load_refuses_a_target_its_changes_would_invalidate(
     # No delete table: every claim in these loads was empty.
     assert seen["conflict_artefacts"] == ["_Staging"]
     assert seen["conflict_held"] == []
+
+    # No claim at all. Nothing is retired, the staged rows load, and no delete
+    # relation is derived to report that nothing goes.
+    assert seen["reseed_again"]["result"]["succeeded"] is True
+    no_claim = seen["no_claim"]["result"]
+    assert no_claim["succeeded"] is True
+    assert no_claim["rows_deleted"] == 0
+    assert no_claim["rows_inserted"] == 1
+    assert [row[0] for row in seen["no_claim_contents"]] == [
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5",
+        "c6",
+    ]
+    assert seen["no_claim_artefacts"] == []
+    assert seen["no_claim_held"] == []
+    # And the uniqueness gate still refuses a value no proposal frees.
+    assert "declared unique key" in (seen["no_claim_conflict"]["raised"] or "")

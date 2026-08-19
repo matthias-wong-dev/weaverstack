@@ -32,10 +32,11 @@ class Sales__Customer(Table):
         # the abfss:// form, which pathlib cannot express. path() is the
         # mounted Path for ordinary Python — see the folder's own module.
         exported = Sales__OrderExport(self).spark_path()
-        rows = (
+        # Staging on its own. This table is the whole truth about its customers,
+        # so a customer the export no longer names is retired by not being here.
+        return (
             self.spark.read.option("header", True)
             .csv(exported)
             .selectExpr("`Customer id`", "`Customer name`")
             .dropDuplicates(["Customer id"])
         )
-        return rows, self.spark.createDataFrame([], "`Customer id` string")

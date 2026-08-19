@@ -73,6 +73,29 @@ class LoadContract:
 
         return bool(self.primary_key) and self.incremental and bool(self.unique_keys)
 
+    def may_breach(self, *, deleting: int, updating: int) -> bool:
+        """Whether these settled counts could breach a threshold at all.
+
+        Reading the target's size costs an action on Delta and a scan on the
+        Warehouse, and :meth:`breaches` needs it. It cannot report a breach for a
+        target smaller than ``stability_rows``, and the larger the target the
+        larger a count has to be to reach a given percentage of it, so a count
+        that would not breach a target of exactly ``stability_rows`` cannot
+        breach any target the gate applies to. That is answerable from the
+        counts alone, and where it says no the size is never asked for.
+
+        The comparison is the one :meth:`breaches` makes, moved across the
+        division and held at the smallest target it can act on. It decides only
+        whether to ask; what a breach *is* stays there.
+        """
+
+        if self.replaces_wholesale:
+            return False
+        return (
+            deleting * 100 > self.delete_threshold * self.stability_rows
+            or updating * 100 > self.update_threshold * self.stability_rows
+        )
+
     def breaches(self, *, target_rows: int, deleting: int, updating: int) -> str | None:
         """Return a stability-threshold breach, or ``None``."""
 

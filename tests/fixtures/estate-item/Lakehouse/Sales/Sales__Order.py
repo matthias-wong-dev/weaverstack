@@ -37,4 +37,4 @@ class Sales__Order(Table):
     def read(self):
         source = Sales__OrderExport(self).path()
         rows = parse_order_date(source)
-        return rows, []
+        return rows

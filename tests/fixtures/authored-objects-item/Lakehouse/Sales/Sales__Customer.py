@@ -26,4 +26,4 @@ class Sales__Customer(Table):
         rows = self.spark.read.csv(source, header=True).selectExpr(
             "`Customer id` as `Customer id`", "`Customer name` as `Customer name`"
         )
-        return rows, []
+        return rows

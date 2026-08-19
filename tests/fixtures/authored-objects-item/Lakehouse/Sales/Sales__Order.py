@@ -36,6 +36,6 @@ class Sales__Order(Table):
         customers = Sales__Customer(self).dataframe()
         existing = self.dataframe()
         if existing.count() and not customers.count():
-            return self.empty_dataframe(), []
+            return self.empty_dataframe()
         rows = self.spark.read.csv(source, header=True).join(customers, "Customer id")
-        return rows, []
+        return rows

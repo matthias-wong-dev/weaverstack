@@ -237,27 +237,25 @@ def test_an_empty_dataframe_is_the_existing_table_with_no_rows(spark):
     ]
 
 
-@pytest.mark.parametrize(
-    ("returned", "expected_deletes"),
-    [(object(), None), ((object(), ["Customer id"]), ["Customer id"])],
-)
-@weaver_test()
-def test_a_table_load_passes_normalised_read_results_to_the_runtime(
-    spark, monkeypatch, returned, expected_deletes
-):
-    import weaver.runtime.table_load as table_load
+def _customer(returned, *, incremental: bool):
+    """One table whose ``read()`` returns whatever a case wants it to."""
+
     from weaver.declaration.metadata import PYTHON, parse_document
+
+    declared = "\n                Incremental: true\n" if incremental else ""
 
     class Sales__Customer(Table):
         def _document(self):
             return parse_document(
-                """
+                f"""
                 Table ID: Sales.Customer
 
                 Description: One row per customer.
 
                 Lineage: The sales system.
 
+                Primary key: Customer id
+{declared}
                 Schema:
                   Customer id: string
                 """,
@@ -267,6 +265,14 @@ def test_a_table_load_passes_normalised_read_results_to_the_runtime(
         def read(self):
             return returned
 
+    return Sales__Customer
+
+
+def _loaded(spark, monkeypatch, table):
+    """One load, with the runtime replaced by what it was handed."""
+
+    import weaver.runtime.table_load as table_load
+
     seen = {}
 
     def load_table(*_args, **kwargs):
@@ -274,14 +280,60 @@ def test_a_table_load_passes_normalised_read_results_to_the_runtime(
         return LoadResult(succeeded=True)
 
     monkeypatch.setattr(table_load, "load_table", load_table)
+    result = table(spark, lakehouse=LAKEHOUSE).load()
+    return result, seen
 
-    result = Sales__Customer(spark, lakehouse=LAKEHOUSE).load()
+
+@pytest.mark.parametrize("incremental", [False, True])
+@weaver_test()
+def test_a_table_that_stages_alone_makes_no_delete_claim(
+    spark, monkeypatch, incremental
+):
+    """The ordinary return, and the only one a non-incremental table has."""
+
+    staged = object()
+
+    result, seen = _loaded(
+        spark, monkeypatch, _customer(staged, incremental=incremental)
+    )
 
     assert result.succeeded
-    assert seen["staging_frame"] is (
-        returned[0] if isinstance(returned, tuple) else returned
+    assert seen["staging_frame"] is staged
+    assert seen["deletes"] is None
+
+
+@weaver_test()
+def test_an_incremental_tables_claim_reaches_the_runtime(spark, monkeypatch):
+    staged, claimed = object(), ["Customer id"]
+
+    result, seen = _loaded(
+        spark, monkeypatch, _customer((staged, claimed), incremental=True)
     )
-    assert seen["deletes"] == expected_deletes
+
+    assert result.succeeded
+    assert seen["staging_frame"] is staged
+    assert seen["deletes"] == claimed
+
+
+@weaver_test()
+def test_a_non_incremental_table_returning_a_tuple_is_refused(spark, monkeypatch):
+    """The source is the whole truth, so a second value states it twice.
+
+    Refused on the shape of the return, before anything is asked of Spark: what
+    the frame holds is not the question, and reading it to find out would be a
+    job run to learn that it was empty.
+    """
+
+    import weaver.runtime.table_load as table_load
+
+    def load_table(*_args, **_kwargs):
+        raise AssertionError("the load reached the runtime")
+
+    monkeypatch.setattr(table_load, "load_table", load_table)
+    table = _customer((object(), []), incremental=False)
+
+    with pytest.raises(LoadError, match="returns staging on its own"):
+        table(spark, lakehouse=LAKEHOUSE).load()
 
 
 # --- views ------------------------------------------------------------------

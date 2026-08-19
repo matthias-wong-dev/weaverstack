@@ -19,21 +19,34 @@ the rejection gate               fault_tolerant decides whether to continue
       ↓
 purge the refused rows           staging becomes the clean incoming state
       ↓
-the delete set                   from clean staging, or the explicit claim
-      ↓
-the upsert set                   new and signature-changed rows, nothing else
+the settled changes              every insert, update and delete, classified
       ↓
 merge uniqueness                 incremental with unique keys only
       ↓
 the stability gate               how much of the target is about to move
       ↓
-delete, update, insert
+delete, then write
 ```
 
 Every gate is reached before anything is written, so refusing is a decision not
 to start rather than an unwind. Each phase is *settled* before the next reads it:
 that is what lets a gate read the size of a change before a row moves, and it is
 a property of the model rather than of any way of storing one.
+
+**The settled changes are one relation**, and each row says which of insert,
+update and delete it is:
+
+```text
+__weaver_operation    I, U or D
+business columns      what the row becomes; for a delete, its key
+row signature         what the target will store
+```
+
+It exists so the change can be *judged* before it is applied. So the gates read
+it, one grouped pass over it gives all three counts, and the mutations consume
+the classification rather than working out again which rows differ. It carries
+the rows themselves rather than reducing to counts, which is also where an
+archive's before-and-after payload would go.
 
 ## Two refusals, and they are different in kind
 
@@ -99,17 +112,38 @@ staging from there on. Nothing is deleted and nothing is overwritten: the raw
 relation is superseded rather than edited, and it is released once the survivors
 are settled and its evidence written.
 
-## The delete set
+## Classifying the changes
 
-Non-incremental, it is the target keys clean staging no longer carries — read
-after the purge, so a target row whose only staged proposal was refused is retired
-by the same rule as any other absence, and no later repair pass is needed.
+Absence means two different things, so the classification is derived two ways and
+the difference is the whole of it.
 
-Incremental, it is the object's explicit claim, narrowed twice. First to keys the
-target actually holds, because a delete for a row that was never there is not a
-deletion and counting it would make the stability guard protect against work the
-load was never going to do. Then, once staging is clean, to keys the source no
-longer produces.
+**Non-incremental**, the target becomes clean staging, so one full outer join
+answers every question at once:
+
+```text
+in staging only                  → I
+in the target only               → D
+in both, signatures differ       → U
+in both, signatures agree        → no row
+```
+
+The deletions are read after the purge, so a target row whose only staged
+proposal was refused is retired by the same rule as any other absence, and no
+later repair pass is needed. A delete row carries its key and no values: the key
+is what retires the row, and it is what `_Delete` is written from.
+
+**Incremental**, a source is a window on the truth, so a key it does not carry
+says nothing about the target's row. Staging alone classifies I and U, and what
+is removed is the object's explicit claim, settled as its own relation and
+narrowed twice. First to keys the target actually holds, because a delete for a
+row that was never there is not a deletion and counting it would make the
+stability guard protect against work the load was never going to do. Then, once
+staging is clean, to keys the source no longer produces.
+
+With no claim there is nothing to remove, and no relation is derived to report
+it. An empty one was a Spark job answering a question the contract had already
+answered, and it is the same distinction merge uniqueness draws: with no claim,
+no target holder is freed by deletion.
 
 That second narrowing is what settles a key that is both claimed and staged. The
 source still producing a row means the row stays, whether or not it changed — so
@@ -180,8 +214,8 @@ One question:
 > still be held by another target row?
 
 A holder gives up its value in exactly two ways. The load deletes it, or the load
-moves it off that value — which includes moving to a null, because a null claims
-nothing. Being in the upsert set is not one of them: a row may be changing another
+moves it off that value, which includes moving to a null, because a null claims
+nothing. Being written at all is not one of them: a row may be changing another
 column entirely and keeping the value it has.
 
 So these pass:
@@ -205,9 +239,9 @@ application, no closure to compute, and no fixed point to iterate towards: the
 proposed target state is either valid under the declared keys or it is not.
 
 One case the plan behind this work listed cannot actually arise. A holder that is
-in the upsert set while keeping the value a claimant wants means both rows carry
-that value in staging, which incoming uniqueness refuses first. The predicate
-still distinguishes the two, because that is what lets a genuine swap through.
+being written while keeping the value a claimant wants means both rows carry that
+value in staging, which incoming uniqueness refuses first. The predicate still
+distinguishes the two, because that is what lets a genuine swap through.
 
 ## Working state, and the physical strategies that differ
 
@@ -234,11 +268,42 @@ entirely at the row counts a typical load moves.
 
 Being persisted rather than durable is a real difference, and it is bounded. A
 lost cache is recomputed from the source, not lost, and by the time the target is
-being mutated staging is no longer read: the delete and upsert relations are
-settled and counted before the first write. The one path that does write staging
+being mutated staging is no longer read: the change relation is settled and
+counted before the first write. The one path that does write staging
 to Delta is the unkeyed wholesale replace, because it empties the target before
 inserting, so it is the only phase whose source could be read after the table it
 may depend on is gone.
+
+## The actions a load does not submit
+
+Every phase costs a Spark job, and the model needs fewer of them than the
+implementation once ran.
+
+**A non-incremental load asks the target one join, not two.** The delete set and
+the upsert set were the same join asked twice, so they are one classification,
+and the three counts are one grouped pass over it rather than a count and a
+grouped count.
+
+**The writes are one merge.** An insert and a merge over the same relation meant
+two passes over the target for a load that had already decided which rows were
+which. One merge consumes the operation: matched and `U` updates, not matched and
+`I` inserts. Deletes stay a separate mutation.
+
+**An incremental load with no claim derives nothing to delete.**
+
+**The target's size is read only where the gate could act on it.** A breach needs
+a count to exceed its percentage of the target, and the gate does not apply below
+`Stability rows` at all, so a count too small to breach a target of exactly that
+size cannot breach a larger one either. That is answerable from the counts
+already in hand, and at the declared defaults it means a load has to be removing
+more than 50,000 rows, or changing more than 200,000, before its target is
+counted. What a breach *is* stays in one place; the precondition only decides
+whether to ask.
+
+**A delete claim is taken as a claim.** Reading it to find out whether it holds
+rows is a job run to learn what the contract says, and what the target actually
+loses is settled by the reconciliation. A non-incremental table returning one at
+all is refused, which is why it returns staging on its own.
 
 ## Diagnostic evidence
 
@@ -257,12 +322,17 @@ rejects, because the rejects alone do not explain themselves. A run that stopped
 at the stability gate or at merge uniqueness writes what it was proposing. Each is
 written once, and staging is written before the purge supersedes it.
 
+`_Delete` is the keys, as it has always been. The change relation carries an
+operation and the values a write needs, which is a shape for the load rather than
+for a reader, so the artefact is written from a projection of the delete rows.
+The classification itself is never written durably.
+
 A run can also end in a failure Weaver has no outcome for: an engine error while
 it was reconciling or writing the target. The load tracks the relations it has
 settled as it goes, and on that exit it writes whichever of them are not already
-written: staging once it is materialised, the rejects and the delete set where
-they exist, and never the upsert set, which describes work rather than a
-proposal. The failure on its way out is the one worth reporting, so a write that
+written: staging once it is materialised, the rejects and the keys to remove
+where they exist, and never the classification, which describes work rather than
+a proposal. The failure on its way out is the one worth reporting, so a write that
 cannot be made is left out and the original error is raised unchanged. The
 relations are released afterwards as they are on every other exit.
 
@@ -272,10 +342,10 @@ just finished. Attempted rather than looked up: a missing table is the ordinary
 case, and reading an inventory to avoid asking for a drop that does nothing would
 cost more than the drop.
 
-There is no upsert artefact, no affected-key table, no loser table per constraint,
-no participant table and no merge-conflict recovery table. What Weaver was going
-to write is answerable from staging and the delete set; the rest are
-implementation mechanics, not artefacts.
+There is no change or upsert artefact, no affected-key table, no loser table per
+constraint, no participant table and no merge-conflict recovery table. What
+Weaver was going to write is answerable from staging and the keys to remove; the
+rest are implementation mechanics, not artefacts.
 
 ## Where it is proved
 

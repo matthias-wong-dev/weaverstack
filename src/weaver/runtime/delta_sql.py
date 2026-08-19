@@ -154,8 +154,8 @@ def participates(columns, alias: str = "s") -> str:
 def moves_off(columns, moving: str = "moving", holder: str = "holder") -> str:
     """Whether one proposed row gives up a holder's unique value.
 
-    Being in the upsert set is not enough on its own: a row may be changing
-    another column entirely and keeping the value it has.
+    Being written is not enough on its own: a row may be changing another column
+    entirely and keeping the value it has.
     """
 
     return " OR ".join(
