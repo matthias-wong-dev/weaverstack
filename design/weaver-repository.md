@@ -41,7 +41,7 @@ repository/
 │   └── Reporting/
 │       ├── schemas/
 │       │   └── Sales.yml
-│       ├── external.yml                external SQL references
+│       ├── shortcuts.yml               shortcuts this Warehouse declares
 │       └── Sales.Customer.sql          T-SQL — it is in a Warehouse
 └── _ignore/
     └── unfinished.py
@@ -67,9 +67,10 @@ Warehouse/Reporting/DWG.Customer.sql    T-SQL
 ## Shortcuts and external references
 
 An item reaches outside itself by declaring what it wants to see. A Lakehouse
-declares Fabric shortcuts in `shortcuts.py`; a Warehouse declares external SQL
-references in `external.yml`. Both files sit at the item root, and both are
-declarations rather than programs.
+declares its shortcuts in `shortcuts.py`, a Warehouse in `shortcuts.yml`. Both
+files sit at the item root, and both are declarations rather than programs. Only
+the physical form differs: a Lakehouse shortcut is a OneLake shortcut, a
+Warehouse one is a view.
 
 ### Lakehouse: `shortcuts.py`
 
@@ -78,18 +79,20 @@ from weaver import Shortcut
 
 Sales__Customer = Shortcut(
     shortcut_type="table",
+    target_type="logical",
     target="Lakehouse/Sales/Sales.Customer",
-    bind=True,
 )
 
 Reference = Shortcut(
     shortcut_type="schema",
+    target_type="physical",
     target="Lakehouse/Reference/Sales",
     workspace="Shared Data",
 )
 
 Landing__Incoming = Shortcut(
     shortcut_type="folder",
+    target_type="physical",
     target="Lakehouse/Landing/Files/Incoming",
     workspace="Shared Data",
 )
@@ -105,12 +108,13 @@ under `Files/<schema>`.
 
 `workspace` names a Fabric workspace, and omitting it means the current one.
 
-`bind` decides what the item half of `target` means. With `bind=True` it is a
-*logical* Weaver item and Weaver follows its current binding before creating the
-shortcut; with `bind=False`, the default, it is the actual Fabric item name. A
-bound target must be in this repository, orders the two items, and cannot also
-name a workspace. A schema shortcut has no bound form: a schema's contents belong
-to the item it points at, and Weaver binds objects rather than namespaces.
+`target_type` decides what the item half of `target` means, and is exactly
+`logical` or `physical`. A logical target is a Weaver item, and Weaver follows
+its current binding before creating the shortcut; it must be in this repository,
+it orders the two items, and it cannot also name a workspace. A physical target
+is the Fabric item itself, and may name a workspace. A schema shortcut is
+physical only: a schema's contents belong to the item it points at, and Weaver
+binds objects rather than namespaces.
 
 The file is parsed, never executed, so it holds `Shortcut` declarations, imports
 and comments only. A computed argument, a loop or a conditional is refused rather
@@ -123,30 +127,32 @@ deploys a generated module of the same name beside them:
 from shortcuts import Sales__Customer, Reference, Landing__Incoming
 
 Sales__Customer(self).dataframe()
-Reference(self).table("Product").dataframe()
+Reference(self).Product.dataframe()
+Reference(self).table("Product Detail").dataframe()
 Landing__Incoming(self).path()
 Landing__Incoming(self).spark_path()
 ```
 
 A schema shortcut names its tables when they are read rather than generating a
-symbol for each, because what is inside one can change without a build. If you
-want a table named at build time, declare a table shortcut.
+symbol for each, because what is inside one can change without a build.
+Attribute access is the ordinary form and `table(name)` stays for names that are
+not Python identifiers. If you want a table named at build time, declare a table
+shortcut.
 
-### Warehouse: `external.yml`
+### Warehouse: `shortcuts.yml`
 
 ```yaml
-Warehouse/Reporting/Sales.Customer:
-  target: Lakehouse/Sales/Sales.Customer
-  bind: true
+logical:
+  Warehouse/Reporting/Sales.Customer: Lakehouse/Sales/Sales.Customer
 
-Warehouse/Reporting/Sales.ReferenceCustomer:
-  target: Warehouse/Reference/Sales.Customer
+physical:
+  Warehouse/Reporting/Sales.ReferenceCustomer: Warehouse/Reference/Sales.Customer
 ```
 
-Keyed by the destination view, which is the item's own four-part identity. Each
-entry takes `target` and an optional `bind`, and nothing else. External references
-are always same-workspace and always materialised as a local view, so they carry
-neither a workspace nor a target kind.
+Two sections, named for how the target is read, each mapping a destination to
+what it points at. The destination is the item's own four-part identity. A
+Warehouse shortcut is always same-workspace and always materialised as a local
+view, so it carries neither a workspace nor a shortcut type.
 
 ### What a declaration may not do
 
@@ -214,7 +220,7 @@ Flat repositories are not inferred. Discovery fails with concrete instructions:
 - replace `_schemas/` with each owning item's `schemas/`;
 - move Python helpers to `Lakehouse/<item>/lib/`;
 - replace document-local aliases with `shortcuts.py` in a Lakehouse item and
-  `external.yml` in a Warehouse one;
+  `shortcuts.yml` in a Warehouse one;
 - drop the `.spark.sql` suffix — a document in a Lakehouse item is already
   Spark SQL.
 

@@ -1,8 +1,7 @@
 # A Lakehouse table, made addressable inside the Warehouse.
 #
 # The Warehouse cannot read Delta files; it reads the Lakehouse's SQL endpoint.
-# Declaring the reference is what lets a Warehouse object name a Lakehouse object
+# Declaring the shortcut is what lets a Warehouse object name a Lakehouse object
 # without either item knowing where the other is bound.
-Warehouse/Reporting/Reporting.OrderSummary:
-  target: Lakehouse/Sales/Sales.OrderSummary
-  bind: true
+logical:
+  Warehouse/Reporting/Reporting.OrderSummary: Lakehouse/Sales/Sales.OrderSummary

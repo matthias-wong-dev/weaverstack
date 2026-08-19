@@ -83,13 +83,13 @@ persistence boundary maps between them and nothing above it sees SQL.
 | `_.ForeignKeyDictionary` | declared relationship | An ER model, not constraints. |
 | `_.TestDictionary` | Test or Assumption | The **logical** authored validation — `test_type`, description and the declared `primary_key`. The procedure or module it compiles to is a physical artefact and is certified in `_.Registry`; there is no Registry row under the logical validation ID. See [validation](validation.md). |
 | `_.Dependency` | referencing-owned edge | The spelling the author wrote, kept as `dependency_reference`, plus the edge Weaver resolved it to. |
-| `_.Alias` | destination-keyed declaration | The canonical destination/source pair reproduced from the consuming item's `shortcuts.py` or `external.yml`. |
+| `_.Shortcut` | one authored declaration | Every shortcut an item declares, reproduced from its `shortcuts.py` or `shortcuts.yml`, including whether the target is logical or physical. |
 
 A shortcut destination also gets a `_.Registry` row, typed as what it physically
 is: a folder under `Files`, a view in a Warehouse, a table in a Lakehouse, and
 `schema` for a schema shortcut. There is no `shortcut` object *type*, because to a
 reader of the catalogue a Lakehouse table shortcut is a table. What it is for is
-the object *role*, recorded as `shortcut`, and where it points is `_.Alias`. That
+the object *role*, recorded as `shortcut`, and where it points is `_.Shortcut`. That
 keeps installed object state and cross-item relationship separate. It describes
 nothing further: no dictionary, column, key or dependency rows, because it
 declares none of them.
@@ -113,8 +113,8 @@ run between one pair of objects, and why an object may reference itself.
 
 `_.Dependency` retains the author's spelling and resolves it within the
 consuming item. Cross-item and cross-engine references use shortcuts and external
-views, which are stored separately in `_.Alias`. Combining `_.Dependency`,
-`_.Alias`, and `_.Registry` produces the full estate graph.
+views, which are stored separately in `_.Shortcut`. Combining `_.Dependency`,
+`_.Shortcut`, and `_.Registry` produces the full estate graph.
 
 A dependency may leave its item. A two-part logical name is recorded with
 `is_within_item=true`; a canonical cross-item name or an authored physical name is

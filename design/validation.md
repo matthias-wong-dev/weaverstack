@@ -60,7 +60,7 @@ groups that apply to it:
 | dependency | `Dependencies` | everything |
 | data lineage | `Lineage` | data objects |
 | build behaviour | `Static`, `Prohibit rebuild` | data objects |
-| shortcut | `shortcuts.py`, `external.yml` | data objects |
+| shortcut | `shortcuts.py`, `shortcuts.yml` | data objects |
 
 A Test adds `Primary key`. An Assumption adds nothing.
 

@@ -150,8 +150,7 @@ the mandatory catalogue Warehouse.
 
 A shortcut is a consuming item's own name for something else: another Weaver
 item's document, or a physical Fabric item Weaver does not manage. A Lakehouse
-declares them in `shortcuts.py` and a Warehouse declares external views in
-`external.yml`. Either way the declaration is owned by the destination item, and
+declares them in `shortcuts.py` and a Warehouse in `shortcuts.yml`. Either way the declaration is owned by the destination item, and
 the source stays the canonical producer.
 
 What a declaration becomes is a decision about the destination's target kind, and
@@ -159,17 +158,17 @@ is therefore made by the planner:
 
 | Destination | Materialisation |
 |---|---|
-| Lakehouse | a `create_alias` action, a OneLake shortcut |
+| Lakehouse | a OneLake shortcut, made over REST |
 | Warehouse | a frozen `CREATE OR ALTER VIEW` over the source's three-part name |
 
 Only the Warehouse form is spelled out in SQL, because there the statement is the
 semantic decision. A shortcut carries one frozen decision, this destination and
 that source, resolved at install time the same way a schema's `LOCATION` is.
 
-`bind` decides where the source address comes from. A **bound** declaration names
-a Weaver document, so the planner freezes the source's target id and the installer
+`target_type` decides where the source address comes from. A **logical** declaration names
+a Weaver document, so the planner freezes the target's id and the installer
 resolves it through its own environment, exactly as it resolves the destination. A
-**direct** declaration names a physical Fabric item, possibly in another
+**physical** declaration names the Fabric item itself, possibly in another
 workspace, which is not a target of this build. Its workspace id, item id and
 case-exact source path are resolved while the estate is readable, before the
 bundle is generated, and carried in the payload. Fabric validates a shortcut's
@@ -192,10 +191,10 @@ that declares something there is refused during discovery, and a wipe removes
 shortcuts through the workspace before it sweeps storage. Removing the shortcut
 root is safe, and it is the only thing Weaver does to one.
 
-A declaration whose bound source item is not bound, whose destination and source
+A declaration whose logical target item is not bound, whose destination and target
 disagree about the `Files`/table namespace, or whose direct target did not resolve
 has no physical form under the current bindings. It is omitted from the plan with
-the reason `alias_unsupported`. That decision belongs to the planner; the
+the reason `shortcut_unsupported`. That decision belongs to the planner; the
 installer may only run an action already frozen for it.
 
 **An omitted alias is not certified.** A `_.Registry` row means the object's work
@@ -216,7 +215,7 @@ to run twice.
 `Files`, a `view` in a Warehouse, a `table` in a Lakehouse, and `schema` for a
 schema shortcut. There is no `shortcut` object *type*, because to a reader of the
 catalogue a Lakehouse table shortcut is a table. What it is for is the object
-*role*, which is `shortcut`, and where it points is `_.Alias`.
+*role*, which is `shortcut`, and where it points is `_.Shortcut`.
 
 A schema shortcut is registered as the schema it presents and nothing inside it
 is. Those objects belong to the item the shortcut points at, they can change
