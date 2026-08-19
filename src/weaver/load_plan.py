@@ -12,6 +12,7 @@ from typing import Mapping, Sequence
 
 from .catalogue.state import Catalogue
 from .catalogue.tables import DEPENDENCY, INSTALLATION, SHORTCUT
+from .declaration.item_dependencies import SHORTCUTS_MODULE
 from .declaration.metadata import ObjectId
 from .declaration.model import (
     FILE_SHAPE,
@@ -394,12 +395,15 @@ def _is_python_module_reference(reference: str) -> bool:
 
     A leading dot is a relative import. Otherwise the tell is the separator: a
     module name cannot carry a dot, so a Python object module spells
-    ``Schema.Object`` as ``Schema__Object``.
+    ``Schema.Object`` as ``Schema__Object``. A shortcut import is named for the
+    module it comes from, because a schema shortcut carries no separator.
     """
 
     if not reference:
         return False
     if reference.startswith("."):
+        return True
+    if reference.startswith(f"{SHORTCUTS_MODULE}."):
         return True
     return _PYTHON_ID_SEPARATOR in reference.rsplit(".", 1)[-1]
 
@@ -420,6 +424,10 @@ def _python_module_identity(
     components = [part for part in reference.split(".") if part]
     if not components or components[0] == _LIB:
         return None
+    if components[0] == SHORTCUTS_MODULE and _PYTHON_ID_SEPARATOR not in components[-1]:
+        # A schema shortcut presents a namespace, so it is registered under the
+        # schema it establishes and names no object of its own.
+        return WeaverDocumentId(item, ObjectId(components[-1], components[-1]))
     parts = python_id_parts(components[-1])
     if len(parts) != 2 or not all(part.strip() for part in parts):
         return None
