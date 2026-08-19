@@ -414,6 +414,164 @@ def test_load_and_test_offer_the_lakehouse_among_their_targets(operation):
     assert session.scope(workspace).spark_home == "Sales"
 
 
+# --- a command's own configuration, inside the session's workspace -----------
+
+
+def _resolved(monkeypatch) -> list:
+    """Every workspace ``load`` resolved, in order.
+
+    Patched where the resolver is defined, which is where ``load`` reads it from
+    when it runs. Asserted through the real operation, so a command line that
+    never reached one cannot pass.
+    """
+
+    from weaver.operations import workspace as workspace_module
+
+    resolved: list = []
+    real = workspace_module.operation_workspace
+
+    def spy(*args, **kwargs):
+        answer = real(*args, **kwargs)
+        resolved.append(answer)
+        return answer
+
+    monkeypatch.setattr(workspace_module, "operation_workspace", spy)
+    return resolved
+
+
+@weaver_test()
+def test_a_commands_catalogue_reaches_the_operation(transport, monkeypatch):
+    """A command at the prompt is an ordinary Weaver command line.
+
+    ``load --catalogue`` names a catalogue inside the workspace the session is
+    open on, and the operation reads that catalogue. The Environment the session
+    was started with is still there, because the command chose neither.
+    """
+
+    resolved = _resolved(monkeypatch)
+    parser = build_parser()
+    workspace = _warehouse_only()
+
+    with ConsoleSession(workspace=workspace) as session:
+        _run(
+            session,
+            parser,
+            [
+                "load",
+                "Lakehouse/Play_LH",
+                "Warehouse/Play_WH",
+                "--catalogue",
+                "Warehouse/Play_Weaver",
+            ],
+        )
+
+        assert resolved, "the load never resolved a workspace"
+        assert resolved[0].catalogue == "Warehouse/Play_Weaver"
+        assert resolved[0].workspace == "My Workspace"
+        assert resolved[0].environment == "weaver"
+
+
+@weaver_test()
+def test_the_session_keeps_its_own_workspace_while_the_command_runs(
+    transport, monkeypatch
+):
+    """The Session holds one workspace for its life, and nothing borrows it.
+
+    Read during the command as well as after it, because a Session whose
+    workspace was swapped and put back would answer correctly afterwards.
+    """
+
+    parser = build_parser()
+    workspace = _warehouse_only()
+    seen: list = []
+
+    from weaver.operations import workspace as workspace_module
+
+    real = workspace_module.operation_workspace
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("session").workspace)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(workspace_module, "operation_workspace", spy)
+
+    with ConsoleSession(workspace=workspace) as session:
+        _run(
+            session,
+            parser,
+            ["load", "Lakehouse/Sales", "--catalogue", "Warehouse/Other"],
+        )
+
+        assert seen == [workspace], "the Session answered with another workspace"
+        assert session.workspace is workspace
+        assert session.workspace.catalogue == "Warehouse/Weaver"
+
+
+@weaver_test()
+def test_a_command_supplies_the_catalogue_a_session_was_opened_without(
+    transport, monkeypatch
+):
+    """A session opened on a workspace alone still runs a command that names one.
+
+    Without this the command reports that it needs a catalogue, having been
+    given one on the line.
+    """
+
+    resolved = _resolved(monkeypatch)
+    parser = build_parser()
+
+    with ConsoleSession(workspace=Workspace(workspace="My Workspace")) as session:
+        _run(
+            session,
+            parser,
+            ["load", "Warehouse/Play_WH", "--catalogue", "Warehouse/Play_Weaver"],
+        )
+
+        assert resolved, "the load never resolved a workspace"
+        assert resolved[0].catalogue == "Warehouse/Play_Weaver"
+
+
+@weaver_test()
+def test_a_command_naming_the_sessions_workspace_runs_in_it(transport, monkeypatch):
+    """Naming the workspace the session is open on says what is already true."""
+
+    resolved = _resolved(monkeypatch)
+    parser = build_parser()
+
+    with ConsoleSession(workspace=_warehouse_only()) as session:
+        _run(
+            session,
+            parser,
+            ["load", "Warehouse/Play_WH", "--workspace", "My Workspace"],
+        )
+
+        assert resolved, "the load never resolved a workspace"
+        assert resolved[0].workspace == "My Workspace"
+        assert resolved[0].catalogue == "Warehouse/Weaver"
+
+
+@weaver_test()
+def test_a_command_naming_another_workspace_is_refused(transport, monkeypatch):
+    """One Session is one Fabric workspace, so the other one has nowhere to run."""
+
+    from weaver.errors import CommandError
+
+    resolved = _resolved(monkeypatch)
+    parser = build_parser()
+
+    with ConsoleSession(workspace=_warehouse_only()) as session:
+        parsed = parser.parse_args(
+            ["load", "Warehouse/Play_WH", "--workspace", "Other"]
+        )
+        parsed.session = session
+
+        with pytest.raises(CommandError, match="Other"):
+            parsed.handler(parsed)
+
+        assert resolved == [], "the operation ran against another workspace"
+        assert session.workspace.workspace == "My Workspace"
+
+
 # --- the invariant that keeps it true ----------------------------------------
 
 

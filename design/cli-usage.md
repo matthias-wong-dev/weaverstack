@@ -108,11 +108,29 @@ nothing more: no pipes, no redirection, no `&&`, no variables.
 each command then names its own workspace, and the session keeps one set of
 resources per workspace it is asked about.
 
-**A workspace given at startup is inherited** by commands that name none, which
-is why the example above repeats no `--workspace`. Flags a command *does* give
-are applied on top, so `build --catalogue Warehouse/Other` overrides the control
-Lakehouse without restating the workspace. Naming a different `--workspace`
-addresses that one instead, with its own resources.
+**A workspace given at startup is the session's**, and stays the session's.
+Commands that name none inherit it, which is why the example above repeats no
+`--workspace`. A command is still an ordinary Weaver command line and gives its
+own configuration within that workspace, so `--catalogue`, `--environment`,
+targets and bindings are the command's:
+
+```text
+weaver session --workspace "Weaver Example" --environment weaver
+weaver> weaver load Lakehouse/Sales Warehouse/Reporting --catalogue Warehouse/Curated
+```
+
+That load reads `Warehouse/Curated`, in `Weaver Example`, with the Environment
+the session was started with. `--catalogue` names a Warehouse inside the
+workspace the session holds; it is not a way to reach another workspace.
+
+**One session is one Fabric workspace.** Naming the workspace the session is
+already open on is accepted, because it says what is already true. Naming a
+different one is refused:
+
+```text
+This session is open on workspace 'Weaver Example', so 'Reporting' cannot be
+reached from it. Open a session on 'Reporting' to run there.
+```
 
 Inheritance is only ever from what the session was started with. A default
 picked up from whichever command ran last would mean the next command silently

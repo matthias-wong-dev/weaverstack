@@ -553,25 +553,29 @@ def _desktop_store(workspace):
 def _resolve_workspace(args: argparse.Namespace):
     """The workspace this command line means.
 
-    Inside ``weaver session`` a command that names no workspace inherits the one
-    the session was started with, and flags it *does* give are applied on top —
-    so ``build --catalogue Other`` overrides the catalogue
-    without having to restate the workspace. A command naming its own
-    ``--workspace`` addresses that one instead, in its own scope.
+    Inside ``weaver session`` the Fabric workspace is the session's, and it stays
+    the session's. A command line is still an ordinary Weaver command line and
+    gives its own configuration within that workspace, so ``--catalogue`` and
+    ``--environment`` apply on top of it:
+
+    .. code-block:: text
+
+        weaver session --workspace "Weaver Example" --environment weaver
+        weaver> weaver load Lakehouse/Sales --catalogue Warehouse/Reporting
+
+    Naming the workspace the session is already open on says what is already
+    true. Naming another one is refused: one Session is one Fabric workspace.
 
     Inheritance is only ever from the session's *starting* workspace. A default
     accumulated from whichever command ran last would mean the next command
-    silently borrowed another workspace's Environment.
+    silently borrowing another workspace's Environment.
     """
 
     from weaver.config import resolve_workspace
 
     inherited = getattr(getattr(args, "session", None), "workspace", None)
-    if (
-        inherited is not None
-        and args.workspace is None
-        and args.workspace_config is None
-    ):
+    if inherited is not None:
+        _refuse_another_workspace(args, inherited)
         workspace = _with_command_overrides(inherited, args)
     else:
         workspace = resolve_workspace(
@@ -585,8 +589,37 @@ def _resolve_workspace(args: argparse.Namespace):
     return workspace
 
 
+def _refuse_another_workspace(args: argparse.Namespace, inherited) -> None:
+    """Refuse a command addressing a workspace other than the Session's own.
+
+    A Session holds one Fabric workspace for its whole life, so a command naming
+    a different one has nowhere to run. Refused here rather than resolved and
+    then quietly ignored.
+    """
+
+    from weaver.config import resolve_workspace
+    from weaver.errors import CommandError
+
+    if args.workspace is None and args.workspace_config is None:
+        return
+    named = resolve_workspace(
+        workspace=args.workspace, workspace_config=args.workspace_config
+    ).workspace
+    if named == inherited.workspace:
+        return
+    raise CommandError(
+        f"This session is open on workspace '{inherited.workspace}', so "
+        f"'{named}' cannot be reached from it. Open a session on '{named}' "
+        "to run there."
+    )
+
+
 def _with_command_overrides(workspace, args: argparse.Namespace):
-    """The session's workspace, with whatever this command line said on top."""
+    """The session's workspace, with whatever this command line said on top.
+
+    The workspace itself is never one of them. What a command may choose is
+    configuration within the workspace the session holds.
+    """
 
     from dataclasses import replace
 
@@ -596,6 +629,22 @@ def _with_command_overrides(workspace, args: argparse.Namespace):
     if getattr(args, "catalogue", None) is not None:
         overrides["catalogue"] = str(args.catalogue)
     return replace(workspace, **overrides) if overrides else workspace
+
+
+def _command_context(workspace) -> dict:
+    """What this command line settled on, for the operation to apply, as names.
+
+    Operations take names and a Session, and a borrowed Session resolves its own
+    workspace as the base. This is how a command's ``--catalogue`` and
+    ``--environment`` reach the operation, applied to the Session's workspace
+    there and changing nothing about the Session. Where this command opened the
+    Session, they are already what it carries.
+    """
+
+    return {
+        "catalogue": workspace.catalogue or None,
+        "environment": workspace.environment or None,
+    }
 
 
 def _session(args: argparse.Namespace):
@@ -823,6 +872,7 @@ def _run_load(
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
             session=opened,
+            **_command_context(workspace),
         )
 
 
@@ -910,6 +960,7 @@ def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
             file=file,
             dry_run=dry_run,
             session=opened,
+            **_command_context(workspace),
         )
 
 
@@ -964,6 +1015,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
                 unbind_from=args.unbind_from,
                 dry_run=True,
                 session=opened,
+                **_command_context(workspace),
             )
         print(f"wipe on {workspace.workspace}\n")
         for report in planned.reports:
@@ -1001,6 +1053,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
             args.targets,
             unbind_from=args.unbind_from,
             session=opened,
+            **_command_context(workspace),
         )
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
@@ -1028,6 +1081,7 @@ def _build_once(args: argparse.Namespace) -> int:
             bind=args.item_bindings,
             bundle=args.bundle,
             session=opened,
+            **_command_context(workspace),
         )
     payload = result.to_mapping()
     if args.json:

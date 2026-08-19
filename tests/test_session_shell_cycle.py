@@ -566,11 +566,33 @@ def test_a_command_may_override_the_control_lakehouse_it_inherits():
 
 
 @weaver_test()
-def test_a_command_naming_its_own_workspace_does_not_inherit():
-    with ConsoleSession(workspace=_workspace("First_Workspace")) as session:
-        resolved = _resolve_workspace(_args(session, workspace="Second_Workspace"))
+def test_a_command_naming_the_sessions_own_workspace_is_accepted():
+    """Saying what is already true, so the session's workspace is the base."""
 
-        assert resolved.workspace == "Second_Workspace"
+    with ConsoleSession(workspace=_workspace(catalogue="Warehouse/Weaver")) as session:
+        resolved = _resolve_workspace(
+            _args(session, workspace="Demo", catalogue="Warehouse/Other")
+        )
+
+        assert resolved.workspace == "Demo"
+        assert resolved.catalogue == "Warehouse/Other"
+
+
+@weaver_test()
+def test_a_command_naming_another_workspace_is_refused():
+    """One Session is one Fabric workspace, and it stays the one it opened on.
+
+    Refused rather than resolved and then ignored, which is what a command that
+    addressed another workspace through a borrowed Session would be.
+    """
+
+    from weaver.errors import CommandError
+
+    with ConsoleSession(workspace=_workspace("First_Workspace")) as session:
+        with pytest.raises(CommandError, match="Second_Workspace"):
+            _resolve_workspace(_args(session, workspace="Second_Workspace"))
+
+        assert session.workspace.workspace == "First_Workspace"
 
 
 @weaver_test()
