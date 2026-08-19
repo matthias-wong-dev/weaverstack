@@ -40,7 +40,7 @@ def discovery_estate(
     session_catalogue_sql,
     tmp_path_factory,
 ):
-    """The generated bundle and a producer table for the alias to point at.
+    """The generated bundle and a producer table for the shortcut to point at.
 
     Arrangement only: the repository, the bundle and the producer's table are
     built over raw harness capabilities and plain Spark, none of it imports
@@ -72,7 +72,7 @@ def discovery_estate(
         catalogue=FixtureCatalogue.from_repository(
             repository, item="Warehouse/_weaver"
         ),
-        name="aliasdiscovery",
+        name="shortcutdiscovery",
         staging=producer.name,
         catalogue_sql=session_catalogue_sql,
     )
@@ -135,7 +135,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
     assert result.status == "succeeded", result.error_message
 
     # The wait ran, and reported itself. Without it the action would return as
-    # soon as the REST call did, and the next statement to read the alias would
+    # soon as the REST call did, and the next statement to read the shortcut would
     # fail with "neither a view nor a table".
     details = result.details or {}
     assert "addressable_after_seconds" in details, (

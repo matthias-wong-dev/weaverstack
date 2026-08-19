@@ -736,7 +736,7 @@ class WeaverRepository:
     #: Weaver document declares, and the load layer deploys it — so its content
     #: has to reach signature derivation and the bundle without either of them
     #: reopening the repository. Files nothing deploys, such as
-    #: ``external.yml``, are listed in :attr:`support_files` and not held here.
+    #: ``shortcuts.yml``, are listed in :attr:`support_files` and not held here.
     support_file_contents: Mapping[str, bytes] = field(default_factory=dict)
     signature: str = ""
     #: The logical pairs the ``logical`` shortcuts stand for, which resolution,

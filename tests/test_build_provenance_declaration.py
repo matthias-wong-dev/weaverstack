@@ -79,7 +79,7 @@ def test_an_action_carries_the_authored_file_it_came_from():
 
 @weaver_test()
 def test_an_action_with_no_authored_source_says_so():
-    """An alias, an endpoint refresh, a prune, a catalogue publication: None is
+    """A shortcut, an endpoint refresh, a prune, a catalogue publication: None is
     the truthful answer, not the nearest-looking file."""
 
     assert _action(source_path=None).source_path is None
@@ -205,8 +205,8 @@ def test_a_failure_with_no_authored_source_still_names_what_failed():
     from weaver.operations.build import BuildFailure
 
     described = BuildFailure(
-        action_id="alias-Lakehouse-Reporting-DWG.Customer",
-        error_type="AliasError",
+        action_id="shortcut-Lakehouse-Reporting-DWG.Customer",
+        error_type="ShortcutError",
         message="the shortcut did not become addressable",
         artefact="Lakehouse/Reporting/DWG.Customer",
     ).describe()

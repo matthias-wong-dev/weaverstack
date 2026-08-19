@@ -245,8 +245,8 @@ class Sales__Customer(Table):
 
 
 @weaver_test()
-def test_load_dag_crosses_items_through_aliases(estate):
-    """The Warehouse consumer's upstream is the Lakehouse table, not the alias."""
+def test_load_dag_crosses_items_through_shortcutes(estate):
+    """The Warehouse consumer's upstream is the Lakehouse table, not the shortcut."""
 
     dag = load_dag(estate, targets=(RAW, REPORTING))
     consumer = "load:Warehouse/Reporting_WH/Sales.Summary"
@@ -258,7 +258,7 @@ def test_load_dag_crosses_items_through_aliases(estate):
 
 
 @weaver_test()
-def test_load_dag_inserts_endpoint_refresh_before_alias_consumers(estate):
+def test_load_dag_inserts_endpoint_refresh_before_shortcut_consumers(estate):
     dag = load_dag(estate, targets=(RAW, REPORTING))
 
     assert (

@@ -84,7 +84,7 @@ def _executors():
             "spark_table",
             "tsql",
             "folder",
-            "alias",
+            "shortcut",
             "tsql_batch",
             "sql_endpoint_refresh",
             "load_file",

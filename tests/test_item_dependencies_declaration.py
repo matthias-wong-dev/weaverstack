@@ -107,7 +107,7 @@ def test_lib_import_creates_no_object_edge(tmp_path):
 
 
 @weaver_test()
-def test_two_part_sql_reference_resolves_through_cross_item_alias(tmp_path):
+def test_two_part_sql_reference_resolves_through_cross_item_shortcut(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     edge = _edge(
         repository,
@@ -122,35 +122,35 @@ def test_two_part_sql_reference_resolves_through_cross_item_alias(tmp_path):
 
 
 @weaver_test()
-def test_the_alias_destination_is_its_own_node_between_source_and_consumer(tmp_path):
+def test_the_shortcut_destination_is_its_own_node_between_source_and_consumer(tmp_path):
     """The graph is three hops where the published edge is two.
 
-    ``dependency_edges`` says where the data comes from, so an alias edge names
+    ``dependency_edges`` says where the data comes from, so a shortcut edge names
     the source document. The graph says what must be built and in what order, and
-    there the alias destination is a thing in its own right — so impact reaches a
+    there the shortcut destination is a thing in its own right — so impact reaches a
     consumer *through* it rather than jumping the boundary.
     """
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     graph = repository.dependency_graph
     source = "Lakehouse/Curated/Sales.Customer"
-    alias = "Warehouse/Reporting/Sales.PortableCustomer"
+    shortcut = "Warehouse/Reporting/Sales.PortableCustomer"
     consumer = "Warehouse/Reporting/Sales.Customer"
 
-    assert alias in graph.nodes
+    assert shortcut in graph.nodes
     pairs = {(edge.upstream, edge.downstream) for edge in graph.edges}
-    assert (source, alias) in pairs
-    assert (alias, consumer) in pairs
-    # The two-hop shortcut must *not* also be there, or the alias would be
+    assert (source, shortcut) in pairs
+    assert (shortcut, consumer) in pairs
+    # The two-hop shortcut must *not* also be there, or the shortcut would be
     # bypassable and a build could order the consumer before it.
     assert (source, consumer) not in pairs
 
     assert consumer in graph.descendants(source)
-    assert graph.descendants(alias) == (consumer,)
+    assert graph.descendants(shortcut) == (consumer,)
 
 
 @weaver_test()
-def test_an_alias_no_document_consumes_still_waits_for_its_source(tmp_path):
+def test_an_shortcut_no_document_consumes_still_waits_for_its_source(tmp_path):
     """It has to be materialised after the thing it points at exists, whether or
     not anything reads it yet."""
 
@@ -162,34 +162,34 @@ def test_an_alias_no_document_consumes_still_waits_for_its_source(tmp_path):
     )
     graph = parse_item_repository(Location(str(root))).dependency_graph
 
-    alias = "Warehouse/Audit/Sales.Unread"
-    assert alias in graph.nodes
-    assert ("Lakehouse/Curated/Sales.Customer", alias) in {
+    shortcut = "Warehouse/Audit/Sales.Unread"
+    assert shortcut in graph.nodes
+    assert ("Lakehouse/Curated/Sales.Customer", shortcut) in {
         (edge.upstream, edge.downstream) for edge in graph.edges
     }
 
 
 @weaver_test()
-def test_published_dependency_edges_ignore_the_alias_node(tmp_path):
+def test_published_dependency_edges_ignore_the_shortcut_node(tmp_path):
     """The graph gained a hop; the catalogue's dependency rows did not.
 
-    Guards the decoupling directly: no edge may name an alias destination as a
+    Guards the decoupling directly: no edge may name a shortcut destination as a
     producer, and none may become within-item by acquiring one.
     """
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
-    destinations = {alias.destination for alias in repository.logical_shortcuts}
+    destinations = {shortcut.destination for shortcut in repository.logical_shortcuts}
 
     assert destinations
     assert all(
         edge.producer not in destinations for edge in repository.dependency_edges
     )
 
-    alias_edge = _edge(
+    shortcut_edge = _edge(
         repository, "Warehouse/Reporting/Sales.Customer", "Sales.PortableCustomer"
     )
-    assert str(alias_edge.producer) == "Lakehouse/Curated/Sales.Customer"
-    assert not alias_edge.is_within_item
+    assert str(shortcut_edge.producer) == "Lakehouse/Curated/Sales.Customer"
+    assert not shortcut_edge.is_within_item
 
 
 @weaver_test()

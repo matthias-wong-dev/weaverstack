@@ -1,7 +1,7 @@
 """
 Table ID: DWG.Customer
 
-Description: One row per customer. The producer side of the cross-item alias.
+Description: One row per customer. The producer side of the cross-item shortcut.
 
 Lineage: $Files/DWG.Seed
 

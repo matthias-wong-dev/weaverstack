@@ -399,7 +399,7 @@ def _lakehouse_artefacts(
         parts = relative.split("/")
         # Everything beneath ``lib/``, whatever it is. The tree is reproduced
         # verbatim, so a helper module's data file travels with the module that
-        # reads it. A declaration surface such as ``external.yml`` beside it
+        # reads it. A declaration surface such as ``shortcuts.yml`` beside it
         # is not runtime source and stays behind.
         if len(parts) < 4 or parts[2] != "lib":
             continue

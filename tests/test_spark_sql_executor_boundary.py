@@ -192,7 +192,7 @@ def test_every_statement_in_a_batch_gets_the_same_epoch():
     """The reason the build_datetime is an installation value rather than a clock call.
 
     One build publishes Registry rows for several items in several statements.
-    Were each to read the clock, an alias and the source it points at could be
+    Were each to read the clock, a shortcut and the source it points at could be
     dated milliseconds apart and then order against each other on the next build
     — which is exactly the false staleness the build_datetime exists to prevent.
     """

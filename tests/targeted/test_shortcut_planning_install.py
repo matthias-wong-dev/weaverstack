@@ -1,4 +1,4 @@
-"""Shortcuts and external views: every decision, in pure Python.
+"""Shortcuts: every decision, in pure Python.
 
 A shortcut is the one construct that reaches outside its item, and almost
 everything about it is a *decision*: is it planned, is it left alone, does its
@@ -8,8 +8,8 @@ installer. None of that needs a workspace. It is computed from the repository an
 the catalogue, both of which can be built directly.
 
 What genuinely needs Fabric is narrower, and it is the *installation*: a OneLake
-shortcut is an API call, Fabric discovers one asynchronously, and an external view
-is a view over a SQL endpoint. Those live in `tests/fabric`.
+shortcut is an API call, Fabric discovers one asynchronously, and a Warehouse
+shortcut materialises as a view over a SQL endpoint. Those live in `tests/fabric`.
 
 The split matters because the expensive suite used to prove the decisions by
 building three estates. A decision proven here costs milliseconds and says which
@@ -67,7 +67,7 @@ def plan_shortcuts(repository, *, selected=(SHORTCUT,)):
     )
 
 
-# --- planning the alias itself ------------------------------------------------
+# --- planning the shortcut itself ------------------------------------------------
 
 
 @weaver_test()
@@ -81,9 +81,9 @@ def test_a_selected_shortcut_is_planned_as_one_action(estate):
 
 @weaver_test()
 def test_an_unselected_shortcut_is_left_alone(estate):
-    """Incremental selection applies to aliases exactly as to documents.
+    """Incremental selection applies to shortcuts exactly as to documents.
 
-    An alias absent from the selection is current — its declaration is unchanged,
+    A shortcut absent from the selection is current — its declaration is unchanged,
     its destination is there, and its source has not moved — so replacing it
     would destroy a working pointer for nothing.
     """
@@ -97,8 +97,8 @@ def test_an_unselected_shortcut_is_left_alone(estate):
 def test_a_retained_shortcut_still_reports_its_schema(estate):
     """The subtle one, and the reason schemas are reported separately.
 
-    An alias that is *not* being replaced still lives in a namespace the item
-    must have. A build that created only the schemas its rebuilt aliases needed
+    A shortcut that is *not* being replaced still lives in a namespace the item
+    must have. A build that created only the schemas its rebuilt shortcuts needed
     would leave the retained ones homeless.
     """
 
@@ -157,7 +157,7 @@ def test_an_unmaterialisable_shortcut_is_withheld_from_certification(estate):
 
 @weaver_test()
 def test_the_consumer_builds_its_view_after_the_shortcut_it_reads(estate):
-    """Inside the consumer, the alias must exist before the view over it runs."""
+    """Inside the consumer, the shortcut must exist before the view over it runs."""
 
     by_item = targets()
     item = item_id(CONSUMER)
@@ -187,7 +187,7 @@ def test_the_consumer_builds_its_view_after_the_shortcut_it_reads(estate):
 
 @weaver_test()
 def test_the_consumer_gets_its_own_endpoint_refresh(estate):
-    """An item that mutated Delta is closed by a refresh, alias or not."""
+    """An item that mutated Delta is closed by a refresh, shortcut or not."""
 
     by_item = targets()
     item = item_id(CONSUMER)
@@ -214,10 +214,10 @@ def test_the_consumer_gets_its_own_endpoint_refresh(estate):
 def certified(repository, *names, build_datetime=None):
     """The Registry as a successful build of these nodes would have left it.
 
-    `declared_signatures` is used for aliases too, and deliberately: an alias
+    `declared_signatures` is used for shortcuts too, and deliberately: a shortcut
     destination is signed by *the pair it declares* — this destination, that
-    source — not by any file, because that pair is the whole of what an alias is.
-    A hand-written signature here would make the alias look changed and drag its
+    source — not by any file, because that pair is the whole of what a shortcut is.
+    A hand-written signature here would make the shortcut look changed and drag its
     consumers into the build, which is how the first version of this file was
     wrong.
     """
@@ -238,7 +238,7 @@ def test_a_shortcut_is_stale_when_its_target_was_published_later(estate):
     A producer rebuilt by some *earlier* build is, to this one, entirely
     unchanged — nothing in the repository records that it moved. The only
     surviving evidence is that its Registry row carries a later build_datetime than the
-    alias over it.
+    shortcut over it.
     """
 
     registered = {
@@ -305,7 +305,7 @@ def test_an_unbound_consumer_keeps_its_stale_shortcut(estate):
 
 @weaver_test()
 def test_a_second_build_over_an_unchanged_estate_plans_no_shortcut_action(estate):
-    """An unchanged alias over an unchanged source must not be replaced.
+    """An unchanged shortcut over an unchanged source must not be replaced.
 
     This is the decision `test_cross_item_shortcut_primitive.py` spent a full
     generate-and-install to observe. It is made from signatures and build datetimes before
@@ -328,7 +328,7 @@ def test_a_second_build_over_an_unchanged_estate_plans_no_shortcut_action(estate
 
 @weaver_test()
 def test_a_changed_target_reaches_the_shortcut_and_its_consumer(estate):
-    """The graph carries a producer's change across the alias in one walk."""
+    """The graph carries a producer's change across the shortcut in one walk."""
 
     everything = {document_id(SOURCE), document_id(VIEW), document_id(SHORTCUT)}
     registered = {

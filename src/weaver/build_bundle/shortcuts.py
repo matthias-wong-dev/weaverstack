@@ -1,4 +1,4 @@
-"""Planning each declared shortcut and external view as one physical action.
+"""Planning each declared shortcut as one physical action.
 
 A shortcut is the consuming item's own name for something else: another Weaver
 item's document, or a physical Fabric item that Weaver does not manage. It is
@@ -125,7 +125,7 @@ def plan_item_shortcuts(
     selected: Iterable[WeaverDocumentId],
     sources: Mapping[str, ResolvedShortcutSource] | None = None,
 ) -> ItemShortcutPlan:
-    """Plan the shortcuts and external views this build selected.
+    """Plan the shortcuts this build selected.
 
     ``selected`` is what incremental selection chose to rebuild. A declaration
     absent from it is current: unchanged, its destination there, and its source
@@ -356,7 +356,7 @@ def _shortcut_action(
 
 
 def _view_statement(declaration, source_target, logical_sources) -> str:
-    """An external view, as the one statement that makes it exist.
+    """A Warehouse shortcut, as the one statement that materialises it.
 
     The source is named by its three-part spelling, which is how a Fabric
     Warehouse reaches another item in the same workspace, and is frozen here for

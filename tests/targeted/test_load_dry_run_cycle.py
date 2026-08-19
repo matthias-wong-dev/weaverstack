@@ -2,7 +2,7 @@
 
 A dry run is the composition test the load layer could not otherwise have: it
 exercises the *real* planning and resolution seams end to end — catalogue read,
-reverse binding, dependency resolution, alias resolution, physical DAG,
+reverse binding, dependency resolution, shortcut resolution, physical DAG,
 endpoint-refresh insertion, dispatch-location resolution, deterministic order —
 and stops at the boundary where a target would be touched.
 

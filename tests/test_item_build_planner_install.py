@@ -37,8 +37,8 @@ from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
 
-class _AliasInventory:
-    """A Warehouse already holding an alias view and one genuine orphan."""
+class _ShortcutInventory:
+    """A Warehouse already holding a shortcut view and one genuine orphan."""
 
     def query(self, statement):
         if "from sys.objects" in statement:
@@ -191,11 +191,11 @@ def test_at_least_one_binding_is_required(tmp_path):
 
 @weaver_test()
 def test_a_shortcut_to_an_unbound_target_item_is_omitted_with_its_reason(tmp_path):
-    """An alias needs a bound source: there is otherwise nothing to point at.
+    """A shortcut needs a bound source: there is otherwise nothing to point at.
 
     Bindings are deliberately sparse, so this is an omission rather than an
     error — and a stated one, because the planner is the only thing allowed to
-    decide an alias has no physical form.
+    decide a shortcut has no physical form.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
@@ -337,7 +337,7 @@ def test_a_shortcut_is_materialised_before_the_documents_that_use_it(tmp_path):
         action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
     }
     # The source item produces the table, its endpoint catches up, and only then
-    # does the consuming item's alias — and the document reading it — exist.
+    # does the consuming item's shortcut — and the document reading it — exist.
     assert (
         at["object-Lakehouse--Curated--Sales.Customer"]
         < at["refresh-sql-endpoint-Lakehouse--Curated"]
@@ -370,7 +370,7 @@ def test_an_items_schemas_are_created_before_its_shortcuts(tmp_path):
 
 
 @weaver_test()
-def test_an_alias_destination_is_not_pruned_as_an_orphan(tmp_path):
+def test_an_shortcut_destination_is_not_pruned_as_an_orphan(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     item = WeaverItemId.parse("Warehouse/Reporting")
     bundle = generate_item_build_bundle(
@@ -383,7 +383,7 @@ def test_an_alias_destination_is_not_pruned_as_an_orphan(tmp_path):
         ),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
-        sql_by_item={item: _AliasInventory()},
+        sql_by_item={item: _ShortcutInventory()},
     )
 
     pruned = {
@@ -650,7 +650,7 @@ def test_sequence_numbers_describe_the_assembled_order_and_nothing_else(tmp_path
 def test_a_consumer_items_whole_group_follows_its_producers(tmp_path):
     """The invariant multi-item build rests on, stated as barriers.
 
-    ``Warehouse/Reporting`` reaches into ``Lakehouse/Curated`` through an alias,
+    ``Warehouse/Reporting`` reaches into ``Lakehouse/Curated`` through a shortcut,
     so nothing of Reporting's may share a barrier with — let alone precede — any
     of Curated's.
     """

@@ -276,9 +276,9 @@ def fabric_target_lakehouse(fabric_workspace_item, fabric_client):
     return _ensure_lakehouse(fabric_client, fabric_workspace_item, "target")
 
 
-#: The roles a cross-item alias run needs its own Lakehouses for.
+#: The roles a cross-item shortcut run needs its own Lakehouses for.
 #:
-#: A producer and a consumer, because a cross-item alias is the one thing a single
+#: A producer and a consumer, because a cross-item shortcut is the one thing a single
 #: destination cannot express — there has to be something to point across to. And a
 #: *second* producer for the Warehouse case, because sharing one would leave that
 #: estate building into a Lakehouse the Lakehouse estate had already built: the
@@ -290,9 +290,9 @@ SHORTCUT_LAKEHOUSE_ROLES = ("producer", "consumer", "warehouse_producer")
 
 @pytest.fixture(scope="session")
 def fabric_shortcut_lakehouses(fabric_workspace_item, fabric_client):
-    """The fixed Lakehouses a cross-item alias run needs, by role.
+    """The fixed Lakehouses a cross-item shortcut run needs, by role.
 
-    A producer and a consumer, because a cross-item alias is the one thing a
+    A producer and a consumer, because a cross-item shortcut is the one thing a
     single destination cannot express — there has to be something to point across
     to. And a *second* producer for the Warehouse case, because sharing one would
     leave that estate building into a Lakehouse the Lakehouse estate had already
@@ -731,7 +731,7 @@ def fabric_empty_lakehouse(
     and residue is not inert. A producer whose table already matches leaves
     incremental selection with nothing to do — correctly — so a test asserting
     *build order* then finds no build action in the plan at all. That is not a
-    hypothetical: it is exactly how the Warehouse alias tests failed when two
+    hypothetical: it is exactly how the Warehouse shortcut tests failed when two
     estates shared a producer.
 
     So ask for this wherever freshness is the premise, and say so in the test.
@@ -1775,7 +1775,7 @@ def fabric_mixed_estate(request, weaver_repo_fixture):
 
     The one arrangement neither single-target context can express, and the one
     the physical load graph most needs: a Delta table published into a Warehouse
-    through an alias is read across a SQL analytics endpoint, and that boundary
+    through a shortcut is read across a SQL analytics endpoint, and that boundary
     is where the refresh barrier lives. Nothing with one physical side has such a
     boundary to cross.
 

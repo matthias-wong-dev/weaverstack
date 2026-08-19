@@ -324,7 +324,7 @@ def test_the_deployed_tree_carries_every_lib_file_not_only_python(estate):
 
 
 @weaver_test()
-def test_an_alias_declaration_is_not_runtime_source(estate):
+def test_an_shortcut_declaration_is_not_runtime_source(estate):
     """It declares where a name points; nothing imports it at load time."""
 
     deployed = {

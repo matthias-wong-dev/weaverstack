@@ -36,7 +36,7 @@ def keep(
     """The keep-set, with the document-declared names defaulting to all of them.
 
     ``declared_objects`` is stated only where the difference is the subject: an
-    alias destination is in ``tables`` or ``views`` and *not* here, because no
+    shortcut destination is in ``tables`` or ``views`` and *not* here, because no
     managed drop can remove one.
     """
 
@@ -231,12 +231,12 @@ def test_a_warehouse_prune_is_t_sql():
 
 
 @weaver_test()
-def test_an_alias_destination_installed_as_the_other_kind_is_still_dropped():
+def test_an_shortcut_destination_installed_as_the_other_kind_is_still_dropped():
     """The limit of the kind-change rule, and why it names *documents*.
 
-    A Warehouse alias is materialised by `create or alter view`, which cannot
-    replace a table, and no managed drop covers an alias. So a table standing
-    where the alias belongs is removed here or the install fails on it.
+    A Warehouse shortcut is materialised by `create or alter view`, which cannot
+    replace a table, and no managed drop covers a shortcut. So a table standing
+    where the shortcut belongs is removed here or the install fails on it.
     """
 
     actions, _ = prune(

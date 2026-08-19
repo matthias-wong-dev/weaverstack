@@ -482,7 +482,7 @@ def test_external_references_are_item_local_and_one_source_may_repeat(tmp_path):
     assert (
         repository.logical_shortcuts[0].source == repository.logical_shortcuts[1].source
     )
-    assert {str(alias.destination) for alias in repository.logical_shortcuts} == {
+    assert {str(shortcut.destination) for shortcut in repository.logical_shortcuts} == {
         "Warehouse/Reporting/Sales.PortableCustomer",
         "Warehouse/Audit/Sales.PortableCustomer",
     }
@@ -610,7 +610,7 @@ def test_canonical_foreign_key_target_is_validated(tmp_path):
 
 
 @weaver_test()
-def test_document_local_alias_headers_are_rejected(tmp_path):
+def test_document_local_shortcut_headers_are_rejected(tmp_path):
     root = _estate(tmp_path)
     source = _table("Sales.Customer").replace(
         "Lineage: A source system.",

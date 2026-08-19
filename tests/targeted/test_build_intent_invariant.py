@@ -108,7 +108,7 @@ def actions_on(plan, target_id: str):
 def test_every_action_that_touches_a_target_is_declared(repository, tmp_path, item):
     """The guard that makes the summary worth writing.
 
-    Not a strict pairing: one alias action stands for every alias an item
+    Not a strict pairing: one shortcut action stands for every shortcut an item
     consumes, so it declares several changes. What must hold is that no action
     changes a target without saying so.
     """

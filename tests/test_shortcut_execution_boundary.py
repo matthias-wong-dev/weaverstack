@@ -1,4 +1,4 @@
-"""Materialising an alias, and closing an item with an endpoint refresh."""
+"""Materialising a shortcut, and closing an item with an endpoint refresh."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ def _action() -> InstallAction:
         id="shortcuts-Lakehouse--Curated",
         kind=CREATE_SHORTCUT,
         resource_node_id=None,
-        executor="alias",
+        executor="shortcut",
         payload="shortcuts-Lakehouse--Curated.shortcut.json",
         payload_sha256="0" * 64,
     )
@@ -62,7 +62,7 @@ def _action() -> InstallAction:
 def _local_context(tmp_path, *, resolver=None, store=None):
 
     # With a Spark destination, as a real Lakehouse target resolves to. Without
-    # one an alias in it cannot even be *named*, which used to go unnoticed
+    # one a shortcut in it cannot even be *named*, which used to go unnoticed
     # because the discovery wait was skipped whenever there was no Spark session.
     destination = replace(
         _target(DESTINATION_TARGET_ID, "Curated_Dev"),
@@ -85,7 +85,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
             local_resolver.files_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
         )
     return InstallationContext(
-        # A host that can ask Spark and finds the alias readable at once. The
+        # A host that can ask Spark and finds the shortcut readable at once. The
         # Installer supplies this on every host, so a context without it is one
         # nobody would build in production — and the executor says so rather
         # than skipping the wait.
@@ -190,7 +190,7 @@ class _LateSpark:
     nor a table.
 
     Doubled as the *capability* the executor asks through rather than as a Spark
-    session, because that is now the seam: the alias executor stays on whichever
+    session, because that is now the seam: the shortcut executor stays on whichever
     host is installing and only the question crosses. A double shaped like a
     session would be testing an arrangement the product no longer has.
     """
@@ -304,7 +304,7 @@ class _NoTransportStore(FilesystemStore):
 
 @weaver_test()
 def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
-    """An alias is a OneLake shortcut, so a host that cannot make one cannot
+    """A shortcut is a OneLake shortcut, so a host that cannot make one cannot
     materialise it — and says which action it could not perform."""
 
     class _WithoutShortcuts:
@@ -409,7 +409,7 @@ def test_the_wait_asks_spark_rather_than_holding_one(tmp_path):
     """A desktop has no Spark session and must still wait for discovery.
 
     The guard was once ``context.spark is not None``, so a desktop install
-    skipped the wait and the next statement to read the alias failed with
+    skipped the wait and the next statement to read the shortcut failed with
     "neither a view nor a table". The context carries no session at all now.
     """
 

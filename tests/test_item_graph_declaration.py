@@ -29,8 +29,8 @@ def test_every_item_is_placed_in_exactly_one_layer(tmp_path):
 
 
 @weaver_test()
-def test_an_alias_puts_its_source_item_in_an_earlier_layer(tmp_path):
-    """``Warehouse/Reporting`` aliases ``Lakehouse/Curated``, so it comes after it."""
+def test_an_shortcut_puts_its_source_item_in_an_earlier_layer(tmp_path):
+    """``Warehouse/Reporting`` shortcuts ``Lakehouse/Curated``, so it comes after it."""
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     layer_of = {
@@ -44,7 +44,7 @@ def test_an_alias_puts_its_source_item_in_an_earlier_layer(tmp_path):
 
 @weaver_test()
 def test_an_unused_shortcut_still_orders_its_two_items(tmp_path):
-    """The alias itself has to be materialised after its source exists.
+    """The shortcut itself has to be materialised after its source exists.
 
     Nothing consumes ``Sales.Landed`` here, so no *document* edge exists — but the
     shortcut or view standing for it is still built in ``Curated`` over a table
@@ -78,7 +78,7 @@ def test_independent_items_share_one_layer(tmp_path):
 
 @weaver_test()
 def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
-    """Two items that alias each other's *different* objects.
+    """Two items that shortcut each other's *different* objects.
 
     The document graph stays acyclic — ``Curated.Customer`` feeds
     ``Reporting.Customer``, and ``Reporting.Audit`` feeds ``Curated.Summary`` —

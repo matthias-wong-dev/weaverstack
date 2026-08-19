@@ -18,6 +18,7 @@ from .dependencies import PythonImport
 from .graph import Graph
 from .item_dependencies import resolve_item_dependencies
 from .metadata import (
+    ALIAS_KEYS,
     ASSUMPTION,
     DELTA_TARGET,
     FOLDER_TARGET,
@@ -187,12 +188,13 @@ def parse_item_repository(
                 f"{surface} belongs to the item that declares it. Put it in "
                 f"<ItemType>/<ItemName>/{surface}."
             )
-    retired = ("shortcut.yml", "external.yml")
-    for name in retired:
-        if any(relative.rsplit("/", 1)[-1] == name for relative, _ in entries):
+    # Named by their exact retired spelling, so a repository still carrying one
+    # is told what it has rather than what it should have had.
+    for retired in ("alias.yml", "external.yml"):
+        if any(relative.rsplit("/", 1)[-1] == retired for relative, _ in entries):
             raise DiscoveryError(
-                f"{name} has been replaced. A Lakehouse declares its shortcuts "
-                f"in {LAKEHOUSE_FILE}, and a Warehouse in {WAREHOUSE_FILE}."
+                f"{retired} has been replaced by shortcuts. A Lakehouse declares "
+                f"them in {LAKEHOUSE_FILE}, and a Warehouse in {WAREHOUSE_FILE}."
             )
 
     invalid_roots = sorted(
@@ -351,10 +353,11 @@ def parse_item_repository(
             item.item_type,
         )
         if source.warehouse_alias is not None or source.lakehouse_alias is not None:
+            retired = " and ".join(sorted(ALIAS_KEYS))
             raise DiscoveryError(
-                f"{relative}: document-local Warehouse shortcut/Lakehouse shortcut "
-                f"headers have been replaced. Declare shortcuts in "
-                f"{LAKEHOUSE_FILE} or {WAREHOUSE_FILE}."
+                f"{relative}: the document-local {retired} headers have been "
+                f"replaced by shortcuts. Declare them in {LAKEHOUSE_FILE} for a "
+                f"Lakehouse item, or {WAREHOUSE_FILE} for a Warehouse one."
             )
         if item.item_type == LAKEHOUSE:
             expected = FOLDER_TARGET if is_files else DELTA_TARGET
@@ -663,13 +666,13 @@ def _python_imports(module: ast.Module) -> tuple[PythonImport, ...]:
                 PythonImport(
                     module=node.module,
                     level=node.level,
-                    names=tuple(shortcut.name for shortcut in node.names),
+                    names=tuple(imported.name for imported in node.names),
                 )
             )
         elif isinstance(node, ast.Import):
             imports.extend(
-                PythonImport(module=shortcut.name, names=(shortcut.name,))
-                for shortcut in node.names
+                PythonImport(module=imported.name, names=(imported.name,))
+                for imported in node.names
             )
     return tuple(imports)
 
@@ -685,7 +688,7 @@ def _item_signature(
 ) -> str:
     """Certify exactly one logical item's authored and generated inputs.
 
-    An item's ``shortcuts.py`` or ``external.yml`` sits under its own prefix and
+    An item's ``shortcuts.py`` or ``shortcuts.yml`` sits under its own prefix and
     is certified with its other support files. The producer's content does not
     participate: a logical dependency does not make an independently installed
     producer part of the consumer's source item.

@@ -56,7 +56,7 @@ def test_stages_are_numbered_consecutively_from_one():
 
 @weaver_test()
 def test_an_empty_stage_takes_no_number_and_leaves_no_gap():
-    empty = PlannedStage(phase=SHORTCUT, description="nothing to alias", batches=())
+    empty = PlannedStage(phase=SHORTCUT, description="nothing to shortcut", batches=())
 
     sequences, _payloads, _changes = enumerate_stages(
         [_stage(PRUNE), empty, _stage(BUILD)]

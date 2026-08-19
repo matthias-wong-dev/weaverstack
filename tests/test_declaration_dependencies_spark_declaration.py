@@ -332,7 +332,7 @@ def test_a_realistic_spark_file_extracts_exactly_its_relations():
 
 @weaver_test()
 def test_the_realistic_file_invents_nothing():
-    """No temp views, no CTE, no alias, no path, nothing from comments or strings."""
+    """No temp views, no CTE, no shortcut, no path, nothing from comments or strings."""
     found = refs(REALISTIC)
     for invented in (
         "raw_orders",

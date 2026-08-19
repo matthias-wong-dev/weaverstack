@@ -1,7 +1,7 @@
 /*
 View ID: DWG.CustomerName
 
-Description: Customer names, read through this item's own alias.
+Description: Customer names, read through this item's own shortcut.
 
 Lineage: $DWG.PortableCustomer
 

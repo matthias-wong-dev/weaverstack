@@ -64,7 +64,7 @@ Lakehouse/Raw/DWG.Customer.sql          Spark SQL
 Warehouse/Reporting/DWG.Customer.sql    T-SQL
 ```
 
-## Shortcuts and external references
+## Shortcuts
 
 An item reaches outside itself by declaring what it wants to see. A Lakehouse
 declares its shortcuts in `shortcuts.py`, a Warehouse in `shortcuts.yml`. Both

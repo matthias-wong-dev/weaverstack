@@ -181,7 +181,7 @@ def test_shortcut_rows_reproduce_what_was_declared(tmp_path):
 def test_a_shortcut_destination_is_registered_as_the_object_it_actually_is(tmp_path):
     """No ``shortcut`` *type*. To every reader of the catalogue an external
     reference in a Warehouse is a view, and that is what it is recorded as. What
-    it is *for* is the role, and where it points is ``_.Alias``."""
+    it is *for* is the role, and where it points is ``_.Shortcut``."""
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(
@@ -194,8 +194,8 @@ def test_a_shortcut_destination_is_registered_as_the_object_it_actually_is(tmp_p
 
 
 @weaver_test()
-def test_a_lakehouse_alias_is_registered_as_a_table(tmp_path):
-    """The same alias against a Lakehouse is a table — a OneLake shortcut is how
+def test_a_lakehouse_shortcut_is_registered_as_a_table(tmp_path):
+    """The same shortcut against a Lakehouse is a table — a OneLake shortcut is how
     it is made, not what it is."""
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
@@ -248,7 +248,7 @@ def test_a_shortcut_describes_nothing_beyond_its_registration(tmp_path):
             row
             for row in projection.for_table(table)
             if (row.get("schema_name"), row.get("object_name")) == destination
-        ], f"{table.name} should hold no row for an alias destination"
+        ], f"{table.name} should hold no row for a shortcut destination"
 
 
 @weaver_test()
@@ -260,7 +260,7 @@ def test_dependency_row_belongs_to_consumer_item_and_preserves_authored_name(tmp
     assert row["item_type"] == "Warehouse"
     assert row["item_name"] == "Reporting"
     assert row["dependency_reference"] == "Sales.PortableCustomer"
-    # The author wrote a local name; resolution followed the alias across, so
+    # The author wrote a local name; resolution followed the shortcut across, so
     # the row keeps both the spelling and the item the edge actually reached.
     assert row["referenced_item_type"] == "Lakehouse"
     assert row["referenced_item_name"] == "Curated"

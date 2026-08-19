@@ -140,7 +140,7 @@ The suite expects these reusable items, each overridable through its matching
 | `PYTEST_LH_1` | Lakehouse | primary Lakehouse target |
 | `PYTEST_LH_2` | Lakehouse | cross-item producer |
 | `PYTEST_LH_3` | Lakehouse | cross-item consumer |
-| `PYTEST_HOUSE` | Lakehouse | producer for a Warehouse external view |
+| `PYTEST_HOUSE` | Lakehouse | producer for a Warehouse shortcut |
 | `PYTEST_WH_1` | Warehouse | Warehouse target |
 | `PYTEST_STAGING` | Lakehouse | repositories and bundles, never a target |
 

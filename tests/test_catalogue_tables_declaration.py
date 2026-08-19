@@ -263,7 +263,7 @@ def test_a_dependency_records_the_reference_exactly_as_authored():
     """The row keeps the author's spelling alongside the edge Weaver resolved.
 
     The authored spelling is what identifies the row, because it is the one
-    thing every dependency has: an edge that leaves the item through an alias
+    thing every dependency has: an edge that leaves the item through a shortcut
     resolves to nothing, and two authored references may reach one object.
     """
 

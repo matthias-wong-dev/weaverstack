@@ -2,7 +2,7 @@
 
 Reached until now only through `plan_item_build`, which meant "a schema was
 created" and "the right statement was created" failed the same test the same way.
-The interesting parts are invisible from up there: the alias namespace nothing
+The interesting parts are invisible from up there: the shortcut namespace nothing
 declares a document in, the bracket escaping, and the fact that a Lakehouse
 schema and a Warehouse schema are different payloads for different executors.
 
@@ -94,12 +94,12 @@ def test_another_items_documents_are_not_this_items_schemas():
 
 
 @weaver_test()
-def test_an_alias_namespace_is_created_though_no_document_lives_in_it():
+def test_an_shortcut_namespace_is_created_though_no_document_lives_in_it():
     """The case that cannot be seen from the documents alone.
 
-    An alias destination lands in one of the item's own schemas, but no
+    A shortcut destination lands in one of the item's own schemas, but no
     *document* of the item need be declared there. A build that created only the
-    schemas its documents needed would leave the alias homeless — and the alias
+    schemas its documents needed would leave the shortcut homeless — and the shortcut
     action would fail against a namespace that was never made.
     """
 
@@ -112,7 +112,7 @@ def test_an_alias_namespace_is_created_though_no_document_lives_in_it():
 
 @weaver_test()
 def test_a_schema_wanted_twice_is_created_once():
-    """Two documents in one schema, and an alias in it too, is still one create."""
+    """Two documents in one schema, and a shortcut in it too, is still one create."""
 
     planned = stage(CUSTOMER, "DWG.Order", extra_schemas=("DWG",))
 

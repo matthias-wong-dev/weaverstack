@@ -184,7 +184,7 @@ class FixtureCatalogue(Catalogue):
         """A catalogue certifying exactly these documents, with no row data.
 
         For tests whose subject is downstream of the Registry — selection,
-        alias staleness, planning — where the rows themselves are never read.
+        shortcut staleness, planning — where the rows themselves are never read.
         """
 
         return cls(
@@ -258,8 +258,8 @@ def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
     """The whole catalogue a successful build of this estate would have left.
 
     Where `FixtureCatalogue.from_repository` gives one item's Registry, this
-    gives the estate: every item's dictionaries, its dependencies, its aliases,
-    the alias destinations the build certified, *and* the Installation rows that
+    gives the estate: every item's dictionaries, its dependencies, its shortcuts,
+    the shortcut destinations the build certified, *and* the Installation rows that
     say which physical target each logical item is bound to.
 
     That last part is what load orchestration cannot do without. A build is
@@ -662,11 +662,11 @@ def shortcut_repository(
     schema: str = "DWG",
     consumer_view: bool = True,
 ):
-    """Two items, the second aliasing a table in the first.
+    """Two items, the second shortcutting a table in the first.
 
-    The smallest repository that can express a cross-item alias, which is the
-    one shape a single-item fixture cannot reach: an alias that did not cross
-    would not be one. The consumer also builds a view over the aliased name, so
+    The smallest repository that can express a cross-item shortcut, which is the
+    one shape a single-item fixture cannot reach: a shortcut that did not cross
+    would not be one. The consumer also builds a view over the shortcut name, so
     the ordering claim — the consumer's whole group waits for the producer's —
     has something to order.
     """
@@ -686,9 +686,9 @@ def shortcut_repository(
         ),
     )
     if consumer_view:
-        # A Warehouse consumer reads its alias through T-SQL over the producer's
+        # A Warehouse consumer reads its shortcut through T-SQL over the producer's
         # SQL endpoint, so the view it builds is spelled differently — and for a
-        # probe that only wants the alias itself, no view is wanted at all.
+        # probe that only wants the shortcut itself, no view is wanted at all.
         if consumer.startswith("Warehouse/"):
             _write(
                 root,
@@ -808,13 +808,13 @@ def load_estate(root: Path):
 
     .. code-block:: text
 
-        Raw Delta table  →  endpoint refresh  →  Warehouse alias consumer
+        Raw Delta table  →  endpoint refresh  →  Warehouse shortcut consumer
                                               →  downstream Warehouse table
 
     Every element earns its place. ``Sales.Order`` is the upstream Delta load;
     ``Sales.Daily`` proves a second dispatch kind and an ordinary within-item
     edge; ``Sales.Export`` proves the folder kind. On the Warehouse side the
-    alias is what makes the dependency *cross*, ``Sales.Summary`` is what
+    shortcut is what makes the dependency *cross*, ``Sales.Summary`` is what
     consumes it, and ``Sales.Live`` is a view — no load work of its own, but a
     conduit a downstream table still depends through.
 

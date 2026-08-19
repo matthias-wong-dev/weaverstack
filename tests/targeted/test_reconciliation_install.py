@@ -135,8 +135,8 @@ def test_a_physical_object_with_no_claim_produces_no_deletes():
 def test_an_item_with_no_inventory_has_nothing_disproved():
     """A build has no business retiring claims about a target it was not given.
 
-    Producers of aliases are read without an inventory for exactly this reason:
-    their rows are needed to judge alias freshness, and nothing about them is
+    Producers of shortcuts are read without an inventory for exactly this reason:
+    their rows are needed to judge shortcut freshness, and nothing about them is
     being built, so nothing about them may be withdrawn.
     """
 
