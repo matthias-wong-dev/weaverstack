@@ -202,15 +202,22 @@ class FabricResolver:
 
         if workspace is None or workspace == self.workspace.name:
             return self.resolve(ItemRef(name), item_type=LAKEHOUSE)
+        # Through this host's own REST client, as every other crossing here is:
+        # inside Fabric that is the session's identity, not a desktop credential.
+        client = self._rest_client()
         return find_item(
-            find_workspace(workspace, client=self.client),
+            find_workspace(workspace, client=client),
             name,
             item_type=LAKEHOUSE,
-            client=self.client,
+            client=client,
         )
 
     def external_root(self, item) -> Location:
-        """The OneLake root of an already-resolved item, wherever it lives."""
+        """The root of an already-resolved item, as this host addresses one.
+
+        The same spelling :meth:`lakehouse` gives for an item of this workspace,
+        so what reads it is the store this host already has.
+        """
 
         return Location(
             f"{self.base_url}/{item.workspace_id}/"

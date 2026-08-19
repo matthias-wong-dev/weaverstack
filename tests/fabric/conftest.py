@@ -901,7 +901,7 @@ def warehouse_primitive_estate(session_disposable_warehouse, tmp_path_factory):
             ),
             target_by_item={identity: target.bound},
             selected_documents=selected,
-            selected_aliases=set(),
+            selected_shortcuts=set(),
             selected_for_drop=set(selected) if rebuild else set(),
             selected_for_build=selected if build else set(),
             registered=(
@@ -1170,6 +1170,7 @@ def _fabric_build_context(
             "from weaver.sessions import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
+            "from weaver.build_bundle.shortcut_sources import read_shortcut_sources\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1188,13 +1189,22 @@ def _fabric_build_context(
             "reconciled = read_reconciled_catalogue("
             "bindings, inventories=inventories, session=session, "
             "repository=repository)\n"
+            # Where a physical shortcut points is resolved while the estate is
+            # readable, as `read_build_state` does for a build assembled by the
+            # product rather than by this harness.
+            "shortcut_sources = read_shortcut_sources(\n"
+            "    [d for d in repository.shortcuts\n"
+            "     if not d.is_logical and not d.is_view\n"
+            "     and d.owner in bindings.by_item],\n"
+            "    resolver=resolver, store=store)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
             f"    output={staged_bundle_source(staging.name, bundle_name)},\n"
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
-            "    stale_claims=reconciled.stale_claims)\n"
+            "    stale_claims=reconciled.stale_claims,\n"
+            "    shortcut_sources=shortcut_sources)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
@@ -1513,6 +1523,7 @@ def _warehouse_build_env(
             "from weaver.sessions import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
+            "from weaver.build_bundle.shortcut_sources import read_shortcut_sources\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1531,13 +1542,22 @@ def _warehouse_build_env(
             "reconciled = read_reconciled_catalogue("
             "bindings, inventories=inventories, session=session, "
             "repository=repository)\n"
+            # Where a physical shortcut points is resolved while the estate is
+            # readable, as `read_build_state` does for a build assembled by the
+            # product rather than by this harness.
+            "shortcut_sources = read_shortcut_sources(\n"
+            "    [d for d in repository.shortcuts\n"
+            "     if not d.is_logical and not d.is_view\n"
+            "     and d.owner in bindings.by_item],\n"
+            "    resolver=resolver, store=store)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
             f"    output={staged_bundle_source(staging.name, bundle_name)},\n"
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
-            "    stale_claims=reconciled.stale_claims)\n"
+            "    stale_claims=reconciled.stale_claims,\n"
+            "    shortcut_sources=shortcut_sources)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )

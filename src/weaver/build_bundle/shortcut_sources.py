@@ -1,9 +1,9 @@
-"""Resolve what a direct shortcut points at, before a bundle is generated.
+"""Resolve what a physical shortcut points at, before a bundle is generated.
 
-A bound shortcut names a Weaver document, so the installer addresses it exactly
-as it addresses every other target of the build. A direct one names a physical
-Fabric item, possibly in another workspace, which is not a target of anything and
-which the installer has no reason to be able to find.
+A logical shortcut names a Weaver document, so the installer addresses it exactly
+as it addresses every other target of the build. A physical one names a Fabric
+item, possibly in another workspace, which is not a target of anything and which
+the installer has no reason to be able to find.
 
 So it is resolved here, where the estate can be read, and frozen into the bundle:
 workspace id, item id, and the source path spelled as storage spells it. Fabric
@@ -27,11 +27,11 @@ def read_shortcut_sources(
     resolver,
     store,
 ) -> dict[str, ResolvedShortcutSource]:
-    """The physical address behind every direct shortcut, by declaration."""
+    """The physical address behind every physical shortcut, by declaration."""
 
     resolved: dict[str, ResolvedShortcutSource] = {}
     for declaration in shortcuts:
-        if declaration.bind:
+        if declaration.is_logical:
             continue
         resolved[f"{declaration.owner}/{declaration.name}"] = _resolve(
             declaration, resolver=resolver, store=store

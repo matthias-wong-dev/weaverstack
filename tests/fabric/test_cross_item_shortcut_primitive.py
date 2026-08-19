@@ -246,7 +246,7 @@ def alias_estate(
         staging=fabric_staging_lakehouse.name,
         catalogue_sql=session_catalogue_sql,
     )
-    batch, alias_action = action_of(bundle.plan, "create_alias")
+    batch, alias_action = action_of(bundle.plan, "create_shortcut")
     _refresh_batch, refresh_action = action_of(bundle.plan, "refresh_sql_endpoint")
 
     at = {
@@ -505,7 +505,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         catalogue_sql=session_catalogue_sql,
         sql=warehouse.executor,
     )
-    batch, alias_action = action_of(bundle.plan, "create_alias")
+    batch, alias_action = action_of(bundle.plan, "create_shortcut")
     at = resolver.spark_destination(ItemRef(producer.name))
     source = at.qualify("DWG", "Customer")
 

@@ -76,7 +76,7 @@ def discovery_estate(
         staging=producer.name,
         catalogue_sql=session_catalogue_sql,
     )
-    batch, alias_action = action_of(bundle.plan, "create_alias")
+    batch, alias_action = action_of(bundle.plan, "create_shortcut")
 
     at = {
         role: resolver.spark_destination(ItemRef(item.name))

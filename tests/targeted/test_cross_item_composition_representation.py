@@ -94,7 +94,8 @@ def test_the_estate_declares_both_physical_sides(repository):
 
     assert {"Lakehouse/Sales", "Warehouse/Reporting"} <= items
     assert [
-        (str(alias.destination), str(alias.source)) for alias in repository.aliases
+        (str(alias.destination), str(alias.source))
+        for alias in repository.logical_shortcuts
     ] == [("Warehouse/Reporting/Rpt.PortableCustomer", "Lakehouse/Sales/DWG.Customer")]
 
 
@@ -123,7 +124,7 @@ def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
 
     produced = _when(plan, "Lakehouse--Sales--DWG.Customer")
     refreshed = _when(plan, "refresh-sql-endpoint-Lakehouse--Sales")
-    aliased = _when(plan, "aliases-Warehouse--Reporting")
+    aliased = _when(plan, "shortcuts-Warehouse--Reporting")
     reported = _when(plan, "Warehouse--Reporting--Rpt.CustomerReport")
     viewed = _when(plan, "Warehouse--Reporting--Rpt.ActiveCustomerReport")
 
@@ -141,7 +142,7 @@ def test_the_warehouse_side_is_reached_over_tds(plan):
     by_target = {
         batch.target_id.split("--")[0]: action.executor
         for _sequence, batch, action in plan.actions()
-        if action.id.endswith("aliases-Warehouse--Reporting")
+        if action.id.endswith("shortcuts-Warehouse--Reporting")
     }
 
     assert by_target == {"Warehouse-Reporting": "tsql_batch"}

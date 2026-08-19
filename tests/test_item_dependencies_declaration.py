@@ -52,8 +52,8 @@ def _dependency_estate(tmp_path):
     _write(root, "Warehouse/Audit/Sales.Change.sql", audit)
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.PortableCustomer:\n  target: Lakehouse/Curated/Sales.Customer\n  bind: true\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
     )
     return root
 
@@ -117,7 +117,7 @@ def test_two_part_sql_reference_resolves_through_cross_item_alias(tmp_path):
 
     assert edge.reference == "Sales.PortableCustomer"
     assert str(edge.producer) == "Lakehouse/Curated/Sales.Customer"
-    assert edge.uses_alias
+    assert edge.uses_shortcut
     assert not edge.is_within_item
 
 
@@ -157,8 +157,8 @@ def test_an_alias_no_document_consumes_still_waits_for_its_source(tmp_path):
     root = _dependency_estate(tmp_path)
     _write(
         root,
-        "Warehouse/Audit/external.yml",
-        "Warehouse/Audit/Sales.Unread:\n  target: Lakehouse/Curated/Sales.Customer\n  bind: true\n",
+        "Warehouse/Audit/shortcuts.yml",
+        "logical:\n  Warehouse/Audit/Sales.Unread: Lakehouse/Curated/Sales.Customer\n",
     )
     graph = parse_item_repository(Location(str(root))).dependency_graph
 
@@ -178,7 +178,7 @@ def test_published_dependency_edges_ignore_the_alias_node(tmp_path):
     """
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
-    destinations = {alias.destination for alias in repository.aliases}
+    destinations = {alias.destination for alias in repository.logical_shortcuts}
 
     assert destinations
     assert all(
@@ -242,12 +242,12 @@ def test_dependency_cycle_across_items_is_rejected(tmp_path):
     _write(
         root,
         "Lakehouse/Curated/shortcuts.py",
-        'from weaver import Shortcut\n\nSales__Reporting = Shortcut(\n    shortcut_type="table",\n    target="Warehouse/Reporting/Sales.Customer",\n    bind=True,\n)\n',
+        'from weaver import Shortcut\n\nSales__Reporting = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Warehouse/Reporting/Sales.Customer",\n)\n',
     )
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.Curated:\n  target: Lakehouse/Curated/Sales.Customer\n  bind: true\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n  Warehouse/Reporting/Sales.Curated: Lakehouse/Curated/Sales.Customer\n",
     )
     with pytest.raises(GraphError, match="dependency cycle"):
         parse_item_repository(Location(str(root)))

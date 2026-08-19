@@ -74,6 +74,18 @@ OBJECT_ROLE_VOCABULARY = {
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}
 
+#: What a shortcut is, and how its target is read. Internal Python keeps the
+#: lowercase values the declaration model uses; the persistence boundary writes
+#: and reads these, exactly as Registry does for object type and role.
+SHORTCUT_TYPE_VOCABULARY = {
+    "table": "Table",
+    "schema": "Schema",
+    "folder": "Folder",
+    "view": "View",
+}
+
+TARGET_TYPE_VOCABULARY = {"logical": "Logical", "physical": "Physical"}
+
 TEST_TYPE_VOCABULARY = {ROLE_TEST: "Test", ROLE_ASSUMPTION: "Assumption"}
 
 STRING = "string"
@@ -691,7 +703,7 @@ DEPENDENCY = CatalogueTable(
     description=(
         "One row per resolved dependency edge, scoped to the referencing item. "
         "The referenced side is the edge Weaver resolved; the authored spelling "
-        "is kept alongside it. Crossing items or engines is an alias, recorded "
+        "is kept alongside it. Crossing items or engines is a shortcut, recorded "
         "separately, not a dependency that quietly changes namespace."
     ),
     key=(
@@ -739,46 +751,82 @@ DEPENDENCY = CatalogueTable(
     ),
 )
 
-ALIAS = CatalogueTable(
-    name="Alias",
+SHORTCUT = CatalogueTable(
+    name="Shortcut",
     description=(
-        "The name one item presents for something another item owns, "
-        "reproduced from the consuming item's own declarations. This is where the "
-        "estate's graph crosses items and engines, so it is kept apart from "
-        "Dependency — composing Dependency, Alias and Registry is what yields "
-        "the whole DAG, and only that composition may cross."
+        "Every shortcut an item declares, reproduced from its own "
+        "shortcuts.py or shortcuts.yml. This is where the estate's graph "
+        "crosses items, engines and workspaces, so it is kept apart from "
+        "Dependency: composing Dependency, Shortcut and Registry is what yields "
+        "the whole DAG, and only that composition may cross. It records what "
+        "was declared, so where a logical target is physically installed stays "
+        "Installation's answer."
     ),
-    key=(
-        SCOPE_ITEM_TYPE,
-        SCOPE_ITEM_NAME,
-        "destination_schema_name",
-        "destination_object_name",
-    ),
+    # Keyed by the authored name rather than by the destination pair, because a
+    # schema shortcut presents a namespace and so names no object, and a merge
+    # key cannot be null. The name is what the author wrote and what a program
+    # imports, so it identifies the declaration exactly.
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "shortcut_name"),
     columns=(
         *_scope(),
         CatalogueColumn(
+            "shortcut_name",
+            not_null=True,
+            description="The name the declaration was written under.",
+        ),
+        CatalogueColumn(
             "destination_schema_name",
             not_null=True,
-            description="The schema the consuming item presents the alias in.",
+            description="The schema the declaring item presents the shortcut in.",
         ),
         CatalogueColumn(
             "destination_object_name",
+            description=(
+                "The name the declaring item presents. Null for a schema "
+                "shortcut, which presents a namespace rather than an object."
+            ),
+        ),
+        CatalogueColumn(
+            "shortcut_type",
             not_null=True,
-            description="The name the consuming item presents.",
+            description="What the shortcut is.",
+            vocabulary=SHORTCUT_TYPE_VOCABULARY,
         ),
         CatalogueColumn(
-            "source_item_type", not_null=True, description="The producer's item type."
+            "target_type",
+            not_null=True,
+            description=(
+                "How the target is read: a Weaver item Weaver binds, or the "
+                "Fabric item itself."
+            ),
+            vocabulary=TARGET_TYPE_VOCABULARY,
         ),
         CatalogueColumn(
-            "source_item_name", not_null=True, description="The producer's item name."
+            "target_item_type", not_null=True, description="The target's item type."
         ),
         CatalogueColumn(
-            "source_schema_name", not_null=True, description="The producer's schema."
+            "target_item_name", not_null=True, description="The target's item name."
         ),
         CatalogueColumn(
-            "source_object_name", not_null=True, description="The producer's name."
+            "target_schema_name",
+            not_null=True,
+            description="The schema or path the target sits in.",
         ),
-        _signature("the alias declaration"),
+        CatalogueColumn(
+            "target_object_name",
+            description=(
+                "The object the target names. Null where it names a schema or a "
+                "path rather than an object."
+            ),
+        ),
+        CatalogueColumn(
+            "target_workspace_name",
+            description=(
+                "The workspace the target is in. Null for a logical target, "
+                "which is bound, and for a physical one in this workspace."
+            ),
+        ),
+        _signature("the shortcut declaration"),
     ),
 )
 
@@ -794,7 +842,7 @@ DICTIONARY_TABLES = (
     FOREIGN_KEY_DICTIONARY,
     TEST_DICTIONARY,
     DEPENDENCY,
-    ALIAS,
+    SHORTCUT,
 )
 
 #: Every catalogue table, dictionaries first, then Installation, then Registry.

@@ -38,7 +38,7 @@ def plan(repository, **overrides):
     inventory = overrides.pop("inventory", target_inventory())
     arguments = {
         "selected_documents": set(),
-        "selected_aliases": set(),
+        "selected_shortcuts": set(),
         "selected_for_drop": set(),
         "selected_for_build": set(),
         "registered": {},

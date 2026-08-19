@@ -206,7 +206,7 @@ def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
 
     from factories import alias_repository
 
-    from weaver.catalogue.tables import ALIAS
+    from weaver.catalogue.tables import SHORTCUT
 
     repository = alias_repository(tmp_path / "repo")
     consumer = item_id("Lakehouse/Curated")
@@ -214,7 +214,7 @@ def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
 
     logical = Catalogue.from_repository(repository)
 
-    assert logical.rows[consumer][ALIAS.name], "the declaration is source"
+    assert logical.rows[consumer][SHORTCUT.name], "the declaration is source"
     assert alias not in logical.registered, "the certification is not"
 
 
@@ -229,7 +229,7 @@ def test_binding_certifies_the_alias_as_what_it_physically_is(tmp_path):
 
     logical = Catalogue.from_repository(repository)
     declared = set(logical.registered) | {
-        alias.destination for alias in repository.aliases
+        alias.destination for alias in repository.logical_shortcuts
     }
     as_lakehouse = for_targets(logical, repository, declared, kinds)
     as_warehouse = for_targets(
@@ -264,7 +264,7 @@ def test_an_item_that_is_not_bound_is_not_published(tmp_path):
     published = for_targets(
         logical,
         repository,
-        {alias.destination for alias in repository.aliases},
+        {alias.destination for alias in repository.logical_shortcuts},
         {producer: "lakehouse"},
     )
 

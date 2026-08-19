@@ -64,7 +64,7 @@ class InstallationContext:
     present.
 
     ``targets`` holds every target the plan declared, already resolved. It exists
-    for the one action that spans two of them — an alias, which points a name in
+    for the one action that spans two of them — a shortcut, which points a name in
     ``target`` at an object in another — and it carries resolved targets rather
     than ids so a second destination is addressed exactly as the batch's own is.
     """

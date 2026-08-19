@@ -126,9 +126,9 @@ def item_prune_stage(
         # Every declared destination, bound or direct, and whether or not this
         # build selected it: a build must not prune the shortcut it is about to
         # create, nor the one it just decided to keep.
-        alias_destinations=[
+        shortcut_destinations=[
             declaration.destination
-            for declaration in (*repository.shortcuts, *repository.externals)
+            for declaration in repository.shortcuts
             if declaration.destination.item == item
         ],
         load_identities=[
@@ -282,7 +282,7 @@ def item_schema_stage(
 ) -> PlannedStage | None:
     """The schemas this item needs and its target does not already hold.
 
-    ``extra_schemas`` carries the schemas the item's planned aliases land in.
+    ``extra_schemas`` carries the schemas the item's planned shortcuts land in.
     They are the item's own declared schemas, but no document of the item need
     live in them, so the namespace would otherwise never be created.
     """

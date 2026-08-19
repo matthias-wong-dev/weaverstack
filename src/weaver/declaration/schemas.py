@@ -1,7 +1,7 @@
 """Schema Weaver document files — one declared schema per file under ``_schemas``.
 
 A repository declares its schemas explicitly rather than letting a two-part
-object ID conjure one on the fly. Every ``Schema.Object`` an object or an alias
+object ID conjure one on the fly. Every ``Schema.Object`` an object or a shortcut
 uses implies a schema, and that schema must be declared here or the repository
 is invalid.
 

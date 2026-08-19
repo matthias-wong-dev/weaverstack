@@ -9,12 +9,11 @@ from test_item_repository_declaration import _estate
 
 from weaver.catalogue.projection import (
     CatalogueProjection,
-    project_alias_registry,
     project_item_catalogue,
+    project_shortcut_registry,
 )
 from weaver.catalogue.reconcile import reconcile
 from weaver.catalogue.tables import (
-    ALIAS,
     CATALOGUE_TABLES,
     DEPENDENCY,
     INSTALLATION,
@@ -22,6 +21,7 @@ from weaver.catalogue.tables import (
     SCHEMA_DICTIONARY,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
+    SHORTCUT,
 )
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
@@ -35,7 +35,7 @@ def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"
     ]
     retained.extend(
         alias.destination
-        for alias in repository.aliases
+        for alias in repository.logical_shortcuts
         if alias.destination.item == item
     )
     # The projection is now source-only. Alias certification and the Installation
@@ -43,7 +43,9 @@ def _project(repository, item_text: str, target: str, *, target_kind="lakehouse"
     # helper still yields the whole picture these tests assert against.
     projection = project_item_catalogue(repository, item=item, retained=retained)
     rows = dict(projection.rows)
-    rows[REGISTRY.name] = tuple(rows.get(REGISTRY.name, ())) + project_alias_registry(
+    rows[REGISTRY.name] = tuple(
+        rows.get(REGISTRY.name, ())
+    ) + project_shortcut_registry(
         repository, item=item, retained=retained, target_kind=target_kind
     )
     item_model = next(m for m in repository.items if m.identity == item)
@@ -151,23 +153,30 @@ def test_installation_records_the_item_signature_not_the_repository_signature(tm
 
 
 @weaver_test()
-def test_alias_rows_reproduce_destination_and_source_canonical_identity(tmp_path):
+def test_shortcut_rows_reproduce_what_was_declared(tmp_path):
+    """Including how the target is read, which is the reader's other question."""
+
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(repository, "Warehouse/Reporting", "Reporting_Dev")
-    row = projection.for_table(ALIAS)[0]
+    row = projection.for_table(SHORTCUT)[0]
 
     assert row[SCOPE_ITEM_TYPE] == "Warehouse"
     assert row[SCOPE_ITEM_NAME] == "Reporting"
+    assert row["shortcut_name"] == "Sales__PortableCustomer"
     assert row["destination_schema_name"] == "Sales"
     assert row["destination_object_name"] == "PortableCustomer"
-    assert row["source_item_type"] == "Lakehouse"
-    assert row["source_item_name"] == "Curated"
-    assert row["source_schema_name"] == "Sales"
-    assert row["source_object_name"] == "Customer"
+    assert row["shortcut_type"] == "view"
+    assert row["target_type"] == "logical"
+    assert row["target_item_type"] == "Lakehouse"
+    assert row["target_item_name"] == "Curated"
+    assert row["target_schema_name"] == "Sales"
+    assert row["target_object_name"] == "Customer"
+    # A logical target is bound, so where it lands is Installation's answer.
+    assert row["target_workspace_name"] is None
 
 
 @weaver_test()
-def test_an_alias_destination_is_registered_as_the_object_it_actually_is(tmp_path):
+def test_a_shortcut_destination_is_registered_as_the_object_it_actually_is(tmp_path):
     """No ``shortcut`` *type*. To every reader of the catalogue an external
     reference in a Warehouse is a view, and that is what it is recorded as. What
     it is *for* is the role, and where it points is ``_.Alias``."""
@@ -198,29 +207,29 @@ def test_a_lakehouse_alias_is_registered_as_a_table(tmp_path):
 
 
 @weaver_test()
-def test_an_alias_signature_is_its_declaration_and_not_its_sources_content(tmp_path):
-    """A rebuilt source does not redefine the alias, so it must not change its
-    signature — that would replace every downstream shortcut on every reload."""
+def test_a_shortcut_signature_is_its_declaration_and_not_its_targets_content(tmp_path):
+    """A rebuilt source does not redeclare the shortcut, so it must not change
+    its signature: that would replace every downstream shortcut on every reload."""
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(
         repository, "Warehouse/Reporting", "Reporting_Dev", target_kind="warehouse"
     )
-    alias = next(
-        alias
-        for alias in repository.aliases
-        if str(alias.destination) == "Warehouse/Reporting/Sales.PortableCustomer"
+    declaration = next(
+        declaration
+        for declaration in repository.shortcuts
+        if str(declaration.destination) == "Warehouse/Reporting/Sales.PortableCustomer"
     )
-    source = repository.source_documents[alias.source]
+    source = repository.source_documents[declaration.logical_source]
 
     registry = _registry_row(projection, "Sales", "PortableCustomer")
-    assert registry["signature"] == alias.signature
+    assert registry["signature"] == declaration.signature
     assert registry["signature"] != source.effective_signature
-    assert projection.for_table(ALIAS)[0]["signature"] == alias.signature
+    assert projection.for_table(SHORTCUT)[0]["signature"] == declaration.signature
 
 
 @weaver_test()
-def test_an_alias_describes_nothing_beyond_its_registration(tmp_path):
+def test_a_shortcut_describes_nothing_beyond_its_registration(tmp_path):
     """It holds no columns, no keys and no dependencies of its own. Only the two
     rows that say it exists and what it stands for."""
 
@@ -231,7 +240,7 @@ def test_an_alias_describes_nothing_beyond_its_registration(tmp_path):
     destination = ("Sales", "PortableCustomer")
 
     for table in CATALOGUE_TABLES:
-        if table in (REGISTRY, ALIAS, SCHEMA_DICTIONARY, INSTALLATION):
+        if table in (REGISTRY, SHORTCUT, SCHEMA_DICTIONARY, INSTALLATION):
             continue
         assert not [
             row
@@ -424,11 +433,11 @@ def test_the_incomplete_catalogue_error_names_what_is_gone_and_what_survived():
     from weaver.errors import BuildError
 
     with pytest.raises(BuildError) as raised:
-        read_catalogue_state(_shaped("Registry", "Alias", "Dependency"), ())
+        read_catalogue_state(_shaped("Registry", "Shortcut", "Dependency"), ())
 
     message = str(raised.value)
     assert "Installation" in message and "TableDictionary" in message
-    assert "Alias" in message and "Dependency" in message
+    assert "Shortcut" in message and "Dependency" in message
 
 
 @weaver_test()

@@ -318,7 +318,7 @@ def _delete_claim_sql(names: dict, query: str, contract: LoadContract) -> str:
         f"from {names['target']} as c\n"
         f"inner join {claim} as d\n"
         f"    on {join}\n"
-        f"where not ({_blank_key_predicate(contract.primary_key, alias='d')});\n\n"
+        f"where not ({_blank_key_predicate(contract.primary_key, shortcut='d')});\n\n"
         f"drop table {claim};"
     )
 
@@ -431,7 +431,7 @@ def _reject_discovery(names: dict, contract: LoadContract) -> str:
             f"select\n"
             f"    __STAGING_SELECT_COLUMNS__\n"
             f"  , row_number() over (\n"
-            f"        partition by {_aliased_columns('s', contract.primary_key)}\n"
+            f"        partition by {_shortcuted_columns('s', contract.primary_key)}\n"
             f"        order by s.{_quote(WORKING_SIGNATURE_COLUMN)}) "
             f"as {_quote(RANK_COLUMN)}\n"
             f"from weaver_valid as s\n"
@@ -567,8 +567,8 @@ def _unique_key_ctes(
                 f"select\n"
                 f"    __STAGING_SELECT_COLUMNS__\n"
                 f"  , row_number() over (\n"
-                f"        partition by {_aliased_columns('s', unique_key)}\n"
-                f"        order by {_aliased_columns('s', contract.primary_key)}) "
+                f"        partition by {_shortcuted_columns('s', unique_key)}\n"
+                f"        order by {_shortcuted_columns('s', contract.primary_key)}) "
                 f"as {_quote(RANK_COLUMN)}\n"
                 f"from {source} as s\n"
                 f"inner join weaver_unique_{index}_duplicate as d\n"
@@ -600,7 +600,7 @@ def _unique_key_ctes(
     return ctes
 
 
-def _violation_predicate(contract: LoadContract, alias: str = "s") -> str:
+def _violation_predicate(contract: LoadContract, shortcut: str = "s") -> str:
     """A row that cannot be loaded whatever else is true of it.
 
     An unusable primary key, and a declared not-null column left empty. Only
@@ -609,15 +609,15 @@ def _violation_predicate(contract: LoadContract, alias: str = "s") -> str:
     permits.
     """
 
-    prefix = f"{alias}." if alias else ""
-    predicates = [_blank_key_predicate(contract.primary_key, alias=alias)]
+    prefix = f"{shortcut}." if shortcut else ""
+    predicates = [_blank_key_predicate(contract.primary_key, shortcut=shortcut)]
     predicates.extend(
         f"{prefix}{_quote(column)} is null" for column in contract.not_null_columns
     )
     return "\n   or ".join(predicates)
 
 
-def _violation_reason(contract: LoadContract, alias: str = "s") -> str:
+def _violation_reason(contract: LoadContract, shortcut: str = "s") -> str:
     """Which of those a row failed, taking the first that applies.
 
     One reason per refused row. A row that is wrong twice over is still one row
@@ -629,11 +629,11 @@ def _violation_reason(contract: LoadContract, alias: str = "s") -> str:
     if not contract.not_null_columns:
         return f"cast('{REASON_BLANK_PK}' as varchar({width}))"
     branches = [
-        f"        when {_blank_key_predicate(contract.primary_key, alias=alias)}\n"
+        f"        when {_blank_key_predicate(contract.primary_key, shortcut=shortcut)}\n"
         f"            then cast('{REASON_BLANK_PK}' as varchar({width}))"
     ]
     branches.extend(
-        f"        when {alias}.{_quote(column)} is null\n"
+        f"        when {shortcut}.{_quote(column)} is null\n"
         f"            then cast('{null_column_reason(column)}' as varchar({width}))"
         for column in contract.not_null_columns
     )
@@ -703,7 +703,7 @@ def _ranked_purge(names: dict, contract: LoadContract) -> str:
     return (
         f";with weaver_ranked as (\n"
         f"    select row_number() over (\n"
-        f"        partition by {_aliased_columns('s', contract.primary_key)}\n"
+        f"        partition by {_shortcuted_columns('s', contract.primary_key)}\n"
         f"        order by {_signature_expression()}) as {_quote(RANK_COLUMN)}\n"
         f"    from {names['staging']} as s\n"
         f")\n"
@@ -743,15 +743,15 @@ def _unique_key_purge(
             f"    having count(*) > 1"
         )
     else:
-        keys = _aliased_columns("s", contract.primary_key)
+        keys = _shortcuted_columns("s", contract.primary_key)
         loser = (
             f"    select {keys}\n"
             f"    from (\n"
             f"        select\n"
-            f"            {_aliased_columns('s', contract.primary_key)}\n"
+            f"            {_shortcuted_columns('s', contract.primary_key)}\n"
             f"          , row_number() over (\n"
-            f"                partition by {_aliased_columns('s', unique_key)}\n"
-            f"                order by {_aliased_columns('s', contract.primary_key)}) "
+            f"                partition by {_shortcuted_columns('s', unique_key)}\n"
+            f"                order by {_shortcuted_columns('s', contract.primary_key)}) "
             f"as {_quote(RANK_COLUMN)}\n"
             f"        from {names['staging']} as s\n"
             f"        inner join weaver_duplicate as d\n"
@@ -902,7 +902,7 @@ def _merge_conflict_branch(
     unique_key: tuple[str, ...],
     has_delete: bool,
 ) -> str:
-    key = _aliased_columns("u", contract.primary_key)
+    key = _shortcuted_columns("u", contract.primary_key)
     participates = "\n          and ".join(
         f"u.{_quote(column)} is not null" for column in unique_key
     )
@@ -1165,22 +1165,22 @@ def _bare_columns(columns: tuple[str, ...]) -> str:
     return ", ".join(_quote(column) for column in columns)
 
 
-def _aliased_columns(alias: str, columns: tuple[str, ...]) -> str:
-    return ", ".join(f"{alias}.{_quote(column)}" for column in columns)
+def _shortcuted_columns(shortcut: str, columns: tuple[str, ...]) -> str:
+    return ", ".join(f"{shortcut}.{_quote(column)}" for column in columns)
 
 
-def _blank_key_predicate(columns: tuple[str, ...], *, alias: str = "s") -> str:
+def _blank_key_predicate(columns: tuple[str, ...], *, shortcut: str = "s") -> str:
     """A key column that is null, empty or only spaces is not a key.
 
     Blank is rejected alongside null: a whitespace key matches nothing a person
     would call a match, and would create a row nobody can find again — or, on
     the delete side, claim one.
 
-    ``alias`` is empty where the predicate is applied to one table with no
+    ``shortcut`` is empty where the predicate is applied to one table with no
     relation to qualify, as the staging purge does.
     """
 
-    prefix = f"{alias}." if alias else ""
+    prefix = f"{shortcut}." if shortcut else ""
     predicates = [
         f"nullif(trim(cast({prefix}{_quote(column)} as varchar(max))), '') is null"
         for column in columns

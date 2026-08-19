@@ -9,16 +9,16 @@ layers and plans each item as one coherent group of stages:
     catalogue claim removal, when required
 
     item layer 0
-        producer item A          prune, drops, schemas, aliases, documents, refresh
-        independent producer B   prune, drops, schemas, aliases, documents, refresh
+        producer item A          prune, drops, schemas, shortcuts, documents, refresh
+        independent producer B   prune, drops, schemas, shortcuts, documents, refresh
     item layer 1
-        consumer item C          prune, drops, schemas, aliases, documents, refresh
+        consumer item C          prune, drops, schemas, shortcuts, documents, refresh
 
     final batched catalogue publication
 
 Items in the same layer share their barriers, one batch each, because nothing
 orders them against each other. Items in different layers never do: a consumer's
-aliases and documents cannot begin until every item it reaches into has
+shortcuts and documents cannot begin until every item it reaches into has
 finished, endpoint included.
 
 Inside an item the document dependency graph decides everything; the item graph
@@ -49,7 +49,7 @@ from .catalogue_actions import (
     render_catalogue_before_build,
 )
 from .endpoints import item_refresh_stage
-from .incremental import select_build, stale_alias_destinations
+from .incremental import select_build, stale_shortcut_destinations
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .physical import (
     item_build_stages,
@@ -94,8 +94,8 @@ def generate_item_build_bundle(
 
     # Four kinds of node are selectable, and most of what follows needs one of
     # them. Documents drive prune, schemas and the physical build pipelines.
-    # Alias destinations are registered objects, so they take part in selection
-    # and certification, but the alias executor materialises them. Load
+    # Shortcut destinations are registered objects, so they take part in selection
+    # and certification, but the shortcut executor materialises them. Load
     # artefacts are signed from their own content and installed by the item's
     # final layer, so they stay out of anything assuming a parsed declaration.
     #
@@ -105,12 +105,12 @@ def generate_item_build_bundle(
     # with an identity of its own.
     (
         selected_documents,
-        selected_aliases,
+        selected_shortcuts,
         selected_loads,
         selected_validations,
     ) = _selectable(repository, by_item)
     selected_ids = (
-        selected_documents | selected_aliases | selected_loads | selected_validations
+        selected_documents | selected_shortcuts | selected_loads | selected_validations
     )
 
     targets = tuple(
@@ -131,7 +131,7 @@ def generate_item_build_bundle(
 
     # Freshness is read before ``registered`` is narrowed, because the whole
     # point is to compare against an item this build does *not* include.
-    stale_aliases = stale_alias_destinations(
+    stale_shortcuts = stale_shortcut_destinations(
         repository, catalogue.registered, bound_items=by_item
     )
     registered = {
@@ -140,7 +140,7 @@ def generate_item_build_bundle(
         if identity.item in by_item
     }
     selection = select_build(
-        repository, registered, selected=selected_ids, stale_aliases=stale_aliases
+        repository, registered, selected=selected_ids, stale_shortcuts=stale_shortcuts
     )
     selected_for_drop = set(selection.selected_for_drop)
     selected_for_build = set(selection.selected_for_build)
@@ -171,7 +171,7 @@ def generate_item_build_bundle(
     if catalogue_before is not None:
         stages.append(catalogue_before)
 
-    # Alias destinations this build wanted but could not materialise. They must
+    # Shortcut destinations this build wanted but could not materialise. They must
     # not reach the Registry: a row there means the object's work succeeded, and
     # for these no work was even planned.
     uncertified: set = set()
@@ -186,7 +186,7 @@ def generate_item_build_bundle(
                 inventory=inventories[item],
                 target_by_item=target_by_item,
                 selected_documents=selected_documents,
-                selected_aliases=selected_aliases,
+                selected_shortcuts=selected_shortcuts,
                 shortcut_sources=shortcut_sources,
                 selected_for_drop=selected_for_drop
                 - selected_loads
@@ -261,7 +261,7 @@ def _selectable(
         },
         {
             declaration.destination
-            for declaration in (*repository.shortcuts, *repository.externals)
+            for declaration in repository.shortcuts
             if declaration.destination.item in by_item
         },
         {
@@ -288,8 +288,8 @@ def certifiable_identities(repository: WeaverRepository, by_item: Mapping) -> se
     three sets, so the two cannot disagree about what a build certifies.
     """
 
-    documents, aliases, loads, validations = _selectable(repository, by_item)
-    return documents | aliases | loads | validations
+    documents, shortcuts, loads, validations = _selectable(repository, by_item)
+    return documents | shortcuts | loads | validations
 
 
 def _item_layers(
@@ -328,8 +328,8 @@ class PlannedItem:
     stages: tuple[PlannedStage, ...]
     #: Nodes this item could not plan, each carrying why.
     omitted: tuple[OmittedNode, ...]
-    #: Alias destinations this item could not materialise *and* was asked to
-    #: build. Withheld from certification: an alias whose source item is unbound
+    #: Shortcut destinations this item could not materialise *and* was asked to
+    #: build. Withheld from certification: a shortcut whose source item is unbound
     #: has no physical form under these bindings, and a Registry row for it would
     #: claim an installation that never happened. One already installed from an
     #: earlier build is left certified — it is still there — so only the
@@ -345,7 +345,7 @@ def plan_item_build(
     inventory: TargetInventory,
     target_by_item,
     selected_documents,
-    selected_aliases,
+    selected_shortcuts,
     selected_for_drop,
     selected_for_build,
     registered,
@@ -364,12 +364,12 @@ def plan_item_build(
     without generating a bundle.
     """
 
-    aliases = plan_item_shortcuts(
+    shortcuts = plan_item_shortcuts(
         repository,
         item=item,
         target=target,
         target_by_item=target_by_item,
-        selected=selected_for_build & selected_aliases,
+        selected=selected_for_build & selected_shortcuts,
         sources=shortcut_sources,
     )
     artefacts = item_runtime_artefacts(
@@ -382,8 +382,8 @@ def plan_item_build(
     )
     stages: list[PlannedStage] = []
 
-    # Prune is given every *declared* alias destination, never only the selected
-    # ones: an alias this build decided not to touch is still desired state, and
+    # Prune is given every *declared* shortcut destination, never only the selected
+    # ones: a shortcut this build decided not to touch is still desired state, and
     # a prune that could not see it would delete the very thing incremental
     # selection just chose to keep. Load artefacts are treated the same way, and
     # the stage derives them itself.
@@ -399,7 +399,7 @@ def plan_item_build(
     stages.extend(
         item_drop_stages(
             repository,
-            selected_for_drop - selected_aliases,
+            selected_for_drop - selected_shortcuts,
             item=item,
             target=target,
             registered=registered,
@@ -411,19 +411,19 @@ def plan_item_build(
         target=target,
         inventory=inventory,
         # `_` is where a Warehouse's generated load procedures live, and no
-        # document declares an object in it — so like an alias's namespace it
+        # document declares an object in it — so like a shortcut's namespace it
         # would never be created if only documents were consulted. It is derived
         # from the artefacts, so an item with no procedures asks for no schema.
-        extra_schemas=tuple(aliases.schemas) + load_schemas(artefacts),
+        extra_schemas=tuple(shortcuts.schemas) + load_schemas(artefacts),
     )
     if schemas is not None:
         stages.append(schemas)
-    if aliases.stage is not None:
-        stages.append(aliases.stage)
+    if shortcuts.stage is not None:
+        stages.append(shortcuts.stage)
     stages.extend(
         item_build_stages(
             repository,
-            selected_for_build - selected_aliases,
+            selected_for_build - selected_shortcuts,
             item=item,
             target=target,
         )
@@ -443,8 +443,8 @@ def plan_item_build(
     )
     return PlannedItem(
         stages=tuple(stages),
-        omitted=aliases.omitted,
-        uncertified=frozenset(aliases.omitted_destinations)
+        omitted=shortcuts.omitted,
+        uncertified=frozenset(shortcuts.omitted_destinations)
         & frozenset(selected_for_build),
     )
 

@@ -11,9 +11,9 @@ them.
 Every row is stamped with the same item scope, passed in once, so no projector
 can derive a different one and write into the wrong installation.
 
-An alias is not a dependency. A dependency row records the reference as the
-author wrote it; :data:`~weaver.catalogue.tables.ALIAS` records what the
-consuming item's alias points at. Keeping them apart is what stops one item
+A shortcut is not a dependency. A dependency row records the reference as the
+author wrote it; :data:`~weaver.catalogue.tables.SHORTCUT` records what the
+consuming item's shortcut points at. Keeping them apart is what stops one item
 appearing to depend directly on another's physical object.
 """
 
@@ -30,13 +30,17 @@ from ..declaration.metadata import (
     VIEW,
     Reference,
 )
-from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
+from ..declaration.model import (
+    WeaverDocumentId,
+    WeaverItemId,
+    WeaverRepository,
+    WeaverSchemaId,
+)
 from ..declaration.references import declared_column_notes, resolve_text
 from ..etl import PROCEDURE_TYPE, artefacts_by_identity, item_runtime_artefacts
 from .claims import catalogue_schema
 from .render import InstallationScope, Row, column_set
 from .tables import (
-    ALIAS,
     CATALOGUE_TABLES,
     COLUMN_DICTIONARY,
     DEPENDENCY,
@@ -49,6 +53,7 @@ from .tables import (
     ROLE_DATA,
     ROLE_SHORTCUT,
     SCHEMA_DICTIONARY,
+    SHORTCUT,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
     CatalogueTable,
@@ -63,6 +68,9 @@ WAREHOUSE_TARGET = "warehouse"
 
 #: Map Weaver document kinds to the catalogue's lower-case vocabulary.
 OBJECT_TYPE_FOR_KIND = {FOLDER: "folder", TABLE: "table", VIEW: "view"}
+
+#: What a schema shortcut is registered as: the namespace it presents.
+SCHEMA_TYPE = "schema"
 
 #: How a validation kind names itself in ``TestDictionary.test_type``. Separate
 #: from the Registry's ``object_role``: the dictionary describes the Test, the
@@ -93,17 +101,17 @@ def project_item_catalogue(
 ) -> CatalogueProjection:
     """One item's catalogue rows, from the declaration and nothing else.
 
-    Every value is a function of source: what the item declares, aliases and
+    Every value is a function of source: what the item declares, shortcuts and
     describes. Nothing about a build, a binding or a target reaches it, so a
     developer keeps the projection correct by adding a declaration.
 
     It says what the repository declares; whether any of it is installed, where,
     and by which Weaver are composed at publication.
 
-    No Registry row is written for an alias destination. The Alias row is a
+    No Registry row is written for a shortcut destination. The Shortcut row is a
     declaration and belongs here; the Registry row certifies that a physical
     object exists at that name and what it is, which needs a binding — see
-    :func:`project_alias_registry`.
+    :func:`project_shortcut_registry`.
     """
 
     scope = InstallationScope(item.item_type, item.item_name)
@@ -114,27 +122,30 @@ def project_item_catalogue(
     # ``retained`` carries every kind of registered object. Splitting them here
     # rather than at the call site keeps the caller from having to know which is
     # which — the repository already does.
-    alias_by_destination = {
-        alias.destination: alias
-        for alias in repository.aliases
-        if alias.destination.item == item
+    # Every declaration, not only the logical ones: a shortcut destination is
+    # not a source document whichever kind of target it names, and what follows
+    # projects tables, columns and keys that it has none of.
+    shortcut_by_destination = {
+        declaration.destination: declaration
+        for declaration in repository.shortcuts
+        if declaration.owner == item
     }
-    retained_aliases = tuple(
-        alias_by_destination[identity]
+    retained_shortcuts = tuple(
+        shortcut_by_destination[identity]
         for identity in retained
-        if identity in alias_by_destination
+        if identity in shortcut_by_destination
     )
     installed = artefacts_by_identity(item_runtime_artefacts(repository, item=item))
     retained_artefacts = tuple(
         installed[identity] for identity in retained if identity in installed
     )
     # A validation carries the item's ordinary logical identity and is not a data
-    # object, so it is separated here for the same reason an alias is: what
+    # object, so it is separated here for the same reason a shortcut is: what
     # follows projects tables, columns and keys, and a Test has none of them.
     retained_validations = tuple(
         identity
         for identity in retained
-        if identity not in alias_by_destination
+        if identity not in shortcut_by_destination
         and identity not in installed
         and repository.source_documents[identity].is_validation
     )
@@ -142,7 +153,7 @@ def project_item_catalogue(
     retained = tuple(
         identity
         for identity in retained
-        if identity not in alias_by_destination
+        if identity not in shortcut_by_destination
         and identity not in installed
         and identity not in validation_set
     )
@@ -197,7 +208,7 @@ def project_item_catalogue(
                 note,
                 owner=source,
                 documents=all_documents,
-                aliases=repository.aliases,
+                shortcuts=repository.logical_shortcuts,
             )
             rows[COLUMN_DICTIONARY.name].append(
                 {
@@ -284,7 +295,7 @@ def project_item_catalogue(
                 **_identity_as(scope, edge.consumer, role="referencing"),
                 "dependency_reference": edge.reference,
                 # Null where the edge did not resolve — an authored physical
-                # name, or a reference that leaves the item through an alias.
+                # name, or a reference that leaves the item through a shortcut.
                 "referenced_item_type": (
                     producer.item.item_type if producer is not None else None
                 ),
@@ -301,19 +312,31 @@ def project_item_catalogue(
             }
         )
 
-    for alias in repository.aliases:
-        if alias.destination.item != item:
+    for declaration in repository.shortcuts:
+        if declaration.owner != item:
             continue
-        rows[ALIAS.name].append(
+        target_object = declaration.target_object
+        rows[SHORTCUT.name].append(
             {
                 **_scope(scope),
-                "destination_schema_name": _catalogue_schema(alias.destination),
-                "destination_object_name": alias.destination.object_id.object,
-                "source_item_type": alias.source.item.item_type,
-                "source_item_name": alias.source.item.item_name,
-                "source_schema_name": _catalogue_schema(alias.source),
-                "source_object_name": alias.source.object_id.object,
-                "signature": alias.signature,
+                "shortcut_name": declaration.name,
+                "destination_schema_name": declaration.schema,
+                # A schema shortcut presents a namespace, so it names no object.
+                "destination_object_name": (
+                    None
+                    if declaration.is_schema
+                    else declaration.destination.object_id.object
+                ),
+                "shortcut_type": declaration.shortcut_type,
+                "target_type": declaration.target_type,
+                "target_item_type": declaration.target_item.item_type,
+                "target_item_name": declaration.target_item.item_name,
+                "target_schema_name": declaration.target_schema,
+                "target_object_name": (
+                    target_object.object if target_object is not None else None
+                ),
+                "target_workspace_name": declaration.workspace,
+                "signature": declaration.signature,
             }
         )
 
@@ -325,8 +348,14 @@ def project_item_catalogue(
             for identity in retained + retained_validations
         }
         | {
-            (_catalogue_schema(alias.destination), alias.destination.object_id.schema)
-            for alias in retained_aliases
+            (
+                _catalogue_schema(declaration.destination),
+                declaration.destination.object_id.schema,
+            )
+            for declaration in retained_shortcuts
+            # A schema shortcut presents the source item's namespace, so the
+            # item does not own that schema and never declares it.
+            if not declaration.is_schema
         }
         # A generated load procedure puts a schema into use that no document
         # declares an object in, so it would otherwise be a schema the
@@ -359,56 +388,61 @@ def project_item_catalogue(
     )
 
 
-def project_alias_registry(
+def project_shortcut_registry(
     repository: WeaverRepository,
     *,
     item: WeaverItemId,
     retained: Iterable[WeaverDocumentId],
     target_kind: str,
 ) -> tuple[Row, ...]:
-    """Registry rows certifying this item's alias destinations, given a binding.
+    """Registry rows certifying this item's shortcut destinations, given a binding.
 
     Separate from :func:`project_item_catalogue` because it is the one part of
-    an item's catalogue that source cannot derive: an alias is registered as
+    an item's catalogue that source cannot derive: a shortcut is registered as
     what it physically is, which depends on its binding.
 
     The kind is required rather than defaulted, because a default would quietly
-    record a Warehouse alias as a table.
+    record a Warehouse view as a table.
+
+    A schema shortcut is registered as the schema it presents, and what is inside
+    one is not: those objects belong to the item the shortcut points at and can
+    change without a build.
     """
 
     scope = InstallationScope(item.item_type, item.item_name)
     wanted = set(retained)
     return tuple(
         {
-            **_identity(scope, alias.destination),
-            "object_type": _alias_object_type(alias.destination, target_kind),
+            **_identity(scope, declaration.destination),
+            "object_type": _shortcut_object_type(declaration, target_kind),
             "object_role": ROLE_SHORTCUT,
-            "signature": alias.signature,
+            "signature": declaration.signature,
         }
-        for alias in sorted(
+        for declaration in sorted(
             (
-                alias
-                for alias in repository.aliases
-                if alias.destination.item == item and alias.destination in wanted
+                declaration
+                for declaration in repository.shortcuts
+                if declaration.owner == item and declaration.destination in wanted
             ),
-            key=lambda alias: str(alias.destination),
+            key=lambda declaration: str(declaration.destination),
         )
     )
 
 
-def _alias_object_type(destination: WeaverDocumentId, target_kind: str) -> str:
-    """What an alias destination physically *is*, in the catalogue's vocabulary.
+def _shortcut_object_type(declaration, target_kind: str) -> str:
+    """What a shortcut destination physically *is*, in the catalogue's vocabulary.
 
-    Not a type of its own: an alias is registered as what it is — a folder under
-    ``Files``, a view in a Warehouse, a table in a Lakehouse — so existence,
-    addressing and dropping are the ordinary operations for that type. A
-    Lakehouse table alias being a OneLake shortcut is execution detail.
+    Not a type of its own: a shortcut is registered as what it is, so existence,
+    addressing and dropping are the ordinary operations for that type. That a
+    Lakehouse table shortcut is a OneLake shortcut is execution detail.
 
-    Its alias-ness is recorded by :data:`~weaver.catalogue.tables.ALIAS`, and
-    nowhere else.
+    What it is *for* is the object role, which is ``shortcut``, and where it
+    points is :data:`~weaver.catalogue.tables.SHORTCUT`.
     """
 
-    if destination.is_files:
+    if declaration.is_schema:
+        return SCHEMA_TYPE
+    if declaration.destination.is_files:
         return OBJECT_TYPE_FOR_KIND[FOLDER]
     if target_kind == WAREHOUSE_TARGET:
         return OBJECT_TYPE_FOR_KIND[VIEW]
@@ -423,7 +457,20 @@ def _catalogue_schema(identity: WeaverDocumentId) -> str:
     return catalogue_schema(identity)
 
 
-def _identity(scope: InstallationScope, identity: WeaverDocumentId) -> dict:
+def _identity(scope: InstallationScope, identity) -> dict:
+    """The two columns every catalogue table names an object by.
+
+    A schema shortcut presents a namespace, so it names the schema and the
+    schema is also what it installs: the object half repeats it rather than
+    being null, because the Registry keys on both.
+    """
+
+    if isinstance(identity, WeaverSchemaId):
+        return {
+            **_scope(scope),
+            "schema_name": identity.schema,
+            "object_name": identity.schema,
+        }
     return {
         **_scope(scope),
         "schema_name": _catalogue_schema(identity),
@@ -452,13 +499,13 @@ def _described(source, all_documents, repository) -> dict:
         source.document.description,
         owner=source,
         documents=all_documents,
-        aliases=repository.aliases,
+        shortcuts=repository.logical_shortcuts,
     )
     lineage = resolve_text(
         source.document.lineage,
         owner=source,
         documents=all_documents,
-        aliases=repository.aliases,
+        shortcuts=repository.logical_shortcuts,
     )
     return {
         "description": description.literal,

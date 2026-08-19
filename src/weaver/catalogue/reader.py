@@ -64,16 +64,16 @@ def read_table(
 def _projected_column(table: CatalogueTable, column, present: dict[str, str]) -> str:
     """One column of the expected schema, as a select expression.
 
-    Aliased back to the internal name, so nothing above the reader sees the
+    Shortcuted back to the internal name, so nothing above the reader sees the
     public spelling.
     """
 
     actual = present.get(column.public_name.casefold())
-    alias = identifier(column.name)
+    shortcut = identifier(column.name)
     if actual is None:
         # Older shape: give this Weaver the column it expects, as a typed null.
-        return f"CAST(NULL AS {column.warehouse_type}) AS {alias}"
-    return f"CAST({identifier(actual)} AS {column.warehouse_type}) AS {alias}"
+        return f"CAST(NULL AS {column.warehouse_type}) AS {shortcut}"
+    return f"CAST({identifier(actual)} AS {column.warehouse_type}) AS {shortcut}"
 
 
 def _internal(table: CatalogueTable, row) -> Row:

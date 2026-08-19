@@ -20,13 +20,13 @@ from factories import (
     LOAD_CONSUMER_TARGET,
     LOAD_PRODUCER,
     LOAD_PRODUCER_TARGET,
-    bound_declaration,
     folder_document,
     installed_catalogue,
     item_bindings,
     lakehouse_table,
     load_estate,
     load_estate_bindings,
+    logical_shortcuts,
     schema_document,
     warehouse_table,
 )
@@ -286,7 +286,7 @@ def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse
 
 #: The consumer's two bound references to the producer, on the surface a
 #: Warehouse declares them.
-_CONSUMER_REFERENCES = bound_declaration(
+_CONSUMER_REFERENCES = logical_shortcuts(
     LOAD_CONSUMER,
     **{
         "Sales.Order": f"{LOAD_PRODUCER}/Sales.Order",

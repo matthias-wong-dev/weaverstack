@@ -114,6 +114,11 @@ class FabricSessionResolver(FabricResolver):
         resolved = self.resolve(item, item_type=LAKEHOUSE)
         return Location(abfss_root(self.workspace.id, resolved.id))
 
+    def external_root(self, item) -> Location:
+        """As :meth:`lakehouse` addresses one here: ``abfss://``, for the session."""
+
+        return Location(abfss_root(item.workspace_id, item.id))
+
     def sql_endpoint(self, target):
         self.client = self._rest_client()
         return super().sql_endpoint(target)

@@ -335,7 +335,7 @@ def _source_relation(table: CatalogueTable, rows: Sequence[Row]) -> str:
         for row in rows
     )
     # Positional names for the raw relation, so a value column cannot be confused
-    # with the aliased output of the same name.
+    # with the shortcuted output of the same name.
     raw = [f"c{index}" for index, _name in enumerate(table.column_names)]
     projected = ", ".join(
         f"CAST({identifier(raw[index])} AS {table.column(name).warehouse_type})"
@@ -396,7 +396,7 @@ def render_delete_obsolete(
     # delete identifies rows by the whole key, scope columns included.
     identity = table.key if isinstance(scope, InstallationScopes) else beyond
 
-    # The target is named in full rather than aliased: a DELETE that aliases its
+    # The target is named in full rather tha shortcuted: a DELETE that shortcuts its
     # target needs T-SQL's second FROM clause, and the qualified name correlates
     # without it.
     matched = "\n                     AND ".join(

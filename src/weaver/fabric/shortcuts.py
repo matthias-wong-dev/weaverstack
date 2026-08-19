@@ -1,4 +1,4 @@
-"""Fabric OneLake shortcut operations for aliases.
+"""Fabric OneLake shortcut operations for shortcuts.
 
 Shortcuts are recreated during installation because they contain no data.
 """
@@ -118,7 +118,7 @@ def create_shortcut(
                 ) from exc
             time.sleep(REPLACE_POLL_INTERVAL)
     return {
-        "shortcut": f"{path}/{name}",
+        "path": f"{path}/{name}",
         "in": destination.name,
         "target": f"{source.name}/{source_path}",
         # Reported because it says which contract Fabric honoured. Creating one
@@ -126,7 +126,7 @@ def create_shortcut(
         # not; so a 202 here would mean the shortcut itself is still being made,
         # which is a different thing from the destination Lakehouse not yet having
         # registered it as a table. Only the second is what the readability wait
-        # in `weaver.build_bundle.executors.alias` exists for.
+        # in `weaver.build_bundle.executors.shortcut` exists for.
         "status": response.status_code,
     }
 

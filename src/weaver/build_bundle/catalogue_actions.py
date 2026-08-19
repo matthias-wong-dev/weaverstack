@@ -195,7 +195,7 @@ def desired_catalogue(
 
     Logical, then narrowed, then bound — in that order and visibly so. The
     narrowing is what keeps a Registry row meaning "this succeeded"; the binding
-    is what lets an alias be certified as the thing it physically is, and what
+    is what lets a shortcut be certified as the thing it physically is, and what
     supplies the Installation facts a repository cannot know.
 
     Named and separate because it is *both* halves of the fixed point. It is what

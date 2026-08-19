@@ -14,7 +14,7 @@ Lakehouse                        a OneLake shortcut, made over REST
 Warehouse                        a frozen view over the source's three-part name
 ===============================  ==============================================
 
-Both are one ``create_alias`` action, and the payload says which it is: a
+Both are one ``create_shortcut`` action, and the payload says which it is: a
 Lakehouse entry carries the shortcut's type, and a Warehouse entry is a T-SQL
 batch. Only the Warehouse form is spelled out in SQL, because only there is the
 statement itself the decision. A shortcut carries one frozen decision: this
@@ -38,7 +38,6 @@ from dataclasses import dataclass
 from typing import Iterable, Mapping
 
 from ..declaration.model import (
-    SCHEMA_SHORTCUT,
     WeaverDocumentId,
     WeaverItemId,
 )
@@ -58,14 +57,14 @@ from .changes import (
     added,
 )
 from .models import (
-    CREATE_ALIAS,
-    OMIT_ALIAS_UNSUPPORTED,
+    CREATE_SHORTCUT,
+    OMIT_SHORTCUT_UNSUPPORTED,
     BuildBatch,
     InstallAction,
     OmittedNode,
 )
 from .payloads import sha256_hex
-from .stages import ALIAS, PlannedStage
+from .stages import SHORTCUT, PlannedStage
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Where a Lakehouse shortcut is materialised, by what it points at.
@@ -101,8 +100,7 @@ def shortcut_node_id(destination) -> str:
     nothing declares it, and no dependency layer contains it.
     """
 
-    return f"alias:{destination}"
-
+    return f"shortcut:{destination}"
 
 
 @dataclass(frozen=True)
@@ -116,7 +114,6 @@ class ItemShortcutPlan:
     #: The caller needs them because a shortcut with no physical form must not be
     #: certified as installed.
     omitted_destinations: tuple[object, ...] = ()
-
 
 
 def plan_item_shortcuts(
@@ -145,10 +142,10 @@ def plan_item_shortcuts(
     declarations = sorted(
         (
             declaration
-            for declaration in (*repository.shortcuts, *repository.externals)
-            if _owner(declaration) == item
+            for declaration in repository.shortcuts
+            if declaration.owner == item
         ),
-        key=lambda declaration: str(_destination(declaration)),
+        key=lambda declaration: str(declaration.destination),
     )
     if not declarations:
         return ItemShortcutPlan()
@@ -159,12 +156,14 @@ def plan_item_shortcuts(
     supported: list[tuple] = []
     schemas: list[str] = []
 
-    bound_sources = {alias.destination: alias.source for alias in repository.aliases}
+    logical_sources = {
+        pair.destination: pair.source for pair in repository.logical_shortcuts
+    }
 
     for declaration in declarations:
         source_target = None
-        if declaration.bind:
-            source = bound_sources.get(_destination(declaration))
+        if declaration.is_logical:
+            source = logical_sources.get(declaration.destination)
             source_target = (
                 target_by_item.get(source.item) if source is not None else None
             )
@@ -177,16 +176,16 @@ def plan_item_shortcuts(
         if reason is not None:
             omitted.append(
                 OmittedNode(
-                    node_id=shortcut_node_id(_destination(declaration)),
-                    reason=OMIT_ALIAS_UNSUPPORTED,
+                    node_id=shortcut_node_id(declaration.destination),
+                    reason=OMIT_SHORTCUT_UNSUPPORTED,
                     detail=reason,
                 )
             )
-            omitted_destinations.append(_destination(declaration))
+            omitted_destinations.append(declaration.destination)
             continue
-        if not _is_schema(declaration):
-            schemas.append(_schema_of(declaration))
-        if _destination(declaration) in chosen:
+        if not declaration.is_schema:
+            schemas.append(declaration.schema)
+        if declaration.destination in chosen:
             supported.append((declaration, source_target))
 
     stage = None
@@ -199,16 +198,16 @@ def plan_item_shortcuts(
             target=target,
             payloads=payloads,
             sources=sources,
-            bound_sources=bound_sources,
+            logical_sources=logical_sources,
         )
         # One action stands for every declaration the item consumes, so it
         # produces several changes. Each names what the destination physically
         # *is* at this binding, which is the same question the Registry row
         # answers.
         stage = PlannedStage(
-            phase=ALIAS,
-            slug="item-aliases",
-            description="materialise item-owned shortcuts and external views",
+            phase=SHORTCUT,
+            slug="item-shortcuts",
+            description="materialise item-owned shortcuts",
             payloads=payloads,
             changes={
                 target.id: tuple(
@@ -222,7 +221,7 @@ def plan_item_shortcuts(
             },
             batches=(
                 BuildBatch(
-                    id=f"item-aliases-{item_slug}",
+                    id=f"item-shortcuts-{item_slug}",
                     target_id=target.id,
                     actions=(action,),
                 ),
@@ -236,41 +235,10 @@ def plan_item_shortcuts(
     )
 
 
-
-# --- one vocabulary over both declaration kinds ------------------------------
-#
-# A shortcut and an external view answer the same questions differently, and the
-# planner asks them in one place rather than branching on the type everywhere.
-
-
-def _owner(declaration) -> WeaverItemId:
-    owner = getattr(declaration, "owner", None)
-    return owner if owner is not None else declaration.destination.item
-
-
-def _destination(declaration):
-    return declaration.destination
-
-
-def _is_schema(declaration) -> bool:
-    return getattr(declaration, "shortcut_type", None) == SCHEMA_SHORTCUT
-
-
-def _is_files(declaration) -> bool:
-    return bool(getattr(declaration, "is_files", False))
-
-
-def _schema_of(declaration) -> str:
-    return declaration.destination.object_id.schema
-
-
 def _key(declaration) -> str:
-    """How a declaration names its resolved source, if it has one frozen."""
+    """How a declaration names its resolved source, where one is frozen."""
 
-    name = getattr(declaration, "name", None)
-    if name is None:
-        return str(declaration.destination)
-    return f"{declaration.owner}/{name}"
+    return f"{declaration.owner}/{declaration.name}"
 
 
 def _unsupported(
@@ -282,8 +250,8 @@ def _unsupported(
 ) -> str | None:
     """Why this declaration has no physical form here, or None when it has one."""
 
-    if not declaration.bind:
-        if target.kind == WAREHOUSE_TARGET:
+    if not declaration.is_logical:
+        if declaration.is_view:
             return None
         if _key(declaration) not in sources:
             return (
@@ -293,18 +261,16 @@ def _unsupported(
         return None
     if source_target is None:
         return (
-            f"source item {declaration.bound_source.item} is not bound, so there "
-            "is no physical source to point at"
+            f"target item {declaration.logical_source.item} is not bound, so "
+            "there is no physical source to point at"
         )
-    if _is_schema(declaration):
-        return "a schema shortcut has no bound form"
-    source = declaration.bound_source
-    if target.kind != WAREHOUSE_TARGET and _is_files(declaration) != source.is_files:
+    source = declaration.logical_source
+    if not declaration.is_view and declaration.is_files != source.is_files:
         return (
             "a shortcut must stay in one namespace: a Files destination needs a "
             "Files source, and a table destination a table source"
         )
-    if target.kind != WAREHOUSE_TARGET and source_target.kind == WAREHOUSE_TARGET:
+    if not declaration.is_view and source_target.kind == WAREHOUSE_TARGET:
         return (
             "a Lakehouse shortcut is a OneLake shortcut, and there is no "
             f"shortcut form for the Warehouse source {source}"
@@ -320,15 +286,15 @@ def _change_kind(declaration, target) -> str:
     view or a table according to what was declared and what it was bound to.
     """
 
-    if target.kind == WAREHOUSE_TARGET:
+    if declaration.is_view:
         return VIEW_KIND
-    if _is_schema(declaration):
+    if declaration.is_schema:
         return SCHEMA_KIND
-    return FOLDER_KIND if _is_files(declaration) else TABLE_KIND
+    return FOLDER_KIND if declaration.is_files else TABLE_KIND
 
 
 def _change_name(declaration) -> str:
-    if _is_schema(declaration):
+    if declaration.is_schema:
         return declaration.name
     return declaration.destination.object_id.qualified
 
@@ -340,7 +306,7 @@ def _shortcut_action(
     target: BoundTarget,
     payloads: dict[str, bytes],
     sources: Mapping[str, ResolvedShortcutSource],
-    bound_sources: Mapping,
+    logical_sources: Mapping,
 ) -> InstallAction:
     """One action for all of this item's declarations.
 
@@ -360,7 +326,7 @@ def _shortcut_action(
         content = (
             json.dumps(
                 [
-                    _view_statement(declaration, source_target, bound_sources)
+                    _view_statement(declaration, source_target, logical_sources)
                     for declaration, source_target in supported
                 ],
                 indent=2,
@@ -368,18 +334,18 @@ def _shortcut_action(
             )
             + "\n"
         ).encode("utf-8")
-        filename = f"aliases-{item_slug}.tsql-batch.json"
+        filename = f"shortcuts-{item_slug}.tsql-batch.json"
         executor = "tsql_batch"
     else:
         content = _shortcut_payload(
-            supported, sources=sources, bound_sources=bound_sources
+            supported, sources=sources, logical_sources=logical_sources
         )
-        filename = f"aliases-{item_slug}.alias.json"
-        executor = "alias"
+        filename = f"shortcuts-{item_slug}.shortcut.json"
+        executor = "shortcut"
     payloads[filename] = content
     return InstallAction(
-        id=f"aliases-{item_slug}",
-        kind=CREATE_ALIAS,
+        id=f"shortcuts-{item_slug}",
+        kind=CREATE_SHORTCUT,
         # No single resource: this action stands for every declaration the item
         # consumes, and the payload names them.
         resource_node_id=None,
@@ -389,7 +355,7 @@ def _shortcut_action(
     )
 
 
-def _view_statement(declaration, source_target, bound_sources) -> str:
+def _view_statement(declaration, source_target, logical_sources) -> str:
     """An external view, as the one statement that makes it exist.
 
     The source is named by its three-part spelling, which is how a Fabric
@@ -409,8 +375,8 @@ def _view_statement(declaration, source_target, bound_sources) -> str:
     destination = declaration.destination
     schema = _tsql_ident(destination.object_id.schema)
     name = _tsql_ident(destination.object_id.object)
-    if declaration.bind:
-        source = bound_sources[destination]
+    if declaration.is_logical:
+        source = logical_sources[destination]
         item_name = source_target.name
         source_object = source.object_id
     else:
@@ -423,7 +389,7 @@ def _view_statement(declaration, source_target, bound_sources) -> str:
     return f"create or alter view {schema}.{name} as select * from {source_sql};"
 
 
-def _shortcut_payload(supported, *, sources, bound_sources) -> bytes:
+def _shortcut_payload(supported, *, sources, logical_sources) -> bytes:
     """This item's Lakehouse shortcuts, as the frozen addresses they stand for.
 
     A bound source is named by target id: the installer already resolves every
@@ -438,13 +404,13 @@ def _shortcut_payload(supported, *, sources, bound_sources) -> bytes:
     for declaration, source_target in supported:
         destination = declaration.destination
         entry = {
-            "alias": str(destination),
-            "type": getattr(declaration, "shortcut_type", "table"),
+            "shortcut": str(destination),
+            "type": declaration.shortcut_type,
             "path": _destination_path(declaration),
             "name": _destination_name(declaration),
         }
-        if declaration.bind:
-            source = bound_sources[destination]
+        if declaration.is_logical:
+            source = logical_sources[destination]
             entry.update(
                 {
                     "source": str(source),
@@ -467,7 +433,7 @@ def _shortcut_payload(supported, *, sources, bound_sources) -> bytes:
             )
         frozen.append(entry)
     return (
-        json.dumps({"aliases": frozen}, indent=2, sort_keys=True, ensure_ascii=False)
+        json.dumps({"shortcuts": frozen}, indent=2, sort_keys=True, ensure_ascii=False)
         + "\n"
     ).encode("utf-8")
 
@@ -480,14 +446,14 @@ def _destination_path(declaration) -> str:
     a schema shortcut is ``path=Tables, name=<Schema>``.
     """
 
-    if _is_schema(declaration):
+    if declaration.is_schema:
         return TABLES_AREA
-    area = FILES_AREA if _is_files(declaration) else TABLES_AREA
+    area = FILES_AREA if declaration.is_files else TABLES_AREA
     return f"{area}/{declaration.destination.object_id.schema}"
 
 
 def _destination_name(declaration) -> str:
-    if _is_schema(declaration):
+    if declaration.is_schema:
         return declaration.name
     return declaration.destination.object_id.object
 

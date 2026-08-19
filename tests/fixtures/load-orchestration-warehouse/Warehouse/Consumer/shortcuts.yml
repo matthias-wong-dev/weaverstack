@@ -1,0 +1,2 @@
+logical:
+  Warehouse/Consumer/Rpt.PortableCustomer: Lakehouse/Producer/DWG.Customer

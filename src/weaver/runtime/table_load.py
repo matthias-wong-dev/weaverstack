@@ -549,7 +549,7 @@ def _surviving_relation(contract: LoadContract) -> str:
     return f"weaver_unique_{len(contract.unique_keys)}_survivor"
 
 
-def _violation_reason(contract: LoadContract, alias: str = "s") -> str:
+def _violation_reason(contract: LoadContract, shortcut: str = "s") -> str:
     """Which refusal a row met, taking the first that applies.
 
     One reason per refused row. A row that is wrong twice over is still one row
@@ -560,11 +560,11 @@ def _violation_reason(contract: LoadContract, alias: str = "s") -> str:
     if not contract.not_null_columns:
         return f"'{REASON_BLANK_PK}'"
     branches = [
-        f"WHEN {blank_key_predicate(contract.primary_key, alias)} "
+        f"WHEN {blank_key_predicate(contract.primary_key, shortcut)} "
         f"THEN '{REASON_BLANK_PK}'"
     ]
     branches += [
-        f"WHEN {alias}.`{column}` IS NULL THEN '{null_column_reason(column)}'"
+        f"WHEN {shortcut}.`{column}` IS NULL THEN '{null_column_reason(column)}'"
         for column in contract.not_null_columns
     ]
     return "CASE " + " ".join(branches) + " END"

@@ -247,7 +247,7 @@ def test_a_build_certifying_nothing_removes_what_the_catalogue_still_claims(
         Registry=[registry_row(CUSTOMER)],
         TableDictionary=[registry_row(CUSTOMER)],
         ColumnDictionary=[registry_row(CUSTOMER)],
-        Alias=[registry_row(CUSTOMER)],
+        Shortcut=[registry_row(CUSTOMER)],
     )
 
     stages = after(repository, current=held)
@@ -256,7 +256,7 @@ def test_a_build_certifying_nothing_removes_what_the_catalogue_still_claims(
     lines = statements(stages[0]) + statements(stages[1])
 
     # Every description and certification the item held is removed...
-    for table in ("TableDictionary", "ColumnDictionary", "Registry", "Alias"):
+    for table in ("TableDictionary", "ColumnDictionary", "Registry", "Shortcut"):
         assert any(
             line.startswith("DELETE FROM") and table in line for line in lines
         ), table

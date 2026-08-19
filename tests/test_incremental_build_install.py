@@ -19,7 +19,7 @@ from weaver.build_bundle import (
     determine_impact,
     generate_item_build_bundle,
 )
-from weaver.build_bundle.incremental import select_build, stale_alias_destinations
+from weaver.build_bundle.incremental import select_build, stale_shortcut_destinations
 from weaver.build_bundle.models import (
     BUILD_FOLDER,
     BUILD_TABLE,
@@ -33,8 +33,8 @@ from weaver.build_bundle.models import (
 )
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue.projection import (
-    project_alias_registry,
     project_item_catalogue,
+    project_shortcut_registry,
 )
 from weaver.catalogue.state import (
     Catalogue,
@@ -71,7 +71,7 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
     ]
     retained.extend(
         alias.destination
-        for alias in repository.aliases
+        for alias in repository.logical_shortcuts
         if alias.destination.item == item
     )
     retained.extend(
@@ -83,7 +83,7 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
     projected = dict(projection.rows)
     projected[REGISTRY.name] = tuple(
         projected.get(REGISTRY.name, ())
-    ) + project_alias_registry(
+    ) + project_shortcut_registry(
         repository,
         item=item,
         retained=retained,
@@ -421,12 +421,12 @@ def _alias_actions(bundle):
     return [
         action
         for _sequence, _batch, action in bundle.plan.actions()
-        if action.kind == "create_alias"
+        if action.kind == "create_shortcut"
     ]
 
 
 @weaver_test()
-def test_an_unchanged_alias_is_not_replaced(tmp_path):
+def test_an_unchanged_shortcut_is_not_replaced(tmp_path):
     """The behaviour this whole change exists for.
 
     An alias used to be remade on every build. Now its declaration is unchanged,
@@ -450,8 +450,8 @@ def test_a_repointed_alias_is_replaced(tmp_path):
     installed = _alias_catalogue(_repository(root))
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.PortableCustomer:\n  target: Lakehouse/Curated/Sales.Archive\n  bind: true\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
     )
     repository = _repository(root)
     bundle = _alias_bundle(tmp_path, repository, rows=installed)
@@ -529,7 +529,7 @@ def test_an_alias_destination_installed_as_a_table_is_pruned(tmp_path):
 
 
 @weaver_test()
-def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
+def test_a_shortcut_is_never_dropped_by_the_document_pipeline(tmp_path):
     """Replacing an alias is the alias executor's job, not a drop and a build.
 
     It holds no data, so it is remade in place; routing it through the generic
@@ -542,10 +542,10 @@ def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
     installed = _alias_catalogue(_repository(root))
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.PortableCustomer:\n"
-        "  target: Lakehouse/Curated/Sales.Archive\n"
-        "  bind: true\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Archive\n",
     )
     repository = _repository(root)
     bundle = _alias_bundle(tmp_path, repository, rows=installed)
@@ -554,7 +554,7 @@ def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
     assert all(
         action.resource_node_id != ALIAS_DESTINATION
         for _sequence, _batch, action in bundle.plan.actions()
-        if action.kind != "create_alias"
+        if action.kind != "create_shortcut"
     )
 
 
@@ -592,11 +592,11 @@ def _consumer_only_selection(repository, rows):
             }
             | {
                 alias.destination
-                for alias in repository.aliases
+                for alias in repository.logical_shortcuts
                 if alias.destination.item == consumer
             }
         ),
-        stale_aliases=stale_alias_destinations(
+        stale_shortcuts=stale_shortcut_destinations(
             repository, registered, bound_items={consumer}
         ),
     )
@@ -641,7 +641,7 @@ def test_a_stale_alias_carries_its_consumers_with_it(tmp_path):
 
 
 @weaver_test()
-def test_an_alias_published_after_its_source_is_left_alone(tmp_path):
+def test_a_shortcut_published_after_its_target_is_left_alone(tmp_path):
     """The ordinary case, and the one that has to stay cheap."""
 
     repository = _repository(_dependency_estate(tmp_path))
@@ -664,7 +664,7 @@ def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
 
     assert all(document.build_datetime is None for document in registered.values())
     assert (
-        stale_alias_destinations(
+        stale_shortcut_destinations(
             repository,
             registered,
             bound_items={WeaverItemId.parse("Warehouse/Reporting")},
@@ -692,7 +692,7 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
         WeaverItemId.parse("Lakehouse/Curated"),
     }
 
-    assert stale_alias_destinations(
+    assert stale_shortcut_destinations(
         repository, Catalogue(rows).registered, bound_items=both
     ) == (WeaverDocumentId.parse(ALIAS_DESTINATION),)
 
@@ -708,7 +708,7 @@ def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
     assert (
-        stale_alias_destinations(
+        stale_shortcut_destinations(
             repository,
             Catalogue(rows).registered,
             bound_items={WeaverItemId.parse("Lakehouse/Curated")},

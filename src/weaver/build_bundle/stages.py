@@ -28,8 +28,8 @@ from .payloads import payload_path
 #: The phases one item's work is made of, in the order they must run.
 #:
 #: Prune and managed drops come first, as the destructive reconciliation of what
-#: is already there. Schemas precede aliases so a Warehouse-view alias has a
-#: schema to be created in, and aliases precede builds so every document is built
+#: is already there. Schemas precede shortcuts so a Warehouse-view shortcut has a
+#: schema to be created in, and shortcuts precede builds so every document is built
 #: against a namespace holding what the item imports. The refresh closes the
 #: item: until a mutated Lakehouse's SQL endpoint has caught up, a dependent
 #: item's view or shortcut would be built over stale metadata. Load follows it,
@@ -37,13 +37,22 @@ from .payloads import payload_path
 PRUNE = "prune"
 DROP = "drop"
 SCHEMA = "schema"
-ALIAS = "alias"
+SHORTCUT = "shortcut"
 BUILD = "build"
 REFRESH = "refresh"
 LOAD = "load"
 CATALOGUE = "catalogue"
 
-_PHASE_ORDER = (PRUNE, DROP, SCHEMA, ALIAS, BUILD, REFRESH, LOAD, CATALOGUE)
+_PHASE_ORDER = (
+    PRUNE,
+    DROP,
+    SCHEMA,
+    SHORTCUT,
+    BUILD,
+    REFRESH,
+    LOAD,
+    CATALOGUE,
+)
 _PHASE_RANK = {phase: rank for rank, phase in enumerate(_PHASE_ORDER)}
 
 

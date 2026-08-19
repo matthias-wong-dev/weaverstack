@@ -53,7 +53,7 @@ TARGET_KINDS = (FOLDER_TARGET, DELTA_TARGET, SQL_TARGET)
 # The two execution namespaces a two-part reference may bind in. A Lakehouse
 # object (Folder or Delta) resolves its references inside the Lakehouse; a
 # Warehouse object (SQL) inside the Warehouse. The two are bridged only by an
-# explicit alias, never by inference.
+# explicit shortcut, never by inference.
 LAKEHOUSE_NAMESPACE = "lakehouse"
 WAREHOUSE_NAMESPACE = "warehouse"
 NAMESPACES = (LAKEHOUSE_NAMESPACE, WAREHOUSE_NAMESPACE)
@@ -88,10 +88,8 @@ _ID_KEYS = {
 }
 _PLACEHOLDERS = {"not declared", "n/a", "tbd", "todo"}
 
-# Cross-engine aliases. A Lakehouse object publishes into the Warehouse with a
-# Warehouse alias; a Warehouse object publishes into the Lakehouse with a
-# Lakehouse alias. Eligibility is by target, not just kind, so both keys are
-# accepted here and refused in _parse_aliases when they sit on the wrong object.
+# The retired document-local headers, kept by their exact authored spelling so a
+# repository still carrying one is told what replaced it.
 WAREHOUSE_ALIAS = "Warehouse alias"
 LAKEHOUSE_ALIAS = "Lakehouse alias"
 _ALIAS_KEYS = {WAREHOUSE_ALIAS, LAKEHOUSE_ALIAS}
@@ -127,7 +125,7 @@ DEFAULT_STABILITY_ROWS = 1_000_000
 # The groups are semantic: each says what a set of keys is about, and each kind
 # composes the groups that apply to it. There is no set every document gets — a
 # Test has a description, notes and dependencies and materialises nothing, so
-# `Lineage`, `Static` and the aliases could not mean anything on it.
+# `Lineage`, `Static` and the shortcuts could not mean anything on it.
 
 #: What any Weaver declaration says about itself.
 DOCUMENT_KEYS = frozenset({"Description", "Notes", "Revision notes"})
@@ -508,8 +506,8 @@ class WeaverDocument:
     has_load_procedure: bool = True
     prohibit_rebuild: bool = False
     static: bool = False
-    warehouse_alias: ObjectId | None = None
-    lakehouse_alias: ObjectId | None = None
+    warehouse_shortcut: ObjectId | None = None
+    lakehouse_shortcut: ObjectId | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -634,7 +632,7 @@ class WeaverDocument:
 
 
 # Transitional public spelling. R8 removes it after callers have migrated;
-# keeping the alias here lets identity and discovery move independently.
+# keeping the shortcut here lets identity and discovery move independently.
 SesDocument = WeaverDocument
 
 
@@ -818,7 +816,9 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         declared_columns, column_notes, primary_key, declared_not_null
     )
 
-    warehouse_alias, lakehouse_alias = _parse_aliases(loaded, language, kind, object_id)
+    warehouse_shortcut, lakehouse_shortcut = _parse_shortcuts(
+        loaded, language, kind, object_id
+    )
 
     return SesDocument(
         kind=kind,
@@ -846,8 +846,8 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         has_load_procedure=has_load_procedure,
         prohibit_rebuild=prohibit_rebuild,
         static=static,
-        warehouse_alias=warehouse_alias,
-        lakehouse_alias=lakehouse_alias,
+        warehouse_shortcut=warehouse_shortcut,
+        lakehouse_shortcut=lakehouse_shortcut,
         raw=dict(loaded),
     )
 
@@ -858,7 +858,7 @@ def _parse_validation(
     """Parse a Test or Assumption header.
 
     A separate path rather than a branch through the object parser: a validation
-    has no schema, lineage, build behaviour or alias. What the two share —
+    has no schema, lineage, build behaviour or shortcut. What the two share —
     description, notes, revisions, dependencies — goes through the same helpers,
     so they cannot drift.
     """
@@ -1084,46 +1084,46 @@ def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]
     return tuple(seen)
 
 
-def _parse_aliases(
+def _parse_shortcuts(
     raw: dict[str, Any], language: str, kind: str, object_id: ObjectId
 ) -> tuple[ObjectId | None, ObjectId | None]:
-    """The cross-engine aliases this object publishes, checked for eligibility.
+    """The cross-engine shortcuts this object publishes, checked for eligibility.
 
-    A Lakehouse object may publish a ``Warehouse alias`` and a Warehouse object
-    a ``Lakehouse alias``; neither belongs on a Folder or on the opposite
-    engine. The alias may name a different ``Schema.Object`` from the native one
+    A Lakehouse object may publish a ``Warehouse shortcut`` and a Warehouse object
+    a ``Lakehouse shortcut``; neither belongs on a Folder or on the opposite
+    engine. The shortcut may name a different ``Schema.Object`` from the native one
     — a Staging table can surface as Sales.Customer — so it is parsed through
     the same two-part model.
     """
 
     target = target_kind_for(language, kind)
-    warehouse_alias = _parse_alias(raw.get(WAREHOUSE_ALIAS), WAREHOUSE_ALIAS)
-    lakehouse_alias = _parse_alias(raw.get(LAKEHOUSE_ALIAS), LAKEHOUSE_ALIAS)
+    warehouse_shortcut = _parse_shortcut(raw.get(WAREHOUSE_ALIAS), WAREHOUSE_ALIAS)
+    lakehouse_shortcut = _parse_shortcut(raw.get(LAKEHOUSE_ALIAS), LAKEHOUSE_ALIAS)
 
-    if warehouse_alias is not None and target != DELTA_TARGET:
+    if warehouse_shortcut is not None and target != DELTA_TARGET:
         raise MetadataError(
             f"{WAREHOUSE_ALIAS} publishes a Lakehouse object into the Warehouse, so it "
             f"belongs on a Delta table or Spark view, not on {object_id.qualified} "
             + (
-                "(a Warehouse object uses Lakehouse alias)"
+                "(a Warehouse object uses Lakehouse shortcut)"
                 if target == SQL_TARGET
                 else "(a Folder is not published across engines)"
             )
         )
-    if lakehouse_alias is not None and target != SQL_TARGET:
+    if lakehouse_shortcut is not None and target != SQL_TARGET:
         raise MetadataError(
             f"{LAKEHOUSE_ALIAS} publishes a Warehouse object into the Lakehouse, so it "
             f"belongs on a SQL table or view, not on {object_id.qualified} "
             + (
-                "(a Lakehouse object uses Warehouse alias)"
+                "(a Lakehouse object uses Warehouse shortcut)"
                 if target == DELTA_TARGET
                 else "(a Folder is not published across engines)"
             )
         )
-    return warehouse_alias, lakehouse_alias
+    return warehouse_shortcut, lakehouse_shortcut
 
 
-def _parse_alias(value: Any, key: str) -> ObjectId | None:
+def _parse_shortcut(value: Any, key: str) -> ObjectId | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value.strip():

@@ -139,7 +139,7 @@ def physical_bundle(
         ),
         target_by_item={item: target},
         selected_documents=selected,
-        selected_aliases=set(),
+        selected_shortcuts=set(),
         selected_for_drop=set(),
         selected_for_build=selected,
         selected_loads=loads,

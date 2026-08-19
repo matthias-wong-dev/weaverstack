@@ -189,7 +189,7 @@ DESKTOP_JOURNEY_NAMES = {
 #: thing a single destination cannot express, since an alias needs something to
 #: point across to.
 CROSS_ITEM_ALIAS_FIXTURE = SesFixture(
-    _FIXTURES / "cross-item-alias",
+    _FIXTURES / "cross-item-shortcut",
     ("Lakehouse/Raw", "Lakehouse/Curated"),
     lakehouse_names={
         "Lakehouse/Raw": "Producer_LH",

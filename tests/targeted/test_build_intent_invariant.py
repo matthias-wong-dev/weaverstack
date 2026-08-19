@@ -45,7 +45,7 @@ from weaver.targets import ItemRef
 PHYSICAL_KINDS = frozenset(
     {
         "create_schema",
-        "create_alias",
+        "create_shortcut",
         "build_folder",
         "build_table",
         "build_view",

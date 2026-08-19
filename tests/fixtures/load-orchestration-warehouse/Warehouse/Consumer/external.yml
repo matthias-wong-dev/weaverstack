@@ -1,3 +1,0 @@
-Warehouse/Consumer/Rpt.PortableCustomer:
-  target: Lakehouse/Producer/DWG.Customer
-  bind: true

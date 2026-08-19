@@ -33,13 +33,13 @@ from weaver.build_bundle import plan_item_build
 from weaver.build_bundle.incremental import (
     declared_signatures,
     select_build,
-    stale_alias_destinations,
+    stale_shortcut_destinations,
 )
 from weaver.build_bundle.shortcuts import plan_item_shortcuts
 
 PRODUCER = "Lakehouse/Raw"
 CONSUMER = "Lakehouse/Curated"
-ALIAS = "Lakehouse/Curated/DWG.PortableCustomer"
+SHORTCUT = "Lakehouse/Curated/DWG.PortableCustomer"
 SOURCE = "Lakehouse/Raw/DWG.Customer"
 VIEW = "Lakehouse/Curated/DWG.CustomerName"
 
@@ -56,7 +56,7 @@ def targets():
     }
 
 
-def plan_aliases(repository, *, selected=(ALIAS,)):
+def plan_aliases(repository, *, selected=(SHORTCUT,)):
     by_item = targets()
     return plan_item_shortcuts(
         repository,
@@ -71,16 +71,16 @@ def plan_aliases(repository, *, selected=(ALIAS,)):
 
 
 @weaver_test()
-def test_a_selected_alias_is_planned_as_one_action(estate):
+def test_a_selected_shortcut_is_planned_as_one_action(estate):
     planned = plan_aliases(estate)
 
     assert planned.stage is not None
     kinds = [action.kind for batch in planned.stage.batches for action in batch.actions]
-    assert kinds == ["create_alias"]
+    assert kinds == ["create_shortcut"]
 
 
 @weaver_test()
-def test_an_unselected_alias_is_left_alone(estate):
+def test_an_unselected_shortcut_is_left_alone(estate):
     """Incremental selection applies to aliases exactly as to documents.
 
     An alias absent from the selection is current — its declaration is unchanged,
@@ -94,7 +94,7 @@ def test_an_unselected_alias_is_left_alone(estate):
 
 
 @weaver_test()
-def test_a_retained_alias_still_reports_its_schema(estate):
+def test_a_retained_shortcut_still_reports_its_schema(estate):
     """The subtle one, and the reason schemas are reported separately.
 
     An alias that is *not* being replaced still lives in a namespace the item
@@ -108,7 +108,7 @@ def test_a_retained_alias_still_reports_its_schema(estate):
 
 
 @weaver_test()
-def test_an_alias_whose_source_item_is_unbound_is_omitted(estate):
+def test_a_shortcut_whose_target_item_is_unbound_is_omitted(estate):
     """It has no physical form under these bindings, so it cannot be planned.
 
     And — the part that matters — it must not be certified either. A Registry row
@@ -120,21 +120,21 @@ def test_an_alias_whose_source_item_is_unbound_is_omitted(estate):
         item=item_id(CONSUMER),
         target=bound_target(id="curated", item_id="Curated_LH"),
         target_by_item={item_id(CONSUMER): bound_target(id="curated")},
-        selected={document_id(ALIAS)},
+        selected={document_id(SHORTCUT)},
     )
 
     assert planned.stage is None
     assert planned.omitted
-    assert document_id(ALIAS) in planned.omitted_destinations
+    assert document_id(SHORTCUT) in planned.omitted_destinations
 
 
 @weaver_test()
-def test_an_unmaterialisable_alias_is_withheld_from_certification(estate):
+def test_an_unmaterialisable_shortcut_is_withheld_from_certification(estate):
     """The whole-item view of the claim above."""
 
     item = item_id(CONSUMER)
     target = bound_target(id="curated", item_id="Curated_LH")
-    selected = {document_id(ALIAS)}
+    selected = {document_id(SHORTCUT)}
 
     planned = plan_item_build(
         estate,
@@ -143,25 +143,25 @@ def test_an_unmaterialisable_alias_is_withheld_from_certification(estate):
         inventory=target_inventory(target_id="curated"),
         target_by_item={item: target},  # the producer is not bound
         selected_documents=set(),
-        selected_aliases=selected,
+        selected_shortcuts=selected,
         selected_for_drop=set(),
         selected_for_build=selected,
         registered={},
     )
 
-    assert document_id(ALIAS) in planned.uncertified
+    assert document_id(SHORTCUT) in planned.uncertified
 
 
 # --- ordering across items ----------------------------------------------------
 
 
 @weaver_test()
-def test_the_consumer_builds_its_view_after_the_alias_it_reads(estate):
+def test_the_consumer_builds_its_view_after_the_shortcut_it_reads(estate):
     """Inside the consumer, the alias must exist before the view over it runs."""
 
     by_item = targets()
     item = item_id(CONSUMER)
-    selected = {document_id(ALIAS), document_id(VIEW)}
+    selected = {document_id(SHORTCUT), document_id(VIEW)}
 
     planned = plan_item_build(
         estate,
@@ -170,7 +170,7 @@ def test_the_consumer_builds_its_view_after_the_alias_it_reads(estate):
         inventory=target_inventory(target_id="curated"),
         target_by_item=by_item,
         selected_documents={document_id(VIEW)},
-        selected_aliases={document_id(ALIAS)},
+        selected_shortcuts={document_id(SHORTCUT)},
         selected_for_drop=set(),
         selected_for_build=selected,
         registered={},
@@ -182,7 +182,7 @@ def test_the_consumer_builds_its_view_after_the_alias_it_reads(estate):
         for batch in stage.batches
         for action in batch.actions
     ]
-    assert kinds.index("create_alias") < kinds.index("build_view")
+    assert kinds.index("create_shortcut") < kinds.index("build_view")
 
 
 @weaver_test()
@@ -199,9 +199,9 @@ def test_the_consumer_gets_its_own_endpoint_refresh(estate):
         inventory=target_inventory(target_id="curated"),
         target_by_item=by_item,
         selected_documents={document_id(VIEW)},
-        selected_aliases={document_id(ALIAS)},
+        selected_shortcuts={document_id(SHORTCUT)},
         selected_for_drop=set(),
-        selected_for_build={document_id(ALIAS), document_id(VIEW)},
+        selected_for_build={document_id(SHORTCUT), document_id(VIEW)},
         registered={},
     )
 
@@ -232,7 +232,7 @@ def certified(repository, *names, build_datetime=None):
 
 
 @weaver_test()
-def test_an_alias_is_stale_when_its_source_was_published_later(estate):
+def test_a_shortcut_is_stale_when_its_target_was_published_later(estate):
     """The half of cross-item freshness the dependency graph cannot answer.
 
     A producer rebuilt by some *earlier* build is, to this one, entirely
@@ -243,24 +243,24 @@ def test_an_alias_is_stale_when_its_source_was_published_later(estate):
 
     registered = {
         **certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00"),
-        **certified(estate, ALIAS, build_datetime="2026-01-01T00:00:00"),
+        **certified(estate, SHORTCUT, build_datetime="2026-01-01T00:00:00"),
     }
 
-    stale = stale_alias_destinations(
+    stale = stale_shortcut_destinations(
         estate, registered, bound_items={item_id(CONSUMER)}
     )
 
-    assert document_id(ALIAS) in stale
+    assert document_id(SHORTCUT) in stale
 
 
 @weaver_test()
-def test_an_alias_published_after_its_source_is_current(estate):
+def test_a_shortcut_published_after_its_target_is_current(estate):
     registered = {
         **certified(estate, SOURCE, build_datetime="2026-01-01T00:00:00"),
-        **certified(estate, ALIAS, build_datetime="2026-01-02T00:00:00"),
+        **certified(estate, SHORTCUT, build_datetime="2026-01-02T00:00:00"),
     }
 
-    stale = stale_alias_destinations(
+    stale = stale_shortcut_destinations(
         estate, registered, bound_items={item_id(CONSUMER)}
     )
 
@@ -277,7 +277,7 @@ def test_a_missing_registry_row_is_not_staleness(estate):
 
     registered = certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00")
 
-    stale = stale_alias_destinations(
+    stale = stale_shortcut_destinations(
         estate, registered, bound_items={item_id(CONSUMER)}
     )
 
@@ -285,15 +285,15 @@ def test_a_missing_registry_row_is_not_staleness(estate):
 
 
 @weaver_test()
-def test_an_unbound_consumer_keeps_its_stale_alias(estate):
+def test_an_unbound_consumer_keeps_its_stale_shortcut(estate):
     """That is the deferral: a build acts only on items it was pointed at."""
 
     registered = {
         **certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00"),
-        **certified(estate, ALIAS, build_datetime="2026-01-01T00:00:00"),
+        **certified(estate, SHORTCUT, build_datetime="2026-01-01T00:00:00"),
     }
 
-    stale = stale_alias_destinations(
+    stale = stale_shortcut_destinations(
         estate, registered, bound_items={item_id(PRODUCER)}
     )
 
@@ -304,7 +304,7 @@ def test_an_unbound_consumer_keeps_its_stale_alias(estate):
 
 
 @weaver_test()
-def test_a_second_build_over_an_unchanged_estate_plans_no_alias_action(estate):
+def test_a_second_build_over_an_unchanged_estate_plans_no_shortcut_action(estate):
     """An unchanged alias over an unchanged source must not be replaced.
 
     This is the decision `test_cross_item_shortcut_primitive.py` spent a full
@@ -313,26 +313,26 @@ def test_a_second_build_over_an_unchanged_estate_plans_no_alias_action(estate):
     that the shortcut object itself was not disturbed.
     """
 
-    everything = {document_id(SOURCE), document_id(VIEW), document_id(ALIAS)}
+    everything = {document_id(SOURCE), document_id(VIEW), document_id(SHORTCUT)}
     registered = certified(
-        estate, SOURCE, VIEW, ALIAS, build_datetime="2026-01-01T00:00:00"
+        estate, SOURCE, VIEW, SHORTCUT, build_datetime="2026-01-01T00:00:00"
     )
-    stale = stale_alias_destinations(estate, registered, bound_items=set(targets()))
+    stale = stale_shortcut_destinations(estate, registered, bound_items=set(targets()))
 
     selection = select_build(
-        estate, registered, selected=everything, stale_aliases=stale
+        estate, registered, selected=everything, stale_shortcuts=stale
     )
 
     assert selection.selected_for_build == ()
 
 
 @weaver_test()
-def test_a_changed_source_reaches_the_alias_and_its_consumer(estate):
+def test_a_changed_target_reaches_the_shortcut_and_its_consumer(estate):
     """The graph carries a producer's change across the alias in one walk."""
 
-    everything = {document_id(SOURCE), document_id(VIEW), document_id(ALIAS)}
+    everything = {document_id(SOURCE), document_id(VIEW), document_id(SHORTCUT)}
     registered = {
-        **certified(estate, SOURCE, VIEW, ALIAS),
+        **certified(estate, SOURCE, VIEW, SHORTCUT),
         # Only the producer moved.
         document_id(SOURCE): registered_document(SOURCE, signature="an-old-hash"),
     }
@@ -377,7 +377,9 @@ def _frozen(planned):
     import json
 
     action = next(action for batch in planned.stage.batches for action in batch.actions)
-    return json.loads(planned.stage.payloads[action.payload].decode("utf-8"))["aliases"]
+    return json.loads(planned.stage.payloads[action.payload].decode("utf-8"))[
+        "shortcuts"
+    ]
 
 
 @weaver_test()
@@ -390,6 +392,7 @@ def test_a_direct_table_shortcut_freezes_the_resolved_physical_source(tmp_path):
         tmp_path,
         "DWG__External = Shortcut(\n"
         '    shortcut_type="table",\n'
+        '    target_type="physical",\n'
         '    target="Lakehouse/Reference/DWG.Customer",\n'
         '    workspace="Shared Data",\n)\n',
     )
@@ -409,7 +412,7 @@ def test_a_direct_table_shortcut_freezes_the_resolved_physical_source(tmp_path):
 
     assert _frozen(planned) == [
         {
-            "alias": "Lakehouse/Curated/DWG.External",
+            "shortcut": "Lakehouse/Curated/DWG.External",
             "type": "table",
             "path": "Tables/DWG",
             "name": "External",
@@ -432,6 +435,7 @@ def test_a_schema_shortcut_is_created_directly_under_tables(tmp_path):
         tmp_path,
         "Reference = Shortcut(\n"
         '    shortcut_type="schema",\n'
+        '    target_type="physical",\n'
         '    target="Lakehouse/Reference/DWG",\n'
         '    workspace="Shared Data",\n)\n',
     )
@@ -467,6 +471,7 @@ def test_a_schema_shortcut_asks_for_no_schema_of_its_own(tmp_path):
         tmp_path,
         "Reference = Shortcut(\n"
         '    shortcut_type="schema",\n'
+        '    target_type="physical",\n'
         '    target="Lakehouse/Reference/DWG",\n'
         '    workspace="Shared Data",\n)\n',
     )
@@ -495,6 +500,7 @@ def test_a_direct_shortcut_with_no_resolved_source_is_omitted(tmp_path):
         tmp_path,
         "DWG__External = Shortcut(\n"
         '    shortcut_type="table",\n'
+        '    target_type="physical",\n'
         '    target="Lakehouse/Reference/DWG.Customer",\n'
         '    workspace="Shared Data",\n)\n',
     )
@@ -504,3 +510,85 @@ def test_a_direct_shortcut_with_no_resolved_source_is_omitted(tmp_path):
     assert planned.stage is None
     assert planned.omitted_destinations == (declaration.destination,)
     assert "not resolved when this bundle was generated" in planned.omitted[0].detail
+
+
+@weaver_test()
+def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_path):
+    """A build resolves the physical targets of the items it is building.
+
+    An item nobody is building has no business failing someone else's build, and
+    a target Weaver cannot reach is a fault in the item that declares it.
+    """
+
+    from unittest.mock import patch
+
+    from factories import _write, lakehouse_table, schema_document
+    from support.sessions import given_session
+
+    from weaver.build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
+    from weaver.build_bundle.workflow import read_build_state
+    from weaver.declaration import parse_item_repository
+    from weaver.locations import Location
+    from weaver.targets import ItemRef
+    from weaver.workspaces import TargetDeclaration, Workspace
+
+    root = tmp_path / "estate"
+    for item, schema in ((CONSUMER, "DWG"), (PRODUCER, "DWG")):
+        _write(root, f"{item}/schemas/{schema}.yml", schema_document(schema))
+        _write(
+            root, f"{item}/{schema}__Customer.py", lakehouse_table(f"{schema}.Customer")
+        )
+    # Declared by the item this build does not bind, and pointing at something
+    # that would not resolve.
+    _write(
+        root,
+        f"{PRODUCER}/shortcuts.py",
+        "from weaver import Shortcut\n\n"
+        "DWG__Absent = Shortcut(\n"
+        '    shortcut_type="table",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/NoSuchItem/DWG.Customer",\n'
+        '    workspace="No Such Workspace",\n)\n',
+    )
+    repository = parse_item_repository(Location(str(root)))
+
+    workspace = Workspace(
+        workspace="Demo",
+        catalogue="Warehouse/Weaver",
+        lakehouses={
+            "Curated_LH": TargetDeclaration(item=item_id(CONSUMER)),
+        },
+    )
+    bindings = ItemBindings(
+        (
+            ItemBinding(
+                item_id(CONSUMER),
+                LakehouseBinding(ItemRef("Curated_LH"), workspace_name="Demo"),
+            ),
+        )
+    )
+
+    resolved: list[str] = []
+
+    def _refuse(shortcuts, **_kwargs):
+        resolved.extend(f"{each.owner}/{each.name}" for each in shortcuts)
+        raise AssertionError("an unbound item's shortcut must not be resolved")
+
+    with (
+        given_session(workspace=workspace, lakehouses=("Curated_LH",)) as session,
+        patch("weaver.build_bundle.workflow.read_target_inventories", return_value={}),
+        patch("weaver.build_bundle.workflow._read_catalogue", return_value=None),
+        patch(
+            "weaver.build_bundle.workflow.read_shortcut_sources", side_effect=_refuse
+        ),
+    ):
+        state = read_build_state(
+            bindings,
+            required_catalogue_items=(),
+            session=session,
+            workspace=workspace,
+            shortcuts=repository.shortcuts,
+        )
+
+    assert resolved == []
+    assert state.shortcut_sources == {}

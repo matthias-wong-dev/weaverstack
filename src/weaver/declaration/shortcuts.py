@@ -1,12 +1,14 @@
-"""Read an item's ``shortcuts.py`` and ``external.yml`` declarations.
+"""Read an item's shortcut declarations.
 
-``shortcuts.py`` is Python syntax used for static declarations. It is parsed,
-never executed: a build reads it to learn what an item points at, and the same
-names are importable from the item's own programs at load time. So the accepted
-syntax is deliberately narrow, and anything that would only have a meaning when
-run is refused here rather than ignored.
+A Lakehouse declares its shortcuts in ``shortcuts.py``, which is Python syntax
+used for static declarations. It is parsed, never executed: a build reads it to
+learn what an item points at, and the same names are importable from the item's
+own programs at load time. So the accepted syntax is deliberately narrow, and
+anything that would only have a meaning when run is refused here.
 
-``external.yml`` is the Warehouse's equivalent, keyed by the destination view.
+A Warehouse declares its shortcuts in ``shortcuts.yml``, in two sections named
+for how the target is read. Each entry is a destination and what it points at,
+and the section says whether that target is a Weaver item or a Fabric one.
 """
 
 from __future__ import annotations
@@ -18,24 +20,26 @@ import yaml
 
 from ..errors import DiscoveryError
 from .model import (
-    ExternalDeclaration,
+    LOGICAL_TARGET,
+    NAME_SEPARATOR,
+    PHYSICAL_TARGET,
+    TARGET_TYPES,
+    VIEW_SHORTCUT,
     ShortcutDeclaration,
     WeaverDocumentId,
     WeaverItemId,
 )
 
-#: The file each surface is declared in, at the item root.
-SHORTCUTS_FILE = "shortcuts.py"
-EXTERNAL_FILE = "external.yml"
+#: The file each item type declares its shortcuts in, at the item root.
+LAKEHOUSE_FILE = "shortcuts.py"
+WAREHOUSE_FILE = "shortcuts.yml"
+SHORTCUT_FILES = (LAKEHOUSE_FILE, WAREHOUSE_FILE)
 
 #: The declaration call an authored ``shortcuts.py`` is written with.
 CONSTRUCTOR = "Shortcut"
 
 #: Its parameters, in the order a positional call gives them.
-PARAMETERS = ("shortcut_type", "target", "workspace", "bind")
-
-#: What ``external.yml`` accepts under one destination.
-EXTERNAL_FIELDS = ("target", "bind")
+PARAMETERS = ("shortcut_type", "target_type", "target", "workspace")
 
 
 def _literal(node: ast.AST, *, relative: str, what: str):
@@ -45,7 +49,7 @@ def _literal(node: ast.AST, *, relative: str, what: str):
         return ast.literal_eval(node)
     except ValueError:
         raise DiscoveryError(
-            f"{relative}: {what} must be a constant. {SHORTCUTS_FILE} is read "
+            f"{relative}: {what} must be a constant. {LAKEHOUSE_FILE} is read "
             "without being run, so write the value out."
         ) from None
 
@@ -58,7 +62,7 @@ def _call(node: ast.AST, *, relative: str, name: str) -> ast.Call:
     if node.func.id != CONSTRUCTOR:
         raise DiscoveryError(
             f"{relative}: {name} is assigned {node.func.id}(...), and "
-            f"{SHORTCUTS_FILE} declares {CONSTRUCTOR}s only"
+            f"{LAKEHOUSE_FILE} declares {CONSTRUCTOR}s only"
         )
     return node
 
@@ -90,7 +94,7 @@ def _arguments(call: ast.Call, *, relative: str, name: str) -> dict:
         arguments[keyword.arg] = _literal(
             keyword.value, relative=relative, what=f"{name}'s {keyword.arg}"
         )
-    for required in ("shortcut_type", "target"):
+    for required in ("shortcut_type", "target_type", "target"):
         if required not in arguments:
             raise DiscoveryError(f"{relative}: {name} declares no {required}")
     return arguments
@@ -105,10 +109,22 @@ def _declaration_name(node: ast.Assign, *, relative: str) -> str:
     return node.targets[0].id
 
 
-def read_shortcuts(
+def _reject_repeat(seen: dict[str, str], name: str, *, relative: str) -> None:
+    prior = seen.get(name.casefold())
+    if prior is not None:
+        detail = (
+            "is declared twice"
+            if prior == name
+            else f"and {prior} differ only by case and cannot coexist"
+        )
+        raise DiscoveryError(f"{relative}: {name} {detail}")
+    seen[name.casefold()] = name
+
+
+def read_lakehouse_shortcuts(
     text: str, *, owner: WeaverItemId, relative: str
 ) -> tuple[ShortcutDeclaration, ...]:
-    """Every shortcut one item declares, read without running the file."""
+    """Every shortcut one Lakehouse declares, read without running the file."""
 
     try:
         module = ast.parse(text, filename=relative)
@@ -128,21 +144,13 @@ def read_shortcuts(
         if not isinstance(statement, ast.Assign):
             raise DiscoveryError(
                 f"{relative}: line {statement.lineno} is "
-                f"{type(statement).__name__.lower()}, and {SHORTCUTS_FILE} holds "
+                f"{type(statement).__name__.lower()}, and {LAKEHOUSE_FILE} holds "
                 f"{CONSTRUCTOR} declarations, imports and comments only"
             )
         name = _declaration_name(statement, relative=relative)
         call = _call(statement.value, relative=relative, name=name)
         arguments = _arguments(call, relative=relative, name=name)
-        prior = seen.get(name.casefold())
-        if prior is not None:
-            detail = (
-                "is declared twice"
-                if prior == name
-                else f"and {prior} differ only by case and cannot coexist"
-            )
-            raise DiscoveryError(f"{relative}: {name} {detail}")
-        seen[name.casefold()] = name
+        _reject_repeat(seen, name, relative=relative)
         try:
             declarations.append(
                 ShortcutDeclaration(
@@ -154,10 +162,10 @@ def read_shortcuts(
     return tuple(declarations)
 
 
-def read_external(
+def read_warehouse_shortcuts(
     text: str, *, owner: WeaverItemId, relative: str
-) -> tuple[ExternalDeclaration, ...]:
-    """Every external view one Warehouse item declares."""
+) -> tuple[ShortcutDeclaration, ...]:
+    """Every shortcut one Warehouse declares, by how its target is read."""
 
     from .metadata import _UniqueKeyLoader
 
@@ -169,61 +177,64 @@ def read_external(
         return ()
     if not isinstance(loaded, dict):
         raise DiscoveryError(
-            f"{relative} maps each destination view to what it points at"
+            f"{relative} holds a {LOGICAL_TARGET} and a {PHYSICAL_TARGET} "
+            "section, each mapping a destination view to what it points at"
+        )
+    unknown = sorted(str(section) for section in set(loaded) - set(TARGET_TYPES))
+    if unknown:
+        expected = ", ".join(TARGET_TYPES)
+        raise DiscoveryError(
+            f"{relative} names section(s) {', '.join(unknown)}, and a shortcut "
+            f"target is {expected}"
         )
 
-    declarations: list[ExternalDeclaration] = []
+    declarations: list[ShortcutDeclaration] = []
     seen: dict[str, str] = {}
-    for raw_destination, body in loaded.items():
-        if not isinstance(raw_destination, str):
-            raise DiscoveryError(f"{relative}: destinations must be strings")
-        try:
-            destination = WeaverDocumentId.parse(raw_destination)
-        except Exception as exc:
-            raise DiscoveryError(f"{relative}: {exc}") from exc
-        if destination.item != owner:
+    for target_type in TARGET_TYPES:
+        entries = loaded.get(target_type)
+        if entries is None:
+            continue
+        if not isinstance(entries, dict):
             raise DiscoveryError(
-                f"{relative}: destination {raw_destination} belongs to "
-                f"{destination.item}, and this file declares {owner}'s own views"
+                f"{relative}: the {target_type} section maps each destination "
+                "view to what it points at"
             )
-        if not isinstance(body, dict):
-            raise DiscoveryError(
-                f"{relative}: {raw_destination} must carry a target, written as "
-                "'target: <ItemType/ItemName/Schema.Object>'"
-            )
-        unknown = sorted(set(body) - set(EXTERNAL_FIELDS))
-        if unknown:
-            expected = ", ".join(EXTERNAL_FIELDS)
-            raise DiscoveryError(
-                f"{relative}: {raw_destination} names {', '.join(unknown)}, and "
-                f"an external reference takes {expected}"
-            )
-        if "target" not in body:
-            raise DiscoveryError(f"{relative}: {raw_destination} declares no target")
-        folded = str(destination).casefold()
-        prior = seen.get(folded)
-        if prior is not None:
-            raise DiscoveryError(
-                f"{relative}: destinations {raw_destination} and {prior} differ "
-                "only by case"
-            )
-        seen[folded] = raw_destination
-        try:
-            declarations.append(
-                ExternalDeclaration(
-                    destination=destination,
-                    target=body["target"],
-                    bind=bool(body.get("bind", False)),
+        for raw_destination, raw_target in entries.items():
+            if not isinstance(raw_destination, str) or not isinstance(raw_target, str):
+                raise DiscoveryError(
+                    f"{relative}: destinations and targets must be strings"
                 )
-            )
-        except Exception as exc:
-            raise DiscoveryError(f"{relative}: {exc}") from exc
+            try:
+                destination = WeaverDocumentId.parse(raw_destination)
+            except Exception as exc:
+                raise DiscoveryError(f"{relative}: {exc}") from exc
+            if destination.item != owner:
+                raise DiscoveryError(
+                    f"{relative}: destination {raw_destination} belongs to "
+                    f"{destination.item}, and this file declares {owner}'s own "
+                    "views"
+                )
+            identity = destination.object_id
+            name = f"{identity.schema}{NAME_SEPARATOR}{identity.object}"
+            _reject_repeat(seen, name, relative=relative)
+            try:
+                declarations.append(
+                    ShortcutDeclaration(
+                        owner=owner,
+                        name=name,
+                        shortcut_type=VIEW_SHORTCUT,
+                        target_type=target_type,
+                        target=raw_target,
+                        relative_path=relative,
+                    )
+                )
+            except Exception as exc:
+                raise DiscoveryError(f"{relative}: {exc}") from exc
     return tuple(declarations)
 
 
 def validate_destinations(
     shortcuts: Iterable[ShortcutDeclaration],
-    externals: Iterable[ExternalDeclaration],
     *,
     documents: Mapping[WeaverDocumentId, object],
     schemas_by_item: Mapping[WeaverItemId, Iterable[str]],
@@ -237,7 +248,6 @@ def validate_destinations(
     """
 
     shortcuts = tuple(shortcuts)
-    externals = tuple(externals)
     folded_documents = {str(identity).casefold(): identity for identity in documents}
 
     claimed: dict[str, str] = {}
@@ -258,15 +268,6 @@ def validate_destinations(
             )
         claimed[destination.casefold()] = destination
 
-    for external in externals:
-        destination = str(external.destination)
-        native = folded_documents.get(destination.casefold())
-        if native is not None:
-            raise DiscoveryError(
-                f"external reference {destination} collides with the declared "
-                f"document {native}"
-            )
-
     # A shortcut's namespace belongs to the item it points at.
     namespaces = {
         (declaration.owner, declaration.schema): declaration
@@ -283,12 +284,6 @@ def validate_destinations(
         owning = namespaces.get((identity.item, identity.object_id.schema))
         if owning is not None:
             raise _beneath(str(identity), owning)
-    for external in externals:
-        owning = namespaces.get(
-            (external.destination.item, external.destination.object_id.schema)
-        )
-        if owning is not None:
-            raise _beneath(str(external.destination), owning)
     for item, declared in schemas_by_item.items():
         for schema in declared:
             owning = namespaces.get((item, schema))

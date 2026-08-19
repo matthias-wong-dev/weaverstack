@@ -12,7 +12,7 @@ from support.workspaces import given_resolver, given_workspace
 from weaver.build_bundle.executors import ShortcutExecutor
 from weaver.build_bundle.executors import shortcut as shortcut_module
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-from weaver.build_bundle.models import CREATE_ALIAS, InstallAction
+from weaver.build_bundle.models import CREATE_SHORTCUT, InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
 from weaver.spark import FabricSparkTarget
@@ -27,7 +27,7 @@ def _payload(**overrides) -> bytes:
     """One shortcut, in the batched shape the action carries."""
 
     mapping = {
-        "alias": "Lakehouse/Curated/Sales.Landed",
+        "shortcut": "Lakehouse/Curated/Sales.Landed",
         "source": "Lakehouse/Raw/Sales.Customer",
         "source_target_id": SOURCE_TARGET_ID,
         "type": "table",
@@ -38,7 +38,7 @@ def _payload(**overrides) -> bytes:
         "source_object": "Customer",
     }
     mapping.update(overrides)
-    return json.dumps({"aliases": [mapping]}).encode("utf-8")
+    return json.dumps({"shortcuts": [mapping]}).encode("utf-8")
 
 
 def _target(target_id: str, item: str) -> ResolvedTarget:
@@ -50,11 +50,11 @@ def _target(target_id: str, item: str) -> ResolvedTarget:
 
 def _action() -> InstallAction:
     return InstallAction(
-        id="aliases-Lakehouse--Curated",
-        kind=CREATE_ALIAS,
+        id="shortcuts-Lakehouse--Curated",
+        kind=CREATE_SHORTCUT,
         resource_node_id=None,
         executor="alias",
-        payload="aliases-Lakehouse--Curated.alias.json",
+        payload="shortcuts-Lakehouse--Curated.shortcut.json",
         payload_sha256="0" * 64,
     )
 
@@ -102,7 +102,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
 
 
 @weaver_test()
-def test_an_alias_naming_a_target_the_plan_never_declared_fails(tmp_path):
+def test_a_shortcut_naming_a_target_the_plan_never_declared_fails(tmp_path):
     context = _local_context(tmp_path)
 
     with pytest.raises(InstallError, match="which this plan does not declare"):
@@ -134,11 +134,11 @@ class _ShortcutResolver:
     def create_onelake_shortcut(self, item, *, path, name, source, source_path):
         self.calls.append((item.name, path, name, source.name, source_path))
         self.events.append("create")
-        return {"shortcut": f"{path}/{name}"}
+        return {"path": f"{path}/{name}"}
 
 
 @weaver_test()
-def test_a_fabric_alias_becomes_one_onelake_shortcut(tmp_path):
+def test_a_shortcut_becomes_one_onelake_shortcut(tmp_path):
     resolver = _ShortcutResolver()
     context = _local_context(tmp_path, resolver=resolver)
 
@@ -147,8 +147,8 @@ def test_a_fabric_alias_becomes_one_onelake_shortcut(tmp_path):
     assert resolver.calls == [
         ("Curated_Dev", "Tables/Sales", "Landed", "Raw_Dev", "Tables/Sales/Customer")
     ]
-    assert details["aliases"][0]["shortcut"] == "Tables/Sales/Landed"
-    assert details["aliases"][0]["source"] == "Lakehouse/Raw/Sales.Customer"
+    assert details["shortcuts"][0]["path"] == "Tables/Sales/Landed"
+    assert details["shortcuts"][0]["source"] == "Lakehouse/Raw/Sales.Customer"
 
 
 class _FoldedSourceStore(FilesystemStore):
@@ -249,9 +249,7 @@ def _addressable_context(tmp_path, spark, resolver):
 
 
 @weaver_test()
-def test_a_fabric_alias_is_not_finished_until_the_shortcut_can_be_read(
-    tmp_path, monkeypatch
-):
+def test_a_shortcut_is_not_finished_until_it_can_be_read(tmp_path, monkeypatch):
     """Returning on the API call would make the plan's barrier a lie."""
 
     monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
@@ -326,20 +324,20 @@ def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
         ShortcutExecutor().execute(_action(), _payload(), context)
 
 
-# --- several aliases, one action ----------------------------------------------
+# --- several shortcuts, one action ----------------------------------------------
 
 
-def _two_aliases() -> bytes:
-    first = json.loads(_payload().decode())["aliases"][0]
-    second = dict(first, alias="Lakehouse/Curated/Sales.Second", object="Second")
-    return json.dumps({"aliases": [first, second]}).encode("utf-8")
+def _two_shortcuts() -> bytes:
+    first = json.loads(_payload().decode())["shortcuts"][0]
+    second = dict(first, shortcut="Lakehouse/Curated/Sales.Second", name="Second")
+    return json.dumps({"shortcuts": [first, second]}).encode("utf-8")
 
 
 @weaver_test()
 def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
-    """The cost of an alias is the wait, so the waits must not serialise.
+    """The cost of a shortcut is the wait, so the waits must not serialise.
 
-    Two aliases through one action means one discovery window, not two — which is
+    Two shortcuts through one action means one discovery window rather than two,
     only true if both shortcuts exist before the first read is attempted.
     """
 
@@ -349,13 +347,13 @@ def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
     spark = _LateSpark(failures=2, events=events)
     context = _addressable_context(tmp_path, spark, resolver)
 
-    details = ShortcutExecutor().execute(_action(), _two_aliases(), context)
+    details = ShortcutExecutor().execute(_action(), _two_shortcuts(), context)
 
-    assert [detail["alias"] for detail in details["aliases"]] == [
+    assert [detail["shortcut"] for detail in details["shortcuts"]] == [
         "Lakehouse/Curated/Sales.Landed",
         "Lakehouse/Curated/Sales.Second",
     ]
-    # Every create precedes every read: two aliases, one discovery window.
+    # Every create precedes every read: two shortcuts, one discovery window.
     creates = [index for index, event in enumerate(events) if event == "create"]
     reads = [index for index, event in enumerate(events) if event == "read"]
     assert len(creates) == 2 and reads
@@ -389,11 +387,11 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
         ]
     ).encode("utf-8")
     action = InstallAction(
-        id="aliases-Warehouse--Reporting",
-        kind=CREATE_ALIAS,
+        id="shortcuts-Warehouse--Reporting",
+        kind=CREATE_SHORTCUT,
         resource_node_id=None,
         executor="tsql_batch",
-        payload="aliases.tsql-batch.json",
+        payload="shortcuts.tsql-batch.json",
         payload_sha256="0" * 64,
     )
 

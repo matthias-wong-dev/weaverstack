@@ -7,7 +7,12 @@ from datetime import datetime
 from typing import Iterable, Mapping
 
 from ..catalogue.state import RegisteredDocument
-from ..declaration.model import WeaverDocumentId, WeaverItemId, WeaverRepository
+from ..declaration.model import (
+    WeaverDocumentId,
+    WeaverItemId,
+    WeaverRepository,
+    parse_installed_identity,
+)
 
 
 def _ordered(values: Iterable[WeaverDocumentId]) -> tuple[WeaverDocumentId, ...]:
@@ -36,22 +41,22 @@ class Impact:
     @classmethod
     def from_mapping(cls, mapping) -> "Impact":
         changed = tuple(
-            WeaverDocumentId.parse(value) for value in mapping.get("changed", ())
+            parse_installed_identity(value) for value in mapping.get("changed", ())
         )
         descendants = mapping.get("impacted_descendants")
         if descendants is None:
             descendants = tuple(
                 value
                 for value in mapping.get("impacted", ())
-                if WeaverDocumentId.parse(value) not in set(changed)
+                if parse_installed_identity(value) not in set(changed)
             )
         return cls(
             new=tuple(
-                WeaverDocumentId.parse(value) for value in mapping.get("new", ())
+                parse_installed_identity(value) for value in mapping.get("new", ())
             ),
             changed=changed,
             impacted_descendants=tuple(
-                WeaverDocumentId.parse(value) for value in descendants
+                parse_installed_identity(value) for value in descendants
             ),
         )
 
@@ -78,14 +83,15 @@ class BuildSelection:
         return cls(
             impact=Impact.from_mapping(mapping.get("impact", {})),
             prohibited=tuple(
-                WeaverDocumentId.parse(value) for value in mapping.get("prohibited", ())
+                parse_installed_identity(value)
+                for value in mapping.get("prohibited", ())
             ),
             selected_for_drop=tuple(
-                WeaverDocumentId.parse(value)
+                parse_installed_identity(value)
                 for value in mapping.get("selected_for_drop", ())
             ),
             selected_for_build=tuple(
-                WeaverDocumentId.parse(value)
+                parse_installed_identity(value)
                 for value in mapping.get("selected_for_build", ())
             ),
         )
@@ -109,13 +115,13 @@ def _as_instant(value) -> datetime | None:
     return None
 
 
-def stale_alias_destinations(
+def stale_shortcut_destinations(
     repository: WeaverRepository,
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
     *,
     bound_items: Iterable[WeaverItemId],
 ) -> tuple[WeaverDocumentId, ...]:
-    """Aliases whose source has been rebuilt since the alias was last published.
+    """Shortcuts whose target was rebuilt since the shortcut was last published.
 
     The half of cross-item freshness the graph cannot answer. A descendant walk
     carries impact only from a producer whose declaration changed; a producer
@@ -123,12 +129,12 @@ def stale_alias_destinations(
     surviving evidence is in the catalogue.
 
     So the Registry rows are compared: each carries the build that published it,
-    and a producer published later than the alias over it means the alias's
+    and a producer published later than the shortcut over it means the shortcut's
     consumers were built against something that has moved on. Naming it here
     joins it to the ordinary changed roots.
 
-    ``bound_items`` scopes it to aliases this build could act on; a consumer item
-    that is not being built keeps its stale alias.
+    ``bound_items`` scopes it to shortcuts this build could act on; a consumer item
+    that is not being built keeps its stale shortcut.
 
     Silent when either row is absent: that is a missing installation, which
     signature classification already calls new.
@@ -136,11 +142,11 @@ def stale_alias_destinations(
 
     bound = set(bound_items)
     stale = []
-    for alias in repository.aliases:
-        if alias.destination.item not in bound:
+    for shortcut in repository.logical_shortcuts:
+        if shortcut.destination.item not in bound:
             continue
-        destination = registered.get(alias.destination)
-        source = registered.get(alias.source)
+        destination = registered.get(shortcut.destination)
+        source = registered.get(shortcut.source)
         if destination is None or source is None:
             continue
         source_datetime = _as_instant(source.build_datetime)
@@ -148,7 +154,7 @@ def stale_alias_destinations(
             continue
         destination_datetime = _as_instant(destination.build_datetime)
         if destination_datetime is None or source_datetime > destination_datetime:
-            stale.append(alias.destination)
+            stale.append(shortcut.destination)
     return _ordered(stale)
 
 
@@ -159,9 +165,9 @@ def declared_signatures(
     """What each selected node's Registry signature should be, from the source.
 
     Three kinds of node are selectable, signed differently. A document is signed
-    by its source file. An alias destination by the pair it declares — this
+    by its source file. An shortcut destination by the pair it declares — this
     destination, that source (see
-    :attr:`~weaver.declaration.model.RepositoryAlias.signature`). A load artefact
+    :attr:`~weaver.declaration.model.RepositoryShortcut.signature`). A load artefact
     by what it is rendered from: a deployed module by its own bytes, a generated
     body by its document plus the generator's version (see :mod:`weaver.etl`).
 
@@ -172,14 +178,16 @@ def declared_signatures(
 
     from ..etl import artefacts_by_identity, runtime_artefacts
 
-    aliases = {alias.destination: alias for alias in repository.aliases}
+    shortcuts = {
+        declaration.destination: declaration for declaration in repository.shortcuts
+    }
     installed = artefacts_by_identity(runtime_artefacts(repository))
     signatures: dict[WeaverDocumentId, str] = {}
     for identity in selected:
-        alias = aliases.get(identity)
+        declaration = shortcuts.get(identity)
         artefact = installed.get(identity)
-        if alias is not None:
-            signatures[identity] = alias.signature
+        if declaration is not None:
+            signatures[identity] = declaration.signature
         elif artefact is not None:
             signatures[identity] = artefact.signature
         else:
@@ -210,18 +218,18 @@ def determine_impact(
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
     *,
     selected: Iterable[WeaverDocumentId],
-    stale_aliases: Iterable[WeaverDocumentId] = (),
+    stale_shortcuts: Iterable[WeaverDocumentId] = (),
 ) -> Impact:
     """Classify bound nodes and expand changed roots across the whole graph.
 
-    Propagation is not confined to one item: the graph carries alias
-    destinations as nodes, so ``source → alias destination → consumer`` is an
+    Propagation is not confined to one item: the graph carries shortcut
+    destinations as nodes, so ``source → shortcut destination → consumer`` is an
     ordinary walk. Items not in the build are deferred by construction — they
     are not in ``selected``, so nothing reaches them.
 
-    ``stale_aliases`` are destinations the catalogue already proved out of date,
+    ``stale_shortcuts`` are destinations the catalogue already proved out of date,
     their source rebuilt by an earlier build (see
-    :func:`weaver.build_bundle.workflow.stale_alias_destinations`). They join the
+    :func:`weaver.build_bundle.workflow.stale_shortcut_destinations`). They join the
     changed roots and their consumers are picked up by the same walk.
     """
 
@@ -241,7 +249,7 @@ def determine_impact(
             new.add(identity)
         elif signature != declared[identity]:
             changed.add(identity)
-    changed |= {identity for identity in stale_aliases if identity in installed}
+    changed |= {identity for identity in stale_shortcuts if identity in installed}
 
     existing = set(installed)
     impacted = set(changed)
@@ -277,12 +285,12 @@ def select_build(
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
     *,
     selected: Iterable[WeaverDocumentId],
-    stale_aliases: Iterable[WeaverDocumentId] = (),
+    stale_shortcuts: Iterable[WeaverDocumentId] = (),
 ) -> BuildSelection:
     impact = determine_impact(
-        repository, registered, selected=selected, stale_aliases=stale_aliases
+        repository, registered, selected=selected, stale_shortcuts=stale_shortcuts
     )
-    # An alias destination has no source document and therefore no
+    # An shortcut destination has no source document and therefore no
     # ``prohibit_rebuild``: nothing an author writes can forbid replacing a
     # pointer, because replacing one destroys nothing.
     prohibited = {

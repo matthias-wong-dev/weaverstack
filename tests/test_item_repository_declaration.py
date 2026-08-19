@@ -114,7 +114,7 @@ def _estate(tmp_path: Path) -> Path:
         _warehouse_table("Sales.Change"),
     )
     _write(root, "Lakehouse/Raw/lib/csv_helpers.py", "def rows():\n    return []\n")
-    _write(root, "Warehouse/Reporting/external.yml", "# nothing external yet\n")
+    _write(root, "Warehouse/Reporting/shortcuts.yml", "# no shortcuts yet\n")
     _write(root, "_ignore/broken/__init__.py", "this is not python\n")
     _write(root, "_ignore/unfinished.py", "not valid\n")
     return root
@@ -251,10 +251,10 @@ def test_an_external_reference_contributes_only_to_its_own_item_signature(tmp_pa
     before = parse_item_repository(Location(str(root)))
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.PortableCustomer:\n"
-        "  target: Lakehouse/Curated/Sales.Customer\n"
-        "  bind: true\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     after = parse_item_repository(Location(str(root)))
 
@@ -335,9 +335,10 @@ def test_a_declaration_surface_at_the_root_names_the_item_it_belongs_to(tmp_path
     root = _estate(tmp_path)
     _write(
         root,
-        "external.yml",
-        "Warehouse/Reporting/Sales.PortableCustomer:\n"
-        "  target: Lakehouse/Curated/Sales.Customer\n",
+        "shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="belongs to the item that declares it"):
         parse_item_repository(Location(str(root)))
@@ -348,9 +349,10 @@ def test_an_external_destination_belongs_to_the_item_declaring_it(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Audit/Sales.PortableCustomer:\n"
-        "  target: Lakehouse/Curated/Sales.Customer\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Audit/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="declares Warehouse/Reporting's own"):
         parse_item_repository(Location(str(root)))
@@ -362,17 +364,17 @@ def test_an_external_reference_certifies_only_its_own_item(tmp_path):
     before = parse_item_repository(Location(str(root)))
     _write(
         root,
-        "Warehouse/Audit/external.yml",
-        "Warehouse/Audit/Sales.PortableCustomer:\n"
-        "  target: Lakehouse/Curated/Sales.Customer\n"
-        "  bind: true\n",
+        "Warehouse/Audit/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Audit/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     after = parse_item_repository(Location(str(root)))
 
     assert after["Warehouse/Audit"].signature != before["Warehouse/Audit"].signature
     for unchanged in ("Lakehouse/Curated", "Lakehouse/Raw", "Warehouse/Reporting"):
         assert after[unchanged].signature == before[unchanged].signature
-    assert "Warehouse/Audit/external.yml" in after.support_files
+    assert "Warehouse/Audit/shortcuts.yml" in after.support_files
 
 
 @weaver_test()
@@ -470,37 +472,37 @@ def test_external_references_are_item_local_and_one_source_may_repeat(tmp_path):
     for item in ("Warehouse/Reporting", "Warehouse/Audit"):
         _write(
             root,
-            f"{item}/external.yml",
-            f"{item}/Sales.PortableCustomer:\n"
-            "  target: Lakehouse/Curated/Sales.Customer\n"
-            "  bind: true\n",
+            f"{item}/shortcuts.yml",
+            "logical:\n"
+            f"  {item}/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
         )
     repository = parse_item_repository(Location(str(root)))
 
-    assert len(repository.aliases) == 2
-    assert repository.aliases[0].source == repository.aliases[1].source
-    assert {str(alias.destination) for alias in repository.aliases} == {
+    assert len(repository.logical_shortcuts) == 2
+    assert (
+        repository.logical_shortcuts[0].source == repository.logical_shortcuts[1].source
+    )
+    assert {str(alias.destination) for alias in repository.logical_shortcuts} == {
         "Warehouse/Reporting/Sales.PortableCustomer",
         "Warehouse/Audit/Sales.PortableCustomer",
     }
 
 
 @weaver_test()
-def test_external_destination_must_not_collide_with_a_native_document(tmp_path):
+def test_a_shortcut_destination_must_not_collide_with_a_native_document(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.Customer:\n"
-        "  target: Lakehouse/Curated/Sales.Customer\n"
-        "  bind: true\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="collides with the declared document"):
+    with pytest.raises(DiscoveryError, match="the repository already declares"):
         parse_item_repository(Location(str(root)))
 
 
 @weaver_test()
-def test_a_bound_reference_may_not_name_its_own_item(tmp_path):
+def test_a_logical_shortcut_may_not_name_its_own_item(tmp_path):
     """A bound reference crosses items. Within one, the document graph already
     orders producer before consumer, and the reference stage runs before every
     document the item declares, so it would be planned before its own source."""
@@ -508,12 +510,12 @@ def test_a_bound_reference_may_not_name_its_own_item(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.PortableCustomer:\n"
-        "  target: Warehouse/Reporting/Sales.Customer\n"
-        "  bind: true\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Warehouse/Reporting/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="the same item"):
+    with pytest.raises(DiscoveryError, match="which is the item declaring it"):
         parse_item_repository(Location(str(root)))
 
 
@@ -522,10 +524,10 @@ def test_an_external_target_must_resolve_with_exact_case(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.PortableCustomer:\n"
-        "  target: Lakehouse/Curated/sales.Customer\n"
-        "  bind: true\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="declared spelling"):
         parse_item_repository(Location(str(root)))
@@ -536,9 +538,9 @@ def test_an_external_target_rejects_physical_three_part_names(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.PortableCustomer:\n"
-        "  target: Curated_LH.Sales.Customer\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "physical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: Curated_LH.Sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="must be ItemType/ItemName"):
         parse_item_repository(Location(str(root)))
@@ -549,11 +551,11 @@ def test_duplicate_external_destination_is_rejected_by_the_yaml_reader(tmp_path)
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.PortableCustomer:\n"
-        "  target: Lakehouse/Raw/Sales.Customer\n"
-        "Warehouse/Reporting/Sales.PortableCustomer:\n"
-        "  target: Lakehouse/Curated/Sales.Customer\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Raw/Sales.Customer\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     with pytest.raises(Exception, match="duplicate metadata key"):
         parse_item_repository(Location(str(root)))
@@ -569,10 +571,10 @@ def test_metadata_reference_may_resolve_through_an_external_destination(tmp_path
     _write(root, "Warehouse/Audit/Sales.Change.sql", source)
     _write(
         root,
-        "Warehouse/Audit/external.yml",
-        "Warehouse/Audit/Sales.PortableCustomer:\n"
-        "  target: Lakehouse/Curated/Sales.Customer\n"
-        "  bind: true\n",
+        "Warehouse/Audit/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Audit/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     parse_item_repository(Location(str(root)))
 

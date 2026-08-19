@@ -41,14 +41,14 @@ FILES_AREA = "Files"
 
 #: How long a freshly created shortcut may take to become addressable, and how
 #: often to ask. Discovery normally takes seconds; the bound exists so a
-#: never-appearing alias fails naming itself rather than as an obscure error in
+#: never-appearing shortcut fails naming itself rather than as an obscure error in
 #: whatever statement reads it next.
 ADDRESSABLE_TIMEOUT = 300.0
 ADDRESSABLE_POLL_INTERVAL = 5.0
 
 
 class ShortcutExecutor:
-    name = "alias"
+    name = "shortcut"
 
     def execute(
         self,
@@ -58,9 +58,9 @@ class ShortcutExecutor:
     ) -> dict[str, Any] | None:
         if payload is None:
             raise InstallError(f"shortcut action {action.id!r} has no payload")
-        frozen = json.loads(payload.decode("utf-8"))["aliases"]
+        frozen = json.loads(payload.decode("utf-8"))["shortcuts"]
         if not frozen:
-            return {"aliases": []}
+            return {"shortcuts": []}
 
         shortcut = getattr(context.resolver, "create_onelake_shortcut", None)
         if shortcut is None:
@@ -71,9 +71,9 @@ class ShortcutExecutor:
 
         made = [self._shortcut(shortcut, each, context) for each in frozen]
 
-        details: dict[str, Any] = {"aliases": made}
+        details: dict[str, Any] = {"shortcuts": made}
         # Every shortcut is created before anything waits, so the cost is one
-        # discovery window rather than one per alias.
+        # discovery window rather than one per shortcut.
         waited = self._await_addressable(context, frozen)
         if waited is not None:
             details["addressable_after_seconds"] = waited
@@ -105,7 +105,11 @@ class ShortcutExecutor:
             source=source_item,
             source_path=source_path,
         )
-        return {"alias": frozen["alias"], "source": frozen["source"], **(made or {})}
+        return {
+            "shortcut": frozen["shortcut"],
+            "source": frozen["source"],
+            **(made or {}),
+        }
 
     def _await_addressable(
         self, context: InstallationContext, frozen: list
@@ -135,7 +139,7 @@ class ShortcutExecutor:
                 "destination, so a shortcut in it cannot be named"
             )
         pending = {
-            each["alias"]: destination.qualify(
+            each["shortcut"]: destination.qualify(
                 each["path"].split("/", 1)[1], each["name"]
             )
             for each in frozen
@@ -148,13 +152,13 @@ class ShortcutExecutor:
         deadline = started + ADDRESSABLE_TIMEOUT
         failure: Exception | None = None
         while pending:
-            for alias, qualified in list(pending.items()):
+            for shortcut, qualified in list(pending.items()):
                 try:
                     # The probe crosses; the waiting does not.
                     context.spark_sql(
                         f"SELECT * FROM {qualified} LIMIT 0", exact_case=True
                     )
-                    del pending[alias]
+                    del pending[shortcut]
                 except Exception as exc:  # not discovered yet — or never will be
                     failure = exc
             if not pending:
@@ -224,17 +228,17 @@ def _physical_source_name(frozen: dict, context: InstallationContext, source) ->
         ]
     except Exception as exc:  # noqa: BLE001 - converted to an install diagnosis
         raise InstallError(
-            f"shortcut {frozen['alias']} has no readable source parent at "
+            f"shortcut {frozen['shortcut']} has no readable source parent at "
             f"{parent.value}: {type(exc).__name__}: {exc}"
         ) from exc
     if len(matches) == 1:
         return matches[0]
     if not matches:
         raise InstallError(
-            f"shortcut {frozen['alias']} has no source to point at: "
+            f"shortcut {frozen['shortcut']} has no source to point at: "
             f"{producer.value} does not exist"
         )
     raise InstallError(
-        f"shortcut {frozen['alias']} source {producer.value} is ambiguous on "
+        f"shortcut {frozen['shortcut']} source {producer.value} is ambiguous on "
         "storage: " + ", ".join(sorted(matches))
     )

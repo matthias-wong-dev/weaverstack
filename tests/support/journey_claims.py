@@ -874,7 +874,7 @@ def _assert_warehouse_installed(env, step) -> None:
     assert (
         when("Lakehouse--Sales--DWG.Customer")
         < when("refresh-sql-endpoint-Lakehouse--Sales")
-        < when("aliases-Warehouse--Reporting")
+        < when("shortcuts-Warehouse--Reporting")
         < when("Warehouse--Reporting--Rpt.CustomerReport")
         < when("Warehouse--Reporting--Rpt.ActiveCustomerReport")
     )

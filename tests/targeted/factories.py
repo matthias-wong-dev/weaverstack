@@ -294,7 +294,7 @@ def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
         # estate without it has a dependency pointing at nothing.
         identities.update(
             alias.destination
-            for alias in repository.aliases
+            for alias in repository.logical_shortcuts
             if alias.destination.item == item
         )
         target_kinds[item] = (
@@ -625,28 +625,31 @@ class {class_name}(Folder):
 '''
 
 
-def bound_declaration(consumer: str, **references: str) -> tuple[str, str]:
-    """Where a consumer declares its bound references, and what it says.
+def logical_shortcuts(consumer: str, **references: str) -> tuple[str, str]:
+    """Where a consumer declares its logical shortcuts, and what it says.
 
     Returns the repository-relative path and the file's text, so a caller states
-    the references and not which surface the item type declares them on: a
-    Lakehouse declares shortcuts, a Warehouse external views.
+    the shortcuts and not which surface the item type declares them on.
     """
 
     if consumer.startswith("Warehouse/"):
         body = "\n".join(
-            f"{consumer}/{local}:\n  target: {source}\n  bind: true"
+            f"  {consumer}/{local}: {source}"
             for local, source in sorted(references.items())
         )
-        return f"{consumer}/external.yml", body + "\n"
+        return f"{consumer}/shortcuts.yml", f"logical:\n{body}\n"
 
     declarations = "\n\n".join(
         f"{local.replace('.', '__')} = Shortcut(\n"
         f'    shortcut_type="table",\n'
+        f'    target_type="logical",\n'
         f'    target="{source}",\n'
-        f"    bind=True,\n"
         f")"
         for local, source in sorted(references.items())
+    )
+    return (
+        f"{consumer}/shortcuts.py",
+        "from weaver import Shortcut\n\n" + declarations + "\n",
     )
     return (
         f"{consumer}/shortcuts.py",
@@ -680,7 +683,7 @@ def alias_repository(
     _write(root, f"{consumer}/schemas/{schema}.yml", schema_document(schema))
     _write(
         root,
-        *bound_declaration(
+        *logical_shortcuts(
             consumer,
             **{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"},
         ),
@@ -796,7 +799,7 @@ LOAD_PRODUCER = "Lakehouse/Raw"
 LOAD_CONSUMER = "Warehouse/Reporting"
 #: The consumer's bound reference to the producer's table, as its own surface
 #: spells it.
-BOUND_CONSUMER_PATH, BOUND_CONSUMER_TEXT = bound_declaration(
+BOUND_CONSUMER_PATH, BOUND_CONSUMER_TEXT = logical_shortcuts(
     LOAD_CONSUMER, **{"Sales.Order": f"{LOAD_PRODUCER}/Sales.Order"}
 )
 LOAD_PRODUCER_TARGET = "Raw_LH"

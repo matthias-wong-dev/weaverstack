@@ -43,7 +43,7 @@ def test_an_alias_puts_its_source_item_in_an_earlier_layer(tmp_path):
 
 
 @weaver_test()
-def test_an_unused_alias_still_orders_its_two_items(tmp_path):
+def test_an_unused_shortcut_still_orders_its_two_items(tmp_path):
     """The alias itself has to be materialised after its source exists.
 
     Nothing consumes ``Sales.Landed`` here, so no *document* edge exists — but the
@@ -55,7 +55,7 @@ def test_an_unused_alias_still_orders_its_two_items(tmp_path):
     _write(
         root,
         "Lakehouse/Curated/shortcuts.py",
-        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target="Lakehouse/Raw/Sales.Customer",\n    bind=True,\n)\n',
+        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Lakehouse/Raw/Sales.Customer",\n)\n',
     )
     repository = parse_item_repository(Location(str(root)))
     layer_of = {
@@ -111,12 +111,12 @@ def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
     _write(
         root,
         "Lakehouse/Curated/shortcuts.py",
-        'from weaver import Shortcut\n\nSales__Audited = Shortcut(\n    shortcut_type="table",\n    target="Warehouse/Reporting/Sales.Audit",\n    bind=True,\n)\n',
+        'from weaver import Shortcut\n\nSales__Audited = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Warehouse/Reporting/Sales.Audit",\n)\n',
     )
     _write(
         root,
-        "Warehouse/Reporting/external.yml",
-        "Warehouse/Reporting/Sales.Landed:\n  target: Lakehouse/Curated/Sales.Customer\n  bind: true\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n  Warehouse/Reporting/Sales.Landed: Lakehouse/Curated/Sales.Customer\n",
     )
 
     with pytest.raises(GraphError, match="item dependency cycle"):

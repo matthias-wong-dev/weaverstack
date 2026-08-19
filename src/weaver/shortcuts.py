@@ -6,8 +6,8 @@ An item declares its shortcuts once, in ``shortcuts.py`` at the item root::
 
     Sales__Customer = Shortcut(
         shortcut_type="table",
+        target_type="logical",
         target="Lakehouse/Sales/Sales.Customer",
-        bind=True,
     )
 
 A build reads that file rather than running it, and deploys a generated module of
@@ -19,7 +19,8 @@ the same name beside the item's programs, so the same names are importable::
 
 What a program reads is the destination item's own table or folder. A shortcut is
 materialised in the item that declares it, so nothing here resolves the source:
-that address was settled when the shortcut was created.
+whether it was logical or physical, in this workspace or another, was settled
+when the bundle was generated.
 
 OneLake makes a shortcut a read-write window into the item it points at, so a
 write beneath one lands in that item. These objects read and do not write.
@@ -48,9 +49,9 @@ class Shortcut:
     """
 
     shortcut_type: str
+    target_type: str
     target: str
     workspace: str | None = None
-    bind: bool = False
 
     def __call__(self, owner: Any):
         raise LoadError(
@@ -75,17 +76,19 @@ class _Bound:
 
 
 class _TableReader(_Bound):
+    """One table this item presents, addressed as any other Weaver table is."""
+
     def __init__(self, owner: Any, schema: str, name: str) -> None:
         super().__init__(owner)
         self._schema = schema
         self._name = name
 
     def dataframe(self):
-        """The shortcut's rows, read from Delta by path.
+        """The rows, read from Delta by path.
 
-        By path rather than catalogue name, for the reason
-        :meth:`weaver.objects.Table.dataframe` gives: a path needs nothing
-        attached, so the same call serves any resolved Lakehouse.
+        The same :class:`~weaver.lakehouse.Lakehouse` addressing
+        :meth:`weaver.objects.Table.dataframe` uses, and for the same reason: a
+        path needs nothing attached, so the call serves any resolved Lakehouse.
         """
 
         return self.spark.read.format("delta").load(
@@ -94,6 +97,8 @@ class _TableReader(_Bound):
 
 
 class _FolderReader(_Bound):
+    """One folder this item presents, addressed as any other Weaver folder is."""
+
     def __init__(self, owner: Any, schema: str, name: str) -> None:
         super().__init__(owner)
         self._schema = schema
@@ -114,7 +119,13 @@ class _SchemaReader(_Bound):
     """A schema shortcut, which presents the source item's namespace.
 
     Its contents belong to the item it points at and can change without a build,
-    so a table is named when it is read rather than generated as a symbol.
+    so a table is named when it is read rather than generated as a symbol::
+
+        Reference(self).Customer.dataframe()
+        Reference(self).table("Customer Detail").dataframe()
+
+    Attribute access is the ordinary form and delegates to :meth:`table`, which
+    stays available for a name that is not a Python identifier.
     """
 
     def __init__(self, owner: Any, schema: str) -> None:
@@ -125,6 +136,14 @@ class _SchemaReader(_Bound):
         if not isinstance(name, str) or not name.strip():
             raise LoadError("a schema shortcut reads a table by name")
         return _TableReader(self._owner, self._schema, name)
+
+    def __getattr__(self, name: str) -> _TableReader:
+        # Only for names this class does not define, so nothing here shadows a
+        # table. Private names are excluded so a copy or a pickle does not read
+        # as a table lookup.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return self.table(name)
 
 
 @dataclass(frozen=True)

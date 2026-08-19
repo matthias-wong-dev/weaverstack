@@ -5,7 +5,7 @@ frozen ``DROP``; ``spark_sql_batch`` runs an ordered catalogue payload as one
 reported action. ``spark_table`` completes a table whose shape only the session
 knows, and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse
 SQL path.
-``alias`` points one Lakehouse name at another item's object, and ``sql_endpoint``
+``shortcut`` points one Lakehouse name at another item's object, and ``sql_endpoint``
 syncs a Lakehouse's SQL analytics endpoint.
 
 ``load_file`` writes one file of the deployed runtime tree, or removes one the

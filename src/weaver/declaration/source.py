@@ -127,7 +127,7 @@ def python_id_parts(stem: str) -> list[str]:
     return stem.split(PYTHON_ID_SEPARATOR)
 
 
-#: Private alias, so the helper reads as an implementation detail at its one
+#: Private shortcut, so the helper reads as an implementation detail at its one
 #: internal call site while staying importable for the authoring surface.
 _python_id_parts = python_id_parts
 
@@ -277,16 +277,16 @@ class SourceDocument:
         return namespace_for_target(self.target_kind)
 
     @property
-    def warehouse_alias(self) -> ObjectId | None:
+    def warehouse_shortcut(self) -> ObjectId | None:
         """This Lakehouse object's Warehouse-facing name, if it publishes one."""
 
-        return self.document.warehouse_alias
+        return self.document.warehouse_shortcut
 
     @property
-    def lakehouse_alias(self) -> ObjectId | None:
+    def lakehouse_shortcut(self) -> ObjectId | None:
         """This Warehouse object's Lakehouse-facing name, if it publishes one."""
 
-        return self.document.lakehouse_alias
+        return self.document.lakehouse_shortcut
 
     @property
     def referenced_object_ids(self) -> tuple[ObjectId, ...]:
@@ -571,8 +571,8 @@ def _imported_modules(module: ast.Module) -> tuple[str, ...]:
     names: list[str] = []
     for node in ast.walk(module):
         if isinstance(node, ast.Import):
-            for alias in node.names:
-                names.append(alias.name.split(".")[0])
+            for shortcut in node.names:
+                names.append(shortcut.name.split(".")[0])
         elif isinstance(node, ast.ImportFrom):
             if node.level:  # from . import x
                 continue
@@ -595,13 +595,13 @@ def _python_imports(module: ast.Module) -> tuple[PythonImport, ...]:
                 PythonImport(
                     module=node.module,
                     level=node.level,
-                    names=tuple(alias.name for alias in node.names),
+                    names=tuple(shortcut.name for shortcut in node.names),
                 )
             )
         elif isinstance(node, ast.Import):
             imports.extend(
-                PythonImport(module=alias.name, names=(alias.name,))
-                for alias in node.names
+                PythonImport(module=shortcut.name, names=(shortcut.name,))
+                for shortcut in node.names
             )
     return tuple(imports)
 
