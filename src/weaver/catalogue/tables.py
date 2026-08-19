@@ -26,14 +26,20 @@ CATALOGUE_SCHEMA = "_"
 #: ``file`` and ``stored_procedure`` are what a load layer installs — a deployed
 #: module or generated statement, and a generated load procedure — and they are
 #: ordinary managed objects rather than infrastructure exempt from the lifecycle.
-OBJECT_TYPES = ("folder", "table", "view", "file", "stored_procedure")
+#: ``schema`` is what a schema shortcut is: a namespace this item presents and
+#: whose contents belong to the item it points at.
+OBJECT_TYPES = ("folder", "table", "view", "file", "stored_procedure", "schema")
 
 #: What an object is for, independent of its physical shape.
 ROLE_DATA = "data"
 ROLE_LOAD = "load"
 ROLE_TEST = "test"
 ROLE_ASSUMPTION = "assumption"
-OBJECT_ROLES = (ROLE_DATA, ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION)
+#: A pointer this item declares at something another item owns. Recorded as a
+#: role rather than a type, because what it physically *is* still varies: a
+#: table, a folder, a view, or the schema a schema shortcut presents.
+ROLE_SHORTCUT = "shortcut"
+OBJECT_ROLES = (ROLE_DATA, ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_SHORTCUT)
 
 #: The roles a runtime artefact carries — everything installed to be *run*
 #: rather than to hold rows. Asked where a selection has to be partitioned.
@@ -55,6 +61,7 @@ OBJECT_TYPE_VOCABULARY = {
     "view": "View",
     "file": "File",
     "stored_procedure": "Stored procedure",
+    "schema": "Schema",
 }
 
 OBJECT_ROLE_VOCABULARY = {
@@ -62,6 +69,7 @@ OBJECT_ROLE_VOCABULARY = {
     ROLE_LOAD: "Load",
     ROLE_TEST: "Test",
     ROLE_ASSUMPTION: "Assumption",
+    ROLE_SHORTCUT: "Shortcut",
 }
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}
@@ -734,8 +742,8 @@ DEPENDENCY = CatalogueTable(
 ALIAS = CatalogueTable(
     name="Alias",
     description=(
-        "The name one item presents for a document another item owns, "
-        "reproduced from the consuming item's own alias.yml. This is where the "
+        "The name one item presents for something another item owns, "
+        "reproduced from the consuming item's own declarations. This is where the "
         "estate's graph crosses items and engines, so it is kept apart from "
         "Dependency — composing Dependency, Alias and Registry is what yields "
         "the whole DAG, and only that composition may cross."

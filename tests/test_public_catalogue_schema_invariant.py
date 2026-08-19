@@ -250,6 +250,7 @@ def test_object_type_vocabulary_is_frozen():
         "view": "View",
         "file": "File",
         "stored_procedure": "Stored procedure",
+        "schema": "Schema",
     }
 
 
@@ -260,6 +261,7 @@ def test_object_role_vocabulary_is_frozen():
         "load": "Load",
         "test": "Test",
         "assumption": "Assumption",
+        "shortcut": "Shortcut",
     }
 
 

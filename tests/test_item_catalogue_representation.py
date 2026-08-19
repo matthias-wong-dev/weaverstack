@@ -168,9 +168,9 @@ def test_alias_rows_reproduce_destination_and_source_canonical_identity(tmp_path
 
 @weaver_test()
 def test_an_alias_destination_is_registered_as_the_object_it_actually_is(tmp_path):
-    """No ``shortcut`` type. To every reader of the catalogue an alias in a
-    Warehouse is a view, and that is what it is recorded as — its alias-ness
-    lives in ``_.Alias`` and nowhere else."""
+    """No ``shortcut`` *type*. To every reader of the catalogue an external
+    reference in a Warehouse is a view, and that is what it is recorded as. What
+    it is *for* is the role, and where it points is ``_.Alias``."""
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(
@@ -179,7 +179,7 @@ def test_an_alias_destination_is_registered_as_the_object_it_actually_is(tmp_pat
     row = _registry_row(projection, "Sales", "PortableCustomer")
 
     assert row["object_type"] == "view"
-    assert row["object_role"] == "data"
+    assert row["object_role"] == "shortcut"
 
 
 @weaver_test()

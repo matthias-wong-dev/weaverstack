@@ -1,27 +1,40 @@
 """Provision the permanent Weaver Fabric pytest estate.
 
-Creates any missing Lakehouses and Warehouses in PYTEST_WORKSPACE.
-Existing items are reused. Nothing is deleted.
+Creates any missing Lakehouses and Warehouses in PYTEST_WORKSPACE, and the
+external estate in PYTEST_WORKSPACE_EXT that shortcut tests point at. Existing
+items are reused and existing external contents are left as they are. Nothing is
+deleted.
+
+The external workspace is not a Weaver target workspace. It holds physical
+resources a test may reference and must never mutate, so its contents are seeded
+here rather than by the suite.
 
 Usage:
-    python scripts/provision_pytest_estate.py
+    python -m tests.fabric.provision_estate
 
 Optional environment variables:
     WEAVER_FABRIC_WORKSPACE
+    WEAVER_FABRIC_WORKSPACE_EXT
     WEAVER_PYTEST_WEAVER
     WEAVER_PYTEST_TARGET
     WEAVER_PYTEST_PRODUCER
     WEAVER_PYTEST_CONSUMER
     WEAVER_PYTEST_WAREHOUSE_PRODUCER
     WEAVER_PYTEST_WAREHOUSE
+    WEAVER_PYTEST_EXTERNAL
 """
 
 from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from collections.abc import Callable
 from typing import Any
+
+from support import external_estate
 
 from weaver.fabric import (
     LAKEHOUSE,
@@ -37,7 +50,9 @@ from weaver.fabric.auth import prefer_cli_credential
 DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
 
 LAKEHOUSE_ROLES = {
-    "weaver": "PYTEST_WEAVER",
+    # Repositories and bundles need OneLake and the catalogue Warehouse has
+    # none, so the suite stages them here and never builds into it.
+    "staging": "PYTEST_STAGING",
     "target": "PYTEST_LH_1",
     "producer": "PYTEST_LH_2",
     "consumer": "PYTEST_LH_3",
@@ -45,6 +60,9 @@ LAKEHOUSE_ROLES = {
 }
 
 WAREHOUSE_ROLES = {
+    # Where the Weaver catalogue lives. A Warehouse: catalogue state is read and
+    # written over TDS.
+    "weaver": "PYTEST_WEAVER",
     "warehouse": "PYTEST_WH_1",
 }
 
@@ -77,6 +95,135 @@ def find_or_create(
             client=client,
         )
         return item, True
+
+
+def external_tables_seeded(workspace_id: str, item_id: str) -> bool:
+    """Whether the external estate's tables are already there.
+
+    Checked rather than rewritten, so the rows a test asserts on stay the rows
+    an earlier run put there.
+    """
+
+    from weaver.fabric import OneLakeDfsClient
+    from weaver.fabric.onelake import onelake_url
+    from weaver.locations import Location
+
+    store = OneLakeDfsClient()
+    return all(
+        store.exists(
+            Location(
+                onelake_url(
+                    workspace_id, item_id, f"Tables/{external_estate.SCHEMA}/{table}"
+                )
+            )
+        )
+        for table in external_estate.TABLES
+    )
+
+
+def seed_external_tables(workspace, item, *, host_workspace) -> None:
+    """Write the external Delta tables, through Spark in the host workspace.
+
+    Spark reaches another workspace by ``abfss://`` path, so the external
+    workspace needs no Environment and no session of its own. The body imports
+    nothing: making a Delta table needs a session, not the installed package.
+    """
+
+    from weaver.fabric import LivySession
+    from weaver.fabric.onelake import abfss_root
+    from weaver.targets import ItemRef
+
+    root = abfss_root(workspace.id, item.id)
+    statements = []
+    for table, (schema, rows) in external_estate.TABLES.items():
+        statements.append(
+            f"spark.createDataFrame({rows!r}, {schema!r})"
+            f".write.format('delta').mode('overwrite')"
+            f".save({root + f'/Tables/{external_estate.SCHEMA}/{table}'!r})"
+        )
+    body = "\n".join(statements) + "\nemit(True)\n"
+
+    session = LivySession.for_workspace(
+        host_workspace, lakehouse=ItemRef(configured_name("staging", "PYTEST_STAGING"))
+    )
+    with session:
+        result = session.run(body)
+    if result.payload is not True:
+        raise RuntimeError(f"seeding the external tables returned {result.payload!r}")
+
+
+def seed_external_file(workspace_id: str, item_id: str) -> bool:
+    """Put the sentinel file in place if it is not already there."""
+
+    from weaver.fabric import OneLakeDfsClient
+    from weaver.fabric.onelake import onelake_url
+    from weaver.locations import Location
+
+    store = OneLakeDfsClient()
+    location = Location(
+        onelake_url(
+            workspace_id,
+            item_id,
+            f"Files/{external_estate.SCHEMA}/{external_estate.FILE}",
+        )
+    )
+    if store.exists(location) and store.read(location) == external_estate.FILE_BYTES:
+        return False
+    store.write(location, external_estate.FILE_BYTES)
+    return True
+
+
+def provision_external(client: FabricClient, host_workspace) -> list[str]:
+    """Create and seed the external workspace's estate. Returns any failures."""
+
+    failures: list[str] = []
+    workspace_name = os.environ.get(
+        external_estate.WORKSPACE_ENV, external_estate.DEFAULT_WORKSPACE
+    )
+    print(f"Resolving external workspace: {workspace_name}")
+    try:
+        workspace = find_workspace(workspace_name)
+    except Exception as exc:
+        return [f"external workspace {workspace_name}: {type(exc).__name__}: {exc}"]
+    print(f"External workspace resolved: {workspace.name} ({workspace.id})")
+
+    for role, default_name in external_estate.ROLES.items():
+        name = configured_name(role, default_name)
+        try:
+            item, created = find_or_create(
+                workspace=workspace,
+                client=client,
+                name=name,
+                item_type=LAKEHOUSE,
+                create=create_lakehouse,
+            )
+        except Exception as exc:
+            failures.append(f"Lakehouse {name}: {type(exc).__name__}: {exc}")
+            print(f"FAILED  Lakehouse  {name}: {exc}")
+            continue
+
+        action = "CREATED" if created else "EXISTS "
+        print(f"{action}  Lakehouse  {item.name} ({item.id})  [external]")
+
+        try:
+            if external_tables_seeded(workspace.id, item.id):
+                print(f"EXISTS     tables     {external_estate.SCHEMA}.*")
+            else:
+                seed_external_tables(workspace, item, host_workspace=host_workspace)
+                print(f"SEEDED     tables     {external_estate.SCHEMA}.*")
+            if seed_external_file(workspace.id, item.id):
+                print(
+                    f"SEEDED     file       Files/{external_estate.SCHEMA}/{external_estate.FILE}"
+                )
+            else:
+                print(
+                    f"EXISTS     file       Files/{external_estate.SCHEMA}/{external_estate.FILE}"
+                )
+        except Exception as exc:
+            failures.append(f"external contents: {type(exc).__name__}: {exc}")
+            print(f"FAILED  contents: {exc}")
+
+    return failures
 
 
 def main() -> int:
@@ -134,6 +281,19 @@ def main() -> int:
 
         action = "CREATED" if created else "EXISTS "
         print(f"{action}  Warehouse  {item.name} ({item.id})")
+
+    from weaver.workspaces import Workspace
+
+    print()
+    failures.extend(
+        provision_external(
+            client,
+            Workspace(
+                workspace=workspace.name,
+                lakehouses={},
+            ),
+        )
+    )
 
     print()
 

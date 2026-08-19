@@ -1,8 +1,8 @@
-"""The alias action waits for Fabric to discover the shortcut it just made.
+"""The shortcut action waits for Fabric to discover the shortcut it just made.
 
-Fabric creates a OneLake shortcut synchronously and *discovers* it
-asynchronously: the consumer's next statement failed with "neither a view nor a
-table" until the alias action learned to wait for a real read to succeed.
+Fabric creates a OneLake shortcut synchronously and discovers it asynchronously:
+the consumer's next statement failed with "neither a view nor a table" until the
+action learned to wait for a real read to succeed.
 
 The wait runs where the Installer runs. Creating the shortcut is a REST call and
 the wait asks Spark a question through ``context.spark_sql``, so a desktop
@@ -12,9 +12,9 @@ show up in its telemetry; the estate the action needs — the repository, the
 generated bundle and the producer's table — is arranged in a fixture and never
 claimed to be either.
 
-Everything else about aliases, including shortcut creation, its target, the
-endpoint refresh and reading through the aliased name, is proven in
-`test_cross_item_alias_primitive.py`.
+Everything else about a shortcut, including its creation, its target, the
+endpoint refresh and reading through the name it establishes, is proven in
+`test_cross_item_shortcut_primitive.py`.
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def discovery_estate(
     Weaver, and none of it is the claim under test.
     """
 
-    from test_cross_item_alias_primitive import action_of, generate, upload
+    from test_cross_item_shortcut_primitive import action_of, generate, upload
 
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
@@ -121,7 +121,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
 ):
     """The action reports how long it waited, which is the behaviour itself."""
 
-    from test_cross_item_alias_primitive import run_from_here
+    from test_cross_item_shortcut_primitive import run_from_here
 
     result = run_from_here(
         discovery_estate["alias_action"],

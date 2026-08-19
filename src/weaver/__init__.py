@@ -35,6 +35,7 @@ from .operations.test import test
 from .operations.wipe import WipeReport, WipeResult, wipe
 from .operations.workspace import current_workspace
 from .sessions.public import session
+from .shortcuts import Shortcut
 from .test_report import ValidationNodeReport, ValidationRunReport
 
 
@@ -71,6 +72,7 @@ __all__ = [
     "ValidationNodeReport",
     # authored objects
     "WeaverObject",
+    "Shortcut",
     "Folder",
     "Table",
     "SparkSqlTable",

@@ -1,0 +1,3 @@
+Warehouse/Reporting/Rpt.PortableCustomer:
+  target: Lakehouse/Raw/DWG.Customer
+  bind: true

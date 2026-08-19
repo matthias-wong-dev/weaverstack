@@ -625,13 +625,33 @@ class {class_name}(Folder):
 '''
 
 
-def alias_declaration(**aliases: str) -> str:
-    """An item's ``alias.yml``: local name to the document it points at."""
+def bound_declaration(consumer: str, **references: str) -> tuple[str, str]:
+    """Where a consumer declares its bound references, and what it says.
 
-    lines = "\n".join(
-        f"  {local}: {source}" for local, source in sorted(aliases.items())
+    Returns the repository-relative path and the file's text, so a caller states
+    the references and not which surface the item type declares them on: a
+    Lakehouse declares shortcuts, a Warehouse external views.
+    """
+
+    if consumer.startswith("Warehouse/"):
+        body = "\n".join(
+            f"{consumer}/{local}:\n  target: {source}\n  bind: true"
+            for local, source in sorted(references.items())
+        )
+        return f"{consumer}/external.yml", body + "\n"
+
+    declarations = "\n\n".join(
+        f"{local.replace('.', '__')} = Shortcut(\n"
+        f'    shortcut_type="table",\n'
+        f'    target="{source}",\n'
+        f"    bind=True,\n"
+        f")"
+        for local, source in sorted(references.items())
     )
-    return f"aliases:\n{lines}\n"
+    return (
+        f"{consumer}/shortcuts.py",
+        "from weaver import Shortcut\n\n" + declarations + "\n",
+    )
 
 
 def alias_repository(
@@ -660,9 +680,9 @@ def alias_repository(
     _write(root, f"{consumer}/schemas/{schema}.yml", schema_document(schema))
     _write(
         root,
-        f"{consumer}/alias.yml",
-        alias_declaration(
-            **{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"}
+        *bound_declaration(
+            consumer,
+            **{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"},
         ),
     )
     if consumer_view:
@@ -774,6 +794,11 @@ def estate_inventories(repository, *, empty: bool = False):
 #: The two items of :func:`load_estate`, and the physical targets they bind to.
 LOAD_PRODUCER = "Lakehouse/Raw"
 LOAD_CONSUMER = "Warehouse/Reporting"
+#: The consumer's bound reference to the producer's table, as its own surface
+#: spells it.
+BOUND_CONSUMER_PATH, BOUND_CONSUMER_TEXT = bound_declaration(
+    LOAD_CONSUMER, **{"Sales.Order": f"{LOAD_PRODUCER}/Sales.Order"}
+)
 LOAD_PRODUCER_TARGET = "Raw_LH"
 LOAD_CONSUMER_TARGET = "Reporting_WH"
 
@@ -808,9 +833,7 @@ def load_estate(root: Path):
         ),
         f"{LOAD_PRODUCER}/Files/Sales__Export.py": folder_document("Sales.Export"),
         f"{LOAD_CONSUMER}/schemas/Sales.yml": schema_document("Sales"),
-        f"{LOAD_CONSUMER}/alias.yml": alias_declaration(
-            **{"Sales.Order": f"{LOAD_PRODUCER}/Sales.Order"}
-        ),
+        BOUND_CONSUMER_PATH: BOUND_CONSUMER_TEXT,
         f"{LOAD_CONSUMER}/Sales.Summary.sql": warehouse_table(
             "Sales.Summary",
             select="select OrderId, Amount from [Sales].[Order]",

@@ -47,6 +47,7 @@ from .tables import (
     KEY_UNIQUE,
     REGISTRY,
     ROLE_DATA,
+    ROLE_SHORTCUT,
     SCHEMA_DICTIONARY,
     TABLE_DICTIONARY,
     TEST_DICTIONARY,
@@ -381,7 +382,7 @@ def project_alias_registry(
         {
             **_identity(scope, alias.destination),
             "object_type": _alias_object_type(alias.destination, target_kind),
-            "object_role": ROLE_DATA,
+            "object_role": ROLE_SHORTCUT,
             "signature": alias.signature,
         }
         for alias in sorted(

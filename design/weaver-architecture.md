@@ -56,7 +56,7 @@ repository/
 │   └── Reporting/
 │       ├── schemas/
 │       │   └── Sales.yml
-│       ├── alias.yml
+│       ├── external.yml
 │       └── Sales.Customer.sql
 │
 └── _ignore/
@@ -99,7 +99,8 @@ Examples include:
 | `Sales.Rollup.sql` | Spark SQL object |
 | `Sales.Customer.sql` | T-SQL object |
 | `schemas/*.yml` | Schema declarations |
-| `alias.yml` | Cross-item bindings |
+| `shortcuts.py` | Fabric shortcuts a Lakehouse declares |
+| `external.yml` | External SQL references a Warehouse declares |
 | `Files/...` | Lakehouse Files content |
 
 Directories such as `lib/` contain ordinary Python modules shared by authored documents.

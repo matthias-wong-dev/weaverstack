@@ -351,8 +351,10 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     repository = full_estate(tmp_path / "repo")
     catalogue = Catalogue.from_repository(repository)
 
-    assert {document.object_type for document in catalogue.registered.values()} == set(
-        OBJECT_TYPES
+    # Every type but ``schema``, which only a schema shortcut carries and which
+    # this estate declares none of.
+    assert {document.object_type for document in catalogue.registered.values()} == (
+        set(OBJECT_TYPES) - {"schema"}
     )
 
 

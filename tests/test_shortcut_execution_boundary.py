@@ -9,8 +9,8 @@ import pytest
 from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace
 
-from weaver.build_bundle.executors import AliasExecutor
-from weaver.build_bundle.executors import alias as alias_module
+from weaver.build_bundle.executors import ShortcutExecutor
+from weaver.build_bundle.executors import shortcut as shortcut_module
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
 from weaver.build_bundle.models import CREATE_ALIAS, InstallAction
 from weaver.build_bundle.targets import BoundTarget
@@ -24,15 +24,15 @@ DESTINATION_TARGET_ID = "Lakehouse-Curated--lakehouse-Curated_Dev"
 
 
 def _payload(**overrides) -> bytes:
-    """One alias, in the batched shape the action now carries."""
+    """One shortcut, in the batched shape the action carries."""
 
     mapping = {
         "alias": "Lakehouse/Curated/Sales.Landed",
         "source": "Lakehouse/Raw/Sales.Customer",
         "source_target_id": SOURCE_TARGET_ID,
-        "area": "Tables",
-        "schema": "Sales",
-        "object": "Landed",
+        "type": "table",
+        "path": "Tables/Sales",
+        "name": "Landed",
         "source_area": "Tables",
         "source_schema": "Sales",
         "source_object": "Customer",
@@ -106,7 +106,7 @@ def test_an_alias_naming_a_target_the_plan_never_declared_fails(tmp_path):
     context = _local_context(tmp_path)
 
     with pytest.raises(InstallError, match="which this plan does not declare"):
-        AliasExecutor().execute(
+        ShortcutExecutor().execute(
             _action(), _payload(source_target_id="lakehouse-Nowhere"), context
         )
 
@@ -142,7 +142,7 @@ def test_a_fabric_alias_becomes_one_onelake_shortcut(tmp_path):
     resolver = _ShortcutResolver()
     context = _local_context(tmp_path, resolver=resolver)
 
-    details = AliasExecutor().execute(_action(), _payload(), context)
+    details = ShortcutExecutor().execute(_action(), _payload(), context)
 
     assert resolver.calls == [
         ("Curated_Dev", "Tables/Sales", "Landed", "Raw_Dev", "Tables/Sales/Customer")
@@ -166,7 +166,7 @@ def test_a_shortcut_uses_the_source_tables_physical_case(tmp_path):
     resolver = _ShortcutResolver()
     context = _local_context(tmp_path, resolver=resolver, store=_FoldedSourceStore())
 
-    AliasExecutor().execute(_action(), _payload(), context)
+    ShortcutExecutor().execute(_action(), _payload(), context)
 
     assert resolver.calls[0][-1] == "Tables/Sales/customer"
 
@@ -254,11 +254,11 @@ def test_a_fabric_alias_is_not_finished_until_the_shortcut_can_be_read(
 ):
     """Returning on the API call would make the plan's barrier a lie."""
 
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
     spark = _LateSpark(failures=2)
     context = _addressable_context(tmp_path, spark, _ShortcutResolver())
 
-    details = AliasExecutor().execute(_action(), _payload(), context)
+    details = ShortcutExecutor().execute(_action(), _payload(), context)
 
     reads = [s for s in spark.statements if s.startswith("SELECT")]
     assert len(reads) == 3
@@ -270,26 +270,28 @@ def test_a_fabric_alias_is_not_finished_until_the_shortcut_can_be_read(
 def test_a_shortcut_that_never_becomes_readable_fails_naming_itself(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_TIMEOUT", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_TIMEOUT", 0)
     context = _addressable_context(
         tmp_path, _LateSpark(failures=99), _ShortcutResolver()
     )
 
     with pytest.raises(InstallError, match="did not become readable within"):
-        AliasExecutor().execute(_action(), _payload(), context)
+        ShortcutExecutor().execute(_action(), _payload(), context)
 
 
 @weaver_test()
-def test_a_files_alias_needs_no_readability_wait(tmp_path, monkeypatch):
+def test_a_folder_shortcut_needs_no_readability_wait(tmp_path, monkeypatch):
     """A folder is a directory; there is no relation to become addressable."""
 
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
     spark = _LateSpark(failures=99)
     context = _addressable_context(tmp_path, spark, _ShortcutResolver())
 
-    details = AliasExecutor().execute(
-        _action(), _payload(area="Files", source_area="Files"), context
+    details = ShortcutExecutor().execute(
+        _action(),
+        _payload(type="folder", path="Files/Sales", source_area="Files"),
+        context,
     )
 
     assert not spark.statements
@@ -321,7 +323,7 @@ def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
     context = _local_context(tmp_path, resolver=_WithoutShortcuts(None))
 
     with pytest.raises(InstallError, match="no way to create a OneLake shortcut"):
-        AliasExecutor().execute(_action(), _payload(), context)
+        ShortcutExecutor().execute(_action(), _payload(), context)
 
 
 # --- several aliases, one action ----------------------------------------------
@@ -341,13 +343,13 @@ def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
     only true if both shortcuts exist before the first read is attempted.
     """
 
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
     events: list[str] = []
     resolver = _ShortcutResolver(events=events)
     spark = _LateSpark(failures=2, events=events)
     context = _addressable_context(tmp_path, spark, resolver)
 
-    details = AliasExecutor().execute(_action(), _two_aliases(), context)
+    details = ShortcutExecutor().execute(_action(), _two_aliases(), context)
 
     assert [detail["alias"] for detail in details["aliases"]] == [
         "Lakehouse/Curated/Sales.Landed",
@@ -416,7 +418,7 @@ def test_the_wait_asks_spark_rather_than_holding_one(tmp_path):
     asked = _LateSpark(failures=1)
     context = _addressable_context(tmp_path, asked, _ShortcutResolver())
 
-    AliasExecutor().execute(_action(), _payload(), context)
+    ShortcutExecutor().execute(_action(), _payload(), context)
 
     assert asked.statements, "the discovery wait was skipped without a Spark session"
     assert all("LIMIT 0" in statement for statement in asked.statements)
@@ -431,6 +433,6 @@ def test_the_probe_carries_weavers_identifier_case(tmp_path):
     asked = _LateSpark(failures=0)
     context = _addressable_context(tmp_path, asked, _ShortcutResolver())
 
-    AliasExecutor().execute(_action(), _payload(), context)
+    ShortcutExecutor().execute(_action(), _payload(), context)
 
     assert asked.exact_case and all(asked.exact_case)

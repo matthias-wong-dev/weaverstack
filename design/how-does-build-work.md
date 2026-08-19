@@ -146,30 +146,57 @@ binds to a Warehouse; Weaver never infers a destructive target from a bare
 display name. The package-owned `Warehouse/_weaver` item is bound implicitly to
 the mandatory catalogue Warehouse.
 
-## 4a. Aliases
+## 4a. Shortcuts and external views
 
-An alias is a consuming item's own name for something another item produces. It
-is declared in that item's `alias.yml`, is owned by the destination item, and
-leaves the source as the canonical producer.
+A shortcut is a consuming item's own name for something else: another Weaver
+item's document, or a physical Fabric item Weaver does not manage. A Lakehouse
+declares them in `shortcuts.py` and a Warehouse declares external views in
+`external.yml`. Either way the declaration is owned by the destination item, and
+the source stays the canonical producer.
 
-What an alias becomes is a decision about the destination's target kind, and is
-therefore made by the planner:
+What a declaration becomes is a decision about the destination's target kind, and
+is therefore made by the planner:
 
 | Destination | Materialisation |
 |---|---|
-| Lakehouse | a `create_alias` action — a OneLake shortcut |
-| Warehouse | a frozen `CREATE OR ALTER VIEW` over the bound source's three-part name |
+| Lakehouse | a `create_alias` action, a OneLake shortcut |
+| Warehouse | a frozen `CREATE OR ALTER VIEW` over the source's three-part name |
 
-Only the Warehouse form is spelled out in SQL, because there the statement *is*
-the semantic decision. A shortcut and a link are two transports for one frozen
-decision — this destination, that source — resolved at install time the same way a
-schema's `LOCATION` is.
+Only the Warehouse form is spelled out in SQL, because there the statement is the
+semantic decision. A shortcut carries one frozen decision, this destination and
+that source, resolved at install time the same way a schema's `LOCATION` is.
 
-An alias whose source item is not bound, or whose destination and source disagree
-about the `Files`/table namespace, has no physical form under the current
-bindings. It is omitted from the plan with the reason `alias_unsupported`. That
-decision belongs to the planner; the installer may only run an alias action
-already frozen for it.
+`bind` decides where the source address comes from. A **bound** declaration names
+a Weaver document, so the planner freezes the source's target id and the installer
+resolves it through its own environment, exactly as it resolves the destination. A
+**direct** declaration names a physical Fabric item, possibly in another
+workspace, which is not a target of this build. Its workspace id, item id and
+case-exact source path are resolved while the estate is readable, before the
+bundle is generated, and carried in the payload. Fabric validates a shortcut's
+target when it is created and its paths are case-sensitive, so an address guessed
+at install time fails rather than resolving to something else.
+
+A `shortcut_type` decides both paths:
+
+| Type | Destination | Source |
+|---|---|---|
+| `table` | `Tables/<schema>/<name>` | a table directory |
+| `schema` | `Tables/<schema>` | a schema directory |
+| `folder` | `Files/<schema>/<name>` | a path under `Files` |
+
+**Weaver owns the shortcut root and nothing reachable through it.** OneLake makes
+a shortcut a read-write window into the item it points at: writing beneath one
+writes into that item, in that item's workspace, and deleting beneath one deletes
+there. So nothing is ever planned inside a schema or folder shortcut, a repository
+that declares something there is refused during discovery, and a wipe removes
+shortcuts through the workspace before it sweeps storage. Removing the shortcut
+root is safe, and it is the only thing Weaver does to one.
+
+A declaration whose bound source item is not bound, whose destination and source
+disagree about the `Files`/table namespace, or whose direct target did not resolve
+has no physical form under the current bindings. It is omitted from the plan with
+the reason `alias_unsupported`. That decision belongs to the planner; the
+installer may only run an action already frozen for it.
 
 **An omitted alias is not certified.** A `_.Registry` row means the object's work
 succeeded, and for an omitted alias no work was planned at all — so the row is
@@ -184,12 +211,17 @@ view it is about to create, nor the one it just decided to keep. An alias holds
 no data, so materialisation replaces rather than colliding: a build has to be able
 to run twice.
 
-**An alias is an ordinary registered object, built incrementally.** It gets a
-`_.Registry` row like any other, typed as what it physically is — a `folder` under
-`Files`, a `view` in a Warehouse, a `table` in a Lakehouse. There is no `shortcut`
-type: to every reader of the catalogue a Lakehouse alias *is* a table, and that it
-is implemented as a shortcut is execution detail. Its alias-ness lives in `_.Alias`
-and nowhere else.
+**A shortcut is an ordinary registered object, built incrementally.** It gets a
+`_.Registry` row like any other, typed as what it physically is: a `folder` under
+`Files`, a `view` in a Warehouse, a `table` in a Lakehouse, and `schema` for a
+schema shortcut. There is no `shortcut` object *type*, because to a reader of the
+catalogue a Lakehouse table shortcut is a table. What it is for is the object
+*role*, which is `shortcut`, and where it points is `_.Alias`.
+
+A schema shortcut is registered as the schema it presents and nothing inside it
+is. Those objects belong to the item the shortcut points at, they can change
+without a build, and enumerating them to decide what to remove would be deciding
+about another item's estate.
 
 Its signature is its declaration — this destination, that source — and nothing
 about the source's content. A reloaded source does not redefine an alias, and

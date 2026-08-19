@@ -52,10 +52,8 @@ def _dependency_estate(tmp_path):
     _write(root, "Warehouse/Audit/Sales.Change.sql", audit)
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        """aliases:
-  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
-""",
+        "Warehouse/Reporting/external.yml",
+        "Warehouse/Reporting/Sales.PortableCustomer:\n  target: Lakehouse/Curated/Sales.Customer\n  bind: true\n",
     )
     return root
 
@@ -159,8 +157,8 @@ def test_an_alias_no_document_consumes_still_waits_for_its_source(tmp_path):
     root = _dependency_estate(tmp_path)
     _write(
         root,
-        "Warehouse/Audit/alias.yml",
-        "aliases:\n  Sales.Unread: Lakehouse/Curated/Sales.Customer\n",
+        "Warehouse/Audit/external.yml",
+        "Warehouse/Audit/Sales.Unread:\n  target: Lakehouse/Curated/Sales.Customer\n  bind: true\n",
     )
     graph = parse_item_repository(Location(str(root))).dependency_graph
 
@@ -243,13 +241,13 @@ def test_dependency_cycle_across_items_is_rejected(tmp_path):
     _write(root, "Warehouse/Reporting/Sales.Customer.sql", reporting)
     _write(
         root,
-        "Lakehouse/Curated/alias.yml",
-        "aliases:\n  Sales.Reporting: Warehouse/Reporting/Sales.Customer\n",
+        "Lakehouse/Curated/shortcuts.py",
+        'from weaver import Shortcut\n\nSales__Reporting = Shortcut(\n    shortcut_type="table",\n    target="Warehouse/Reporting/Sales.Customer",\n    bind=True,\n)\n',
     )
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        "aliases:\n  Sales.Curated: Lakehouse/Curated/Sales.Customer\n",
+        "Warehouse/Reporting/external.yml",
+        "Warehouse/Reporting/Sales.Curated:\n  target: Lakehouse/Curated/Sales.Customer\n  bind: true\n",
     )
     with pytest.raises(GraphError, match="dependency cycle"):
         parse_item_repository(Location(str(root)))

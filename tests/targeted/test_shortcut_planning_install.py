@@ -1,14 +1,15 @@
-"""Cross-item aliases: every decision, in pure Python.
+"""Shortcuts and external views: every decision, in pure Python.
 
-An alias is the one construct that reaches across items, and almost everything
-about it is a *decision* — is it planned, is it left alone, does its schema still
-get created, does its consumer wait for its producer, is it stale because the
-producer moved on. None of that needs a workspace: it is computed from the
-repository and the catalogue, both of which can be built directly.
+A shortcut is the one construct that reaches outside its item, and almost
+everything about it is a *decision*: is it planned, is it left alone, does its
+schema still get created, does its consumer wait for its producer, is it stale
+because the producer moved on, and what pair of addresses is frozen for the
+installer. None of that needs a workspace. It is computed from the repository and
+the catalogue, both of which can be built directly.
 
 What genuinely needs Fabric is narrower, and it is the *installation*: a OneLake
-shortcut is an API call, Fabric discovers one asynchronously, and a Warehouse
-alias is a view over a SQL endpoint. Those live in `tests/fabric`.
+shortcut is an API call, Fabric discovers one asynchronously, and an external view
+is a view over a SQL endpoint. Those live in `tests/fabric`.
 
 The split matters because the expensive suite used to prove the decisions by
 building three estates. A decision proven here costs milliseconds and says which
@@ -29,12 +30,12 @@ from factories import (
 from support.weaver_test import weaver_test
 
 from weaver.build_bundle import plan_item_build
-from weaver.build_bundle.aliases import plan_item_aliases
 from weaver.build_bundle.incremental import (
     declared_signatures,
     select_build,
     stale_alias_destinations,
 )
+from weaver.build_bundle.shortcuts import plan_item_shortcuts
 
 PRODUCER = "Lakehouse/Raw"
 CONSUMER = "Lakehouse/Curated"
@@ -57,7 +58,7 @@ def targets():
 
 def plan_aliases(repository, *, selected=(ALIAS,)):
     by_item = targets()
-    return plan_item_aliases(
+    return plan_item_shortcuts(
         repository,
         item=item_id(CONSUMER),
         target=by_item[item_id(CONSUMER)],
@@ -114,7 +115,7 @@ def test_an_alias_whose_source_item_is_unbound_is_omitted(estate):
     would claim an installation that never happened.
     """
 
-    planned = plan_item_aliases(
+    planned = plan_item_shortcuts(
         estate,
         item=item_id(CONSUMER),
         target=bound_target(id="curated", item_id="Curated_LH"),
@@ -306,7 +307,7 @@ def test_an_unbound_consumer_keeps_its_stale_alias(estate):
 def test_a_second_build_over_an_unchanged_estate_plans_no_alias_action(estate):
     """An unchanged alias over an unchanged source must not be replaced.
 
-    This is the decision `test_cross_item_alias_primitive.py` spent a full
+    This is the decision `test_cross_item_shortcut_primitive.py` spent a full
     generate-and-install to observe. It is made from signatures and build datetimes before
     any pointer is touched, so it belongs here — what Fabric can still say is
     that the shortcut object itself was not disturbed.
@@ -340,3 +341,166 @@ def test_a_changed_source_reaches_the_alias_and_its_consumer(estate):
 
     assert document_id(SOURCE) in selection.selected_for_build
     assert document_id(VIEW) in selection.selected_for_build
+
+
+# --- direct shortcuts, and the addresses frozen for them ----------------------
+
+
+def _direct(tmp_path, body: str):
+    """One item declaring only direct shortcuts, with nothing to bind to."""
+
+    from factories import _write, lakehouse_table, schema_document
+
+    from weaver.declaration import parse_item_repository
+    from weaver.locations import Location
+
+    root = tmp_path / "direct"
+    _write(root, f"{CONSUMER}/schemas/DWG.yml", schema_document("DWG"))
+    _write(root, f"{CONSUMER}/DWG__Report.py", lakehouse_table("DWG.Report"))
+    _write(root, f"{CONSUMER}/shortcuts.py", "from weaver import Shortcut\n\n" + body)
+    return parse_item_repository(Location(str(root)))
+
+
+def _plan_direct(repository, sources, *, selected):
+    by_item = targets()
+    return plan_item_shortcuts(
+        repository,
+        item=item_id(CONSUMER),
+        target=by_item[item_id(CONSUMER)],
+        target_by_item=by_item,
+        selected=selected,
+        sources=sources,
+    )
+
+
+def _frozen(planned):
+    import json
+
+    action = next(action for batch in planned.stage.batches for action in batch.actions)
+    return json.loads(planned.stage.payloads[action.payload].decode("utf-8"))["aliases"]
+
+
+@weaver_test()
+def test_a_direct_table_shortcut_freezes_the_resolved_physical_source(tmp_path):
+    """The installer resolves targets of this build, and a direct source is not one."""
+
+    from weaver.build_bundle.shortcuts import ResolvedShortcutSource
+
+    repository = _direct(
+        tmp_path,
+        "DWG__External = Shortcut(\n"
+        '    shortcut_type="table",\n'
+        '    target="Lakehouse/Reference/DWG.Customer",\n'
+        '    workspace="Shared Data",\n)\n',
+    )
+    declaration = repository.shortcuts[0]
+    planned = _plan_direct(
+        repository,
+        {
+            f"{declaration.owner}/{declaration.name}": ResolvedShortcutSource(
+                workspace_id="ws-external",
+                item_id="item-reference",
+                item_name="Reference",
+                path="Tables/DWG/Customer",
+            )
+        },
+        selected={declaration.destination},
+    )
+
+    assert _frozen(planned) == [
+        {
+            "alias": "Lakehouse/Curated/DWG.External",
+            "type": "table",
+            "path": "Tables/DWG",
+            "name": "External",
+            "source": "Lakehouse/Reference/DWG.Customer",
+            "source_workspace_id": "ws-external",
+            "source_item_id": "item-reference",
+            "source_item_name": "Reference",
+            "source_path": "Tables/DWG/Customer",
+        }
+    ]
+
+
+@weaver_test()
+def test_a_schema_shortcut_is_created_directly_under_tables(tmp_path):
+    """Measured against Fabric: a schema shortcut is path=Tables, name=<Schema>."""
+
+    from weaver.build_bundle.shortcuts import ResolvedShortcutSource
+
+    repository = _direct(
+        tmp_path,
+        "Reference = Shortcut(\n"
+        '    shortcut_type="schema",\n'
+        '    target="Lakehouse/Reference/DWG",\n'
+        '    workspace="Shared Data",\n)\n',
+    )
+    declaration = repository.shortcuts[0]
+    planned = _plan_direct(
+        repository,
+        {
+            f"{declaration.owner}/{declaration.name}": ResolvedShortcutSource(
+                workspace_id="ws-external",
+                item_id="item-reference",
+                item_name="Reference",
+                path="Tables/DWG",
+            )
+        },
+        selected={declaration.destination},
+    )
+
+    frozen = _frozen(planned)[0]
+    assert (frozen["path"], frozen["name"], frozen["type"]) == (
+        "Tables",
+        "Reference",
+        "schema",
+    )
+
+
+@weaver_test()
+def test_a_schema_shortcut_asks_for_no_schema_of_its_own(tmp_path):
+    """It *is* the namespace, and the item it points at owns what is inside."""
+
+    from weaver.build_bundle.shortcuts import ResolvedShortcutSource
+
+    repository = _direct(
+        tmp_path,
+        "Reference = Shortcut(\n"
+        '    shortcut_type="schema",\n'
+        '    target="Lakehouse/Reference/DWG",\n'
+        '    workspace="Shared Data",\n)\n',
+    )
+    declaration = repository.shortcuts[0]
+    planned = _plan_direct(
+        repository,
+        {
+            f"{declaration.owner}/{declaration.name}": ResolvedShortcutSource(
+                workspace_id="ws",
+                item_id="item",
+                item_name="Reference",
+                path="Tables/DWG",
+            )
+        },
+        selected={declaration.destination},
+    )
+
+    assert planned.schemas == ()
+
+
+@weaver_test()
+def test_a_direct_shortcut_with_no_resolved_source_is_omitted(tmp_path):
+    """The installer may only run an action already frozen for it."""
+
+    repository = _direct(
+        tmp_path,
+        "DWG__External = Shortcut(\n"
+        '    shortcut_type="table",\n'
+        '    target="Lakehouse/Reference/DWG.Customer",\n'
+        '    workspace="Shared Data",\n)\n',
+    )
+    declaration = repository.shortcuts[0]
+    planned = _plan_direct(repository, {}, selected={declaration.destination})
+
+    assert planned.stage is None
+    assert planned.omitted_destinations == (declaration.destination,)
+    assert "not resolved when this bundle was generated" in planned.omitted[0].detail

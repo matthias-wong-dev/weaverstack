@@ -54,8 +54,8 @@ def test_an_unused_alias_still_orders_its_two_items(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Lakehouse/Curated/alias.yml",
-        "aliases:\n  Sales.Landed: Lakehouse/Raw/Sales.Customer\n",
+        "Lakehouse/Curated/shortcuts.py",
+        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target="Lakehouse/Raw/Sales.Customer",\n    bind=True,\n)\n',
     )
     repository = parse_item_repository(Location(str(root)))
     layer_of = {
@@ -110,13 +110,13 @@ def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
     )
     _write(
         root,
-        "Lakehouse/Curated/alias.yml",
-        "aliases:\n  Sales.Audited: Warehouse/Reporting/Sales.Audit\n",
+        "Lakehouse/Curated/shortcuts.py",
+        'from weaver import Shortcut\n\nSales__Audited = Shortcut(\n    shortcut_type="table",\n    target="Warehouse/Reporting/Sales.Audit",\n    bind=True,\n)\n',
     )
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        "aliases:\n  Sales.Landed: Lakehouse/Curated/Sales.Customer\n",
+        "Warehouse/Reporting/external.yml",
+        "Warehouse/Reporting/Sales.Landed:\n  target: Lakehouse/Curated/Sales.Customer\n  bind: true\n",
     )
 
     with pytest.raises(GraphError, match="item dependency cycle"):

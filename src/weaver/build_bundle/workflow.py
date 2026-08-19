@@ -12,7 +12,7 @@ import stat
 import tempfile
 import zipfile
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Iterator, Mapping
@@ -39,6 +39,8 @@ from .prune import (
     read_warehouse_inventory,
 )
 from .report import InstallationReport
+from .shortcut_sources import read_shortcut_sources
+from .shortcuts import ResolvedShortcutSource
 from .targets import (
     WAREHOUSE_TARGET,
     ItemBindings,
@@ -85,11 +87,18 @@ class BuildState:
 
     catalogue: Catalogue
     target_inventories: Mapping[WeaverItemId, TargetInventory]
+    #: Where each direct shortcut points, resolved while the estate was
+    #: readable. Keyed by ``<owner>/<name>``.
+    shortcut_sources: Mapping[str, ResolvedShortcutSource] = field(default_factory=dict)
 
     def to_mapping(self) -> dict[str, object]:
         return {
             "format_version": 1,
             "catalogue": self.catalogue.to_mapping(),
+            "shortcut_sources": {
+                key: vars(source)
+                for key, source in sorted(self.shortcut_sources.items())
+            },
             "target_inventories": [
                 {
                     "item": str(item),
@@ -115,6 +124,10 @@ class BuildState:
                     entry["inventory"]
                 )
                 for entry in mapping.get("target_inventories", ())
+            },
+            shortcut_sources={
+                key: ResolvedShortcutSource(**value)
+                for key, value in (mapping.get("shortcut_sources") or {}).items()
             },
         )
 
@@ -176,6 +189,7 @@ def read_build_state(
     session,
     workspace=None,
     sql_by_item=None,
+    shortcuts=(),
 ) -> BuildState:
     """Read only the authoritative state a source-independent planner needs.
 
@@ -198,7 +212,20 @@ def read_build_state(
             workspace=workspace,
             required=tuple(required_catalogue_items),
         )
-    return BuildState(catalogue=catalogue, target_inventories=inventories)
+    sources = {}
+    direct = tuple(declaration for declaration in shortcuts if not declaration.bind)
+    if direct:
+        with session.step("Resolve direct shortcut targets"):
+            sources = read_shortcut_sources(
+                direct,
+                resolver=session.resolver(workspace),
+                store=session.transport_store(workspace),
+            )
+    return BuildState(
+        catalogue=catalogue,
+        target_inventories=inventories,
+        shortcut_sources=sources,
+    )
 
 
 def _read_catalogue(*, session, workspace, required):
@@ -487,6 +514,7 @@ def build_item_repository_source(
             session=session,
             workspace=workspace,
             sql_by_item=sql_by_item,
+            shortcuts=repository.shortcuts,
         )
         return build_item_repository(
             repository,

@@ -450,8 +450,8 @@ def test_a_repointed_alias_is_replaced(tmp_path):
     installed = _alias_catalogue(_repository(root))
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
+        "Warehouse/Reporting/external.yml",
+        "Warehouse/Reporting/Sales.PortableCustomer:\n  target: Lakehouse/Curated/Sales.Archive\n  bind: true\n",
     )
     repository = _repository(root)
     bundle = _alias_bundle(tmp_path, repository, rows=installed)
@@ -542,8 +542,10 @@ def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
     installed = _alias_catalogue(_repository(root))
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
+        "Warehouse/Reporting/external.yml",
+        "Warehouse/Reporting/Sales.PortableCustomer:\n"
+        "  target: Lakehouse/Curated/Sales.Archive\n"
+        "  bind: true\n",
     )
     repository = _repository(root)
     bundle = _alias_bundle(tmp_path, repository, rows=installed)

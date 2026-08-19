@@ -1,18 +1,18 @@
-"""Cross-item aliases, installed for real — and only what installing can answer.
+"""Cross-item shortcuts, installed for real, and only what installing can answer.
 
-Every *decision* an alias involves is proven in pure Python
-(`tests/targeted/test_alias_planning.py`): whether one is planned, left alone,
-has its schema created anyway, waits for its producer, or is stale because the
-producer moved on. None of that needs a workspace.
+Every decision a shortcut involves is proven in pure Python
+(`tests/targeted/test_shortcut_planning_install.py`): whether one is planned,
+left alone, has its schema created anyway, waits for its producer, or is stale
+because the producer moved on. None of that needs a workspace.
 
 What only Fabric can answer is what happens when the plan *runs*:
 
 **A OneLake shortcut is a workspace API call**, not a file operation, so only
 asking the workspace proves one exists.
 
-**Fabric creates a shortcut synchronously and discovers it asynchronously** — the
+**Fabric creates a shortcut synchronously and discovers it asynchronously.** The
 consumer's next statement failed with "neither a view nor a table" until the
-alias action learned to wait for a real read to succeed.
+action learned to wait for a real read to succeed.
 
 **A Lakehouse's SQL analytics endpoint lags its Delta tables**, which is why an
 item that mutated Delta is closed by a refresh. Nothing below a real workspace
@@ -32,7 +32,7 @@ through its alias.
 That leaves exactly one claim needing the published wheel, and it has its own
 file: the executor's *wait* for asynchronous discovery is guarded by
 ``context.spark is not None``, so running the action from here skips it. See
-`test_alias_discovery_boundary.py`.
+`test_shortcut_discovery_boundary.py`.
 """
 
 from __future__ import annotations
@@ -286,7 +286,7 @@ def alias_estate(
     aliased = at["consumer"].qualify("DWG", "PortableCustomer")
     # Fabric discovers a shortcut asynchronously, and running the action from
     # here skipped the executor's own wait — so the read retries. That the
-    # *executor* waits is asserted in `test_alias_discovery_boundary.py`, where it can be.
+    # *executor* waits is asserted in `test_shortcut_discovery_boundary.py`, where it can be.
     seen = livy_session.run(
         "import time\n"
         "_deadline = time.monotonic() + 180\n"
@@ -419,7 +419,7 @@ def test_the_shortcut_survives_a_build_that_does_not_touch_it(
 
     That an unchanged alias over an unchanged source plans *no action* is decided
     from signatures and build datetimes before any pointer is touched, and belongs in
-    `tests/targeted/test_alias_planning.py` — installing an estate to watch a
+    `tests/targeted/test_shortcut_planning_install.py`: installing an estate to watch a
     decision get made was the expensive habit this module is shedding.
 
     What remains here is the object itself: after the endpoint refresh ran

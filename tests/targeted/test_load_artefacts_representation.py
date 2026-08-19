@@ -332,7 +332,7 @@ def test_an_alias_declaration_is_not_runtime_source(estate):
         for artefact in item_load_artefacts(estate, item=item_id())
     }
 
-    assert not any(name.endswith("alias.yml") for name in deployed)
+    assert not any(name.endswith("external.yml") for name in deployed)
 
 
 # --- incremental selection ----------------------------------------------------

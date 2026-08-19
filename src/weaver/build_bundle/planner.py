@@ -37,7 +37,6 @@ from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
-from .aliases import plan_item_aliases
 from .bundle import (
     SUPPORTED_FORMAT_VERSION,
     BuildBundle,
@@ -61,6 +60,7 @@ from .physical import (
     item_schema_stage,
 )
 from .prune import TargetInventory
+from .shortcuts import plan_item_shortcuts
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
 from .targets import WAREHOUSE_TARGET, ItemBindings, WarehouseBinding
 
@@ -75,6 +75,7 @@ def generate_item_build_bundle(
     catalogue: Catalogue,
     stale_claims: tuple = (),
     catalogue_binding: WarehouseBinding,
+    shortcut_sources: Mapping[str, object] | None = None,
 ) -> BuildBundle:
     """Freeze the one incremental build model into an installable bundle."""
 
@@ -186,6 +187,7 @@ def generate_item_build_bundle(
                 target_by_item=target_by_item,
                 selected_documents=selected_documents,
                 selected_aliases=selected_aliases,
+                shortcut_sources=shortcut_sources,
                 selected_for_drop=selected_for_drop
                 - selected_loads
                 - selected_validations,
@@ -258,9 +260,9 @@ def _selectable(
             if identity.item in by_item and not source.is_validation
         },
         {
-            alias.destination
-            for alias in repository.aliases
-            if alias.destination.item in by_item
+            declaration.destination
+            for declaration in (*repository.shortcuts, *repository.externals)
+            if declaration.destination.item in by_item
         },
         {
             artefact.identity
@@ -349,6 +351,7 @@ def plan_item_build(
     registered,
     selected_loads=(),
     removed=(),
+    shortcut_sources=None,
 ) -> PlannedItem:
     """One item's physical plan, from prepared inputs.
 
@@ -361,12 +364,13 @@ def plan_item_build(
     without generating a bundle.
     """
 
-    aliases = plan_item_aliases(
+    aliases = plan_item_shortcuts(
         repository,
         item=item,
         target=target,
         target_by_item=target_by_item,
         selected=selected_for_build & selected_aliases,
+        sources=shortcut_sources,
     )
     artefacts = item_runtime_artefacts(
         repository,

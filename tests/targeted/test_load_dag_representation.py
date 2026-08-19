@@ -20,7 +20,7 @@ from factories import (
     LOAD_CONSUMER_TARGET,
     LOAD_PRODUCER,
     LOAD_PRODUCER_TARGET,
-    alias_declaration,
+    bound_declaration,
     folder_document,
     installed_catalogue,
     item_bindings,
@@ -284,6 +284,17 @@ def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse
     }
 
 
+#: The consumer's two bound references to the producer, on the surface a
+#: Warehouse declares them.
+_CONSUMER_REFERENCES = bound_declaration(
+    LOAD_CONSUMER,
+    **{
+        "Sales.Order": f"{LOAD_PRODUCER}/Sales.Order",
+        "Sales.Customer": f"{LOAD_PRODUCER}/Sales.Customer",
+    },
+)
+
+
 @weaver_test()
 def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
     """Two crossings out of one Lakehouse are one barrier, not two."""
@@ -293,12 +304,7 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
         f"{LOAD_PRODUCER}/Sales__Order.py": lakehouse_table("Sales.Order"),
         f"{LOAD_PRODUCER}/Sales__Customer.py": lakehouse_table("Sales.Customer"),
         f"{LOAD_CONSUMER}/schemas/Sales.yml": schema_document("Sales"),
-        f"{LOAD_CONSUMER}/alias.yml": alias_declaration(
-            **{
-                "Sales.Order": f"{LOAD_PRODUCER}/Sales.Order",
-                "Sales.Customer": f"{LOAD_PRODUCER}/Sales.Customer",
-            }
-        ),
+        _CONSUMER_REFERENCES[0]: _CONSUMER_REFERENCES[1],
         f"{LOAD_CONSUMER}/Sales.Summary.sql": warehouse_table(
             "Sales.Summary",
             select=(

@@ -303,7 +303,7 @@ A capability that behaves differently in the two execution positions requires
 coverage in both.
 
 Planning tests construct a `BuildState` and assert a `BuildBundle`. Fabric tests
-cover behaviour that requires a real estate, including alias readability, bundle
+cover behaviour that requires a real estate, including shortcut readability, bundle
 ordering, and endpoint convergence.
 
 Operational constraints:

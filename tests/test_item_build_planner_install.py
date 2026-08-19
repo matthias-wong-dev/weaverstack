@@ -274,12 +274,12 @@ def test_warehouse_alias_is_a_view_over_the_bound_source(tmp_path):
 
 
 @weaver_test()
-def test_lakehouse_alias_freezes_both_addresses_by_target_id(tmp_path):
+def test_a_bound_shortcut_freezes_both_addresses_by_target_id(tmp_path):
     root = _dependency_estate(tmp_path)
     _write(
         root,
-        "Lakehouse/Curated/alias.yml",
-        "aliases:\n  Sales.Landed: Lakehouse/Raw/Sales.Customer\n",
+        "Lakehouse/Curated/shortcuts.py",
+        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target="Lakehouse/Raw/Sales.Customer",\n    bind=True,\n)\n',
     )
     repository = _repository(root)
     store = FilesystemStore()
@@ -307,9 +307,9 @@ def test_lakehouse_alias_freezes_both_addresses_by_target_id(tmp_path):
     assert len(frozen["aliases"]) == 1
     assert frozen["aliases"][0] == {
         "alias": "Lakehouse/Curated/Sales.Landed",
-        "area": "Tables",
-        "object": "Landed",
-        "schema": "Sales",
+        "type": "table",
+        "path": "Tables/Sales",
+        "name": "Landed",
         "source": "Lakehouse/Raw/Sales.Customer",
         "source_area": "Tables",
         "source_object": "Customer",

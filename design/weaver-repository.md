@@ -33,6 +33,7 @@ repository/
 │   ├── Curated/
 │   │   ├── schemas/
 │   │   │   └── Sales.yml
+│   │   ├── shortcuts.py                Fabric shortcuts this item declares
 │   │   └── Sales.Rollup.sql            Spark SQL — it is in a Lakehouse
 │   └── _weaver/
 │       └── … generated catalogue sources …
@@ -40,7 +41,7 @@ repository/
 │   └── Reporting/
 │       ├── schemas/
 │       │   └── Sales.yml
-│       ├── alias.yml
+│       ├── external.yml                external SQL references
 │       └── Sales.Customer.sql          T-SQL — it is in a Warehouse
 └── _ignore/
     └── unfinished.py
@@ -63,29 +64,105 @@ Lakehouse/Raw/DWG.Customer.sql          Spark SQL
 Warehouse/Reporting/DWG.Customer.sql    T-SQL
 ```
 
-## Aliases are item-local
+## Shortcuts and external references
 
-An alias is a name one item wants for a document another item owns, so it is
-declared in the consuming item's own `alias.yml`. The file's location names that
-item, so the declaration only maps the item's local `Schema.Object` to the full
-four-part source.
+An item reaches outside itself by declaring what it wants to see. A Lakehouse
+declares Fabric shortcuts in `shortcuts.py`; a Warehouse declares external SQL
+references in `external.yml`. Both files sit at the item root, and both are
+declarations rather than programs.
 
-Inside `Warehouse/Reporting/alias.yml`:
+### Lakehouse: `shortcuts.py`
 
-```yaml
-aliases:
-  DWG.Customer: Lakehouse/Raw/DWG.Customer
+```python
+from weaver import Shortcut
+
+Sales__Customer = Shortcut(
+    shortcut_type="table",
+    target="Lakehouse/Sales/Sales.Customer",
+    bind=True,
+)
+
+Reference = Shortcut(
+    shortcut_type="schema",
+    target="Lakehouse/Reference/Sales",
+    workspace="Shared Data",
+)
+
+Landing__Incoming = Shortcut(
+    shortcut_type="folder",
+    target="Lakehouse/Landing/Files/Incoming",
+    workspace="Shared Data",
+)
 ```
 
-The destination schema must be declared by the owning item, and an alias may not
-shadow a document that item already declares natively. Two items may each alias
-the same source under their own local names.
+The variable name is the destination, spelled as every other document in the item
+is: `Schema__Object` for a table or a folder, and the schema name itself for a
+schema shortcut. There is no separate destination field.
 
-An alias also orders the two items: the consuming item is built after the item
-that produces the source, and a cycle between items is a repository error. Build
-materialises the alias as a OneLake shortcut for a Lakehouse destination and as a
-view for a Warehouse one — see
-[how build works](how-does-build-work.md#4a-aliases).
+`shortcut_type` is `table`, `schema` or `folder`, and it decides both paths: a
+table sits under `Tables/<schema>`, a schema directly under `Tables`, and a folder
+under `Files/<schema>`.
+
+`workspace` names a Fabric workspace, and omitting it means the current one.
+
+`bind` decides what the item half of `target` means. With `bind=True` it is a
+*logical* Weaver item and Weaver follows its current binding before creating the
+shortcut; with `bind=False`, the default, it is the actual Fabric item name. A
+bound target must be in this repository, orders the two items, and cannot also
+name a workspace. A schema shortcut has no bound form: a schema's contents belong
+to the item it points at, and Weaver binds objects rather than namespaces.
+
+The file is parsed, never executed, so it holds `Shortcut` declarations, imports
+and comments only. A computed argument, a loop or a conditional is refused rather
+than ignored.
+
+The same names are importable from the item's own programs, because a build
+deploys a generated module of the same name beside them:
+
+```python
+from shortcuts import Sales__Customer, Reference, Landing__Incoming
+
+Sales__Customer(self).dataframe()
+Reference(self).table("Product").dataframe()
+Landing__Incoming(self).path()
+Landing__Incoming(self).spark_path()
+```
+
+A schema shortcut names its tables when they are read rather than generating a
+symbol for each, because what is inside one can change without a build. If you
+want a table named at build time, declare a table shortcut.
+
+### Warehouse: `external.yml`
+
+```yaml
+Warehouse/Reporting/Sales.Customer:
+  target: Lakehouse/Sales/Sales.Customer
+  bind: true
+
+Warehouse/Reporting/Sales.ReferenceCustomer:
+  target: Warehouse/Reference/Sales.Customer
+```
+
+Keyed by the destination view, which is the item's own four-part identity. Each
+entry takes `target` and an optional `bind`, and nothing else. External references
+are always same-workspace and always materialised as a local view, so they carry
+neither a workspace nor a target kind.
+
+### What a declaration may not do
+
+The destination schema must be declared by the owning item, and a declaration may
+not shadow a document that item already declares. Two items may each reference the
+same source under their own local names.
+
+**Weaver owns the shortcut and nothing reachable through it.** A Fabric shortcut
+is a read-write window into the item it points at: writing beneath one writes into
+that item, in that item's workspace, and so does deleting. So nothing may be
+declared inside a schema or folder shortcut, and a repository that does is
+refused. Removing the shortcut itself is safe and is the only thing Weaver ever
+does to one.
+
+Build materialises a Lakehouse declaration as a OneLake shortcut and a Warehouse
+one as a view. See [how build works](how-does-build-work.md#4a-aliases).
 
 The built-in `Warehouse/_weaver` item is generated and managed by Weaver inside
 the parsed repository in memory. It declares the catalogue tables and is never
@@ -136,7 +213,8 @@ Flat repositories are not inferred. Discovery fails with concrete instructions:
 - move Folder documents to `Lakehouse/<item>/Files/`;
 - replace `_schemas/` with each owning item's `schemas/`;
 - move Python helpers to `Lakehouse/<item>/lib/`;
-- replace document-local aliases with the consuming item's own `alias.yml`;
+- replace document-local aliases with `shortcuts.py` in a Lakehouse item and
+  `external.yml` in a Warehouse one;
 - drop the `.spark.sql` suffix — a document in a Lakehouse item is already
   Spark SQL.
 

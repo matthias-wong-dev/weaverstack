@@ -123,10 +123,13 @@ def item_prune_stage(
     managed = managed_sets(
         documents,
         target_kind,
+        # Every declared destination, bound or direct, and whether or not this
+        # build selected it: a build must not prune the shortcut it is about to
+        # create, nor the one it just decided to keep.
         alias_destinations=[
-            alias.destination
-            for alias in repository.aliases
-            if alias.destination.item == item
+            declaration.destination
+            for declaration in (*repository.shortcuts, *repository.externals)
+            if declaration.destination.item == item
         ],
         load_identities=[
             artefact.identity

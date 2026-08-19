@@ -554,8 +554,17 @@ def managed_sets(
     # Taken before the aliases join, because these are the names a managed drop
     # can remove by their registered type. See :class:`_Managed`.
     declared_objects = tables | views
+    #: The namespaces a schema shortcut presents. Kept, and never looked inside:
+    #: what is in one belongs to the item it points at, and OneLake makes a
+    #: shortcut a read-write window, so enumerating it to decide what to remove
+    #: would be deciding about another item's objects.
+    shortcut_schemas = set()
     for destination in alias_destinations:
-        qualified = destination.object_id.qualified
+        identity = getattr(destination, "object_id", None)
+        if identity is None:
+            shortcut_schemas.add(destination.schema.lower())
+            continue
+        qualified = identity.qualified
         if destination.is_files:
             folders.add(qualified)
         elif object_target_kind == SQL_TARGET:
@@ -563,6 +572,7 @@ def managed_sets(
         else:
             tables.add(qualified)
     schemas = {name.split(".", 1)[0].lower() for name in tables | views}
+    schemas.update(shortcut_schemas)
     schemas.update(
         identity.object_id.schema.lower()
         for identity in load_identities

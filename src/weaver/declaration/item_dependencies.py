@@ -15,7 +15,11 @@ from .model import (
     WeaverItemId,
     WeaverRepository,
 )
+from .shortcuts import SHORTCUTS_FILE
 from .source import SourceDocument
+
+#: How a program imports its item's declarations.
+SHORTCUTS_MODULE = SHORTCUTS_FILE.removesuffix(".py")
 
 
 def _declared_references(
@@ -33,6 +37,7 @@ def _inferred_references(
     source: SourceDocument,
     consumer: WeaverDocumentId,
     edges: list[ItemDependency],
+    shortcuts: Mapping[WeaverItemId, Mapping[str, object]] | None = None,
 ) -> tuple[tuple[str, WeaverDocumentId], ...]:
     """What the document's own source says it reads.
 
@@ -42,7 +47,7 @@ def _inferred_references(
     """
 
     if source.language == "python":
-        return tuple(_python_references(source))
+        return tuple(_python_references(source, consumer, edges, shortcuts or {}))
 
     references: list[tuple[str, WeaverDocumentId]] = []
     for reference in source.discovered_references:
@@ -98,6 +103,11 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
 
     native = repository.source_documents
     aliases = {alias.destination: alias.source for alias in repository.aliases}
+    #: Each item's shortcut declarations by authored symbol, which is the name a
+    #: program imports them under.
+    shortcuts: dict[WeaverItemId, dict[str, object]] = {}
+    for declaration in repository.shortcuts:
+        shortcuts.setdefault(declaration.owner, {})[declaration.name] = declaration
     folded_native = {str(identity).casefold(): identity for identity in native}
     folded_alias = {str(identity).casefold(): identity for identity in aliases}
     edges: list[ItemDependency] = []
@@ -111,7 +121,7 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
         if source.document.declares_dependencies:
             references = _declared_references(source, consumer)
         else:
-            references = _inferred_references(source, consumer, edges)
+            references = _inferred_references(source, consumer, edges, shortcuts)
 
         for written, destination in references:
             producer, kind = _resolve_destination(
@@ -259,10 +269,22 @@ def _resolve_destination(
     )
 
 
-def _python_references(source: SourceDocument) -> list[tuple[str, WeaverDocumentId]]:
+def _python_references(
+    source: SourceDocument,
+    consumer: WeaverDocumentId,
+    edges: list[ItemDependency],
+    shortcuts: Mapping[WeaverItemId, Mapping[str, object]],
+) -> list[tuple[str, WeaverDocumentId]]:
     assert source.logical_id is not None
+    declared = shortcuts.get(source.logical_id.item, {})
     references: list[tuple[str, WeaverDocumentId]] = []
     for imported in source.python_imports:
+        if imported.module == SHORTCUTS_MODULE and not imported.level:
+            references.extend(
+                _shortcut_reference(name, declared, source, consumer, edges)
+                for name in imported.names
+            )
+            continue
         candidates = _resolved_python_modules(source.logical_id, imported)
         for written, components in candidates:
             if components and components[0] == "lib":
@@ -287,7 +309,53 @@ def _python_references(source: SourceDocument) -> list[tuple[str, WeaverDocument
                     ),
                 )
             )
-    return references
+    return [reference for reference in references if reference is not None]
+
+
+def _shortcut_reference(
+    name: str,
+    declared: Mapping[str, object],
+    source: SourceDocument,
+    consumer: WeaverDocumentId,
+    edges: list[ItemDependency],
+):
+    """What importing one shortcut symbol makes this document depend on.
+
+    A bound shortcut names a Weaver document, so it resolves and orders like any
+    other logical reference. A direct one names something physical, which may
+    have no producer in this repository at all, so it is recorded as a physical
+    edge and given no graph edge: there is nothing here to order it against.
+
+    A schema shortcut is always physical, and stays a dependency on the schema
+    rather than on whatever a program later reads through it. What appears
+    inside it belongs to the item it points at and can change without a build.
+    """
+
+    written = f"{SHORTCUTS_MODULE}.{name}"
+    if name in (SHORTCUTS_MODULE, "*"):
+        raise DiscoveryError(
+            f"{source.node_id}: import each shortcut by name, as "
+            f"'from {SHORTCUTS_MODULE} import <Name>'. Discovery reads the "
+            "imports to learn what this document depends on."
+        )
+    declaration = declared.get(name)
+    if declaration is None:
+        known = ", ".join(sorted(declared)) or "nothing"
+        raise DiscoveryError(
+            f"{source.node_id}: import {written!r} names no shortcut. "
+            f"{source.logical_id.item}/{SHORTCUTS_MODULE}.py declares {known}."
+        )
+    if declaration.bind:
+        return (written, declaration.destination)
+    edges.append(
+        ItemDependency(
+            consumer=consumer,
+            reference=written,
+            resolution_kind="physical",
+            is_within_item=False,
+        )
+    )
+    return None
 
 
 def _resolved_python_modules(
