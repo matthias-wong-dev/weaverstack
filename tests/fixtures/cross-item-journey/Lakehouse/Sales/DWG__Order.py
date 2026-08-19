@@ -28,11 +28,8 @@ class DWG__Order(Table):
         # reading that table here is what makes the dependency matter: an order
         # exists only for a customer that has already been loaded.
         customers = DWG__Customer(self).dataframe()
-        return (
-            customers.selectExpr(
-                "cast(CustomerId as int) as OrderId",
-                "cast(CustomerId as int) as CustomerId",
-                "cast(CustomerId * 10 as decimal(18, 2)) as Amount",
-            ),
-            None,
+        return customers.selectExpr(
+            "cast(CustomerId as int) as OrderId",
+            "cast(CustomerId as int) as CustomerId",
+            "cast(CustomerId * 10 as decimal(18, 2)) as Amount",
         )
