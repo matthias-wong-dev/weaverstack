@@ -109,10 +109,13 @@ class _Spark:
     #: load has no outcome for. Raised before the statement is recorded, so what
     #: was recorded is what the session actually ran.
     fail_on: str | None = None
-    #: Every durable write fails, which is how the evidence a failure leaves is
-    #: made to fail in its turn.
-    fail_creates: bool = False
+    #: Durable writes that fail, which is how the evidence a load leaves is made
+    #: to fail in its turn. ``True`` for every one, or the name of a single table.
+    fail_creates: bool | str = False
     statements: list = field(default_factory=list)
+    #: Every durable write asked for, including the ones that failed, so a table
+    #: written twice can be told from one written once.
+    attempted: list = field(default_factory=list)
     counted: list = field(default_factory=list)
     persisted: list = field(default_factory=list)
     unpersisted: list = field(default_factory=list)
@@ -128,8 +131,12 @@ class _Spark:
     def sql(self, text: str) -> _Frame:
         if self.fail_on is not None and self.fail_on in text:
             raise _Boom(f"the engine failed on: {text.splitlines()[0]}")
-        if self.fail_creates and text.startswith("CREATE TABLE"):
-            raise _EvidenceRefused("the evidence could not be written")
+        if text.startswith("CREATE TABLE"):
+            self.attempted.append(text.split("`")[5])
+            if self.fail_creates is True or (
+                isinstance(self.fail_creates, str) and self.fail_creates in text
+            ):
+                raise _EvidenceRefused("the evidence could not be written")
         self.statements.append(text)
         return _Frame(self, text)
 
@@ -296,6 +303,9 @@ def _failed(
 #: Where a failure is injected, by the phase whose statement carries the text.
 AT_UPSERT = "weaver_proposed"
 AT_DELETE_MUTATION = "WHEN MATCHED THEN DELETE"
+#: The second mutation a busy load submits, so the deletes have already gone in
+#: when it fails and the target is left halfway through the change.
+AT_UPSERT_INSERT = "INSERT INTO `lh`.`DWG`.`Customer` ("
 
 
 #: A load with rows to read, nothing refused and nothing to change.
@@ -586,12 +596,42 @@ def test_a_failure_after_the_deletes_are_derived_leaves_them_too():
 
 
 @weaver_test()
-def test_a_failure_partway_through_the_target_leaves_the_same_evidence():
-    """The deletes went in and the upserts did not, which is what to look at."""
+def test_a_failure_before_the_first_mutation_leaves_a_target_no_one_touched():
+    """Nothing had moved, so the evidence is the whole of what was proposed."""
 
     spark = _failed(BUSY, fail_on=AT_DELETE_MUTATION)
 
+    assert spark.mutations == []
     assert spark.created == ["Customer_Staging", "Customer_Delete"]
+
+
+@weaver_test()
+def test_a_failure_partway_through_the_target_leaves_the_same_evidence():
+    """The deletes went in and the upserts did not, which is what to look at.
+
+    A target halfway through a change is the case the evidence matters most for:
+    the delete set says which rows are already gone.
+    """
+
+    spark = _failed(BUSY, fail_on=AT_UPSERT_INSERT)
+
+    # One mutation ran and the next did not, so the target is genuinely partway
+    # through rather than untouched.
+    assert len(spark.mutations) == 1
+    assert "WHEN MATCHED THEN DELETE" in spark.mutations[0]
+    assert spark.created == ["Customer_Staging", "Customer_Delete"]
+    # Written on the way out, after the mutation that got through.
+    written_at = next(
+        index
+        for index, one in enumerate(spark.statements)
+        if one.startswith("CREATE TABLE") and "Customer_Delete`" in one
+    )
+    deleted_at = next(
+        index
+        for index, one in enumerate(spark.statements)
+        if "WHEN MATCHED THEN DELETE" in one
+    )
+    assert written_at > deleted_at
 
 
 @weaver_test()
@@ -619,7 +659,7 @@ def test_a_failure_after_a_tolerated_rejection_keeps_the_rejects_it_wrote():
 def test_a_failure_never_leaves_the_upsert_set():
     """Evidence describes what was proposed, and the upsert set is work."""
 
-    spark = _failed(BUSY, fail_on=AT_DELETE_MUTATION)
+    spark = _failed(BUSY, fail_on=AT_UPSERT_INSERT)
 
     assert not any("_Upsert" in one for one in spark.statements)
 
@@ -653,3 +693,33 @@ def test_a_failed_load_whose_evidence_failed_gives_every_relation_back():
 
     assert spark.leaked == []
     assert set(spark.unpersisted) == {frame.view for frame in spark.persisted}
+
+
+@weaver_test()
+def test_a_durable_write_that_failed_does_not_count_as_written():
+    """A gate's write failing leaves the role to be attempted again on the way out.
+
+    The load tracks what it has written so it does not write it twice. If that
+    record were made before the write rather than after it, a table that never
+    arrived would be treated as evidence that is already there.
+    """
+
+    spark = _Spark(
+        counts=dict(BUSY, reject=2, clean=1), fail_creates="Customer_Staging"
+    )
+    with pytest.raises(_EvidenceRefused):
+        load_table(
+            spark,
+            contract=_contract(),
+            lakehouse=_Lakehouse(),
+            staging_frame=_Staged(),
+            fault_tolerant=True,
+        )
+
+    assert spark.attempted == [
+        "Customer_Staging",
+        "Customer_Staging",
+        "Customer_Reject",
+    ]
+    assert spark.created == ["Customer_Reject"]
+    assert spark.leaked == []

@@ -915,19 +915,22 @@ def _keep_evidence(spark, names, kept: set, **relations) -> None:
         _Reject    what did Weaver refuse, and why?
         _Delete    what was Weaver proposing to remove?
 
-    Each is written once. A load can pass more than one gate that owes evidence,
-    and the relation holding what the source proposed is released as soon as the
-    purge supersedes it.
+    Each is written once, and ``kept`` names what is on disk rather than what was
+    asked for. A load can pass more than one gate that owes evidence, and the
+    relation holding what the source proposed is released as soon as the purge
+    supersedes it.
     """
 
     for role, view in relations.items():
         if view is None or role in kept:
             continue
-        kept.add(role)
         spark.sql(
             f"CREATE TABLE {names[role]} USING delta {COLUMN_MAPPING} AS "
             f"SELECT * FROM {view}"
         )
+        # Recorded after the write, so being in ``kept`` means the table is
+        # there. A write that failed leaves the role to be attempted again.
+        kept.add(role)
 
 
 def _keep_unclassified_evidence(spark, names, kept: set, evidence: dict) -> None:
