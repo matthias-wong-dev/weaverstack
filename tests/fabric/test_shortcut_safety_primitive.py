@@ -212,3 +212,104 @@ def test_a_wipe_removes_the_shortcut_and_not_what_it_points_at(probe):
     # Read in the external workspace, not through the shortcut that is now gone.
     assert _source_tables(probe) == before_tables
     assert probe.store.read(probe.source.file()) == before_bytes
+
+
+# --- what Spark sees through one -----------------------------------------------
+
+
+def _read(session, workspace, statements: dict[str, str]) -> dict:
+    """Ask Spark every question about this moment in one submission.
+
+    Retried as a whole, because Fabric discovers a shortcut asynchronously and
+    the first read after creating one can arrive before it does.
+    """
+
+    import time
+
+    deadline = time.monotonic() + 180
+    while True:
+        try:
+            return {
+                label: session.execute_spark_sql(
+                    statement, workspace=workspace, exact_case=True
+                )
+                for label, statement in statements.items()
+            }
+        except Exception:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(5)
+
+
+@weaver_test(remote=True, resources={"rest", "livy"})
+def test_spark_reads_a_schema_shortcut_as_a_schema(probe, weaver_session):
+    """A schema shortcut presents a namespace Spark can name and read.
+
+    The whole namespace, without the item declaring a table in it: four-part
+    naming reaches each table the source holds, and ``SHOW TABLES`` lists them.
+    That is what a schema shortcut offers over one shortcut per table, and it is
+    also why nothing beneath it is Weaver's to manage.
+    """
+
+    probe.create(
+        path="Tables",
+        name=probe.schema,
+        source_path=f"Tables/{external_estate.SCHEMA}",
+    )
+    destination = probe.resolver.spark_destination(probe.target)
+
+    seen = _read(
+        weaver_session,
+        probe.workspace,
+        {
+            "tables": f"SHOW TABLES IN {destination.qualified_schema(probe.schema)}",
+            "customers": (
+                "SELECT CustomerName FROM "
+                f"{destination.qualify(probe.schema, 'Customer')} ORDER BY CustomerId"
+            ),
+            "products": (
+                "SELECT ProductName FROM "
+                f"{destination.qualify(probe.schema, 'Product')} ORDER BY ProductId"
+            ),
+        },
+    )
+
+    listed = {row["tableName"] for row in seen["tables"]}
+    assert set(external_estate.TABLES) <= listed
+    assert [row["CustomerName"] for row in seen["customers"]] == [
+        name for _id, name in external_estate.TABLES["Customer"][1]
+    ]
+    assert [row["ProductName"] for row in seen["products"]] == [
+        name for _id, name in external_estate.TABLES["Product"][1]
+    ]
+
+
+@weaver_test(remote=True, resources={"rest", "livy"})
+def test_a_table_shortcut_carries_its_own_schema(probe, weaver_session):
+    """Fabric presents the containing directory as a schema.
+
+    A table shortcut placed under a schema the Lakehouse does not have is
+    accepted and is readable by four-part name.
+    """
+
+    probe.create(
+        path=f"Tables/{probe.schema}",
+        name="Customer",
+        source_path=external_estate.table_path("Customer"),
+    )
+    destination = probe.resolver.spark_destination(probe.target)
+
+    seen = _read(
+        weaver_session,
+        probe.workspace,
+        {
+            "customers": (
+                "SELECT CustomerName FROM "
+                f"{destination.qualify(probe.schema, 'Customer')} ORDER BY CustomerId"
+            )
+        },
+    )
+
+    assert [row["CustomerName"] for row in seen["customers"]] == [
+        name for _id, name in external_estate.TABLES["Customer"][1]
+    ]
