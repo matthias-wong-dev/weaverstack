@@ -427,7 +427,11 @@ class SparkSqlTable(Table):
         return parse_document(module_metadata_text(module), language=SPARK_SQL)
 
     def read(self):
-        """Run the embedded program and return ``(staging, deletes)``."""
+        """Run the embedded program and return what it staged.
+
+        The same shapes an authored ``read()`` returns: staging on its own, and
+        for an incremental table naming keys to delete, the two together.
+        """
 
         from .runtime.load_contract import LoadContract
         from .runtime.spark_sql_table import read_spark_sql

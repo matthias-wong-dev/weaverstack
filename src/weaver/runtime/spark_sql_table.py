@@ -16,14 +16,17 @@ from ..errors import LoadError
 from .load_contract import LoadContract
 
 
-def read_spark_sql(spark: Any, *, sql: str, contract: LoadContract) -> tuple[Any, Any]:
-    """Run one authored program and return ``(staging, deletes)``.
+def read_spark_sql(spark: Any, *, sql: str, contract: LoadContract) -> Any:
+    """Run one authored program and return what it staged.
 
-    ``deletes`` is ``None`` when the program has a single query, because that is
-    what a table with nothing explicit to remove returns — and
-    :func:`~weaver.runtime.table_load.load_table` already knows what to do with
-    it in both the incremental and the non-incremental case. Synthesising an
-    empty frame instead would be inventing a claim the program never made.
+    One query stages and claims nothing, and the frame comes back on its own:
+    that is the shape every table returns, and a non-incremental one may return
+    no other. A second query names the keys to delete, and the two come back
+    together as an incremental table's claim.
+
+    Synthesising an empty second frame for a program that has one query would
+    invent a claim it never made, and a load would then run a Spark job to
+    establish that the claim was empty.
     """
 
     if not isinstance(sql, str) or not sql.strip():
@@ -48,7 +51,7 @@ def read_spark_sql(spark: Any, *, sql: str, contract: LoadContract) -> tuple[Any
             frames.append(frame)
 
     if len(frames) == 1:
-        return frames[0], None
+        return frames[0]
     staging, deletes = frames
     _check_delete_columns(deletes, contract)
     return staging, deletes
