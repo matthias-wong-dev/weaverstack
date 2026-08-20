@@ -16,7 +16,6 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.catalogue import (
-    ALIAS,
     AUDIT_COLUMN_NAMES,
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
@@ -29,6 +28,7 @@ from weaver.catalogue import (
     KEY_DICTIONARY,
     REGISTRY,
     SCHEMA_DICTIONARY,
+    SHORTCUT,
     SIGNATURE,
     TABLE_DICTIONARY,
     CatalogueColumn,
@@ -50,7 +50,7 @@ def test_there_are_exactly_eleven_catalogue_tables():
         "ForeignKeyDictionary",
         "TestDictionary",
         "Dependency",
-        "Alias",
+        "Shortcut",
         "Installation",
         "Registry",
     ]
@@ -263,7 +263,7 @@ def test_a_dependency_records_the_reference_exactly_as_authored():
     """The row keeps the author's spelling alongside the edge Weaver resolved.
 
     The authored spelling is what identifies the row, because it is the one
-    thing every dependency has: an edge that leaves the item through an alias
+    thing every dependency has: an edge that leaves the item through a shortcut
     resolves to nothing, and two authored references may reach one object.
     """
 
@@ -279,20 +279,17 @@ def test_a_dependency_records_the_reference_exactly_as_authored():
 
 
 @weaver_test()
-def test_an_alias_is_keyed_by_the_name_its_own_item_presents():
-    """The destination is the consuming item's own local name."""
+def test_a_shortcut_is_keyed_by_its_own_id():
+    """The shortcut's own id identifies it, and a schema shortcut has no object
+    for a merge key to use."""
 
-    assert ALIAS.key == (
-        "item_type",
-        "item_name",
-        "destination_schema_name",
-        "destination_object_name",
-    )
-    assert ALIAS.column_names[-5:-1] == (
-        "source_item_type",
-        "source_item_name",
-        "source_schema_name",
-        "source_object_name",
+    assert SHORTCUT.key == ("item_type", "item_name", "shortcut_id")
+    assert SHORTCUT.column_names[-6:-1] == (
+        "target_item_type",
+        "target_item_name",
+        "target_schema_name",
+        "target_object_name",
+        "target_workspace_name",
     )
 
 

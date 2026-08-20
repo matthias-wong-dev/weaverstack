@@ -168,17 +168,60 @@ class FabricResolver:
         source: ItemRef,
         source_path: str,
     ) -> dict:
-        """Point ``item``'s ``path/name`` at ``source``'s ``source_path``."""
+        """Point ``item``'s ``path/name`` at ``source``'s ``source_path``.
+
+        ``source`` is a name in this workspace, or an item already resolved
+        elsewhere. A direct shortcut may point outside the workspace the build is
+        bound to, and that address is settled when the bundle is generated, so
+        there is nothing left to look up here.
+        """
 
         from .shortcuts import create_shortcut
 
+        resolved_source = (
+            source
+            if getattr(source, "id", None) and getattr(source, "workspace_id", None)
+            else self.resolve(source, item_type=LAKEHOUSE)
+        )
         return create_shortcut(
             self.resolve(item, item_type=LAKEHOUSE),
             path=path,
             name=name,
-            source=self.resolve(source, item_type=LAKEHOUSE),
+            source=resolved_source,
             source_path=source_path,
             client=self._rest_client(),
+        )
+
+    def external_lakehouse(self, name: str, *, workspace: str | None = None):
+        """One Lakehouse, in this workspace or a named one, resolved to an item.
+
+        For a shortcut's *source*, which may sit outside the workspace the build
+        is bound to. Nothing binds it and nothing builds into it: Weaver resolves
+        it so a shortcut can name it, and that is all.
+        """
+
+        if workspace is None or workspace == self.workspace.name:
+            return self.resolve(ItemRef(name), item_type=LAKEHOUSE)
+        # Through this host's own REST client, as every other crossing here is:
+        # inside Fabric that is the session's identity, not a desktop credential.
+        client = self._rest_client()
+        return find_item(
+            find_workspace(workspace, client=client),
+            name,
+            item_type=LAKEHOUSE,
+            client=client,
+        )
+
+    def external_root(self, item) -> Location:
+        """The root of an already-resolved item, as this host addresses one.
+
+        The same spelling :meth:`lakehouse` gives for an item of this workspace,
+        so what reads it is the store this host already has.
+        """
+
+        return Location(
+            f"{self.base_url}/{item.workspace_id}/"
+            + lakehouse_artifact_segment(item.id)
         )
 
     def onelake_shortcuts(self, item: ItemRef) -> tuple:

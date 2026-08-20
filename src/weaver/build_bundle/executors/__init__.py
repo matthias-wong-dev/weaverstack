@@ -5,7 +5,7 @@ frozen ``DROP``; ``spark_sql_batch`` runs an ordered catalogue payload as one
 reported action. ``spark_table`` completes a table whose shape only the session
 knows, and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse
 SQL path.
-``alias`` points one Lakehouse name at another item's object, and ``sql_endpoint``
+``shortcut`` points one Lakehouse name at another item's object, and ``sql_endpoint``
 syncs a Lakehouse's SQL analytics endpoint.
 
 ``load_file`` writes one file of the deployed runtime tree, or removes one the
@@ -21,10 +21,10 @@ session is attached to.
 
 from __future__ import annotations
 
-from .alias import AliasExecutor
 from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedExecution
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
+from .shortcut import ShortcutExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
 from .spark_table import SparkTableExecutor
@@ -43,7 +43,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         LoadFileExecutor.name: LoadFileExecutor(),
         TSqlExecutor.name: TSqlExecutor(),
         TSqlBatchExecutor.name: TSqlBatchExecutor(),
-        AliasExecutor.name: AliasExecutor(),
+        ShortcutExecutor.name: ShortcutExecutor(),
         SqlEndpointRefreshExecutor.name: SqlEndpointRefreshExecutor(),
     }
 
@@ -52,7 +52,7 @@ __all__ = [
     "ActionExecutor",
     "InstallationContext",
     "ResolvedTarget",
-    "AliasExecutor",
+    "ShortcutExecutor",
     "SkippedExecution",
     "SparkSqlExecutor",
     "SparkSqlBatchExecutor",

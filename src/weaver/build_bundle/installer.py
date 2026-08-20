@@ -214,7 +214,7 @@ class Installer:
         # One instant for the whole installation, taken once and handed to every
         # batch. Registry rows are published across several statements — one pair
         # per item — and rows written by one build have to be indistinguishable in
-        # age, or an alias and the source it points at could order against each
+        # age, or a shortcut and the source it points at could order against each
         # other merely for having been written a few milliseconds apart.
         build_datetime = _epoch(started)
         sequence_results: list[SequenceResult] = []

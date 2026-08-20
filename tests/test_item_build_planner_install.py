@@ -37,8 +37,8 @@ from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
 
-class _AliasInventory:
-    """A Warehouse already holding an alias view and one genuine orphan."""
+class _ShortcutInventory:
+    """A Warehouse already holding a shortcut view and one genuine orphan."""
 
     def query(self, statement):
         if "from sys.objects" in statement:
@@ -190,12 +190,12 @@ def test_at_least_one_binding_is_required(tmp_path):
 
 
 @weaver_test()
-def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
-    """An alias needs a bound source: there is otherwise nothing to point at.
+def test_a_shortcut_to_an_unbound_target_item_is_omitted_with_its_reason(tmp_path):
+    """A shortcut needs a bound source: there is otherwise nothing to point at.
 
     Bindings are deliberately sparse, so this is an omission rather than an
     error — and a stated one, because the planner is the only thing allowed to
-    decide an alias has no physical form.
+    decide a shortcut has no physical form.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
@@ -209,15 +209,15 @@ def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
     omitted = {
         node.node_id: node
         for node in bundle.plan.omitted_nodes
-        if node.reason == "alias_unsupported"
+        if node.reason == "shortcut_unsupported"
     }
-    assert set(omitted) == {"alias:Warehouse/Reporting/Sales.PortableCustomer"}
+    assert set(omitted) == {"shortcut:Warehouse/Reporting/Sales.PortableCustomer"}
     assert (
         "Lakehouse/Curated is not bound"
-        in omitted["alias:Warehouse/Reporting/Sales.PortableCustomer"].detail
+        in omitted["shortcut:Warehouse/Reporting/Sales.PortableCustomer"].detail
     )
     assert not any(
-        action.kind == "create_alias" for _s, _b, action in bundle.plan.actions()
+        action.kind == "create_shortcut" for _s, _b, action in bundle.plan.actions()
     )
 
     # And it is not certified either. A Registry row means the object's work
@@ -237,7 +237,7 @@ def test_alias_to_an_unbound_source_item_is_omitted_with_its_reason(tmp_path):
 
 
 @weaver_test()
-def test_warehouse_alias_is_a_view_over_the_bound_source(tmp_path):
+def test_a_warehouse_shortcut_is_a_view_over_the_bound_target(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     store = FilesystemStore()
     bundle = generate_item_build_bundle(
@@ -252,34 +252,34 @@ def test_warehouse_alias_is_a_view_over_the_bound_source(tmp_path):
         store=store,
     )
 
-    alias = next(
+    shortcut = next(
         action
         for _s, _b, action in bundle.plan.actions()
-        if action.kind == "create_alias"
+        if action.kind == "create_shortcut"
     )
-    # One action for the item's aliases, and each statement its own batch —
+    # One action for the item's shortcuts, and each statement its own batch:
     # T-SQL will not accept a CREATE VIEW that is not first in its batch.
-    assert alias.executor == "tsql_batch"
-    assert alias.id == "aliases-Warehouse--Reporting"
+    assert shortcut.executor == "tsql_batch"
+    assert shortcut.id == "shortcuts-Warehouse--Reporting"
     statements = json.loads(
-        store.read(bundle.location.join(*alias.payload.split("/"))).decode()
+        store.read(bundle.location.join(*shortcut.payload.split("/"))).decode()
     )
     assert statements == [
         "create or alter view [Sales].[PortableCustomer] as select * from "
         "[Curated_Dev].[Sales].[Customer];"
     ]
     assert not bundle.plan.omitted_nodes or all(
-        node.reason != "alias_unsupported" for node in bundle.plan.omitted_nodes
+        node.reason != "shortcut_unsupported" for node in bundle.plan.omitted_nodes
     )
 
 
 @weaver_test()
-def test_lakehouse_alias_freezes_both_addresses_by_target_id(tmp_path):
+def test_a_bound_shortcut_freezes_both_addresses_by_target_id(tmp_path):
     root = _dependency_estate(tmp_path)
     _write(
         root,
-        "Lakehouse/Curated/alias.yml",
-        "aliases:\n  Sales.Landed: Lakehouse/Raw/Sales.Customer\n",
+        "Lakehouse/Curated/shortcuts.py",
+        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Lakehouse/Raw/Sales.Customer",\n)\n',
     )
     repository = _repository(root)
     store = FilesystemStore()
@@ -295,21 +295,21 @@ def test_lakehouse_alias_freezes_both_addresses_by_target_id(tmp_path):
         store=store,
     )
 
-    alias = next(
+    shortcut = next(
         action
         for _s, _b, action in bundle.plan.actions()
-        if action.kind == "create_alias"
+        if action.kind == "create_shortcut"
     )
-    assert alias.executor == "alias"
+    assert shortcut.executor == "shortcut"
     frozen = json.loads(
-        store.read(bundle.location.join(*alias.payload.split("/"))).decode()
+        store.read(bundle.location.join(*shortcut.payload.split("/"))).decode()
     )
-    assert len(frozen["aliases"]) == 1
-    assert frozen["aliases"][0] == {
-        "alias": "Lakehouse/Curated/Sales.Landed",
-        "area": "Tables",
-        "object": "Landed",
-        "schema": "Sales",
+    assert len(frozen["shortcuts"]) == 1
+    assert frozen["shortcuts"][0] == {
+        "shortcut": "Lakehouse/Curated/Sales.Landed",
+        "type": "table",
+        "path": "Tables/Sales",
+        "name": "Landed",
         "source": "Lakehouse/Raw/Sales.Customer",
         "source_area": "Tables",
         "source_object": "Customer",
@@ -319,7 +319,7 @@ def test_lakehouse_alias_freezes_both_addresses_by_target_id(tmp_path):
 
 
 @weaver_test()
-def test_an_alias_is_materialised_before_the_documents_that_use_it(tmp_path):
+def test_a_shortcut_is_materialised_before_the_documents_that_use_it(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     bundle = generate_item_build_bundle(
         repository,
@@ -337,17 +337,17 @@ def test_an_alias_is_materialised_before_the_documents_that_use_it(tmp_path):
         action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
     }
     # The source item produces the table, its endpoint catches up, and only then
-    # does the consuming item's alias — and the document reading it — exist.
+    # does the consuming item's shortcut — and the document reading it — exist.
     assert (
         at["object-Lakehouse--Curated--Sales.Customer"]
         < at["refresh-sql-endpoint-Lakehouse--Curated"]
-        < at["aliases-Warehouse--Reporting"]
+        < at["shortcuts-Warehouse--Reporting"]
         < at["object-Warehouse--Reporting--Sales.Customer"]
     )
 
 
 @weaver_test()
-def test_an_items_schemas_are_created_before_its_aliases(tmp_path):
+def test_an_items_schemas_are_created_before_its_shortcuts(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     bundle = generate_item_build_bundle(
         repository,
@@ -364,11 +364,13 @@ def test_an_items_schemas_are_created_before_its_aliases(tmp_path):
     at = {
         action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
     }
-    assert at["schema-Warehouse--Reporting-Sales"] < at["aliases-Warehouse--Reporting"]
+    assert (
+        at["schema-Warehouse--Reporting-Sales"] < at["shortcuts-Warehouse--Reporting"]
+    )
 
 
 @weaver_test()
-def test_an_alias_destination_is_not_pruned_as_an_orphan(tmp_path):
+def test_an_shortcut_destination_is_not_pruned_as_an_orphan(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     item = WeaverItemId.parse("Warehouse/Reporting")
     bundle = generate_item_build_bundle(
@@ -381,7 +383,7 @@ def test_an_alias_destination_is_not_pruned_as_an_orphan(tmp_path):
         ),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
-        sql_by_item={item: _AliasInventory()},
+        sql_by_item={item: _ShortcutInventory()},
     )
 
     pruned = {
@@ -467,7 +469,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
             "spark_sql_batch": noop,
             "spark_table": noop,
             "folder": noop,
-            "alias": noop,
+            "shortcut": noop,
             "tsql_batch": noop,
             "sql_endpoint_refresh": noop,
             "load_file": noop,
@@ -648,7 +650,7 @@ def test_sequence_numbers_describe_the_assembled_order_and_nothing_else(tmp_path
 def test_a_consumer_items_whole_group_follows_its_producers(tmp_path):
     """The invariant multi-item build rests on, stated as barriers.
 
-    ``Warehouse/Reporting`` reaches into ``Lakehouse/Curated`` through an alias,
+    ``Warehouse/Reporting`` reaches into ``Lakehouse/Curated`` through a shortcut,
     so nothing of Reporting's may share a barrier with — let alone precede — any
     of Curated's.
     """

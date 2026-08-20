@@ -48,7 +48,7 @@ SPARK_TABLE_EXECUTOR = "spark_table"
 TSQL_EXECUTOR = "tsql"
 TSQL_BATCH_EXECUTOR = "tsql_batch"
 FOLDER_EXECUTOR = "folder"
-ALIAS_EXECUTOR = "alias"
+SHORTCUT_EXECUTOR = "shortcut"
 SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 LOAD_FILE_EXECUTOR = "load_file"
 #: Executors a bundle may carry. ``spark_sql`` runs one finished statement — a
@@ -57,7 +57,7 @@ LOAD_FILE_EXECUTOR = "load_file"
 #: SQL table's deferred build by running its query and creating the table;
 #: ``tsql`` runs a self-contained Warehouse script and ``tsql_batch`` an
 #: ordered array of them, each as its own batch; ``folder`` makes or removes a
-#: directory; ``alias`` points one Lakehouse name at another item's object
+#: directory; ``shortcut`` points one Lakehouse name at another item's object
 VALID_EXECUTORS = frozenset(
     {
         SPARK_SQL_EXECUTOR,
@@ -66,7 +66,7 @@ VALID_EXECUTORS = frozenset(
         TSQL_EXECUTOR,
         TSQL_BATCH_EXECUTOR,
         FOLDER_EXECUTOR,
-        ALIAS_EXECUTOR,
+        SHORTCUT_EXECUTOR,
         SQL_ENDPOINT_REFRESH_EXECUTOR,
         LOAD_FILE_EXECUTOR,
     }
@@ -80,7 +80,7 @@ _EXECUTOR_EXTENSION = {
     SPARK_TABLE_EXECUTOR: ".spark-table.json",
     TSQL_EXECUTOR: ".sql",
     TSQL_BATCH_EXECUTOR: ".tsql-batch.json",
-    ALIAS_EXECUTOR: ".alias.json",
+    SHORTCUT_EXECUTOR: ".shortcut.json",
     # A deployed file's payload is its exact bytes, whatever they are — a Python
     # module, a generated statement — so the extension names the *role* rather
     # than the content, which is the one thing every load file has in common.

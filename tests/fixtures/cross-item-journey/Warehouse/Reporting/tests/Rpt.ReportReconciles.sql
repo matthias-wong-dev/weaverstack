@@ -13,7 +13,7 @@ Revision notes:
   - 2026-08-10 Created.
 */
 
--- Expected: what the producing Lakehouse holds, read through this item's alias.
+-- Expected: what the producing Lakehouse holds, read through this item's shortcut.
 select CustomerId, CustomerName from [Rpt].[PortableCustomer];
 
 -- Actual: what this Warehouse materialised from it.

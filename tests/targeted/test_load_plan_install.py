@@ -66,7 +66,7 @@ def plan(repository, *, item=None, target=None, **overrides):
     target = target or bound_target()
     arguments = {
         "selected_documents": set(),
-        "selected_aliases": set(),
+        "selected_shortcuts": set(),
         "selected_for_drop": set(),
         "selected_for_build": set(),
         "selected_loads": set(),

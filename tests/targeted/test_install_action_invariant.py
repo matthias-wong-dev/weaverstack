@@ -62,9 +62,9 @@ COVERED = {
     "create_schema": ("test_create_schema_action_creates_the_schema_in_the_warehouse",),
     "build_table": ("test_build_table_action_is_accepted_by_fabric",),
     "build_view": ("test_build_view_action_creates_a_view_over_the_table_it_reads",),
-    "create_alias": (
-        "test_the_alias_exists_as_a_onelake_shortcut",
-        "test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse",
+    "create_shortcut": (
+        "test_the_shortcut_exists_as_a_onelake_shortcut",
+        "test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse",
     ),
     "prune_table": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_view": ("test_prune_table_action_removes_an_object_nothing_declares",),

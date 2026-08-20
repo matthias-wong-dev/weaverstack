@@ -7,9 +7,9 @@ from support.weaver_test import weaver_test
 
 from weaver.build_bundle.models import BuildBatch, InstallAction
 from weaver.build_bundle.stages import (
-    ALIAS,
     BUILD,
     PRUNE,
+    SHORTCUT,
     PlannedStage,
     enumerate_stages,
     merge_layer_stages,
@@ -48,7 +48,7 @@ def _stage(phase, *, index=0, slug="things", batch="one", payloads=None, actions
 @weaver_test()
 def test_stages_are_numbered_consecutively_from_one():
     sequences, _payloads, _changes = enumerate_stages(
-        [_stage(PRUNE), _stage(ALIAS), _stage(BUILD)]
+        [_stage(PRUNE), _stage(SHORTCUT), _stage(BUILD)]
     )
 
     assert [sequence.number for sequence in sequences] == [1, 2, 3]
@@ -56,7 +56,7 @@ def test_stages_are_numbered_consecutively_from_one():
 
 @weaver_test()
 def test_an_empty_stage_takes_no_number_and_leaves_no_gap():
-    empty = PlannedStage(phase=ALIAS, description="nothing to alias", batches=())
+    empty = PlannedStage(phase=SHORTCUT, description="nothing to shortcut", batches=())
 
     sequences, _payloads, _changes = enumerate_stages(
         [_stage(PRUNE), empty, _stage(BUILD)]

@@ -239,8 +239,8 @@ class BuildEnv:
     #: leaving a caller to guess.
     bundle_location: Callable[[str], Any] = None
     #: Every Lakehouse this fixture bound, by the item that owns it. Empty unless
-    #: the fixture asked for more than one — a cross-item alias is the only thing
-    #: that does, and it needs both ends addressable to prove the alias points
+    #: the fixture asked for more than one — a cross-item shortcut is the only thing
+    #: that does, and it needs both ends addressable to prove the shortcut points
     #: across rather than at itself.
     destinations: Mapping[str, Any] = field(default_factory=dict)
 
@@ -433,8 +433,8 @@ def _bindings_for(
     estate proves its Warehouse leaves are omitted.
 
     ``lakehouses`` maps a specific item to its own Lakehouse, for the one thing a
-    single destination cannot express: a cross-item alias needs the producer and
-    the consumer in *different* Lakehouses, or the alias would point a name at
+    single destination cannot express: a cross-item shortcut needs the producer and
+    the consumer in *different* Lakehouses, or the shortcut would point a name at
     something already in the same place. ``lakehouse`` remains the default for
     every item not named there, so single-target fixtures are untouched.
     """

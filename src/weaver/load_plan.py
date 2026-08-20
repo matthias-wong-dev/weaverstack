@@ -11,7 +11,8 @@ from types import MappingProxyType
 from typing import Mapping, Sequence
 
 from .catalogue.state import Catalogue
-from .catalogue.tables import ALIAS, DEPENDENCY, INSTALLATION
+from .catalogue.tables import DEPENDENCY, INSTALLATION, SHORTCUT
+from .declaration.item_dependencies import SHORTCUTS_MODULE
 from .declaration.metadata import ObjectId
 from .declaration.model import (
     FILE_SHAPE,
@@ -148,8 +149,13 @@ class InstalledObject:
 
 
 @dataclass(frozen=True)
-class InstalledAlias:
-    """One name a consuming item presents for another item's document."""
+class InstalledShortcut:
+    """One logical shortcut a consuming item installed, as the catalogue kept it.
+
+    Only the logical ones. A load reads this to learn which producer a name
+    stands for, and a physical shortcut has no producer in the estate: it points
+    at an item Weaver does not manage.
+    """
 
     destination: WeaverDocumentId
     source: WeaverDocumentId
@@ -177,7 +183,7 @@ class InstalledEstate:
     objects: Mapping[WeaverDocumentId, InstalledObject]
     primitives: Mapping[WeaverDocumentId, InstalledObject]
     dependencies: tuple[InstalledDependency, ...]
-    aliases: tuple[InstalledAlias, ...]
+    shortcuts: tuple[InstalledShortcut, ...]
     #: Physical addresses two logical objects both claim, by the target they are
     #: in. Recorded rather than raised — see :meth:`from_catalogue`.
     ambiguous: Mapping[PhysicalTargetRef, tuple[str, ...]] = field(default_factory=dict)
@@ -241,7 +247,7 @@ class InstalledEstate:
             objects=MappingProxyType(objects),
             primitives=MappingProxyType(primitives),
             dependencies=_dependencies(catalogue),
-            aliases=_aliases(catalogue),
+            shortcuts=_shortcuts(catalogue),
             ambiguous=MappingProxyType(
                 {target: tuple(found) for target, found in ambiguous.items()}
             ),
@@ -321,26 +327,36 @@ def _dependencies(catalogue: Catalogue) -> tuple[InstalledDependency, ...]:
     return tuple(sorted(found, key=lambda edge: (str(edge.consumer), edge.reference)))
 
 
-def _aliases(catalogue: Catalogue) -> tuple[InstalledAlias, ...]:
+def _shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
+    """The logical shortcuts the catalogue holds, as producer pairs.
+
+    A physical shortcut is skipped: it names an item outside the estate, so
+    there is no producer for a load to order against.
+    """
+
     found = []
     for item, tables in catalogue.rows.items():
-        for row in tables.get(ALIAS.name, ()):
+        for row in tables.get(SHORTCUT.name, ()):
+            if str(row.get("target_type") or "").casefold() != "logical":
+                continue
+            object_name = str(row.get("object_name") or "")
+            target_object = str(row.get("target_object_name") or "")
+            if not object_name or not target_object:
+                continue
             destination = _document_id(
-                item,
-                str(row.get("destination_schema_name") or ""),
-                str(row.get("destination_object_name") or ""),
+                item, str(row.get("schema_name") or ""), object_name
             )
-            source_item = WeaverItemId(
-                str(row.get("source_item_type") or ""),
-                str(row.get("source_item_name") or ""),
+            target_item = WeaverItemId(
+                str(row.get("target_item_type") or ""),
+                str(row.get("target_item_name") or ""),
             )
             source = _document_id(
-                source_item,
-                str(row.get("source_schema_name") or ""),
-                str(row.get("source_object_name") or ""),
+                target_item,
+                str(row.get("target_schema_name") or ""),
+                target_object,
             )
-            found.append(InstalledAlias(destination=destination, source=source))
-    return tuple(sorted(found, key=lambda alias: str(alias.destination)))
+            found.append(InstalledShortcut(destination=destination, source=source))
+    return tuple(sorted(found, key=lambda each: str(each.destination)))
 
 
 _FILES_PREFIX = "Files/"
@@ -377,12 +393,15 @@ def _is_python_module_reference(reference: str) -> bool:
 
     A leading dot is a relative import. Otherwise the tell is the separator: a
     module name cannot carry a dot, so a Python object module spells
-    ``Schema.Object`` as ``Schema__Object``.
+    ``Schema.Object`` as ``Schema__Object``. A shortcut import is named for the
+    module it comes from, because a schema shortcut carries no separator.
     """
 
     if not reference:
         return False
     if reference.startswith("."):
+        return True
+    if reference.startswith(f"{SHORTCUTS_MODULE}."):
         return True
     return _PYTHON_ID_SEPARATOR in reference.rsplit(".", 1)[-1]
 
@@ -403,6 +422,10 @@ def _python_module_identity(
     components = [part for part in reference.split(".") if part]
     if not components or components[0] == _LIB:
         return None
+    if components[0] == SHORTCUTS_MODULE and _PYTHON_ID_SEPARATOR not in components[-1]:
+        # A schema shortcut presents a namespace, so it is registered under the
+        # schema it establishes and names no object of its own.
+        return WeaverDocumentId(item, ObjectId(components[-1], components[-1]))
     parts = python_id_parts(components[-1])
     if len(parts) != 2 or not all(part.strip() for part in parts):
         return None
@@ -636,8 +659,8 @@ class _Planner:
         self.refresh_nodes: dict[str, LoadNode] = {}
         #: Which physical targets a refresh barrier must wait for, by refresh id.
         self.refresh_sources: dict[str, PhysicalTargetRef] = {}
-        self._alias_by_destination = {
-            alias.destination: alias for alias in estate.aliases
+        self._shortcut_by_destination = {
+            each.destination: each for each in estate.shortcuts
         }
         self._dependencies: dict[WeaverDocumentId, list[InstalledDependency]] = {}
         for edge in estate.dependencies:
@@ -786,7 +809,7 @@ class _Planner:
             if crossed is None:
                 self.edges.add((upstream_id, node.node_id))
             else:
-                # An alias read as SQL: the producer's endpoint has to catch up
+                # A shortcut read as SQL: the producer's endpoint has to catch up
                 # before the consumer can see it, so the barrier replaces the
                 # direct edge rather than sitting beside it.
                 refresh_id = self._refresh_node(crossed).node_id
@@ -832,9 +855,9 @@ class _Planner:
         """Every selected load in a refreshed Lakehouse runs before its barrier.
 
         Broad by necessity: one barrier per affected Lakehouse, behind all of
-        its selected loads rather than only those an alias names. A narrower
+        its selected loads rather than only those a shortcut names. A narrower
         placement would need to know which tables a consumer's query touches,
-        and the catalogue records the alias rather than the read.
+        and the catalogue records the shortcut rather than the read.
         """
 
         for node_id, target in self.refresh_sources.items():
@@ -894,16 +917,16 @@ class _Planner:
             resolved = self._resolve_reference(consumer, edge)
             if resolved is None:
                 continue
-            producer, through_alias = resolved
+            producer, through_shortcut = resolved
             producer_target = self.estate.objects[producer].target
             crossing = None
             if (
-                through_alias
+                through_shortcut
                 and producer_target.is_lakehouse
                 and not consumer_target.is_lakehouse
             ):
                 # Lakehouse to Warehouse is the one crossing read through a SQL
-                # analytics endpoint. A Lakehouse-to-Lakehouse alias is a OneLake
+                # analytics endpoint. A Lakehouse-to-Lakehouse shortcut is a OneLake
                 # shortcut — Delta on both sides, and nothing to synchronise.
                 crossing = producer_target
             producers.append((producer, crossing))
@@ -914,8 +937,8 @@ class _Planner:
     ) -> tuple[WeaverDocumentId, bool] | None:
         """What one written reference names, in the consumer's own namespace.
 
-        Aliases are consulted before native objects, and the order matters: an
-        alias destination is registered in the consuming item like any other, so
+        Shortcuts are consulted before native objects, and the order matters: an
+        shortcut destination is registered in the consuming item like any other, so
         a native lookup would find it, stop there, and lose the crossing.
         """
 
@@ -927,6 +950,13 @@ class _Planner:
                 # is real source and it is not a Weaver object, so it orders
                 # nothing.
                 return None
+            if producer not in self.estate.objects:
+                # A shortcut import says nothing about which area its
+                # destination is in, so a folder shortcut resolves to the table
+                # spelling first. The estate is what knows.
+                beneath_files = replace(producer, is_files=True)
+                if beneath_files in self.estate.objects:
+                    producer = beneath_files
             if producer not in self.estate.objects:
                 raise LoadError(
                     f"{consumer} imports {reference!r}, which resolves to "
@@ -952,14 +982,14 @@ class _Planner:
                 "Schema.Object reference"
             )
         candidate = WeaverDocumentId(consumer.item, ObjectId(parts[0], parts[1]))
-        alias = self._alias_by_destination.get(candidate)
-        if alias is not None:
-            if alias.source not in self.estate.objects:
+        shortcut = self._shortcut_by_destination.get(candidate)
+        if shortcut is not None:
+            if shortcut.source not in self.estate.objects:
                 raise LoadError(
-                    f"{consumer} reads alias {reference}, which points at "
-                    f"{alias.source} — not an installed object"
+                    f"{consumer} reads shortcut {reference}, which points at "
+                    f"{shortcut.source} — not an installed object"
                 )
-            return alias.source, True
+            return shortcut.source, True
         if candidate in self.estate.objects:
             return candidate, False
         folder = replace(candidate, is_files=True)
@@ -967,13 +997,13 @@ class _Planner:
             return folder, False
         raise LoadError(
             f"{consumer} declares dependency {reference!r}, which resolves to "
-            "neither an installed object nor an alias in its own item"
+            "neither an installed object nor a shortcut in its own item"
         )
 
 
 __all__ = [
     "ENDPOINT_REFRESH",
-    "InstalledAlias",
+    "InstalledShortcut",
     "InstalledDependency",
     "InstalledEstate",
     "InstalledObject",

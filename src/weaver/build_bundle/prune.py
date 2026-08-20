@@ -71,8 +71,8 @@ class _Managed:
     #: Object names a *document* declares, whatever kind it declares them as. A
     #: document installed under the other kind is a kind change, removed by the
     #: item's managed drop, which reads the installed type from the Registry, so
-    #: prune spares the name. Alias destinations are held out: nothing drops one,
-    #: so an alias whose name is installed as the other kind is still prune's to
+    #: prune spares the name. Shortcut destinations are held out: nothing drops one,
+    #: so a shortcut whose name is installed as the other kind is still prune's to
     #: remove.
     declared_objects: frozenset[str]
 
@@ -520,12 +520,12 @@ def managed_sets(
     documents: Mapping[str, SourceDocument],
     object_target_kind: str = DELTA_TARGET,
     *,
-    alias_destinations: Iterable[WeaverDocumentId] = (),
+    shortcut_destinations: Iterable[WeaverDocumentId] = (),
     load_identities: Iterable[WeaverDocumentId] = (),
 ) -> _Managed:
     """The keep-set for one physical side: Delta objects, or Warehouse ones.
 
-    ``alias_destinations`` belong in the keep-set: they are desired state in
+    ``shortcut_destinations`` belong in the keep-set: they are desired state in
     this item as a declared document is, produced elsewhere, and a build
     that pruned the shortcut it was about to create would be destructive and
     pointless. Which set one joins follows its physical form — a folder under
@@ -551,11 +551,20 @@ def managed_sets(
     folders = {
         d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET
     }
-    # Taken before the aliases join, because these are the names a managed drop
+    # Taken before the shortcuts join, because these are the names a managed drop
     # can remove by their registered type. See :class:`_Managed`.
     declared_objects = tables | views
-    for destination in alias_destinations:
-        qualified = destination.object_id.qualified
+    #: The namespaces a schema shortcut presents. Kept, and never looked inside:
+    #: what is in one belongs to the item it points at, and OneLake makes a
+    #: shortcut a read-write window, so enumerating it to decide what to remove
+    #: would be deciding about another item's objects.
+    shortcut_schemas = set()
+    for destination in shortcut_destinations:
+        identity = getattr(destination, "object_id", None)
+        if identity is None:
+            shortcut_schemas.add(destination.schema.lower())
+            continue
+        qualified = identity.qualified
         if destination.is_files:
             folders.add(qualified)
         elif object_target_kind == SQL_TARGET:
@@ -563,6 +572,7 @@ def managed_sets(
         else:
             tables.add(qualified)
     schemas = {name.split(".", 1)[0].lower() for name in tables | views}
+    schemas.update(shortcut_schemas)
     schemas.update(
         identity.object_id.schema.lower()
         for identity in load_identities

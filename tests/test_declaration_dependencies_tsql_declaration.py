@@ -224,7 +224,7 @@ def test_update_extracts_target_and_source():
 
 
 @weaver_test()
-def test_update_through_an_alias_extracts_the_real_relation():
+def test_update_through_an_shortcut_extracts_the_real_relation():
     assert refs("""
         update o
            set o.[Amount] = 0
@@ -349,7 +349,7 @@ def test_a_realistic_tsql_file_extracts_exactly_its_relations():
 
 @weaver_test()
 def test_the_realistic_file_invents_nothing():
-    """No temp table, CTE, alias, variable, comment or string contributes."""
+    """No temp table, CTE, shortcut, variable, comment or string contributes."""
     found = refs(REALISTIC)
     for invented in ("#recent", "enriched", "Legacy.", "@cutoff"):
         assert not any(invented in name for name in found)

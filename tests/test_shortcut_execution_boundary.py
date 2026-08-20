@@ -1,4 +1,4 @@
-"""Materialising an alias, and closing an item with an endpoint refresh."""
+"""Materialising a shortcut, and closing an item with an endpoint refresh."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ import pytest
 from support.weaver_test import weaver_test
 from support.workspaces import given_resolver, given_workspace
 
-from weaver.build_bundle.executors import AliasExecutor
-from weaver.build_bundle.executors import alias as alias_module
+from weaver.build_bundle.executors import ShortcutExecutor
+from weaver.build_bundle.executors import shortcut as shortcut_module
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-from weaver.build_bundle.models import CREATE_ALIAS, InstallAction
+from weaver.build_bundle.models import CREATE_SHORTCUT, InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
 from weaver.spark import FabricSparkTarget
@@ -24,21 +24,21 @@ DESTINATION_TARGET_ID = "Lakehouse-Curated--lakehouse-Curated_Dev"
 
 
 def _payload(**overrides) -> bytes:
-    """One alias, in the batched shape the action now carries."""
+    """One shortcut, in the batched shape the action carries."""
 
     mapping = {
-        "alias": "Lakehouse/Curated/Sales.Landed",
+        "shortcut": "Lakehouse/Curated/Sales.Landed",
         "source": "Lakehouse/Raw/Sales.Customer",
         "source_target_id": SOURCE_TARGET_ID,
-        "area": "Tables",
-        "schema": "Sales",
-        "object": "Landed",
+        "type": "table",
+        "path": "Tables/Sales",
+        "name": "Landed",
         "source_area": "Tables",
         "source_schema": "Sales",
         "source_object": "Customer",
     }
     mapping.update(overrides)
-    return json.dumps({"aliases": [mapping]}).encode("utf-8")
+    return json.dumps({"shortcuts": [mapping]}).encode("utf-8")
 
 
 def _target(target_id: str, item: str) -> ResolvedTarget:
@@ -50,11 +50,11 @@ def _target(target_id: str, item: str) -> ResolvedTarget:
 
 def _action() -> InstallAction:
     return InstallAction(
-        id="aliases-Lakehouse--Curated",
-        kind=CREATE_ALIAS,
+        id="shortcuts-Lakehouse--Curated",
+        kind=CREATE_SHORTCUT,
         resource_node_id=None,
-        executor="alias",
-        payload="aliases-Lakehouse--Curated.alias.json",
+        executor="shortcut",
+        payload="shortcuts-Lakehouse--Curated.shortcut.json",
         payload_sha256="0" * 64,
     )
 
@@ -62,7 +62,7 @@ def _action() -> InstallAction:
 def _local_context(tmp_path, *, resolver=None, store=None):
 
     # With a Spark destination, as a real Lakehouse target resolves to. Without
-    # one an alias in it cannot even be *named*, which used to go unnoticed
+    # one a shortcut in it cannot even be *named*, which used to go unnoticed
     # because the discovery wait was skipped whenever there was no Spark session.
     destination = replace(
         _target(DESTINATION_TARGET_ID, "Curated_Dev"),
@@ -85,7 +85,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
             local_resolver.files_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
         )
     return InstallationContext(
-        # A host that can ask Spark and finds the alias readable at once. The
+        # A host that can ask Spark and finds the shortcut readable at once. The
         # Installer supplies this on every host, so a context without it is one
         # nobody would build in production — and the executor says so rather
         # than skipping the wait.
@@ -102,11 +102,11 @@ def _local_context(tmp_path, *, resolver=None, store=None):
 
 
 @weaver_test()
-def test_an_alias_naming_a_target_the_plan_never_declared_fails(tmp_path):
+def test_a_shortcut_naming_a_target_the_plan_never_declared_fails(tmp_path):
     context = _local_context(tmp_path)
 
     with pytest.raises(InstallError, match="which this plan does not declare"):
-        AliasExecutor().execute(
+        ShortcutExecutor().execute(
             _action(), _payload(source_target_id="lakehouse-Nowhere"), context
         )
 
@@ -134,21 +134,21 @@ class _ShortcutResolver:
     def create_onelake_shortcut(self, item, *, path, name, source, source_path):
         self.calls.append((item.name, path, name, source.name, source_path))
         self.events.append("create")
-        return {"shortcut": f"{path}/{name}"}
+        return {"path": f"{path}/{name}"}
 
 
 @weaver_test()
-def test_a_fabric_alias_becomes_one_onelake_shortcut(tmp_path):
+def test_a_shortcut_becomes_one_onelake_shortcut(tmp_path):
     resolver = _ShortcutResolver()
     context = _local_context(tmp_path, resolver=resolver)
 
-    details = AliasExecutor().execute(_action(), _payload(), context)
+    details = ShortcutExecutor().execute(_action(), _payload(), context)
 
     assert resolver.calls == [
         ("Curated_Dev", "Tables/Sales", "Landed", "Raw_Dev", "Tables/Sales/Customer")
     ]
-    assert details["aliases"][0]["shortcut"] == "Tables/Sales/Landed"
-    assert details["aliases"][0]["source"] == "Lakehouse/Raw/Sales.Customer"
+    assert details["shortcuts"][0]["path"] == "Tables/Sales/Landed"
+    assert details["shortcuts"][0]["source"] == "Lakehouse/Raw/Sales.Customer"
 
 
 class _FoldedSourceStore(FilesystemStore):
@@ -166,7 +166,7 @@ def test_a_shortcut_uses_the_source_tables_physical_case(tmp_path):
     resolver = _ShortcutResolver()
     context = _local_context(tmp_path, resolver=resolver, store=_FoldedSourceStore())
 
-    AliasExecutor().execute(_action(), _payload(), context)
+    ShortcutExecutor().execute(_action(), _payload(), context)
 
     assert resolver.calls[0][-1] == "Tables/Sales/customer"
 
@@ -190,7 +190,7 @@ class _LateSpark:
     nor a table.
 
     Doubled as the *capability* the executor asks through rather than as a Spark
-    session, because that is now the seam: the alias executor stays on whichever
+    session, because that is now the seam: the shortcut executor stays on whichever
     host is installing and only the question crosses. A double shaped like a
     session would be testing an arrangement the product no longer has.
     """
@@ -249,16 +249,14 @@ def _addressable_context(tmp_path, spark, resolver):
 
 
 @weaver_test()
-def test_a_fabric_alias_is_not_finished_until_the_shortcut_can_be_read(
-    tmp_path, monkeypatch
-):
+def test_a_shortcut_is_not_finished_until_it_can_be_read(tmp_path, monkeypatch):
     """Returning on the API call would make the plan's barrier a lie."""
 
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
     spark = _LateSpark(failures=2)
     context = _addressable_context(tmp_path, spark, _ShortcutResolver())
 
-    details = AliasExecutor().execute(_action(), _payload(), context)
+    details = ShortcutExecutor().execute(_action(), _payload(), context)
 
     reads = [s for s in spark.statements if s.startswith("SELECT")]
     assert len(reads) == 3
@@ -270,26 +268,28 @@ def test_a_fabric_alias_is_not_finished_until_the_shortcut_can_be_read(
 def test_a_shortcut_that_never_becomes_readable_fails_naming_itself(
     tmp_path, monkeypatch
 ):
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_TIMEOUT", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_TIMEOUT", 0)
     context = _addressable_context(
         tmp_path, _LateSpark(failures=99), _ShortcutResolver()
     )
 
     with pytest.raises(InstallError, match="did not become readable within"):
-        AliasExecutor().execute(_action(), _payload(), context)
+        ShortcutExecutor().execute(_action(), _payload(), context)
 
 
 @weaver_test()
-def test_a_files_alias_needs_no_readability_wait(tmp_path, monkeypatch):
+def test_a_folder_shortcut_needs_no_readability_wait(tmp_path, monkeypatch):
     """A folder is a directory; there is no relation to become addressable."""
 
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
     spark = _LateSpark(failures=99)
     context = _addressable_context(tmp_path, spark, _ShortcutResolver())
 
-    details = AliasExecutor().execute(
-        _action(), _payload(area="Files", source_area="Files"), context
+    details = ShortcutExecutor().execute(
+        _action(),
+        _payload(type="folder", path="Files/Sales", source_area="Files"),
+        context,
     )
 
     assert not spark.statements
@@ -304,7 +304,7 @@ class _NoTransportStore(FilesystemStore):
 
 @weaver_test()
 def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
-    """An alias is a OneLake shortcut, so a host that cannot make one cannot
+    """A shortcut is a OneLake shortcut, so a host that cannot make one cannot
     materialise it — and says which action it could not perform."""
 
     class _WithoutShortcuts:
@@ -321,39 +321,39 @@ def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
     context = _local_context(tmp_path, resolver=_WithoutShortcuts(None))
 
     with pytest.raises(InstallError, match="no way to create a OneLake shortcut"):
-        AliasExecutor().execute(_action(), _payload(), context)
+        ShortcutExecutor().execute(_action(), _payload(), context)
 
 
-# --- several aliases, one action ----------------------------------------------
+# --- several shortcuts, one action ----------------------------------------------
 
 
-def _two_aliases() -> bytes:
-    first = json.loads(_payload().decode())["aliases"][0]
-    second = dict(first, alias="Lakehouse/Curated/Sales.Second", object="Second")
-    return json.dumps({"aliases": [first, second]}).encode("utf-8")
+def _two_shortcuts() -> bytes:
+    first = json.loads(_payload().decode())["shortcuts"][0]
+    second = dict(first, shortcut="Lakehouse/Curated/Sales.Second", name="Second")
+    return json.dumps({"shortcuts": [first, second]}).encode("utf-8")
 
 
 @weaver_test()
 def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
-    """The cost of an alias is the wait, so the waits must not serialise.
+    """The cost of a shortcut is the wait, so the waits must not serialise.
 
-    Two aliases through one action means one discovery window, not two — which is
+    Two shortcuts through one action means one discovery window rather than two,
     only true if both shortcuts exist before the first read is attempted.
     """
 
-    monkeypatch.setattr(alias_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
     events: list[str] = []
     resolver = _ShortcutResolver(events=events)
     spark = _LateSpark(failures=2, events=events)
     context = _addressable_context(tmp_path, spark, resolver)
 
-    details = AliasExecutor().execute(_action(), _two_aliases(), context)
+    details = ShortcutExecutor().execute(_action(), _two_shortcuts(), context)
 
-    assert [detail["alias"] for detail in details["aliases"]] == [
+    assert [detail["shortcut"] for detail in details["shortcuts"]] == [
         "Lakehouse/Curated/Sales.Landed",
         "Lakehouse/Curated/Sales.Second",
     ]
-    # Every create precedes every read: two aliases, one discovery window.
+    # Every create precedes every read: two shortcuts, one discovery window.
     creates = [index for index, event in enumerate(events) if event == "create"]
     reads = [index for index, event in enumerate(events) if event == "read"]
     assert len(creates) == 2 and reads
@@ -387,11 +387,11 @@ def test_a_batch_of_tsql_statements_runs_each_as_its_own_batch():
         ]
     ).encode("utf-8")
     action = InstallAction(
-        id="aliases-Warehouse--Reporting",
-        kind=CREATE_ALIAS,
+        id="shortcuts-Warehouse--Reporting",
+        kind=CREATE_SHORTCUT,
         resource_node_id=None,
         executor="tsql_batch",
-        payload="aliases.tsql-batch.json",
+        payload="shortcuts.tsql-batch.json",
         payload_sha256="0" * 64,
     )
 
@@ -409,14 +409,14 @@ def test_the_wait_asks_spark_rather_than_holding_one(tmp_path):
     """A desktop has no Spark session and must still wait for discovery.
 
     The guard was once ``context.spark is not None``, so a desktop install
-    skipped the wait and the next statement to read the alias failed with
+    skipped the wait and the next statement to read the shortcut failed with
     "neither a view nor a table". The context carries no session at all now.
     """
 
     asked = _LateSpark(failures=1)
     context = _addressable_context(tmp_path, asked, _ShortcutResolver())
 
-    AliasExecutor().execute(_action(), _payload(), context)
+    ShortcutExecutor().execute(_action(), _payload(), context)
 
     assert asked.statements, "the discovery wait was skipped without a Spark session"
     assert all("LIMIT 0" in statement for statement in asked.statements)
@@ -431,6 +431,6 @@ def test_the_probe_carries_weavers_identifier_case(tmp_path):
     asked = _LateSpark(failures=0)
     context = _addressable_context(tmp_path, asked, _ShortcutResolver())
 
-    AliasExecutor().execute(_action(), _payload(), context)
+    ShortcutExecutor().execute(_action(), _payload(), context)
 
     assert asked.exact_case and all(asked.exact_case)

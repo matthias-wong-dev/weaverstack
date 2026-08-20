@@ -286,7 +286,8 @@ These are gone rather than deprecated, and named here so a retirement stays
 retired once nobody remembers why the name was a problem:
 
 ```text
-InstallationEnvironment            LocalWorkspace
+alias.yml and external.yml         InstallationEnvironment
+Alias as a user-facing concept     LocalWorkspace
 LoadEnvironment                    LocalResolver
 LoadPlan as the runtime owner      FabricWorkspace (there is one Workspace)
 ResolvedLoadPlan                   SparkNaming / SparkDestination

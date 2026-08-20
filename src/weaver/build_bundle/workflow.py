@@ -12,7 +12,7 @@ import stat
 import tempfile
 import zipfile
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Iterator, Mapping
@@ -39,6 +39,8 @@ from .prune import (
     read_warehouse_inventory,
 )
 from .report import InstallationReport
+from .shortcut_sources import physical_shortcuts, read_shortcut_sources
+from .shortcuts import ResolvedShortcutSource
 from .targets import (
     WAREHOUSE_TARGET,
     ItemBindings,
@@ -85,11 +87,18 @@ class BuildState:
 
     catalogue: Catalogue
     target_inventories: Mapping[WeaverItemId, TargetInventory]
+    #: Where each direct shortcut points, resolved while the estate was
+    #: readable. Keyed by ``<owner>/<name>``.
+    shortcut_sources: Mapping[str, ResolvedShortcutSource] = field(default_factory=dict)
 
     def to_mapping(self) -> dict[str, object]:
         return {
             "format_version": 1,
             "catalogue": self.catalogue.to_mapping(),
+            "shortcut_sources": {
+                key: vars(source)
+                for key, source in sorted(self.shortcut_sources.items())
+            },
             "target_inventories": [
                 {
                     "item": str(item),
@@ -116,19 +125,23 @@ class BuildState:
                 )
                 for entry in mapping.get("target_inventories", ())
             },
+            shortcut_sources={
+                key: ResolvedShortcutSource(**value)
+                for key, value in (mapping.get("shortcut_sources") or {}).items()
+            },
         )
 
 
 def catalogue_items_for_build(
     repository: WeaverRepository, bindings: ItemBindings
 ) -> tuple[WeaverItemId, ...]:
-    """Catalogue scope needed for selection and cross-item alias freshness."""
+    """Catalogue scope needed for selection and cross-item shortcut freshness."""
 
     bound = set(bindings.by_item)
     items = bound | {
-        alias.source.item
-        for alias in repository.aliases
-        if alias.destination.item in bound and alias.source.item not in bound
+        shortcut.source.item
+        for shortcut in repository.logical_shortcuts
+        if shortcut.destination.item in bound and shortcut.source.item not in bound
     }
     return tuple(sorted(items, key=str))
 
@@ -176,6 +189,7 @@ def read_build_state(
     session,
     workspace=None,
     sql_by_item=None,
+    shortcuts=(),
 ) -> BuildState:
     """Read only the authoritative state a source-independent planner needs.
 
@@ -198,7 +212,20 @@ def read_build_state(
             workspace=workspace,
             required=tuple(required_catalogue_items),
         )
-    return BuildState(catalogue=catalogue, target_inventories=inventories)
+    sources = {}
+    physical = physical_shortcuts(shortcuts, bindings=bindings)
+    if physical:
+        with session.step("Resolve physical shortcut targets"):
+            sources = read_shortcut_sources(
+                physical,
+                resolver=session.resolver(workspace),
+                store=session.transport_store(workspace),
+            )
+    return BuildState(
+        catalogue=catalogue,
+        target_inventories=inventories,
+        shortcut_sources=sources,
+    )
 
 
 def _read_catalogue(*, session, workspace, required):
@@ -487,6 +514,7 @@ def build_item_repository_source(
             session=session,
             workspace=workspace,
             sql_by_item=sql_by_item,
+            shortcuts=repository.shortcuts,
         )
         return build_item_repository(
             repository,
@@ -514,12 +542,12 @@ def read_reconciled_catalogue(
     """Read the Weaver catalogue and prove selected claims physically.
 
     The read covers the bound items and, when a ``repository`` is given, the
-    items that *produce* what those items alias. Those producers are not being
+    items that *produce* what those items shortcut. Those producers are not being
     built and nothing about them will be written — but their Registry rows carry
-    the build that published them, and comparing that against the alias's own row
+    the build that published them, and comparing that against the shortcut's own row
     is the only way to learn that a producer moved on while this consumer was not
     looking (see
-    :func:`~weaver.build_bundle.incremental.stale_alias_destinations`).
+    :func:`~weaver.build_bundle.incremental.stale_shortcut_destinations`).
 
     They are read without an inventory, so nothing about them is reconciled away:
     a build has no business proving claims about a target it was not pointed at.
@@ -528,9 +556,9 @@ def read_reconciled_catalogue(
     items = {binding.item for binding in bindings.entries}
     if repository is not None:
         items |= {
-            alias.source.item
-            for alias in repository.aliases
-            if alias.destination.item in items and alias.source.item not in items
+            shortcut.source.item
+            for shortcut in repository.logical_shortcuts
+            if shortcut.destination.item in items and shortcut.source.item not in items
         }
 
     workspace = workspace if workspace is not None else session.workspace

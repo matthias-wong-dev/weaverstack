@@ -15,7 +15,11 @@ from .model import (
     WeaverItemId,
     WeaverRepository,
 )
+from .shortcuts import LAKEHOUSE_FILE
 from .source import SourceDocument
+
+#: How a program imports its item's declarations.
+SHORTCUTS_MODULE = LAKEHOUSE_FILE.removesuffix(".py")
 
 
 def _declared_references(
@@ -33,6 +37,7 @@ def _inferred_references(
     source: SourceDocument,
     consumer: WeaverDocumentId,
     edges: list[ItemDependency],
+    shortcuts: Mapping[WeaverItemId, Mapping[str, object]] | None = None,
 ) -> tuple[tuple[str, WeaverDocumentId], ...]:
     """What the document's own source says it reads.
 
@@ -42,7 +47,7 @@ def _inferred_references(
     """
 
     if source.language == "python":
-        return tuple(_python_references(source))
+        return tuple(_python_references(source, consumer, edges, shortcuts or {}))
 
     references: list[tuple[str, WeaverDocumentId]] = []
     for reference in source.discovered_references:
@@ -97,9 +102,16 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     """Return ``repository`` with exact item-owned edges and a global DAG."""
 
     native = repository.source_documents
-    aliases = {alias.destination: alias.source for alias in repository.aliases}
+    logical_pairs = {
+        pair.destination: pair.source for pair in repository.logical_shortcuts
+    }
+    #: Each item's shortcut declarations by authored symbol, which is the name a
+    #: program imports them under.
+    shortcuts: dict[WeaverItemId, dict[str, object]] = {}
+    for declaration in repository.shortcuts:
+        shortcuts.setdefault(declaration.owner, {})[declaration.name] = declaration
     folded_native = {str(identity).casefold(): identity for identity in native}
-    folded_alias = {str(identity).casefold(): identity for identity in aliases}
+    folded_logical = {str(identity).casefold(): identity for identity in logical_pairs}
     edges: list[ItemDependency] = []
     #: Graph edges, kept separately from ``edges`` because the two answer
     #: different questions — see :func:`_document_graph`.
@@ -111,15 +123,15 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
         if source.document.declares_dependencies:
             references = _declared_references(source, consumer)
         else:
-            references = _inferred_references(source, consumer, edges)
+            references = _inferred_references(source, consumer, edges, shortcuts)
 
         for written, destination in references:
             producer, kind = _resolve_destination(
                 destination,
                 native=native,
-                aliases=aliases,
+                logical_pairs=logical_pairs,
                 folded_native=folded_native,
-                folded_alias=folded_alias,
+                folded_logical=folded_logical,
                 consumer=consumer,
                 written=written,
             )
@@ -136,7 +148,7 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
                 )
             )
             # ``destination`` is what the consumer named in its own namespace: the
-            # producer itself when that resolved natively, and the item's alias
+            # producer itself when that resolved natively, and the item's shortcut
             # destination when it resolved through one. The edge above records the
             # producer either way; the graph records the hop actually taken.
             graph_edges.add((str(destination), str(consumer)))
@@ -155,7 +167,7 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
             ),
         )
     )
-    graph = _document_graph(native, aliases, graph_edges)
+    graph = _document_graph(native, logical_pairs, graph_edges)
     item_graph = _item_graph(repository, resolved)
     by_name = {str(item.identity): item.identity for item in repository.items}
     return replace(
@@ -171,32 +183,32 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
 
 def _document_graph(
     native: Mapping[WeaverDocumentId, SourceDocument],
-    aliases: Mapping[WeaverDocumentId, WeaverDocumentId],
+    logical_pairs: Mapping[WeaverDocumentId, WeaverDocumentId],
     graph_edges: set[tuple[str, str]],
 ) -> Graph:
     """The graph incremental selection is planned against.
 
     Not a projection of :attr:`dependency_edges`. An edge records where a
-    reference resolved to, so an alias edge names the source document as the
-    producer. This graph answers what must be *built*, where the alias
+    reference resolved to, so a shortcut edge names the source document as the
+    producer. This graph answers what must be *built*, where the shortcut
     destination is a shortcut or view in its own right:
 
     .. code-block:: text
 
-        source document → alias destination → consumer document
+        source document → shortcut destination → consumer document
 
-    Three hops rather than two, so impact propagates across items with the alias
+    Three hops rather than two, so impact propagates across items with the shortcut
     as an ordinary node rather than a planner special case.
 
-    Every alias contributes its ``source → destination`` edge whether or not a
+    Every shortcut contributes its ``source → destination`` edge whether or not a
     document consumes it: it still has to be materialised after its source.
     """
 
     edges = set(graph_edges)
-    for destination, source in aliases.items():
+    for destination, source in logical_pairs.items():
         edges.add((str(source), str(destination)))
     nodes = [str(identity) for identity in native]
-    nodes.extend(str(destination) for destination in aliases)
+    nodes.extend(str(destination) for destination in logical_pairs)
     return Graph(nodes, sorted(edges))
 
 
@@ -206,8 +218,8 @@ def _item_graph(
     """The acyclic item-level graph a multi-item build is planned against.
 
     One item depends on another when it reaches into it: either a document
-    resolves to a document that other item owns, or this item declares an alias
-    whose source lives there. The alias edge matters on its own — an alias with
+    resolves to a document that other item owns, or this item declares a shortcut
+    whose source lives there. The shortcut edge matters on its own — a shortcut with
     no consumer yet still has to be materialised after its source exists — so it
     is not left to be implied by the dependency edges.
 
@@ -225,10 +237,10 @@ def _item_graph(
         if edge.producer is None or edge.producer.item == edge.consumer.item:
             continue
         edges.add((str(edge.producer.item), str(edge.consumer.item)))
-    for alias in repository.aliases:
-        # Repository parsing rejects a same-item alias, so every alias is an
+    for shortcut in repository.logical_shortcuts:
+        # Repository parsing rejects a same-item shortcut, so every shortcut is an
         # edge between two distinct items.
-        edges.add((str(alias.source.item), str(alias.destination.item)))
+        edges.add((str(shortcut.source.item), str(shortcut.destination.item)))
 
     try:
         return Graph((str(item.identity) for item in repository.items), sorted(edges))
@@ -240,17 +252,17 @@ def _resolve_destination(
     destination: WeaverDocumentId,
     *,
     native: Mapping[WeaverDocumentId, SourceDocument],
-    aliases: Mapping[WeaverDocumentId, WeaverDocumentId],
+    logical_pairs: Mapping[WeaverDocumentId, WeaverDocumentId],
     folded_native: Mapping[str, WeaverDocumentId],
-    folded_alias: Mapping[str, WeaverDocumentId],
+    folded_logical: Mapping[str, WeaverDocumentId],
     consumer: WeaverDocumentId,
     written: str,
 ) -> tuple[WeaverDocumentId, str]:
     if destination in native:
         return destination, "native"
-    if destination in aliases:
-        return aliases[destination], "alias"
-    case_match = folded_native.get(str(destination).casefold()) or folded_alias.get(
+    if destination in logical_pairs:
+        return logical_pairs[destination], "shortcut"
+    case_match = folded_native.get(str(destination).casefold()) or folded_logical.get(
         str(destination).casefold()
     )
     detail = f"; declared spelling is {case_match}" if case_match else ""
@@ -259,10 +271,22 @@ def _resolve_destination(
     )
 
 
-def _python_references(source: SourceDocument) -> list[tuple[str, WeaverDocumentId]]:
+def _python_references(
+    source: SourceDocument,
+    consumer: WeaverDocumentId,
+    edges: list[ItemDependency],
+    shortcuts: Mapping[WeaverItemId, Mapping[str, object]],
+) -> list[tuple[str, WeaverDocumentId]]:
     assert source.logical_id is not None
+    declared = shortcuts.get(source.logical_id.item, {})
     references: list[tuple[str, WeaverDocumentId]] = []
     for imported in source.python_imports:
+        if imported.module == SHORTCUTS_MODULE and not imported.level:
+            references.extend(
+                _shortcut_reference(name, declared, source, consumer, edges)
+                for name in imported.names
+            )
+            continue
         candidates = _resolved_python_modules(source.logical_id, imported)
         for written, components in candidates:
             if components and components[0] == "lib":
@@ -287,7 +311,54 @@ def _python_references(source: SourceDocument) -> list[tuple[str, WeaverDocument
                     ),
                 )
             )
-    return references
+    return [reference for reference in references if reference is not None]
+
+
+def _shortcut_reference(
+    name: str,
+    declared: Mapping[str, object],
+    source: SourceDocument,
+    consumer: WeaverDocumentId,
+    edges: list[ItemDependency],
+):
+    """What importing one shortcut symbol makes this document depend on.
+
+    A logical shortcut names a Weaver document, so it resolves and orders like
+    any other logical reference. A physical one names something Weaver does not
+    manage, which may have no producer in this repository at all, so it is
+    recorded as a physical edge and given no graph edge: there is nothing here to
+    order it against.
+
+    A schema shortcut is always physical, and stays a dependency on the schema
+    rather than on whatever a program later reads through it. What appears
+    inside it belongs to the item it points at and can change without a build.
+    """
+
+    written = f"{SHORTCUTS_MODULE}.{name}"
+    if name in (SHORTCUTS_MODULE, "*"):
+        raise DiscoveryError(
+            f"{source.node_id}: import each shortcut by name, as "
+            f"'from {SHORTCUTS_MODULE} import <Name>'. Discovery reads the "
+            "imports to learn what this document depends on."
+        )
+    declaration = declared.get(name)
+    if declaration is None:
+        known = ", ".join(sorted(declared)) or "nothing"
+        raise DiscoveryError(
+            f"{source.node_id}: import {written!r} names no shortcut. "
+            f"{source.logical_id.item}/{SHORTCUTS_MODULE}.py declares {known}."
+        )
+    if declaration.is_logical:
+        return (written, declaration.destination)
+    edges.append(
+        ItemDependency(
+            consumer=consumer,
+            reference=written,
+            resolution_kind="physical",
+            is_within_item=False,
+        )
+    )
+    return None
 
 
 def _resolved_python_modules(

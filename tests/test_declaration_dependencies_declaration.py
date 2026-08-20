@@ -141,7 +141,7 @@ def test_a_temp_table_is_not_a_reference():
 
 
 @weaver_test()
-def test_an_alias_is_not_a_reference():
+def test_an_shortcut_is_not_a_reference():
     assert refs("""
         select o.Amount
         from Sales.Order as o

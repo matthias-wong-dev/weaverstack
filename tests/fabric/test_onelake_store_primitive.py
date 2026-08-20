@@ -21,13 +21,33 @@ def store(rest_session, fabric_workspace):
     return rest_session.transport_store(fabric_workspace)
 
 
+#: Where these tests work, beneath the staging Lakehouse's Files area. Staging
+#: rather than a target, because a target's inventory would report what is
+#: written here as declared folders.
+PRIMITIVE_AREA = "primitive_tests"
+
+
 @pytest.fixture
-def files_root(fabric_lakehouses):
-    return Location(
+def files_root(store, fabric_staging_lakehouse, request):
+    """A subtree of the fixed staging Lakehouse that this test owns outright.
+
+    Named for the test, and emptied on the way in as well as out: the item is
+    permanent, so residue from an interrupted run is possible in a way it was
+    not when each test got a new Lakehouse.
+    """
+
+    root = Location(
         onelake_url(
-            fabric_lakehouses["workspace"].id, fabric_lakehouses["target"].id, "Files"
+            fabric_staging_lakehouse.workspace_id,
+            fabric_staging_lakehouse.id,
+            f"Files/{PRIMITIVE_AREA}/{request.node.name}",
         )
     )
+    store.delete(root, recursive=True)
+    try:
+        yield root
+    finally:
+        store.delete(root, recursive=True)
 
 
 @weaver_test(remote=True)

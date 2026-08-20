@@ -127,7 +127,7 @@ class FilesystemStore:
     def delete(self, location: Location, *, recursive: bool = False) -> None:
         path = self._local(location)
         if _is_link(path):
-            # A link is removed, never followed: the alias it stands for is
+            # A link is removed, never followed: the path it stands for is
             # disposable, the object it points at belongs to another item.
             if _is_junction(path):
                 path.rmdir()

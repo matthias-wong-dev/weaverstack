@@ -154,15 +154,19 @@ PUBLIC_SCHEMA: dict[str, tuple[str, ...]] = {
         "Signature",
         *AUDIT,
     ),
-    "Alias": (
+    "Shortcut": (
         "Item type",
         "Item name",
-        "Destination schema name",
-        "Destination object name",
-        "Source item type",
-        "Source item name",
-        "Source schema name",
-        "Source object name",
+        "Shortcut ID",
+        "Schema name",
+        "Object name",
+        "Shortcut type",
+        "Target type",
+        "Target item type",
+        "Target item name",
+        "Target schema name",
+        "Target object name",
+        "Target workspace name",
         "Signature",
         *AUDIT,
     ),
@@ -250,6 +254,7 @@ def test_object_type_vocabulary_is_frozen():
         "view": "View",
         "file": "File",
         "stored_procedure": "Stored procedure",
+        "schema": "Schema",
     }
 
 
@@ -260,6 +265,7 @@ def test_object_role_vocabulary_is_frozen():
         "load": "Load",
         "test": "Test",
         "assumption": "Assumption",
+        "shortcut": "Shortcut",
     }
 
 

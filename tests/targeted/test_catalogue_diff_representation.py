@@ -220,7 +220,7 @@ def test_every_statement_stays_scoped_to_the_item(repository):
 def test_an_installation_the_build_did_not_name_is_never_touched(repository):
     """A scoped build must not reach an item it was not pointed at.
 
-    The catalogue read covers more items than a build publishes — alias
+    The catalogue read covers more items than a build publishes — shortcut
     producers come back with it — so "everything I read" and "everything I may
     write" are different sets, and only the second may drive a statement.
     """

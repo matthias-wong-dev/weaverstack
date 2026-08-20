@@ -1,15 +1,31 @@
-"""Fabric OneLake shortcut operations for aliases.
+"""Fabric OneLake shortcut operations for shortcuts.
 
 Shortcuts are recreated during installation because they contain no data.
 """
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from urllib.parse import quote
 
-from .client import FabricClient
+from ..errors import CommandError
+from .client import FabricClient, FabricError
 from .resources import Item
+
+#: How long a removed shortcut may take to stop conflicting with a new one of
+#: the same name, and how often to retry. Fabric accepts the delete immediately
+#: and settles it shortly afterwards, so a create issued in between is refused.
+#: Measured at under a second; the bound is for a slow tenant.
+REPLACE_TIMEOUT = 30.0
+REPLACE_POLL_INTERVAL = 2.0
+
+#: How Fabric distinguishes the two conflicts a create can meet, both of which
+#: are a 409. The first is the shortcut being replaced, still settling. The
+#: second is something else already occupying the path, which waiting will not
+#: change. ``Shorcuts`` is Fabric's spelling.
+_STILL_SETTLING = "ShorcutsOperationNotAllowed"
+_PATH_OCCUPIED = "NameConflictError"
 
 
 @dataclass(frozen=True)
@@ -61,26 +77,48 @@ def create_shortcut(
     source_path: str,
     client: FabricClient,
 ) -> dict:
-    """Point ``destination``'s ``path/name`` at ``source``'s ``source_path``."""
+    """Point ``destination``'s ``path/name`` at ``source``'s ``source_path``.
+
+    An existing shortcut of the same name is replaced rather than treated as a
+    collision: a shortcut holds no data, and a build has to be able to run twice.
+    Fabric settles a deletion a moment after accepting it, so the create is
+    retried while it reports the old name as still there.
+    """
 
     delete_shortcut(destination, path=path, name=name, client=client)
-    response = client.request(
-        "POST",
-        f"workspaces/{destination.workspace_id}/items/{destination.id}/shortcuts",
-        payload={
-            "path": path,
-            "name": name,
-            "target": {
-                "oneLake": {
-                    "workspaceId": source.workspace_id,
-                    "itemId": source.id,
-                    "path": source_path,
-                }
-            },
+    payload = {
+        "path": path,
+        "name": name,
+        "target": {
+            "oneLake": {
+                "workspaceId": source.workspace_id,
+                "itemId": source.id,
+                "path": source_path,
+            }
         },
-    )
+    }
+    endpoint = f"workspaces/{destination.workspace_id}/items/{destination.id}/shortcuts"
+    deadline = time.monotonic() + REPLACE_TIMEOUT
+    while True:
+        try:
+            response = client.request("POST", endpoint, payload=payload)
+            break
+        except FabricError as exc:
+            message = str(exc)
+            if _PATH_OCCUPIED in message:
+                raise CommandError(
+                    f"{destination.name} already holds something at {path}/{name}, "
+                    "so a shortcut cannot be created there. Remove it, or point "
+                    "the shortcut at another name."
+                ) from exc
+            if _STILL_SETTLING not in message or time.monotonic() >= deadline:
+                raise CommandError(
+                    f"could not create the shortcut {path}/{name} in "
+                    f"{destination.name}: {exc}"
+                ) from exc
+            time.sleep(REPLACE_POLL_INTERVAL)
     return {
-        "shortcut": f"{path}/{name}",
+        "path": f"{path}/{name}",
         "in": destination.name,
         "target": f"{source.name}/{source_path}",
         # Reported because it says which contract Fabric honoured. Creating one
@@ -88,7 +126,7 @@ def create_shortcut(
         # not; so a 202 here would mean the shortcut itself is still being made,
         # which is a different thing from the destination Lakehouse not yet having
         # registered it as a table. Only the second is what the readability wait
-        # in `weaver.build_bundle.executors.alias` exists for.
+        # in `weaver.build_bundle.executors.shortcut` exists for.
         "status": response.status_code,
     }
 

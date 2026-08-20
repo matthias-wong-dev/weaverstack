@@ -8,22 +8,22 @@ The estate is permanent and named by default — `PYTEST_WORKSPACE`, holding
 at all. Every name is still overridable (`WEAVER_FABRIC_WORKSPACE`,
 `WEAVER_PYTEST_<ROLE>`) for a tenant that arranges its items differently.
 
-Items are found rather than made, and emptied rather than re-created. The
-lifecycle tests that do create and delete carry their own `provision` marker.
+Items are found rather than made, and emptied rather than re-created. Creating
+and deleting them is `provision_estate.py`'s job; the fixed-estate fixtures fill
+in an item a tenant has not got yet, so a first run needs no separate ritual.
 """
 
 from __future__ import annotations
 
 import os
 import time
-import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
 from typing import Any
 
 import pytest
+from support import external_estate
 from support.build_env import (
     BuildEnv,
     InstallOutcome,
@@ -47,8 +47,6 @@ DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
 ENVIRONMENT_ENV = "WEAVER_FABRIC_ENVIRONMENT"
 DEFAULT_ENVIRONMENT = "weaver"
 
-#: Disposable items carry this prefix so an abandoned one is obvious.
-TEST_PREFIX = "weavertest"
 WAREHOUSE_READY_TIMEOUT = 600.0
 WAREHOUSE_POLL_INTERVAL = 5.0
 
@@ -98,16 +96,6 @@ def fabric_client(fabric_workspace_item):
     from weaver.fabric import FabricClient
 
     return FabricClient()
-
-
-def _disposable_name(role: str) -> str:
-    """A name no human would have chosen, so cleanup is unambiguous.
-
-    Still used by the ``provision`` tests, whose subject *is* creating and
-    deleting items.
-    """
-
-    return f"{TEST_PREFIX}_{role}_{uuid.uuid4().hex[:8]}"
 
 
 #: The estate the suite expects to already exist, by role. Fixed rather than
@@ -173,8 +161,14 @@ def staged_bundle_source(lakehouse, name: str) -> str:
     )
 
 
+def _fixed_name_from(roles: dict[str, str], role: str) -> str:
+    """One role's item name, as this tenant spells it."""
+
+    return os.environ.get(f"WEAVER_PYTEST_{role.upper()}", roles[role])
+
+
 def _fixed_name(role: str) -> str:
-    return os.environ.get(f"WEAVER_PYTEST_{role.upper()}", FIXED_ITEMS[role])
+    return _fixed_name_from(FIXED_ITEMS, role)
 
 
 def _ensure_lakehouse(client, workspace, role: str):
@@ -231,40 +225,6 @@ def _ensure_catalogue_warehouse(client, workspace, role: str):
         return create_warehouse(workspace, name, client=client)
 
 
-def _warehouse_name() -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-    return f"Weaver_Pytest_{timestamp}_{uuid.uuid4().hex[:4]}"
-
-
-@pytest.fixture
-def fabric_lakehouses(fabric_workspace_item, fabric_client):
-    """Two Lakehouses, created and then deleted.
-
-    The local equivalent of this fixture is `lakehouses`, and the pair are
-    deliberately shaped the same so a test can be written against either.
-    """
-
-    from weaver.fabric import create_lakehouse, delete_item
-
-    created = []
-    try:
-        weaver = create_lakehouse(
-            fabric_workspace_item, _disposable_name("weaver"), client=fabric_client
-        )
-        created.append(weaver)
-        target = create_lakehouse(
-            fabric_workspace_item, _disposable_name("target"), client=fabric_client
-        )
-        created.append(target)
-        yield {"workspace": fabric_workspace_item, "weaver": weaver, "target": target}
-    finally:
-        for item in created:
-            try:
-                delete_item(item, client=fabric_client)
-            except Exception as exc:  # cleanup must not mask a test failure
-                print(f"warning: could not delete {item}: {exc}")
-
-
 # --- running Weaver inside Fabric --------------------------------------------
 #
 # Session-scoped, because a Lakehouse and a Livy session are expensive to obtain
@@ -316,23 +276,23 @@ def fabric_target_lakehouse(fabric_workspace_item, fabric_client):
     return _ensure_lakehouse(fabric_client, fabric_workspace_item, "target")
 
 
-#: The roles a cross-item alias run needs its own Lakehouses for.
+#: The roles a cross-item shortcut run needs its own Lakehouses for.
 #:
-#: A producer and a consumer, because a cross-item alias is the one thing a single
+#: A producer and a consumer, because a cross-item shortcut is the one thing a single
 #: destination cannot express — there has to be something to point across to. And a
 #: *second* producer for the Warehouse case, because sharing one would leave that
 #: estate building into a Lakehouse the Lakehouse estate had already built: the
 #: producer's table would be unchanged, incremental selection would correctly emit
 #: no work and no endpoint refresh for it, and the ordering that test is about would
 #: not be in the plan at all. Cheaper to give it its own than to weaken the test.
-ALIAS_LAKEHOUSE_ROLES = ("producer", "consumer", "warehouse_producer")
+SHORTCUT_LAKEHOUSE_ROLES = ("producer", "consumer", "warehouse_producer")
 
 
 @pytest.fixture(scope="session")
-def fabric_alias_lakehouses(fabric_workspace_item, fabric_client):
-    """The fixed Lakehouses a cross-item alias run needs, by role.
+def fabric_shortcut_lakehouses(fabric_workspace_item, fabric_client):
+    """The fixed Lakehouses a cross-item shortcut run needs, by role.
 
-    A producer and a consumer, because a cross-item alias is the one thing a
+    A producer and a consumer, because a cross-item shortcut is the one thing a
     single destination cannot express — there has to be something to point across
     to. And a *second* producer for the Warehouse case, because sharing one would
     leave that estate building into a Lakehouse the Lakehouse estate had already
@@ -345,6 +305,103 @@ def fabric_alias_lakehouses(fabric_workspace_item, fabric_client):
         role: _ensure_lakehouse(fabric_client, fabric_workspace_item, role)
         for role in ("producer", "consumer", "warehouse_producer")
     }
+
+
+# --- the external workspace ---------------------------------------------------
+#
+# A second workspace, holding physical resources a shortcut may point at. It is
+# not a Weaver target workspace: nothing is built into it, and the tests that
+# read it are proving that no destructive operation reached it. Its contents come
+# from `provision_estate.py`, which seeds them through Spark, so a fixture here
+# finds them rather than filling them in.
+
+
+@pytest.fixture(scope="session")
+def fabric_external_workspace_item():
+    """The external workspace, or a skip when this tenant has not got one."""
+
+    pytest.importorskip("azure.identity", reason="pip install weaverstack")
+
+    from weaver.fabric.auth import prefer_cli_credential
+
+    prefer_cli_credential()
+
+    name = os.environ.get(
+        external_estate.WORKSPACE_ENV, external_estate.DEFAULT_WORKSPACE
+    )
+
+    from weaver.fabric import find_workspace
+
+    try:
+        return find_workspace(name)
+    except Exception as exc:
+        pytest.skip(
+            f"cannot reach the external workspace {name!r}: {type(exc).__name__}: {exc}"
+        )
+
+
+@pytest.fixture(scope="session")
+def fabric_external_lakehouse(fabric_external_workspace_item, fabric_client):
+    """The external Lakehouse, found rather than made.
+
+    Its tables are Delta and are written by Spark, so an absent one is a setup
+    step rather than something this fixture can complete. The skip says which
+    script to run.
+    """
+
+    from weaver.fabric.resources import LAKEHOUSE, find_item
+
+    name = _fixed_name_from(external_estate.ROLES, "external")
+    try:
+        return find_item(
+            fabric_external_workspace_item,
+            name,
+            item_type=LAKEHOUSE,
+            client=fabric_client,
+        )
+    except Exception as exc:
+        pytest.skip(
+            f"the external Lakehouse {name!r} is not in "
+            f"{fabric_external_workspace_item.name!r} ({type(exc).__name__}). "
+            "Run tests/fabric/provision_estate.py to create and seed it."
+        )
+
+
+@dataclass(frozen=True)
+class ExternalSource:
+    """One external Lakehouse, and how to address what it holds."""
+
+    item: Any
+    location: Callable[[str], Any]
+
+    @property
+    def schema(self) -> str:
+        return external_estate.SCHEMA
+
+    def table(self, name: str):
+        return self.location(external_estate.table_path(name))
+
+    def file(self, name: str = external_estate.FILE):
+        return self.location(external_estate.file_path(name))
+
+
+@pytest.fixture(scope="session")
+def external_source(fabric_external_lakehouse):
+    """Where the external estate is, and what it is expected to hold.
+
+    Read-only. A test uses it to name a shortcut's physical target, and to read
+    the source directly afterwards to show a destructive operation left it alone.
+    """
+
+    from weaver.fabric.onelake import onelake_url
+    from weaver.locations import Location
+
+    item = fabric_external_lakehouse
+
+    def location(relative: str) -> Location:
+        return Location(onelake_url(item.workspace_id, item.id, relative))
+
+    return ExternalSource(item=item, location=location)
 
 
 @pytest.fixture(scope="session")
@@ -674,7 +731,7 @@ def fabric_empty_lakehouse(
     and residue is not inert. A producer whose table already matches leaves
     incremental selection with nothing to do — correctly — so a test asserting
     *build order* then finds no build action in the plan at all. That is not a
-    hypothetical: it is exactly how the Warehouse alias tests failed when two
+    hypothetical: it is exactly how the Warehouse shortcut tests failed when two
     estates shared a producer.
 
     So ask for this wherever freshness is the premise, and say so in the test.
@@ -844,7 +901,7 @@ def warehouse_primitive_estate(session_disposable_warehouse, tmp_path_factory):
             ),
             target_by_item={identity: target.bound},
             selected_documents=selected,
-            selected_aliases=set(),
+            selected_shortcuts=set(),
             selected_for_drop=set(selected) if rebuild else set(),
             selected_for_build=selected if build else set(),
             registered=(
@@ -918,77 +975,69 @@ def warehouse_primitive_estate(session_disposable_warehouse, tmp_path_factory):
 
 @pytest.fixture
 def populated_fabric_lakehouse(
-    fabric_workspace_item,
-    fabric_client,
     fabric_workspace,
+    fabric_client,
+    fabric_target_lakehouse,
+    fabric_empty_lakehouse,
     livy_session,
     lakehouse_sql_statements,
     populate_folder_files,
 ):
-    """A disposable Fabric target populated through Environment-backed Livy."""
+    """The fixed target Lakehouse, emptied and then populated for one wipe.
 
-    from weaver.fabric import (
-        FabricResolver,
-        OneLakeDfsClient,
-        create_lakehouse,
-        delete_item,
+    Emptied first, because the item is permanent: the claim is about which
+    schemas a wipe removes, so anything an earlier module left behind would be
+    counted among them.
+    """
+
+    from weaver.fabric import FabricResolver, OneLakeDfsClient
+
+    target = ItemRef(fabric_target_lakehouse.name)
+    resolver = FabricResolver(fabric_workspace, client=fabric_client)
+    store = OneLakeDfsClient()
+
+    fabric_empty_lakehouse(fabric_target_lakehouse.name)
+
+    populate_folder_files(store, resolver, target)
+    tables_root = f"{resolver.spark_root(target)}/Tables"
+    statements = [
+        statement
+        for script in ("build.spark.sql", "load.spark.sql")
+        for statement in lakehouse_sql_statements(script, tables_root)
+    ]
+    body = "\n".join(f"spark.sql({statement!r})" for statement in statements)
+    # Raw Spark, no Weaver import: a session is needed to make a Delta table,
+    # the installed package is not.
+    result = _timed_session_run(
+        livy_session, "seed wipe fixture", f"{body}\nemit(True)\n"
     )
+    assert result.payload is True
 
-    item = None
-    try:
-        item = create_lakehouse(
-            fabric_workspace_item,
-            _disposable_name("target"),
-            client=fabric_client,
+    def wipe() -> tuple[str, ...]:
+        """Weaver's own wipe, run from here.
+
+        `wipe_delta_target` never needed a session: a Delta table is a
+        directory, there is no catalogue to enumerate, and shortcuts go over
+        REST. It ran in one only because that is where the installed package
+        lived, which put a wheel publish in front of a claim about directory
+        removal.
+        """
+
+        from weaver.physical_wipe import wipe_delta_target
+        from weaver.targets import DeltaTarget
+
+        report = wipe_delta_target(
+            DeltaTarget(lakehouse=target), fabric_workspace, store=store
         )
-        target = ItemRef(item.name)
-        resolver = FabricResolver(fabric_workspace, client=fabric_client)
-        store = OneLakeDfsClient()
+        return tuple(report.removed)
 
-        populate_folder_files(store, resolver, target)
-        tables_root = f"{resolver.spark_root(target)}/Tables"
-        statements = [
-            statement
-            for script in ("build.spark.sql", "load.spark.sql")
-            for statement in lakehouse_sql_statements(script, tables_root)
-        ]
-        body = "\n".join(f"spark.sql({statement!r})" for statement in statements)
-        # Raw Spark, no Weaver import: a session is needed to make a Delta table,
-        # the installed package is not.
-        result = livy_session.run(f"{body}\nemit(True)\n")
-        assert result.payload is True
-
-        def wipe() -> tuple[str, ...]:
-            """Weaver's own wipe, run from here.
-
-            `wipe_delta_target` never needed a session: a Delta table is a
-            directory, there is no catalogue to enumerate, and shortcuts go over
-            REST. It ran in one only because that is where the installed package
-            lived — which put a wheel publish in front of a claim about directory
-            removal.
-            """
-
-            from weaver.physical_wipe import wipe_delta_target
-            from weaver.targets import DeltaTarget
-
-            report = wipe_delta_target(
-                DeltaTarget(lakehouse=target), fabric_workspace, store=store
-            )
-            return tuple(report.removed)
-
-        yield PopulatedLakehouse(
-            workspace=fabric_workspace,
-            target=target,
-            resolver=resolver,
-            store=store,
-            wipe=wipe,
-        )
-    finally:
-        if item is not None:
-            try:
-                delete_item(item, client=fabric_client)
-            except Exception as exc:
-                print(f"warning: could not delete {item}: {exc}")
+    yield PopulatedLakehouse(
+        workspace=fabric_workspace,
+        target=target,
+        resolver=resolver,
+        store=store,
+        wipe=wipe,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -1121,6 +1170,8 @@ def _fabric_build_context(
             "from weaver.sessions import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
+            "from weaver.build_bundle.shortcut_sources import ("
+            "physical_shortcuts, read_shortcut_sources)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1139,13 +1190,21 @@ def _fabric_build_context(
             "reconciled = read_reconciled_catalogue("
             "bindings, inventories=inventories, session=session, "
             "repository=repository)\n"
+            # Through the same seam `read_build_state` uses, so which
+            # declarations are resolved is decided in one place. This harness
+            # assembles its own build state, and anything it re-derives here
+            # would silently drift from the product.
+            "shortcut_sources = read_shortcut_sources(\n"
+            "    physical_shortcuts(repository.shortcuts, bindings=bindings),\n"
+            "    resolver=resolver, store=store)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
             f"    output={staged_bundle_source(staging.name, bundle_name)},\n"
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
-            "    stale_claims=reconciled.stale_claims)\n"
+            "    stale_claims=reconciled.stale_claims,\n"
+            "    shortcut_sources=shortcut_sources)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
@@ -1464,6 +1523,8 @@ def _warehouse_build_env(
             "from weaver.sessions import NotebookSession\n"
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
+            "from weaver.build_bundle.shortcut_sources import ("
+            "physical_shortcuts, read_shortcut_sources)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1482,13 +1543,21 @@ def _warehouse_build_env(
             "reconciled = read_reconciled_catalogue("
             "bindings, inventories=inventories, session=session, "
             "repository=repository)\n"
+            # Through the same seam `read_build_state` uses, so which
+            # declarations are resolved is decided in one place. This harness
+            # assembles its own build state, and anything it re-derives here
+            # would silently drift from the product.
+            "shortcut_sources = read_shortcut_sources(\n"
+            "    physical_shortcuts(repository.shortcuts, bindings=bindings),\n"
+            "    resolver=resolver, store=store)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
             f"    output={staged_bundle_source(staging.name, bundle_name)},\n"
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
-            "    stale_claims=reconciled.stale_claims)\n"
+            "    stale_claims=reconciled.stale_claims,\n"
+            "    shortcut_sources=shortcut_sources)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
@@ -1706,7 +1775,7 @@ def fabric_mixed_estate(request, weaver_repo_fixture):
 
     The one arrangement neither single-target context can express, and the one
     the physical load graph most needs: a Delta table published into a Warehouse
-    through an alias is read across a SQL analytics endpoint, and that boundary
+    through a shortcut is read across a SQL analytics endpoint, and that boundary
     is where the refresh barrier lives. Nothing with one physical side has such a
     boundary to cross.
 

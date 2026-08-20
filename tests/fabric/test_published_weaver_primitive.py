@@ -292,7 +292,7 @@ def test_the_session_native_store_reads_back_what_it_wrote(
     OneLake; `store_for(Workspace)` inside a session returns something
     else entirely. Exercising the DFS client from the checkout says nothing about
     whether the session-native one writes, lists and deletes the same way — and
-    the folder executor and the Files-area alias both go through it.
+    the folder executor and the Files-area shortcut both go through it.
     """
 
     payload = livy_session.run(

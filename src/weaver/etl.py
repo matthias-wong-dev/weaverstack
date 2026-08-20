@@ -62,6 +62,11 @@ LOAD_FOLDER = "Load"
 #: parse_date`` keeps working because ``lib`` sits exactly where it was authored.
 LOAD_ROOT = f"{ETL_SCHEMA}/{LOAD_FOLDER}"
 
+#: The deployed module an item's programs import their shortcuts from. It sits
+#: at the runtime root, so ``from shortcuts import Sales__Customer`` resolves the
+#: same way inside a load as the authored name reads in the repository.
+SHORTCUTS_MODULE = "shortcuts.py"
+
 #: What a generated load procedure is called: the object it loads, spelled out.
 #: ``Load Sales.Customer`` is a real name in a real schema, not an encoding, so
 #: the catalogue stores it exactly as the Warehouse holds it.
@@ -372,12 +377,30 @@ def _lakehouse_artefacts(
                     source_path=source.relative_path,
                 )
             )
+    declared = tuple(
+        declaration for declaration in repository.shortcuts if declaration.owner == item
+    )
+    if declared:
+        # Generated rather than copied: the authored file says what to create,
+        # and a program needs what to read.
+        from .shortcuts import render_runtime_module
+
+        payload = render_runtime_module(declared).encode("utf-8")
+        artefacts.append(
+            _file_artefact(
+                item,
+                SHORTCUTS_MODULE,
+                payload=payload,
+                signature=content_hash(payload),
+                source_path=declared[0].relative_path,
+            )
+        )
     for relative, content in sorted(repository.support_file_contents.items()):
         parts = relative.split("/")
         # Everything beneath ``lib/``, whatever it is. The tree is reproduced
         # verbatim, so a helper module's data file travels with the module that
-        # reads it — an ``alias.yml`` beside it is a declaration rather than
-        # runtime source and stays behind.
+        # reads it. A declaration surface such as ``shortcuts.yml`` beside it
+        # is not runtime source and stays behind.
         if len(parts) < 4 or parts[2] != "lib":
             continue
         if WeaverItemId(parts[0], parts[1]) != item:

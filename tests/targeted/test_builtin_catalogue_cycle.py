@@ -68,7 +68,7 @@ def estate(tmp_path):
             "spark_schema",
             "spark_table",
             "folder",
-            "alias",
+            "shortcut",
             "sql_endpoint_refresh",
             "tsql",
             "tsql_batch",

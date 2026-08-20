@@ -1,7 +1,7 @@
 """One build, two physical sides, and the barrier between them.
 
 ``cross-item-journey`` is the journey estate plus the Warehouse that reports on
-it: a Delta table published into the Warehouse through an alias, materialised
+it: a Delta table published into the Warehouse through a shortcut, materialised
 there, viewed, and reconciled against its source by a Test. It is the one shape
 no single-target estate can express.
 
@@ -94,7 +94,8 @@ def test_the_estate_declares_both_physical_sides(repository):
 
     assert {"Lakehouse/Sales", "Warehouse/Reporting"} <= items
     assert [
-        (str(alias.destination), str(alias.source)) for alias in repository.aliases
+        (str(shortcut.destination), str(shortcut.source))
+        for shortcut in repository.logical_shortcuts
     ] == [("Warehouse/Reporting/Rpt.PortableCustomer", "Lakehouse/Sales/DWG.Customer")]
 
 
@@ -114,7 +115,7 @@ def test_one_bundle_carries_both_targets(plan):
 def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
     """The composition claim: source, then barrier, then consumer.
 
-    A Warehouse object reading an aliased Delta table reaches it over the SQL
+    A Warehouse object reading an shortcut Delta table reaches it over the SQL
     analytics endpoint, and the endpoint is eventually consistent with the
     Lakehouse. Building the Warehouse side first would read a table the endpoint
     has not seen yet — and the estate would be self-consistent on each side
@@ -123,16 +124,16 @@ def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
 
     produced = _when(plan, "Lakehouse--Sales--DWG.Customer")
     refreshed = _when(plan, "refresh-sql-endpoint-Lakehouse--Sales")
-    aliased = _when(plan, "aliases-Warehouse--Reporting")
+    shortcut = _when(plan, "shortcuts-Warehouse--Reporting")
     reported = _when(plan, "Warehouse--Reporting--Rpt.CustomerReport")
     viewed = _when(plan, "Warehouse--Reporting--Rpt.ActiveCustomerReport")
 
-    assert produced < refreshed < aliased < reported < viewed
+    assert produced < refreshed < shortcut < reported < viewed
 
 
 @weaver_test()
 def test_the_warehouse_side_is_reached_over_tds(plan):
-    """A Warehouse alias is a T-SQL view over the endpoint, not a shortcut.
+    """A Warehouse shortcut is a T-SQL view over the endpoint, not a shortcut.
 
     Which is why this estate is Fabric-only in a way the Lakehouse journey is
     not.
@@ -141,7 +142,7 @@ def test_the_warehouse_side_is_reached_over_tds(plan):
     by_target = {
         batch.target_id.split("--")[0]: action.executor
         for _sequence, batch, action in plan.actions()
-        if action.id.endswith("aliases-Warehouse--Reporting")
+        if action.id.endswith("shortcuts-Warehouse--Reporting")
     }
 
     assert by_target == {"Warehouse-Reporting": "tsql_batch"}

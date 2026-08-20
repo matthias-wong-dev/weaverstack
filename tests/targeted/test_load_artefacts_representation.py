@@ -324,7 +324,7 @@ def test_the_deployed_tree_carries_every_lib_file_not_only_python(estate):
 
 
 @weaver_test()
-def test_an_alias_declaration_is_not_runtime_source(estate):
+def test_an_shortcut_declaration_is_not_runtime_source(estate):
     """It declares where a name points; nothing imports it at load time."""
 
     deployed = {
@@ -332,7 +332,7 @@ def test_an_alias_declaration_is_not_runtime_source(estate):
         for artefact in item_load_artefacts(estate, item=item_id())
     }
 
-    assert not any(name.endswith("alias.yml") for name in deployed)
+    assert not any(name.endswith("shortcuts.yml") for name in deployed)
 
 
 # --- incremental selection ----------------------------------------------------

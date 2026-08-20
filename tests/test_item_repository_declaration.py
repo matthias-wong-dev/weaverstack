@@ -114,7 +114,7 @@ def _estate(tmp_path: Path) -> Path:
         _warehouse_table("Sales.Change"),
     )
     _write(root, "Lakehouse/Raw/lib/csv_helpers.py", "def rows():\n    return []\n")
-    _write(root, "Warehouse/Reporting/alias.yml", "aliases: {}\n")
+    _write(root, "Warehouse/Reporting/shortcuts.yml", "# no shortcuts yet\n")
     _write(root, "_ignore/broken/__init__.py", "this is not python\n")
     _write(root, "_ignore/unfinished.py", "not valid\n")
     return root
@@ -246,13 +246,15 @@ def test_python_document_signature_covers_only_its_transitive_lib_imports(tmp_pa
 
 
 @weaver_test()
-def test_alias_contributes_only_to_its_destination_item_signature(tmp_path):
+def test_an_external_reference_contributes_only_to_its_own_item_signature(tmp_path):
     root = _estate(tmp_path)
     before = parse_item_repository(Location(str(root)))
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     after = parse_item_repository(Location(str(root)))
 
@@ -329,48 +331,50 @@ def test_a_dialect_suffix_is_not_a_document_name(tmp_path):
 
 
 @weaver_test()
-def test_an_alias_declared_at_the_root_names_the_item_it_belongs_to(tmp_path):
+def test_a_declaration_surface_at_the_root_names_the_item_it_belongs_to(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "alias.yml",
-        "aliases:\n"
+        "shortcuts.yml",
+        "logical:\n"
         "  Warehouse/Reporting/Sales.PortableCustomer: "
         "Lakehouse/Curated/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="an alias belongs to the item"):
+    with pytest.raises(DiscoveryError, match="belongs to the item that declares it"):
         parse_item_repository(Location(str(root)))
 
 
 @weaver_test()
-def test_an_item_local_alias_does_not_repeat_its_own_item(tmp_path):
+def test_an_external_destination_belongs_to_the_item_declaring_it(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        "aliases:\n"
-        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Audit/Sales.PortableCustomer: "
         "Lakehouse/Curated/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="this item's own Schema.Object"):
+    with pytest.raises(DiscoveryError, match="declares Warehouse/Reporting's own"):
         parse_item_repository(Location(str(root)))
 
 
 @weaver_test()
-def test_an_item_alias_certifies_only_its_own_item(tmp_path):
+def test_an_external_reference_certifies_only_its_own_item(tmp_path):
     root = _estate(tmp_path)
     before = parse_item_repository(Location(str(root)))
     _write(
         root,
-        "Warehouse/Audit/alias.yml",
-        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
+        "Warehouse/Audit/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Audit/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     after = parse_item_repository(Location(str(root)))
 
     assert after["Warehouse/Audit"].signature != before["Warehouse/Audit"].signature
     for unchanged in ("Lakehouse/Curated", "Lakehouse/Raw", "Warehouse/Reporting"):
         assert after[unchanged].signature == before[unchanged].signature
-    assert "Warehouse/Audit/alias.yml" in after.support_files
+    assert "Warehouse/Audit/shortcuts.yml" in after.support_files
 
 
 @weaver_test()
@@ -461,104 +465,104 @@ def test_files_metadata_reference_uses_its_distinct_namespace(tmp_path):
 
 
 @weaver_test()
-def test_aliases_are_item_local_and_one_source_may_repeat(tmp_path):
+def test_external_references_are_item_local_and_one_source_may_repeat(tmp_path):
     """Two items may each name the same producer under their own local name."""
 
     root = _estate(tmp_path)
     for item in ("Warehouse/Reporting", "Warehouse/Audit"):
         _write(
             root,
-            f"{item}/alias.yml",
-            "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
+            f"{item}/shortcuts.yml",
+            "logical:\n"
+            f"  {item}/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
         )
     repository = parse_item_repository(Location(str(root)))
 
-    assert len(repository.aliases) == 2
-    assert repository.aliases[0].source == repository.aliases[1].source
-    assert {str(alias.destination) for alias in repository.aliases} == {
+    assert len(repository.logical_shortcuts) == 2
+    assert (
+        repository.logical_shortcuts[0].source == repository.logical_shortcuts[1].source
+    )
+    assert {str(shortcut.destination) for shortcut in repository.logical_shortcuts} == {
         "Warehouse/Reporting/Sales.PortableCustomer",
         "Warehouse/Audit/Sales.PortableCustomer",
     }
 
 
 @weaver_test()
-def test_alias_destination_must_not_collide_with_a_native_document(tmp_path):
+def test_a_shortcut_destination_must_not_collide_with_a_native_document(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        """aliases:
-  Sales.Customer: Lakehouse/Curated/Sales.Customer
-""",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="collides with native document"):
+    with pytest.raises(DiscoveryError, match="the repository already declares"):
         parse_item_repository(Location(str(root)))
 
 
 @weaver_test()
-def test_an_alias_may_not_name_a_source_its_own_item_owns(tmp_path):
-    """An alias crosses items. Within one, the document graph already orders
-    producer before consumer — and the alias stage runs before every document
-    the item declares, so a same-item alias would be planned before its own
-    source was built."""
+def test_a_logical_shortcut_may_not_name_its_own_item(tmp_path):
+    """A bound reference crosses items. Within one, the document graph already
+    orders producer before consumer, and the reference stage runs before every
+    document the item declares, so it would be planned before its own source."""
 
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        """aliases:
-  Sales.PortableCustomer: Warehouse/Reporting/Sales.Customer
-""",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Warehouse/Reporting/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="are both owned by Warehouse/Reporting"):
+    with pytest.raises(DiscoveryError, match="which is the item declaring it"):
         parse_item_repository(Location(str(root)))
 
 
 @weaver_test()
-def test_alias_source_must_resolve_with_exact_case(tmp_path):
+def test_an_external_target_must_resolve_with_exact_case(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        """aliases:
-  Sales.PortableCustomer: Lakehouse/Curated/sales.Customer
-""",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="declared spelling"):
         parse_item_repository(Location(str(root)))
 
 
 @weaver_test()
-def test_alias_rejects_physical_three_part_names(tmp_path):
+def test_an_external_target_rejects_physical_three_part_names(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        """aliases:
-  Sales.PortableCustomer: Curated_LH.Sales.Customer
-""",
+        "Warehouse/Reporting/shortcuts.yml",
+        "physical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: Curated_LH.Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="document identity must be"):
+    with pytest.raises(DiscoveryError, match="must be ItemType/ItemName"):
         parse_item_repository(Location(str(root)))
 
 
 @weaver_test()
-def test_duplicate_alias_destination_is_rejected_by_yaml_reader(tmp_path):
+def test_duplicate_external_destination_is_rejected_by_the_yaml_reader(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        """aliases:
-  Sales.PortableCustomer: Lakehouse/Raw/Sales.Customer
-  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
-""",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Raw/Sales.Customer\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     with pytest.raises(Exception, match="duplicate metadata key"):
         parse_item_repository(Location(str(root)))
 
 
 @weaver_test()
-def test_metadata_reference_may_resolve_through_alias_destination(tmp_path):
+def test_metadata_reference_may_resolve_through_an_external_destination(tmp_path):
     root = _estate(tmp_path)
     source = _warehouse_table("Sales.Change").replace(
         "Description: A reporting table.",
@@ -567,10 +571,10 @@ def test_metadata_reference_may_resolve_through_alias_destination(tmp_path):
     _write(root, "Warehouse/Audit/Sales.Change.sql", source)
     _write(
         root,
-        "Warehouse/Audit/alias.yml",
-        """aliases:
-  Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer
-""",
+        "Warehouse/Audit/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Audit/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Customer\n",
     )
     parse_item_repository(Location(str(root)))
 
@@ -606,12 +610,12 @@ def test_canonical_foreign_key_target_is_validated(tmp_path):
 
 
 @weaver_test()
-def test_document_local_alias_headers_are_rejected_in_new_layout(tmp_path):
+def test_document_local_shortcut_headers_are_rejected(tmp_path):
     root = _estate(tmp_path)
     source = _table("Sales.Customer").replace(
         "Lineage: A source system.",
         "Lineage: A source system.\nWarehouse alias: Sales.CustomerAlias",
     )
     _write(root, "Lakehouse/Raw/Sales__Customer.py", source)
-    with pytest.raises(DiscoveryError, match="replaced by the item's own alias.yml"):
+    with pytest.raises(DiscoveryError, match="have been replaced"):
         parse_item_repository(Location(str(root)))

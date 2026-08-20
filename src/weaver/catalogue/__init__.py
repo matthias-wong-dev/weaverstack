@@ -28,7 +28,6 @@ from .state import (
     retaining,
 )
 from .tables import (
-    ALIAS,
     AUDIT_COLUMN_NAMES,
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
@@ -48,6 +47,7 @@ from .tables import (
     ROLE_DATA,
     ROLE_LOAD,
     SCHEMA_DICTIONARY,
+    SHORTCUT,
     SIGNATURE,
     TABLE_DICTIONARY,
     CatalogueColumn,
@@ -56,7 +56,7 @@ from .tables import (
 )
 
 __all__ = [
-    "ALIAS",
+    "SHORTCUT",
     "AUDIT_COLUMN_NAMES",
     "CATALOGUE_SCHEMA",
     "CATALOGUE_TABLES",

@@ -1,24 +1,24 @@
-"""Cross-item aliases, installed for real — and only what installing can answer.
+"""Cross-item shortcuts, installed for real, and only what installing can answer.
 
-Every *decision* an alias involves is proven in pure Python
-(`tests/targeted/test_alias_planning.py`): whether one is planned, left alone,
-has its schema created anyway, waits for its producer, or is stale because the
-producer moved on. None of that needs a workspace.
+Every decision a shortcut involves is proven in pure Python
+(`tests/targeted/test_shortcut_planning_install.py`): whether one is planned,
+left alone, has its schema created anyway, waits for its producer, or is stale
+because the producer moved on. None of that needs a workspace.
 
 What only Fabric can answer is what happens when the plan *runs*:
 
 **A OneLake shortcut is a workspace API call**, not a file operation, so only
 asking the workspace proves one exists.
 
-**Fabric creates a shortcut synchronously and discovers it asynchronously** — the
+**Fabric creates a shortcut synchronously and discovers it asynchronously.** The
 consumer's next statement failed with "neither a view nor a table" until the
-alias action learned to wait for a real read to succeed.
+action learned to wait for a real read to succeed.
 
 **A Lakehouse's SQL analytics endpoint lags its Delta tables**, which is why an
 item that mutated Delta is closed by a refresh. Nothing below a real workspace
 exercises that refresh.
 
-So the bundle is generated *here*, in pure Python, and **only the alias action is
+So the bundle is generated *here*, in pure Python, and **only the shortcut action is
 run** out of it — not the estate around it. Schemas, tables, views, catalogue
 publication and the refreshes are minutes of work that answer none of the
 questions above, and every one is proven elsewhere.
@@ -27,12 +27,12 @@ And the action runs *from here too*, against the real workspace: creating a
 OneLake shortcut is a REST call and refreshing an endpoint is another, so both
 reach Fabric perfectly well from this checkout. Only two things need a session,
 and neither imports Weaver — making the source table, and reading it back
-through its alias.
+through its shortcut.
 
 That leaves exactly one claim needing the published wheel, and it has its own
 file: the executor's *wait* for asynchronous discovery is guarded by
 ``context.spark is not None``, so running the action from here skips it. See
-`test_alias_discovery_boundary.py`.
+`test_shortcut_discovery_boundary.py`.
 """
 
 from __future__ import annotations
@@ -41,17 +41,17 @@ from pathlib import Path
 
 import pytest
 from conftest import staged_bundle, staged_repository_root
-from factories import FixtureCatalogue, alias_repository
+from factories import FixtureCatalogue, shortcut_repository
 from support.weaver_test import weaver_test
 
 from weaver.targets import ItemRef
 
 #: Logical names owned by this module alone. The catalogue is keyed by logical
 #: item, never by physical target, so two estates sharing a name share Registry
-#: rows — which is how an unrelated build could make this one's alias correctly
+#: rows — which is how an unrelated build could make this one's shortcut correctly
 #: stale and quietly remove the work it is about.
-PRODUCER = "Lakehouse/AliasProducer"
-CONSUMER = "Lakehouse/AliasConsumer"
+PRODUCER = "Lakehouse/ShortcutProducer"
+CONSUMER = "Lakehouse/ShortcutConsumer"
 
 
 def upload(store, root, source: Path) -> None:
@@ -186,7 +186,7 @@ def run_from_here(
         context=InstallationContext(
             # From the Installer, as every production context gets them. An
             # executor stays on the desktop and only its statements cross — a
-            # table alias asking whether it has become readable, a table build
+            # table shortcut asking whether it has become readable, a table build
             # asking what shape its query has.
             spark_sql=installer.spark_sql(),
             spark_sql_batch=installer.spark_sql_batch(),
@@ -194,7 +194,7 @@ def run_from_here(
             store=store,
             target=resolved[batch_target],
             targets=resolved,
-            # A Warehouse alias is a T-SQL view, so it needs a SQL capability.
+            # A Warehouse shortcut is a T-SQL view, so it needs a SQL capability.
             # Injected here because a desktop caller has no session identity to
             # acquire one from — which is exactly the difference the parity
             # probes exist to cover.
@@ -204,17 +204,17 @@ def run_from_here(
 
 
 @pytest.fixture(scope="module")
-def alias_estate(
+def shortcut_estate(
     fabric_workspace,
     fabric_client,
-    fabric_alias_lakehouses,
+    fabric_shortcut_lakehouses,
     fabric_staging_lakehouse,
     livy_session,
     weaver_session,
     session_catalogue_sql,
     tmp_path_factory,
 ):
-    """The alias action, run from here against real Fabric."""
+    """The shortcut action, run from here against real Fabric."""
 
     from factories import item_bindings
 
@@ -223,11 +223,11 @@ def alias_estate(
 
     resolver = FabricResolver(fabric_workspace, client=fabric_client)
     store = OneLakeDfsClient()
-    producer = fabric_alias_lakehouses["producer"]
-    consumer = fabric_alias_lakehouses["consumer"]
+    producer = fabric_shortcut_lakehouses["producer"]
+    consumer = fabric_shortcut_lakehouses["consumer"]
 
-    root = tmp_path_factory.mktemp("alias-repo")
-    alias_repository(root, producer=PRODUCER, consumer=CONSUMER)
+    root = tmp_path_factory.mktemp("shortcut-repo")
+    shortcut_repository(root, producer=PRODUCER, consumer=CONSUMER)
     staged = staged_repository_root(resolver, fabric_staging_lakehouse.name)
     upload(store, staged, root)
     repository = parse_item_repository(staged, store=store)
@@ -242,11 +242,11 @@ def alias_estate(
         catalogue=FixtureCatalogue.from_repository(
             repository, item="Warehouse/_weaver"
         ),
-        name="aliasaction",
+        name="shortcutaction",
         staging=fabric_staging_lakehouse.name,
         catalogue_sql=session_catalogue_sql,
     )
-    batch, alias_action = action_of(bundle.plan, "create_alias")
+    batch, shortcut_action = action_of(bundle.plan, "create_shortcut")
     _refresh_batch, refresh_action = action_of(bundle.plan, "refresh_sql_endpoint")
 
     at = {
@@ -265,15 +265,15 @@ def alias_estate(
         "emit(True)\n",
     )
 
-    alias_result = run_from_here(
-        alias_action,
+    shortcut_result = run_from_here(
+        shortcut_action,
         bundle,
         workspace=fabric_workspace,
         store=store,
         batch_target=batch.target_id,
         session=weaver_session,
     )
-    assert alias_result.status == "succeeded", alias_result.error_message
+    assert shortcut_result.status == "succeeded", shortcut_result.error_message
     refresh_result = run_from_here(
         refresh_action,
         bundle,
@@ -283,24 +283,24 @@ def alias_estate(
         session=weaver_session,
     )
 
-    aliased = at["consumer"].qualify("DWG", "PortableCustomer")
+    shortcut = at["consumer"].qualify("DWG", "PortableCustomer")
     # Fabric discovers a shortcut asynchronously, and running the action from
     # here skipped the executor's own wait — so the read retries. That the
-    # *executor* waits is asserted in `test_alias_discovery_boundary.py`, where it can be.
+    # *executor* waits is asserted in `test_shortcut_discovery_boundary.py`, where it can be.
     seen = livy_session.run(
         "import time\n"
         "_deadline = time.monotonic() + 180\n"
         "_seen = {}\n"
         "while True:\n"
         "    try:\n"
-        f"        _seen['alias_rows'] = spark.sql('SELECT count(*) AS n FROM {aliased}').collect()[0][0]\n"
+        f"        _seen['shortcut_rows'] = spark.sql('SELECT count(*) AS n FROM {shortcut}').collect()[0][0]\n"
         "        break\n"
         "    except Exception as exc:\n"
         "        if time.monotonic() >= _deadline:\n"
         "            raise\n"
         "        time.sleep(5)\n"
         f"_seen['consumer_tables'] = sorted(r.tableName for r in spark.sql('SHOW TABLES IN {at['consumer'].qualified_schema('DWG')}').collect())\n"
-        f"_seen['alias_in_producer'] = spark.catalog.tableExists({at['producer'].qualify('DWG', 'PortableCustomer')!r})\n"
+        f"_seen['shortcut_in_producer'] = spark.catalog.tableExists({at['producer'].qualify('DWG', 'PortableCustomer')!r})\n"
         f"_seen['source_in_consumer'] = spark.catalog.tableExists({at['consumer'].qualify('DWG', 'Customer')!r})\n"
         f"_seen['produced'] = spark.catalog.tableExists({source!r})\n"
         "emit(_seen)\n",
@@ -329,14 +329,14 @@ def alias_estate(
 
 
 @weaver_test(remote=True)
-def test_the_alias_exists_as_a_onelake_shortcut(alias_estate, fabric_client):
+def test_the_shortcut_exists_as_a_onelake_shortcut(shortcut_estate, fabric_client):
     """Asked of the workspace, not of the plan: the shortcut is really there.
 
     A OneLake shortcut is an API call, and the planned action does not stand in
     for asking Fabric whether one is there.
     """
 
-    consumer = alias_estate["consumer"]
+    consumer = shortcut_estate["consumer"]
     found = {
         ((entry.get("path") or "").strip("/"), entry.get("name")): entry.get(
             "target", {}
@@ -348,62 +348,64 @@ def test_the_alias_exists_as_a_onelake_shortcut(alias_estate, fabric_client):
 
     assert ("Tables/DWG", "PortableCustomer") in found
     target = found[("Tables/DWG", "PortableCustomer")]
-    assert target.get("itemId") == alias_estate["producer"].id
+    assert target.get("itemId") == shortcut_estate["producer"].id
     source_schema = (
-        alias_estate["resolver"].tables_root(ItemRef(alias_estate["producer"].name))
+        shortcut_estate["resolver"].tables_root(
+            ItemRef(shortcut_estate["producer"].name)
+        )
         / "DWG"
     )
     physical_source = next(
         entry.name
-        for entry in alias_estate["store"].list(source_schema)
+        for entry in shortcut_estate["store"].list(source_schema)
         if entry.name.casefold() == "customer"
     )
     assert target.get("path") == f"Tables/DWG/{physical_source}"
 
 
 @weaver_test(remote=True)
-def test_the_consumer_reads_the_producers_table_through_its_own_name(alias_estate):
-    """The claim an alias makes, checked where it has to hold.
+def test_the_consumer_reads_the_producers_table_through_its_own_name(shortcut_estate):
+    """The claim a shortcut makes, checked where it has to hold.
 
     Checked by *reading*, not by listing: Fabric creates a shortcut synchronously
     and discovers it asynchronously, so a name in the catalogue is not yet a name
     a statement can use.
     """
 
-    seen = alias_estate["payload"]["seen"]
+    seen = shortcut_estate["payload"]["seen"]
 
     # A read, not a listing, and it must succeed rather than merely return a
     # name: build creates structure and never data, so zero rows is the success
     # case and an exception is the failure this waits out.
-    assert seen["alias_rows"] == 0
+    assert seen["shortcut_rows"] == 0
 
 
 @weaver_test(remote=True)
-def test_the_producers_table_is_not_moved_or_duplicated(alias_estate):
-    """An alias adds a name in the consumer; the object stays where it is."""
+def test_the_producers_table_is_not_moved_or_duplicated(shortcut_estate):
+    """A shortcut adds a name in the consumer; the object stays where it is."""
 
-    seen = alias_estate["payload"]["seen"]
+    seen = shortcut_estate["payload"]["seen"]
 
     assert seen["produced"] is True
-    assert seen["alias_in_producer"] is False
+    assert seen["shortcut_in_producer"] is False
     assert seen["source_in_consumer"] is False
 
 
 @weaver_test(remote=True)
-def test_the_consumers_endpoint_reports_the_aliased_table(alias_estate):
+def test_the_consumers_endpoint_reports_the_shortcuted_table(shortcut_estate):
     """What the refresh is for: the SQL side sees what Spark just created."""
 
-    seen = alias_estate["payload"]["seen"]
+    seen = shortcut_estate["payload"]["seen"]
 
     assert "PortableCustomer" in seen["consumer_tables"]
 
 
 @weaver_test(remote=True)
-def test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real(alias_estate):
+def test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real(shortcut_estate):
     """That the refresh is *planned* is pure Python. That it found a real
     endpoint and did work is not."""
 
-    refresh = alias_estate["payload"]["refresh"]
+    refresh = shortcut_estate["payload"]["refresh"]
 
     assert refresh["status"] == "succeeded", refresh["error"]
     details = refresh["details"] or {}
@@ -413,13 +415,13 @@ def test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real(alias_estate
 
 @weaver_test(remote=True)
 def test_the_shortcut_survives_a_build_that_does_not_touch_it(
-    alias_estate, fabric_client
+    shortcut_estate, fabric_client
 ):
     """The one part of the incremental claim a workspace still has to answer.
 
-    That an unchanged alias over an unchanged source plans *no action* is decided
+    That an unchanged shortcut over an unchanged source plans *no action* is decided
     from signatures and build datetimes before any pointer is touched, and belongs in
-    `tests/targeted/test_alias_planning.py` — installing an estate to watch a
+    `tests/targeted/test_shortcut_planning_install.py`: installing an estate to watch a
     decision get made was the expensive habit this module is shedding.
 
     What remains here is the object itself: after the endpoint refresh ran
@@ -430,7 +432,7 @@ def test_the_shortcut_survives_a_build_that_does_not_touch_it(
 
     from weaver.fabric.shortcuts import list_shortcuts
 
-    shortcuts = list_shortcuts(alias_estate["consumer"], client=fabric_client)
+    shortcuts = list_shortcuts(shortcut_estate["consumer"], client=fabric_client)
 
     assert [shortcut.qualified for shortcut in shortcuts] == [
         "Tables/DWG/PortableCustomer"
@@ -440,15 +442,15 @@ def test_the_shortcut_survives_a_build_that_does_not_touch_it(
 # --- the Warehouse form -------------------------------------------------------
 
 
-WAREHOUSE_PRODUCER = "Lakehouse/AliasHouseProducer"
-WAREHOUSE_CONSUMER = "Warehouse/AliasReporting"
+WAREHOUSE_PRODUCER = "Lakehouse/ShortcutHouseProducer"
+WAREHOUSE_CONSUMER = "Warehouse/ShortcutReporting"
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
-def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
+def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
     fabric_workspace,
     fabric_client,
-    fabric_alias_lakehouses,
+    fabric_shortcut_lakehouses,
     fabric_staging_lakehouse,
     clean_disposable_warehouse,
     livy_session,
@@ -456,9 +458,9 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     session_catalogue_sql,
     tmp_path_factory,
 ):
-    """The other alias form, and the one that leans hardest on the endpoint.
+    """The other shortcut form, and the one that leans hardest on the endpoint.
 
-    A Warehouse cannot hold a OneLake shortcut, so aliasing a Lakehouse table
+    A Warehouse cannot hold a OneLake shortcut, so shortcutting a Lakehouse table
     into one is a T-SQL view over that Lakehouse's SQL analytics endpoint —
     which is exactly the metadata Fabric syncs *behind* a Delta mutation rather
     than with it. Nothing local has an endpoint, so nothing local can say
@@ -467,18 +469,18 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     One action, out of a real bundle, run on the session's own identity.
     """
 
-    from factories import alias_repository, item_bindings
+    from factories import item_bindings, shortcut_repository
 
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
     resolver = FabricResolver(fabric_workspace, client=fabric_client)
     store = OneLakeDfsClient()
-    producer = fabric_alias_lakehouses["warehouse_producer"]
+    producer = fabric_shortcut_lakehouses["warehouse_producer"]
     warehouse = clean_disposable_warehouse
 
-    root = tmp_path_factory.mktemp("wh-alias-repo")
-    alias_repository(
+    root = tmp_path_factory.mktemp("wh-shortcut-repo")
+    shortcut_repository(
         root,
         producer=WAREHOUSE_PRODUCER,
         consumer=WAREHOUSE_CONSUMER,
@@ -500,16 +502,16 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
         catalogue=FixtureCatalogue.from_repository(
             repository, item="Warehouse/_weaver"
         ),
-        name="whalias",
+        name="whshortcut",
         staging=fabric_staging_lakehouse.name,
         catalogue_sql=session_catalogue_sql,
         sql=warehouse.executor,
     )
-    batch, alias_action = action_of(bundle.plan, "create_alias")
+    batch, shortcut_action = action_of(bundle.plan, "create_shortcut")
     at = resolver.spark_destination(ItemRef(producer.name))
     source = at.qualify("DWG", "Customer")
 
-    # The alias lands in a schema the build's schema stage would have made. That
+    # The shortcut lands in a schema the build's schema stage would have made. That
     # stage is not the subject and is proven elsewhere, so it is arranged here
     # over TDS rather than run.
     warehouse.executor.execute_script(
@@ -522,8 +524,8 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     # on by `fabric_destination`'s `preserve_table_identifier_case`). Fabric folds
     # a table identifier to lower case at creation otherwise, and a Warehouse
     # collates case-sensitively — so a bare CREATE lands `customer` while the view
-    # below asks, correctly, for `Customer`, and the alias fails with "Invalid
-    # object name" as though the alias SQL were wrong. The conf is set inline
+    # below asks, correctly, for `Customer`, and the shortcut fails with "Invalid
+    # object name" as though the shortcut SQL were wrong. The conf is set inline
     # rather than through the helper because this body must not need the wheel.
     #
     # The DROP is deliberately *outside* that scope, so it resolves
@@ -552,13 +554,14 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     # stage is only emitted when the item's planned work mutated Delta (see
     # `weaver.build_bundle.endpoints.item_refresh_stage`). A plan that dropped it
     # would leave the Warehouse reading an endpoint that never caught up, and the
-    # alias below would fail with "Invalid object name" — a symptom that reads
-    # like broken alias SQL and is nothing of the kind. So the search says so
+    # shortcut below would fail with "Invalid object name" — a symptom that reads
+    # like broken shortcut SQL and is nothing of the kind. So the search says so
     # rather than falling through in silence.
     refreshes = [
         (refresh_batch, action)
         for _sequence, refresh_batch, action in bundle.plan.actions()
-        if action.kind == "refresh_sql_endpoint" and "AliasHouseProducer" in action.id
+        if action.kind == "refresh_sql_endpoint"
+        and "ShortcutHouseProducer" in action.id
     ]
     assert refreshes, (
         "the plan carries no SQL endpoint refresh for the producer, so the "
@@ -576,7 +579,7 @@ def test_a_warehouse_alias_is_a_view_over_the_bound_lakehouse(
     )
 
     result = run_from_here(
-        alias_action,
+        shortcut_action,
         bundle,
         workspace=fabric_workspace,
         store=store,

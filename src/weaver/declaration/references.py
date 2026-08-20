@@ -12,7 +12,7 @@ from typing import Iterable, Mapping
 
 from ..errors import DiscoveryError
 from .metadata import MetadataText, Reference
-from .model import RepositoryAlias, WeaverDocumentId, WeaverItemId
+from .model import RepositoryShortcut, WeaverDocumentId, WeaverItemId
 from .source import SourceDocument
 
 #: The note the catalogue gives Weaver's own surrogate column, which no author
@@ -46,7 +46,7 @@ def resolve_text(
     *,
     owner: SourceDocument,
     documents: Iterable[SourceDocument],
-    aliases: Iterable[RepositoryAlias] = (),
+    shortcuts: Iterable[RepositoryShortcut] = (),
 ) -> ResolvedText:
     """Follow one piece of metadata to its literal prose.
 
@@ -60,13 +60,15 @@ def resolve_text(
         return ResolvedText(literal=text.literal)
 
     index = _index(documents)
-    alias_index = {str(alias.destination): str(alias.source) for alias in aliases}
+    shortcut_index = {
+        str(shortcut.destination): str(shortcut.source) for shortcut in shortcuts
+    }
     written = str(text.reference)
     literal = _follow(
         text.reference,
         owner,
         index,
-        alias_index=alias_index,
+        shortcut_index=shortcut_index,
         seen=[(owner.node_id, written)],
     )
     return ResolvedText(literal=literal, reference=written)
@@ -89,12 +91,12 @@ def _follow(
     referrer: SourceDocument,
     index: Mapping[str, list[SourceDocument]],
     *,
-    alias_index: Mapping[str, str],
+    shortcut_index: Mapping[str, str],
     seen: list[tuple[str, str]],
 ) -> str | None:
     """The literal at the end of a chain, or None when it cannot be followed."""
 
-    target = _target(reference, referrer, index, alias_index=alias_index)
+    target = _target(reference, referrer, index, shortcut_index=shortcut_index)
     if target is None:
         if referrer.logical_id is not None:
             raise DiscoveryError(
@@ -126,7 +128,7 @@ def _follow(
         text.reference,
         target,
         index,
-        alias_index=alias_index,
+        shortcut_index=shortcut_index,
         seen=seen + [step],
     )
 
@@ -136,7 +138,7 @@ def _target(
     referrer: SourceDocument,
     index: Mapping[str, list[SourceDocument]],
     *,
-    alias_index: Mapping[str, str],
+    shortcut_index: Mapping[str, str],
 ) -> SourceDocument | None:
     """The object a documentation reference names, excluding the referrer itself.
 
@@ -157,7 +159,7 @@ def _target(
             item, reference.object_id, is_files=reference.is_files
         )
         key = str(identity)
-        key = alias_index.get(key, key)
+        key = shortcut_index.get(key, key)
         candidates = index.get(key, [])
         return candidates[0] if len(candidates) == 1 else None
 
@@ -181,35 +183,37 @@ def _target(
 def validate_repository_metadata(
     documents: Iterable[SourceDocument],
     *,
-    aliases: Iterable[RepositoryAlias] = (),
+    shortcuts: Iterable[RepositoryShortcut] = (),
 ) -> None:
     """Eagerly validate every logical metadata pointer in an item repository."""
 
     documents = tuple(documents)
-    aliases = tuple(aliases)
+    shortcuts = tuple(shortcuts)
     index = _index(documents)
-    alias_index = {str(alias.destination): str(alias.source) for alias in aliases}
+    shortcut_index = {
+        str(shortcut.destination): str(shortcut.source) for shortcut in shortcuts
+    }
     for source in documents:
         resolve_text(
             source.document.description,
             owner=source,
             documents=documents,
-            aliases=aliases,
+            shortcuts=shortcuts,
         )
         resolve_text(
             source.document.lineage,
             owner=source,
             documents=documents,
-            aliases=aliases,
+            shortcuts=shortcuts,
         )
         for _column, note in declared_column_notes(source):
-            resolve_text(note, owner=source, documents=documents, aliases=aliases)
+            resolve_text(note, owner=source, documents=documents, shortcuts=shortcuts)
         for foreign_key in source.document.foreign_keys:
             reference = foreign_key.logical_reference or Reference(
                 schema=foreign_key.reference.schema,
                 object=foreign_key.reference.object,
             )
-            target = _target(reference, source, index, alias_index=alias_index)
+            target = _target(reference, source, index, shortcut_index=shortcut_index)
             if target is None:
                 raise DiscoveryError(
                     f"{source.node_id}: foreign key target {reference.target} "

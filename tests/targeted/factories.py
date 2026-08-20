@@ -184,7 +184,7 @@ class FixtureCatalogue(Catalogue):
         """A catalogue certifying exactly these documents, with no row data.
 
         For tests whose subject is downstream of the Registry — selection,
-        alias staleness, planning — where the rows themselves are never read.
+        shortcut staleness, planning — where the rows themselves are never read.
         """
 
         return cls(
@@ -258,8 +258,8 @@ def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
     """The whole catalogue a successful build of this estate would have left.
 
     Where `FixtureCatalogue.from_repository` gives one item's Registry, this
-    gives the estate: every item's dictionaries, its dependencies, its aliases,
-    the alias destinations the build certified, *and* the Installation rows that
+    gives the estate: every item's dictionaries, its dependencies, its shortcuts,
+    the shortcut destinations the build certified, *and* the Installation rows that
     say which physical target each logical item is bound to.
 
     That last part is what load orchestration cannot do without. A build is
@@ -289,13 +289,14 @@ def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
             artefact.identity
             for artefact in item_runtime_artefacts(repository, item=item)
         )
-        # An alias destination is certified by the build that made it, and it has
-        # to be here: it is the name the consuming item reads through, so an
-        # estate without it has a dependency pointing at nothing.
+        # A shortcut destination is certified by the build that made it, and it
+        # has to be here: it is the name the consuming item reads through, so an
+        # estate without it has a dependency pointing at nothing. Every kind,
+        # because a physical shortcut is installed here exactly as a logical one.
         identities.update(
-            alias.destination
-            for alias in repository.aliases
-            if alias.destination.item == item
+            declaration.destination
+            for declaration in repository.shortcuts
+            if declaration.owner == item
         )
         target_kinds[item] = (
             "warehouse" if item.item_type == "Warehouse" else "lakehouse"
@@ -625,16 +626,35 @@ class {class_name}(Folder):
 '''
 
 
-def alias_declaration(**aliases: str) -> str:
-    """An item's ``alias.yml``: local name to the document it points at."""
+def logical_shortcuts(consumer: str, **references: str) -> tuple[str, str]:
+    """Where a consumer declares its logical shortcuts, and what it says.
 
-    lines = "\n".join(
-        f"  {local}: {source}" for local, source in sorted(aliases.items())
+    Returns the repository-relative path and the file's text, so a caller states
+    the shortcuts and not which surface the item type declares them on.
+    """
+
+    if consumer.startswith("Warehouse/"):
+        body = "\n".join(
+            f"  {consumer}/{local}: {source}"
+            for local, source in sorted(references.items())
+        )
+        return f"{consumer}/shortcuts.yml", f"logical:\n{body}\n"
+
+    declarations = "\n\n".join(
+        f"{local.replace('.', '__')} = Shortcut(\n"
+        f'    shortcut_type="table",\n'
+        f'    target_type="logical",\n'
+        f'    target="{source}",\n'
+        f")"
+        for local, source in sorted(references.items())
     )
-    return f"aliases:\n{lines}\n"
+    return (
+        f"{consumer}/shortcuts.py",
+        "from weaver import Shortcut\n\n" + declarations + "\n",
+    )
 
 
-def alias_repository(
+def shortcut_repository(
     root: Path,
     *,
     producer: str = "Lakehouse/Raw",
@@ -642,11 +662,11 @@ def alias_repository(
     schema: str = "DWG",
     consumer_view: bool = True,
 ):
-    """Two items, the second aliasing a table in the first.
+    """Two items, the second shortcutting a table in the first.
 
-    The smallest repository that can express a cross-item alias, which is the
-    one shape a single-item fixture cannot reach: an alias that did not cross
-    would not be one. The consumer also builds a view over the aliased name, so
+    The smallest repository that can express a cross-item shortcut, which is the
+    one shape a single-item fixture cannot reach: a shortcut that did not cross
+    would not be one. The consumer also builds a view over the shortcut name, so
     the ordering claim — the consumer's whole group waits for the producer's —
     has something to order.
     """
@@ -660,15 +680,15 @@ def alias_repository(
     _write(root, f"{consumer}/schemas/{schema}.yml", schema_document(schema))
     _write(
         root,
-        f"{consumer}/alias.yml",
-        alias_declaration(
-            **{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"}
+        *logical_shortcuts(
+            consumer,
+            **{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"},
         ),
     )
     if consumer_view:
-        # A Warehouse consumer reads its alias through T-SQL over the producer's
+        # A Warehouse consumer reads its shortcut through T-SQL over the producer's
         # SQL endpoint, so the view it builds is spelled differently — and for a
-        # probe that only wants the alias itself, no view is wanted at all.
+        # probe that only wants the shortcut itself, no view is wanted at all.
         if consumer.startswith("Warehouse/"):
             _write(
                 root,
@@ -774,6 +794,11 @@ def estate_inventories(repository, *, empty: bool = False):
 #: The two items of :func:`load_estate`, and the physical targets they bind to.
 LOAD_PRODUCER = "Lakehouse/Raw"
 LOAD_CONSUMER = "Warehouse/Reporting"
+#: The consumer's bound reference to the producer's table, as its own surface
+#: spells it.
+BOUND_CONSUMER_PATH, BOUND_CONSUMER_TEXT = logical_shortcuts(
+    LOAD_CONSUMER, **{"Sales.Order": f"{LOAD_PRODUCER}/Sales.Order"}
+)
 LOAD_PRODUCER_TARGET = "Raw_LH"
 LOAD_CONSUMER_TARGET = "Reporting_WH"
 
@@ -783,13 +808,13 @@ def load_estate(root: Path):
 
     .. code-block:: text
 
-        Raw Delta table  →  endpoint refresh  →  Warehouse alias consumer
+        Raw Delta table  →  endpoint refresh  →  Warehouse shortcut consumer
                                               →  downstream Warehouse table
 
     Every element earns its place. ``Sales.Order`` is the upstream Delta load;
     ``Sales.Daily`` proves a second dispatch kind and an ordinary within-item
     edge; ``Sales.Export`` proves the folder kind. On the Warehouse side the
-    alias is what makes the dependency *cross*, ``Sales.Summary`` is what
+    shortcut is what makes the dependency *cross*, ``Sales.Summary`` is what
     consumes it, and ``Sales.Live`` is a view — no load work of its own, but a
     conduit a downstream table still depends through.
 
@@ -808,9 +833,7 @@ def load_estate(root: Path):
         ),
         f"{LOAD_PRODUCER}/Files/Sales__Export.py": folder_document("Sales.Export"),
         f"{LOAD_CONSUMER}/schemas/Sales.yml": schema_document("Sales"),
-        f"{LOAD_CONSUMER}/alias.yml": alias_declaration(
-            **{"Sales.Order": f"{LOAD_PRODUCER}/Sales.Order"}
-        ),
+        BOUND_CONSUMER_PATH: BOUND_CONSUMER_TEXT,
         f"{LOAD_CONSUMER}/Sales.Summary.sql": warehouse_table(
             "Sales.Summary",
             select="select OrderId, Amount from [Sales].[Order]",

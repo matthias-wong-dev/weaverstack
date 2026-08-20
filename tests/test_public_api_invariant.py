@@ -40,6 +40,8 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "ValidationRunReport",
         "ValidationNodeReport",
         "WeaverObject",
+        # The authored shortcut declaration, imported by an item's shortcuts.py.
+        "Shortcut",
         "Folder",
         "Table",
         "SparkSqlTable",

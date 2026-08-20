@@ -1,7 +1,7 @@
 # A Lakehouse table, made addressable inside the Warehouse.
 #
 # The Warehouse cannot read Delta files; it reads the Lakehouse's SQL endpoint.
-# Declaring the alias is what lets a Warehouse object name a Lakehouse object
+# Declaring the shortcut is what lets a Warehouse object name a Lakehouse object
 # without either item knowing where the other is bound.
-aliases:
-  Reporting.OrderSummary: Lakehouse/Sales/Sales.OrderSummary
+logical:
+  Warehouse/Reporting/Reporting.OrderSummary: Lakehouse/Sales/Sales.OrderSummary

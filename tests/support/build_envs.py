@@ -30,9 +30,9 @@ class SesFixture:
     so that the Warehouse leaves must be omitted.
 
     ``lakehouse_names`` gives a named item its own Lakehouse instead of the
-    environment's single default. Only a cross-item alias needs it, and it needs
-    it essentially: an alias is one item's name for what another item owns, so
-    with both items in one Lakehouse there is nothing for the alias to cross.
+    environment's single default. Only a cross-item shortcut needs it, and it needs
+    it essentially: a shortcut is one item's name for what another item owns, so
+    with both items in one Lakehouse there is nothing for the shortcut to cross.
     """
 
     path: Path
@@ -78,7 +78,7 @@ class SesFixture:
 
         ``names`` maps whole item ids — ``{"Lakehouse/Sales": "Lakehouse/Stock"}``.
         Directories are renamed and every text file is rewritten, because a
-        document may name another item: an alias says which item it crosses to.
+        document may name another item: a shortcut says which item it crosses to.
         """
 
         copied = self.disposable(root)
@@ -133,7 +133,7 @@ LOAD_ORCHESTRATION_FIXTURE = SesFixture(
     _FIXTURES / "load-orchestration", ("Lakehouse/Sales",)
 )
 #: The canonical *physical* load scenario, and the one no single-target estate
-#: can hold: a Delta table published into a Warehouse through an alias, read
+#: can hold: a Delta table published into a Warehouse through a shortcut, read
 #: there across a SQL analytics endpoint, and consumed by a Warehouse table with
 #: a generated load procedure of its own. That crossing is where the
 #: endpoint-refresh barrier lives.
@@ -152,7 +152,7 @@ LOAD_ORCHESTRATION_WAREHOUSE_FIXTURE = SesFixture(
 #: logical item — the physical target is never identity — so two fixtures naming
 #: the same item describe the *same registered objects*, and building one makes
 #: the other's rows look rebuilt. ``BUILD_FIXTURE`` declared ``Lakehouse/Raw``,
-#: which is exactly what the alias fixtures declare; this one does not collide
+#: which is exactly what the shortcut fixtures declare; this one does not collide
 #: with anything.
 #:
 #: It carries one of each shape a Lakehouse build has to handle, so a single
@@ -165,7 +165,7 @@ LAKEHOUSE_JOURNEY_FIXTURE = SesFixture(
 #: The journey estate, plus the Warehouse that reports on it. Byte for byte the
 #: same Lakehouse as ``LAKEHOUSE_JOURNEY_FIXTURE``, so the Lakehouse claims are
 #: the same claims, and what the composition adds is a second physical side: an
-#: alias publishing a Delta table into the Warehouse, a table materialised from
+#: shortcut publishing a Delta table into the Warehouse, a table materialised from
 #: it, a view over that, and a Test that reconciles the two.
 #:
 #: The composition is what neither half can state alone. Each side is
@@ -185,11 +185,11 @@ DESKTOP_JOURNEY_NAMES = {
     "Lakehouse/Sales": "Lakehouse/Stock",
     "Warehouse/Reporting": "Warehouse/Analysis",
 }
-#: A producer and the consumer that aliases it, in two Lakehouses — the one
-#: thing a single destination cannot express, since an alias needs something to
+#: A producer and the consumer that shortcuts it, in two Lakehouses — the one
+#: thing a single destination cannot express, since a shortcut needs something to
 #: point across to.
-CROSS_ITEM_ALIAS_FIXTURE = SesFixture(
-    _FIXTURES / "cross-item-alias",
+CROSS_ITEM_SHORTCUT_FIXTURE = SesFixture(
+    _FIXTURES / "cross-item-shortcut",
     ("Lakehouse/Raw", "Lakehouse/Curated"),
     lakehouse_names={
         "Lakehouse/Raw": "Producer_LH",

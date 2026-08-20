@@ -94,7 +94,7 @@ Discovery reads and validates the complete repository without importing authored
 Python modules. It establishes:
 
 - canonical document and schema identities;
-- metadata, aliases, and item ownership;
+- metadata, shortcuts, and item ownership;
 - dependency edges and deterministic graph layers;
 - source hashes and effective build signatures;
 - explicit physical bindings for every selected item.
@@ -108,7 +108,7 @@ to calculate this closure.
 
 Discovery also derives an **item-level** dependency graph and its topological
 layers. One item depends on another when one of its documents resolves to a
-document that other item owns, or when it declares an alias whose source lives
+document that other item owns, or when it declares a shortcut whose target lives
 there. Within-item edges do not appear: the document graph already orders those.
 
 A circular item graph is a repository error, rejected while the whole declaration
@@ -118,11 +118,11 @@ correct build today. The parsed repository retains the resulting layers so every
 later stage consumes one authoritative ordering rather than reconstructing one.
 
 Cross-item dependencies are represented in both graphs, and impact crosses them.
-The document graph carries alias destinations as nodes, so the path from a
+The document graph carries shortcut destinations as nodes, so the path from a
 producer to another item's consumer is an ordinary one:
 
 ```text
-source document -> alias destination -> consumer document
+source document -> shortcut destination -> consumer document
 ```
 
 A changed object therefore expands to its descendants wherever they are, and the
@@ -131,92 +131,123 @@ deferred, but by construction rather than by rule: they are not selected, so
 nothing reaches them.
 
 **The graph is not a projection of the published dependency rows.** `_.Dependency`
-records what the author wrote and where it resolved to, so an alias edge names the
+records what the author wrote and where it resolved to, so a shortcut edge names the
 *source document* as its producer — that is the truth about lineage. The graph
-answers what must be built and in what order, and there the alias destination is a
+answers what must be built and in what order, and there the shortcut destination is a
 thing in its own right. The two are deliberately allowed to differ.
 
-A same-item alias is rejected at parse. An alias exists to cross an item boundary;
+A same-item shortcut is rejected at parse. A shortcut exists to cross an item boundary;
 within one item the document graph already orders producer before consumer, and
-the alias stage runs ahead of every document an item declares — so a same-item
-alias would be planned before its own source was built.
+the shortcut stage runs ahead of every document an item declares, so a same-item
+shortcut would be planned before its own source was built.
 
 Bindings are typed. A Lakehouse item binds to a Lakehouse and a Warehouse item
 binds to a Warehouse; Weaver never infers a destructive target from a bare
 display name. The package-owned `Warehouse/_weaver` item is bound implicitly to
 the mandatory catalogue Warehouse.
 
-## 4a. Aliases
+## 4a. Shortcuts
 
-An alias is a consuming item's own name for something another item produces. It
-is declared in that item's `alias.yml`, is owned by the destination item, and
-leaves the source as the canonical producer.
+A shortcut is a consuming item's own name for something else: another Weaver
+item's document, or a physical Fabric item Weaver does not manage. A Lakehouse
+declares them in `shortcuts.py` and a Warehouse in `shortcuts.yml`. Either way the declaration is owned by the destination item, and
+the source stays the canonical producer.
 
-What an alias becomes is a decision about the destination's target kind, and is
-therefore made by the planner:
+What a declaration becomes is a decision about the destination's target kind, and
+is therefore made by the planner:
 
 | Destination | Materialisation |
 |---|---|
-| Lakehouse | a `create_alias` action — a OneLake shortcut |
-| Warehouse | a frozen `CREATE OR ALTER VIEW` over the bound source's three-part name |
+| Lakehouse | a OneLake shortcut, made over REST |
+| Warehouse | a frozen `CREATE OR ALTER VIEW` over the source's three-part name |
 
-Only the Warehouse form is spelled out in SQL, because there the statement *is*
-the semantic decision. A shortcut and a link are two transports for one frozen
-decision — this destination, that source — resolved at install time the same way a
-schema's `LOCATION` is.
+Only the Warehouse form is spelled out in SQL, because there the statement is the
+semantic decision. A shortcut carries one frozen decision, this destination and
+that source, resolved at install time the same way a schema's `LOCATION` is.
 
-An alias whose source item is not bound, or whose destination and source disagree
-about the `Files`/table namespace, has no physical form under the current
-bindings. It is omitted from the plan with the reason `alias_unsupported`. That
-decision belongs to the planner; the installer may only run an alias action
-already frozen for it.
+`target_type` decides where the source address comes from. A **logical** declaration names
+a Weaver document, so the planner freezes the target's id and the installer
+resolves it through its own environment, exactly as it resolves the destination. A
+**physical** declaration names the Fabric item itself, possibly in another
+workspace, which is not a target of this build. Its workspace id, item id and
+case-exact source path are resolved while the estate is readable, before the
+bundle is generated, and carried in the payload. Fabric validates a shortcut's
+target when it is created and its paths are case-sensitive, so an address guessed
+at install time fails rather than resolving to something else.
 
-**An omitted alias is not certified.** A `_.Registry` row means the object's work
-succeeded, and for an omitted alias no work was planned at all — so the row is
-withheld. Only for one this build was also asked to build: an alias already
+A `shortcut_type` decides both paths:
+
+| Type | Destination | Source |
+|---|---|---|
+| `table` | `Tables/<schema>/<name>` | a table directory |
+| `schema` | `Tables/<schema>` | a schema directory |
+| `folder` | `Files/<schema>/<name>` | a path under `Files` |
+
+**Weaver owns the shortcut root and nothing reachable through it.** OneLake makes
+a shortcut a read-write window into the item it points at: writing beneath one
+writes into that item, in that item's workspace, and deleting beneath one deletes
+there. So nothing is ever planned inside a schema or folder shortcut, a repository
+that declares something there is refused during discovery, and a wipe removes
+shortcuts through the workspace before it sweeps storage. Removing the shortcut
+root is safe, and it is the only thing Weaver does to one.
+
+A declaration whose logical target item is not bound, whose destination and target
+disagree about the `Files`/table namespace, or whose direct target did not resolve
+has no physical form under the current bindings. It is omitted from the plan with
+the reason `shortcut_unsupported`. That decision belongs to the planner; the
+installer may only run an action already frozen for it.
+
+**An omitted shortcut is not certified.** A `_.Registry` row means the object's work
+succeeded, and for an omitted shortcut no work was planned at all, so the row is
+withheld. Only for one this build was also asked to build: a shortcut already
 installed by an earlier build, whose source item simply is not bound this time,
 is still physically there and stays certified.
 
-Alias destinations join the prune keep-set — *all* of them, not only the ones a
+Shortcut destinations join the prune keep-set, *all* of them and not only the ones a
 build selected. They are desired state in the consuming item exactly as a declared
 document is, merely produced elsewhere, so a build must not prune the shortcut or
-view it is about to create, nor the one it just decided to keep. An alias holds
+view it is about to create, nor the one it just decided to keep. A shortcut holds
 no data, so materialisation replaces rather than colliding: a build has to be able
 to run twice.
 
-**An alias is an ordinary registered object, built incrementally.** It gets a
-`_.Registry` row like any other, typed as what it physically is — a `folder` under
-`Files`, a `view` in a Warehouse, a `table` in a Lakehouse. There is no `shortcut`
-type: to every reader of the catalogue a Lakehouse alias *is* a table, and that it
-is implemented as a shortcut is execution detail. Its alias-ness lives in `_.Alias`
-and nowhere else.
+**A shortcut is an ordinary registered object, built incrementally.** It gets a
+`_.Registry` row like any other, typed as what it physically is: a `folder` under
+`Files`, a `view` in a Warehouse, a `table` in a Lakehouse, and `schema` for a
+schema shortcut. There is no `shortcut` object *type*, because to a reader of the
+catalogue a Lakehouse table shortcut is a table. What it is for is the object
+*role*, which is `shortcut`, and where it points is `_.Shortcut`.
+
+A schema shortcut is registered as the schema it presents and nothing inside it
+is. Those objects belong to the item the shortcut points at, they can change
+without a build, and enumerating them to decide what to remove would be deciding
+about another item's estate.
 
 Its signature is its declaration — this destination, that source — and nothing
-about the source's content. A reloaded source does not redefine an alias, and
+about the source's content. A reloaded source does not redefine a shortcut, and
 signing it with the source's hash would replace every downstream shortcut whenever
 a table was rebuilt.
 
-An alias is therefore rebuilt only when it is new, when its declaration changed,
+A shortcut is therefore rebuilt only when it is new, when its declaration changed,
 when its destination is missing from the target, or when its source has been
-rebuilt since the alias was last published. That last one cannot come from a
+rebuilt since the shortcut was last published. That last one cannot come from a
 signature — see [§7a](#7a-cross-item-freshness).
 
-It is materialised by the alias executor, never by the generic drop-and-build
+It is materialised by the shortcut executor, never by the generic drop-and-build
 pipeline: it holds no data, so it is replaced in place rather than dropped and
 recreated, and there is no source document for a build stage to render.
 
-**One action materialises all of an item's aliases.** The cost of an alias is not
+**One action materialises all of an item's shortcuts.** The cost of a shortcut is not
 the create — that is about a second — but the wait after it, so N actions running
 serially would pay N waits where one action that creates everything and then waits
 pays roughly one. For a Warehouse the statements go in an ordered array run through
 `tsql_batch`, one batch each, because T-SQL requires `CREATE VIEW` to be the first
 statement in its batch and will reject two of them sharing one.
 
-**An alias action is not finished until the alias can be read.** Fabric creates a
+**A shortcut action is not finished until the shortcut can be read.** Fabric creates a
 shortcut synchronously and discovers it asynchronously, and in between the
 Lakehouse reports the name as neither a view nor a table. The action therefore
-polls a real read of the alias before returning. Without that wait the barrier the
-plan puts around the alias means nothing, and the failure surfaces in the next
+polls a real read of the shortcut before returning. Without that wait the barrier the
+plan puts around the shortcut means nothing, and the failure surfaces in the next
 item's DDL instead — which is where it did surface, in Fabric, before the wait
 existed. Measured against a real workspace, the shortcut exists in about a second
 and becomes readable 6–31 seconds later.
@@ -276,21 +307,21 @@ helper closure extends it as described in section 4.
 
 Removed documents are not incoming impact candidates. They are handled by prune.
 
-An alias destination is compared the same way, against the signature of its own
-declaration. See [§4a](#4a-aliases).
+An shortcut destination is compared the same way, against the signature of its own
+declaration. See [§4a](#4a-shortcuts).
 
 ## 7a. Cross-item freshness
 
 A signature says whether a *declaration* changed. It cannot say whether an object
 was **rebuilt** — reloading a table changes no declaration — and that is exactly
-what a consumer in another item needs to know about the thing behind its alias.
+what a consumer in another item needs to know about the thing behind its shortcut.
 
 So every `_.Registry` row carries the build that published it. Registry
 publication is Weaver's completion boundary — a row is written last, after
 everything the object needed succeeded — so "when was this published" is "when was
 this last built", and two rows can be ordered against each other.
 
-An alias whose source is dated *later* than the alias itself is stale: its
+A shortcut whose source is dated *later* than the shortcut itself is stale: its
 consumers were built against something that has since moved on. It joins the
 ordinary changed roots, and its consumers are picked up by the ordinary descendant
 walk.
@@ -300,7 +331,7 @@ starts from a node whose declaration changed, and a producer rebuilt by some
 earlier build is, to this one, entirely unchanged.
 
 **Deferral falls out of it.** Build only the producer and nothing about the
-consumer is touched: its alias keeps its old build_datetime and stays stale until the
+consumer is touched: its shortcut keeps its old build_datetime and stays stale until the
 consumer is next built, when the comparison selects it.
 
 The build_datetime is set on **insert and never on update**. Every rebuild reaches the
@@ -312,7 +343,7 @@ It is written as an `{{build_datetime}}` token resolved once per installation, n
 literal frozen at generation time and not `current_timestamp()`. A literal would
 give the same repository different payload bytes every run and destroy bundle
 identity; a clock call is read per statement, and one build publishes Registry
-rows in several statements, so an alias and its source could be dated apart and
+rows in several statements, so a shortcut and its source could be dated apart and
 then order against each other. A row written before build datetimes existed reads as null,
 which orders as older than any build_datetime and is not compared against another null.
 
@@ -323,9 +354,9 @@ node through its transitive descendants:
 
 ```mermaid
 flowchart TD
-    R["Incoming documents and alias destinations"]
+    R["Incoming documents and shortcut destinations"]
     C["Reconciled Registry"]
-    E["Stale aliases, by build build_datetime"]
+    E["Stale shortcuts, by build build_datetime"]
 
     R --> I["determine_impact"]
     C --> I
@@ -344,14 +375,14 @@ flowchart TD
     N --> BUILD["Selected for build"]
     DROP --> BUILD
 
-    BUILD --> AL["Alias destinations: alias executor"]
+    BUILD --> AL["Shortcut destinations: shortcut executor"]
     BUILD --> DOC["Documents: drop and build stages"]
 ```
 
 The inspectable `Impact` records `new`, `changed`, and `impacted_descendants`.
 Unchanged nodes are implicit rather than copied into the manifest.
 
-An alias destination has no source document and therefore no `prohibit_rebuild`:
+An shortcut destination has no source document and therefore no `prohibit_rebuild`:
 nothing an author writes can forbid replacing a pointer, because replacing one
 destroys nothing.
 `impacted` is a convenience view over changed existing roots plus affected
@@ -418,9 +449,9 @@ For a name a document declares, prune compares the name rather than the name and
 the kind. An object declared as a table and still held as a view is a kind
 change, and the managed drop below removes it by its installed type.
 
-Alias destinations are compared by kind, because no managed drop covers one. A
-Warehouse alias is remade by `CREATE OR ALTER VIEW`, which cannot replace a
-table, so a table standing at the alias's name is prune's to remove.
+Shortcut destinations are compared by kind, because no managed drop covers one. A
+Warehouse shortcut is remade by `CREATE OR ALTER VIEW`, which cannot replace a
+table, so a table standing at the shortcut's name is prune's to remove.
 
 A managed drop removes a desired, installed object only because incremental
 selection chose it for rebuild. Its catalogue claims are deleted first, then its
@@ -606,13 +637,13 @@ catalogue claim removal, when required
 
 item layer 0
     producer item A
-        prune, managed drops, schemas, aliases, documents, endpoint refresh, load
+        prune, managed drops, schemas, shortcuts, documents, endpoint refresh, load
     independent producer item B
-        prune, managed drops, schemas, aliases, documents, endpoint refresh, load
+        prune, managed drops, schemas, shortcuts, documents, endpoint refresh, load
 
 item layer 1
     consumer item C
-        prune, managed drops, schemas, aliases, documents, endpoint refresh, load
+        prune, managed drops, schemas, shortcuts, documents, endpoint refresh, load
 
 final batched catalogue publication
 ```
@@ -623,8 +654,8 @@ do. That is the one invariant multi-item build rests on: no item in a later laye
 begins before every item it reaches into has completed, endpoint included.
 
 Within an item, prune and managed drops lead because they are the destructive
-reconciliation of what is already there. Schemas precede aliases so a
-Warehouse-backed alias has a schema to be created in, and aliases precede the
+reconciliation of what is already there. Schemas precede shortcuts so a
+Warehouse-backed shortcut has a schema to be created in, and shortcuts precede the
 item's own documents so those are built against a namespace that already holds
 what the item imports. The load layer closes the item: its artefacts depend on
 the item's structure being finished, which is expressed by the layer being last
@@ -692,11 +723,11 @@ Weaver fails before mutation where possible:
 - invalid metadata, identity, helper imports, and document or item dependency
   cycles fail parsing;
 - missing bindings or inventories fail planning;
-- an alias the current bindings give no physical form is omitted at planning, with
+- a shortcut the current bindings give no physical form is omitted at planning, with
   its reason recorded;
 - payload tampering fails bundle validation;
 - unexpected create and managed-drop collisions fail execution;
-- an alias that never becomes readable, or an endpoint refresh that settles as
+- a shortcut that never becomes readable, or an endpoint refresh that settles as
   failed, fails its own action rather than the next item's;
 - an action failure stops later dependency barriers and final certification.
 

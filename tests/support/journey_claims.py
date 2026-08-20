@@ -785,9 +785,9 @@ def drive(journey):
 # --- the same estate, with the Warehouse that reports on it -------------------
 #
 # `cross-item-journey` is `lakehouse-journey` byte for byte, plus a Warehouse
-# item that aliases into it. So every claim above is the same claim, and what is
+# item that shortcuts into it. So every claim above is the same claim, and what is
 # added here is the composition: a Delta table published into a Warehouse
-# through an alias, materialised there, and reconciled against its source.
+# through a shortcut, materialised there, and reconciled against its source.
 #
 # A Warehouse, so a real workspace is the only place this can run.
 
@@ -855,7 +855,7 @@ def _warehouse_objects(env) -> dict:
 def _assert_warehouse_installed(env, step) -> None:
     """The reporting side exists, and it was built after what it reads.
 
-    The order is the claim. A Warehouse object reading an aliased Delta table
+    The order is the claim. A Warehouse object reading an shortcut Delta table
     reaches it over the SQL analytics endpoint, which is eventually consistent
     with the Lakehouse — so building the Warehouse before the refresh would read
     a table the endpoint has not seen, and each side would be self-consistent
@@ -874,7 +874,7 @@ def _assert_warehouse_installed(env, step) -> None:
     assert (
         when("Lakehouse--Sales--DWG.Customer")
         < when("refresh-sql-endpoint-Lakehouse--Sales")
-        < when("aliases-Warehouse--Reporting")
+        < when("shortcuts-Warehouse--Reporting")
         < when("Warehouse--Reporting--Rpt.CustomerReport")
         < when("Warehouse--Reporting--Rpt.ActiveCustomerReport")
     )
@@ -895,14 +895,14 @@ def _assert_warehouse_installed(env, step) -> None:
 
 
 def _assert_warehouse_loaded(env, seen) -> None:
-    """The report holds what the Lakehouse produced, read through the alias."""
+    """The report holds what the Lakehouse produced, read through the shortcut."""
 
     dry, real = seen["dry"], seen["real"]
     assert dry["status"] == "succeeded", _why(dry)
     assert real["status"] == "succeeded", _why(real)
 
     # Both sides ran, in one run, ordered by the crossing between them: the
-    # report cannot be materialised before the table it reads through the alias.
+    # report cannot be materialised before the table it reads through the shortcut.
     order = [node_id.rsplit("/", 1)[-1] for node_id in real["order"]]
     assert {"DWG.Customer", "Rpt.CustomerReport"} <= set(order), order
     assert order.index("DWG.Customer") < order.index("Rpt.CustomerReport"), order

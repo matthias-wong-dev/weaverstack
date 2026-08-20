@@ -212,7 +212,7 @@ performing it means:
 write_file            → OneLake        (the deployed Python tree; the bulk)
 build_procedure       → TDS
 refresh_sql_endpoint  → REST
-create_schema, build_table, build_view, alias
+create_schema, build_table, build_view, shortcut
                       → Session Spark SQL
 ```
 
@@ -303,7 +303,7 @@ A capability that behaves differently in the two execution positions requires
 coverage in both.
 
 Planning tests construct a `BuildState` and assert a `BuildBundle`. Fabric tests
-cover behaviour that requires a real estate, including alias readability, bundle
+cover behaviour that requires a real estate, including shortcut readability, bundle
 ordering, and endpoint convergence.
 
 Operational constraints:

@@ -195,53 +195,53 @@ def test_no_publication_epoch_is_stamped(repository):
 
 
 @weaver_test()
-def test_an_alias_is_not_certified_until_it_is_bound(tmp_path):
-    """The logical catalogue declares the alias and certifies nothing about it.
+def test_an_shortcut_is_not_certified_until_it_is_bound(tmp_path):
+    """The logical catalogue declares the shortcut and certifies nothing about it.
 
-    An alias is a view in a Warehouse and a table in a Lakehouse. The Alias row —
+    A shortcut is a view in a Warehouse and a table in a Lakehouse. The Shortcut row —
     this name points at that object — is a declaration and belongs to the source.
     The Registry row says a physical object exists *and what it is*, which cannot
     be answered without knowing what it was bound to. So it is not answered.
     """
 
-    from factories import alias_repository
+    from factories import shortcut_repository
 
-    from weaver.catalogue.tables import ALIAS
+    from weaver.catalogue.tables import SHORTCUT
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     consumer = item_id("Lakehouse/Curated")
-    alias = document_id("Lakehouse/Curated/DWG.PortableCustomer")
+    shortcut = document_id("Lakehouse/Curated/DWG.PortableCustomer")
 
     logical = Catalogue.from_repository(repository)
 
-    assert logical.rows[consumer][ALIAS.name], "the declaration is source"
-    assert alias not in logical.registered, "the certification is not"
+    assert logical.rows[consumer][SHORTCUT.name], "the declaration is source"
+    assert shortcut not in logical.registered, "the certification is not"
 
 
 @weaver_test()
-def test_binding_certifies_the_alias_as_what_it_physically_is(tmp_path):
-    from factories import alias_repository
+def test_binding_certifies_the_shortcut_as_what_it_physically_is(tmp_path):
+    from factories import shortcut_repository
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
-    alias = document_id("Lakehouse/Curated/DWG.PortableCustomer")
+    shortcut = document_id("Lakehouse/Curated/DWG.PortableCustomer")
     kinds = {producer: "lakehouse", consumer: "lakehouse"}
 
     logical = Catalogue.from_repository(repository)
     declared = set(logical.registered) | {
-        alias.destination for alias in repository.aliases
+        shortcut.destination for shortcut in repository.logical_shortcuts
     }
     as_lakehouse = for_targets(logical, repository, declared, kinds)
     as_warehouse = for_targets(
         logical, repository, declared, {**kinds, consumer: "warehouse"}
     )
 
-    assert as_lakehouse.registered[alias].object_type == "table"
-    assert as_warehouse.registered[alias].object_type == "view"
+    assert as_lakehouse.registered[shortcut].object_type == "table"
+    assert as_warehouse.registered[shortcut].object_type == "view"
     # Same declaration either way: only the physical form moved.
     assert (
-        as_lakehouse.registered[alias].signature
-        == as_warehouse.registered[alias].signature
+        as_lakehouse.registered[shortcut].signature
+        == as_warehouse.registered[shortcut].signature
     )
 
 
@@ -249,22 +249,22 @@ def test_binding_certifies_the_alias_as_what_it_physically_is(tmp_path):
 def test_an_item_that_is_not_bound_is_not_published(tmp_path):
     """Binding and scoping are one decision, which is what removes the hazard.
 
-    An alias certified against a *guessed* kind would record a Warehouse alias as
+    A shortcut certified against a *guessed* kind would record a Warehouse shortcut as
     a table — wrong, quiet, and in the authoritative record. There is no path to
     that here: naming the item is how it gets published, and naming it means
     stating its kind. An item left out is simply out of scope.
     """
 
-    from factories import alias_repository
+    from factories import shortcut_repository
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
 
     logical = Catalogue.from_repository(repository)
     published = for_targets(
         logical,
         repository,
-        {alias.destination for alias in repository.aliases},
+        {shortcut.destination for shortcut in repository.logical_shortcuts},
         {producer: "lakehouse"},
     )
 
@@ -284,9 +284,9 @@ def test_several_items_project_into_one_catalogue(tmp_path):
     that invites are exactly what the item scope exists to prevent.
     """
 
-    from factories import alias_repository
+    from factories import shortcut_repository
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
 
     catalogue = retaining(
@@ -311,9 +311,9 @@ def test_an_items_rows_carry_its_own_scope(tmp_path):
     item's installation.
     """
 
-    from factories import alias_repository
+    from factories import shortcut_repository
 
-    repository = alias_repository(tmp_path / "repo")
+    repository = shortcut_repository(tmp_path / "repo")
     consumer = item_id("Lakehouse/Curated")
 
     catalogue = retaining(
@@ -351,8 +351,10 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
     repository = full_estate(tmp_path / "repo")
     catalogue = Catalogue.from_repository(repository)
 
-    assert {document.object_type for document in catalogue.registered.values()} == set(
-        OBJECT_TYPES
+    # Every type but ``schema``, which only a schema shortcut carries and which
+    # this estate declares none of.
+    assert {document.object_type for document in catalogue.registered.values()} == (
+        set(OBJECT_TYPES) - {"schema"}
     )
 
 

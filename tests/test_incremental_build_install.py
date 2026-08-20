@@ -19,7 +19,7 @@ from weaver.build_bundle import (
     determine_impact,
     generate_item_build_bundle,
 )
-from weaver.build_bundle.incremental import select_build, stale_alias_destinations
+from weaver.build_bundle.incremental import select_build, stale_shortcut_destinations
 from weaver.build_bundle.models import (
     BUILD_FOLDER,
     BUILD_TABLE,
@@ -33,8 +33,8 @@ from weaver.build_bundle.models import (
 )
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue.projection import (
-    project_alias_registry,
     project_item_catalogue,
+    project_shortcut_registry,
 )
 from weaver.catalogue.state import (
     Catalogue,
@@ -58,7 +58,7 @@ def _repository(root):
 def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
     """One item's catalogue as a completed build would have left it.
 
-    Every kind of registered object is included — documents, the item's alias
+    Every kind of registered object is included — documents, the item's shortcut
     destinations and its load artefacts — because that is what a real
     installation holds, and selection reads them all the same way.
     """
@@ -70,20 +70,20 @@ def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
         identity for identity in repository.source_documents if identity.item == item
     ]
     retained.extend(
-        alias.destination
-        for alias in repository.aliases
-        if alias.destination.item == item
+        shortcut.destination
+        for shortcut in repository.logical_shortcuts
+        if shortcut.destination.item == item
     )
     retained.extend(
         artefact.identity for artefact in item_load_artefacts(repository, item=item)
     )
     projection = project_item_catalogue(repository, item=item, retained=retained)
-    # Alias certification is a binding-time step now, so it is composed here to
+    # Shortcut certification is a binding-time step now, so it is composed here to
     # give these tests the same complete catalogue they asserted against before.
     projected = dict(projection.rows)
     projected[REGISTRY.name] = tuple(
         projected.get(REGISTRY.name, ())
-    ) + project_alias_registry(
+    ) + project_shortcut_registry(
         repository,
         item=item,
         retained=retained,
@@ -199,11 +199,11 @@ def _stale(rows, item_text: str, object_name: str) -> None:
 
 @weaver_test()
 def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
-    """Impact crosses the alias, because the alias is in the graph.
+    """Impact crosses the shortcut, because the shortcut is in the graph.
 
     The consumer is in another item and reaches its producer only through
     ``Sales.PortableCustomer``. Nothing here special-cases that: the walk is the
-    ordinary descendant walk, and the alias is an ordinary hop on it.
+    ordinary descendant walk, and the shortcut is an ordinary hop on it.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
@@ -335,7 +335,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
     assert repository.source_documents[existing].effective_signature in registry_payload
 
 
-ALIAS_DESTINATION = "Warehouse/Reporting/Sales.PortableCustomer"
+SHORTCUT_DESTINATION = "Warehouse/Reporting/Sales.PortableCustomer"
 
 #: Two publication instants, in order. Datetimes because that is what Spark
 #: hands back for a timestamp column.
@@ -343,8 +343,8 @@ EARLIER = datetime(2026, 7, 30, 9, 0, 0)
 LATER = datetime(2026, 7, 31, 9, 0, 0)
 
 
-def _alias_bindings():
-    """The producer and the consumer that aliases it, both bound."""
+def _shortcut_bindings():
+    """The producer and the consumer that shortcuts it, both bound."""
 
     from weaver.build_bundle import WarehouseBinding
 
@@ -362,16 +362,16 @@ def _alias_bindings():
     )
 
 
-def _alias_inventories(repository, *, alias_installed=True):
-    """Both targets as they stand, with the alias view present or absent.
+def _shortcut_inventories(repository, *, shortcut_installed=True):
+    """Both targets as they stand, with the shortcut view present or absent.
 
-    The alias destination is an ordinary view in the Warehouse's inventory —
+    The shortcut destination is an ordinary view in the Warehouse's inventory —
     which is exactly the point of registering it as one — so leaving it out is
-    how "somebody deleted the alias" is expressed.
+    how "somebody deleted the shortcut" is expressed.
     """
 
     inventories = {}
-    for binding in _alias_bindings().entries:
+    for binding in _shortcut_bindings().entries:
         target = binding.to_bound_target()
         item = binding.item
         objects = [
@@ -381,7 +381,7 @@ def _alias_inventories(repository, *, alias_installed=True):
         ]
         views = list(objects) if target.kind == "warehouse" else []
         tables = [] if target.kind == "warehouse" else list(objects)
-        if alias_installed and item == WeaverItemId.parse("Warehouse/Reporting"):
+        if shortcut_installed and item == WeaverItemId.parse("Warehouse/Reporting"):
             views.append("Sales.PortableCustomer")
         inventories[item] = TargetInventory(
             target_id=target.id,
@@ -394,21 +394,23 @@ def _alias_inventories(repository, *, alias_installed=True):
     return inventories
 
 
-def _alias_catalogue(repository):
+def _shortcut_catalogue(repository):
     rows = {}
     for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
         rows.update(_catalogue(repository, item_text).rows)
     return rows
 
 
-def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bundle"):
+def _shortcut_bundle(
+    tmp_path, repository, *, rows, shortcut_installed=True, name="bundle"
+):
     return generate_item_build_bundle(
         repository,
-        bindings=_alias_bindings(),
+        bindings=_shortcut_bindings(),
         output=Location(str(tmp_path / name)),
         store=FilesystemStore(),
-        target_inventories=_alias_inventories(
-            repository, alias_installed=alias_installed
+        target_inventories=_shortcut_inventories(
+            repository, shortcut_installed=shortcut_installed
         ),
         catalogue=Catalogue(rows),
         catalogue_binding=WarehouseBinding(
@@ -417,84 +419,86 @@ def _alias_bundle(tmp_path, repository, *, rows, alias_installed=True, name="bun
     )
 
 
-def _alias_actions(bundle):
+def _shortcut_actions(bundle):
     return [
         action
         for _sequence, _batch, action in bundle.plan.actions()
-        if action.kind == "create_alias"
+        if action.kind == "create_shortcut"
     ]
 
 
 @weaver_test()
-def test_an_unchanged_alias_is_not_replaced(tmp_path):
+def test_an_unchanged_shortcut_is_not_replaced(tmp_path):
     """The behaviour this whole change exists for.
 
-    An alias used to be remade on every build. Now its declaration is unchanged,
+    A shortcut used to be remade on every build. Now its declaration is unchanged,
     its destination is present and its source was not rebuilt — so there is
     nothing to do, and a shortcut that takes seconds to become readable is not
     torn down and remade for nothing.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    bundle = _alias_bundle(tmp_path, repository, rows=_alias_catalogue(repository))
+    bundle = _shortcut_bundle(
+        tmp_path, repository, rows=_shortcut_catalogue(repository)
+    )
 
-    assert _alias_actions(bundle) == []
+    assert _shortcut_actions(bundle) == []
 
 
 @weaver_test()
-def test_a_repointed_alias_is_replaced(tmp_path):
-    """The declaration *is* the alias, so changing what it points at changes it."""
+def test_a_repointed_shortcut_is_replaced(tmp_path):
+    """The declaration *is* the shortcut, so changing what it points at changes it."""
 
     root = _dependency_estate(tmp_path)
     _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
-    installed = _alias_catalogue(_repository(root))
+    installed = _shortcut_catalogue(_repository(root))
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
     )
     repository = _repository(root)
-    bundle = _alias_bundle(tmp_path, repository, rows=installed)
+    bundle = _shortcut_bundle(tmp_path, repository, rows=installed)
 
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
 
 
 @weaver_test()
-def test_an_alias_whose_destination_is_gone_is_remade(tmp_path):
+def test_an_shortcut_whose_destination_is_gone_is_remade(tmp_path):
     """Registered but not there: reconciliation drops the row, so it reads as new.
 
-    Nothing alias-specific does this — the alias is registered as a view, and the
+    Nothing shortcut-specific does this — the shortcut is registered as a view, and the
     Warehouse inventory simply does not hold one.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
     state = Catalogue(
-        rows=_alias_catalogue(repository),
+        rows=_shortcut_catalogue(repository),
         present_tables=frozenset({REGISTRY.name}),
     )
     reconciled = reconcile_catalogue_state(
-        state, inventories=_alias_inventories(repository, alias_installed=False)
+        state, inventories=_shortcut_inventories(repository, shortcut_installed=False)
     )
 
-    assert ALIAS_DESTINATION in reconciled.stale_objects
+    assert SHORTCUT_DESTINATION in reconciled.stale_objects
 
-    bundle = _alias_bundle(
-        tmp_path, repository, rows=reconciled.catalogue.rows, alias_installed=False
+    bundle = _shortcut_bundle(
+        tmp_path, repository, rows=reconciled.catalogue.rows, shortcut_installed=False
     )
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
 
 
 @weaver_test()
-def test_an_alias_destination_installed_as_a_table_is_pruned(tmp_path):
+def test_an_shortcut_destination_installed_as_a_table_is_pruned(tmp_path):
     """The keep-set wants this name, and prune removes it anyway.
 
-    A Warehouse alias is remade by `create or alter view`, which cannot replace
-    a table, and no managed drop covers an alias destination. So a table
-    standing at the alias's name has to go before the alias stage runs.
+    A Warehouse shortcut is remade by `create or alter view`, which cannot replace
+    a table, and no managed drop covers a shortcut destination. So a table
+    standing at the shortcut's name has to go before the shortcut stage runs.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    inventories = _alias_inventories(repository, alias_installed=False)
+    inventories = _shortcut_inventories(repository, shortcut_installed=False)
     reporting = WeaverItemId.parse("Warehouse/Reporting")
     inventories[reporting] = replace(
         inventories[reporting],
@@ -502,14 +506,14 @@ def test_an_alias_destination_installed_as_a_table_is_pruned(tmp_path):
     )
     reconciled = reconcile_catalogue_state(
         Catalogue(
-            rows=_alias_catalogue(repository),
+            rows=_shortcut_catalogue(repository),
             present_tables=frozenset({REGISTRY.name}),
         ),
         inventories=inventories,
     )
     bundle = generate_item_build_bundle(
         repository,
-        bindings=_alias_bindings(),
+        bindings=_shortcut_bindings(),
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
         target_inventories=inventories,
@@ -525,12 +529,12 @@ def test_an_alias_destination_installed_as_a_table_is_pruned(tmp_path):
     ]
 
     assert len(pruned) == 1
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
 
 
 @weaver_test()
-def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
-    """Replacing an alias is the alias executor's job, not a drop and a build.
+def test_a_shortcut_is_never_dropped_by_the_document_pipeline(tmp_path):
+    """Replacing a shortcut is the shortcut executor's job, not a drop and a build.
 
     It holds no data, so it is remade in place; routing it through the generic
     drop would emit a ``drop view`` for a shortcut and ask the build pipeline for
@@ -539,20 +543,22 @@ def test_an_alias_is_never_dropped_by_the_document_pipeline(tmp_path):
 
     root = _dependency_estate(tmp_path)
     _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
-    installed = _alias_catalogue(_repository(root))
+    installed = _shortcut_catalogue(_repository(root))
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        "aliases:\n  Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: "
+        "Lakehouse/Curated/Sales.Archive\n",
     )
     repository = _repository(root)
-    bundle = _alias_bundle(tmp_path, repository, rows=installed)
+    bundle = _shortcut_bundle(tmp_path, repository, rows=installed)
 
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
     assert all(
-        action.resource_node_id != ALIAS_DESTINATION
+        action.resource_node_id != SHORTCUT_DESTINATION
         for _sequence, _batch, action in bundle.plan.actions()
-        if action.kind != "create_alias"
+        if action.kind != "create_shortcut"
     )
 
 
@@ -589,45 +595,45 @@ def _consumer_only_selection(repository, rows):
                 if identity.item == consumer
             }
             | {
-                alias.destination
-                for alias in repository.aliases
-                if alias.destination.item == consumer
+                shortcut.destination
+                for shortcut in repository.logical_shortcuts
+                if shortcut.destination.item == consumer
             }
         ),
-        stale_aliases=stale_alias_destinations(
+        stale_shortcuts=stale_shortcut_destinations(
             repository, registered, bound_items={consumer}
         ),
     )
 
 
 @weaver_test()
-def test_an_alias_is_stale_when_its_unbound_source_was_published_later(tmp_path):
+def test_an_shortcut_is_stale_when_its_unbound_source_was_published_later(tmp_path):
     """The case the graph cannot answer.
 
     The producer is not in this build, so there is no walk from it. It was
     rebuilt at some earlier time by some earlier build, and the only surviving
-    evidence is that its Registry row is dated after the alias's.
+    evidence is that its Registry row is dated after the shortcut's.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
     selection = _consumer_only_selection(repository, rows)
-    destination = WeaverDocumentId.parse(ALIAS_DESTINATION)
+    destination = WeaverDocumentId.parse(SHORTCUT_DESTINATION)
 
     assert destination in selection.impact.changed
     assert destination in selection.selected_for_build
 
 
 @weaver_test()
-def test_a_stale_alias_carries_its_consumers_with_it(tmp_path):
+def test_a_stale_shortcut_carries_its_consumers_with_it(tmp_path):
     """It joins the ordinary changed roots, so the ordinary walk does the rest —
     there is no separate cross-item descendant handling."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
@@ -639,11 +645,11 @@ def test_a_stale_alias_carries_its_consumers_with_it(tmp_path):
 
 
 @weaver_test()
-def test_an_alias_published_after_its_source_is_left_alone(tmp_path):
+def test_a_shortcut_published_after_its_target_is_left_alone(tmp_path):
     """The ordinary case, and the one that has to stay cheap."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", LATER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", EARLIER)
 
@@ -658,11 +664,11 @@ def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
     the estate. Both rows read as null, and null is not newer than null."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    registered = Catalogue(_alias_catalogue(repository)).registered
+    registered = Catalogue(_shortcut_catalogue(repository)).registered
 
     assert all(document.build_datetime is None for document in registered.values())
     assert (
-        stale_alias_destinations(
+        stale_shortcut_destinations(
             repository,
             registered,
             bound_items={WeaverItemId.parse("Warehouse/Reporting")},
@@ -677,12 +683,12 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
 
     Binding it changes nothing: its signature matches the repository, so the
     descendant walk never starts from it, and only the build datetimes record that it
-    moved after the alias was made. Were the comparison skipped whenever the
+    moved after the shortcut was made. Were the comparison skipped whenever the
     producer happened to be bound, that estate would stay stale forever.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
     both = {
@@ -690,23 +696,23 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
         WeaverItemId.parse("Lakehouse/Curated"),
     }
 
-    assert stale_alias_destinations(
+    assert stale_shortcut_destinations(
         repository, Catalogue(rows).registered, bound_items=both
-    ) == (WeaverDocumentId.parse(ALIAS_DESTINATION),)
+    ) == (WeaverDocumentId.parse(SHORTCUT_DESTINATION),)
 
 
 @weaver_test()
-def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
+def test_an_unbuilt_consumer_keeps_its_stale_shortcut(tmp_path):
     """Deferral: only the producer is bound, so nothing about the consumer is
-    touched and its alias stays stale until the consumer is next built."""
+    touched and its shortcut stays stale until the consumer is next built."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
     assert (
-        stale_alias_destinations(
+        stale_shortcut_destinations(
             repository,
             Catalogue(rows).registered,
             bound_items={WeaverItemId.parse("Lakehouse/Curated")},
@@ -716,18 +722,18 @@ def test_an_unbuilt_consumer_keeps_its_stale_alias(tmp_path):
 
 
 @weaver_test()
-def test_a_stale_alias_is_replaced_by_the_alias_executor(tmp_path):
+def test_a_stale_shortcut_is_replaced_by_the_shortcut_executor(tmp_path):
     """End to end through the planner: the freshness comparison reaches the
-    physical action, and reaches it as an alias action rather than a drop."""
+    physical action, and reaches it as a shortcut action rather than a drop."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
+    rows = _shortcut_catalogue(repository)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
-    bundle = _alias_bundle(tmp_path, repository, rows=rows)
+    bundle = _shortcut_bundle(tmp_path, repository, rows=rows)
 
-    assert len(_alias_actions(bundle)) == 1
+    assert len(_shortcut_actions(bundle)) == 1
 
 
 @weaver_test()
@@ -738,9 +744,9 @@ def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
     planner."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    rows = _alias_catalogue(repository)
-    first = _alias_bundle(tmp_path, repository, rows=rows, name="first")
-    second = _alias_bundle(tmp_path, repository, rows=rows, name="second")
+    rows = _shortcut_catalogue(repository)
+    first = _shortcut_bundle(tmp_path, repository, rows=rows, name="first")
+    second = _shortcut_bundle(tmp_path, repository, rows=rows, name="second")
 
     assert first.plan.bundle_id == second.plan.bundle_id
 
@@ -749,7 +755,7 @@ def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
 def test_the_registry_payload_carries_the_token_unresolved(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     store = FilesystemStore()
-    bundle = _alias_bundle(tmp_path, repository, rows={})
+    bundle = _shortcut_bundle(tmp_path, repository, rows={})
     registry = next(
         action
         for _sequence, _batch, action in bundle.plan.actions()

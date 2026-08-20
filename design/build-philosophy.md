@@ -587,9 +587,9 @@ unsupported result during planning or pre-installation validation. It should not
 be simulated through behaviour that changes the meaning of the build.
 
 That rule also applies to logical features whose physical implementation has not
-landed. Repository aliases may be valid declarations, graph edges and catalogue
+landed. Declared shortcuts may be valid declarations, graph edges and catalogue
 rows before Weaver can materialise them. A retained action that uses such an
-alias must fail explicitly before mutation; it must not run the consumer's
+shortcut must fail explicitly before mutation; it must not run the consumer's
 two-part name against whichever physical item happens to be bound.
 
 Workspace-specific adapters may determine **how** an action runs. They do not

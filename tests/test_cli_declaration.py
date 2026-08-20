@@ -67,7 +67,7 @@ def test_a_target_oriented_command_needs_at_least_one_target(command):
 
 @weaver_test()
 def test_no_target_oriented_command_still_offers_the_old_spelling(capsys):
-    """Pre-alpha, so the inconsistent spelling is gone rather than aliased.
+    """Pre-alpha, so the inconsistent spelling is gone rather than shortcut.
 
     Asserted because a silently accepted ``--targets`` would be worse than a
     removed one: the sequence would keep working for whoever already typed it

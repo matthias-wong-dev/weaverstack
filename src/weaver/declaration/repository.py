@@ -11,15 +11,14 @@ import hashlib
 from dataclasses import replace
 from typing import Iterable, Mapping
 
-import yaml
-
-from ..errors import DiscoveryError, IdentityError, MetadataError
+from ..errors import DiscoveryError
 from ..locations import Location
 from ..store import FilesystemStore, Store
 from .dependencies import PythonImport
 from .graph import Graph
 from .item_dependencies import resolve_item_dependencies
 from .metadata import (
+    ALIAS_KEYS,
     ASSUMPTION,
     DELTA_TARGET,
     FOLDER_TARGET,
@@ -27,13 +26,13 @@ from .metadata import (
     SQL_TARGET,
     TEST,
     ObjectId,
-    _UniqueKeyLoader,
 )
 from .model import (
     FILES,
     ITEM_TYPES,
     LAKEHOUSE,
-    RepositoryAlias,
+    WAREHOUSE,
+    RepositoryShortcut,
     WeaverDocumentId,
     WeaverItem,
     WeaverItemId,
@@ -42,6 +41,14 @@ from .model import (
 )
 from .references import validate_repository_metadata
 from .schemas import SchemaSes, read_schema_document
+from .shortcuts import (
+    LAKEHOUSE_FILE,
+    SHORTCUT_FILES,
+    WAREHOUSE_FILE,
+    read_lakehouse_shortcuts,
+    read_warehouse_shortcuts,
+    validate_destinations,
+)
 from .source import (
     SourceDocument,
     language_for_filename,
@@ -175,12 +182,20 @@ def parse_item_repository(
                 "Weaver supplies package loading"
             )
 
-    if any(relative == "alias.yml" for relative, _ in entries):
-        raise DiscoveryError(
-            "alias.yml: an alias belongs to the item that consumes it — declare it "
-            "in <ItemType>/<ItemName>/alias.yml, keyed by that item's own "
-            "Schema.Object"
-        )
+    for surface in SHORTCUT_FILES:
+        if any(relative == surface for relative, _ in entries):
+            raise DiscoveryError(
+                f"{surface} belongs to the item that declares it. Put it in "
+                f"<ItemType>/<ItemName>/{surface}."
+            )
+    # Named by their exact retired spelling, so a repository still carrying one
+    # is told what it has rather than what it should have had.
+    for retired in ("alias.yml", "external.yml"):
+        if any(relative.rsplit("/", 1)[-1] == retired for relative, _ in entries):
+            raise DiscoveryError(
+                f"{retired} has been replaced by shortcuts. A Lakehouse declares "
+                f"them in {LAKEHOUSE_FILE}, and a Warehouse in {WAREHOUSE_FILE}."
+            )
 
     invalid_roots = sorted(
         {
@@ -252,15 +267,34 @@ def parse_item_repository(
         item: [] for item in item_ids
     }
 
-    alias_files: dict[WeaverItemId, str] = {}
+    shortcut_files: dict[WeaverItemId, str] = {}
+    warehouse_shortcut_files: dict[WeaverItemId, str] = {}
     for relative in sorted(files):
         parts = relative.split("/")
         item = WeaverItemId(parts[0], parts[1])
         within = parts[2:]
 
-        if within == ["alias.yml"]:
-            # Alias files are part of their owning item.
-            alias_files[item] = relative
+        if within == [LAKEHOUSE_FILE]:
+            # Declarations, not a Weaver document: read for what they say and
+            # never executed here.
+            if item.item_type != LAKEHOUSE:
+                raise DiscoveryError(
+                    f"{relative}: {LAKEHOUSE_FILE} declares OneLake shortcuts, "
+                    "which belong to a Lakehouse item. A Warehouse declares "
+                    f"its shortcuts in {WAREHOUSE_FILE}."
+                )
+            shortcut_files[item] = relative
+            support_files.append(relative)
+            continue
+
+        if within == [WAREHOUSE_FILE]:
+            if item.item_type != WAREHOUSE:
+                raise DiscoveryError(
+                    f"{relative}: {WAREHOUSE_FILE} declares Warehouse views, "
+                    "which belong to a Warehouse item. A Lakehouse declares "
+                    f"its shortcuts in {LAKEHOUSE_FILE}."
+                )
+            warehouse_shortcut_files[item] = relative
             support_files.append(relative)
             continue
 
@@ -319,9 +353,11 @@ def parse_item_repository(
             item.item_type,
         )
         if source.warehouse_alias is not None or source.lakehouse_alias is not None:
+            retired = " and ".join(sorted(ALIAS_KEYS))
             raise DiscoveryError(
-                f"{relative}: document-local Warehouse alias/Lakehouse alias headers "
-                "have been replaced by the item's own alias.yml"
+                f"{relative}: the document-local {retired} headers have been "
+                f"replaced by shortcuts. Declare them in {LAKEHOUSE_FILE} for a "
+                f"Lakehouse item, or {WAREHOUSE_FILE} for a Warehouse one."
             )
         if item.item_type == LAKEHOUSE:
             expected = FOLDER_TARGET if is_files else DELTA_TARGET
@@ -430,14 +466,25 @@ def parse_item_repository(
             )
         )
 
-    aliases = _read_item_aliases(
-        root,
-        store,
-        alias_files,
+    shortcuts = _read_item_declarations(
+        root, store, shortcut_files, read=read_lakehouse_shortcuts
+    ) + _read_item_declarations(
+        root, store, warehouse_shortcut_files, read=read_warehouse_shortcuts
+    )
+    validate_destinations(
+        shortcuts,
+        documents=source_documents,
+        schemas_by_item={
+            item: [schema.schema for schema in declared]
+            for item, declared in schemas_by_item.items()
+        },
+    )
+    logical_shortcuts = _logical_pairs(
+        shortcuts,
         source_documents=source_documents,
         schemas_by_item=schemas_by_item,
     )
-    validate_repository_metadata(source_documents.values(), aliases=aliases)
+    validate_repository_metadata(source_documents.values(), shortcuts=logical_shortcuts)
 
     source_documents = _with_build_signatures(
         source_documents,
@@ -486,7 +533,8 @@ def parse_item_repository(
         signature=_item_repository_signature(
             files, store, root, generated=generated_files
         ),
-        aliases=aliases,
+        logical_shortcuts=logical_shortcuts,
+        shortcuts=shortcuts,
         generated_files=generated_files,
     )
     return resolve_item_dependencies(repository)
@@ -618,13 +666,13 @@ def _python_imports(module: ast.Module) -> tuple[PythonImport, ...]:
                 PythonImport(
                     module=node.module,
                     level=node.level,
-                    names=tuple(alias.name for alias in node.names),
+                    names=tuple(imported.name for imported in node.names),
                 )
             )
         elif isinstance(node, ast.Import):
             imports.extend(
-                PythonImport(module=alias.name, names=(alias.name,))
-                for alias in node.names
+                PythonImport(module=imported.name, names=(imported.name,))
+                for imported in node.names
             )
     return tuple(imports)
 
@@ -640,8 +688,8 @@ def _item_signature(
 ) -> str:
     """Certify exactly one logical item's authored and generated inputs.
 
-    An item's ``alias.yml`` sits under its own prefix and is certified with its
-    other support files. The producer's content deliberately does not
+    An item's ``shortcuts.py`` or ``shortcuts.yml`` sits under its own prefix and
+    is certified with its other support files. The producer's content does not
     participate: a logical dependency does not make an independently installed
     producer part of the consumer's source item.
     """
@@ -727,104 +775,60 @@ def _item_repository_signature(
     return digest.hexdigest()
 
 
-def _read_item_aliases(
-    root: Location,
-    store: Store,
-    alias_files: Mapping[WeaverItemId, str],
-    *,
-    source_documents: Mapping[WeaverDocumentId, SourceDocument],
-    schemas_by_item: Mapping[WeaverItemId, list[WeaverSchemaId]],
-) -> tuple[RepositoryAlias, ...]:
-    """Read each item's own ``alias.yml``.
+def _read_item_declarations(root, store, files, *, read):
+    """Read one declaration surface for every item that has it."""
 
-    The file's location names the consuming item, so a declaration maps that
-    item's local ``Schema.Object`` to a full four-part source elsewhere in the
-    workspace. Nothing in the file repeats what the directory already says.
-    """
-
-    aliases: list[RepositoryAlias] = []
-    native_folded = {
-        str(identity).casefold(): identity for identity in source_documents
-    }
-    destination_folded: dict[str, WeaverDocumentId] = {}
-
-    for item in sorted(alias_files):
-        relative = alias_files[item]
+    declarations = []
+    for item in sorted(files):
+        relative = files[item]
         try:
             text = store.read(root.join(*relative.split("/"))).decode("utf-8-sig")
         except UnicodeDecodeError as exc:
             raise DiscoveryError(f"{relative}: must be UTF-8 text ({exc})") from exc
-        try:
-            loaded = yaml.load(text, Loader=_UniqueKeyLoader)
-        except MetadataError:
-            raise
-        except yaml.YAMLError as exc:
-            raise DiscoveryError(f"{relative}: invalid YAML: {exc}") from exc
-        if not isinstance(loaded, dict) or set(loaded) != {"aliases"}:
-            raise DiscoveryError(
-                f"{relative} must contain exactly one 'aliases' mapping"
-            )
-        declarations = loaded["aliases"]
-        if not isinstance(declarations, dict):
-            raise DiscoveryError(f"{relative}: 'aliases' must be a mapping")
+        declarations.extend(read(text, owner=item, relative=relative))
+    return tuple(declarations)
 
+
+def _logical_pairs(
+    shortcuts,
+    *,
+    source_documents: Mapping[WeaverDocumentId, SourceDocument],
+    schemas_by_item: Mapping[WeaverItemId, list[WeaverSchemaId]],
+) -> tuple[RepositoryShortcut, ...]:
+    """The logical pairs the ``logical`` shortcuts stand for.
+
+    A logical shortcut names a Weaver document, so it resolves, orders and
+    reports exactly as a logical reference always has. A physical one names a
+    Fabric item and has no logical source, so it contributes nothing here and is
+    planned from its declaration instead.
+    """
+
+    native_folded = {
+        str(identity).casefold(): identity for identity in source_documents
+    }
+    pairs: list[RepositoryShortcut] = []
+    for declaration in shortcuts:
+        if not declaration.is_logical:
+            continue
+        destination = declaration.destination
+        item = declaration.owner
+        source = declaration.logical_source
+        if source not in source_documents:
+            case_match = native_folded.get(str(source).casefold())
+            detail = f"; declared spelling is {case_match}" if case_match else ""
+            raise DiscoveryError(
+                f"{item}: logical target {source} is not a document in this "
+                f"repository{detail}"
+            )
         declared_schemas = {schema.schema for schema in schemas_by_item[item]}
-        for raw_destination, raw_source in declarations.items():
-            if not isinstance(raw_destination, str) or not isinstance(raw_source, str):
-                raise DiscoveryError(
-                    f"{relative}: destinations and sources must be strings"
-                )
-            try:
-                destination = WeaverDocumentId.parse_local(item, raw_destination)
-            except IdentityError as exc:
-                raise DiscoveryError(
-                    f"{relative}: an alias destination is this item's own "
-                    f"Schema.Object — the item is already known ({exc})"
-                ) from exc
-            try:
-                source = WeaverDocumentId.parse(raw_source)
-            except IdentityError as exc:
-                raise DiscoveryError(f"{relative}: {exc}") from exc
-            local = destination.object_id
-            if source not in source_documents:
-                case_match = native_folded.get(str(source).casefold())
-                detail = f"; declared spelling is {case_match}" if case_match else ""
-                raise DiscoveryError(
-                    f"{relative}: alias source {source} is not a document{detail}"
-                )
-            if source.item == item:
-                # An alias exists to cross an item boundary. Within one item the
-                # document graph already orders producer before consumer, and a
-                # document can name its own item's object directly — so a
-                # same-item alias would be a second name for something already
-                # reachable, ordered by an alias stage that runs before every
-                # document the item declares and therefore before its own source.
-                raise DiscoveryError(
-                    f"{relative}: alias destination {destination} and its source "
-                    f"{source} are both owned by {item} — an alias crosses items, "
-                    "so reference the source directly instead"
-                )
-            if local.schema not in declared_schemas:
-                raise DiscoveryError(
-                    f"{relative}: alias destination schema {local.schema!r} is not "
-                    f"declared by item {item}"
-                )
-            folded = str(destination).casefold()
-            native = native_folded.get(folded)
-            if native is not None:
-                raise DiscoveryError(
-                    f"{relative}: alias destination {destination} collides with "
-                    f"native document {native}"
-                )
-            prior = destination_folded.get(folded)
-            if prior is not None:
-                raise DiscoveryError(
-                    f"{relative}: alias destinations {destination} and {prior} "
-                    "differ only by case"
-                )
-            destination_folded[folded] = destination
-            aliases.append(RepositoryAlias(destination=destination, source=source))
-    return tuple(aliases)
+        if destination.object_id.schema not in declared_schemas:
+            raise DiscoveryError(
+                f"{item}: {destination} sits in schema "
+                f"{destination.object_id.schema!r}, which the item does not "
+                "declare"
+            )
+        pairs.append(RepositoryShortcut(destination=destination, source=source))
+    return tuple(pairs)
 
 
 def _repository_files(store: Store, root: Location) -> list[str]:
@@ -864,7 +868,7 @@ def importable_module_name(relative_path: str) -> str | None:
     return stem.replace("/", ".")
 
 
-# --- schema, namespace and alias resolution ---------------------------------
+# --- schema, namespace and shortcut resolution ---------------------------------
 
 
 # --- the internal dependency graph -------------------------------------------

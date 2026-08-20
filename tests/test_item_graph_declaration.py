@@ -29,8 +29,8 @@ def test_every_item_is_placed_in_exactly_one_layer(tmp_path):
 
 
 @weaver_test()
-def test_an_alias_puts_its_source_item_in_an_earlier_layer(tmp_path):
-    """``Warehouse/Reporting`` aliases ``Lakehouse/Curated``, so it comes after it."""
+def test_an_shortcut_puts_its_source_item_in_an_earlier_layer(tmp_path):
+    """``Warehouse/Reporting`` shortcuts ``Lakehouse/Curated``, so it comes after it."""
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     layer_of = {
@@ -43,8 +43,8 @@ def test_an_alias_puts_its_source_item_in_an_earlier_layer(tmp_path):
 
 
 @weaver_test()
-def test_an_unused_alias_still_orders_its_two_items(tmp_path):
-    """The alias itself has to be materialised after its source exists.
+def test_an_unused_shortcut_still_orders_its_two_items(tmp_path):
+    """The shortcut itself has to be materialised after its source exists.
 
     Nothing consumes ``Sales.Landed`` here, so no *document* edge exists — but the
     shortcut or view standing for it is still built in ``Curated`` over a table
@@ -54,8 +54,8 @@ def test_an_unused_alias_still_orders_its_two_items(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Lakehouse/Curated/alias.yml",
-        "aliases:\n  Sales.Landed: Lakehouse/Raw/Sales.Customer\n",
+        "Lakehouse/Curated/shortcuts.py",
+        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Lakehouse/Raw/Sales.Customer",\n)\n',
     )
     repository = parse_item_repository(Location(str(root)))
     layer_of = {
@@ -78,7 +78,7 @@ def test_independent_items_share_one_layer(tmp_path):
 
 @weaver_test()
 def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
-    """Two items that alias each other's *different* objects.
+    """Two items that shortcut each other's *different* objects.
 
     The document graph stays acyclic — ``Curated.Customer`` feeds
     ``Reporting.Customer``, and ``Reporting.Audit`` feeds ``Curated.Summary`` —
@@ -110,13 +110,13 @@ def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
     )
     _write(
         root,
-        "Lakehouse/Curated/alias.yml",
-        "aliases:\n  Sales.Audited: Warehouse/Reporting/Sales.Audit\n",
+        "Lakehouse/Curated/shortcuts.py",
+        'from weaver import Shortcut\n\nSales__Audited = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Warehouse/Reporting/Sales.Audit",\n)\n',
     )
     _write(
         root,
-        "Warehouse/Reporting/alias.yml",
-        "aliases:\n  Sales.Landed: Lakehouse/Curated/Sales.Customer\n",
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n  Warehouse/Reporting/Sales.Landed: Lakehouse/Curated/Sales.Customer\n",
     )
 
     with pytest.raises(GraphError, match="item dependency cycle"):

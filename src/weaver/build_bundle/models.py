@@ -15,7 +15,7 @@ from .targets import BoundTarget
 
 #: Action kinds. Create kinds build structure; prune kinds reconcile the target.
 CREATE_SCHEMA = "create_schema"
-CREATE_ALIAS = "create_alias"
+CREATE_SHORTCUT = "create_shortcut"
 BUILD_FOLDER = "build_folder"
 BUILD_TABLE = "build_table"
 BUILD_VIEW = "build_view"
@@ -77,16 +77,16 @@ CATALOGUE_KINDS = frozenset(
 OMIT_TARGET_UNBOUND = "target_unbound"
 OMIT_DEPENDS_ON_OMITTED = "depends_on_omitted_node"
 OMIT_UNSUPPORTED_EXECUTOR = "unsupported_executor"
-#: An alias the current bindings give no physical form. The planner decides this
-#: — never the installer, which may only run an alias action already frozen for
+#: A shortcut the current bindings give no physical form. The planner decides this
+#: — never the installer, which may only run a shortcut action already frozen for
 #: it — and records it so the absence is a stated decision rather than a gap.
-OMIT_ALIAS_UNSUPPORTED = "alias_unsupported"
+OMIT_SHORTCUT_UNSUPPORTED = "shortcut_unsupported"
 OMISSION_REASONS = frozenset(
     {
         OMIT_TARGET_UNBOUND,
         OMIT_DEPENDS_ON_OMITTED,
         OMIT_UNSUPPORTED_EXECUTOR,
-        OMIT_ALIAS_UNSUPPORTED,
+        OMIT_SHORTCUT_UNSUPPORTED,
     }
 )
 
@@ -135,7 +135,7 @@ class InstallAction:
     ``id`` or a payload name: several authored files can compile to one deployed
     spelling, so a path derived later would be a guess.
 
-    An action with no authored source — an alias, an endpoint refresh, a prune,
+    An action with no authored source — a shortcut, an endpoint refresh, a prune,
     a catalogue publication — has None.
     """
 

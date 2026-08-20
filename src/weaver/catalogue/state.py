@@ -48,7 +48,7 @@ class Catalogue:
 
     One class whatever produced it: read from the catalogue Warehouse in
     production, or built directly from Registry rows or a repository in a test.
-    Incremental selection, alias staleness and claim collection all work from
+    Incremental selection, shortcut staleness and claim collection all work from
     ``registered`` and ``rows``, so they are pure Python.
 
     ``rows`` is the row data by item and table. ``registered`` is the certified
@@ -166,8 +166,8 @@ class Catalogue:
         transform it later.
 
         It carries no binding — no target name, Weaver version, Installation
-        row, publication build_datetime, or Registry certification for an alias
-        destination, because an alias is a view in a Warehouse and a table in a
+        row, publication build_datetime, or Registry certification for a shortcut
+        destination, because a shortcut is a view in a Warehouse and a table in a
         Lakehouse and this does not know which.
         """
 
@@ -283,15 +283,15 @@ def for_targets(
     identities,
     target_kinds: Mapping[WeaverItemId, str],
 ) -> Catalogue:
-    """Bind to targets: certify alias destinations, and scope to what is bound.
+    """Bind to targets: certify shortcut destinations, and scope to what is bound.
 
     ``target_kinds`` names the items being published and what each is bound to,
-    as one decision: an item not named is not published, so an alias can never
-    be certified against a guessed kind. A default would write a Warehouse alias
+    as one decision: an item not named is not published, so a shortcut can never
+    be certified against a guessed kind. A default would write a Warehouse shortcut
     into the Registry as a table.
 
     ``identities`` is what the build certified, passed rather than read off the
-    rows because the two differ: an alias whose source item is unbound still has
+    rows because the two differ: a shortcut whose source item is unbound still has
     its declaration published, while a Registry row would claim work that never
     happened.
 
@@ -299,21 +299,24 @@ def for_targets(
     rows are all obsolete, and the publication is what says so.
     """
 
-    from .projection import project_alias_registry
+    from .projection import project_shortcut_registry
 
     certified = set(identities)
     rows = {}
     for item, kind in target_kinds.items():
         tables = dict(catalogue.rows.get(item, {}))
+        # Every declaration, not only the logical ones: a physical shortcut is
+        # installed here exactly as a logical one is, and an uncertified
+        # destination would be pruned on the next build.
         certifiable = {
-            alias.destination
-            for alias in repository.aliases
-            if alias.destination.item == item and alias.destination in certified
+            declaration.destination
+            for declaration in repository.shortcuts
+            if declaration.owner == item and declaration.destination in certified
         }
         if certifiable:
             tables[REGISTRY.name] = tuple(
                 tables.get(REGISTRY.name, ())
-            ) + project_alias_registry(
+            ) + project_shortcut_registry(
                 repository, item=item, retained=certifiable, target_kind=kind
             )
         rows[item] = MappingProxyType(tables)
@@ -566,8 +569,8 @@ def read_installed_catalogue(catalogue: Any) -> Catalogue:
     and groups rows by the scope they carry.
 
     The shape check is weaker than the build's: a missing table reads as no rows
-    rather than a fault, because an estate with no aliases has never had an
-    Alias table written. Nothing here writes, so nothing needs the guarantee
+    rather than a fault, because an estate with no shortcuts has never had an
+    Shortcut table written. Nothing here writes, so nothing needs the guarantee
     that the catalogue can be written.
     """
 

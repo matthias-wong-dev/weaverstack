@@ -140,8 +140,21 @@ The suite expects these reusable items, each overridable through its matching
 | `PYTEST_LH_1` | Lakehouse | primary Lakehouse target |
 | `PYTEST_LH_2` | Lakehouse | cross-item producer |
 | `PYTEST_LH_3` | Lakehouse | cross-item consumer |
-| `PYTEST_HOUSE` | Lakehouse | Warehouse alias producer |
+| `PYTEST_HOUSE` | Lakehouse | producer for a Warehouse shortcut |
 | `PYTEST_WH_1` | Warehouse | Warehouse target |
+| `PYTEST_STAGING` | Lakehouse | repositories and bundles, never a target |
+
+A second workspace holds what a direct shortcut points at. It is not a Weaver
+target workspace: nothing is built into it, and the tests that read it are
+proving that no destructive operation reached it.
+
+| Item | Type | Role |
+|---|---|---|
+| `PYTEST_WORKSPACE_EXT` | Workspace | external estate, `WEAVER_FABRIC_WORKSPACE_EXT` |
+| `PYTEST_EXT_LH` | Lakehouse | external tables, schema and folder sentinels |
+
+Its contents are seeded by `tests/fabric/provision_estate.py`, which writes the
+Delta tables through Spark, so a fixture finds them rather than filling them in.
 
 Lakehouses must be schema-enabled. The suite empties fixed targets between
 estate transitions instead of recreating them. Provision tests separately

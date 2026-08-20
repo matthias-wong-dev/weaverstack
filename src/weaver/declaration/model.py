@@ -287,8 +287,8 @@ class WeaverDocumentId:
     def parse_local(cls, item: "WeaverItemId", text: str) -> "WeaverDocumentId":
         """Parse the item-relative spelling — the inverse of :attr:`relative`.
 
-        Used where the item is already known from context, such as an item's own
-        ``alias.yml``, so the declaration does not repeat it.
+        Used where the item is already known from context, so a declaration
+        does not repeat it.
         """
 
         parts = _split(text, what="document identity")
@@ -316,27 +316,48 @@ class WeaverDocumentId:
         return f"{self.item}/{self.relative}"
 
 
+def parse_installed_identity(text: str):
+    """One identity a build installs, whichever kind it is.
+
+    Almost everything Weaver installs is a :class:`WeaverDocumentId`. A schema
+    shortcut is the exception: it presents a namespace rather than an object, so
+    its identity is a :class:`WeaverSchemaId`, and a plan that recorded it has to
+    be able to read it back.
+    """
+
+    parts = _split(text, what="installed identity")
+    if len(parts) == 3 and "." not in parts[2]:
+        return WeaverSchemaId(WeaverItemId(parts[0], parts[1]), parts[2])
+    return WeaverDocumentId.parse(text)
+
+
 @dataclass(frozen=True, order=True)
-class RepositoryAlias:
-    """One destination-keyed logical alias from ``alias.yml``."""
+class RepositoryShortcut:
+    """One logical pair a ``logical`` shortcut stands for.
+
+    Internal. Dependency resolution, ordering and freshness are computed over
+    these, because a logical target is a Weaver document like any other. A
+    physical shortcut names an item Weaver does not manage and has no logical
+    source, so it never becomes one of these.
+    """
 
     destination: WeaverDocumentId
     source: WeaverDocumentId
 
     @property
     def signature(self) -> str:
-        """What this alias *is*, hashed — and nothing about what it points to.
+        """What this shortcut is, hashed, and nothing about what it points to.
 
-        An alias declares one thing: this destination stands for that source. So
-        its signature is the pair, and only the pair. The source document's own
-        content is deliberately absent: a rebuilt source does not redefine the
-        alias, and treating it as a change would replace every downstream
-        shortcut whenever a table was reloaded.
+        A shortcut declares one thing: this destination stands for that source.
+        So its signature is the pair and only the pair. The source document's own
+        content is absent: a rebuilt source does not redeclare the shortcut, and
+        treating it as a change would replace every downstream shortcut whenever
+        a table was reloaded.
 
-        A source that was rebuilt is still a reason to remake the alias — but
-        that is freshness, answered by comparing build datetimes in the Registry,
-        not by this signature. Keeping the two apart is what lets an unchanged
-        alias over an unchanged source be left alone.
+        A source that was rebuilt is still a reason to remake the shortcut, but
+        that is freshness, answered by comparing build datetimes in the Registry
+        rather than by this signature. Keeping the two apart is what lets an
+        unchanged shortcut over an unchanged source be left alone.
         """
 
         declaration = f"{self.destination}\0{self.source}".encode("utf-8")
@@ -346,6 +367,277 @@ class RepositoryAlias:
         return f"{self.destination}: {self.source}"
 
 
+#: What a shortcut points at, which decides how its paths are built and what the
+#: destination is known by. ``view`` is the Warehouse form: it reaches another
+#: item over TDS rather than through OneLake, and it is still a shortcut.
+TABLE_SHORTCUT = "table"
+SCHEMA_SHORTCUT = "schema"
+FOLDER_SHORTCUT = "folder"
+VIEW_SHORTCUT = "view"
+SHORTCUT_TYPES = (TABLE_SHORTCUT, SCHEMA_SHORTCUT, FOLDER_SHORTCUT, VIEW_SHORTCUT)
+
+#: How the target is read. ``logical`` names a Weaver item and is followed
+#: through its current binding; ``physical`` names the Fabric item itself.
+LOGICAL_TARGET = "logical"
+PHYSICAL_TARGET = "physical"
+TARGET_TYPES = (LOGICAL_TARGET, PHYSICAL_TARGET)
+
+#: How an authored declaration name spells a two-part identity, matching the
+#: module naming an item's own documents already use.
+NAME_SEPARATOR = "__"
+
+
+def _one_of(value: object, allowed: tuple[str, ...], *, what: str) -> str:
+    """One value from a closed vocabulary, compared rather than coerced."""
+
+    if not isinstance(value, str) or value not in allowed:
+        expected = ", ".join(allowed)
+        raise IdentityError(f"{what} must be one of {expected}, got {value!r}")
+    return value
+
+
+@dataclass(frozen=True, order=True)
+class ShortcutDeclaration:
+    """One shortcut an item declares, exactly as it was authored.
+
+    The declaration is the author's intent and nothing more. Which workspace and
+    item a target resolves to, and what path each side becomes, are settled
+    during planning against the workspace the build is bound to.
+
+    ``name`` is the authored symbol, and it names the destination:
+    ``Sales__Customer`` for a table, folder or view, and ``Reference`` for a
+    schema. ``target`` is kept as written, because whether its item half is a
+    Weaver item or a Fabric one is what ``target_type`` says.
+    """
+
+    owner: WeaverItemId
+    name: str
+    shortcut_type: str
+    target_type: str
+    target: str
+    workspace: str | None = None
+    #: Where this was written, carried from the reader so nothing downstream
+    #: reconstructs an authored path.
+    relative_path: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "shortcut_type",
+            _one_of(self.shortcut_type, SHORTCUT_TYPES, what="shortcut_type"),
+        )
+        object.__setattr__(
+            self,
+            "target_type",
+            _one_of(self.target_type, TARGET_TYPES, what="target_type"),
+        )
+        if not isinstance(self.target, str) or not self.target.strip():
+            raise IdentityError("a shortcut target must be a non-empty string")
+        object.__setattr__(self, "target", self.target.strip())
+        if self.workspace is not None:
+            object.__setattr__(
+                self, "workspace", _logical_name(self.workspace, what="workspace")
+            )
+        if self.is_logical and self.workspace is not None:
+            raise IdentityError(
+                f"shortcut {self.name!r} has a logical target, so it cannot name "
+                "a workspace: Weaver follows the target item's own binding"
+            )
+        if self.is_logical and self.shortcut_type == SCHEMA_SHORTCUT:
+            raise IdentityError(
+                f"shortcut {self.name!r} is a schema shortcut, so its target must "
+                "be physical: a schema's contents belong to the item it points "
+                "at, and Weaver binds objects rather than namespaces"
+            )
+        if self.shortcut_type == VIEW_SHORTCUT:
+            if self.owner.item_type != WAREHOUSE:
+                raise IdentityError(
+                    "a view shortcut is a Warehouse view, so it belongs to a "
+                    f"Warehouse item, got {self.owner}"
+                )
+            if self.workspace is not None:
+                raise IdentityError(
+                    f"shortcut {self.name!r} is a Warehouse view, which reaches "
+                    "another item in the same workspace, so it cannot name one"
+                )
+        elif self.owner.item_type != LAKEHOUSE:
+            raise IdentityError(
+                f"a {self.shortcut_type} shortcut is a OneLake shortcut, so it "
+                f"belongs to a Lakehouse item, got {self.owner}"
+            )
+        # Validated here so a malformed declaration is refused where it is
+        # written rather than where something tries to resolve it.
+        self.destination
+        self.target_item
+        self.target_tail
+        if self.is_logical and self.target_item == self.owner:
+            raise IdentityError(
+                f"shortcut {self.name!r} has a logical target in {self.owner}, "
+                "which is the item declaring it. A shortcut crosses items, so "
+                "reference the object directly instead."
+            )
+
+    @property
+    def is_logical(self) -> bool:
+        return self.target_type == LOGICAL_TARGET
+
+    @property
+    def is_schema(self) -> bool:
+        return self.shortcut_type == SCHEMA_SHORTCUT
+
+    @property
+    def is_view(self) -> bool:
+        return self.shortcut_type == VIEW_SHORTCUT
+
+    @property
+    def is_files(self) -> bool:
+        return self.shortcut_type == FOLDER_SHORTCUT
+
+    @property
+    def destination(self):
+        """What this shortcut is called in the item that declares it.
+
+        A schema shortcut is a :class:`WeaverSchemaId`: it establishes a
+        namespace rather than an object, and what appears inside belongs to the
+        item it points at. Everything else is an ordinary
+        :class:`WeaverDocumentId` in the owning item.
+        """
+
+        if self.is_schema:
+            return WeaverSchemaId(self.owner, self.name)
+        parts = self.name.split(NAME_SEPARATOR)
+        if len(parts) != 2 or not all(parts):
+            raise IdentityError(
+                f"shortcut {self.name!r} names a {self.shortcut_type}, so its "
+                f"name must be Schema{NAME_SEPARATOR}Object"
+            )
+        return WeaverDocumentId(
+            self.owner,
+            ObjectId(
+                schema=_logical_name(parts[0], what="schema name"),
+                object=_logical_name(parts[1], what="object name"),
+            ),
+            is_files=self.is_files,
+        )
+
+    @property
+    def schema(self) -> str:
+        """The schema this shortcut occupies in the item that declares it."""
+
+        return self.name if self.is_schema else self.destination.object_id.schema
+
+    @property
+    def shortcut_id(self) -> str:
+        """The shortcut as its author declared it, in this item's own terms.
+
+        ``Sales.Customer`` for a table or a folder, ``Reference`` for a schema.
+        The authored symbol spells the same thing with ``__`` because a Python
+        name cannot carry a dot.
+        """
+
+        if self.is_schema:
+            return self.name
+        return self.destination.object_id.qualified
+
+    @property
+    def target_item(self) -> WeaverItemId:
+        """The item half of the target, typed.
+
+        The same spelling either way, because it is the same two questions:
+        which kind of item, and which one. ``target_type`` says whether the
+        answer is a Weaver item or a Fabric one.
+        """
+
+        parts = _split(self.target, what="shortcut target")
+        if len(parts) < 3:
+            raise IdentityError(
+                f"shortcut target {self.target!r} must be ItemType/ItemName "
+                "followed by what it points at"
+            )
+        return WeaverItemId(parts[0], parts[1])
+
+    @property
+    def target_tail(self) -> str:
+        """What the target names inside its item, validated for this type.
+
+        A table or a view names ``Schema.Object``, a schema names one schema, and
+        a folder names a canonical relative path beneath ``Files``.
+        """
+
+        parts = _split(self.target, what="shortcut target")
+        tail = "/".join(parts[2:])
+        if self.shortcut_type in (TABLE_SHORTCUT, VIEW_SHORTCUT):
+            _object_id(tail)
+        elif self.is_schema:
+            _logical_name(tail, what="target schema")
+        else:
+            if parts[2] != FILES or len(parts) < 4:
+                raise IdentityError(
+                    f"shortcut target {self.target!r} must name a path beneath "
+                    f"{FILES}/, because a folder shortcut points into a "
+                    "Lakehouse's Files area"
+                )
+            # The same canonical-relative-path rule a file identity is held to.
+            _relative_path("/".join(parts[3:]), what="target folder path")
+        return tail
+
+    @property
+    def target_object(self) -> ObjectId | None:
+        """The object the target names, or None where it names a namespace."""
+
+        if self.shortcut_type in (TABLE_SHORTCUT, VIEW_SHORTCUT):
+            return _object_id(self.target_tail)
+        return None
+
+    @property
+    def target_schema(self) -> str:
+        """The schema or path the target sits in, however it is spelled."""
+
+        if self.is_schema:
+            return self.target_tail
+        if self.is_files:
+            return self.target_tail.split("/", 1)[1]
+        return _object_id(self.target_tail).schema
+
+    @property
+    def logical_source(self) -> "WeaverDocumentId":
+        """The Weaver document a logical shortcut names."""
+
+        if not self.is_logical:
+            raise IdentityError(
+                f"shortcut {self.name!r} has a physical target, so it names a "
+                "Fabric item rather than a Weaver document"
+            )
+        return WeaverDocumentId.parse(self.target)
+
+    @property
+    def signature(self) -> str:
+        """What this shortcut is, hashed.
+
+        The declaration and nothing about what it points at, for the reason
+        :attr:`RepositoryShortcut.signature` gives.
+        """
+
+        declaration = "\0".join(
+            (
+                str(self.owner),
+                self.name,
+                self.shortcut_type,
+                self.target_type,
+                self.target,
+                self.workspace or "",
+            )
+        ).encode("utf-8")
+        return hashlib.sha256(declaration).hexdigest()
+
+    def __str__(self) -> str:
+        where = f" in {self.workspace}" if self.workspace else ""
+        return (
+            f"{self.owner}/{self.name}: {self.target_type} "
+            f"{self.shortcut_type} {self.target}{where}"
+        )
+
+
 @dataclass(frozen=True, order=True)
 class ItemDependency:
     """One consumer-owned dependency declaration and its logical resolution."""
@@ -353,12 +645,12 @@ class ItemDependency:
     consumer: WeaverDocumentId
     reference: str
     producer: WeaverDocumentId | None = None
-    resolution_kind: str = "native"  # native | alias | physical
+    resolution_kind: str = "native"  # native | shortcut | physical
     is_within_item: bool = False
 
     @property
-    def uses_alias(self) -> bool:
-        return self.resolution_kind == "alias"
+    def uses_shortcut(self) -> bool:
+        return self.resolution_kind == "shortcut"
 
     @property
     def is_physical(self) -> bool:
@@ -443,11 +735,17 @@ class WeaverRepository:
     #: repository-relative path. A ``lib/`` module is authored source that no
     #: Weaver document declares, and the load layer deploys it — so its content
     #: has to reach signature derivation and the bundle without either of them
-    #: reopening the repository. Files nothing deploys, such as ``alias.yml``,
-    #: are listed in :attr:`support_files` and not held here.
+    #: reopening the repository. Files nothing deploys, such as
+    #: ``shortcuts.yml``, are listed in :attr:`support_files` and not held here.
     support_file_contents: Mapping[str, bytes] = field(default_factory=dict)
     signature: str = ""
-    aliases: tuple[RepositoryAlias, ...] = ()
+    #: The logical pairs the ``logical`` shortcuts stand for, which resolution,
+    #: ordering and freshness are computed over.
+    logical_shortcuts: tuple[RepositoryShortcut, ...] = ()
+    #: Every shortcut each item declares, as authored. This keeps the intent,
+    #: including the physical declarations that name a Fabric item and so have
+    #: no logical source.
+    shortcuts: tuple[ShortcutDeclaration, ...] = ()
     dependency_edges: tuple[ItemDependency, ...] = ()
     dependency_graph: object | None = None
     #: The item-level graph over :attr:`items`, and its topological layers.

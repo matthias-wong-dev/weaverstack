@@ -1,8 +1,8 @@
-"""The alias action waits for Fabric to discover the shortcut it just made.
+"""The shortcut action waits for Fabric to discover the shortcut it just made.
 
-Fabric creates a OneLake shortcut synchronously and *discovers* it
-asynchronously: the consumer's next statement failed with "neither a view nor a
-table" until the alias action learned to wait for a real read to succeed.
+Fabric creates a OneLake shortcut synchronously and discovers it asynchronously:
+the consumer's next statement failed with "neither a view nor a table" until the
+action learned to wait for a real read to succeed.
 
 The wait runs where the Installer runs. Creating the shortcut is a REST call and
 the wait asks Spark a question through ``context.spark_sql``, so a desktop
@@ -12,16 +12,16 @@ show up in its telemetry; the estate the action needs — the repository, the
 generated bundle and the producer's table — is arranged in a fixture and never
 claimed to be either.
 
-Everything else about aliases, including shortcut creation, its target, the
-endpoint refresh and reading through the aliased name, is proven in
-`test_cross_item_alias_primitive.py`.
+Everything else about a shortcut, including its creation, its target, the
+endpoint refresh and reading through the name it establishes, is proven in
+`test_cross_item_shortcut_primitive.py`.
 """
 
 from __future__ import annotations
 
 import pytest
 from conftest import staged_repository_root
-from factories import FixtureCatalogue, alias_repository, item_bindings
+from factories import FixtureCatalogue, item_bindings, shortcut_repository
 from support.weaver_test import weaver_test
 
 from weaver.targets import ItemRef
@@ -34,31 +34,31 @@ CONSUMER = "Lakehouse/DiscoveryConsumer"
 def discovery_estate(
     fabric_workspace,
     fabric_client,
-    fabric_alias_lakehouses,
+    fabric_shortcut_lakehouses,
     fabric_staging_lakehouse,
     livy_session,
     session_catalogue_sql,
     tmp_path_factory,
 ):
-    """The generated bundle and a producer table for the alias to point at.
+    """The generated bundle and a producer table for the shortcut to point at.
 
     Arrangement only: the repository, the bundle and the producer's table are
     built over raw harness capabilities and plain Spark, none of it imports
     Weaver, and none of it is the claim under test.
     """
 
-    from test_cross_item_alias_primitive import action_of, generate, upload
+    from test_cross_item_shortcut_primitive import action_of, generate, upload
 
     from weaver.declaration import parse_item_repository
     from weaver.fabric import FabricResolver, OneLakeDfsClient
 
     resolver = FabricResolver(fabric_workspace, client=fabric_client)
     store = OneLakeDfsClient()
-    producer = fabric_alias_lakehouses["producer"]
-    consumer = fabric_alias_lakehouses["consumer"]
+    producer = fabric_shortcut_lakehouses["producer"]
+    consumer = fabric_shortcut_lakehouses["consumer"]
 
     root = tmp_path_factory.mktemp("discovery-repo")
-    alias_repository(root, producer=PRODUCER, consumer=CONSUMER)
+    shortcut_repository(root, producer=PRODUCER, consumer=CONSUMER)
     staged = staged_repository_root(resolver, fabric_staging_lakehouse.name)
     upload(store, staged, root)
     repository = parse_item_repository(staged, store=store)
@@ -72,11 +72,11 @@ def discovery_estate(
         catalogue=FixtureCatalogue.from_repository(
             repository, item="Warehouse/_weaver"
         ),
-        name="aliasdiscovery",
+        name="shortcutdiscovery",
         staging=producer.name,
         catalogue_sql=session_catalogue_sql,
     )
-    batch, alias_action = action_of(bundle.plan, "create_alias")
+    batch, shortcut_action = action_of(bundle.plan, "create_shortcut")
 
     at = {
         role: resolver.spark_destination(ItemRef(item.name))
@@ -108,7 +108,7 @@ def discovery_estate(
     return {
         "bundle": bundle,
         "batch": batch,
-        "alias_action": alias_action,
+        "shortcut_action": shortcut_action,
         "store": store,
     }
 
@@ -121,10 +121,10 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
 ):
     """The action reports how long it waited, which is the behaviour itself."""
 
-    from test_cross_item_alias_primitive import run_from_here
+    from test_cross_item_shortcut_primitive import run_from_here
 
     result = run_from_here(
-        discovery_estate["alias_action"],
+        discovery_estate["shortcut_action"],
         discovery_estate["bundle"],
         workspace=fabric_workspace,
         store=discovery_estate["store"],
@@ -135,7 +135,7 @@ def test_the_executor_waits_for_fabric_to_discover_the_shortcut(
     assert result.status == "succeeded", result.error_message
 
     # The wait ran, and reported itself. Without it the action would return as
-    # soon as the REST call did, and the next statement to read the alias would
+    # soon as the REST call did, and the next statement to read the shortcut would
     # fail with "neither a view nor a table".
     details = result.details or {}
     assert "addressable_after_seconds" in details, (
