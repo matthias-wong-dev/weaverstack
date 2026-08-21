@@ -351,7 +351,6 @@ def test_authored_code_consumes_folder_changes_through_the_fabric_mount(
     )
 
     assert seen["result"]["succeeded"] is True
-    # A managed Folder with files but no history reports why it cannot answer.
     assert "change metadata is unavailable" in seen["unobserved"]
     assert seen["keys_are_full_paths"] is True
     assert seen["values_are_utc"] is True

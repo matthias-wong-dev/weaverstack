@@ -392,12 +392,7 @@ def files_since(
     file_keys,
     qualified: str,
 ) -> dict[Path, datetime]:
-    """Current files changed after ``bookmark``, mapped to their change datetime.
-
-    Only documents strictly newer than the timezone-aware bookmark are opened.
-    A file whose latest event after the bookmark is a deletion is absent, and so
-    is one an event claims but the destination no longer holds.
-    """
+    """Current files changed strictly after an aware ``bookmark``, and when."""
 
     boundary = _change_boundary(bookmark)
     root = Path(destination).absolute()
@@ -420,10 +415,10 @@ def deleted_since(
     file_keys,
     qualified: str,
 ) -> dict[Path, datetime]:
-    """Files deleted after ``bookmark``, mapped to their deletion datetime.
+    """Files deleted strictly after an aware ``bookmark``, and when.
 
-    A returned path is the logical file the deletion retired, so it does not
-    exist unless a later load put a file back under the same name.
+    A returned path is the file the deletion retired, so it normally does not
+    exist.
     """
 
     boundary = _change_boundary(bookmark)
@@ -446,12 +441,9 @@ def latest_files(
     file_keys,
     qualified: str,
 ) -> dict[Path, datetime]:
-    """The current files from the newest change that still has surviving files.
+    """The current files from the newest change that left files in place.
 
-    Documents are read newest first and reading stops at the first one with a
-    file still in place, so an ordinary call reads one directory and one
-    document. Deletions recorded by newer documents suppress the files they
-    retired.
+    A file a newer change deleted is not reported.
     """
 
     root = Path(destination).absolute()
@@ -482,8 +474,7 @@ def _change_boundary(bookmark: datetime) -> datetime:
 def _change_documents(destination: str | Path) -> list[tuple[datetime, Path]]:
     """Every change document beneath the Folder, oldest first.
 
-    Raises :class:`FileNotFoundError` when the Folder has no change history, so
-    a caller can tell an unobserved Folder from one that has not changed.
+    Raises :class:`FileNotFoundError` when there is no ``_changes`` directory.
     """
 
     changes = Path(destination) / CHANGES_DIRECTORY
@@ -501,11 +492,10 @@ def _available_change_documents(
     *,
     qualified: str,
 ) -> list[tuple[datetime, Path]]:
-    """The Folder's change history, or a reason it cannot be reported.
+    """The Folder's change history, empty when Weaver has never written it.
 
-    A Folder Weaver has never written has no history. When it holds files
-    matching its File key, their lifecycle datetimes are unknown, so the caller
-    is told that rather than given an empty result.
+    Raises when the Folder holds files matching its File key, because their
+    lifecycle datetimes are then unknown rather than absent.
     """
 
     try:

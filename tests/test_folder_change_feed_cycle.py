@@ -296,8 +296,7 @@ def test_a_change_document_failure_reports_failure_after_publication(
     assert (landing._staging_path() / "published.csv").exists()
 
 
-#: Every change-helper test measures from one bookmark, so a document's offset
-#: from it is the only thing a reader has to hold.
+#: Every change-helper test measures from this one bookmark.
 BOOKMARK = datetime(2026, 8, 20, tzinfo=timezone.utc)
 
 
