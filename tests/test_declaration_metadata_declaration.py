@@ -439,10 +439,17 @@ def test_a_delta_table_may_not_declare_identity(language):
 
 
 @weaver_test()
-def test_folder_defaults_to_incremental_and_prohibited_rebuild():
+def test_folder_defaults_to_incremental_and_allows_rebuild():
     document = parse(FOLDER_YAML)
     assert document.kind == FOLDER
     assert document.is_incremental is True
+    assert document.prohibit_rebuild is False
+
+
+@weaver_test()
+def test_a_folder_may_override_both_optional_defaults():
+    document = parse(FOLDER_YAML + "\nIncremental: false\nProhibit rebuild: true")
+    assert document.is_incremental is False
     assert document.prohibit_rebuild is True
 
 

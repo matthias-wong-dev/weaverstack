@@ -97,6 +97,16 @@ def test_a_warehouse_table_generates_a_stored_procedure():
 
 
 @weaver_test()
+def test_warehouse_row_lifecycle_datetimes_use_the_utc_clock():
+    procedure = _warehouse().create_load().payload.decode()
+
+    assert (
+        "declare @weaver_load_datetime datetime2(6) = sysutcdatetime();"
+        in procedure.lower()
+    )
+
+
+@weaver_test()
 def test_a_spark_sql_table_generates_a_deployed_module():
     """Compiled into a primitive, not into a load program.
 

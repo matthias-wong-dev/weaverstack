@@ -744,7 +744,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     revisions, revision_format = _parse_revision_notes(loaded.get("Revision notes"))
     static = _parse_bool(loaded.get("Static"), "Static")
     prohibit_rebuild = _parse_flag_with_default(
-        loaded, "Prohibit rebuild", default=kind == FOLDER
+        loaded, "Prohibit rebuild", default=False
     )
     file_keys = _parse_file_keys(loaded.get("File key"), kind=kind)
 

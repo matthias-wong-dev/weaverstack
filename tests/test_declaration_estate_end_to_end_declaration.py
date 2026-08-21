@@ -112,7 +112,7 @@ def test_a_folder_carries_its_file_key_and_defaults(authored):
     document = authored["Lakehouse/Sales/Files/Sales.OrderExport"].document
     assert document.file_keys == ("*.csv",)
     assert document.is_incremental is True
-    assert document.prohibit_rebuild is True
+    assert document.prohibit_rebuild is False
 
 
 @weaver_test()
