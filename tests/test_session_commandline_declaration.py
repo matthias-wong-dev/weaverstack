@@ -29,15 +29,9 @@ def test_quoting_survives():
 
 
 @weaver_test()
-def test_a_session_requires_the_program_name_and_shows_the_line_to_write():
-    with pytest.raises(CommandError) as raised:
-        command_words("load Lakehouse/Sales", require_program=True)
+def test_the_program_name_is_optional():
+    """The prompt and a composition both accept a line without it."""
 
-    assert "weaver load Lakehouse/Sales" in str(raised.value)
-
-
-@weaver_test()
-def test_a_composition_does_not_require_the_program_name():
     assert command_words("load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
 
 
@@ -181,7 +175,7 @@ def test_a_context_may_exclude_a_command_and_say_why():
 def test_a_top_level_option_reaches_the_parser(line):
     """``weaver --help`` is a normal invocation, so it stays one here."""
 
-    assert command_words(line, require_program=True) == [line.split()[1]]
+    assert command_words(line) == [line.split()[1]]
 
 
 @weaver_test()

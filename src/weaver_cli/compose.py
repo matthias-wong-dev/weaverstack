@@ -21,7 +21,6 @@ COMPOSE_KEY = "compose"
 NOT_IN_A_COMPOSITION = {
     "session": "a composition cannot open an interactive prompt",
     "compose": "a composition cannot run another composition",
-    "doctor": "run it from a shell; it reports on this machine, not a workspace",
 }
 
 

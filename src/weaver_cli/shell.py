@@ -1,9 +1,11 @@
 """Interactive Weaver session: ordinary CLI commands, one ConsoleSession.
 
-Commands are written exactly as they are in a terminal, in ``compose.yml`` and
-in the documentation — ``weaver build .`` — and are parsed by the top-level CLI
-parser and run by its handlers. What the session adds is the Session underneath
-them, held open so a credential, item resolution and Livy are paid for once.
+Commands are written as they are in a terminal, in ``compose.yml`` and in the
+documentation — ``weaver build .`` — and are parsed by the top-level CLI parser
+and run by its handlers. The leading ``weaver`` is optional at the prompt, so
+``build .`` and ``weaver build .`` are the same command. What the session adds
+is the Session underneath them, held open so a credential, item resolution and
+Livy are paid for once.
 """
 
 from __future__ import annotations
@@ -21,10 +23,13 @@ PROMPT = "weaver> "
 #: Optional history-file override.
 HISTORY_ENV = "WEAVER_SESSION_HISTORY"
 
-#: Commands unavailable from an interactive session.
+#: Commands unavailable from an interactive session. A session holds one
+#: workspace open to build, load, test, wipe and compose in; installing Weaver
+#: into an Environment and managing the Fabric estate are done from a shell.
 NOT_IN_A_SESSION = {
     "session": "already in a session",
-    "doctor": "run it from a shell, not a session",
+    "install": "run it from a shell, not a session",
+    "fabric": "run it from a shell, not a session",
 }
 
 EXITS = {"exit", "quit"}
@@ -117,7 +122,7 @@ def _run_entry(session, parser, entry: str) -> _Outcome:
             ran = True
             continue
         try:
-            words = command_words(text, require_program=True, excluded=NOT_IN_A_SESSION)
+            words = command_words(text, excluded=NOT_IN_A_SESSION)
         except CommandError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return _Outcome(ran=True)
@@ -292,8 +297,8 @@ def _available(parser) -> str:
 def _usage(parser) -> str:
     return (
         f"Available: {_available(parser)}.\n"
-        f"Commands start with `{PROGRAM}`, as they do in a terminal. "
-        "`help` for options, `exit` to leave.\n"
+        "Commands are written as they are in a terminal; the leading "
+        f"`{PROGRAM}` is optional. `help` for options, `exit` to leave.\n"
     )
 
 
