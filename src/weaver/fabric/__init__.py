@@ -14,11 +14,11 @@ from .capacity import (
 )
 from .client import FabricClient, FabricError
 from .environment import (
-    InstallResult,
+    EnvironmentPublishResult,
     build_wheel,
     find_or_create_environment,
-    install,
     missing_from_environment,
+    publish_environment,
 )
 from .livy import (
     LivyError,
@@ -72,8 +72,8 @@ __all__ = [
     "FabricResolver",
     "FabricSessionResolver",
     "FabricStore",
-    "install",
-    "InstallResult",
+    "publish_environment",
+    "EnvironmentPublishResult",
     "build_wheel",
     "find_or_create_environment",
     "missing_from_environment",

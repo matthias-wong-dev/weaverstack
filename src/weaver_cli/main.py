@@ -7,7 +7,7 @@ import sys
 import time
 
 import weaver
-from weaver.errors import WeaverError
+from weaver.errors import CommandError, WeaverError
 
 #: The capacity verbs, kept here so building the parser imports nothing from
 #: `weaver.fabric` — `weaver --help` should not pay for a transport.
@@ -107,6 +107,21 @@ def _requires_rest(args) -> frozenset[str]:
     return requirements(AUTH, RESOLVER)
 
 
+def _requires_install(args) -> frozenset[str]:
+    """A frozen bundle may contain any target kind, so declare the coarse set."""
+
+    from weaver.sessions.requirements import (
+        AUTH,
+        LIVY,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
+    )
+
+    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+
+
 def command_requirements(parsed) -> frozenset[str]:
     """What one parsed command says it will want. Empty when it says nothing."""
 
@@ -190,6 +205,16 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_args(compose)
     compose.set_defaults(handler=handle_compose)
 
+    check = subcommands.add_parser(
+        "check", help="Check repository source without contacting Fabric."
+    )
+    check.add_argument(
+        "repository",
+        nargs="?",
+        help="Repository folder. Defaults to the current directory.",
+    )
+    check.set_defaults(handler=handle_check)
+
     build = subcommands.add_parser(
         "build", help="Build repository objects into bound targets."
     )
@@ -206,11 +231,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Physical target with an optional logical target override.",
     )
     build.add_argument(
-        "--bundle",
-        nargs="?",
-        const="",
-        metavar="NAME",
-        help=("Keep a .weaver.zip build record. Omit NAME to use a UTC timestamp."),
+        "--bundle-only",
+        action="store_true",
+        help="Create a deployment bundle without installing it.",
+    )
+    build.add_argument(
+        "--bundle-path",
+        metavar="PATH",
+        help="Directory to write a bundle created with --bundle-only.",
     )
     build.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(build)
@@ -301,15 +329,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     install = subcommands.add_parser(
         "install",
-        help="Build and install Weaver in a Fabric Environment.",
+        help="Install a previously built deployment bundle.",
     )
-    # Fabric only, and no way to ask for less than a publish. An Environment
-    # that is staged but not published is one a session cannot import from, so
-    # `--no-publish` only ever produced a half-installed workspace; and a
-    # `--workspace-type local` that this command rejects two lines later is a
-    # choice offered in order to refuse it.
-    _add_workspace_args(install, include_catalogue=False)
-    install.set_defaults(handler=handle_install, requires=_requires_rest)
+    install.add_argument(
+        "bundle", metavar="BUNDLE", help="Bundle directory or .weaver.zip archive."
+    )
+    install.add_argument("--json", action="store_true", help="emit the report as JSON")
+    _add_workspace_args(install)
+    install.set_defaults(handler=handle_install, requires=_requires_install)
 
     # Fabric estate management rather than a Weaver lifecycle verb: these act on
     # workspace items and on the capacity underneath them, and nothing they do
@@ -319,6 +346,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     fabric_commands = fabric.add_subparsers(dest="fabric_command", metavar="command")
     fabric.set_defaults(handler=_group_help(fabric))
+
+    environment = fabric_commands.add_parser(
+        "environment", help="Manage Fabric Environments."
+    )
+    environment_commands = environment.add_subparsers(
+        dest="environment_command", metavar="command"
+    )
+    environment.set_defaults(handler=_group_help(environment))
+    environment_publish = environment_commands.add_parser(
+        "publish", help="Publish Weaver into a Fabric Environment."
+    )
+    environment_publish.add_argument("environment", help="Fabric Environment name.")
+    _add_workspace_args(
+        environment_publish, include_catalogue=False, include_environment=False
+    )
+    environment_publish.set_defaults(
+        handler=handle_environment_publish, requires=_requires_rest
+    )
 
     notebook = fabric_commands.add_parser(
         "notebook", help="Deploy or run a Fabric notebook."
@@ -441,8 +486,8 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
     return 0 if result.succeeded or args.no_wait else 1
 
 
-def handle_install(args: argparse.Namespace) -> int:
-    """Build Weaver from this checkout and install it into a Fabric Environment.
+def handle_environment_publish(args: argparse.Namespace) -> int:
+    """Build Weaver from this checkout and publish it to a Fabric Environment.
 
     The authoritative deployment path. Afterwards a notebook, Livy session or
     Fabric pytest run attached to the Environment can ``import weaver`` with no
@@ -450,7 +495,7 @@ def handle_install(args: argparse.Namespace) -> int:
 
     The result is always printed, and it is the JSON — a command's result is
     what it produced, not an option. Progress goes to stderr and the result to
-    stdout, so ``weaver install | jq`` works while a person still watches the
+    stdout, so ``weaver fabric environment publish Runtime | jq`` works while a person still watches the
     publish tick over.
     """
 
@@ -462,16 +507,18 @@ def handle_install(args: argparse.Namespace) -> int:
     workspace = _resolve_workspace(args)
     if not workspace.environment:
         raise CommandError(
-            "A Fabric Environment is required to install Weaver. "
+            "A Fabric Environment is required to publish Weaver. "
             "Use --environment or configure one for this workspace."
         )
     _prefer_desktop_credential()
-    from weaver.fabric import install as run_install
+    from weaver.fabric import publish_environment
 
     started = time.perf_counter()
     with use_or_create_session(_session(args), workspace=workspace) as session:
-        with session.task("Install", f"{workspace.workspace}/{workspace.environment}"):
-            result = run_install(
+        with session.task(
+            "Publish Environment", f"{workspace.workspace}/{workspace.environment}"
+        ):
+            result = publish_environment(
                 workspace.workspace,
                 workspace.environment,
                 session=session,
@@ -482,6 +529,26 @@ def handle_install(args: argparse.Namespace) -> int:
     payload["timings"]["total"] = round(total, 2)
     print(json.dumps(payload, indent=2))
     return 0
+
+
+def handle_install(args: argparse.Namespace) -> int:
+    """Install a frozen bundle into the selected workspace."""
+
+    import json
+
+    workspace = _resolve_workspace(args)
+    report = weaver.install(
+        args.bundle,
+        workspace=workspace.workspace,
+        session=_session(args),
+        **_command_context(workspace),
+    )
+    if args.json:
+        print(json.dumps(report.to_mapping(), indent=2))
+    else:
+        print(f"install {report.status}")
+        print(f"  bundle: {report.bundle_id}")
+    return 0 if report.succeeded else 1
 
 
 def handle_capacity(args: argparse.Namespace) -> int:
@@ -510,12 +577,14 @@ def _add_workspace_args(
     parser: argparse.ArgumentParser,
     *,
     include_catalogue: bool = True,
+    include_environment: bool = True,
 ) -> None:
     """Add the explicit values that a Workspace configuration can abbreviate."""
 
     parser.add_argument("--workspace", help="Fabric Workspace name.")
     parser.add_argument("--workspace-config", help="Workspace configuration file.")
-    parser.add_argument("--environment", help="Fabric Environment name.")
+    if include_environment:
+        parser.add_argument("--environment", help="Fabric Environment name.")
     if include_catalogue:
         parser.add_argument(
             "--catalogue",
@@ -696,6 +765,19 @@ END_OF_FILE = "\x04"
 ENTER = ("\r", "\n")
 
 
+def _retry_until_fixed(attempt) -> int:
+    """Run an attempt and repeat it after an interactive failure."""
+
+    if not _can_ask():
+        return attempt()
+    while True:
+        status = attempt()
+        if not status:
+            return status
+        if not _retry_wanted():
+            return status
+
+
 def _until_fixed(args: argparse.Namespace, attempt) -> int:
     """Run a task and offer another attempt after an interactive failure.
 
@@ -711,12 +793,7 @@ def _until_fixed(args: argparse.Namespace, attempt) -> int:
         _session(args), workspace=_resolve_workspace(args)
     ) as session:
         args.session = session
-        while True:
-            status = attempt()
-            if not status:
-                return status
-            if not _retry_wanted():
-                return status
+        return _retry_until_fixed(attempt)
 
 
 def _retry_wanted() -> bool:
@@ -1079,6 +1156,8 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
 
 def handle_build(args: argparse.Namespace) -> int:
+    if args.bundle_path and not args.bundle_only:
+        raise CommandError("--bundle-path requires --bundle-only")
     return _until_fixed(args, lambda: _build_once(args))
 
 
@@ -1092,7 +1171,8 @@ def _build_once(args: argparse.Namespace) -> int:
         result = weaver.build(
             args.repository,
             bind=args.item_bindings,
-            bundle=args.bundle,
+            bundle_only=args.bundle_only,
+            bundle_path=args.bundle_path,
             session=opened,
             **_command_context(workspace),
         )
@@ -1102,14 +1182,28 @@ def _build_once(args: argparse.Namespace) -> int:
     else:
         print(f"build {result.status}: workspace declaration")
         print(f"  bundle: {result.bundle_id}")
-        if result.archive:
-            print(f"  record: {result.archive}")
+        if result.bundle_path:
+            print(f"  path:   {result.bundle_path}")
         print(f"  items:  {', '.join(result.items)}")
         for error in result.errors:
             # Show the operation and source before lower-level diagnostics.
             print()
             print(_indented(error.describe()), file=sys.stderr)
     return 0 if result.succeeded else 1
+
+
+def handle_check(args: argparse.Namespace) -> int:
+    return _retry_until_fixed(lambda: _check_once(args))
+
+
+def _check_once(args: argparse.Namespace) -> int:
+    try:
+        weaver.check(args.repository)
+    except WeaverError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print("Repository valid.")
+    return 0
 
 
 def _indented(text: str, prefix: str = "  ") -> str:

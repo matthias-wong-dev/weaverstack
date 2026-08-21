@@ -120,14 +120,14 @@ def test_the_installed_package_imports_and_reports_a_version(
 
     assert wanted in published, (
         f"this checkout is weaverstack {wanted}, but the Environment has "
-        f"published {sorted(published)} — run `weaver install`"
+        f"published {sorted(published)} — run `weaver fabric environment publish`"
     )
 
     assert payload["dist"] in published, (
         f"this Fabric session is running weaverstack {payload['dist']}, but the "
         f"Environment has published {sorted(published)}. A publish reports "
         "Success before new sessions are served the new image — wait for it "
-        "rather than publishing again, and only rerun `weaver install` if the "
+        "rather than publishing again, and only rerun `weaver fabric environment publish` if the "
         "published set is genuinely not this checkout's."
     )
 

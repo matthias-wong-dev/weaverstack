@@ -42,7 +42,7 @@ WORKSPACE_ENV = "WEAVER_FABRIC_WORKSPACE"
 #: The permanent suite workspace. A default rather than a required export: the
 #: estate it holds is permanent too, so naming it per run was ceremony.
 DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
-#: The Environment the session attaches to — installed once with `weaver install`
+#: The Environment the session attaches to — published once with `weaver fabric environment publish`
 #: and consumed by the suite, never uploaded by it.
 ENVIRONMENT_ENV = "WEAVER_FABRIC_ENVIRONMENT"
 DEFAULT_ENVIRONMENT = "weaver"
@@ -436,7 +436,7 @@ def livy_session(fabric_workspace, fabric_client, request):
     """One Spark session in Fabric with the Weaver Environment attached.
 
     Skips — rather than fails — when the Environment is missing or carries no
-    usable Weaver, because that means ``weaver install`` has not been run, which
+    usable Weaver, because that means Environment publication has not been run, which
     is a setup step, not a defect in what is under test.
     """
 
@@ -487,7 +487,9 @@ def livy_session(fabric_workspace, fabric_client, request):
     try:
         session = LivySession.for_workspace(fabric_workspace)
     except CommandError as exc:
-        pytest.skip(f"{exc}; run `weaver install` into the Environment first")
+        pytest.skip(
+            f"{exc}; run `weaver fabric environment publish` into the Environment first"
+        )
     started = time.monotonic()
     try:
         session.start()

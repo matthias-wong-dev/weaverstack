@@ -349,7 +349,7 @@ class ConsoleSession(Session):
         # duration. The cost is still recorded in telemetry.
         scope = self.scope(workspace)
         # A program is Python that imports Weaver where Spark is, so this is the
-        # one crossing that waits on `weaver install`. Spark SQL and TDS reach
+        # one crossing that waits on Environment publication. Spark SQL and TDS reach
         # the same workspace without it.
         scope.ensure_weaver()
         scope.check_published_version(self.warn)
@@ -671,7 +671,7 @@ class ConsoleScope(WorkspaceScope):
         if published and published != local:
             warn(
                 f"this console runs weaverstack {local}; {self.name} has "
-                f"{published} published — run `weaver install` if the difference "
+                f"{published} published — run `weaver fabric environment publish {self.workspace.environment} --workspace {self.workspace.workspace}` if the difference "
                 "matters"
             )
 
@@ -722,9 +722,9 @@ class ConsoleScope(WorkspaceScope):
             return CommandError(
                 f"{name} could not run: the Weaver published in {self.name} is "
                 f"older than this console ({__version__}) and does not carry "
-                f"{exc.evalue}. Publish the current wheel with `weaver install "
-                f'--workspace "{self.name}" --environment '
-                f"{getattr(self.workspace, 'environment', '<environment>')}`"
+                f"{exc.evalue}. Publish the current wheel with `weaver fabric environment publish "
+                f"{getattr(self.workspace, 'environment', '<environment>')} "
+                f'--workspace "{self.name}"`'
             )
         return exc
 

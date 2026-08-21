@@ -37,7 +37,7 @@ executes, and a desktop reaches it through the Session.
 One Workspace configuration can abbreviate the full desktop lifecycle:
 
 ```bash
-weaver install     --workspace-config workspace.yml
+weaver fabric environment publish weaver --workspace-config workspace.yml
 weaver build ./estate --workspace-config workspace.yml --bind Lakehouse/Sales_Dev
 ```
 

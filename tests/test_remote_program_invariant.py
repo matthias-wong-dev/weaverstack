@@ -204,7 +204,7 @@ def _only_in_prose(source: str, word: str) -> bool:
 
 @weaver_test()
 def test_only_the_run_boundary_submits_a_program():
-    """Which crossing waits on `weaver install`, held to one.
+    """Which crossing waits on Environment publication, held to one.
 
     A program is Python that imports Weaver where Spark is, so submitting one
     asserts the published wheel. Spark SQL, TDS and storage reach the same
@@ -225,6 +225,6 @@ def test_only_the_run_boundary_submits_a_program():
             callers.add(relative)
 
     assert callers == allowed, (
-        "submitting a program is what requires `weaver install`; keep it to the "
+        "submitting a program is what requires Environment publication; keep it to the "
         f"run boundary, or say here why another crossing needs the wheel: {sorted(callers)}"
     )

@@ -275,7 +275,7 @@ def test_a_version_difference_warns_and_names_the_fix(monkeypatch):
 
         assert session.warnings
         assert "9.9.9-elsewhere" in session.warnings[0]
-        assert "weaver install" in session.warnings[0]
+        assert "weaver fabric environment publish" in session.warnings[0]
 
 
 @weaver_test()
@@ -402,7 +402,9 @@ def test_a_wheel_too_old_to_import_weaver_says_to_publish():
     )
     session, scope = _scope_with(livy)
 
-    with pytest.raises(CommandError, match="weaver install") as raised:
+    with pytest.raises(
+        CommandError, match="weaver fabric environment publish"
+    ) as raised:
         scope.livy_run("emit(1)", name="read_build_state")
 
     assert "older than this console" in str(raised.value)

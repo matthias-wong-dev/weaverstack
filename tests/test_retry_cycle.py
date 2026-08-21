@@ -386,6 +386,7 @@ def test_every_retryable_command_offers_the_same_prompt():
 
     for command in ("_build_once", "_load_once", "_test_once"):
         assert f"_until_fixed(args, lambda: {command}(args))" in source
+    assert "_retry_until_fixed(lambda: _check_once(args))" in source
 
 
 # --- the keyboard itself ------------------------------------------------------

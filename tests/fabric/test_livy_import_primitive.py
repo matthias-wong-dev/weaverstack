@@ -15,7 +15,7 @@ from weaver.runtime.delta_sql import delta_audit_names, delta_signature_name
 # --- what the installed Environment provides ----------------------------------
 #
 # One round trip, not four. These are four claims about *one static thing* — the
-# Environment `weaver install` published — so asking them separately bought four
+# Environment publication produced — so asking them separately bought four
 # waits and no extra confidence: the Environment cannot have changed between
 # them. That is the distinction worth keeping in mind when adding to this file.
 # The protocol tests below stay separate calls, because there the call itself is
@@ -66,7 +66,7 @@ def installed_environment(livy_session):
 def test_weaver_imports_inside_a_fabric_session(installed_environment):
     """The claim: a Fabric session imports the installed Weaver and uses it.
 
-    The version is whatever ``weaver install`` published into the Environment —
+    The version is whatever Environment publication put into the Environment —
     not necessarily this checkout's — so we assert a real version came back, not
     that it equals the laptop's.
     """

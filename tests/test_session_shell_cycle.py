@@ -233,7 +233,7 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
     )
 
     assert _available(build_parser()) == ", ".join(expected)
-    assert expected == ["build", "compose", "load", "test", "wipe"]
+    assert expected == ["build", "check", "compose", "install", "load", "test", "wipe"]
 
 
 # --- a composition run from the prompt ---------------------------------------
@@ -376,10 +376,10 @@ def test_a_session_cannot_be_started_inside_a_session(recorded, capsys):
     assert "already in a session" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("command", ["install", "fabric"])
+@pytest.mark.parametrize("command", ["fabric"])
 @weaver_test()
 def test_the_commands_a_session_does_not_offer(command, recorded, capsys):
-    """A session builds, loads, tests and wipes; the rest is shell work."""
+    """Fabric estate management remains shell work."""
 
     seen, factory = recorded
 

@@ -171,9 +171,8 @@ Remote tests exercise the current checkout immediately. Hosted and integration
 tests require the current Weaver wheel in a Fabric Environment:
 
 ```bash
-.venv/bin/weaver install \
-  --workspace PYTEST_WORKSPACE \
-  --environment weaver
+.venv/bin/weaver fabric environment publish weaver \
+  --workspace PYTEST_WORKSPACE
 ```
 
 Publish again when Weaver Python changes. A Livy session can run Spark SQL
