@@ -58,15 +58,12 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
         before_load,
     )
     assert consumed["paths_are_full"] is True
-    assert [path.rsplit("/", 1)[-1] for path in consumed["upserts"]] == [
+    assert consumed["datetimes_are_utc"] is True
+    assert [path.rsplit("/", 1)[-1] for path in consumed["changed"]] == [
         "customers.csv"
     ]
-    assert [path.rsplit("/", 1)[-1] for path in consumed["inserts"]] == [
-        "customers.csv"
-    ]
-    assert consumed["updates"] == []
-    assert consumed["deletes"] == []
-    assert consumed["exists"] == [True]
+    assert consumed["latest"] == consumed["changed"]
+    assert consumed["deleted"] == []
     assert consumed["contents"] and "CustomerId" in consumed["contents"][0]
 
     tested = weaver.test([lakehouse, warehouse], session=weaver_session)
@@ -117,7 +114,7 @@ def _consume_folder_changes(session, workspace, lakehouse: str, bookmark) -> dic
 
     source = f"""
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from weaver import lakehouse_for
@@ -137,21 +134,24 @@ sys.path.insert(0, destination.files_root() + "/_/Load")
 from Files.Raw__CustomerCsv import Raw__CustomerCsv
 
 folder = Raw__CustomerCsv(spark, lakehouse=destination)
-changes = Raw__CustomerCsv(folder).changes_since(
-    datetime.fromisoformat({bookmark.isoformat()!r})
-)
+consumer = Raw__CustomerCsv(folder)
+bookmark = datetime.fromisoformat({bookmark.isoformat()!r})
+changed = consumer.files_since(bookmark)
+latest = consumer.latest_files()
+deleted = consumer.deleted_since(bookmark)
 emit({{
-    "upserts": [str(path) for path in changes["upserts"]],
-    "deletes": [str(path) for path in changes["deletes"]],
-    "inserts": [str(path) for path in changes["inserts"]],
-    "updates": [str(path) for path in changes["updates"]],
+    "changed": {{str(path): at.isoformat() for path, at in changed.items()}},
+    "latest": {{str(path): at.isoformat() for path, at in latest.items()}},
+    "deleted": [str(path) for path in deleted],
     "paths_are_full": all(
         isinstance(path, Path) and path.is_absolute()
-        for values in changes.values() for path in values
+        for path in (*changed, *latest)
     ),
-    "exists": [path.exists() for path in changes["upserts"]],
-    "contents": [path.read_text(encoding="utf-8")
-                 for path in changes["upserts"]],
+    "datetimes_are_utc": all(
+        at.utcoffset() == timedelta(0)
+        for at in (*changed.values(), *latest.values())
+    ),
+    "contents": [path.read_text(encoding="utf-8") for path in changed],
 }})
 """
     return session.execute_python(

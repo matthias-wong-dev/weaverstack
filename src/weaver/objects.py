@@ -177,12 +177,53 @@ class Folder(WeaverObject):
 
         return self.lakehouse.folder_spark_path(*self.identity)
 
-    def changes_since(self, bookmark: datetime) -> dict:
-        """Return each file's latest change after ``bookmark`` as full paths."""
+    def files_since(self, bookmark: datetime) -> dict[Path, datetime]:
+        """Current files changed after ``bookmark``, and when each changed::
 
-        from .runtime.folder_load import changes_since
+            for path in Sales__Landing(self).files_since(bookmark):
+                ...
 
-        return changes_since(self.path(), bookmark)
+        Keys are full paths ordinary Python can open. Values are the UTC
+        datetime Weaver recorded the change, which is a file's update datetime.
+        """
+
+        from .runtime.folder_load import files_since
+
+        return files_since(self.path(), bookmark, **self._change_scope())
+
+    def latest_files(self) -> dict[Path, datetime]:
+        """The current files from the newest change that left files in place.
+
+        One load can write several files, so this reports every file that
+        change committed and still survives.
+        """
+
+        from .runtime.folder_load import latest_files
+
+        return latest_files(self.path(), **self._change_scope())
+
+    def deleted_since(self, bookmark: datetime) -> dict[Path, datetime]:
+        """Files deleted after ``bookmark``, and when each was deleted.
+
+        A returned path names the file the deletion retired, so it does not
+        exist unless a later load put a file back under the same name.
+        """
+
+        from .runtime.folder_load import deleted_since
+
+        return deleted_since(self.path(), bookmark, **self._change_scope())
+
+    def _change_scope(self) -> dict:
+        """The File key and identity the change helpers report against.
+
+        The File key decides whether a folder without a ``_changes`` history is
+        one Weaver has never written or one it cannot describe.
+        """
+
+        from .runtime.load_contract import FolderLoadContract
+
+        contract = FolderLoadContract.from_document(self._document())
+        return {"file_keys": contract.file_keys, "qualified": contract.qualified}
 
     def staging_folder(self) -> "StagingFolder":
         """The staging directory available to this ``read()``.
