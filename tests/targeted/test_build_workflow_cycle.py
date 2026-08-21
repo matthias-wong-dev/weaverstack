@@ -30,7 +30,9 @@ from support.workspaces import WORKSPACE, given_resolver, given_workspace
 from weaver.build_bundle import (
     LakehouseBinding,
     build_item_repository,
+    build_repository_bundle,
     effective_item_bindings,
+    load_bundle,
 )
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue as RealCatalogue
@@ -146,6 +148,29 @@ def test_it_returns_the_plan_it_generated_and_the_report_it_installed(estate):
     assert result.plan.bundle_id
     assert result.report.bundle_id == result.plan.bundle_id
     assert result.report.status == "succeeded"
+
+
+@weaver_test()
+def test_bundle_generation_is_a_durable_seam_before_installation(estate, tmp_path):
+    bindings = _bindings()
+    output = Location(str(tmp_path / "handover"))
+
+    bundle = build_repository_bundle(
+        estate["repository"],
+        bindings=bindings,
+        state=BuildState(
+            catalogue=RealCatalogue(rows={}), target_inventories=_inventories()
+        ),
+        source_store=estate["store"],
+        catalogue_binding=LakehouseBinding(
+            lakehouse=ItemRef("Weaver"), workspace_name="Demo"
+        ),
+        output=output,
+    )
+
+    assert bundle.location == output
+    assert load_bundle(output, store=estate["store"]).bundle_id == bundle.bundle_id
+    assert not any(executor.seen for executor in estate["executors"].values())
 
 
 @weaver_test()
@@ -312,29 +337,6 @@ def test_a_failure_stops_the_rest_of_its_sequence(estate):
         action.status == "succeeded" and action.action_id.startswith("publish-registry")
         for action in result.report.action_results()
     )
-
-
-# --- the archive --------------------------------------------------------------
-
-
-@weaver_test()
-def test_no_archive_is_written_unless_one_is_asked_for(estate):
-    result = build(estate)
-
-    assert result.archive is None
-
-
-@weaver_test()
-def test_an_archive_is_persisted_where_it_was_asked_for(estate, tmp_path):
-    """The bundle outlives the temporary directory it was built in — which is the
-    point of asking for one, since the build itself is ephemeral."""
-
-    archive = Location(str(tmp_path / "handover.weaver.zip"))
-
-    result = build(estate, archive=archive, archive_store=estate["store"])
-
-    assert result.archive == archive
-    assert archive.path.is_file()
 
 
 # --- a capability offered is not a capability acquired -------------------------

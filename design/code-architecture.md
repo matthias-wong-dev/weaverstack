@@ -273,12 +273,12 @@ so nothing it submits imports Weaver and a desktop build needs no published
 wheel.
 
 One thing still crosses as a program: `weaver.run.entry`, for a run's deployed
-Python primitives. A desktop `weaver load` therefore requires `weaver install` to
+Python primitives. A desktop `weaver load` therefore requires `weaver fabric environment publish` to
 have published the current wheel; the version check reports when it has not:
 
 ```text
 the Weaver published in <workspace> is older than this console ...
-Publish the current wheel with `weaver install ...`
+Publish the current wheel with `weaver fabric environment publish <environment> --workspace <workspace>`
 ```
 
 The entry points are few and stable, and each is a named function rather than

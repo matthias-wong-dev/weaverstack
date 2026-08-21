@@ -311,7 +311,7 @@ class LivySession:
         and has no reason to start Spark at all, which is what the error says.
 
         The workspace's ``environment`` is attached where it names one, so a
-        body that imports Weaver finds what ``weaver install`` published.
+        body that imports Weaver finds what ``weaver fabric environment publish`` published.
         Nothing is copied into the workspace.
 
         An Environment is *not* required to start a session. Submitting Spark
@@ -565,6 +565,6 @@ def environment_bootstrap() -> str:
         "    raise ImportError(\n"
         "        'this body imports Weaver, and the attached Fabric Environment '\n"
         "        'has no usable Weaver install; run '\n"
-        "        'weaver install --workspace <ws> --environment <env>'\n"
+        "        'weaver fabric environment publish <env> --workspace <ws>'\n"
         "    ) from _exc\n"
     )

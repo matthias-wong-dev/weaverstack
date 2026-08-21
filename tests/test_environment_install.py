@@ -1,4 +1,4 @@
-"""Unit tests for the Environment install helpers that need no Fabric.
+"""Unit tests for the Environment publication helpers that need no Fabric.
 
 The Fabric round-trip is exercised by the opt-in integration path; here we pin
 the pure logic: which files count as Weaver wheels, how a version is read back
@@ -203,11 +203,11 @@ def test_fabric_client_preserves_failure_status(monkeypatch):
     assert info.value.status_code == 429
 
 
-# --- install() diff-and-skip decisions, without touching Fabric --------------
+# --- publication diff-and-skip decisions, without touching Fabric ------------
 
 
 def _wire(monkeypatch, *, published: dict, staged: dict, state: str, wheel_name: str):
-    """Stub every Fabric call install() makes; record uploads and publishes."""
+    """Stub every Fabric call publication makes; record uploads and publishes."""
 
     events: dict[str, object] = {
         "uploaded_yml": False,
@@ -274,7 +274,7 @@ def test_unchanged_source_skips_publish(monkeypatch):
         state="Success",
         wheel_name=wheel,
     )
-    result = env_mod.install("WS", "weaver", client=object())
+    result = env_mod.publish_environment("WS", "weaver", client=object())
     assert result.wheel_changed is False
     assert result.dependencies_changed is False
     assert result.publish_status == "AlreadyInstalled"
@@ -301,7 +301,7 @@ def test_code_change_uploads_only_the_wheel_and_publishes(monkeypatch):
         state="Success",
         wheel_name=new_wheel,
     )
-    result = env_mod.install("WS", "weaver", client=object())
+    result = env_mod.publish_environment("WS", "weaver", client=object())
     assert result.wheel_changed is True
     assert result.dependencies_changed is False
     assert events["uploaded_wheel"] is True
@@ -314,7 +314,7 @@ def test_a_changed_wheel_is_always_published(monkeypatch):
     """There is no stage-without-publish mode, and there must not be one.
 
     Staging is Fabric's scratch area; a session imports the published revision.
-    An install that stopped after staging left a workspace that looked done and
+    A publication that stopped after staging left a workspace that looked done and
     could not ``import weaver``, so the flag that did it is gone rather than
     defaulted off.
     """
@@ -331,12 +331,12 @@ def test_a_changed_wheel_is_always_published(monkeypatch):
         state="Success",
         wheel_name="weaverstack-0.1.1.dev222-py3-none-any.whl",
     )
-    result = env_mod.install("WS", "weaver", client=object())
+    result = env_mod.publish_environment("WS", "weaver", client=object())
     assert events["published"] is True
     assert result.published is True
 
     with pytest.raises(TypeError):
-        env_mod.install("WS", "weaver", client=object(), publish=False)
+        env_mod.publish_environment("WS", "weaver", client=object(), publish=False)
 
 
 @weaver_test()

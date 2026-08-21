@@ -100,5 +100,8 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "execute_load_plan",
         "open_task_log",
         "PhysicalTargetRef",
+        "check",
+        "CheckResult",
+        "install",
     }
     assert all(not hasattr(weaver, name) for name in internal)

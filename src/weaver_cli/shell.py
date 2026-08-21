@@ -24,13 +24,16 @@ PROMPT = "weaver> "
 HISTORY_ENV = "WEAVER_SESSION_HISTORY"
 
 #: Commands unavailable from an interactive session. A session holds one
-#: workspace open to build, load, test, wipe and compose in; installing Weaver
-#: into an Environment and managing the Fabric estate are done from a shell.
+#: workspace open for repository and bundle work; Fabric estate management is
+#: done from a shell.
 NOT_IN_A_SESSION = {
     "session": "already in a session",
-    "install": "run it from a shell, not a session",
     "fabric": "run it from a shell, not a session",
 }
+
+# Source checking and bundle installation remain usable at the prompt, but the
+# session banner introduces the core lifecycle rather than every available seam.
+SECONDARY_SESSION_COMMANDS = {"check", "install"}
 
 EXITS = {"exit", "quit"}
 HELP = {"help", "?"}
@@ -291,7 +294,11 @@ def _default_workspace(args: argparse.Namespace):
 def _available(parser) -> str:
     """The commands this session accepts, from the parser rather than a list."""
 
-    return ", ".join(sorted(command_names(parser) - set(NOT_IN_A_SESSION)))
+    return ", ".join(
+        sorted(
+            command_names(parser) - set(NOT_IN_A_SESSION) - SECONDARY_SESSION_COMMANDS
+        )
+    )
 
 
 def _usage(parser) -> str:

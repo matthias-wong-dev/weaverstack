@@ -6,6 +6,7 @@ so importing ``weaver`` does not require Spark, Fabric credentials, or the CLI.
 
 from __future__ import annotations
 
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -67,7 +68,8 @@ class BuildResult:
     source: str
     items: tuple[str, ...]
     bundle_id: str
-    archive: str | None
+    installation: bool
+    bundle_path: str | None
     status: str
     errors: tuple[BuildFailure, ...] = ()
 
@@ -80,7 +82,8 @@ class BuildResult:
             "source": self.source,
             "items": list(self.items),
             "bundle_id": self.bundle_id,
-            "archive": self.archive,
+            "installation": self.installation,
+            "bundle_path": self.bundle_path,
             "status": self.status,
             "errors": [error.to_mapping() for error in self.errors],
         }
@@ -94,7 +97,8 @@ def build(
     catalogue: str | None = None,
     environment: str | None = None,
     workspace_config: str | Path | None = None,
-    bundle: str | None = None,
+    bundle_only: bool = False,
+    bundle_path: str | Path | None = None,
     session=None,
 ) -> BuildResult:
     """Build an authored repository.
@@ -113,6 +117,9 @@ def build(
     ``Workspace`` travels. Supplied, its resources are reused and it is left
     open; omitted, this operation creates and closes one.
     """
+
+    if bundle_path is not None and not bundle_only:
+        raise CommandError("bundle_path requires bundle_only=True")
 
     resolved_workspace = operation_workspace(
         "build",
@@ -154,7 +161,8 @@ def build(
                 source_store=prepared.store,
                 bindings=bindings,
                 catalogue_binding=control,
-                bundle_name=bundle,
+                bundle_only=bundle_only,
+                bundle_path=bundle_path,
                 source=source_location.value,
             )
             with opened.task("Build", resolved_workspace.workspace):
@@ -234,24 +242,14 @@ def _item_bindings(bind, workspace: Workspace):
     )
 
 
-def _archive_location(resolver, bundle_name: str | None):
-    if bundle_name is None:
-        return None
-    from ..build_bundle.workflow import timestamped_archive_name
-
-    name = bundle_name or timestamped_archive_name()
-    if not name.endswith(".weaver.zip"):
-        name += ".weaver.zip"
-    return resolver.build_bundle(name)
-
-
 def _result_from_item_build(source, bindings, result) -> BuildResult:
     report = result.report
     return BuildResult(
         source=source,
         items=tuple(str(binding.item) for binding in bindings.entries),
         bundle_id=result.bundle_id,
-        archive=result.archive.value if result.archive else None,
+        installation=True,
+        bundle_path=None,
         status=report.status,
         errors=tuple(
             BuildFailure(
@@ -275,7 +273,8 @@ def _run_build(
     source_store,
     bindings,
     catalogue_binding,
-    bundle_name,
+    bundle_only,
+    bundle_path,
     source,
 ) -> BuildResult:
     """One build, wherever this process happens to be.
@@ -298,7 +297,6 @@ def _run_build(
         read_build_state,
     )
 
-    resolver = session.resolver(workspace)
     # No wrapping Step: `read_build_state` opens one per part it reads, and a
     # Step inside a Step would make a fourth level of a hierarchy that has
     # three. What a reader wants is the parts — the catalogue and the
@@ -309,6 +307,28 @@ def _run_build(
         session=session,
         workspace=workspace,
     )
+    if bundle_only:
+        from ..build_bundle import build_repository_bundle
+
+        output = _bundle_output(bundle_path)
+        with session.step("Build bundle"):
+            bundle = build_repository_bundle(
+                repository,
+                bindings=bindings,
+                state=state,
+                source_store=source_store,
+                catalogue_binding=catalogue_binding,
+                output=output,
+            )
+        return BuildResult(
+            source=source,
+            items=tuple(str(binding.item) for binding in bindings.entries),
+            bundle_id=bundle.bundle_id,
+            installation=False,
+            bundle_path=bundle.location.value,
+            status="succeeded",
+        )
+
     with session.step("Build and install"):
         result = build_item_repository(
             repository,
@@ -318,9 +338,19 @@ def _run_build(
             workspace=workspace,
             source_store=source_store,
             catalogue_binding=catalogue_binding,
-            archive=_archive_location(resolver, bundle_name),
         )
     return _result_from_item_build(source, bindings, result)
+
+
+def _bundle_output(path: str | Path | None) -> Location:
+    """A durable local directory for a bundle-only build."""
+
+    if path is None:
+        return Location(tempfile.mkdtemp(prefix="weaver-bundle-"))
+    output = Path(path)
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        raise BuildError(f"bundle path must not exist or must be empty: {output}")
+    return Location(str(output))
 
 
 def _binding_text(binding) -> str:

@@ -336,12 +336,12 @@ It is not a workflow engine, and is not meant to become one: no conditionals,
 no parallelism, no variables, no retries, no project-root discovery. Commands
 run in order and stop at the first failure.
 
-## Install and catalogue bootstrap
+## Fabric Environment publication and catalogue bootstrap
 
 Install Weaver into a Fabric Environment:
 
 ```bash
-weaver install --workspace Analytics --environment Runtime
+weaver fabric environment publish Runtime --workspace Analytics
 ```
 
 There is no separate initialise lifecycle. The package-owned catalogue is built
@@ -392,11 +392,20 @@ in.
 A build needs no `--environment`. What it submits to Spark is SQL that imports
 nothing, so it runs on the workspace's default runtime; `load`, `test` and the
 other commands that run Weaver inside Fabric name the Environment
-`weaver install` published to. A build binding only Warehouses starts no Spark
+`weaver fabric environment publish` published to. A build binding only Warehouses starts no Spark
 session at all.
 
-Add `--bundle` to retain a timestamped `.weaver.zip` build record, or
-`--bundle <name>` to choose its name.
+An ordinary build does not retain an artifact. For controlled handoff, use the
+advanced split workflow:
+
+```bash
+weaver build ./estate --bundle-only --bundle-path ./dist/estate-bundle
+weaver install ./dist/estate-bundle --workspace-config examples/weaver_example.yml
+```
+
+`weaver check [repository]` is also available for agents, CI and editor tooling
+that need to validate source without contacting Fabric. It is not a prerequisite
+for `weaver build`, which always checks source itself.
 
 ## Test
 

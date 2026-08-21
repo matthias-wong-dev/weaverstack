@@ -1,134 +1,85 @@
-"""What ``weaver install`` offers, and what it always does.
-
-Three properties, and each one exists because the alternative confused somebody.
-
-The command **always publishes**, so there is no flag to stop half way. It
-**always prints its result**, because a result is what a command produced rather
-than something you opt into. And it offers **no local workspace**, because it
-refuses one anyway — a choice presented in order to be rejected is worse than no
-choice at all.
-"""
+"""The two meanings that were previously both called ``install``."""
 
 from __future__ import annotations
 
-import json
 from importlib import import_module
 
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver_cli.main import build_parser, handle_install
-
-
-def _parse(*words):
-    return build_parser().parse_args(["install", *words])
-
-
-# --- the surface --------------------------------------------------------------
-
-
-@pytest.mark.parametrize("flag", ["--json", "--no-publish"])
-@weaver_test()
-def test_install_offers_no_flag_for_a_decision_it_has_already_made(flag, capsys):
-    """Each of these was a way to ask for a half-finished or silent install."""
-
-    with pytest.raises(SystemExit):
-        _parse(flag, "local")
-    assert "unrecognized arguments" in capsys.readouterr().err
+from weaver_cli.main import (
+    build_parser,
+    command_requirements,
+    handle_environment_publish,
+)
 
 
 @weaver_test()
-def test_install_still_takes_the_workspace_and_environment_it_needs():
-    parsed = _parse("--workspace", "Sales", "--environment", "weaver")
+def test_install_requires_a_bundle_and_accepts_workspace_configuration():
+    parsed = build_parser().parse_args(["install", "handover", "--workspace", "Sales"])
+
+    assert parsed.bundle == "handover"
     assert parsed.workspace == "Sales"
-    assert parsed.environment == "weaver"
+    assert not hasattr(parsed, "environment")
+    assert not hasattr(parsed, "catalogue")
+    assert command_requirements(parsed)
 
 
 @weaver_test()
-def test_install_never_advertises_a_local_workspace():
-    help_text = build_parser().parse_args(["install"]).__dict__
-    assert "workspace_type" not in help_text
+@pytest.mark.parametrize("option", ["--environment", "--catalogue"])
+def test_bundle_install_does_not_accept_deployment_configuration(option, capsys):
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["install", "handover", option, "Runtime"])
+    assert f"unrecognized arguments: {option} Runtime" in capsys.readouterr().err
 
 
-# --- what it does -------------------------------------------------------------
+@weaver_test()
+def test_environment_publish_has_its_own_fabric_surface():
+    parsed = build_parser().parse_args(
+        ["fabric", "environment", "publish", "Runtime", "--workspace", "Sales"]
+    )
+
+    assert parsed.environment == "Runtime"
+    assert parsed.workspace == "Sales"
+
+
+@weaver_test()
+def test_bundle_install_passes_the_resolved_workspace_to_core(monkeypatch):
+    cli = import_module("weaver_cli.main")
+    import weaver.operations.install as install_operation
+    from weaver.workspaces import Workspace
+
+    seen = {}
+    workspace = Workspace(workspace="Sales")
+    monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
+    monkeypatch.setattr(
+        install_operation,
+        "install",
+        lambda bundle, **kwargs: seen.update(bundle=bundle, **kwargs) or _Report(),
+    )
+
+    args = build_parser().parse_args(["install", "handover", "--workspace", "Sales"])
+    assert cli.handle_install(args) == 0
+    assert seen == {"bundle": "handover", "workspace": "Sales", "session": None}
+
+
+class _Report:
+    status = "succeeded"
+    bundle_id = "bundle"
+    succeeded = True
+
+    def to_mapping(self):
+        return {"status": self.status, "bundle_id": self.bundle_id}
 
 
 class _Result:
     workspace_name = "Sales"
 
     def as_dict(self):
-        return {"environment_name": "weaver", "published": True, "timings": {}}
-
-
-@weaver_test()
-def test_install_prints_its_result_without_being_asked(monkeypatch, capsys):
-    """No flag, and the payload is on stdout so a pipe gets only the result."""
-
-    cli = import_module("weaver_cli.main")
-    from weaver.workspaces import Workspace
-
-    workspace = Workspace(workspace="Sales", environment="weaver")
-    monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
-    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
-    monkeypatch.setattr(cli, "_session", lambda args: _RecordingSession())
-
-    import weaver.fabric as fabric
-
-    monkeypatch.setattr(fabric, "install", lambda *a, **k: _Result())
-
-    assert handle_install(_parse()) == 0
-    printed = json.loads(capsys.readouterr().out)
-    assert printed["environment_name"] == "weaver"
-    assert "total" in printed["timings"]
-
-
-@weaver_test()
-def test_install_frames_its_work_so_a_long_publish_is_visible(monkeypatch, capsys):
-    """A five-minute publish that prints nothing is indistinguishable from a hang.
-
-    The frames are the existing Task/Step ones, which is what makes the live
-    ticking line appear — this asserts install opens them, not that a second
-    progress mechanism exists.
-    """
-
-    cli = import_module("weaver_cli.main")
-    from weaver.workspaces import Workspace
-
-    session = _RecordingSession()
-    workspace = Workspace(workspace="Sales", environment="weaver")
-    monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
-    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
-    monkeypatch.setattr(cli, "_session", lambda args: session)
-
-    import weaver.fabric as fabric
-    from weaver.fabric import environment as env_mod
-
-    def _install(workspace_name, environment_name, *, session=None, **kwargs):
-        step = env_mod._reporter(session)
-        with step("Publish"):
-            pass
-        return _Result()
-
-    monkeypatch.setattr(fabric, "install", _install)
-
-    handle_install(_parse())
-    assert session.opened == [("task", "Install"), ("step", "Publish")]
-
-
-@weaver_test()
-def test_installing_without_a_session_still_works():
-    """A pytest fixture installing Weaver wants the work, not the reporting."""
-
-    from weaver.fabric import environment as env_mod
-
-    step = env_mod._reporter(None)
-    with step("Publish", "some detail"):
-        pass
+        return {"environment_name": "Runtime", "published": True, "timings": {}}
 
 
 class _RecordingSession:
-    """Enough Session to record which frames were opened."""
-
     closed = False
 
     def __init__(self):
@@ -152,3 +103,24 @@ class _RecordingSession:
 
     def step(self, name, detail=None):
         return self._frame("step", name)
+
+
+@weaver_test()
+def test_environment_publish_prints_its_result(monkeypatch, capsys):
+    cli = import_module("weaver_cli.main")
+    from weaver.workspaces import Workspace
+
+    workspace = Workspace(workspace="Sales", environment="Runtime")
+    monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(cli, "_session", lambda args: _RecordingSession())
+
+    import weaver.fabric as fabric
+
+    monkeypatch.setattr(fabric, "publish_environment", lambda *a, **k: _Result())
+
+    args = build_parser().parse_args(
+        ["fabric", "environment", "publish", "Runtime", "--workspace", "Sales"]
+    )
+    assert handle_environment_publish(args) == 0
+    assert '"published": true' in capsys.readouterr().out

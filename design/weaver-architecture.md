@@ -530,10 +530,10 @@ weaver build \
 The repository does not contain deployment-specific information. The Workspace
 determines where logical declarations are deployed.
 
-`--environment` names the Fabric Environment `weaver install` published to, and
-is needed by the commands that run Weaver inside Fabric: `load`, `test` and
-`install` itself. A build submits Spark SQL that imports nothing, so it needs
-none.
+`--environment` names the Fabric Environment `weaver fabric environment publish`
+published to, and is needed by the commands that run Weaver-authored Python
+inside Fabric: `load` and `test`. A build and bundle installation execute
+frozen SQL and bundle payloads, so neither needs it.
 
 ---
 
@@ -691,37 +691,28 @@ weaver build \
 
 ---
 
-## Build Records
+## Deployment bundles
 
-A Build Bundle may optionally be retained as a deployment record.
-
-```bash
-weaver build \
-    ./estate \
-    --workspace-config workspace.yml \
-    --bind Lakehouse/Raw \
-    --bundle
-```
-
-When no name is supplied, Weaver assigns a timestamp.
-
-A custom name may also be provided.
+A Build Bundle may be explicitly retained for a split build/deploy workflow.
 
 ```bash
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
     --bind Lakehouse/Raw \
-    --bundle release-2026-08
+    --bundle-only \
+    --bundle-path ./dist/raw-bundle
 ```
 
-The resulting archive is stored as
+The generated directory is the canonical bundle and can later be installed
+without rereading source or replanning:
 
-```text
-release-2026-08.weaver.zip
+```bash
+weaver install ./dist/raw-bundle --workspace-config workspace.yml
 ```
 
-This archive captures the generated deployment bundle.
+Normal `weaver build` plans and installs immediately; it does not retain a
+bundle as a side effect.
 
 The repository remains the source of truth.
 

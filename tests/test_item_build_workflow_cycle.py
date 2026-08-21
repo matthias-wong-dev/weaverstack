@@ -162,7 +162,6 @@ def test_direct_build_reads_each_remote_repository_file_once_and_no_bundle_file(
     assert result.report.status == "succeeded"
     assert set(remote.reads) == expected_files
     assert set(remote.reads.values()) == {1}
-    assert result.archive is None
     assert not any(path.endswith("plan.yml") for path in remote.reads)
 
 
@@ -291,38 +290,6 @@ def test_the_cli_area_is_reserved_from_inventory_and_nothing_else_is(tmp_path):
     assert "cli" not in inventory.folder_schemas
     assert "build_bundles" in inventory.folder_schemas
     assert "weaver_items" in inventory.folder_schemas
-
-
-@weaver_test()
-def test_direct_build_can_upload_one_archive_after_install_without_rereading_source(
-    tmp_path, prepared_state
-):
-    root = Location(str(_estate(tmp_path)))
-    remote = CountingStore()
-    archive = Location(str(tmp_path / "records" / "record.weaver.zip"))
-    expected_files = {
-        entry.location.value
-        for entry in FilesystemStore().list(root, recursive=True)
-        if not entry.is_directory
-    }
-    result = build_item_repository_source(
-        root,
-        source_store=remote,
-        bindings=_bindings(),
-        session=given_session(
-            store=remote,
-            lakehouses=("Weaver", "Weaver_Control", "Raw_Dev", "Sales_LH"),
-        ),
-        catalogue_binding=_control(),
-        archive=archive,
-        executors=_executors(),
-    )
-
-    assert result.report.status == "succeeded"
-    assert result.archive == archive
-    assert set(remote.reads) == expected_files
-    assert set(remote.reads.values()) == {1}
-    assert remote.writes == [archive.value]
 
 
 @weaver_test()

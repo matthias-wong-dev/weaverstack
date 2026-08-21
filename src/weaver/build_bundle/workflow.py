@@ -74,7 +74,6 @@ class ItemBuildResult:
     report: InstallationReport
     repository_signature: str
     item_signatures: Mapping[WeaverItemId, str]
-    archive: Location | None = None
 
     @property
     def bundle_id(self) -> str:
@@ -432,8 +431,6 @@ def build_item_repository(
     workspace=None,
     source_store: Store,
     catalogue_binding: WarehouseBinding,
-    archive: Location | None = None,
-    archive_store: Store | None = None,
     output: Location | None = None,
     executors=None,
 ) -> ItemBuildResult:
@@ -451,27 +448,18 @@ def build_item_repository(
     it.
     """
 
-    builder = Builder(
-        repository=repository,
-        state=state,
-        bindings=bindings,
-        catalogue_binding=catalogue_binding,
-        source_store=source_store,
-    )
     installer = Installer(session, workspace=workspace, executors=executors)
 
     with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
-        bundle = builder.build(
-            output=output or Location((Path(temporary) / "bundle").as_posix())
+        bundle = build_repository_bundle(
+            repository,
+            state=state,
+            bindings=bindings,
+            catalogue_binding=catalogue_binding,
+            source_store=source_store,
+            output=output or Location((Path(temporary) / "bundle").as_posix()),
         )
         report = installer.install(bundle)
-        persisted = None
-        if archive is not None:
-            persisted = persist_bundle_archive(
-                bundle,
-                archive,
-                store=archive_store or installer.store,
-            )
         return ItemBuildResult(
             plan=bundle.plan,
             report=report,
@@ -479,8 +467,32 @@ def build_item_repository(
             item_signatures={
                 item.identity: item.signature for item in repository.items
             },
-            archive=persisted,
         )
+
+
+def build_repository_bundle(
+    repository: WeaverRepository,
+    *,
+    state: BuildState,
+    bindings: ItemBindings,
+    catalogue_binding: WarehouseBinding,
+    source_store: Store,
+    output: Location,
+) -> BuildBundle:
+    """Build one durable bundle from a parsed repository and observed state.
+
+    This is the boundary between planning and installation. It deliberately has
+    no Session: target state is already represented by ``state`` and mutation
+    belongs to :class:`Installer`.
+    """
+
+    return Builder(
+        repository=repository,
+        state=state,
+        bindings=bindings,
+        catalogue_binding=catalogue_binding,
+        source_store=source_store,
+    ).build(output=output)
 
 
 def build_item_repository_source(
@@ -491,8 +503,6 @@ def build_item_repository_source(
     session,
     workspace=None,
     catalogue_binding: WarehouseBinding,
-    archive: Location | None = None,
-    archive_store: Store | None = None,
     output: Location | None = None,
     sql_by_item=None,
     executors=None,
@@ -524,8 +534,6 @@ def build_item_repository_source(
             workspace=workspace,
             source_store=prepared.store,
             catalogue_binding=catalogue_binding,
-            archive=archive,
-            archive_store=archive_store,
             output=output,
             executors=executors,
         )

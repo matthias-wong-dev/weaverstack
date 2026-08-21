@@ -3,7 +3,7 @@
 This is a ``remote`` Fabric test, not a ``hosted`` one, and the distinction is
 the point. Nothing here imports the installed package — it asks the *platform*
 what a mount is, which needs a session and nothing else. So it runs in the fast
-loop, with no ``weaver install`` in front of it.
+loop, with no Environment publication in front of it.
 
 That matters because the mount is what broke. A Folder's authored code writes
 ordinary files, and ``folder_path()`` was handing it an ``abfss://`` URL that

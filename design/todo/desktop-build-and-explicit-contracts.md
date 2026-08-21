@@ -146,7 +146,7 @@ surface is the coupling that has already caused Fabric failures.
 [open questions](#open-questions).
 
 B1 to B3 are behaviour-preserving. B4 renames symbols the published wheel
-exports, so it lands together with `weaver install`.
+exports, so it lands together with Environment publication.
 
 ## Phase C: desktop install, by deletion
 
@@ -305,7 +305,7 @@ because the old desktop calls `install_actions` and it is gone. The forward
 direction is safe. Land C5 and the republish together.
 
 **Symbol drift at B4.** Renaming what the wheel exports produces the version
-mismatch message until `weaver install` runs. The failure names the fix, but B4
+mismatch message until Weaver is published to the Environment. The failure names the fix, but B4
 and the republish are one change.
 
 **C4 coverage.** Feasibility is strongly indicated and not yet proven against a

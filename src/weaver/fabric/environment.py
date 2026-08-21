@@ -43,7 +43,7 @@ def project_root() -> Path:
         if (parent / "pyproject.toml").is_file():
             return parent
     raise CommandError(
-        "A Weaver project root was not found. Run `weaver install` from a "
+        "A Weaver project root was not found. Run `weaver fabric environment publish` from a "
         f"checkout containing pyproject.toml above {here}."
     )
 
@@ -145,7 +145,7 @@ def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> 
     )
     if result.returncode != 0:
         raise CommandError(
-            "Wheel build failed. `weaver install` builds the wheel with "
+            "Wheel build failed. `weaver fabric environment publish` builds the wheel with "
             "`python -m build`, so install `build` and try again.\n"
             + (result.stderr.strip() or result.stdout.strip())[-1000:]
         )
@@ -224,7 +224,7 @@ def read_staging(env: Item, *, client: FabricClient) -> dict:
     A freshly created Environment answers 404 here — ``This environment does not
     have any staged libraries`` — which is the same "nothing yet"
     :func:`read_published` reads from a 404, and is read the same way. Treated
-    as fatal, it made the first ``weaver install`` into a new Environment fail.
+    as fatal, it made the first Environment publication into a new Environment fail.
     """
 
     try:
@@ -391,12 +391,12 @@ def publish_and_wait(
     )
 
 
-# --- the orchestrated install ------------------------------------------------
+# --- environment publication -------------------------------------------------
 
 
 @dataclass
-class InstallResult:
-    """What one ``weaver install`` did — serialisable for ``--json``."""
+class EnvironmentPublishResult:
+    """What one Environment publication did — serialisable for ``--json``."""
 
     workspace_name: str
     workspace_id: str
@@ -423,14 +423,14 @@ def _version_from_wheel(filename: str) -> str:
     return stem.split("-py3-")[0].split("-py2.py3-")[0]
 
 
-def install(
+def publish_environment(
     workspace_name: str,
     environment_name: str,
     *,
     client: FabricClient | None = None,
     root: Path | None = None,
     session=None,
-) -> InstallResult:
+) -> EnvironmentPublishResult:
     """Build the wheel, stage what changed, and publish if anything changed.
 
     The one installation path, and it always finishes: there is no
@@ -507,7 +507,7 @@ def install(
                 f"Environment publish finished with status {publish_status!r}."
             )
 
-    return InstallResult(
+    return EnvironmentPublishResult(
         workspace_name=workspace.name,
         workspace_id=workspace.id,
         environment_name=env.name,

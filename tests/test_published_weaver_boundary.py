@@ -1,4 +1,4 @@
-"""Which crossings wait on `weaver install`, and which only need a session.
+"""Which crossings wait on Environment publication, and which only need a session.
 
 A Fabric Environment and a published Weaver are two separate needs. Attaching
 an Environment is how a Livy session starts at all; publishing a wheel into it
@@ -135,7 +135,7 @@ def test_a_body_that_cannot_import_weaver_is_told_to_install():
     source = environment_bootstrap()
 
     assert "import weaver" in source
-    assert "weaver install --workspace <ws> --environment <env>" in source
+    assert "weaver fabric environment publish <env> --workspace <ws>" in source
 
 
 @weaver_test()
