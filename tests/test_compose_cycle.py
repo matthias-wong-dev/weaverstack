@@ -189,13 +189,13 @@ def test_an_entry_naming_another_program_is_refused_by_the_parser(entry, recorde
     assert "not a valid Weaver command" in str(raised.value)
 
 
-@pytest.mark.parametrize("command", ["session", "compose", "doctor"])
+@pytest.mark.parametrize("command", ["session", "compose"])
 @weaver_test()
 def test_the_commands_a_composition_cannot_contain(command):
     with pytest.raises(CommandError) as raised:
         composition_words(f"weaver {command} dev")
 
-    assert "cannot" in str(raised.value) or "shell" in str(raised.value)
+    assert "cannot" in str(raised.value)
 
 
 # --- confirmation -------------------------------------------------------------

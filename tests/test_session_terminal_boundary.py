@@ -199,7 +199,9 @@ def test_a_raised_error_stops_the_rest_of_the_pasted_block(recorded, capsys):
 
 
 @weaver_test()
-def test_a_bare_command_in_a_pasted_block_stops_it(recorded, capsys):
+def test_a_pasted_block_may_omit_the_program_name(recorded, capsys):
+    """The leading `weaver` is optional line by line, so a mixed block runs."""
+
     calls, parser, _, history = recorded
     keys = pasted("build .", "weaver load Lakehouse/Landing") + f"exit{ENTER}"
 
@@ -207,8 +209,8 @@ def test_a_bare_command_in_a_pasted_block_stops_it(recorded, capsys):
         with driven(keys, session=session, parser=parser, history=history):
             pass
 
-    assert calls == []
-    assert "weaver build ." in capsys.readouterr().err
+    assert [parsed.command for parsed in calls] == ["build", "load"]
+    assert capsys.readouterr().err == ""
 
 
 @weaver_test()

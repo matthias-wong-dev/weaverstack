@@ -137,14 +137,15 @@ def test_an_ordinary_weaver_command_line_runs_unchanged(line, every_command):
 
 
 @weaver_test()
-def test_a_bare_command_says_how_to_write_it(recorded, capsys):
+def test_the_leading_program_name_is_optional(recorded, capsys):
+    """`build .` and `weaver build .` are the same command at the prompt."""
+
     seen, factory = recorded
 
     _run("build .\nweaver build .\nexit\n", factory)
 
-    reported = capsys.readouterr().err
-    assert "weaver build ." in reported, "the message shows the line to write"
-    assert len(seen) == 1, "only the canonical spelling ran"
+    assert capsys.readouterr().err == ""
+    assert len(seen) == 2, "both spellings ran"
 
 
 @weaver_test()
@@ -232,7 +233,7 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
     )
 
     assert _available(build_parser()) == ", ".join(expected)
-    assert "compose" in expected, "a composition runs from inside a session"
+    assert expected == ["build", "compose", "load", "test", "wipe"]
 
 
 # --- a composition run from the prompt ---------------------------------------
@@ -375,6 +376,19 @@ def test_a_session_cannot_be_started_inside_a_session(recorded, capsys):
     assert "already in a session" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("command", ["install", "fabric"])
+@weaver_test()
+def test_the_commands_a_session_does_not_offer(command, recorded, capsys):
+    """A session builds, loads, tests and wipes; the rest is shell work."""
+
+    seen, factory = recorded
+
+    _run(f"{command}\nexit\n", factory)
+
+    assert seen == []
+    assert "not a session" in capsys.readouterr().err
+
+
 @weaver_test()
 def test_blank_lines_and_comments_are_not_commands(recorded):
     seen, factory = recorded
@@ -415,7 +429,7 @@ def test_the_banner_lists_the_parser_s_commands(recorded, capsys):
     printed = _banner_for("A_Workspace", recorded, capsys)
 
     assert "Available: build." in printed
-    assert "start with `weaver`" in printed
+    assert "the leading `weaver` is optional" in printed
 
 
 class _Preparing:

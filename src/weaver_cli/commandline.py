@@ -2,9 +2,9 @@
 
 ``weaver session`` and ``weaver compose`` both take command lines a person
 typed or pasted, so they read them the same way: ``shlex`` quoting, an optional
-or required leading ``weaver``, and the few commands the context cannot run.
-A line copied from a terminal, a composition file or the documentation means
-the same thing in all three places.
+leading ``weaver``, and the few commands the context cannot run. A line copied
+from a terminal, a composition file or the documentation means the same thing in
+all three places.
 
 What a line *means* is argparse's answer, not this module's. Nothing here
 decides whether a command exists or whether its options are valid; the words go
@@ -42,14 +42,12 @@ def command_names(parser: argparse.ArgumentParser) -> frozenset[str]:
 def command_words(
     line: str,
     *,
-    require_program: bool = False,
     excluded: Mapping[str, str] | None = None,
 ) -> list[str]:
     """The arguments one written Weaver command line means.
 
-    ``require_program`` demands the leading ``weaver``; without it the program
-    name is optional. ``excluded`` maps a command name to the reason it cannot
-    run in this context.
+    The leading ``weaver`` is optional. ``excluded`` maps a command name to the
+    reason it cannot run in this context.
     """
 
     text = line.strip()
@@ -68,12 +66,7 @@ def command_words(
     if not words:
         raise CommandError("a Weaver command line cannot be empty")
 
-    if words[0] == PROGRAM:
-        rest = words[1:]
-    elif require_program:
-        raise CommandError(f"Commands start with `{PROGRAM}`. Write: {PROGRAM} {text}")
-    else:
-        rest = words
+    rest = words[1:] if words[0] == PROGRAM else words
     if not rest:
         raise CommandError(f"{text!r} names no command")
 

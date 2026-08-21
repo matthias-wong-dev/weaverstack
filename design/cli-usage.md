@@ -64,14 +64,14 @@ weaver session --workspace "Weaver Example" --environment weaver
 Weaver · Weaver Example
 Starting: Fabric credential
 
-Available: build, compose, fabric, install, load, test, wipe.
-Commands start with `weaver`, as they do in a terminal. `help` for options, `exit` to leave.
+Available: build, compose, load, test, wipe.
+Commands are written as they are in a terminal; the leading `weaver` is optional. `help` for options, `exit` to leave.
 
-weaver> weaver wipe Lakehouse/Sales Warehouse/Reporting --yes
-weaver> weaver build . --bind Lakehouse/Sales=Sales
+weaver> wipe Lakehouse/Sales Warehouse/Reporting --yes
+weaver> build . --bind Lakehouse/Sales=Sales
 weaver> weaver load Lakehouse/Sales Warehouse/Reporting
 weaver> weaver test Lakehouse/Sales
-weaver> weaver compose all
+weaver> compose all
 weaver> exit
 ```
 
@@ -80,8 +80,14 @@ written in a terminal, in `compose.yml` and in this document, parsed by the
 same parser and run by the same handlers. A line copied from any of them runs
 here unchanged, and what the session adds is underneath: one Session, held
 open, so a credential, item resolution and Livy are paid for once rather than
-per command. The commands offered are the CLI's own, less `session` itself, so
-`weaver --help` and `weaver --version` answer here as they do in a terminal.
+per command. The leading `weaver` is optional, so `build .` and
+`weaver build .` are the same command, and `weaver --help` and
+`weaver --version` answer here as they do in a terminal.
+
+**A session offers the workspace lifecycle**: `build`, `load`, `test`, `wipe`
+and `compose`. `install` publishes Weaver into a Fabric Environment and
+`weaver fabric` manages the estate underneath a workspace; both are run from a
+shell rather than from a prompt holding one workspace open.
 
 **Quoting holds a value together; nothing escapes.** `--workspace "Research &
 Development"` is one workspace name, and a backslash is an ordinary character
@@ -317,9 +323,9 @@ already; `--yes` carries the same authority to each command in the sequence.
 **Entries are ordinary Weaver command lines**, read by the same function the
 session prompt reads a typed line with, parsed by the same parser and run by
 the same handlers, so an option means here what it means at a prompt. The
-leading `weaver` is optional, because a composition holds nothing else. Nothing
-shell-shaped is accepted — no pipes, no redirection, no `&&`, no variables, no
-other executables — and neither is `session`, `doctor` or a nested `compose`.
+leading `weaver` is optional, as it is at a prompt. Nothing shell-shaped is
+accepted — no pipes, no redirection, no `&&`, no variables, no other
+executables — and neither is `session` or a nested `compose`.
 
 **One Session runs the whole sequence**, which is the point: authentication,
 item resolution and Livy are paid for once rather than four times. Typed at a
