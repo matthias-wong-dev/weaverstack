@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from ..errors import CommandError
 from ..locations import Location
 from ..store import FilesystemStore
@@ -14,9 +12,6 @@ def install(
     bundle,
     *,
     workspace: str | None = None,
-    catalogue: str | None = None,
-    environment: str | None = None,
-    workspace_config: str | Path | None = None,
     session=None,
 ):
     """Validate and install a frozen bundle without rereading its repository."""
@@ -35,9 +30,6 @@ def install(
     resolved_workspace = operation_workspace(
         "install",
         workspace=workspace,
-        catalogue=catalogue,
-        environment=environment,
-        workspace_config=workspace_config,
         session=session,
         needs_catalogue=False,
     )

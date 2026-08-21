@@ -30,8 +30,6 @@ from .objects import (
     WeaverObject,
 )
 from .operations.build import BuildResult, build
-from .operations.check import CheckResult, check
-from .operations.install import install
 from .operations.load import load
 from .operations.test import test
 from .operations.wipe import WipeReport, WipeResult, wipe
@@ -59,9 +57,6 @@ __all__ = [
     # ordinary operations and results
     "build",
     "BuildResult",
-    "check",
-    "CheckResult",
-    "install",
     "wipe",
     "WipeReport",
     "WipeResult",

@@ -347,7 +347,10 @@ def _bundle_output(path: str | Path | None) -> Location:
 
     if path is None:
         return Location(tempfile.mkdtemp(prefix="weaver-bundle-"))
-    return Location(str(path))
+    output = Path(path)
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        raise BuildError(f"bundle path must not exist or must be empty: {output}")
+    return Location(str(output))
 
 
 def _binding_text(binding) -> str:

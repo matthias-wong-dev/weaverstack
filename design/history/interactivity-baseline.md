@@ -214,13 +214,13 @@ Both Fabric runs of this change failed first with
 error: read_inventories could not run: the Weaver published in Weaver Example is
 older than this console and does not carry cannot import name
 '_lakehouse_inventories_here' from 'weaver.build_bundle.workflow'.
-Publish the current wheel with `weaver install ...`
+Publish the current wheel with `weaver fabric environment publish ...`
 ```
 
 The diagnosis is good and names the fix, and the failure closed every open frame
 correctly. But the coupling is real and the decomposition increases it: each new
 remote entry point is another symbol the desktop and the wheel must agree on,
-and `weaver install` costs about five minutes. Nothing here is wrong — §5.6
+and Environment publication costs about five minutes. Nothing here is wrong — §5.6
 accepts using the installed runtime — but a development loop that needs a
 republish per new crossing is worth watching, and is an argument for keeping the
 remote surface small and stable rather than growing an entry point per action.
@@ -336,7 +336,8 @@ The plan already decides which half wins. §7.2, on `await_addressable`:
 So **`hosted` is about where the orchestration is, not about whether the wheel is
 imported** — and the "no published wheel" gloss on `remote` is what has to go.
 That is a documentation change with teeth: it means `-m "fabric and remote"`
-starts requiring `weaver install` to have run, which is a real cost the marker
+starts requiring Weaver to have been published to its Environment, which is a
+real cost the marker
 was explicitly promising to avoid.
 
 Worth deciding deliberately rather than discovering per test, because it changes

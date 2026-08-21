@@ -225,15 +225,33 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
     """No hand-written list: what the session offers is what the parser has."""
 
     from weaver_cli.main import build_parser
-    from weaver_cli.shell import NOT_IN_A_SESSION, _available
+    from weaver_cli.shell import (
+        NOT_IN_A_SESSION,
+        SECONDARY_SESSION_COMMANDS,
+        _available,
+    )
 
     expected = sorted(
         set(build_parser()._subparsers._group_actions[0].choices)
         - set(NOT_IN_A_SESSION)
+        - SECONDARY_SESSION_COMMANDS
     )
 
     assert _available(build_parser()) == ", ".join(expected)
-    assert expected == ["build", "check", "compose", "install", "load", "test", "wipe"]
+    assert expected == ["build", "compose", "load", "test", "wipe"]
+    assert SECONDARY_SESSION_COMMANDS.isdisjoint(NOT_IN_A_SESSION)
+
+
+@weaver_test()
+def test_secondary_commands_remain_accepted_in_a_session():
+    from weaver_cli.commandline import command_words
+    from weaver_cli.shell import NOT_IN_A_SESSION
+
+    assert command_words("weaver check .", excluded=NOT_IN_A_SESSION) == ["check", "."]
+    assert command_words("weaver install bundle", excluded=NOT_IN_A_SESSION) == [
+        "install",
+        "bundle",
+    ]
 
 
 # --- a composition run from the prompt ---------------------------------------

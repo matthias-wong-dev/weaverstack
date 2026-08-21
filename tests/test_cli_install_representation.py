@@ -20,14 +20,17 @@ def test_install_requires_a_bundle_and_accepts_workspace_configuration():
 
     assert parsed.bundle == "handover"
     assert parsed.workspace == "Sales"
+    assert not hasattr(parsed, "environment")
+    assert not hasattr(parsed, "catalogue")
     assert command_requirements(parsed)
 
 
 @weaver_test()
-def test_old_environment_install_surface_is_not_accepted(capsys):
+@pytest.mark.parametrize("option", ["--environment", "--catalogue"])
+def test_bundle_install_does_not_accept_deployment_configuration(option, capsys):
     with pytest.raises(SystemExit):
-        build_parser().parse_args(["install", "--environment", "Runtime"])
-    assert "BUNDLE" in capsys.readouterr().err
+        build_parser().parse_args(["install", "handover", option, "Runtime"])
+    assert f"unrecognized arguments: {option} Runtime" in capsys.readouterr().err
 
 
 @weaver_test()
@@ -43,14 +46,21 @@ def test_environment_publish_has_its_own_fabric_surface():
 @weaver_test()
 def test_bundle_install_passes_the_resolved_workspace_to_core(monkeypatch):
     cli = import_module("weaver_cli.main")
+    import weaver.operations.install as install_operation
     from weaver.workspaces import Workspace
 
+    seen = {}
     workspace = Workspace(workspace="Sales")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
-    monkeypatch.setattr(cli.weaver, "install", lambda *args, **kwargs: _Report())
+    monkeypatch.setattr(
+        install_operation,
+        "install",
+        lambda bundle, **kwargs: seen.update(bundle=bundle, **kwargs) or _Report(),
+    )
 
     args = build_parser().parse_args(["install", "handover", "--workspace", "Sales"])
     assert cli.handle_install(args) == 0
+    assert seen == {"bundle": "handover", "workspace": "Sales", "session": None}
 
 
 class _Report:

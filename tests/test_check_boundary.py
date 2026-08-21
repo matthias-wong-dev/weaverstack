@@ -8,8 +8,8 @@ from shutil import copytree
 import pytest
 from support.weaver_test import weaver_test
 
-import weaver
 from weaver.errors import DiscoveryError
+from weaver.operations.check import check
 from weaver_cli.main import build_parser, command_requirements, handle_check
 
 
@@ -29,7 +29,7 @@ def test_check_parses_a_valid_repository_without_running_authored_python(tmp_pat
         encoding="utf-8",
     )
 
-    result = weaver.check(root)
+    result = check(root)
 
     assert result.source == str(root)
 
@@ -40,7 +40,7 @@ def test_check_raises_existing_parser_errors(tmp_path):
     (root / "Lakehouse" / "Raw" / "unexpected.txt").write_text("x", encoding="utf-8")
 
     with pytest.raises(DiscoveryError):
-        weaver.check(root)
+        check(root)
 
 
 @weaver_test()

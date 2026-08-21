@@ -91,6 +91,18 @@ def _build(repository, **kwargs):
     return weaver.build(str(repository), bind="Lakehouse/Sales_LH=Sales", **kwargs)
 
 
+@weaver_test()
+def test_bundle_path_refuses_an_already_populated_directory(tmp_path):
+    """`--bundle-path` cannot leave an old manifest or payload in place."""
+
+    output = tmp_path / "release"
+    output.mkdir()
+    (output / "plan.yml").write_text("old bundle", encoding="utf-8")
+
+    with pytest.raises(BuildError, match="must not exist or must be empty"):
+        weaver.operations.build._bundle_output(output)
+
+
 # --- notebook inference -------------------------------------------------------
 
 

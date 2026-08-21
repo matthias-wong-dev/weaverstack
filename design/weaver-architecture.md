@@ -530,10 +530,10 @@ weaver build \
 The repository does not contain deployment-specific information. The Workspace
 determines where logical declarations are deployed.
 
-`--environment` names the Fabric Environment `weaver fabric environment publish` published to, and
-is needed by the commands that run Weaver inside Fabric: `load`, `test` and
-`install` itself. A build submits Spark SQL that imports nothing, so it needs
-none.
+`--environment` names the Fabric Environment `weaver fabric environment publish`
+published to, and is needed by the commands that run Weaver-authored Python
+inside Fabric: `load` and `test`. A build and bundle installation execute
+frozen SQL and bundle payloads, so neither needs it.
 
 ---
 

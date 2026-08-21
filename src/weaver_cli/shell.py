@@ -31,6 +31,10 @@ NOT_IN_A_SESSION = {
     "fabric": "run it from a shell, not a session",
 }
 
+# Source checking and bundle installation remain usable at the prompt, but the
+# session banner introduces the core lifecycle rather than every available seam.
+SECONDARY_SESSION_COMMANDS = {"check", "install"}
+
 EXITS = {"exit", "quit"}
 HELP = {"help", "?"}
 
@@ -290,7 +294,11 @@ def _default_workspace(args: argparse.Namespace):
 def _available(parser) -> str:
     """The commands this session accepts, from the parser rather than a list."""
 
-    return ", ".join(sorted(command_names(parser) - set(NOT_IN_A_SESSION)))
+    return ", ".join(
+        sorted(
+            command_names(parser) - set(NOT_IN_A_SESSION) - SECONDARY_SESSION_COMMANDS
+        )
+    )
 
 
 def _usage(parser) -> str:

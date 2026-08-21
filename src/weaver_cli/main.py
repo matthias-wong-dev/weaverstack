@@ -335,7 +335,7 @@ def build_parser() -> argparse.ArgumentParser:
         "bundle", metavar="BUNDLE", help="Bundle directory or .weaver.zip archive."
     )
     install.add_argument("--json", action="store_true", help="emit the report as JSON")
-    _add_workspace_args(install)
+    _add_workspace_args(install, include_catalogue=False, include_environment=False)
     install.set_defaults(handler=handle_install, requires=_requires_install)
 
     # Fabric estate management rather than a Weaver lifecycle verb: these act on
@@ -536,12 +536,13 @@ def handle_install(args: argparse.Namespace) -> int:
 
     import json
 
+    from weaver.operations.install import install
+
     workspace = _resolve_workspace(args)
-    report = weaver.install(
+    report = install(
         args.bundle,
         workspace=workspace.workspace,
         session=_session(args),
-        **_command_context(workspace),
     )
     if args.json:
         print(json.dumps(report.to_mapping(), indent=2))
@@ -649,7 +650,7 @@ def _resolve_workspace(args: argparse.Namespace):
     else:
         workspace = resolve_workspace(
             workspace=args.workspace,
-            environment=args.environment,
+            environment=getattr(args, "environment", None),
             catalogue=getattr(args, "catalogue", None),
             workspace_config=args.workspace_config,
         )
@@ -1197,8 +1198,10 @@ def handle_check(args: argparse.Namespace) -> int:
 
 
 def _check_once(args: argparse.Namespace) -> int:
+    from weaver.operations.check import check
+
     try:
-        weaver.check(args.repository)
+        check(args.repository)
     except WeaverError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
