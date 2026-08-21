@@ -104,6 +104,9 @@ def run_test(
     ``state`` lets a caller provide an already-read catalogue snapshot.
     """
 
+    _require_lakehouse_environment(
+        session, workspace=workspace, requested=requested, dry_run=dry_run
+    )
     started = datetime.now(timezone.utc)
 
     if file is not None:
@@ -186,6 +189,22 @@ def _dispatch_collecting(*, collect: bool):
     return dispatch
 
 
+def _require_lakehouse_environment(session, *, workspace, requested, dry_run: bool):
+    """Fail before planning when a desktop Lakehouse run cannot start."""
+
+    from ..sessions.base import ACROSS_BOUNDARY
+
+    if dry_run or workspace.environment or not lakehouse_names(requested):
+        return
+    if session.position(workspace) != ACROSS_BOUNDARY:
+        return
+    target = next(target for target in requested if target.is_lakehouse)
+    raise CommandError(
+        f"{target} requires a Fabric Environment with Weaver installed. Pass "
+        "--environment <name>, or set environment in workspace configuration."
+    )
+
+
 def _as_validation_node(node) -> ValidationNodeReport:
     """One run node, in the vocabulary a validation's readers use.
 
@@ -210,6 +229,8 @@ def _as_validation_node(node) -> ValidationNodeReport:
     else:
         status = FAILED
     result = getattr(node.result, "result", node.result)
+    if status == INVALID and not _has_result_for_validation(node.role, result):
+        result = _failed_validation_result(node, result)
     return ValidationNodeReport(
         logical_id=node.logical_id,
         kind=node.role or "Test",
@@ -227,6 +248,27 @@ def _as_validation_node(node) -> ValidationNodeReport:
         started_at=node.started_at,
         finished_at=node.finished_at,
     )
+
+
+def _has_result_for_validation(kind, result) -> bool:
+    """Whether a result carries the counts for this validation kind."""
+
+    from ..declaration.metadata import ASSUMPTION
+
+    field = "violation_count" if kind == ASSUMPTION else "missing_count"
+    return hasattr(result, field)
+
+
+def _failed_validation_result(node, result):
+    """Give an invalid validation a result in its own result vocabulary."""
+
+    from ..declaration.metadata import ASSUMPTION
+    from ..runtime.validation_result import AssumptionResult, TestResult
+
+    message = getattr(result, "error_message", None) or "could not run"
+    if node.role == ASSUMPTION:
+        return AssumptionResult.failed_to_run(message)
+    return TestResult.failed_to_run(message)
 
 
 def _reported(

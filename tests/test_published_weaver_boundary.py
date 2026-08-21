@@ -117,14 +117,14 @@ def test_the_import_is_submitted_once_per_livy_session(monkeypatch):
 
 @weaver_test()
 def test_a_workspace_naming_no_environment_is_told_where_weaver_comes_from():
-    """A missing Environment names the workspace and the publish that fills it."""
+    """A missing Environment names the workspace and how to configure one."""
 
     from weaver.fabric.livy import missing_environment
 
     message = missing_environment(Workspace(workspace="Analytics"))
 
     assert "Analytics" in message
-    assert "weaver install" in message
+    assert "requires a Fabric Environment with Weaver installed" in message
     assert "--environment" in message
 
 

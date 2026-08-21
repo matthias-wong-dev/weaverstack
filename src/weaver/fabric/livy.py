@@ -539,21 +539,14 @@ def _resolve_environment_id(workspace, resolver) -> str:
 
 
 def missing_environment(workspace=None) -> str:
-    """Why a Fabric Environment is needed, said where the need arises.
-
-    Not when a Livy session starts — Spark runs on the workspace default — but
-    when a body wants to ``import weaver``, which is what an Environment
-    carries.
-    """
+    """Explain how to configure the Environment required by a Fabric run."""
 
     name = getattr(workspace, "workspace", None)
     where = f" for workspace {name!r}" if name else ""
     return (
-        f"No Fabric Environment is named{where}. Running Weaver inside Fabric "
-        f"needs the Environment `weaver install` published to: pass "
-        f"environment= in Python, --environment on the command line, or set "
-        f"environment in workspace configuration. A build needs none of this; "
-        f"its Spark statements import nothing."
+        f"No Fabric Environment is configured{where}. Running Weaver in Fabric "
+        "requires a Fabric Environment with Weaver installed. Pass "
+        "--environment <name>, or set environment in workspace configuration."
     )
 
 

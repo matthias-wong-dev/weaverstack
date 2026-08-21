@@ -174,6 +174,68 @@ def _ran(validation, executor=None, *, collect=False):
     )
 
 
+@weaver_test()
+def test_a_lakehouse_run_requires_an_environment_before_reading_the_catalogue():
+    """A desktop run cannot dispatch Lakehouse code without an Environment."""
+
+    from weaver.errors import CommandError
+    from weaver.operations.test import run_test
+    from weaver.sessions.testing import TestSession
+    from weaver.workspaces import Workspace
+
+    workspace = Workspace(workspace="Analytics")
+    with TestSession(workspace=workspace) as session:
+        with pytest.raises(
+            CommandError,
+            match="Lakehouse/Sales_LH requires a Fabric Environment with Weaver installed",
+        ):
+            run_test(
+                session,
+                workspace=workspace,
+                requested=(LAKEHOUSE_TARGET,),
+            )
+
+        assert session.calls == []
+
+
+@pytest.mark.parametrize(
+    ("kind", "result_type"),
+    [("Test", TestResult), ("Assumption", AssumptionResult)],
+)
+@weaver_test()
+def test_a_dispatch_error_is_projected_into_the_validation_result_kind(
+    kind, result_type
+):
+    """A report of an invalid validation always retains its own result shape."""
+
+    from types import SimpleNamespace
+
+    from weaver.operations.test import _as_validation_node
+    from weaver.run.result import FAILED as RUN_FAILED
+    from weaver.run.result import RunFailure
+
+    node = _as_validation_node(
+        SimpleNamespace(
+            logical_id="Lakehouse/Sales/Sales.OrdersReconcile",
+            physical_target="Lakehouse/Sales_LH",
+            primitive_kind=PYTHON_VALIDATION,
+            dispatch_location="remote",
+            role=kind,
+            status=RUN_FAILED,
+            raised=True,
+            executed=True,
+            messages=(),
+            result=RunFailure("LivyError: session unavailable"),
+            started_at=None,
+            finished_at=None,
+        )
+    )
+
+    assert node.status == INVALID
+    assert isinstance(node.result, result_type)
+    assert node.result.error_message == "LivyError: session unavailable"
+
+
 # --- which primitive ----------------------------------------------------------
 
 
