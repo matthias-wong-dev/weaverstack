@@ -421,7 +421,7 @@ def _log_rows(workspace, workflow_id):
 
 LOADED = """
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from weaver import lakehouse_for
@@ -452,7 +452,10 @@ sys.path.insert(0, destination.files_root() + "/_/Load")
 from Files.Raw__CustomerCsv import Raw__CustomerCsv
 
 folder = Raw__CustomerCsv(spark, lakehouse=destination)
-changes = Raw__CustomerCsv(folder).changes_since(before_load)
+consumer = Raw__CustomerCsv(folder)
+changed = consumer.files_since(before_load)
+latest = consumer.latest_files()
+deleted = consumer.deleted_since(before_load)
 
 # Read here rather than from the desktop, and that is not an economy. `_.Log` is
 # written asynchronously and the barrier is the Session closing, so a reader in
@@ -461,15 +464,18 @@ emit({
     "dry": dry,
     "real": real,
     "log": _log_rows(workspace, real["workflow_id"]),
-    "changes": {key: [str(path) for path in values]
-                for key, values in changes.items()},
+    "changed": {str(path): at.isoformat() for path, at in changed.items()},
+    "latest": {str(path): at.isoformat() for path, at in latest.items()},
+    "deleted": [str(path) for path in deleted],
     "change_paths_are_full": all(
         isinstance(path, Path) and path.is_absolute()
-        for values in changes.values() for path in values
+        for path in (*changed, *latest)
     ),
-    "upserts_exist": [path.exists() for path in changes["upserts"]],
-    "upsert_contents": [path.read_text(encoding="utf-8")
-                        for path in changes["upserts"]],
+    "change_datetimes_are_utc": all(
+        at.utcoffset() == timedelta(0)
+        for at in (*changed.values(), *latest.values())
+    ),
+    "changed_contents": [path.read_text(encoding="utf-8") for path in changed],
 })
 """
 
@@ -543,16 +549,11 @@ def _assert_loaded(env, seen) -> None:
     # same Fabric session that ran the load. A downstream object receives a full
     # path it can read immediately.
     assert seen["change_paths_are_full"] is True
-    assert [path.rsplit("/", 1)[-1] for path in seen["changes"]["upserts"]] == [
-        "customers.csv"
-    ]
-    assert [path.rsplit("/", 1)[-1] for path in seen["changes"]["inserts"]] == [
-        "customers.csv"
-    ]
-    assert seen["changes"]["updates"] == []
-    assert seen["changes"]["deletes"] == []
-    assert seen["upserts_exist"] == [True]
-    assert seen["upsert_contents"] and "CustomerId" in seen["upsert_contents"][0]
+    assert seen["change_datetimes_are_utc"] is True
+    assert [path.rsplit("/", 1)[-1] for path in seen["changed"]] == ["customers.csv"]
+    assert seen["latest"] == seen["changed"]
+    assert seen["deleted"] == []
+    assert seen["changed_contents"] and "CustomerId" in seen["changed_contents"][0]
 
 
 def _assert_load_materialised(env, journey) -> None:

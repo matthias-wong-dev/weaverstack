@@ -363,11 +363,33 @@ No-op loads append nothing. `_changes/` is Weaver-owned: authored code cannot
 stage or delete its contents, and Folder reconciliation never inventories it as
 business data.
 
-`Folder.changes_since(bookmark)` reads only documents strictly newer than the
-timezone-aware bookmark. It collapses the event stream by logical file path and
-returns the latest classification as full `Path` objects. Inserts and updates
-also appear in `upserts`; a latest deletion appears only in `deletes`, even
-though its returned path no longer exists.
+Three Folder methods report that history. Each returns
+`dict[Path, datetime]`: keys are full paths ordinary Python can open, and values
+are the UTC datetime Weaver recorded the change, which is a file's update
+datetime.
+
+| method | what it returns |
+|---|---|
+| `files_since(bookmark)` | current files changed after the bookmark |
+| `latest_files()` | current files from the newest change that left files in place |
+| `deleted_since(bookmark)` | files deleted after the bookmark, and when |
+
+Iterating a result gives the files themselves, so a consumer that needs no
+metadata writes `for path in folder.files_since(bookmark)`.
+
+`files_since` and `deleted_since` take a timezone-aware bookmark, open only
+documents strictly newer than it, and collapse the event stream by logical file
+path. A file whose latest event is a deletion appears in `deleted_since` and not
+in `files_since`, and its path no longer exists. `latest_files` reads documents
+newest first and stops at the first one with a file still in place, so a load
+that wrote several files reports all of them and a later deletion-only change
+does not become the latest delivery.
+
+These methods report the lifecycle Weaver observed, and there is no filesystem
+timestamp fallback. A Folder with no `_changes` history and no file matching its
+`File key` returns an empty result. One that holds managed files without a
+history raises, because Weaver never saw those files arrive and cannot say when
+they changed.
 
 ---
 

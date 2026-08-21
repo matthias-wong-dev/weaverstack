@@ -296,106 +296,271 @@ def test_a_change_document_failure_reports_failure_after_publication(
     assert (landing._staging_path() / "published.csv").exists()
 
 
+#: Every change-helper test measures from this one bookmark.
+BOOKMARK = datetime(2026, 8, 20, tzinfo=timezone.utc)
+
+
+def _at(seconds: int | float) -> datetime:
+    return BOOKMARK + timedelta(seconds=seconds)
+
+
+def _place(folder: Folder, *names: str) -> None:
+    """Put current files in the destination without recording a change."""
+
+    for name in names:
+        target = folder.path() / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("current", encoding="utf-8")
+
+
 @weaver_test()
-def test_changes_since_uses_a_strict_boundary_without_reading_older_documents(
-    landing,
-):
-    boundary = datetime(2026, 8, 20, 2, tzinfo=timezone.utc)
-    old = _write_document(landing, boundary - timedelta(seconds=1), updates=["old.csv"])
-    old.write_text("not json", encoding="utf-8")
-    _write_document(landing, boundary, updates=["boundary.csv"])
-    _write_document(landing, boundary + timedelta(microseconds=1), inserts=["new.csv"])
-    landing.path().mkdir(parents=True, exist_ok=True)
-    (landing.path() / "new.csv").write_text("new", encoding="utf-8")
+def test_a_load_is_reportable_through_every_change_helper(landing, monkeypatch):
+    import weaver.runtime.folder_load as runtime
 
-    changes = landing.changes_since(boundary)
+    changed_at = datetime(2026, 8, 20, 1, 22, 41, 123456, tzinfo=timezone.utc)
+    monkeypatch.setattr(runtime, "_utc_now", lambda: changed_at)
+    landing.files = {"June.csv": "june"}
+    landing.load()
+    before = changed_at - timedelta(seconds=1)
 
-    assert changes == {
-        "upserts": (landing.path() / "new.csv",),
-        "deletes": (),
-        "inserts": (landing.path() / "new.csv",),
-        "updates": (),
+    assert landing.files_since(before) == {landing.path() / "June.csv": changed_at}
+    assert landing.latest_files() == {landing.path() / "June.csv": changed_at}
+    assert landing.deleted_since(before) == {}
+
+
+@weaver_test()
+def test_files_since_maps_each_inserted_file_to_its_change_datetime(landing):
+    _write_document(landing, _at(1), inserts=["June.csv", "nested/July.csv"])
+    _place(landing, "June.csv", "nested/July.csv")
+
+    changed = landing.files_since(BOOKMARK)
+
+    assert changed == {
+        landing.path() / "June.csv": _at(1),
+        landing.path() / "nested/July.csv": _at(1),
     }
+    assert all(isinstance(path, Path) and path.is_absolute() for path in changed)
+    assert all(at.utcoffset() == timedelta(0) for at in changed.values())
 
 
 @weaver_test()
-def test_changes_since_reads_no_documents_when_none_are_later(landing):
-    boundary = datetime(2026, 8, 20, 2, tzinfo=timezone.utc)
-    old = _write_document(landing, boundary - timedelta(seconds=1), inserts=["old.csv"])
-    old.write_text("not json", encoding="utf-8")
+def test_files_since_iterates_as_paths_a_consumer_can_read(landing):
+    _write_document(landing, _at(1), inserts=["June.csv"])
+    _place(landing, "June.csv")
 
-    assert landing.changes_since(boundary) == {
-        "upserts": (),
-        "deletes": (),
-        "inserts": (),
-        "updates": (),
-    }
+    for path in landing.files_since(BOOKMARK):
+        assert isinstance(path, Path)
+        assert path.read_text(encoding="utf-8") == "current"
 
 
 @weaver_test()
-def test_changes_since_refuses_a_malformed_later_document(landing):
-    bookmark = datetime(2026, 8, 20, tzinfo=timezone.utc)
-    malformed = _write_document(
-        landing, bookmark + timedelta(seconds=1), inserts=["new.csv"]
+def test_files_since_collapses_repeated_changes_to_the_latest_datetime(landing):
+    _write_document(landing, _at(1), inserts=["June.csv"])
+    _write_document(landing, _at(2), updates=["June.csv"])
+    _write_document(landing, _at(3), updates=["June.csv"])
+    _place(landing, "June.csv")
+
+    assert landing.files_since(BOOKMARK) == {landing.path() / "June.csv": _at(3)}
+
+
+@weaver_test()
+def test_files_since_omits_a_file_deleted_after_its_update(landing):
+    _write_document(landing, _at(1), updates=["June.csv"])
+    _write_document(landing, _at(2), deletes=["June.csv"])
+
+    assert landing.files_since(BOOKMARK) == {}
+
+
+@weaver_test()
+def test_files_since_reports_a_file_reinserted_after_a_delete(landing):
+    _write_document(landing, _at(1), deletes=["June.csv"])
+    _write_document(landing, _at(2), inserts=["June.csv"])
+    _place(landing, "June.csv")
+
+    assert landing.files_since(BOOKMARK) == {landing.path() / "June.csv": _at(2)}
+
+
+@weaver_test()
+def test_files_since_omits_a_file_removed_outside_weaver(landing):
+    _write_document(landing, _at(1), inserts=["externally-removed.csv"])
+
+    assert landing.files_since(BOOKMARK) == {}
+
+
+@weaver_test()
+def test_files_since_uses_a_strict_boundary_without_reading_older_documents(landing):
+    for at in (_at(-1), BOOKMARK):
+        _write_document(landing, at, updates=["earlier.csv"]).write_text(
+            "not json", encoding="utf-8"
+        )
+    _write_document(landing, _at(0.000001), inserts=["new.csv"])
+    _place(landing, "earlier.csv", "new.csv")
+
+    assert landing.files_since(BOOKMARK) == {landing.path() / "new.csv": _at(0.000001)}
+
+
+@weaver_test()
+def test_files_since_reports_nothing_when_no_document_is_later(landing):
+    _write_document(landing, _at(-1), inserts=["old.csv"]).write_text(
+        "not json", encoding="utf-8"
     )
-    malformed.write_text("not json", encoding="utf-8")
+    _place(landing, "old.csv")
+
+    assert landing.files_since(BOOKMARK) == {}
+
+
+@weaver_test()
+def test_files_since_refuses_a_malformed_later_document(landing):
+    _write_document(landing, _at(1), inserts=["new.csv"]).write_text(
+        "not json", encoding="utf-8"
+    )
 
     with pytest.raises(LoadError, match="cannot read Folder change document"):
-        landing.changes_since(bookmark)
+        landing.files_since(BOOKMARK)
 
 
 @weaver_test()
-def test_changes_since_returns_only_current_upserts(landing):
-    bookmark = datetime(2026, 8, 20, tzinfo=timezone.utc)
-    _write_document(
-        landing, bookmark + timedelta(seconds=1), inserts=["externally-removed.csv"]
-    )
+def test_deleted_since_maps_each_deletion_to_its_datetime(landing):
+    _write_document(landing, _at(1), updates=["June.csv"])
+    _write_document(landing, _at(2), deletes=["June.csv", "May.csv"])
 
-    assert landing.changes_since(bookmark) == {
-        "upserts": (),
-        "deletes": (),
-        "inserts": (),
-        "updates": (),
+    deleted = landing.deleted_since(BOOKMARK)
+
+    assert deleted == {
+        landing.path() / "June.csv": _at(2),
+        landing.path() / "May.csv": _at(2),
+    }
+    assert not any(path.exists() for path in deleted)
+
+
+@weaver_test()
+def test_deleted_since_omits_a_file_reinserted_after_its_delete(landing):
+    _write_document(landing, _at(1), deletes=["June.csv"])
+    _write_document(landing, _at(2), inserts=["June.csv"])
+    _place(landing, "June.csv")
+
+    assert landing.deleted_since(BOOKMARK) == {}
+
+
+@weaver_test()
+def test_deleted_since_uses_a_strict_boundary_without_reading_older_documents(landing):
+    _write_document(landing, BOOKMARK, deletes=["earlier.csv"]).write_text(
+        "not json", encoding="utf-8"
+    )
+    _write_document(landing, _at(0.000001), deletes=["June.csv"])
+
+    assert landing.deleted_since(BOOKMARK) == {
+        landing.path() / "June.csv": _at(0.000001)
     }
 
 
 @weaver_test()
-def test_changes_since_collapses_each_key_to_its_latest_event(landing):
-    bookmark = datetime(2026, 8, 20, tzinfo=timezone.utc)
-    _write_document(
-        landing,
-        bookmark + timedelta(seconds=1),
-        inserts=["updated.csv", "deleted.csv"],
-        deletes=["reinserted.csv"],
-    )
-    _write_document(
-        landing,
-        bookmark + timedelta(seconds=2),
-        updates=["updated.csv"],
-        deletes=["deleted.csv"],
-        inserts=["reinserted.csv"],
-    )
-    for name in ("reinserted.csv", "updated.csv"):
-        (landing.path() / name).write_text("current", encoding="utf-8")
-
-    changes = landing.changes_since(bookmark)
-
-    assert changes == {
-        "upserts": (
-            landing.path() / "reinserted.csv",
-            landing.path() / "updated.csv",
-        ),
-        "deletes": (landing.path() / "deleted.csv",),
-        "inserts": (landing.path() / "reinserted.csv",),
-        "updates": (landing.path() / "updated.csv",),
-    }
-    assert all(
-        isinstance(path, Path) and path.is_absolute() for path in changes["upserts"]
-    )
-    assert not changes["deletes"][0].exists()
+def test_a_change_bookmark_must_be_timezone_aware(landing):
+    for helper in (landing.files_since, landing.deleted_since):
+        with pytest.raises(LoadError, match="timezone-aware"):
+            helper(datetime(2026, 8, 20))
 
 
 @weaver_test()
-def test_changes_since_requires_an_aware_datetime(landing):
-    with pytest.raises(LoadError, match="timezone-aware"):
-        landing.changes_since(datetime(2026, 8, 20))
+def test_latest_files_reports_every_surviving_file_from_the_newest_change(landing):
+    _write_document(landing, _at(1), inserts=["a.csv"])
+    _write_document(landing, _at(2), inserts=["b.csv"], updates=["a.csv"])
+    _place(landing, "a.csv", "b.csv")
+
+    assert landing.latest_files() == {
+        landing.path() / "a.csv": _at(2),
+        landing.path() / "b.csv": _at(2),
+    }
+
+
+@weaver_test()
+def test_latest_files_reads_no_document_older_than_the_newest_survivor(landing):
+    _write_document(landing, _at(1), inserts=["old.csv"]).write_text(
+        "not json", encoding="utf-8"
+    )
+    _write_document(landing, _at(2), inserts=["new.csv"])
+    _place(landing, "new.csv", "old.csv")
+
+    assert landing.latest_files() == {landing.path() / "new.csv": _at(2)}
+
+
+@weaver_test()
+def test_latest_files_skips_newer_deletion_only_changes(landing):
+    _write_document(landing, _at(1), inserts=["a.csv", "b.csv"])
+    _write_document(landing, _at(2), deletes=["other.csv"])
+    _write_document(landing, _at(3), deletes=["old.csv"])
+    _place(landing, "a.csv", "b.csv")
+
+    assert landing.latest_files() == {
+        landing.path() / "a.csv": _at(1),
+        landing.path() / "b.csv": _at(1),
+    }
+
+
+@weaver_test()
+def test_latest_files_suppresses_a_file_a_newer_change_deleted(landing):
+    _write_document(landing, _at(1), inserts=["a.csv", "b.csv"])
+    _write_document(landing, _at(2), deletes=["b.csv"])
+    _place(landing, "a.csv")
+
+    assert landing.latest_files() == {landing.path() / "a.csv": _at(1)}
+
+
+@weaver_test()
+def test_latest_files_keeps_scanning_when_a_newer_change_left_nothing(landing):
+    _write_document(landing, _at(1), inserts=["kept.csv"])
+    _write_document(landing, _at(2), inserts=["retired.csv"])
+    _write_document(landing, _at(3), deletes=["retired.csv"])
+    _place(landing, "kept.csv")
+
+    assert landing.latest_files() == {landing.path() / "kept.csv": _at(1)}
+
+
+@weaver_test()
+def test_latest_files_keeps_scanning_past_a_file_removed_outside_weaver(landing):
+    _write_document(landing, _at(1), inserts=["kept.csv"])
+    _write_document(landing, _at(2), inserts=["removed.csv"])
+    _place(landing, "kept.csv")
+
+    assert landing.latest_files() == {landing.path() / "kept.csv": _at(1)}
+
+
+@weaver_test()
+def test_latest_files_refuses_a_malformed_newest_document(landing):
+    _write_document(landing, _at(1), inserts=["new.csv"]).write_text(
+        "not json", encoding="utf-8"
+    )
+
+    with pytest.raises(LoadError, match="cannot read Folder change document"):
+        landing.latest_files()
+
+
+@weaver_test()
+def test_change_metadata_is_empty_for_a_folder_weaver_has_not_written(landing):
+    assert landing.files_since(BOOKMARK) == {}
+    assert landing.deleted_since(BOOKMARK) == {}
+    assert landing.latest_files() == {}
+
+
+@weaver_test()
+def test_change_metadata_is_empty_when_no_file_matches_the_file_key(landing):
+    landing.path().mkdir(parents=True)
+    (landing.path() / "manual.txt").write_text("outside the key", encoding="utf-8")
+
+    assert landing.files_since(BOOKMARK) == {}
+    assert landing.deleted_since(BOOKMARK) == {}
+    assert landing.latest_files() == {}
+
+
+@weaver_test()
+def test_change_metadata_is_refused_for_managed_files_with_no_history(landing):
+    _place(landing, "manual.csv")
+    expected = "Sales.Landing: Folder change metadata is unavailable"
+
+    for call in (
+        lambda: landing.files_since(BOOKMARK),
+        lambda: landing.deleted_since(BOOKMARK),
+        landing.latest_files,
+    ):
+        with pytest.raises(LoadError, match=expected):
+            call()

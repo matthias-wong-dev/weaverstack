@@ -99,11 +99,12 @@ emit(results)
 #: Python; the test process never reads ``_changes`` itself.
 CHANGE_FEED = r"""
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from weaver import Folder, lakehouse_for
 from weaver.declaration.metadata import PYTHON, parse_document
+from weaver.errors import LoadError
 from weaver.runtime.folder_load import _with_retry
 
 destination = lakehouse_for(resolver, target)
@@ -152,6 +153,14 @@ try:
     (folder.path() / "updated.csv").write_text("old", encoding="utf-8")
     (folder.path() / "deleted.csv").write_text("delete me", encoding="utf-8")
 
+    # The seeded state is a managed Folder Weaver has never written, so its
+    # lifecycle datetimes are unavailable rather than empty.
+    unobserved = None
+    try:
+        Raw__ChangeFeedProbe(folder).latest_files()
+    except LoadError as exc:
+        unobserved = str(exc)
+
     bookmark = datetime.now(timezone.utc)
     Raw__ChangeFeedProbe.files = {
         "updated.csv": "updated",
@@ -161,32 +170,39 @@ try:
     result = folder.load()
 
     # Constructed from another authored object, which is the public downstream
-    # spelling: My__Folder(self).changes_since(self.bookmark()).
-    changes = Raw__ChangeFeedProbe(folder).changes_since(bookmark)
+    # spelling: My__Folder(self).files_since(self.bookmark()).
+    consumer = Raw__ChangeFeedProbe(folder)
+    changed = consumer.files_since(bookmark)
+    latest = consumer.latest_files()
+    deleted = consumer.deleted_since(bookmark)
     documents = sorted((folder.path() / "_changes").glob("*.json"))
     boundary = datetime.strptime(
         documents[-1].stem, "%Y-%m-%dT%H-%M-%S.%fZ"
     ).replace(tzinfo=timezone.utc)
-    strict = Raw__ChangeFeedProbe(folder).changes_since(boundary)
 
     emit({
         "result": result.as_row(),
-        "changes": {key: [str(path) for path in values]
-                    for key, values in changes.items()},
-        "all_paths": all(
+        "unobserved": unobserved,
+        "changed": {str(path): at.isoformat() for path, at in changed.items()},
+        "latest": {str(path): at.isoformat() for path, at in latest.items()},
+        "deleted": {str(path): at.isoformat() for path, at in deleted.items()},
+        "keys_are_full_paths": all(
             isinstance(path, Path) and path.is_absolute()
-            for values in changes.values() for path in values
+            for path in (*changed, *latest, *deleted)
         ),
-        "existing": {
-            str(path): path.exists()
-            for path in changes["inserts"] + changes["updates"]
-        },
-        "contents": {str(path): path.read_text(encoding="utf-8")
-                     for path in changes["upserts"]},
-        "deleted_exists": [path.exists() for path in changes["deletes"]],
+        "values_are_utc": all(
+            at.utcoffset() == timedelta(0)
+            for at in (*changed.values(), *latest.values(), *deleted.values())
+        ),
+        "contents": {path.name: path.read_text(encoding="utf-8")
+                     for path in changed},
+        "latest_contents": {path.name: path.read_text(encoding="utf-8")
+                            for path in latest},
+        "deleted_exists": [path.exists() for path in deleted],
         "change_documents": [path.name for path in documents],
-        "strict": {key: [str(path) for path in values]
-                   for key, values in strict.items()},
+        "committed_at": boundary.isoformat(),
+        "strict_changed": [str(path) for path in consumer.files_since(boundary)],
+        "strict_deleted": [str(path) for path in consumer.deleted_since(boundary)],
     })
 finally:
     for path in (folder.path(), folder._staging_path(), reject):
@@ -247,7 +263,7 @@ try:
     except LoadError as exc:
         raised = True
         result = exc.result
-    changes = Raw__FileKeyProbe(folder).changes_since(bookmark)
+    changes = Raw__FileKeyProbe(folder).files_since(bookmark)
     emit({
         "raised": raised,
         "result": result.as_row(),
@@ -258,8 +274,7 @@ try:
             if (folder.path() / "good.csv").exists() else None,
         "change_documents": len(list((folder.path() / "_changes").glob("*.json")))
             if (folder.path() / "_changes").exists() else 0,
-        "changes": {key: [path.name for path in values]
-                    for key, values in changes.items()},
+        "changes": [path.name for path in changes],
     })
 finally:
     for path in (folder.path(), folder._staging_path(), reject):
@@ -336,19 +351,25 @@ def test_authored_code_consumes_folder_changes_through_the_fabric_mount(
     )
 
     assert seen["result"]["succeeded"] is True
-    assert seen["all_paths"] is True
-    assert all(seen["existing"].values())
-    assert sorted(Path(path).name for path in seen["changes"]["upserts"]) == [
+    assert "change metadata is unavailable" in seen["unobserved"]
+    assert seen["keys_are_full_paths"] is True
+    assert seen["values_are_utc"] is True
+    assert sorted(Path(path).name for path in seen["changed"]) == [
         "inserted.csv",
         "updated.csv",
     ]
-    assert [Path(path).name for path in seen["changes"]["inserts"]] == ["inserted.csv"]
-    assert [Path(path).name for path in seen["changes"]["updates"]] == ["updated.csv"]
-    assert [Path(path).name for path in seen["changes"]["deletes"]] == ["deleted.csv"]
-    assert sorted(seen["contents"].values()) == ["inserted", "updated"]
+    # Every file the load committed carries the datetime of that one commit.
+    assert set(seen["changed"].values()) == {seen["committed_at"]}
+    assert seen["latest"] == seen["changed"]
+    # Read where the load committed, so a returned key is immediately usable.
+    assert seen["contents"] == {"inserted.csv": "inserted", "updated.csv": "updated"}
+    assert seen["latest_contents"] == seen["contents"]
+    assert [Path(path).name for path in seen["deleted"]] == ["deleted.csv"]
+    assert set(seen["deleted"].values()) == {seen["committed_at"]}
     assert seen["deleted_exists"] == [False]
     assert len(seen["change_documents"]) == 1
-    assert all(not values for values in seen["strict"].values())
+    assert seen["strict_changed"] == []
+    assert seen["strict_deleted"] == []
 
 
 @weaver_test(hosted=True)
@@ -367,7 +388,7 @@ def test_an_intolerant_file_key_rejection_is_enforced_through_the_fabric_mount(
     assert seen["bad_published"] is False
     assert seen["bad_rejected"] is True
     assert seen["change_documents"] == 0
-    assert all(not values for values in seen["changes"].values())
+    assert seen["changes"] == []
 
 
 @weaver_test(hosted=True)
@@ -387,9 +408,4 @@ def test_a_tolerant_file_key_rejection_is_enforced_through_the_fabric_mount(
     assert seen["bad_rejected"] is True
     assert seen["good_contents"] == "good"
     assert seen["change_documents"] == 1
-    assert seen["changes"] == {
-        "upserts": ["good.csv"],
-        "deletes": [],
-        "inserts": ["good.csv"],
-        "updates": [],
-    }
+    assert seen["changes"] == ["good.csv"]

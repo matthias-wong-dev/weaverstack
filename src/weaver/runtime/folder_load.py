@@ -385,54 +385,158 @@ def _write_change_document(
     _safe_write_text(target, json.dumps(payload, indent=2) + "\n")
 
 
-def changes_since(destination: str | Path, bookmark: datetime) -> dict:
-    """Return each file's latest change strictly after an aware bookmark."""
+def files_since(
+    destination: str | Path,
+    bookmark: datetime,
+    *,
+    file_keys,
+    qualified: str,
+) -> dict[Path, datetime]:
+    """Current files changed strictly after an aware ``bookmark``, and when."""
+
+    boundary = _change_boundary(bookmark)
+    root = Path(destination).absolute()
+    latest = _collapse_change_events(
+        _change_documents_since(
+            destination, boundary, file_keys=file_keys, qualified=qualified
+        )
+    )
+    return {
+        root / relative: changed_at
+        for relative, (operation, changed_at) in sorted(latest.items())
+        if operation in ("inserts", "updates") and (root / relative).is_file()
+    }
+
+
+def deleted_since(
+    destination: str | Path,
+    bookmark: datetime,
+    *,
+    file_keys,
+    qualified: str,
+) -> dict[Path, datetime]:
+    """Files deleted strictly after an aware ``bookmark``, and when.
+
+    A returned path is the file the deletion retired, so it normally does not
+    exist.
+    """
+
+    boundary = _change_boundary(bookmark)
+    root = Path(destination).absolute()
+    latest = _collapse_change_events(
+        _change_documents_since(
+            destination, boundary, file_keys=file_keys, qualified=qualified
+        )
+    )
+    return {
+        root / relative: changed_at
+        for relative, (operation, changed_at) in sorted(latest.items())
+        if operation == "deletes"
+    }
+
+
+def latest_files(
+    destination: str | Path,
+    *,
+    file_keys,
+    qualified: str,
+) -> dict[Path, datetime]:
+    """The current files from the newest change that left files in place.
+
+    A file a newer change deleted is not reported.
+    """
+
+    root = Path(destination).absolute()
+    documents = _available_change_documents(destination, file_keys, qualified=qualified)
+    tombstones: set[str] = set()
+    for changed_at, path in reversed(documents):
+        document = _read_change_document(path)
+        candidates = {*document["inserts"], *document["updates"]}
+        tombstones.update(document["deletes"])
+        surviving = {
+            root / relative: changed_at
+            for relative in sorted(candidates - tombstones)
+            if (root / relative).is_file()
+        }
+        if surviving:
+            return surviving
+    return {}
+
+
+def _change_boundary(bookmark: datetime) -> datetime:
+    """The bookmark as UTC, refusing a naive datetime."""
 
     if not isinstance(bookmark, datetime) or bookmark.utcoffset() is None:
         raise LoadError("a Folder change bookmark must be a timezone-aware datetime")
-    boundary = bookmark.astimezone(timezone.utc)
-    root = Path(destination).absolute()
-    changes = root / CHANGES_DIRECTORY
-    empty = {"upserts": (), "deletes": (), "inserts": (), "updates": ()}
-    if not changes.is_dir():
-        return empty
+    return bookmark.astimezone(timezone.utc)
 
-    later: list[tuple[datetime, Path]] = []
-    for entry in changes.iterdir():
-        if not entry.is_file() or entry.suffix != ".json":
-            continue
-        changed_at = _parse_change_filename(entry.name)
-        if changed_at > boundary:
-            later.append((changed_at, entry))
-    if not later:
-        return empty
 
-    latest: dict[str, str] = {}
-    for _changed_at, path in sorted(later, key=lambda item: (item[0], item[1].name)):
+def _change_documents(destination: str | Path) -> list[tuple[datetime, Path]]:
+    """Every change document beneath the Folder, oldest first.
+
+    Raises :class:`FileNotFoundError` when there is no ``_changes`` directory.
+    """
+
+    changes = Path(destination) / CHANGES_DIRECTORY
+    documents = [
+        (_parse_change_filename(entry.name), entry)
+        for entry in changes.iterdir()
+        if entry.is_file() and entry.suffix == ".json"
+    ]
+    return sorted(documents, key=lambda item: (item[0], item[1].name))
+
+
+def _available_change_documents(
+    destination: str | Path,
+    file_keys,
+    *,
+    qualified: str,
+) -> list[tuple[datetime, Path]]:
+    """The Folder's change history, empty when Weaver has never written it.
+
+    Raises when the Folder holds files matching its File key, because their
+    lifecycle datetimes are then unknown rather than absent.
+    """
+
+    try:
+        return _change_documents(destination)
+    except FileNotFoundError:
+        if not managed_relative_files(Path(destination), file_keys):
+            return []
+        raise LoadError(
+            f"{qualified}: Folder change metadata is unavailable because the "
+            f"Folder contains managed files but has no {CHANGES_DIRECTORY} history"
+        ) from None
+
+
+def _change_documents_since(
+    destination: str | Path,
+    boundary: datetime,
+    *,
+    file_keys,
+    qualified: str,
+) -> list[tuple[datetime, Path]]:
+    """The change documents strictly newer than ``boundary``, oldest first."""
+
+    return [
+        entry
+        for entry in _available_change_documents(
+            destination, file_keys, qualified=qualified
+        )
+        if entry[0] > boundary
+    ]
+
+
+def _collapse_change_events(documents) -> dict[str, tuple[str, datetime]]:
+    """Each file's latest operation and the datetime it was recorded."""
+
+    latest: dict[str, tuple[str, datetime]] = {}
+    for changed_at, path in documents:
         document = _read_change_document(path)
         for operation in ("inserts", "updates", "deletes"):
             for relative in document[operation]:
-                latest[relative] = operation
-
-    inserts = tuple(
-        root / relative
-        for relative in sorted(latest)
-        if latest[relative] == "inserts" and (root / relative).is_file()
-    )
-    updates = tuple(
-        root / relative
-        for relative in sorted(latest)
-        if latest[relative] == "updates" and (root / relative).is_file()
-    )
-    deletes = tuple(
-        root / relative for relative in sorted(latest) if latest[relative] == "deletes"
-    )
-    return {
-        "upserts": tuple(sorted((*inserts, *updates), key=str)),
-        "deletes": deletes,
-        "inserts": inserts,
-        "updates": updates,
-    }
+                latest[relative] = (operation, changed_at)
+    return latest
 
 
 def _read_change_document(path: Path) -> dict[str, tuple[str, ...]]:
@@ -601,8 +705,10 @@ __all__ = [
     "RESET_PAUSE",
     "TOLERATED_MESSAGE",
     "StagingFolder",
-    "changes_since",
+    "deleted_since",
+    "files_since",
     "folder_is_populated",
+    "latest_files",
     "load_folder",
     "managed_relative_files",
     "matches_file_key",
