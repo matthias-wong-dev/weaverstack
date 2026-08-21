@@ -971,9 +971,17 @@ def _print_test(report) -> None:
     for node in report.nodes:
         result = node.result
         found = ""
-        if result is not None and hasattr(result, "violation_count"):
+        if (
+            result is not None
+            and getattr(result, "error_message", None) is None
+            and hasattr(result, "violation_count")
+        ):
             found = f"  ({result.violation_count} violation(s))"
-        elif result is not None:
+        elif (
+            result is not None
+            and getattr(result, "error_message", None) is None
+            and hasattr(result, "missing_count")
+        ):
             found = (
                 f"  ({result.missing_count} missing, "
                 f"{result.unexpected_count} unexpected)"
@@ -981,6 +989,11 @@ def _print_test(report) -> None:
         print(f"  {node.status:<10} {node.kind:<11} {node.logical_id}{found}")
         for message in node.messages:
             print(f"      {message}")
+        error_message = (
+            None if result is None else getattr(result, "error_message", None)
+        )
+        if error_message and not node.messages:
+            print(f"      {error_message}")
 
     totals = report.totals()
     print(

@@ -30,7 +30,7 @@ from weaver.test_report import (
 from weaver_cli import main
 
 
-def _node(name, kind, status, result=None, diagnostics=None):
+def _node(name, kind, status, result=None, diagnostics=None, messages=()):
     return ValidationNodeReport(
         logical_id=f"Lakehouse/Sales/{name}",
         kind=kind,
@@ -41,6 +41,7 @@ def _node(name, kind, status, result=None, diagnostics=None):
         executed=status != PLANNED,
         result=result,
         diagnostics=diagnostics,
+        messages=messages,
     )
 
 
@@ -190,6 +191,52 @@ def test_the_counts_are_rendered_per_validation(captured, capsys):
     assert "2 missing, 1 unexpected" in printed
     assert "4 violation(s)" in printed
     assert "0 passed, 2 failed, 0 could not run" in printed
+
+
+@weaver_test()
+def test_an_invalid_validation_prints_its_error_without_counts(captured, capsys):
+    captured["report"] = ValidationRunReport(
+        status=INVALID,
+        nodes=(
+            _node(
+                "Sales.OrdersReconcile",
+                "Test",
+                INVALID,
+                TestResult.failed_to_run("not installed"),
+                messages=("not installed",),
+            ),
+        ),
+    )
+
+    assert _run("Lakehouse/Sales") == 1
+
+    printed = capsys.readouterr().out
+    assert "not installed" in printed
+    assert "missing" not in printed
+
+
+@weaver_test()
+def test_a_generic_dispatch_failure_does_not_break_test_rendering(captured, capsys):
+    from weaver.run.result import RunFailure
+
+    captured["report"] = ValidationRunReport(
+        status=INVALID,
+        nodes=(
+            _node(
+                "Sales.OrdersReconcile",
+                "Test",
+                INVALID,
+                RunFailure("LivyError: session unavailable"),
+                messages=("LivyError: session unavailable",),
+            ),
+        ),
+    )
+
+    assert _run("Lakehouse/Sales") == 1
+
+    printed = capsys.readouterr().out
+    assert "LivyError: session unavailable" in printed
+    assert "missing" not in printed
 
 
 @weaver_test()
