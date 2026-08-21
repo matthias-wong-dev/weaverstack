@@ -333,6 +333,18 @@ def test_changes_since_reads_no_documents_when_none_are_later(landing):
 
 
 @weaver_test()
+def test_changes_since_refuses_a_malformed_later_document(landing):
+    bookmark = datetime(2026, 8, 20, tzinfo=timezone.utc)
+    malformed = _write_document(
+        landing, bookmark + timedelta(seconds=1), inserts=["new.csv"]
+    )
+    malformed.write_text("not json", encoding="utf-8")
+
+    with pytest.raises(LoadError, match="cannot read Folder change document"):
+        landing.changes_since(bookmark)
+
+
+@weaver_test()
 def test_changes_since_returns_only_current_upserts(landing):
     bookmark = datetime(2026, 8, 20, tzinfo=timezone.utc)
     _write_document(
