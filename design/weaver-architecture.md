@@ -342,6 +342,33 @@ FROM Sales.Customer
 
 Weaver provides the execution context without a template language.
 
+## Folder loads and changes
+
+A Folder manages only files claimed by its `File key`. `Incremental` is optional
+and defaults to `true`, so omission does not make an absent source file a delete.
+`Incremental: false` declares that staging is the whole incoming state and lets
+ordinary reconciliation remove claimed files omitted from it. `Prohibit rebuild`
+is also optional and defaults to `false` for a Folder.
+
+Files staged outside the key are rejected before publication. Weaver preserves
+them beneath the sibling `<Folder>_Reject` Folder, retaining their relative
+paths. A clean later load removes stale reject evidence. Files placed manually
+in the destination outside the declared key are not part of the load and remain
+untouched.
+
+Each successful mutation appends one JSON document beneath the managed Folder's
+`_changes/` directory. Its UTC filename identifies when the change was committed,
+and its insert, update and delete entries are paths relative to the Folder root.
+No-op loads append nothing. `_changes/` is Weaver-owned: authored code cannot
+stage or delete its contents, and Folder reconciliation never inventories it as
+business data.
+
+`Folder.changes_since(bookmark)` reads only documents strictly newer than the
+timezone-aware bookmark. It collapses the event stream by logical file path and
+returns the latest classification as full `Path` objects. Inserts and updates
+also appear in `upserts`; a latest deletion appears only in `deletes`, even
+though its returned path no longer exists.
+
 ---
 
 # Developer Experience

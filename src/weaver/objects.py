@@ -5,6 +5,7 @@ Objects receive a Spark session, resolved Lakehouse destination, and identity.
 
 from __future__ import annotations
 
+from datetime import datetime
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -175,6 +176,13 @@ class Folder(WeaverObject):
         """
 
         return self.lakehouse.folder_spark_path(*self.identity)
+
+    def changes_since(self, bookmark: datetime) -> dict:
+        """Return each file's latest change after ``bookmark`` as full paths."""
+
+        from .runtime.folder_load import changes_since
+
+        return changes_since(self.path(), bookmark)
 
     def staging_folder(self) -> "StagingFolder":
         """The staging directory available to this ``read()``.

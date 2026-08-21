@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE, DESKTOP_JOURNEY_NAMES
 from support.weaver_test import weaver_test
@@ -45,8 +47,27 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
         (failure.action_id, failure.message) for failure in built.errors
     ]
 
+    before_load = datetime.now(timezone.utc) - timedelta(minutes=1)
     loaded = weaver.load([lakehouse, warehouse], session=weaver_session)
     assert loaded.succeeded, loaded.to_mapping()
+
+    consumed = _consume_folder_changes(
+        weaver_session,
+        fabric_workspace,
+        fabric_target_lakehouse.name,
+        before_load,
+    )
+    assert consumed["paths_are_full"] is True
+    assert [path.rsplit("/", 1)[-1] for path in consumed["upserts"]] == [
+        "customers.csv"
+    ]
+    assert [path.rsplit("/", 1)[-1] for path in consumed["inserts"]] == [
+        "customers.csv"
+    ]
+    assert consumed["updates"] == []
+    assert consumed["deletes"] == []
+    assert consumed["exists"] == [True]
+    assert consumed["contents"] and "CustomerId" in consumed["contents"][0]
 
     tested = weaver.test([lakehouse, warehouse], session=weaver_session)
     totals = tested.totals()
@@ -87,6 +108,60 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
     workflow_id, task_types = next(iter(composed.items()))
     assert workflow_id
     assert task_types == {"load", "test"}
+
+
+def _consume_folder_changes(session, workspace, lakehouse: str, bookmark) -> dict:
+    """Run the authored downstream API where the desktop load ran its Folder."""
+
+    from weaver.sessions.program import RemoteProgram
+
+    source = f"""
+import sys
+from datetime import datetime
+from pathlib import Path
+
+from weaver import lakehouse_for
+from weaver.resolution import resolver_for
+from weaver.targets import ItemRef
+from weaver.workspaces import Workspace
+
+workspace = Workspace(
+    workspace={workspace.workspace!r},
+    catalogue={workspace.catalogue!r},
+    environment={workspace.environment!r},
+)
+resolver = resolver_for(workspace)
+destination = lakehouse_for(resolver, ItemRef({lakehouse!r}))
+sys.path.insert(0, destination.files_root() + "/_/Load")
+
+from Files.Raw__CustomerCsv import Raw__CustomerCsv
+
+folder = Raw__CustomerCsv(spark, lakehouse=destination)
+changes = Raw__CustomerCsv(folder).changes_since(
+    datetime.fromisoformat({bookmark.isoformat()!r})
+)
+emit({{
+    "upserts": [str(path) for path in changes["upserts"]],
+    "deletes": [str(path) for path in changes["deletes"]],
+    "inserts": [str(path) for path in changes["inserts"]],
+    "updates": [str(path) for path in changes["updates"]],
+    "paths_are_full": all(
+        isinstance(path, Path) and path.is_absolute()
+        for values in changes.values() for path in values
+    ),
+    "exists": [path.exists() for path in changes["upserts"]],
+    "contents": [path.read_text(encoding="utf-8")
+                 for path in changes["upserts"]],
+}})
+"""
+    return session.execute_python(
+        RemoteProgram(
+            name="consume Folder changes",
+            call=lambda: None,
+            source=source,
+        ),
+        workspace=workspace,
+    )
 
 
 def _assert_evidence(session, workspace, report, task_type: str) -> None:
