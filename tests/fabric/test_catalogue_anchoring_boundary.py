@@ -10,8 +10,8 @@ to ``_.Bookmark`` resolves in Spark.
 object is constructed and loaded by authored code running in Fabric, the way a
 developer in a notebook constructs and loads one.
 
-One submission, one evidence payload. Every question about the anchored object
-is asked in one body and answered here against what it brought back.
+One submission, one evidence payload — one for the anchored object's own life and
+one for the reference, which needs a build of its own to exist.
 """
 
 from __future__ import annotations
@@ -62,26 +62,6 @@ results["in_memory"] = first.bookmark().isoformat()
 second = Raw__CustomerCsv(spark, lakehouse=destination, catalogue=workspace.catalogue)
 results["persisted"] = second.bookmark().isoformat()
 
-# The Lakehouse's own reference to `_.Bookmark`. What the build installed here is
-# a shortcut to the catalogue Warehouse's table, so this is the local reference
-# rather than a table of its own — read first as storage, which says what is
-# actually there, and then by the four-part name a statement would use.
-from weaver.locations import Location
-
-tables = Location(destination.spark_root) / "Tables"
-results["tables"] = sorted(entry.name for entry in store.list(tables))
-reference = destination.qualify("_", "Bookmark")
-results["reference"] = reference
-try:
-    results["reference_rows"] = spark.sql(
-        f"select count(*) as n from {reference}"
-    ).collect()[0]["n"]
-except Exception as refused:
-    # Reported rather than raised, so the payload still carries what storage
-    # holds — which is what says whether the reference was installed at all.
-    results["reference_rows"] = None
-    results["reference_error"] = str(refused).splitlines()[0]
-
 emit(results)
 """
 
@@ -116,14 +96,55 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
     assert datetime.fromisoformat(seen["in_memory"]) == began
     assert datetime.fromisoformat(seen["persisted"]) == began
 
-    # And the Lakehouse's local reference is there, and resolves. What it counts
-    # is the catalogue Warehouse's own table, so the number belongs to the estate
-    # rather than to this test; that a count came back at all is the claim.
-    planned = [
+
+#: What the Lakehouse holds under ``Tables``, and whether the reference resolves.
+REFERENCE = r"""
+from weaver import lakehouse_for
+from weaver.locations import Location
+
+destination = lakehouse_for(resolver, target)
+results = {}
+results["tables"] = sorted(
+    entry.name for entry in store.list(Location(destination.spark_root) / "Tables")
+)
+reference = destination.qualify("_", "Bookmark")
+results["reference"] = reference
+results["rows"] = spark.sql(f"select count(*) as n from {reference}").collect()[0]["n"]
+emit(results)
+"""
+
+
+@weaver_test(hosted=True)
+def test_the_build_after_the_catalogue_installs_the_lakehouse_reference(
+    fabric_lakehouse_estate,
+):
+    """The documented two-build behaviour, and the shortcut it ends with.
+
+    A Warehouse publishes a table to OneLake after creating it, so the build that
+    creates the catalogue has nothing for a shortcut to point at. This estate's
+    first build was that build. The one here is the next, which finds the table
+    installed and gives the Lakehouse its reference — and then Spark reads
+    ``_.Bookmark`` in the Lakehouse by the four-part name a statement would use.
+    """
+
+    env = fabric_lakehouse_estate.env
+
+    bundle = env.generate("reference")
+    installed = [
         action.id
-        for _sequence, _batch, action in fabric_lakehouse_estate.bundle.plan.actions()
+        for _sequence, _batch, action in bundle.plan.actions()
         if "bookmark-reference" in action.id
     ]
-    assert "_" in seen["tables"], (seen["tables"], planned)
+    outcome = env.install(bundle)
+    assert outcome.status == "succeeded", outcome.action_error
+    assert installed, "the build after the catalogue plans the reference"
+
+    seen = env.run_python(REFERENCE, label="read the bookmark reference")
+
+    # A shortcut under `Tables/_`, which is Weaver's own rather than the item's.
+    assert "_" in seen["tables"], seen["tables"]
     assert seen["reference"].endswith("`_`.`Bookmark`")
-    assert isinstance(seen["reference_rows"], int)
+    # What it counts is the catalogue Warehouse's own table, so the number
+    # belongs to the estate rather than to this test; that a count came back
+    # through the shortcut at all is the claim.
+    assert isinstance(seen["rows"], int)
