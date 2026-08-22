@@ -200,6 +200,34 @@ def test_a_child_inherits_the_catalogue_its_parent_was_given(lakehouse):
     assert DWG__Order(parent)._bookmarks.catalogue == "Warehouse/Weaver"
 
 
+@weaver_test()
+def test_a_bookmark_is_resolved_once_for_a_load(lakehouse, monkeypatch):
+    """So a read that mentions it twice reaches the catalogue once.
+
+    And so the Static gate and the read cannot disagree about how far this
+    object had got — they are the same answer, not two lookups. A standalone
+    load resolves through a Warehouse connection, so this is a round trip and
+    not only tidiness.
+    """
+
+    import weaver.runtime.bookmark as module
+
+    resolutions = []
+    real = module.bookmark_of
+
+    def counted(*args, **kwargs):
+        resolutions.append(True)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(module, "bookmark_of", counted)
+    table = DWG__Customer(
+        object(), lakehouse=lakehouse, bookmarks=loaded("DWG.Customer")
+    )
+
+    assert table.bookmark == table.bookmark == LOADED_AT
+    assert len(resolutions) == 1
+
+
 # --- what a child inherits -----------------------------------------------------
 
 

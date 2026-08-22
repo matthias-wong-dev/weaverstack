@@ -93,6 +93,11 @@ class WeaverObject:
         #: What this object needs to answer :attr:`bookmark`, or None. Private:
         #: authored code asks for the bookmark, not for how it was obtained.
         self._bookmarks = with_catalogue(bookmarks or inherited, catalogue)
+        #: The bookmark resolved for the load in progress. One resolution per
+        #: load, so a ``read()`` that mentions ``self.bookmark`` twice reaches
+        #: the catalogue once — and so the Static gate and the read can never
+        #: disagree about how far this object had got.
+        self._resolved_bookmark = None
 
     # --- identity ---------------------------------------------------------
 
@@ -133,14 +138,16 @@ class WeaverObject:
 
         from .runtime.bookmark import bookmark_of
 
-        schema, name = self.identity
-        return bookmark_of(
-            self._bookmarks,
-            lakehouse=self.lakehouse.name,
-            schema=schema,
-            object=name,
-            is_files=self._is_files,
-        )
+        if self._resolved_bookmark is None:
+            schema, name = self.identity
+            self._resolved_bookmark = bookmark_of(
+                self._bookmarks,
+                lakehouse=self.lakehouse.name,
+                schema=schema,
+                object=name,
+                is_files=self._is_files,
+            )
+        return self._resolved_bookmark
 
     def _require_catalogue(self) -> None:
         """Refuse to load without the catalogue a load has to record itself in.
@@ -153,6 +160,9 @@ class WeaverObject:
         load nothing is orchestrating.
         """
 
+        # A load resolves its own bookmark, so whatever a previous one settled on
+        # is not this one's answer.
+        self._resolved_bookmark = None
         context = self._bookmarks
         if context is not None and (context.supplied or context.catalogue):
             return
