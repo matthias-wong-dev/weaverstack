@@ -60,6 +60,12 @@ BOOKKEEPING = {
     "refresh_sql_endpoint",
 }
 
+#: What the build that creates the catalogue cannot do, and the next one does.
+#: Bookmark reconciliation plans against a table that did not exist yet, and the
+#: Lakehouse reference points at a Delta directory the Warehouse publishes to
+#: OneLake shortly after creating it. See `design/catalogue.md`.
+DEFERRED_TO_THE_NEXT_BUILD = {"reconcile_bookmarks", "create_bookmark_reference"}
+
 
 def _folder(env, schema, name):
     return env.resolver.folder_object(FolderTarget(lakehouse=env.target), schema, name)
@@ -332,13 +338,22 @@ def _assert_authored_objects_reach_the_build(env) -> None:
 
 
 def _assert_unchanged(env, step) -> None:
-    """Building an already-correct estate must cost nothing and break nothing."""
+    """Building an already-correct estate must cost nothing and break nothing.
+
+    This is the build after the one that created the catalogue, and two things
+    wait for it. Bookmarks are reconciled against a table that did not exist when
+    the previous build planned, and the Lakehouse's ``_.Bookmark`` reference
+    points at a Delta directory the Warehouse had not published yet. Neither
+    rebuilds a declared object, which is what this step is about; the strict
+    claim — an installed catalogue and a present reference plan nothing at all —
+    is `tests/targeted/test_bookmark_build_install.py`.
+    """
 
     _raise_if_the_transition_broke(step)
 
     assert step.outcome.status == "succeeded", step.outcome.action_error
 
-    physical = step.kinds() - BOOKKEEPING
+    physical = step.kinds() - BOOKKEEPING - DEFERRED_TO_THE_NEXT_BUILD
     assert physical == set(), (
         f"a build with nothing to do performed {sorted(physical)} — something was "
         "rebuilt that did not need to be"
