@@ -1,0 +1,353 @@
+"""What a Catalogue is responsible for, now that it owns catalogue I/O.
+
+The ``_`` schema is the catalogue and every table in it is a catalogue table, so
+one object reads it and one object writes it. Four claims about that object:
+
+* it is *selectively materialised* — it holds what it was asked for, and
+  ``_.Log`` is not asked for, being history nothing consults;
+* it answers which installed object a physical name is, or refuses to guess;
+* runtime rows go through it, appended or merged, and a merged row is visible to
+  a reader of the same catalogue at once;
+* a write that did not land is raised by ``flush`` and nowhere else.
+
+Pure Python. Every input is constructible, and the rows are in the shape the
+``_`` schema holds them.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+import pytest
+from support.catalogues import LOADED_AT, Recording, identity, loaded, never
+from support.weaver_test import weaver_test
+
+from weaver.catalogue.claims import bookmark_row
+from weaver.catalogue.state import Catalogue
+from weaver.catalogue.tables import (
+    BOOKMARK,
+    BOOKMARK_SENTINEL,
+    CATALOGUE_TABLES,
+    LOG,
+    PROJECTED_TABLES,
+    READABLE_TABLES,
+    RUNTIME_TABLES,
+)
+from weaver.errors import CommandError, ConfigError
+
+
+class _Connection:
+    """A catalogue connection over canned rows, keyed the way Python holds them."""
+
+    def __init__(self, rows=None) -> None:
+        self._rows = rows or {}
+        self.read: list[str] = []
+
+    def columns_of(self, table):
+        return {name.casefold(): name for name in table.public_columns}
+
+    def rows(self, statement: str):
+        name = next(
+            table.name for table in CATALOGUE_TABLES if f"[{table.name}]" in statement
+        )
+        self.read.append(name)
+        return self._rows.get(name, [])
+
+
+# --- selective materialisation -------------------------------------------------
+
+
+@weaver_test()
+def test_the_readable_tables_are_every_table_but_the_log():
+    """History is appended and never consulted, and it grows with the estate."""
+
+    assert set(READABLE_TABLES) == set(CATALOGUE_TABLES) - {LOG}
+    assert LOG in RUNTIME_TABLES
+    assert BOOKMARK in RUNTIME_TABLES
+    assert not set(RUNTIME_TABLES) & set(PROJECTED_TABLES)
+
+
+@weaver_test()
+def test_an_installed_read_does_not_read_the_log():
+    from weaver.catalogue.state import read_installed_catalogue
+
+    connection = _Connection()
+
+    catalogue = read_installed_catalogue(connection)
+
+    assert LOG.name not in connection.read
+    assert LOG.name not in catalogue.materialised
+    assert BOOKMARK.name in connection.read
+
+
+@weaver_test()
+def test_a_read_materialises_what_it_was_asked_for_and_no_more():
+    from weaver.catalogue.state import read_installed_catalogue
+    from weaver.catalogue.tables import INSTALLATION, REGISTRY
+
+    connection = _Connection()
+
+    catalogue = read_installed_catalogue(connection, tables=(INSTALLATION, REGISTRY))
+
+    assert connection.read == [INSTALLATION.name, REGISTRY.name]
+    assert catalogue.materialised == {INSTALLATION.name, REGISTRY.name}
+
+
+# --- which installed object a name is ------------------------------------------
+
+
+@weaver_test()
+def test_a_physical_name_resolves_through_installation_and_registry():
+    """Not through the target's name: a physical name is not a logical identity."""
+
+    catalogue = loaded("DWG.Customer")
+
+    resolved = catalogue.installed_object(
+        target_name="Sales_LH", schema="DWG", object="Customer", is_files=False
+    )
+
+    assert resolved == identity("DWG.Customer")
+
+
+@weaver_test()
+def test_a_folder_resolves_under_its_files_identity():
+    """A Folder and a Table of the same name are two objects."""
+
+    catalogue = never("Raw.CustomerCsv", files=True)
+
+    resolved = catalogue.installed_object(
+        target_name="Sales_LH", schema="Raw", object="CustomerCsv", is_files=True
+    )
+
+    assert resolved == identity("Raw.CustomerCsv", files=True)
+
+
+@weaver_test()
+def test_an_object_the_catalogue_does_not_record_is_refused():
+    with pytest.raises(ConfigError) as raised:
+        never("DWG.Customer").installed_object(
+            target_name="Sales_LH", schema="DWG", object="Absent", is_files=False
+        )
+
+    assert "not an object the Weaver catalogue records as installed" in str(
+        raised.value
+    )
+
+
+@weaver_test()
+def test_a_name_two_bound_items_both_claim_is_refused():
+    """Anything that guessed would act on the wrong object."""
+
+    from types import MappingProxyType
+
+    from weaver.declaration.model import WeaverItemId
+
+    def rows(item_name):
+        owner = WeaverItemId("Lakehouse", item_name)
+        return owner, MappingProxyType(
+            {
+                "Installation": (
+                    {
+                        "item_type": "Lakehouse",
+                        "item_name": item_name,
+                        "target_name": "Sales_LH",
+                        "weaver_version": "0.1",
+                        "signature": "s",
+                    },
+                ),
+                "Registry": (
+                    {
+                        "item_type": "Lakehouse",
+                        "item_name": item_name,
+                        "schema_name": "DWG",
+                        "object_name": "Customer",
+                        "object_type": "table",
+                        "object_role": "data",
+                        "signature": "s",
+                        "build_datetime": None,
+                    },
+                ),
+            }
+        )
+
+    catalogue = Catalogue(MappingProxyType(dict([rows("Sales"), rows("Archive")])))
+
+    with pytest.raises(ConfigError) as raised:
+        catalogue.installed_object(
+            target_name="Sales_LH", schema="DWG", object="Customer", is_files=False
+        )
+
+    assert "more than one installed object" in str(raised.value)
+
+
+@weaver_test()
+def test_a_runtime_artefact_is_not_the_object_it_loads():
+    """The module that does the loading is not the thing being loaded."""
+
+    from types import MappingProxyType
+
+    from weaver.declaration.model import WeaverItemId
+
+    owner = WeaverItemId("Lakehouse", "Sales")
+    catalogue = Catalogue(
+        MappingProxyType(
+            {
+                owner: MappingProxyType(
+                    {
+                        "Installation": (
+                            {
+                                "item_type": "Lakehouse",
+                                "item_name": "Sales",
+                                "target_name": "Sales_LH",
+                                "weaver_version": "0.1",
+                                "signature": "s",
+                            },
+                        ),
+                        "Registry": (
+                            {
+                                "item_type": "Lakehouse",
+                                "item_name": "Sales",
+                                "schema_name": "DWG",
+                                "object_name": "Customer",
+                                "object_type": "table",
+                                "object_role": "load",
+                                "signature": "s",
+                                "build_datetime": None,
+                            },
+                        ),
+                    }
+                )
+            }
+        )
+    )
+
+    with pytest.raises(ConfigError):
+        catalogue.installed_object(
+            target_name="Sales_LH", schema="DWG", object="Customer", is_files=False
+        )
+
+
+# --- how far an object has been loaded -----------------------------------------
+
+
+@weaver_test()
+def test_a_bookmark_row_reads_back_as_an_aware_instant():
+    assert loaded("DWG.Customer").bookmark(identity("DWG.Customer")) == LOADED_AT
+
+
+@weaver_test()
+def test_no_bookmark_row_reads_as_the_sentinel():
+    """Absence is the answer, not a missing one: nothing has loaded cleanly."""
+
+    catalogue = never("DWG.Customer")
+
+    assert catalogue.bookmark(identity("DWG.Customer")) == BOOKMARK_SENTINEL
+    assert catalogue.bookmark(identity("DWG.Customer")) == datetime(
+        1900, 1, 1, tzinfo=timezone.utc
+    )
+
+
+@weaver_test()
+def test_a_stored_instant_with_no_zone_is_read_as_utc():
+    """``datetime2`` carries none, and every instant Weaver writes there is UTC."""
+
+    naive = datetime(2026, 8, 20, 6, 0)
+
+    at = loaded("DWG.Customer", at=naive).bookmark(identity("DWG.Customer"))
+
+    assert at == naive.replace(tzinfo=timezone.utc)
+    assert at.tzinfo is not None
+
+
+@weaver_test()
+def test_another_objects_bookmark_is_not_this_ones():
+    catalogue = loaded("DWG.Order")
+
+    assert catalogue.bookmark(identity("DWG.Order")) == LOADED_AT
+    assert catalogue.bookmark(identity("DWG.Customer")) == BOOKMARK_SENTINEL
+
+
+# --- writing through it --------------------------------------------------------
+
+
+@weaver_test()
+def test_a_submitted_row_is_appended():
+    catalogue = never("DWG.Customer")
+
+    catalogue.submit(LOG, {"log_sk": "a", "task_type": "load"})
+
+    assert catalogue.writer.submitted == [("Log", {"log_sk": "a", "task_type": "load"})]
+    assert catalogue.writer.updated == []
+
+
+@weaver_test()
+def test_an_updated_row_is_merged():
+    catalogue = never("DWG.Customer")
+    row = bookmark_row(identity("DWG.Customer"), LOADED_AT)
+
+    catalogue.update(BOOKMARK, row)
+
+    assert catalogue.writer.updated == [("Bookmark", row)]
+    assert catalogue.writer.submitted == []
+
+
+@weaver_test()
+def test_an_updated_bookmark_is_visible_to_a_reader_at_once():
+    """A run that just advanced a bookmark and then asks is asking about its own load.
+
+    Before the Warehouse has it, deliberately: the write is queued and the flush
+    is later, and a reader in between must not see what the row replaced.
+    """
+
+    catalogue = never("DWG.Customer")
+    assert catalogue.bookmark(identity("DWG.Customer")) == BOOKMARK_SENTINEL
+
+    catalogue.update(BOOKMARK, bookmark_row(identity("DWG.Customer"), LOADED_AT))
+
+    assert catalogue.bookmark(identity("DWG.Customer")) == LOADED_AT
+    assert catalogue.writer.flushes == 0
+
+
+@weaver_test()
+def test_an_updated_bookmark_replaces_the_one_that_was_read():
+    later = datetime(2026, 8, 25, 9, 0, tzinfo=timezone.utc)
+    catalogue = loaded("DWG.Customer")
+
+    catalogue.update(BOOKMARK, bookmark_row(identity("DWG.Customer"), later))
+
+    assert catalogue.bookmark(identity("DWG.Customer")) == later
+
+
+@weaver_test()
+def test_a_write_that_did_not_land_is_raised_by_flush():
+    """The one place a failure surfaces, because the queue is what came before it."""
+
+    catalogue = never("DWG.Customer", writer=Recording(failing=RuntimeError("refused")))
+    catalogue.update(BOOKMARK, bookmark_row(identity("DWG.Customer"), LOADED_AT))
+
+    with pytest.raises(RuntimeError, match="refused"):
+        catalogue.flush()
+
+
+@weaver_test()
+def test_a_catalogue_with_nowhere_to_write_says_so():
+    """What a catalogue reconstructed from a payload has: it crossed as data."""
+
+    catalogue = Catalogue({})
+
+    with pytest.raises(CommandError) as raised:
+        catalogue.submit(LOG, {"log_sk": "a"})
+
+    assert "cannot be written here" in str(raised.value)
+
+
+@weaver_test()
+def test_a_catalogue_survives_the_crossing_that_carries_it():
+    """A bookmark is a catalogue row, so it travels the way every row travels."""
+
+    crossed = Catalogue.from_mapping(loaded("DWG.Customer").to_mapping())
+
+    assert crossed.bookmark(identity("DWG.Customer")) == LOADED_AT
+    assert crossed.installed_object(
+        target_name="Sales_LH", schema="DWG", object="Customer", is_files=False
+    ) == identity("DWG.Customer")
