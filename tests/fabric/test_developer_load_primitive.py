@@ -140,9 +140,9 @@ Incremental: true
         return staging, type(self).deletes
 
 
-folder = Raw__ChangeFeedProbe(
-    spark, lakehouse=destination, catalogue=workspace.catalogue
-)
+# Freestanding: this probe is not part of the built estate, so it has no place in
+# the catalogue's record and needs none — it uses no bookmark.
+folder = Raw__ChangeFeedProbe(spark, lakehouse=destination)
 reject = folder.path().with_name(folder.path().name + "_Reject")
 
 
@@ -251,9 +251,8 @@ File key: "*.csv"
         return staging, []
 
 
-folder = Raw__FileKeyProbe(
-    spark, lakehouse=destination, catalogue=workspace.catalogue
-)
+# Freestanding, as above: an ad-hoc probe the estate does not record.
+folder = Raw__FileKeyProbe(spark, lakehouse=destination)
 reject = folder.path().with_name(folder.path().name + "_Reject")
 
 
