@@ -37,6 +37,7 @@ from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
+from ..catalogue.tables import BOOKMARK
 from .bookmarks import render_bookmark_reconciliation, render_bookmark_reference
 from .bundle import (
     SUPPORTED_FORMAT_VERSION,
@@ -180,9 +181,10 @@ def generate_item_build_bundle(
         items=tuple(target_by_item),
         selected_for_build=selected_for_build,
         removed=removed,
-        # A catalogue holding nothing is one this bundle is creating, so there is
-        # no bookmark to reset and none to prune.
-        installed=bool(catalogue.present_tables),
+        # A catalogue with no `_.Bookmark` is one this bundle is creating it in:
+        # every build binds the built-in item, so the table arrives with this
+        # bundle and can hold no row anything could have written.
+        installed=BOOKMARK.name in catalogue.present_tables,
         catalogue_target=catalogue_target,
     )
     if bookmarks is not None:

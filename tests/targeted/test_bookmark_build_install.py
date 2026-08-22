@@ -41,7 +41,7 @@ from support.workspaces import WORKSPACE
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
 from weaver.build_bundle.bookmarks import bookmark_statements
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import BOOKMARK_SENTINEL_TEXT, CATALOGUE_TABLES
+from weaver.catalogue.tables import BOOKMARK_SENTINEL_TEXT, BUILT_TABLES
 from weaver.declaration import parse_item_repository
 from weaver.etl import item_bookmarkable_objects
 from weaver.locations import Location
@@ -56,12 +56,11 @@ def estate(tmp_path):
     return full_estate(tmp_path / "repo")
 
 
-#: A catalogue holding no rows but every table. The distinction is the one the
-#: bookmark stage turns on: a catalogue holding *nothing* is one the same bundle
-#: is creating, and has no bookmarks to reconcile.
-EMPTY = Catalogue(
-    {}, present_tables=frozenset(table.name for table in CATALOGUE_TABLES)
-)
+#: A catalogue holding no rows but every table, `_.Bookmark` included. That last
+#: is the distinction the bookmark stage turns on: a catalogue without the table
+#: is one this bundle is creating it in, and it can hold no row anything could
+#: have written.
+EMPTY = Catalogue({}, present_tables=frozenset(table.name for table in BUILT_TABLES))
 
 
 def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
@@ -209,15 +208,27 @@ def test_a_build_that_changes_one_object_resets_only_that_one(estate, tmp_path):
     assert "N'Files/Raw', N'CustomerCsv'" not in merge
 
 
+@pytest.mark.parametrize(
+    "present",
+    [
+        pytest.param(frozenset(), id="bootstrap"),
+        pytest.param(
+            frozenset(table.name for table in BUILT_TABLES if table.name != "Bookmark"),
+            id="upgrade",
+        ),
+    ],
+)
 @weaver_test()
-def test_a_build_creating_the_catalogue_reconciles_no_bookmarks(estate, tmp_path):
-    """The bootstrap case: the table this would write is in the same bundle.
+def test_a_build_creating_the_table_reconciles_no_bookmarks(estate, tmp_path, present):
+    """The table this would write is arriving in the same bundle.
 
-    Not a silent skip. A catalogue holding nothing has never had anything
-    installed into it, so there is no row to reset and none to prune.
+    Every build binds the built-in item, so a catalogue without `_.Bookmark` gets
+    it from this build — whether that catalogue is empty or is an older estate
+    being upgraded. Not a silent skip: a table nothing could ever have written to
+    has no row to reset and none to prune.
     """
 
-    bundle = _bundle(estate, tmp_path, catalogue=Catalogue({}))
+    bundle = _bundle(estate, tmp_path, catalogue=Catalogue({}, present_tables=present))
 
     assert _bookmark_actions(bundle) == []
 
@@ -389,7 +400,7 @@ def _installed(repository) -> Catalogue:
     )
     return Catalogue(
         rows=state.rows,
-        present_tables=frozenset(table.name for table in CATALOGUE_TABLES),
+        present_tables=frozenset(table.name for table in BUILT_TABLES),
     )
 
 

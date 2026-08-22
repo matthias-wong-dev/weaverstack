@@ -381,7 +381,14 @@ class RegisteredDocument:
 #: Add a name here in the same change that adds the table, and only then: a table
 #: listed here that *was* in an older release would turn a repair case into a
 #: silent partial rebuild.
-INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name})
+INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name, BOOKMARK.name})
+
+#: The tables whose presence a build has to know about. The reconciled ones,
+#: because a claim may only be raised against a table that is there — and
+#: ``_.Bookmark``, because whether a build reconciles bookmarks at all turns on
+#: whether it already exists. ``_.Log`` is absent: nothing reads it to decide
+#: anything, so asking would only give a new way to refuse an old estate.
+CHECKED_TABLES = CATALOGUE_TABLES + (BOOKMARK,)
 
 
 def _encode_json_value(value):
@@ -461,7 +468,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     present: set[str] = set()
     missing: set[str] = set()
     incompatible: list[str] = []
-    for table in CATALOGUE_TABLES:
+    for table in CHECKED_TABLES:
         columns = catalogue.columns_of(table)
         if columns is None:
             missing.add(table.name)
