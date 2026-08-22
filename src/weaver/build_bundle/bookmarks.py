@@ -1,18 +1,22 @@
-"""Bring ``_.Bookmark`` into line with what a build will leave installed.
+"""What a build does about bookmarks: reconcile the rows, present the table.
 
-Two statements, both against the catalogue Warehouse:
-
-* a scoped delete of rows whose object this build no longer loads;
-* a scoped merge resetting to the sentinel every loadable object it rebuilds.
-
-Both run **before** any physical work, and the ordering is the safety property. A
-bookmark at the sentinel makes the next load read the whole source; a bookmark
-left advanced over a table that was dropped and recreated makes it read almost
-nothing. So the reset is written first and the rebuild follows it: a build that
-fails in between leaves work to repeat rather than rows that will never arrive.
+**Reconciling the rows.** One action against the catalogue Warehouse, carrying a
+scoped delete of rows whose object this build no longer loads and a scoped merge
+resetting to the sentinel every loadable object it rebuilds. It runs **before**
+any physical work, and the ordering is the safety property: a bookmark at the
+sentinel makes the next load read the whole source, while one left advanced over
+a table that was dropped and recreated makes it read almost nothing. So the reset
+is written first and the rebuild follows it, and a build that fails in between
+leaves work to repeat rather than rows that will never arrive.
 
 The scope is the items this build reconciles, and nothing wider. Rows belonging
 to an item the build was not pointed at are another build's to maintain.
+
+**Presenting the table.** Every target the build installs a load into gets the
+catalogue's ``_.Bookmark`` under that name — a view in a Warehouse, a OneLake
+shortcut in a Lakehouse — because a generated procedure says ``[_].[Bookmark]``
+and authored Spark SQL may too. That happens in the load phase, with the
+artefacts it exists for.
 """
 
 from __future__ import annotations
