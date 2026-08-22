@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
 from sql_support import CatalogObject, user_objects
 from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
 from support.weaver_test import register_session, weaver_test
@@ -42,9 +43,23 @@ def _failures(report):
     return [(failure.action_id, failure.message) for failure in report.errors]
 
 
+@pytest.fixture
+def catalogue_of_its_own(clean_disposable_warehouse):
+    """The disposable Warehouse, and its ``_`` removed when the test is done.
+
+    Every other Warehouse test uses this item as an ordinary target, where
+    ``_.Bookmark`` is a *view* over the catalogue's table. A real table of that
+    name left behind is one the next ``create or alter view`` cannot replace, so
+    the catalogue this test installs goes whether or not the test passed.
+    """
+
+    yield clean_disposable_warehouse
+    _forget_the_catalogue_schema(clean_disposable_warehouse.executor)
+
+
 @weaver_test(remote=True, resources={"rest", "tds"})
 def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
-    fabric_workspace, clean_disposable_warehouse, tmp_path_factory
+    fabric_workspace, catalogue_of_its_own, tmp_path_factory
 ):
     """Bootstrap, drop the table, build again, and read the estate once.
 
@@ -53,19 +68,20 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     bundle must leave it there.
     """
 
-    warehouse = clean_disposable_warehouse
+    warehouse = catalogue_of_its_own
     name = warehouse.item.name
     own_catalogue = replace(fabric_workspace, catalogue=f"Warehouse/{name}")
     estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("upgrade"))
     bind = f"Warehouse/{name}=Reporting"
-    target = f"Warehouse/{name}"
 
-    # The fixture wipes this Warehouse as an ordinary target, which spares `_`
-    # because `_` is the catalogue's. Here it *is* the catalogue, so wiping it
-    # again under that name is what leaves nothing for the first build to find.
-    with ConsoleSession(workspace=own_catalogue) as session:
-        register_session(session)
-        weaver.wipe([target], session=session)
+    # Setup, not the claim. This Warehouse is the catalogue *and* the estate's
+    # target, so both items of the build want `_`: the built-in item for the
+    # catalogue tables, and the estate's for its load procedures. Each plans to
+    # create it and the second fails, which is a defect of its own — an installed
+    # catalogue is where this test starts, so it puts the schema there.
+    warehouse.executor.execute_script(
+        "if schema_id(N'_') is null exec('create schema [_]');"
+    )
 
     # One Warehouse holding both `_` and the user's own schemas, which is a
     # supported arrangement: Weaver owns `_` there and nothing else.
@@ -130,3 +146,19 @@ def test_a_built_warehouse_is_given_a_view_over_the_catalogues_bookmark(
         f"select count(*) as n from [_].[{BOOKMARK.name}]"
     )
     assert int(dict(counted[0])["n"]) >= 0
+
+
+#: Which statement drops each kind of object, in the order dependencies allow: a
+#: view over a table goes before the table does.
+_DROP = (("V", "view"), ("P", "procedure"), ("U", "table"))
+
+
+def _forget_the_catalogue_schema(executor) -> None:
+    """Leave this Warehouse holding no ``_`` at all."""
+
+    held = {object for object in user_objects(executor) if object.schema == "_"}
+    for kind, statement in _DROP:
+        for object in sorted(held):
+            if object.kind == kind:
+                executor.execute_script(f"drop {statement} [_].[{object.name}];")
+    executor.execute_script("if schema_id(N'_') is not null exec('drop schema [_]');")
