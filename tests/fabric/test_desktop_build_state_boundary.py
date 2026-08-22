@@ -49,21 +49,34 @@ def recorded_session(fabric_workspace, livy_session):
         yield session
 
 
+@pytest.fixture
+def emptied_target(fabric_empty_lakehouse, fabric_target_lakehouse):
+    """The target Lakehouse holding no schemas, emptied before the claim begins.
+
+    The read asks Spark for a Lakehouse's views once per schema storage
+    discovered, so how much Spark it uses is a fact about the estate. Emptiness
+    is this test's premise rather than its luck, and it is established here so
+    the Livy the emptying needs is fixture acquisition rather than part of the
+    claim.
+    """
+
+    fabric_empty_lakehouse(fabric_target_lakehouse.name)
+    return fabric_target_lakehouse
+
+
 @weaver_test(remote=True, resources={"onelake", "rest", "tds"})
 def test_build_state_is_read_without_importing_weaver_in_fabric(
-    recorded_session, fabric_workspace, fabric_target_lakehouse
+    recorded_session, fabric_workspace, emptied_target
 ):
     """The acceptance condition: state read from a desktop, planning-ready.
 
-    Spark is not declared, and that is a fact about the estate rather than about
-    the read: the read asks Spark for a Lakehouse's views once per schema
-    storage discovered, so a target left empty by an earlier module has none to
-    ask about. That the views come over Spark is
+    Spark is not declared, because a target with no schemas has no views to ask
+    about. That the views come over Spark is
     `test_a_lakehouse_inventory_lists_views_over_spark_sql`, which asks for a
     named schema and so does not depend on what is there.
     """
 
-    bindings = item_bindings(("Lakehouse/Sales", fabric_target_lakehouse.name))
+    bindings = item_bindings(("Lakehouse/Sales", emptied_target.name))
     state = read_build_state(
         bindings,
         required_catalogue_items=(),
@@ -75,7 +88,7 @@ def test_build_state_is_read_without_importing_weaver_in_fabric(
     # populated one are both valid answers.
     assert state.catalogue is not None
     inventory = state.target_inventories[bindings.entries[0].item]
-    assert inventory.target_name == fabric_target_lakehouse.name
+    assert inventory.target_name == emptied_target.name
     assert inventory.kind == "lakehouse"
 
 
