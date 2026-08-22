@@ -109,7 +109,27 @@ class Estate:
         return f"{self.object_name}Raw"
 
 
-def _install(executor, object_name: str, *, static: bool) -> Estate:
+#: The logical item the installed procedures belong to. A load procedure is keyed
+#: by it — its bookmark row carries the Registry's four-part identity — so it is
+#: named here rather than left to a default.
+ITEM = WeaverItemId("Warehouse", "Reporting")
+
+
+def _install_bookmark_reference(executor, catalogue: str) -> None:
+    """What a build gives every Warehouse it installs a load into.
+
+    The catalogue's ``_.Bookmark`` under that name. A procedure reads and writes
+    its own bookmark through it, so one installed without it could neither answer
+    Static nor record having run.
+    """
+
+    executor.execute_script(
+        "create or alter view [_].[Bookmark] as "
+        f"select * from [{catalogue}].[_].[Bookmark];"
+    )
+
+
+def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Estate:
     document = read_source_document(
         f"{SCHEMA}.{object_name}.sql",
         _source(object_name, static=static).encode("utf-8"),
@@ -119,6 +139,7 @@ def _install(executor, object_name: str, *, static: bool) -> Estate:
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
+    _install_bookmark_reference(executor, catalogue)
     estate = Estate(executor, object_name)
     _drop(estate)
     executor.execute_script(
@@ -126,16 +147,12 @@ def _install(executor, object_name: str, *, static: bool) -> Estate:
         "([Customer id] varchar(50) null, [Customer name] varchar(200) null);"
     )
     executor.execute_script(document.create_ddl().content)
-    executor.execute_script(
-        document.create_load(
-            item=WeaverItemId("Warehouse", "Reporting")
-        ).payload.decode("utf-8")
-    )
+    executor.execute_script(document.create_load(item=ITEM).payload.decode("utf-8"))
     return estate
 
 
 @pytest.fixture(scope="module")
-def estate(clean_disposable_warehouse):
+def estate(clean_disposable_warehouse, fabric_workspace):
     """The built table and its installed load, from the generators themselves.
 
     Both come from `create_ddl()` and `create_load()` rather than from
@@ -143,16 +160,26 @@ def estate(clean_disposable_warehouse):
     procedure works against a table Weaver does not actually generate.
     """
 
-    built = _install(clean_disposable_warehouse.executor, OBJECT, static=False)
+    built = _install(
+        clean_disposable_warehouse.executor,
+        OBJECT,
+        fabric_workspace.catalogue_item.name,
+        static=False,
+    )
     yield built
     _drop(built)
 
 
 @pytest.fixture(scope="module")
-def static_estate(clean_disposable_warehouse):
+def static_estate(clean_disposable_warehouse, fabric_workspace):
     """The same table declared static, under a name of its own."""
 
-    built = _install(clean_disposable_warehouse.executor, STATIC_OBJECT, static=True)
+    built = _install(
+        clean_disposable_warehouse.executor,
+        STATIC_OBJECT,
+        fabric_workspace.catalogue_item.name,
+        static=True,
+    )
     yield built
     _drop(built)
 
@@ -185,12 +212,43 @@ def _reset(estate: Estate) -> None:
     estate.executor.execute_script(
         f"delete from [{SCHEMA}].[{name}];\n"
         f"delete from [{SCHEMA}].[{estate.raw}];\n"
+        + _forget_bookmark(name)
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
             f"drop table [{SCHEMA}].[{name}{suffix}];"
             for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging")
         )
     )
+
+
+def _forget_bookmark(name: str) -> str:
+    """Remove one object's bookmark row, keyed as the Registry keys it.
+
+    Through the view a build installs, so a sequence starts from "never cleanly
+    loaded" however the last one left it — and so the delete itself proves a
+    delete reaches the catalogue's table through that view.
+    """
+
+    return (
+        "delete from [_].[Bookmark] "
+        f"where [Item type] = N'{ITEM.item_type}' "
+        f"and [Item name] = N'{ITEM.item_name}' "
+        f"and [Schema name] = N'{SCHEMA}' "
+        f"and [Object name] = N'{name}';\n"
+    )
+
+
+def _bookmark(estate) -> object:
+    """This object's bookmark, as the catalogue holds it, or None."""
+
+    rows = estate.executor.query(
+        "select [Bookmark datetime] as at from [_].[Bookmark] "
+        f"where [Item type] = N'{ITEM.item_type}' "
+        f"and [Item name] = N'{ITEM.item_name}' "
+        f"and [Schema name] = N'{SCHEMA}' "
+        f"and [Object name] = N'{estate.object_name}';"
+    )
+    return rows[0]["at"] if rows else None
 
 
 def _source_rows(estate: Estate, rows) -> None:
@@ -413,8 +471,91 @@ def _static_run(static_estate):
             "seed": seed,
             "seeded_contents": seeded_contents,
             "leftovers": _leftovers(static_estate),
+            "bookmark": _bookmark(static_estate),
         },
     )
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_clean_load_records_its_own_bookmark_through_the_view(estate):
+    """Run by hand, the procedure maintains its own object's history.
+
+    ``@update_catalogue`` defaults to 1, and in every Warehouse but the one the
+    catalogue lives in ``_.Bookmark`` is a view over the catalogue's table. So
+    this is also the claim that an update and an insert through that view reach
+    the table behind it.
+    """
+
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+    before = _bookmark(estate)
+
+    result = _load(estate, fault_tolerant=False)
+    after = _bookmark(estate)
+
+    assert before is None
+    assert result.succeeded is True
+    assert after is not None
+    # The instant the procedure took at its own start, reported and recorded.
+    assert result.bookmark_datetime is not None
+    assert after.replace(tzinfo=result.bookmark_datetime.tzinfo) == (
+        result.bookmark_datetime
+    )
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_second_clean_load_moves_the_bookmark_on(estate):
+    """The row is updated in place, which is the half an insert cannot prove."""
+
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+    _load(estate, fault_tolerant=False)
+    first = _bookmark(estate)
+
+    _source_rows(estate, CHANGED)
+    _load(estate, fault_tolerant=False)
+    second = _bookmark(estate)
+
+    assert first is not None and second is not None
+    assert second > first
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_load_that_rejected_rows_leaves_the_bookmark_where_it_was(estate):
+    """It has not read its window, whether or not it was told to tolerate them."""
+
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+    _load(estate, fault_tolerant=False)
+    clean = _bookmark(estate)
+
+    _source_rows(estate, REJECTABLE)
+    rejected = _load(estate, fault_tolerant=True)
+
+    assert rejected.rows_rejected > 0
+    assert rejected.bookmark_datetime is None
+    assert _bookmark(estate) == clean
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_an_orchestrated_load_leaves_the_bookmark_to_the_run(estate):
+    """``@update_catalogue = 0`` is how a run says it will write the row itself."""
+
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+
+    result = LoadResult.from_row(
+        estate.executor.call_procedure(
+            f"[_].[Load {SCHEMA}.{estate.object_name}]",
+            inputs=(("fault_tolerant", 0), ("update_catalogue", 0)),
+            outputs=RESULT_PARAMETERS,
+        )
+    )
+
+    assert result.succeeded is True
+    # It still reports the instant, because the run needs it to advance the row.
+    assert result.bookmark_datetime is not None
+    assert _bookmark(estate) is None
 
 
 @weaver_test(remote=True, resources={"tds"})
@@ -436,6 +577,9 @@ def test_the_static_warehouse_load_seeds_once_and_then_is_a_no_op(static_estate)
     ) == (0, 0, 0, 0, 0)
     assert static_run.contents == CLEAN
     assert static_run.extra["leftovers"] == 0
+    # What closed the gate the second time: the bookmark the seed recorded.
+    assert static_run.extra["bookmark"] is not None
+    assert result.bookmark_datetime is None
 
 
 # --- declared constraints, executed ------------------------------------------
@@ -515,7 +659,9 @@ class WideEstate(Estate):
         return f"{self.object_name}Retire"
 
 
-def _install_wide(executor, object_name: str, *, incremental: bool) -> WideEstate:
+def _install_wide(
+    executor, object_name: str, catalogue: str, *, incremental: bool
+) -> WideEstate:
     document = read_source_document(
         f"{SCHEMA}.{object_name}.sql",
         _wide_source(object_name, incremental=incremental).encode("utf-8"),
@@ -525,6 +671,7 @@ def _install_wide(executor, object_name: str, *, incremental: bool) -> WideEstat
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
+    _install_bookmark_reference(executor, catalogue)
     estate = WideEstate(executor, object_name, retires=incremental)
     _drop_wide(estate)
     executor.execute_script(f"create table [{SCHEMA}].[{estate.raw}] ({WIDE_RAW_DDL});")
@@ -534,11 +681,7 @@ def _install_wide(executor, object_name: str, *, incremental: bool) -> WideEstat
             "([Customer id] varchar(50) null);"
         )
     executor.execute_script(document.create_ddl().content)
-    executor.execute_script(
-        document.create_load(
-            item=WeaverItemId("Warehouse", "Reporting")
-        ).payload.decode("utf-8")
-    )
+    executor.execute_script(document.create_load(item=ITEM).payload.decode("utf-8"))
     return estate
 
 
@@ -558,6 +701,7 @@ def _reset_wide(estate: WideEstate) -> None:
     statements = [
         f"delete from [{SCHEMA}].[{name}];",
         f"delete from [{SCHEMA}].[{estate.raw}];",
+        _forget_bookmark(name),
     ]
     if estate.retires:
         statements.append(f"delete from [{SCHEMA}].[{estate.retire}];")
@@ -632,18 +776,24 @@ def _reject_reasons(estate: WideEstate) -> dict:
 
 
 @pytest.fixture(scope="module")
-def constrained_estate(clean_disposable_warehouse):
+def constrained_estate(clean_disposable_warehouse, fabric_workspace):
     built = _install_wide(
-        clean_disposable_warehouse.executor, CONSTRAINED_OBJECT, incremental=False
+        clean_disposable_warehouse.executor,
+        CONSTRAINED_OBJECT,
+        fabric_workspace.catalogue_item.name,
+        incremental=False,
     )
     yield built
     _drop_wide(built)
 
 
 @pytest.fixture(scope="module")
-def merge_estate(clean_disposable_warehouse):
+def merge_estate(clean_disposable_warehouse, fabric_workspace):
     built = _install_wide(
-        clean_disposable_warehouse.executor, MERGE_OBJECT, incremental=True
+        clean_disposable_warehouse.executor,
+        MERGE_OBJECT,
+        fabric_workspace.catalogue_item.name,
+        incremental=True,
     )
     yield built
     _drop_wide(built)

@@ -172,7 +172,18 @@ def generate_tsql_load_script(
         "load/load_procedure",
         load_procedure=names["procedure"],
         result_parameters=_result_parameters(),
-        result_assignment=_indent(_result_assignment(), 4),
+        result_assignment=_indent(
+            _result_assignment(
+                # The instant this load began, reported only when the load was
+                # clean. A caller advances a bookmark to an instant a load
+                # established, and one that rejected a row established none.
+                bookmark_datetime=(
+                    "case when @weaver_error is null and @weaver_rows_rejected = 0 "
+                    "then @weaver_load_datetime end"
+                )
+            ),
+            4,
+        ),
         bookmark_key=_indent(_bookmark_key(document, item), 4),
         bookmark_update=_indent(_bookmark_update(document, item), 4),
         live_delete_datetime=AUDIT_LIVE_DELETE_DATETIME,
@@ -302,25 +313,33 @@ def _bookmark_key(document: SesDocument, item) -> str:
 def _bookmark_update(document: SesDocument, item) -> str:
     """Advance this object's bookmark, when the procedure owns that decision.
 
-    An update and an insert rather than one merge: in every Warehouse but the
-    one the catalogue lives in, ``_.Bookmark`` is a view over the catalogue's
-    table, and an update and an insert through a view over one table are
-    ordinary DML.
+    A ``MERGE``, and that is not a style choice. In every Warehouse but the one
+    the catalogue lives in, ``_.Bookmark`` is a view over the catalogue's table:
+    Fabric refuses a plain ``INSERT`` through such a view and accepts a
+    ``MERGE``'s, so one statement is both the upsert this needs and the only
+    form that reaches the table from either side.
 
     ``@update_catalogue = 0`` is how an orchestrated run says it will advance the
     bookmark itself, through the catalogue writer that also records the run.
     """
 
     identity = _bookmark_identity(document, item)
-    predicate = " and ".join(
-        f"{identifier(BOOKMARK.public_name_of(column))} = {_key_literal(value)}"
+    source = ", ".join(
+        f"{_key_literal(value)} as {identifier(BOOKMARK.public_name_of(column))}"
         for column, value in identity.items()
     )
+    on = " and ".join(
+        f"target.{identifier(BOOKMARK.public_name_of(column))} = "
+        f"source.{identifier(BOOKMARK.public_name_of(column))}"
+        for column in identity
+    )
+    bookmark = identifier(BOOKMARK.public_name_of("bookmark_datetime"))
+    updated = identifier(BOOKMARK.public_name_of(AUDIT_UPDATE_COLUMN))
     columns = ", ".join(
         identifier(BOOKMARK.public_name_of(name)) for name in BOOKMARK.physical_columns
     )
     values = ", ".join(
-        [_key_literal(value) for value in identity.values()]
+        [f"source.{identifier(BOOKMARK.public_name_of(column))}" for column in identity]
         + [
             "@weaver_load_datetime",
             "sysdatetime()",
@@ -328,21 +347,19 @@ def _bookmark_update(document: SesDocument, item) -> str:
             f"convert(datetime2(6), '{AUDIT_LIVE_DELETE_DATETIME}')",
         ]
     )
-    bookmark = identifier(BOOKMARK.public_name_of("bookmark_datetime"))
-    updated = identifier(BOOKMARK.public_name_of(AUDIT_UPDATE_COLUMN))
     return (
         "-- A clean load moved this object's bookmark forward. An orchestrated\n"
         "-- run passes @update_catalogue = 0 and writes it with the run's record.\n"
-        "if @update_catalogue = 1 and @weaver_error is null and @weaver_rows_rejected = 0\n"
+        "if @update_catalogue = 1 and @weaver_error is null "
+        "and @weaver_rows_rejected = 0\n"
         "begin\n"
-        f"    update {_bookmark_table()}\n"
-        f"       set {bookmark} = @weaver_load_datetime\n"
-        f"         , {updated} = sysdatetime()\n"
-        f"     where {predicate};\n"
-        "\n"
-        "    if @@rowcount = 0\n"
-        f"        insert into {_bookmark_table()} ({columns})\n"
-        f"        values ({values});\n"
+        f"    merge into {_bookmark_table()} as target\n"
+        f"    using (select {source}) as source\n"
+        f"       on {on}\n"
+        f"    when matched then update set target.{bookmark} = @weaver_load_datetime\n"
+        f"                              , target.{updated} = sysdatetime()\n"
+        f"    when not matched then insert ({columns})\n"
+        f"                          values ({values});\n"
         "end;"
     )
 

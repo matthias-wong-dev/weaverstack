@@ -264,7 +264,7 @@ def test_the_prune_keeps_every_object_the_repository_still_declares(estate):
 
 @weaver_test()
 def test_an_object_the_repository_no_longer_declares_is_pruned(estate, tmp_path):
-    """Its key is simply absent from the keep-set, so the anti-join removes it."""
+    """Its key is absent from the keep-set, so the anti-join removes the row."""
 
     smaller = _without_the_folder(tmp_path)
     statements = bookmark_statements(
