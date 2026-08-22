@@ -42,8 +42,7 @@ from ..catalogue.render import (
     render_delete_obsolete,
 )
 from ..catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA
-from ..catalogue.tsql import identifier
-from ..declaration.model import WeaverDocumentId, WeaverItemId
+from ..declaration.model import WAREHOUSE, WeaverDocumentId, WeaverItemId
 from ..etl import item_bookmarkable_objects
 from .changes import TABLE as TABLE_KIND
 from .changes import VIEW as VIEW_KIND
@@ -55,6 +54,7 @@ from .models import (
     InstallAction,
 )
 from .payloads import sha256_hex
+from .shortcuts import Reference, declaration_key, shortcut_payload, view_statement
 from .stages import CATALOGUE, LOAD, PlannedStage
 from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 
@@ -193,6 +193,36 @@ def render_bookmark_reconciliation(
 # --- the local name a generated statement uses --------------------------------
 
 
+#: What the reference's action and payload are named after.
+SLUG = "bookmark-reference"
+
+
+def _reference(item: WeaverItemId, catalogue: str) -> Reference:
+    """``_.Bookmark`` as the reference it is: a shortcut nobody authored.
+
+    Weaver's own infrastructure, so it is not published as a ``_.Shortcut`` row —
+    but *what it becomes* is exactly what a declared shortcut becomes, so it is
+    expressed as one and rendered by the same code. A Warehouse gets the view, a
+    Lakehouse the OneLake shortcut.
+    """
+
+    from ..declaration.metadata import ObjectId
+    from ..declaration.model import TABLE_SHORTCUT, VIEW_SHORTCUT
+
+    qualified = f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}"
+    return Reference(
+        owner=item,
+        name=qualified,
+        destination=WeaverDocumentId(item, ObjectId(CATALOGUE_SCHEMA, BOOKMARK.name)),
+        shortcut_type=(
+            VIEW_SHORTCUT if item.item_type == WAREHOUSE else TABLE_SHORTCUT
+        ),
+        target=f"{WAREHOUSE}/{catalogue}/{qualified}",
+        target_item_name=catalogue,
+        target_object=ObjectId(CATALOGUE_SCHEMA, BOOKMARK.name),
+    )
+
+
 def bookmark_reference_views(
     repository, *, item: WeaverItemId, target
 ) -> tuple[str, ...]:
@@ -210,12 +240,6 @@ def bookmark_reference_views(
     return (f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",)
 
 
-SLUG = "bookmark-reference"
-
-#: Where a Lakehouse presents its ``_.Bookmark``, and how a shortcut spells it.
-LAKEHOUSE_PATH = f"Tables/{CATALOGUE_SCHEMA}"
-
-
 def render_bookmark_reference(
     repository,
     *,
@@ -228,31 +252,23 @@ def render_bookmark_reference(
 ) -> PlannedStage | None:
     """Give a built target the catalogue's ``_.Bookmark`` under that name.
 
-    Weaver runtime infrastructure rather than a declared shortcut: nothing
-    authored it and it is not published as a ``_.Shortcut`` row. It is created in
-    the load phase, with the artefacts it exists for. Not with the declared
-    shortcuts, which precede an item's documents: nothing built reads a bookmark,
-    only a load does — and on the build that creates the catalogue, the table
-    this points at is built in the same bundle and is not there yet when the
-    shortcut phase runs.
+    A generated Warehouse load procedure says ``[_].[Bookmark]``, and authored
+    Spark SQL may too, so every target holding loadable objects presents it.
 
-    A generated Warehouse load procedure reads and writes its own bookmark, and
-    it says ``[_].[Bookmark]`` to do it. In the Warehouse the catalogue lives in
-    that is already the table; in any other it is a view over the catalogue's
-    three-part name, which is how a Fabric Warehouse reaches another item in the
-    workspace.
-
-    A Lakehouse gets a OneLake shortcut instead, so authored Spark SQL can read
-    ``_.Bookmark`` where it runs. Read-only, being a Warehouse's published Delta:
-    a Lakehouse load's bookmark is advanced by the run, not by the object.
+    Created in the load phase, with the artefacts it exists for — not with the
+    declared shortcuts, which precede an item's documents. Nothing built reads a
+    bookmark, and on the build that creates the catalogue the table this points at
+    is built in the same bundle and is not there yet when the shortcut phase runs.
     """
 
     if not item_bookmarkable_objects(repository, item=item):
         return None
+    reference = _reference(item, catalogue_target.name)
     if target.kind == WAREHOUSE_TARGET:
-        return _warehouse_view(item, target, catalogue_target, inventory)
+        return _warehouse_view(reference, item, target, catalogue_target, inventory)
     return _lakehouse_shortcut(
         repository,
+        reference,
         item=item,
         target=target,
         selected_for_build=selected_for_build,
@@ -260,7 +276,9 @@ def render_bookmark_reference(
     )
 
 
-def _warehouse_view(item, target, catalogue_target, inventory) -> PlannedStage | None:
+def _warehouse_view(
+    reference, item, target, catalogue_target, inventory
+) -> PlannedStage | None:
     """The view, created when the Warehouse does not already hold it.
 
     Gated on the inventory, so an unchanged repository plans nothing and a view
@@ -274,12 +292,7 @@ def _warehouse_view(item, target, catalogue_target, inventory) -> PlannedStage |
     if inventory.has_object(CATALOGUE_SCHEMA, BOOKMARK.name, "view"):
         return None
 
-    statement = (
-        f"create or alter view {identifier(CATALOGUE_SCHEMA)}."
-        f"{identifier(BOOKMARK.name)} as select * from "
-        f"{identifier(catalogue_target.name)}.{identifier(CATALOGUE_SCHEMA)}."
-        f"{identifier(BOOKMARK.name)};"
-    )
+    statement = view_statement(reference, catalogue_target)
     item_slug = str(item).replace("/", "--")
     filename = f"{SLUG}-{item_slug}.tsql-batch.json"
     content = (json.dumps([statement], indent=2, ensure_ascii=False) + "\n").encode(
@@ -296,7 +309,7 @@ def _warehouse_view(item, target, catalogue_target, inventory) -> PlannedStage |
 
 
 def _lakehouse_shortcut(
-    repository, *, item, target, selected_for_build, source
+    repository, reference, *, item, target, selected_for_build, source
 ) -> PlannedStage | None:
     """The OneLake shortcut, asserted whenever a loadable object is installed.
 
@@ -316,28 +329,14 @@ def _lakehouse_shortcut(
         return None
 
     item_slug = str(item).replace("/", "--")
-    frozen = {
-        "shortcuts": [
-            {
-                "shortcut": f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",
-                "type": "table",
-                "path": LAKEHOUSE_PATH,
-                "name": BOOKMARK.name,
-                "source": f"{source.item_name}/{source.path}",
-                "source_workspace_id": source.workspace_id,
-                "source_item_id": source.item_id,
-                "source_item_name": source.item_name,
-                "source_path": source.path,
-            }
-        ]
-    }
-    filename = f"{SLUG}-{item_slug}.shortcut.json"
-    content = (json.dumps(frozen, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    content = shortcut_payload(
+        [(reference, target)], sources={declaration_key(reference): source}
+    )
     return _stage(
         item_slug,
         target=target,
         executor="shortcut",
-        filename=filename,
+        filename=f"{SLUG}-{item_slug}.shortcut.json",
         content=content,
         description="present the catalogue's _.Bookmark in this Lakehouse",
     )
@@ -377,7 +376,13 @@ def _stage(
         # Declared alongside the action, as every physical change is: what this
         # leaves is part of what the target holds afterwards.
         changes={
-            target.id: (added(_CHANGE_KIND[target.kind], _qualified(), action.id),)
+            target.id: (
+                added(
+                    _CHANGE_KIND[target.kind],
+                    f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",
+                    action.id,
+                ),
+            )
         },
     )
 
@@ -385,10 +390,6 @@ def _stage(
 #: What the reference physically is, by target kind. A Warehouse view and a
 #: Lakehouse table shortcut both answer to ``_.Bookmark``.
 _CHANGE_KIND = {WAREHOUSE_TARGET: VIEW_KIND, LAKEHOUSE_TARGET: TABLE_KIND}
-
-
-def _qualified() -> str:
-    return f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}"
 
 
 def _is_builtin(item: WeaverItemId) -> bool:
