@@ -18,7 +18,6 @@ from support.weaver_test import weaver_test
 from weaver.catalogue import (
     AUDIT_COLUMN_NAMES,
     CATALOGUE_SCHEMA,
-    PROJECTED_TABLES,
     COLUMN_DICTIONARY,
     DEPENDENCY,
     DICTIONARY_TABLES,
@@ -26,6 +25,7 @@ from weaver.catalogue import (
     FOREIGN_KEY_DICTIONARY,
     INSTALLATION,
     KEY_DICTIONARY,
+    PROJECTED_TABLES,
     REGISTRY,
     SCHEMA_DICTIONARY,
     SHORTCUT,

@@ -347,8 +347,8 @@ class _FakeTds:
     @classmethod
     def answer(cls, statement: str) -> list[dict]:
         from weaver.catalogue.tables import (
-            PROJECTED_TABLES,
             INSTALLATION,
+            PROJECTED_TABLES,
             REGISTRY,
         )
 

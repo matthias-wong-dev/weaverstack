@@ -56,16 +56,16 @@ def _result_for(status: str) -> str:
 
 @dataclass
 class RunLog:
-    """One workflow's evidence, appended through a Session-managed flusher."""
+    """One workflow's evidence, appended through the catalogue that holds it."""
 
     workflow_id: str
     task_type: str
-    flusher: Any
+    catalogue: Any
 
     def submit(self, node) -> None:
         """Record one settled node."""
 
-        self.flusher.submit(self.row(node))
+        self.catalogue.submit(LOG, self.row(node))
 
     def row(self, node) -> dict:
         """The ``_.Log`` row one settled node produces."""
@@ -160,26 +160,29 @@ def new_workflow_id() -> str:
     return uuid.uuid4().hex
 
 
-def open_run_log(session, *, workspace=None, task_type: str, workflow_id=None):
-    """Where this run's evidence goes — the sink, opened at the boundary.
+def open_run_log(
+    catalogue, *, workspace=None, task_type: str, workflow_id=None, session=None
+):
+    """Where this run's evidence goes — into the catalogue that owns ``_.Log``.
 
     Downstream of the Runner by construction: a run is correct without one, and
     this is called by the operation that wants a durable record rather than by
     the thing doing the work. ``task_type`` is what the record says it was,
     because a load and a validation need the same capabilities and are not the
     same event.
+
+    It builds rows and does not own a write stream: the catalogue does, and
+    ``_.Log`` is one of its tables.
     """
 
-    from ..targets import WarehouseTarget
-
-    workspace = workspace if workspace is not None else session.workspace
-    if workspace is None or not workspace.catalogue:
+    if workspace is not None and not workspace.catalogue:
         raise RunError("writing run evidence needs a Workspace with a catalogue")
-    catalogue = WarehouseTarget(warehouse=workspace.catalogue_item)
     return RunLog(
-        workflow_id=workflow_id or session.workflow_id or new_workflow_id(),
+        workflow_id=workflow_id
+        or (session.workflow_id if session is not None else None)
+        or new_workflow_id(),
         task_type=task_type,
-        flusher=session.flusher(LOG, warehouse=catalogue, workspace=workspace),
+        catalogue=catalogue,
     )
 
 

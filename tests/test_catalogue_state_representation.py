@@ -8,8 +8,8 @@ from support.weaver_test import weaver_test
 from weaver.build_bundle.catalogue_actions import _claim_statements
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue import (
-    PROJECTED_TABLES,
     FOLDER_DICTIONARY,
+    PROJECTED_TABLES,
     REGISTRY,
     TABLE_DICTIONARY,
 )

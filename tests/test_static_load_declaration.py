@@ -21,7 +21,7 @@ out of generation carrying the check.
 from __future__ import annotations
 
 import pytest
-from support.bookmarks import loaded, never
+from support.catalogues import loaded, never
 from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
@@ -208,7 +208,7 @@ def test_a_bookmarked_static_table_reports_a_successful_load_of_nothing(tmp_path
 
     result = (
         Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
-        .with_bookmarks(loaded("Sales.Country"))
+        .with_catalogue(loaded("Sales.Country", target="LH"))
         .load()
     )
 
@@ -228,34 +228,48 @@ def test_a_static_table_with_no_bookmark_loads(tmp_path):
 
     table = Sales__Country(
         _Session(), lakehouse=mounted_lakehouse("LH", tmp_path)
-    ).with_bookmarks(never())
+    ).with_catalogue(never("Sales.Country", target="LH"))
 
     with pytest.raises(AssertionError, match="read\\(\\) must not run"):
         table.load()
 
 
-@pytest.mark.parametrize("static", [False, True])
 @weaver_test()
-def test_a_table_with_no_catalogue_refuses_to_load(tmp_path, static):
-    """Static or not: a load records how far it got, and that lives in the catalogue.
+def test_a_freestanding_table_loads_and_records_nothing(tmp_path):
+    """``My__Table(spark)`` runs. It has no place in the estate's record of itself.
 
     The catalogue is a constructor argument rather than a ``load()`` one, because
     an authored ``read()`` is called by Weaver and takes nothing — so anything
-    ``read()`` may reach has to be set before the load begins. It is refused
-    before ``read()`` runs, which this object asserts for itself.
+    ``read()`` may reach has to be set before the load begins.
     """
+
+    class Sales__Country(_TableUnderTest):
+        static = False
+
+    table = Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
+
+    # It reaches read(), which this object refuses — the point is that it got
+    # there rather than being turned away for having no catalogue.
+    with pytest.raises(AssertionError, match="read\\(\\) must not run"):
+        table.load()
+    assert table.installed is None
+
+
+@weaver_test()
+def test_a_freestanding_static_table_cannot_answer_its_gate(tmp_path):
+    """Static asks how far this object got, and only the catalogue knows."""
 
     from weaver.errors import LoadError
 
     class Sales__Country(_TableUnderTest):
-        pass
+        static = True
 
-    Sales__Country.static = static
     table = Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
 
     with pytest.raises(LoadError) as raised:
         table.load()
 
+    assert "not anchored" in str(raised.value)
     assert "catalogue=" in str(raised.value)
 
 

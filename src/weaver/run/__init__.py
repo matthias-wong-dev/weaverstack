@@ -25,7 +25,6 @@ Seven modules, and each is a step of that line rather than a fragment of one:
 
 from __future__ import annotations
 
-from .bookmarks import RunBookmarks, open_run_bookmarks
 from .dispatch import can_refresh, dispatch_primitive
 from .evidence import RunLog, new_workflow_id, open_run_log
 from .graph import RunGraph, RunNode, graph_for
@@ -50,7 +49,6 @@ __all__ = [
     "RunNodeResult",
     "RunRequest",
     "RunResult",
-    "RunBookmarks",
     "RunState",
     "Runner",
     "can_refresh",
@@ -59,7 +57,6 @@ __all__ = [
     "graph_for",
     "RunLog",
     "new_workflow_id",
-    "open_run_bookmarks",
     "open_run_log",
     "run_status",
 ]

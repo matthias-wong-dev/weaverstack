@@ -41,7 +41,6 @@ from ..etl import PROCEDURE_TYPE, artefacts_by_identity, item_runtime_artefacts
 from .claims import catalogue_schema
 from .render import InstallationScope, Row, column_set
 from .tables import (
-    PROJECTED_TABLES,
     COLUMN_DICTIONARY,
     DEPENDENCY,
     FOLDER_DICTIONARY,
@@ -49,6 +48,7 @@ from .tables import (
     KEY_DICTIONARY,
     KEY_PRIMARY,
     KEY_UNIQUE,
+    PROJECTED_TABLES,
     REGISTRY,
     ROLE_DATA,
     ROLE_SHORTCUT,

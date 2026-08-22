@@ -740,7 +740,7 @@ def test_run_evidence_uses_the_nodes_structured_identity():
         logical_id="neither is this",
     )
 
-    row = RunLog("workflow", "load", flusher=None).row(settled)
+    row = RunLog("workflow", "load", catalogue=None).row(settled)
 
     assert row["target_type"] == "Lakehouse"
     assert row["target_name"] == "Sales_LH"

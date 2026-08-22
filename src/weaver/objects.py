@@ -35,14 +35,25 @@ class WeaverObject:
 
     ``spark`` is the session authored code runs through, and it is mandatory.
     Another Weaver object may be passed in its place — ``Another__Table(self)`` —
-    inheriting that object's session, Lakehouse and bookmark context, which is
-    how one object reaches another.
+    inheriting that object's session, Lakehouse and catalogue, which is how one
+    object reaches another.
 
-    ``catalogue`` names the Weaver catalogue in the ordinary target grammar,
-    ``"Warehouse/Weaver"``. It is what makes ``self.bookmark`` answerable for a
-    load nothing is orchestrating; a run supplies the same thing through
-    :meth:`with_bookmarks` instead, because what a run knows is not something an
-    author should have to accept an argument for.
+    An object is either **freestanding** or **catalogue-anchored**::
+
+        My__Table(spark)                              # freestanding
+        My__Table(spark, catalogue="Warehouse/Weaver") # anchored
+
+    Anchoring is what gives an object a place in the estate's own record of
+    itself. It is resolved once, here: the catalogue says which installed object
+    this is, and an object it does not record — or records twice — is a
+    :class:`~weaver.errors.ConfigError` at construction rather than a surprise
+    inside a load. A freestanding object runs, and has no bookmark to read and
+    nothing to record.
+
+    An orchestrated run supplies an already-populated catalogue through
+    :meth:`with_catalogue` instead, because a deployed primitive's constructor is
+    a contract — ``cls(spark, lakehouse=...)`` — and a class meeting only that
+    contract must keep working.
     """
 
     def __init__(
@@ -58,9 +69,9 @@ class WeaverObject:
             spark = owner.spark
             if lakehouse is None:
                 lakehouse = owner.lakehouse
-            # The context, never the value: a child reads its own bookmark by its
-            # own identity, from the same catalogue its parent reads from.
-            inherited = owner._bookmarks
+            # The catalogue, never a value read from it: a child resolves its
+            # own identity and its own bookmark against the same catalogue.
+            inherited = owner._catalogue
         if spark is None:
             raise LoadError(
                 f"{type(self).__name__} needs the Spark session it runs through — "
@@ -89,16 +100,18 @@ class WeaverObject:
         #: folders both hang off it, so nothing an object reaches needs a mount.
         self.spark_root = self.lakehouse.spark_root
 
-        from .runtime.bookmark import with_catalogue
+        #: The catalogue this object is anchored to, or None if freestanding.
+        #: Private: authored code asks the object about itself, not about how the
+        #: answer was obtained.
+        self._catalogue = None
+        #: This object's installed identity, resolved once with the anchor.
+        self._installed = None
+        if catalogue is not None:
+            from .runtime.anchor import anchored
 
-        #: What this object needs to answer :attr:`bookmark`, or None. Private:
-        #: authored code asks for the bookmark, not for how it was obtained.
-        self._bookmarks = with_catalogue(inherited, catalogue)
-        #: The bookmark resolved for the load in progress. One resolution per
-        #: load, so a ``read()`` that mentions ``self.bookmark`` twice reaches
-        #: the catalogue once — and so the Static gate and the read can never
-        #: disagree about how far this object had got.
-        self._resolved_bookmark = None
+            self._catalogue, self._installed = anchored(self, catalogue)
+        elif inherited is not None:
+            self.with_catalogue(inherited)
 
     # --- identity ---------------------------------------------------------
 
@@ -114,110 +127,94 @@ class WeaverObject:
 
         return "{}.{}".format(*self.identity)
 
-    # --- how far this object has been loaded ------------------------------
+    # --- the catalogue this object is anchored to --------------------------
 
-    def with_bookmarks(self, context: Any) -> "WeaverObject":
-        """Take the bookmarks a run read, and return this object.
+    def with_catalogue(self, catalogue: Any, identity: Any = None) -> "WeaverObject":
+        """Anchor this object to an already-populated catalogue, and return it.
 
         How an orchestrated run supplies what a standalone load names with
         ``catalogue=``. Set after construction rather than passed to it, because
         a deployed primitive's constructor is a contract — ``cls(spark,
         lakehouse=...)`` — and a class meeting only that contract must keep
         working.
+
+        ``identity`` is this object's installed identity where the caller already
+        knows it, which a run does. Resolved from the catalogue otherwise.
         """
 
-        self._bookmarks = context
-        self._resolved_bookmark = None
+        from .runtime.anchor import resolved_identity
+
+        self._catalogue = catalogue
+        self._installed = (
+            identity if identity is not None else resolved_identity(self, catalogue)
+        )
         return self
+
+    @property
+    def installed(self):
+        """This object's identity in the catalogue, or None if freestanding."""
+
+        return self._installed
 
     #: Whether this object's catalogue identity carries the ``Files/`` prefix. A
     #: Folder and a Table of the same name are two objects, and one bookmark
     #: cannot stand for both.
     _is_files = False
 
-    @property
     def bookmark(self):
         """The UTC instant immediately before this object's last clean load began.
 
-        An aware datetime, always. An object that has never had a clean load
-        carries the sentinel, so an incremental read asks for everything::
+        An aware datetime, always. An object no clean load has run for since its
+        current physical incarnation has no bookmark row, and that reads as the
+        sentinel — so an incremental read asks for everything::
 
             def read(self):
-                return Source__Export(self).files_since(self.bookmark)
+                return Source__Export(self).files_since(self.bookmark())
 
-        Answerable only where a catalogue was supplied — by a run, or by
-        ``catalogue="Warehouse/Weaver"``. Nothing is inferred from the physical
-        Lakehouse's name and nothing falls back to the sentinel: a read that
-        cannot see its bookmark would quietly reload the world.
+        Answerable only by a catalogue-anchored object. A freestanding one has no
+        place in the estate's record of itself, and says so rather than inventing
+        a sentinel: a read that could not see its bookmark and reloaded the world
+        instead would look like a slow load rather than a fault.
         """
 
-        from .runtime.bookmark import bookmark_of
+        return self._anchor().bookmark(self._installed)
 
-        if self._resolved_bookmark is None:
-            schema, name = self.identity
-            self._resolved_bookmark = bookmark_of(
-                self._bookmarks,
-                lakehouse=self.lakehouse.name,
-                schema=schema,
-                object=name,
-                is_files=self._is_files,
-            )
-        return self._resolved_bookmark
+    def _anchor(self):
+        """The catalogue this object is anchored to, or a failure saying it is not."""
 
-    def _require_catalogue(self) -> None:
-        """Refuse to load without the catalogue a load has to record itself in.
-
-        A clean load moves this object's bookmark, and a ``Static`` object's gate
-        reads it. Neither is optional, so a load that could reach neither is
-        refused rather than performed and left unrecorded.
-
-        An orchestrated run supplies the same thing itself, so this is about a
-        load nothing is orchestrating.
-        """
-
-        # A load resolves its own bookmark, so whatever a previous one settled on
-        # is not this one's answer.
-        self._resolved_bookmark = None
-        context = self._bookmarks
-        if context is not None and (context.supplied or context.catalogue):
-            return
+        if self._catalogue is not None:
+            return self._catalogue
         raise LoadError(
-            f"{self.object_id} cannot load without the Weaver catalogue: a clean "
-            "load records how far it got, and a Static object reads that record "
-            "to decide whether to run at all. Construct it as "
+            f"{self.object_id} is not anchored to the Weaver catalogue, so it has "
+            "no bookmark and can record none. Construct it as "
             f'{type(self).__name__}(spark, catalogue="Warehouse/<name>").'
         )
 
-    def _bookmarked(self, result, began):
+    def _bookmarked(self, result, began, *, update_catalogue: bool):
         """One load's result, carrying the instant a clean run of it began.
 
-        Reported rather than written: a run advances the bookmark itself, beside
-        its record of the node that settled. A standalone load has no run to do
-        that, so it writes its own here — and only on a clean success, because a
-        load that rejected a row has not read its window.
+        Always reported, so whoever records it has the instant this engine took.
+        Written here only when this load owns that decision: a run passes
+        ``update_catalogue=False`` and records the node itself, beside the
+        evidence that it settled.
+
+        Only a clean success, either way. A load that rejected a row has not read
+        its window.
         """
 
         from dataclasses import replace as _replace
 
         if not result.succeeded or result.rows_rejected:
             return result
-        self._advance_bookmark(began)
+        # Anchored *and* asked. A freestanding object has no place in the estate's
+        # record of itself, so there is nothing for it to record.
+        if update_catalogue and self._catalogue is not None:
+            from .catalogue.claims import bookmark_row
+            from .catalogue.tables import BOOKMARK
+
+            self._catalogue.update(BOOKMARK, bookmark_row(self._installed, began))
+            self._catalogue.flush()
         return _replace(result, bookmark_datetime=began)
-
-    def _advance_bookmark(self, at) -> None:
-        """Record a clean standalone load. A run advances its own bookmarks."""
-
-        from .runtime.bookmark import advance
-
-        schema, name = self.identity
-        advance(
-            self._bookmarks,
-            lakehouse=self.lakehouse.name,
-            schema=schema,
-            object=name,
-            is_files=self._is_files,
-            at=at,
-        )
 
     def read(self):
         raise NotImplementedError(f"{type(self).__name__} must implement read()")
@@ -257,9 +254,9 @@ class WeaverObject:
 def _sentinel():
     """The bookmark of an object no clean load has run for."""
 
-    from .runtime.bookmark import sentinel
+    from .catalogue.tables import BOOKMARK_SENTINEL
 
-    return sentinel()
+    return BOOKMARK_SENTINEL
 
 
 class Folder(WeaverObject):
@@ -413,13 +410,18 @@ class Folder(WeaverObject):
         destination = self.path()
         return destination.with_name(f"{destination.name}{STAGING_SUFFIX}")
 
-    def load(self, fault_tolerant: bool = False) -> "LoadResult":
+    def load(
+        self, fault_tolerant: bool = False, *, update_catalogue: bool = True
+    ) -> "LoadResult":
         """Run this folder's ``read()`` and publish what it staged.
 
-        Independently runnable, needing no repository or bundle — but not without
-        the catalogue, which is where a load records how far it got::
+        Independently runnable, needing no repository and no bundle::
 
             Sales__Export(spark, catalogue="Warehouse/Weaver").load()
+
+        ``update_catalogue`` says whether this load records itself. A direct load
+        does; an orchestrated run passes ``False`` and records the node itself,
+        beside the evidence that it settled, so one row has one writer.
 
         Staging is reset, issued to ``read()``, published, and removed on
         success — retained on failure, as the one directory worth looking at.
@@ -433,7 +435,6 @@ class Folder(WeaverObject):
         from .runtime.load_contract import FolderLoadContract
         from .runtime.load_result import LoadResult
 
-        self._require_catalogue()
         # Before the gate and before read(), so the instant a clean load is
         # bookmarked at precedes everything it read.
         began = datetime.now(timezone.utc)
@@ -441,7 +442,7 @@ class Folder(WeaverObject):
         # A static folder bypasses staging, source reads and file reconciliation.
         # The bookmark decides it, not the folder's contents: Static means "load
         # this once", and a bookmark is the record of whether that has happened.
-        if contract.static and self.bookmark > _sentinel():
+        if contract.static and self.bookmark() > _sentinel():
             return LoadResult(succeeded=True)
 
         issued = new_staging_folder(self.path(), self._staging_path())
@@ -466,7 +467,7 @@ class Folder(WeaverObject):
             # first one's directory.
             self._issued_staging = None
         remove_staging(issued.path)
-        return self._bookmarked(result, began)
+        return self._bookmarked(result, began, update_catalogue=update_catalogue)
 
 
 class Table(WeaverObject):
@@ -533,13 +534,18 @@ class Table(WeaverObject):
         self,
         fault_tolerant: bool = False,
         ignore_stability_threshold: bool = False,
+        *,
+        update_catalogue: bool = True,
     ) -> "LoadResult":
         """Run this table's ``read()`` and write what it staged.
 
-        Independently runnable, needing no repository or bundle — but not without
-        the catalogue, which is where a load records how far it got::
+        Independently runnable, needing no repository and no bundle::
 
             Sales__Customer(spark, catalogue="Warehouse/Weaver").load()
+
+        ``update_catalogue`` says whether this load records itself. A direct load
+        does; an orchestrated run passes ``False`` and records the node itself,
+        beside the evidence that it settled, so one row has one writer.
 
         ``ignore_stability_threshold`` waives the declared delete and update
         limits for one run, for when a very large change is the correct answer.
@@ -549,7 +555,6 @@ class Table(WeaverObject):
         from .runtime.load_result import LoadResult
         from .runtime.table_load import load_table
 
-        self._require_catalogue()
         # Before the gate and before read(), so the instant a clean load is
         # bookmarked at precedes everything it read.
         began = datetime.now(timezone.utc)
@@ -559,7 +564,7 @@ class Table(WeaverObject):
         # once", and a bookmark is the record of whether that has happened — so a
         # table somebody populated by hand is still loaded, and a table a clean
         # load emptied is still skipped.
-        if contract.static and self.bookmark > _sentinel():
+        if contract.static and self.bookmark() > _sentinel():
             return LoadResult(succeeded=True)
 
         # Staging: unvalidated, unreconciled, nothing yet classified as new or
@@ -576,6 +581,7 @@ class Table(WeaverObject):
                 ignore_stability_threshold=ignore_stability_threshold,
             ),
             began,
+            update_catalogue=update_catalogue,
         )
 
 

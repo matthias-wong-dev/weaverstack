@@ -99,12 +99,13 @@ def session(tmp_path):
 
             return refuse
 
+    opened = given_session(
+        workspace=workspace, resolver=Refreshing(workspace), store=Refuses()
+    )
     return Prepared(
-        catalogue=installed_catalogue(repository, bindings),
+        catalogue=installed_catalogue(repository, bindings, session=opened),
         workspace=workspace,
-        session=given_session(
-            workspace=workspace, resolver=Refreshing(workspace), store=Refuses()
-        ),
+        session=opened,
     )
 
 

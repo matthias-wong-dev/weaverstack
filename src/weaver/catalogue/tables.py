@@ -1049,6 +1049,10 @@ RUNTIME_TABLES = (LOG, BOOKMARK)
 #: Every catalogue table, however it is maintained.
 CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
+#: The catalogue tables an operation reads. ``_.Log`` is not one: it is history,
+#: appended and never consulted, and reading it would grow with the estate's age.
+READABLE_TABLES = PROJECTED_TABLES + (BOOKMARK,)
+
 
 #: The ``_`` schema tables no build may drop, folded for comparison. Every
 #: catalogue table holds state a rebuild cannot reproduce: projected rows belong

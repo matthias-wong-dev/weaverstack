@@ -25,6 +25,7 @@ def run_python_primitive(
     object: str,
     expected_class: str,
     fault_tolerant: bool = False,
+    identity: str | None = None,
     session=None,
     workspace=None,
 ) -> dict:
@@ -32,7 +33,7 @@ def run_python_primitive(
 
     from ..declaration.model import WeaverItemId, parse_installed_identity
     from ..load_plan import LAKEHOUSE_TARGET, PhysicalTargetRef
-    from ..runtime.session_scopes import scope_bookmarks
+    from ..runtime.session_scopes import scope_catalogue
     from .dispatch import python_primitive
 
     return python_primitive(
@@ -46,12 +47,10 @@ def run_python_primitive(
         runtime_scope=get_scope(run_id),
         session=_session(session, workspace),
         workspace=workspace,
-        # Read where the run opened its scope, not here: the map crossed once,
-        # with the scope, and this is one node of the run that carried it.
-        bookmarks={
-            parse_installed_identity(text): _instant(value)
-            for text, value in scope_bookmarks(run_id).items()
-        },
+        # Read where the run opened its scope, not here: the catalogue crossed
+        # once, with the scope, and this is one node of the run that carried it.
+        catalogue=scope_catalogue(run_id),
+        node_identity=parse_installed_identity(identity) if identity else None,
     ).as_row()
 
 
@@ -83,15 +82,6 @@ def run_validation_primitive(
         "result": carried.result.to_mapping(),
         "diagnostics": list(carried.diagnostics or ()),
     }
-
-
-def _instant(value):
-    """One bookmark read back from a submitted program's arguments."""
-
-    from datetime import datetime, timezone
-
-    at = datetime.fromisoformat(str(value))
-    return at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
 
 
 def _session(session, workspace):

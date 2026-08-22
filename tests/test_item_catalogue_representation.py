@@ -14,9 +14,9 @@ from weaver.catalogue.projection import (
 )
 from weaver.catalogue.reconcile import reconcile
 from weaver.catalogue.tables import (
-    PROJECTED_TABLES,
     DEPENDENCY,
     INSTALLATION,
+    PROJECTED_TABLES,
     REGISTRY,
     SCHEMA_DICTIONARY,
     SCOPE_ITEM_NAME,

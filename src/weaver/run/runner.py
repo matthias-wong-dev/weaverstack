@@ -199,7 +199,7 @@ class Runner:
                     session,
                     workspace=self.workspace,
                     # Read once for the run, handed to whatever imports a module.
-                    bookmarks=self.state.bookmarks,
+                    catalogue=self.state.catalogue,
                 )
             )
         return self._runtime_scope

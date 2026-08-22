@@ -28,7 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from support.bookmarks import loaded, never
+from support.catalogues import loaded, never
 from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
@@ -88,13 +88,13 @@ def export(tmp_path):
     # static test says otherwise by rebuilding the object with `loaded(...)`.
     return Sales__Export(
         object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
-    ).with_bookmarks(never())
+    ).with_catalogue(never("Sales.Export", files=True))
 
 
 def _already_loaded(export):
     """The same folder, as a run that had already loaded it cleanly sees it."""
 
-    return Sales__Export(object(), lakehouse=export.lakehouse).with_bookmarks(
+    return Sales__Export(object(), lakehouse=export.lakehouse).with_catalogue(
         loaded("Sales.Export", files=True)
     )
 
@@ -131,7 +131,9 @@ def test_repeated_calls_within_one_load_hand_back_the_same_object(export):
             seen.append(self.staging_folder())
             return seen[0], []
 
-    Sales__Twice(object(), lakehouse=export.lakehouse).with_bookmarks(never()).load()
+    Sales__Twice(object(), lakehouse=export.lakehouse).with_catalogue(
+        never("Sales.Twice", files=True)
+    ).load()
 
     assert seen[0] is seen[1]
 
@@ -311,7 +313,7 @@ def test_an_explicit_folder_delete_is_applied_through_the_load_runtime(tmp_path)
 
     export = Sales__Export(
         object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
-    ).with_bookmarks(never())
+    ).with_catalogue(never("Sales.Export", files=True))
     export.files = {"keep.csv": "keep", "remove.csv": "remove"}
     export.load()
 
@@ -634,26 +636,35 @@ def test_a_static_folder_beside_unmanaged_files_still_loads(export):
     assert (export.path() / "seed.csv").exists()
 
 
-@pytest.mark.parametrize("static", [False, True])
 @weaver_test()
-def test_a_folder_with_no_catalogue_refuses_to_load(export, static):
-    """Static or not: a load records how far it got, and that lives in the catalogue.
+def test_a_freestanding_folder_loads_and_records_nothing(export):
+    """``Sales__Export(spark)`` runs, with no place in the estate's own record."""
 
-    The catalogue is a constructor argument rather than a ``load()`` one, because
-    an authored ``read()`` is called by Weaver and takes nothing — so anything
-    ``read()`` may reach has to be set before the load begins.
-    """
+    unaware = Sales__Export(object(), lakehouse=export.lakehouse)
+    unaware.static = False
+    unaware.files = {"seed.csv": "x"}
+
+    result = unaware.load()
+
+    assert result.succeeded
+    assert result.rows_inserted == 1
+    assert unaware.installed is None
+
+
+@weaver_test()
+def test_a_freestanding_static_folder_cannot_answer_its_gate(export):
+    """Static asks how far this folder got, and only the catalogue knows."""
 
     from weaver.errors import LoadError
 
     unaware = Sales__Export(object(), lakehouse=export.lakehouse)
-    unaware.static = static
+    unaware.static = True
     unaware.files = {"seed.csv": "x"}
 
     with pytest.raises(LoadError) as raised:
         unaware.load()
 
-    assert "catalogue=" in str(raised.value)
+    assert "not anchored" in str(raised.value)
     assert not _staging(unaware).exists()
 
 

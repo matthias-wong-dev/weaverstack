@@ -255,7 +255,9 @@ def _object_type_of(repository, identity) -> str:
     return {"Table": "table", "View": "view", "Folder": "folder"}[str(kind)]
 
 
-def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
+def installed_catalogue(
+    repository, bindings: ItemBindings, *, session=None
+) -> Catalogue:
     """The whole catalogue a successful build of this estate would have left.
 
     Where `FixtureCatalogue.from_repository` gives one item's Registry, this
@@ -331,7 +333,17 @@ def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
                 },
             ),
         }
-    return Catalogue(rows=rows)
+    # A catalogue a run writes to, because a run records what it did *into* it.
+    # Through the Session where there is one, so a claim about the statements a
+    # run submits still sees them; a recorder otherwise.
+    from support.catalogues import Recording
+
+    from weaver.catalogue.writer import writer_for
+
+    return Catalogue(
+        rows=rows,
+        writer=Recording() if session is None else writer_for(session),
+    )
 
 
 # --- physical state ---------------------------------------------------------

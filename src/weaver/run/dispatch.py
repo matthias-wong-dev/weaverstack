@@ -163,7 +163,8 @@ def python_primitive(
     runtime_scope,
     session,
     workspace=None,
-    bookmarks=None,
+    catalogue=None,
+    node_identity=None,
 ):
     """Import the deployed module, construct its object, and load it.
 
@@ -204,18 +205,18 @@ def python_primitive(
     )
     cls = getattr(module, expected_class)
     primitive = cls(session.spark(workspace), lakehouse=lakehouse)
-    # The item and the run's bookmarks, never one object's value: an object this
-    # one constructs resolves its own bookmark by its own identity, from the same
-    # map, so `Other__Thing(self)` needs no argument of its own.
+    # The run's catalogue, and the identity the run already resolved. An object
+    # this one constructs inherits the same catalogue and resolves its own
+    # identity against it, so `Other__Thing(self)` needs no argument.
     #
     # Asked for rather than passed to the constructor, because `cls(spark,
-    # lakehouse=...)` is the whole contract a deployed primitive has to meet. A
-    # primitive with nowhere to put bookmarks has no `self.bookmark` to answer.
-    take = getattr(primitive, "with_bookmarks", None)
-    if take is not None:
-        from ..runtime.bookmark import BookmarkContext
-
-        take(BookmarkContext(item=logical_item, bookmarks=bookmarks or {}))
+    # lakehouse=...)` is the whole contract a deployed primitive has to meet. One
+    # with nowhere to put a catalogue records nothing and is left alone.
+    take = getattr(primitive, "with_catalogue", None)
+    if take is not None and catalogue is not None:
+        take(catalogue, identity=node_identity)
+        # The run records what settled, so the primitive does not record itself.
+        return primitive.load(fault_tolerant=fault_tolerant, update_catalogue=False)
     return primitive.load(fault_tolerant=fault_tolerant)
 
 

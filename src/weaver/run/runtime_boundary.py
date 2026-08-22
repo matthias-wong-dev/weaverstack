@@ -68,12 +68,12 @@ class DirectRunScope:
     """
 
     def __init__(
-        self, runtime_scope, session=None, workspace=None, *, bookmarks=None
+        self, runtime_scope, session=None, workspace=None, *, catalogue=None
     ) -> None:
         self.runtime_scope = runtime_scope
         self._session = session
         self._workspace = workspace
-        self._bookmarks = bookmarks or {}
+        self._catalogue = catalogue
 
     def dispatch_python(self, node, *, expected_class: str, fault_tolerant: bool):
         from .dispatch import python_primitive
@@ -89,7 +89,8 @@ class DirectRunScope:
             runtime_scope=self.runtime_scope,
             session=self._session,
             workspace=self._workspace,
-            bookmarks=self._bookmarks,
+            catalogue=self._catalogue,
+            node_identity=node.logical_id,
         ).as_row()
 
     def dispatch_validation(self, installed, *, collect: bool):
@@ -107,33 +108,38 @@ class DirectRunScope:
         self.runtime_scope.close()
 
 
-def open_runtime_scope(session, *, workspace=None, bookmarks=None) -> RunScope:
+def open_runtime_scope(session, *, workspace=None, catalogue=None) -> RunScope:
     """The scope this run's Python primitives will be imported into.
 
-    ``bookmarks`` travels with it, because it has the same lifetime and crosses
-    for the same reason: read once for the run, and read from there by every
-    object the run dispatches.
+    The run's catalogue travels with it, because it has the same lifetime and
+    crosses for the same reason: read once for the run, and read from there by
+    every object the run dispatches.
     """
 
     from ..runtime.python_context import RuntimeScope
     from ..sessions.base import ACROSS_BOUNDARY
 
     if session is None:
-        return DirectRunScope(RuntimeScope.new(), bookmarks=bookmarks)
+        return DirectRunScope(RuntimeScope.new(), catalogue=catalogue)
 
     # An unplaced Session has nothing to reach into, so the imports happen here.
     # That judgement is the Session's: inferring it from an error would turn a
     # bad configuration into a local scope, and the run would report success
     # against an estate it never reached.
     if session.position(workspace) == ACROSS_BOUNDARY:
-        return FabricRunScope.begin(session, workspace=workspace, bookmarks=bookmarks)
-    return DirectRunScope(RuntimeScope.new(), session, workspace, bookmarks=bookmarks)
+        return FabricRunScope.begin(session, workspace=workspace, catalogue=catalogue)
+    return DirectRunScope(RuntimeScope.new(), session, workspace, catalogue=catalogue)
 
 
-def _as_text(bookmarks) -> dict:
-    """One run's bookmarks as a submitted program can carry them."""
+def _as_data(catalogue) -> dict | None:
+    """One run's catalogue as a submitted program can carry it.
 
-    return {str(identity): at.isoformat() for identity, at in (bookmarks or {}).items()}
+    The catalogue's own serialisation, because a catalogue crossing a boundary is
+    a solved problem and a second representation would be one more thing to keep
+    in step.
+    """
+
+    return None if catalogue is None else catalogue.to_mapping()
 
 
 class FabricRunScope:
@@ -150,7 +156,7 @@ class FabricRunScope:
         self._closed = False
 
     @classmethod
-    def begin(cls, session, *, workspace=None, bookmarks=None) -> "FabricRunScope":
+    def begin(cls, session, *, workspace=None, catalogue=None) -> "FabricRunScope":
         from ..runtime.session_scopes import open_scope
 
         run_id = uuid.uuid4().hex
@@ -159,7 +165,7 @@ class FabricRunScope:
         # As text, because what crosses is a submitted program's arguments.
         scope._submit(
             open_scope,
-            {"run_id": run_id, "bookmarks": _as_text(bookmarks)},
+            {"run_id": run_id, "catalogue": _as_data(catalogue)},
             addressed=False,
         )
         return scope
@@ -186,6 +192,7 @@ class FabricRunScope:
                 "object": node.primitive_object.object,
                 "expected_class": expected_class,
                 "fault_tolerant": fault_tolerant,
+                "identity": str(node.logical_id) if node.logical_id else None,
             },
             detail=node.node_id,
         )

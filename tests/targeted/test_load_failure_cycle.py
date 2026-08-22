@@ -111,10 +111,13 @@ def session(tmp_path):
         base_url=Path(tmp_path).as_posix(),
     )
     store = FilesystemStore()
+    opened = given_session(workspace=workspace, resolver=resolver, store=store)
     return Prepared(
-        catalogue=installed_catalogue(repository, bindings),
+        # Writing through the Session, so a claim about the statements a run
+        # submits still sees them.
+        catalogue=installed_catalogue(repository, bindings, session=opened),
         workspace=workspace,
-        session=given_session(workspace=workspace, resolver=resolver, store=store),
+        session=opened,
     )
 
 

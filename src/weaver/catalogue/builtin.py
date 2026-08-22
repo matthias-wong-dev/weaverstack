@@ -8,8 +8,8 @@ from dataclasses import replace
 from ..declaration.model import WAREHOUSE, WeaverItemId
 from .tables import (
     BOOKMARK,
-    CATALOGUE_TABLES,
     CATALOGUE_SCHEMA,
+    CATALOGUE_TABLES,
     LOG,
     RUNTIME_TABLES,
     CatalogueColumn,

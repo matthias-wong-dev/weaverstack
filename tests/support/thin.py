@@ -310,8 +310,8 @@ def thin_estate(
         )
 
     target = PhysicalTargetRef("lakehouse", lakehouse)
-    return ThinEstate(
-        session=session
+    opened = (
+        session
         if session is not None
         else given_session(
             workspace=workspace,
@@ -320,9 +320,14 @@ def thin_estate(
             # Without a Session of its own a thin run reaches its primitive in
             # this process, which is what made it thin.
             executes_here=True,
-        ),
+        )
+    )
+    return ThinEstate(
+        session=opened,
         workspace=workspace,
-        state=RunState(catalogue=installed_catalogue(repository, bindings)),
+        state=RunState(
+            catalogue=installed_catalogue(repository, bindings, session=opened)
+        ),
         target=target,
         root=root,
         nodes={
