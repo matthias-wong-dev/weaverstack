@@ -28,6 +28,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from support.bookmarks import loaded, never
 from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
@@ -83,7 +84,23 @@ def export(tmp_path):
     Sales__Export.returns = None
     Sales__Export.static = False
     Sales__Export.seen = []
-    return Sales__Export(object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path))
+    # Nothing loaded yet, which is the state every load here starts from. A
+    # static test says otherwise by rebuilding the object with `loaded(...)`.
+    return Sales__Export(
+        object(),
+        lakehouse=mounted_lakehouse("Sales_LH", tmp_path),
+        bookmarks=never(),
+    )
+
+
+def _already_loaded(export):
+    """The same folder, as a run that had already loaded it cleanly sees it."""
+
+    return Sales__Export(
+        object(),
+        lakehouse=export.lakehouse,
+        bookmarks=loaded("Sales.Export", files=True),
+    )
 
 
 def _staging(export) -> Path:
@@ -505,14 +522,15 @@ def test_a_transient_cleanup_failure_does_not_fail_a_published_load(export, flak
 
 # --- static ------------------------------------------------------------------
 #
-# A static folder is materialised once and never again. The check happens before
-# anything else a load does, which for a folder is the whole point: a populated
-# static folder must not create a staging directory, must not run the author's
+# A static folder is materialised once and never again, and its bookmark is the
+# record of whether that has happened. The check happens before anything else a
+# load does, which for a folder matters more than for a table: a folder already
+# loaded must not create a staging directory, must not run the author's
 # download, and must not reconcile files.
 
 
 @weaver_test()
-def test_a_static_folder_loads_normally_into_an_empty_destination(export):
+def test_a_static_folder_with_no_bookmark_loads_normally(export):
     export.static = True
     export.files = {"seed.csv": "x"}
 
@@ -524,13 +542,15 @@ def test_a_static_folder_loads_normally_into_an_empty_destination(export):
 
 
 @weaver_test()
-def test_a_populated_static_folder_is_a_successful_no_op(export):
+def test_a_bookmarked_static_folder_is_a_successful_no_op(export):
     export.static = True
     export.files = {"seed.csv": "x"}
     export.load()
 
-    export.files = {"seed.csv": "changed"}
-    result = export.load()
+    already = _already_loaded(export)
+    already.static = True
+    already.files = {"seed.csv": "changed"}
+    result = already.load()
 
     assert result.succeeded
     assert (
@@ -543,7 +563,18 @@ def test_a_populated_static_folder_is_a_successful_no_op(export):
 
 
 @weaver_test()
-def test_a_populated_static_folder_does_not_run_the_authored_download(export):
+def test_a_bookmarked_static_folder_advances_nothing(export):
+    """A skip is a clean success, so the absent instant is what holds it still."""
+
+    export.static = True
+    already = _already_loaded(export)
+    already.static = True
+
+    assert already.load().bookmark_datetime is None
+
+
+@weaver_test()
+def test_a_bookmarked_static_folder_does_not_run_the_authored_download(export):
     """Proved by counting, because "did nothing" is what is being claimed."""
 
     export.static = True
@@ -551,41 +582,47 @@ def test_a_populated_static_folder_does_not_run_the_authored_download(export):
     export.load()
     Sales__Export.seen = []
 
-    export.load()
+    already = _already_loaded(export)
+    already.static = True
+    already.load()
 
     assert Sales__Export.seen == []
 
 
 @weaver_test()
-def test_a_populated_static_folder_creates_no_staging_directory(export):
+def test_a_bookmarked_static_folder_creates_no_staging_directory(export):
     export.static = True
     export.files = {"seed.csv": "x"}
     export.load()
 
-    export.load()
+    already = _already_loaded(export)
+    already.static = True
+    already.load()
 
     assert not _staging(export).exists()
 
 
 @weaver_test()
-def test_a_populated_static_folder_leaves_its_destination_exactly_as_it_was(export):
+def test_a_bookmarked_static_folder_leaves_its_destination_exactly_as_it_was(export):
     export.static = True
     export.files = {"seed.csv": "original"}
     export.load()
 
-    export.files = {"other.csv": "different"}
-    export.load()
+    already = _already_loaded(export)
+    already.static = True
+    already.files = {"other.csv": "different"}
+    already.load()
 
     assert {p.name for p in export.path().glob("*.csv")} == {"seed.csv"}
     assert (export.path() / "seed.csv").read_text(encoding="utf-8") == "original"
 
 
 @weaver_test()
-def test_a_folder_holding_only_unmanaged_files_is_not_populated(export):
-    """The file key scopes the question.
+def test_a_static_folder_beside_unmanaged_files_still_loads(export):
+    """What the destination holds is not what decides it.
 
-    A folder may sit beside files nobody declared, and those say nothing about
-    whether *this* folder has been materialised.
+    A folder may sit beside files nobody declared, and a folder somebody
+    populated by hand has still never been loaded. Only the bookmark says.
     """
 
     export.static = True
@@ -597,6 +634,22 @@ def test_a_folder_holding_only_unmanaged_files_is_not_populated(export):
 
     assert result.rows_inserted == 1
     assert (export.path() / "seed.csv").exists()
+
+
+@weaver_test()
+def test_a_static_folder_with_no_catalogue_says_what_is_missing(export, tmp_path):
+    """Where the record lives is the catalogue, so a load has to be able to read it."""
+
+    from weaver.errors import LoadError
+
+    unaware = Sales__Export(object(), lakehouse=export.lakehouse)
+    unaware.static = True
+
+    with pytest.raises(LoadError) as raised:
+        unaware.load()
+
+    assert "Static" in str(raised.value)
+    assert "catalogue=" in str(raised.value)
 
 
 @weaver_test()
@@ -613,14 +666,12 @@ def test_a_non_static_folder_reloads_whatever_the_destination_holds(export):
 
 
 @weaver_test()
-def test_a_non_static_folder_never_asks_whether_its_destination_is_populated(
-    export, monkeypatch
-):
-    """`static` is checked before the folder is inspected, and the order matters.
+def test_no_load_asks_whether_the_destination_is_populated(export, monkeypatch):
+    """What the destination holds decides nothing, static or not.
 
-    Python evaluates arguments eagerly, so asking whether the destination is
-    populated *inside* a predicate would walk the managed tree on every ordinary
-    load — to answer a question only a static folder can act on.
+    A folder somebody populated by hand has not been loaded, and a folder a
+    clean load emptied has been. The bookmark is the record, so the managed tree
+    is never walked to answer the question.
     """
 
     import weaver.runtime.folder_load as module
@@ -631,29 +682,13 @@ def test_a_non_static_folder_never_asks_whether_its_destination_is_populated(
         "folder_is_populated",
         lambda *a, **k: asked.append(True) or True,
     )
-    export.static = False
     export.files = {"a.csv": "x"}
 
-    result = export.load()
+    assert export.load().rows_inserted == 1
 
-    assert asked == []
-    assert result.rows_inserted == 1
-
-
-@weaver_test()
-def test_a_static_folder_does_ask(export, monkeypatch):
-    import weaver.runtime.folder_load as module
-
-    asked = []
-    real = module.folder_is_populated
-    monkeypatch.setattr(
-        module,
-        "folder_is_populated",
-        lambda *a, **k: (asked.append(True), real(*a, **k))[1],
-    )
     export.static = True
-    export.files = {"a.csv": "x"}
-
+    Sales__Export.seen = []
+    export.files = {"b.csv": "y"}
     export.load()
 
-    assert asked == [True]
+    assert asked == []

@@ -5,7 +5,7 @@ Objects receive a Spark session, resolved Lakehouse destination, and identity.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -35,16 +35,31 @@ class WeaverObject:
 
     ``spark`` is the session authored code runs through, and it is mandatory.
     Another Weaver object may be passed in its place — ``Another__Table(self)`` —
-    inheriting that object's session and Lakehouse, which is how one object
-    reaches another.
+    inheriting that object's session, Lakehouse and bookmark context, which is
+    how one object reaches another.
+
+    ``catalogue`` names the Weaver catalogue in the ordinary target grammar,
+    ``"Warehouse/Weaver"``. It is what makes ``self.bookmark`` answerable for a
+    load nothing is orchestrating; a run supplies the same thing itself.
     """
 
-    def __init__(self, spark: Any, *, lakehouse: Lakehouse | None = None) -> None:
+    def __init__(
+        self,
+        spark: Any,
+        *,
+        lakehouse: Lakehouse | None = None,
+        catalogue: str | None = None,
+        bookmarks: Any = None,
+    ) -> None:
+        inherited = None
         if isinstance(spark, WeaverObject):
             owner = spark
             spark = owner.spark
             if lakehouse is None:
                 lakehouse = owner.lakehouse
+            # The context, never the value: a child reads its own bookmark by its
+            # own identity, from the same catalogue its parent reads from.
+            inherited = owner._bookmarks
         if spark is None:
             raise LoadError(
                 f"{type(self).__name__} needs the Spark session it runs through — "
@@ -73,6 +88,12 @@ class WeaverObject:
         #: folders both hang off it, so nothing an object reaches needs a mount.
         self.spark_root = self.lakehouse.spark_root
 
+        from .runtime.bookmark import with_catalogue
+
+        #: What this object needs to answer :attr:`bookmark`, or None. Private:
+        #: authored code asks for the bookmark, not for how it was obtained.
+        self._bookmarks = with_catalogue(bookmarks or inherited, catalogue)
+
     # --- identity ---------------------------------------------------------
 
     @property
@@ -86,6 +107,88 @@ class WeaverObject:
         """This object's ``Schema.Object`` ID, from its class name."""
 
         return "{}.{}".format(*self.identity)
+
+    # --- how far this object has been loaded ------------------------------
+
+    #: Whether this object's catalogue identity carries the ``Files/`` prefix. A
+    #: Folder and a Table of the same name are two objects, and one bookmark
+    #: cannot stand for both.
+    _is_files = False
+
+    @property
+    def bookmark(self):
+        """The UTC instant immediately before this object's last clean load began.
+
+        An aware datetime, always. An object that has never had a clean load
+        carries the sentinel, so an incremental read asks for everything::
+
+            def read(self):
+                return Source__Thing(self).changes_since(self.bookmark)
+
+        Answerable only where a catalogue was supplied — by a run, or by
+        ``catalogue="Warehouse/Weaver"``. Nothing is inferred from the physical
+        Lakehouse's name and nothing falls back to the sentinel: a read that
+        cannot see its bookmark would quietly reload the world.
+        """
+
+        from .runtime.bookmark import bookmark_of
+
+        schema, name = self.identity
+        return bookmark_of(
+            self._bookmarks,
+            lakehouse=self.lakehouse.name,
+            schema=schema,
+            object=name,
+            is_files=self._is_files,
+        )
+
+    def _require_catalogue_for_static(self) -> None:
+        """A Static object needs to be able to read whether it has been loaded.
+
+        Its own message, because the missing thing is the same but the reason is
+        not: an author who never touched ``self.bookmark`` should not be told
+        their read uses one.
+        """
+
+        context = self._bookmarks
+        if context is not None and (context.supplied or context.catalogue):
+            return
+        raise LoadError(
+            f"{self.object_id} is Static, so whether it has already been loaded "
+            "is recorded in the Weaver catalogue rather than in the target. "
+            'Supply catalogue="Warehouse/<name>".'
+        )
+
+    def _bookmarked(self, result, began):
+        """One load's result, carrying the instant a clean run of it began.
+
+        Reported rather than written: a run advances the bookmark itself, beside
+        its record of the node that settled. A standalone load has no run to do
+        that, so it writes its own here — and only on a clean success, because a
+        load that rejected a row has not read its window.
+        """
+
+        from dataclasses import replace as _replace
+
+        if not result.succeeded or result.rows_rejected:
+            return result
+        self._advance_bookmark(began)
+        return _replace(result, bookmark_datetime=began)
+
+    def _advance_bookmark(self, at) -> None:
+        """Record a clean standalone load. A run advances its own bookmarks."""
+
+        from .runtime.bookmark import advance
+
+        schema, name = self.identity
+        advance(
+            self._bookmarks,
+            lakehouse=self.lakehouse.name,
+            schema=schema,
+            object=name,
+            is_files=self._is_files,
+            at=at,
+        )
 
     def read(self):
         raise NotImplementedError(f"{type(self).__name__} must implement read()")
@@ -122,6 +225,14 @@ class WeaverObject:
         return f"<{type(self).__name__} {self.object_id} in {self.lakehouse.name}>"
 
 
+def _sentinel():
+    """The bookmark of an object no clean load has run for."""
+
+    from .runtime.bookmark import sentinel
+
+    return sentinel()
+
+
 class Folder(WeaverObject):
     """Files materialised into a Lakehouse Files directory.
 
@@ -134,8 +245,12 @@ class Folder(WeaverObject):
     :meth:`spark_path` the ``abfss://`` string an engine needs.
     """
 
-    def __init__(self, spark: Any, *, lakehouse: Lakehouse | None = None) -> None:
-        super().__init__(spark, lakehouse=lakehouse)
+    #: A Folder's catalogue identity carries the ``Files/`` prefix, so a Folder
+    #: and a Table of the same name keep separate bookmarks.
+    _is_files = True
+
+    def __init__(self, spark: Any, **kwargs: Any) -> None:
+        super().__init__(spark, **kwargs)
         self._issued_staging = None
         self._read_staging = None
 
@@ -269,19 +384,27 @@ class Folder(WeaverObject):
         destination = self.path()
         return destination.with_name(f"{destination.name}{STAGING_SUFFIX}")
 
-    def load(self, fault_tolerant: bool = False) -> "LoadResult":
+    def load(
+        self, fault_tolerant: bool = False, *, catalogue: str | None = None
+    ) -> "LoadResult":
         """Run this folder's ``read()`` and publish what it staged.
 
-        Independently runnable, needing no repository, catalogue or bundle::
+        Independently runnable, needing no repository or bundle::
 
             Sales__Export(spark).load(fault_tolerant=False)
+
+        ``catalogue`` is needed by a folder whose ``read()`` uses
+        ``self.bookmark``, and by one that should record a clean load so the next
+        one reads from there::
+
+            Sales__Export(spark).load(catalogue="Warehouse/Weaver")
 
         Staging is reset, issued to ``read()``, published, and removed on
         success — retained on failure, as the one directory worth looking at.
         """
 
+        from .runtime.bookmark import with_catalogue
         from .runtime.folder_load import (
-            folder_is_populated,
             load_folder,
             new_staging_folder,
             remove_staging,
@@ -289,13 +412,18 @@ class Folder(WeaverObject):
         from .runtime.load_contract import FolderLoadContract
         from .runtime.load_result import LoadResult
 
+        self._bookmarks = with_catalogue(self._bookmarks, catalogue)
+        # Before the gate and before read(), so the instant a clean load is
+        # bookmarked at precedes everything it read.
+        began = datetime.now(timezone.utc)
         contract = FolderLoadContract.from_document(self._document())
-        # Static folders bypass staging, source reads, and file reconciliation.
-        # `static` is tested first because Python evaluates arguments eagerly:
-        # the populated check walks the managed tree, and only a static folder
-        # can act on the answer.
-        if contract.static and folder_is_populated(self.path(), contract.file_keys):
-            return LoadResult(succeeded=True)
+        # A static folder bypasses staging, source reads and file reconciliation.
+        # The bookmark decides it, not the folder's contents: Static means "load
+        # this once", and a bookmark is the record of whether that has happened.
+        if contract.static:
+            self._require_catalogue_for_static()
+            if self.bookmark > _sentinel():
+                return LoadResult(succeeded=True)
 
         issued = new_staging_folder(self.path(), self._staging_path())
         self._issued_staging = issued
@@ -319,7 +447,7 @@ class Folder(WeaverObject):
             # first one's directory.
             self._issued_staging = None
         remove_staging(issued.path)
-        return result
+        return self._bookmarked(result, began)
 
 
 class Table(WeaverObject):
@@ -386,42 +514,59 @@ class Table(WeaverObject):
         self,
         fault_tolerant: bool = False,
         ignore_stability_threshold: bool = False,
+        *,
+        catalogue: str | None = None,
     ) -> "LoadResult":
         """Run this table's ``read()`` and write what it staged.
 
-        Independently runnable, needing no repository, catalogue or bundle::
+        Independently runnable, needing no repository or bundle::
 
             Sales__Customer(spark).load(fault_tolerant=True)
+
+        ``catalogue`` is needed by a table whose ``read()`` uses
+        ``self.bookmark``, and by one that should record a clean load so the next
+        one reads from there::
+
+            Sales__Customer(spark).load(catalogue="Warehouse/Weaver")
 
         ``ignore_stability_threshold`` waives the declared delete and update
         limits for one run, for when a very large change is the correct answer.
         """
 
+        from .runtime.bookmark import with_catalogue
         from .runtime.load_contract import LoadContract
         from .runtime.load_result import LoadResult
-        from .runtime.table_load import load_table, table_is_populated
+        from .runtime.table_load import load_table
 
+        self._bookmarks = with_catalogue(self._bookmarks, catalogue)
+        # Before the gate and before read(), so the instant a clean load is
+        # bookmarked at precedes everything it read.
+        began = datetime.now(timezone.utc)
         contract = LoadContract.from_document(self._document())
-        # Before read(), so an already-seeded static object costs no source
-        # query. `static` is tested first because Python evaluates arguments
-        # eagerly: the populated check is a Spark action, and only a static
-        # object can act on the answer.
-        if contract.static and table_is_populated(
-            self.spark, contract=contract, lakehouse=self.lakehouse
-        ):
-            return LoadResult(succeeded=True)
+        # Before read(), so a seeded static object costs no source query. The
+        # bookmark decides it, not the table's contents: Static means "load this
+        # once", and a bookmark is the record of whether that has happened — so a
+        # table somebody populated by hand is still loaded, and a table a clean
+        # load emptied is still skipped.
+        if contract.static:
+            self._require_catalogue_for_static()
+            if self.bookmark > _sentinel():
+                return LoadResult(succeeded=True)
 
         # Staging: unvalidated, unreconciled, nothing yet classified as new or
         # changed.
         staged, deletes = self._staged(contract)
-        return load_table(
-            self.spark,
-            contract=contract,
-            lakehouse=self.lakehouse,
-            staging_frame=staged,
-            deletes=deletes,
-            fault_tolerant=fault_tolerant,
-            ignore_stability_threshold=ignore_stability_threshold,
+        return self._bookmarked(
+            load_table(
+                self.spark,
+                contract=contract,
+                lakehouse=self.lakehouse,
+                staging_frame=staged,
+                deletes=deletes,
+                fault_tolerant=fault_tolerant,
+                ignore_stability_threshold=ignore_stability_threshold,
+            ),
+            began,
         )
 
 

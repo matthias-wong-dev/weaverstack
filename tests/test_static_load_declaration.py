@@ -21,6 +21,7 @@ out of generation carrying the check.
 from __future__ import annotations
 
 import pytest
+from support.bookmarks import loaded, never
 from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
@@ -217,10 +218,14 @@ def _counting(monkeypatch, module_name: str, attribute: str, answer: bool):
 
 
 @weaver_test()
-def test_a_non_static_table_never_asks_whether_its_target_is_populated(
-    monkeypatch, tmp_path
-):
-    """The cost this ordering removes from every ordinary load in an estate."""
+def test_no_table_asks_whether_its_target_is_populated(monkeypatch, tmp_path):
+    """What the target holds decides nothing, static or not.
+
+    A table somebody populated by hand has not been loaded, and a table a clean
+    load emptied has been. The bookmark is the record, so the target is never
+    counted to answer the question — which also removes a Spark action from every
+    ordinary load in an estate.
+    """
 
     calls = _counting(
         monkeypatch, "weaver.runtime.table_load", "table_is_populated", True
@@ -229,7 +234,9 @@ def test_a_non_static_table_never_asks_whether_its_target_is_populated(
     class Sales__Country(_TableUnderTest):
         static = False
 
-    table = Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
+    table = Sales__Country(
+        _Session(), lakehouse=mounted_lakehouse("LH", tmp_path), bookmarks=never()
+    )
     # It goes on to read(), which this double refuses — the point is only that
     # it got there without asking the target anything.
     with pytest.raises(AssertionError, match="read\\(\\) must not run"):
@@ -239,22 +246,54 @@ def test_a_non_static_table_never_asks_whether_its_target_is_populated(
 
 
 @weaver_test()
-def test_a_static_table_does_ask(monkeypatch, tmp_path):
-
-    calls = _counting(
-        monkeypatch, "weaver.runtime.table_load", "table_is_populated", True
-    )
-
+def test_a_bookmarked_static_table_reports_a_successful_load_of_nothing(tmp_path):
     class Sales__Country(_TableUnderTest):
         static = True
 
     result = Sales__Country(
-        _Session(), lakehouse=mounted_lakehouse("LH", tmp_path)
+        _Session(),
+        lakehouse=mounted_lakehouse("LH", tmp_path),
+        bookmarks=loaded("Sales.Country"),
     ).load()
 
-    assert calls == [True]
     assert result.succeeded
     assert result.rows_read == 0
+    # A skip is a clean success, so the absent instant is what holds the
+    # bookmark still.
+    assert result.bookmark_datetime is None
+
+
+@weaver_test()
+def test_a_static_table_with_no_bookmark_loads(tmp_path):
+    """The gate opens for an object no clean load has run for."""
+
+    class Sales__Country(_TableUnderTest):
+        static = True
+
+    table = Sales__Country(
+        _Session(), lakehouse=mounted_lakehouse("LH", tmp_path), bookmarks=never()
+    )
+
+    with pytest.raises(AssertionError, match="read\\(\\) must not run"):
+        table.load()
+
+
+@weaver_test()
+def test_a_static_table_with_no_catalogue_says_what_is_missing(tmp_path):
+    """Where the record lives is the catalogue, so a load has to read it."""
+
+    from weaver.errors import LoadError
+
+    class Sales__Country(_TableUnderTest):
+        static = True
+
+    table = Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
+
+    with pytest.raises(LoadError) as raised:
+        table.load()
+
+    assert "Static" in str(raised.value)
+    assert "catalogue=" in str(raised.value)
 
 
 # --- the Warehouse procedure carries it ---------------------------------------
@@ -262,7 +301,9 @@ def test_a_static_table_does_ask(monkeypatch, tmp_path):
 
 def _procedure(*, static: bool) -> str:
     document = _document(WAREHOUSE_TABLE, "Sales.Country.sql", WAREHOUSE, static=static)
-    return document.create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode("utf-8")
+    return document.create_load(
+        item=WeaverItemId("Warehouse", "Reporting")
+    ).payload.decode("utf-8")
 
 
 @weaver_test()

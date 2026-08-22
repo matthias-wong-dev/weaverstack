@@ -560,6 +560,57 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     )
 
 
+def resolve_installed_object(
+    catalogue: Any, *, target_name: str, schema: str, object: str, is_files: bool
+) -> WeaverDocumentId:
+    """Which installed object a physical target's ``Schema.Object`` is.
+
+    The catalogue answers it, not the target's name: ``Installation`` says which
+    logical item is bound to a physical one and ``Registry`` says what that item
+    installed, so this reads what Weaver recorded rather than inferring an item
+    from a Lakehouse's name.
+
+    Exactly one match, or a failure saying which. Two items may be bound to one
+    physical target, so a name that resolves twice is genuinely ambiguous and a
+    load that guessed would advance the wrong object's bookmark.
+    """
+
+    stored = f"{_FILES_PREFIX}{schema}" if is_files else schema
+    installed = read_installed_catalogue(catalogue)
+    found = [
+        identity
+        for identity, document in installed.registered.items()
+        if document.object_role == ROLE_DATA
+        and catalogue_schema(identity).casefold() == stored.casefold()
+        and identity.object_id.object.casefold() == object.casefold()
+        and _bound_to(installed, identity.item, target_name)
+    ]
+    if len(found) == 1:
+        return found[0]
+    where = f"{stored}.{object} in {target_name}"
+    if not found:
+        raise BuildError(
+            f"{where} is not an object the Weaver catalogue records as installed, "
+            "so it has no bookmark. Build it first, or name the target it was "
+            "built into."
+        )
+    raise BuildError(
+        f"{where} matches more than one installed object — "
+        + ", ".join(sorted(str(identity) for identity in found))
+        + ". Two logical items are bound to this target, so which bookmark is "
+        "meant cannot be settled here."
+    )
+
+
+def _bound_to(installed: "Catalogue", item: WeaverItemId, target_name: str) -> bool:
+    """Whether ``item``'s installation records this physical target."""
+
+    for row in installed.rows.get(item, {}).get(INSTALLATION.name, ()):
+        if str(row.get("target_name") or "").casefold() == target_name.casefold():
+            return True
+    return False
+
+
 def read_installed_bookmarks(catalogue: Any) -> Mapping[WeaverDocumentId, datetime]:
     """Every bookmark the catalogue holds, keyed as the Registry keys an object.
 
@@ -594,7 +645,9 @@ def read_installed_bookmarks(catalogue: Any) -> Mapping[WeaverDocumentId, dateti
                 f"{BOOKMARK.qualified} row for {identity} holds "
                 f"{at!r} rather than a datetime"
             )
-        bookmarks[identity] = at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+        bookmarks[identity] = (
+            at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+        )
     return MappingProxyType(bookmarks)
 
 

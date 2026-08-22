@@ -37,6 +37,7 @@ from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
+from .bookmarks import render_bookmark_reconciliation, render_bookmark_reference
 from .bundle import (
     SUPPORTED_FORMAT_VERSION,
     BuildBundle,
@@ -61,7 +62,6 @@ from .physical import (
 )
 from .prune import TargetInventory
 from .shortcuts import plan_item_shortcuts
-from .bookmarks import render_bookmark_reconciliation, render_bookmark_reference
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
 from .targets import WAREHOUSE_TARGET, ItemBindings, WarehouseBinding
 

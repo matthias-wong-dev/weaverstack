@@ -126,7 +126,11 @@ def _install(executor, object_name: str, *, static: bool) -> Estate:
         "([Customer id] varchar(50) null, [Customer name] varchar(200) null);"
     )
     executor.execute_script(document.create_ddl().content)
-    executor.execute_script(document.create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode("utf-8"))
+    executor.execute_script(
+        document.create_load(
+            item=WeaverItemId("Warehouse", "Reporting")
+        ).payload.decode("utf-8")
+    )
     return estate
 
 
@@ -530,7 +534,11 @@ def _install_wide(executor, object_name: str, *, incremental: bool) -> WideEstat
             "([Customer id] varchar(50) null);"
         )
     executor.execute_script(document.create_ddl().content)
-    executor.execute_script(document.create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode("utf-8"))
+    executor.execute_script(
+        document.create_load(
+            item=WeaverItemId("Warehouse", "Reporting")
+        ).payload.decode("utf-8")
+    )
     return estate
 
 

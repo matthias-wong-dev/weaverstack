@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from typing import Iterable, Sequence
 
+from ..catalogue.claims import bookmark_row
 from ..catalogue.render import (
     InstallationScope,
     InstallationScopes,
@@ -27,7 +28,6 @@ from ..catalogue.render import (
     render_delete_obsolete,
     render_merge,
 )
-from ..catalogue.claims import catalogue_schema
 from ..catalogue.tables import BOOKMARK, BOOKMARK_SENTINEL_TEXT, CATALOGUE_SCHEMA
 from ..catalogue.tsql import identifier
 from ..declaration.model import WeaverDocumentId, WeaverItemId
@@ -70,20 +70,11 @@ def _precondition() -> str:
 def _row(identity: WeaverDocumentId, *, bookmark: str | None = None) -> dict:
     """One bookmark row's identity, spelled as the Registry spells it.
 
-    Through :func:`~weaver.catalogue.claims.catalogue_schema`, so a Folder keeps
-    its ``Files/`` prefix. Without it a Folder and a Table of the same name are
-    one key, and one bookmark would stand for both.
+    A Folder keeps its ``Files/`` prefix: without it a Folder and a Table of the
+    same name are one key, and one bookmark would stand for both.
     """
 
-    row = {
-        "item_type": identity.item.item_type,
-        "item_name": identity.item.item_name,
-        "schema_name": catalogue_schema(identity),
-        "object_name": identity.object_id.object,
-    }
-    if bookmark is not None:
-        row["bookmark_datetime"] = bookmark
-    return row
+    return bookmark_row(identity, bookmark)
 
 
 def bookmark_statements(
@@ -99,7 +90,7 @@ def bookmark_statements(
     reconciles nothing that can hold a bookmark. And a build with nothing to
     build and nothing to remove has nothing to say about bookmarks: an
     unchanged repository produces an empty bundle, so the statements are issued
-    when the build acts and not merely because it ran.
+    when the build acts, not on every run.
 
     When they are issued the prune is a full reconciliation of the scope rather
     than a delete of the objects this build noticed, so a row left behind by an
@@ -184,7 +175,9 @@ def render_bookmark_reconciliation(
 # --- the local name a generated statement uses --------------------------------
 
 
-def bookmark_reference_views(repository, *, item: WeaverItemId, target) -> tuple[str, ...]:
+def bookmark_reference_views(
+    repository, *, item: WeaverItemId, target
+) -> tuple[str, ...]:
     """``_.Bookmark`` where this item's target presents it as a view.
 
     For the keep-set, so prune spares the reference this build creates. It goes
@@ -330,7 +323,13 @@ def _lakehouse_shortcut(
 
 
 def _stage(
-    item_slug: str, *, target, executor: str, filename: str, content: bytes, description: str
+    item_slug: str,
+    *,
+    target,
+    executor: str,
+    filename: str,
+    content: bytes,
+    description: str,
 ) -> PlannedStage:
     action = InstallAction(
         id=f"{SLUG}-{item_slug}",
@@ -347,14 +346,14 @@ def _stage(
         description=description,
         payloads={filename: content},
         batches=(
-            BuildBatch(id=f"{SLUG}-{item_slug}", target_id=target.id, actions=(action,)),
+            BuildBatch(
+                id=f"{SLUG}-{item_slug}", target_id=target.id, actions=(action,)
+            ),
         ),
         # Declared alongside the action, as every physical change is: what this
         # leaves is part of what the target holds afterwards.
         changes={
-            target.id: (
-                added(_CHANGE_KIND[target.kind], _qualified(), action.id),
-            )
+            target.id: (added(_CHANGE_KIND[target.kind], _qualified(), action.id),)
         },
     )
 

@@ -28,7 +28,6 @@ from .tables import (
     RuntimeTable,
     public_column_name,
 )
-
 from .tsql import TIMESTAMP_TYPE, identifier, literal, qualified_name, typed_literal
 
 #: What these renderers work on. A projected catalogue table and a
@@ -495,9 +494,7 @@ def render_delete_obsolete(
     )
 
 
-def _keep_relation(
-    table: Table, rows: Sequence[Row], identity: Sequence[str]
-) -> str:
+def _keep_relation(table: Table, rows: Sequence[Row], identity: Sequence[str]) -> str:
     """The rows a build still claims, as one relation.
 
     The casts sit outside the constructor for the reason they do in

@@ -96,9 +96,9 @@ def test_the_reported_bookmark_instant_is_always_aware_utc():
 
     expected = datetime(2026, 8, 22, 4, 5, 6, tzinfo=timezone.utc)
 
-    assert LoadResult.from_row(row(datetime(2026, 8, 22, 4, 5, 6))).bookmark_datetime == (
-        expected
-    )
+    assert LoadResult.from_row(
+        row(datetime(2026, 8, 22, 4, 5, 6))
+    ).bookmark_datetime == (expected)
     assert LoadResult.from_row(row("2026-08-22T04:05:06")).bookmark_datetime == expected
     assert (
         LoadResult.from_row(row("2026-08-22T04:05:06+00:00")).bookmark_datetime

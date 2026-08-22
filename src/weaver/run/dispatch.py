@@ -163,6 +163,7 @@ def python_primitive(
     runtime_scope,
     session,
     workspace=None,
+    bookmarks=None,
 ):
     """Import the deployed module, construct its object, and load it.
 
@@ -202,9 +203,16 @@ def python_primitive(
         context, within, expected=expected_class, node_id=node_id
     )
     cls = getattr(module, expected_class)
-    return cls(session.spark(workspace), lakehouse=lakehouse).load(
-        fault_tolerant=fault_tolerant
-    )
+    # The item and the run's bookmarks, never one object's value: an object this
+    # one constructs resolves its own bookmark by its own identity, from the same
+    # map, so `Other__Thing(self)` needs no argument of its own.
+    from ..runtime.bookmark import BookmarkContext
+
+    return cls(
+        session.spark(workspace),
+        lakehouse=lakehouse,
+        bookmarks=BookmarkContext(item=logical_item, bookmarks=bookmarks or {}),
+    ).load(fault_tolerant=fault_tolerant)
 
 
 def _endpoint_refresh(node, session, workspace):

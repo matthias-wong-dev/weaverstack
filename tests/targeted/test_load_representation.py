@@ -30,11 +30,10 @@ from weaver.declaration.load import (
     TSQL_LOAD_VERSION,
     has_generated_load,
 )
-from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
+from weaver.declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from weaver.runtime.load_contract import REASON_BLANK_PK, REASON_DUPLICATE_PK
 from weaver.runtime.load_result import RESULT_COLUMNS
 from weaver.spark import FabricSparkTarget
-from weaver.declaration.model import WeaverItemId
 
 SALES = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
 
@@ -99,7 +98,11 @@ def test_a_warehouse_table_generates_a_stored_procedure():
 
 @weaver_test()
 def test_warehouse_row_lifecycle_datetimes_use_the_utc_clock():
-    procedure = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    procedure = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert (
         "declare @weaver_load_datetime datetime2(6) = sysutcdatetime();"
@@ -164,10 +167,10 @@ def test_a_change_to_generation_must_move_its_template_version():
         "tsql": (
             TSQL_LOAD_VERSION,
             hashlib.sha256(
-                    _warehouse()
-                    .create_load(item=WeaverItemId("Warehouse", "Reporting"))
-                    .payload
-                ).hexdigest(),
+                _warehouse()
+                .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+                .payload
+            ).hexdigest(),
         ),
         "spark": (
             SPARK_LOAD_VERSION,
@@ -183,7 +186,9 @@ def test_a_change_to_generation_must_move_its_template_version():
 
 @weaver_test()
 def test_generation_is_deterministic():
-    assert _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")) == _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting"))
+    assert _warehouse().create_load(
+        item=WeaverItemId("Warehouse", "Reporting")
+    ) == _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting"))
     assert _spark().create_load(destination=SALES) == _spark().create_load(
         destination=SALES
     )
@@ -200,7 +205,11 @@ def test_an_intolerant_run_raises_rather_than_returning_a_quiet_row():
     raised would make every caller special-case which one it was talking to.
     """
 
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "throw 51020" in payload  # rows rejected, intolerant
     assert "throw 51021" in payload  # over a stability threshold, intolerant
@@ -210,7 +219,11 @@ def test_an_intolerant_run_raises_rather_than_returning_a_quiet_row():
 def test_a_breach_never_writes_whatever_fault_tolerant_says():
     """Tolerating exactly the change the threshold prevents would defeat it."""
 
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
     breach = payload.index("if @weaver_error is not null")
     insert = payload.index("insert into [Sales].[Customer] (")
 
@@ -220,7 +233,11 @@ def test_a_breach_never_writes_whatever_fault_tolerant_says():
 
 @weaver_test()
 def test_an_empty_target_is_never_guarded():
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "@weaver_target_rows > 0" in payload
 
@@ -233,7 +250,11 @@ def test_the_procedure_takes_a_fault_tolerant_parameter_defaulting_to_refusal():
     the target as it was.
     """
 
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "@fault_tolerant bit = 0" in payload
 
@@ -247,7 +268,11 @@ def test_the_procedure_returns_the_result_contract_through_its_signature():
     bodies the two-query contract now encourages. A named output is not.
     """
 
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     for column in RESULT_COLUMNS:
         assert f"@{column} " in payload
@@ -260,7 +285,11 @@ def test_the_procedure_returns_the_result_contract_through_its_signature():
 def test_the_outputs_are_optional_so_the_procedure_stays_runnable_by_hand():
     """`exec [_].[Load Sales.Customer];` must still work, undeclared."""
 
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     for column in RESULT_COLUMNS:
         assert f"@{column} " in payload
@@ -272,14 +301,22 @@ def test_the_identity_column_is_excluded_by_asking_the_engine():
     """Not by naming it. The installer filters on `is_identity`, so the load
     cannot insert into a generated column whatever the declaration said."""
 
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "c.is_identity = 0" in payload
 
 
 @weaver_test()
 def test_the_intermediate_tables_are_real_and_named_for_their_object():
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     for suffix in ("_Staging", "_Upsert", "_Reject"):
         assert f"[Sales].[Customer{suffix}]" in payload
@@ -294,7 +331,11 @@ def test_a_keyed_load_rejects_blank_and_duplicate_keys():
     different problems.
     """
 
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert REASON_BLANK_PK in payload
     assert REASON_DUPLICATE_PK in payload
@@ -304,7 +345,11 @@ def test_a_keyed_load_rejects_blank_and_duplicate_keys():
 def test_an_unkeyed_load_replaces_wholesale_and_rejects_nothing():
     """With no key no row can be matched, so there is nothing to reject."""
 
-    payload = _warehouse(_no_key(WAREHOUSE_TABLE)).create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse(_no_key(WAREHOUSE_TABLE))
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "delete from [Sales].[Customer];" in payload
     assert "_Reject" not in payload
@@ -313,7 +358,11 @@ def test_an_unkeyed_load_replaces_wholesale_and_rejects_nothing():
 
 @weaver_test()
 def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing():
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "delete c" in payload
     # Reported from cardinality, not from @@rowcount: the driver says what the
@@ -325,7 +374,11 @@ def test_a_non_incremental_load_deletes_rows_the_source_stopped_producing():
 def test_an_incremental_load_deletes_nothing():
     """Absence from a window is not a retirement."""
 
-    payload = _warehouse(_incremental(WAREHOUSE_TABLE)).create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse(_incremental(WAREHOUSE_TABLE))
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "delete c\n" not in payload
     assert "absence retires nothing" in payload
@@ -368,7 +421,11 @@ Schema:
 
 
 def _installer(source: str = WAREHOUSE_TABLE) -> str:
-    return _warehouse(source).create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    return (
+        _warehouse(source)
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
 
 def _body(source: str = WAREHOUSE_TABLE) -> str:
@@ -771,7 +828,11 @@ select [Customer id] from #Retired""",
 
 
 def _two_query_payload() -> str:
-    return _warehouse(TWO_QUERY_WAREHOUSE).create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    return (
+        _warehouse(TWO_QUERY_WAREHOUSE)
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
 
 @weaver_test()
@@ -856,7 +917,11 @@ def test_a_cte_query_is_run_as_a_statement_not_as_a_subquery():
     whatever shape the query has.
     """
 
-    payload = _warehouse(CTE_WAREHOUSE).create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse(CTE_WAREHOUSE)
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "with recent as (" in payload
     assert "into [Sales].[Customer_Staging] from recent;" in payload
@@ -864,7 +929,11 @@ def test_a_cte_query_is_run_as_a_statement_not_as_a_subquery():
 
 @weaver_test()
 def test_a_one_query_incremental_table_has_no_delete_table():
-    payload = _warehouse(_incremental(WAREHOUSE_TABLE)).create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse(_incremental(WAREHOUSE_TABLE))
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "Customer_Delete" not in payload
 
@@ -881,14 +950,22 @@ GUARDED_WAREHOUSE = WAREHOUSE_TABLE.replace(
 
 @weaver_test()
 def test_the_procedure_takes_a_threshold_waiver_defaulting_to_enforcement():
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "@ignore_stability_threshold bit = 0" in payload
 
 
 @weaver_test()
 def test_the_declared_thresholds_reach_the_procedure():
-    payload = _warehouse(GUARDED_WAREHOUSE).create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse(GUARDED_WAREHOUSE)
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "@weaver_target_rows >= 500" in payload
     assert "/ @weaver_target_rows > 2" in payload
@@ -900,7 +977,11 @@ def test_the_thresholds_are_checked_before_the_first_write():
     """A breach must leave the target as it was, so refusing has to be a
     decision not to start rather than an unwind."""
 
-    payload = _warehouse(GUARDED_WAREHOUSE).create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse(GUARDED_WAREHOUSE)
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
     gate = payload.index("@ignore_stability_threshold = 0 and")
     insert = payload.index("insert into [Sales].[Customer] (")
 
@@ -909,7 +990,11 @@ def test_the_thresholds_are_checked_before_the_first_write():
 
 @weaver_test()
 def test_the_defaults_are_the_documented_ones():
-    payload = _warehouse().create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
 
     assert "@weaver_target_rows >= 1000000" in payload
     assert "/ @weaver_target_rows > 5" in payload

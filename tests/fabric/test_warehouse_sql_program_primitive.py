@@ -31,10 +31,9 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
-from weaver.declaration.model import WAREHOUSE
+from weaver.declaration.model import WAREHOUSE, WeaverItemId
 from weaver.declaration.tsql_load import RESULT_PARAMETERS
 from weaver.runtime import LoadResult
-from weaver.declaration.model import WeaverItemId
 
 SCHEMA = "DWG"
 
@@ -185,7 +184,11 @@ def _install(executor, name: str, source: str):
     document = _document(name, source)
     _drop_object(executor, name)
     executor.execute_script(document.create_ddl().content)
-    executor.execute_script(document.create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode("utf-8"))
+    executor.execute_script(
+        document.create_load(
+            item=WeaverItemId("Warehouse", "Reporting")
+        ).payload.decode("utf-8")
+    )
     return document
 
 

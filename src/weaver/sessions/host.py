@@ -42,6 +42,27 @@ def inside_fabric_session(workspace: Workspace) -> bool:
     return context.get("currentWorkspaceName") == workspace.workspace
 
 
+def current_workspace_name() -> str | None:
+    """The Fabric workspace this process is running in, or None outside one.
+
+    Read from the notebook runtime rather than from configuration, because it is
+    the one thing a process inside Fabric knows about itself that no caller had
+    to tell it.
+    """
+
+    try:
+        from notebookutils import runtime
+    except ImportError:
+        return None
+    context = runtime.context
+    if callable(context):
+        context = context()
+    if not isinstance(context, Mapping):
+        return None
+    name = context.get("currentWorkspaceName")
+    return str(name) if name else None
+
+
 def active_spark():
     """The Spark session this process is already running in."""
 

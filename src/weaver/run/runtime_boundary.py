@@ -67,10 +67,13 @@ class DirectRunScope:
     which imports it.
     """
 
-    def __init__(self, runtime_scope, session=None, workspace=None) -> None:
+    def __init__(
+        self, runtime_scope, session=None, workspace=None, *, bookmarks=None
+    ) -> None:
         self.runtime_scope = runtime_scope
         self._session = session
         self._workspace = workspace
+        self._bookmarks = bookmarks or {}
 
     def dispatch_python(self, node, *, expected_class: str, fault_tolerant: bool):
         from .dispatch import python_primitive
@@ -86,6 +89,7 @@ class DirectRunScope:
             runtime_scope=self.runtime_scope,
             session=self._session,
             workspace=self._workspace,
+            bookmarks=self._bookmarks,
         ).as_row()
 
     def dispatch_validation(self, installed, *, collect: bool):
@@ -103,22 +107,33 @@ class DirectRunScope:
         self.runtime_scope.close()
 
 
-def open_runtime_scope(session, *, workspace=None) -> RunScope:
-    """The scope this run's Python primitives will be imported into."""
+def open_runtime_scope(session, *, workspace=None, bookmarks=None) -> RunScope:
+    """The scope this run's Python primitives will be imported into.
+
+    ``bookmarks`` travels with it, because it has the same lifetime and crosses
+    for the same reason: read once for the run, and read from there by every
+    object the run dispatches.
+    """
 
     from ..runtime.python_context import RuntimeScope
     from ..sessions.base import ACROSS_BOUNDARY
 
     if session is None:
-        return DirectRunScope(RuntimeScope.new())
+        return DirectRunScope(RuntimeScope.new(), bookmarks=bookmarks)
 
     # An unplaced Session has nothing to reach into, so the imports happen here.
     # That judgement is the Session's: inferring it from an error would turn a
     # bad configuration into a local scope, and the run would report success
     # against an estate it never reached.
     if session.position(workspace) == ACROSS_BOUNDARY:
-        return FabricRunScope.begin(session, workspace=workspace)
-    return DirectRunScope(RuntimeScope.new(), session, workspace)
+        return FabricRunScope.begin(session, workspace=workspace, bookmarks=bookmarks)
+    return DirectRunScope(RuntimeScope.new(), session, workspace, bookmarks=bookmarks)
+
+
+def _as_text(bookmarks) -> dict:
+    """One run's bookmarks as a submitted program can carry them."""
+
+    return {str(identity): at.isoformat() for identity, at in (bookmarks or {}).items()}
 
 
 class FabricRunScope:
@@ -135,12 +150,18 @@ class FabricRunScope:
         self._closed = False
 
     @classmethod
-    def begin(cls, session, *, workspace=None) -> "FabricRunScope":
+    def begin(cls, session, *, workspace=None, bookmarks=None) -> "FabricRunScope":
         from ..runtime.session_scopes import open_scope
 
         run_id = uuid.uuid4().hex
         scope = cls(session, workspace, run_id)
-        scope._submit(open_scope, {"run_id": run_id}, addressed=False)
+        # The bookmarks cross once, with the scope that will outlive every node.
+        # As text, because what crosses is a submitted program's arguments.
+        scope._submit(
+            open_scope,
+            {"run_id": run_id, "bookmarks": _as_text(bookmarks)},
+            addressed=False,
+        )
         return scope
 
     # --- what dispatch asks of it -------------------------------------------

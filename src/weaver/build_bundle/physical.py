@@ -251,7 +251,9 @@ def item_drop_stages(
 
 
 def _drop_action(identity, installed_type, target, payloads) -> InstallAction:
-    _refuse_protected(identity.object_id.schema, identity.object_id.object, str(identity))
+    _refuse_protected(
+        identity.object_id.schema, identity.object_id.object, str(identity)
+    )
     try:
         installed_kind = _DECLARATION_KIND[installed_type]
     except KeyError as exc:

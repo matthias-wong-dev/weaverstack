@@ -129,23 +129,33 @@ def run_load(
         RunState,
         can_refresh,
         dispatch_primitive,
+        open_run_bookmarks,
         open_run_log,
     )
-    from ..run.state import read_installed_catalogue
+    from ..run.state import read_installed_bookmarks, read_installed_catalogue
 
     started = datetime.now(timezone.utc)
     with session.step("Read catalogue"):
+        supplied = state is not None
         catalogue = (
             state.catalogue
-            if state is not None
+            if supplied
             else read_installed_catalogue(session=session, workspace=workspace)
+        )
+        # Read with the catalogue rather than per node: one run plans against one
+        # description of the estate, and a run of two hundred objects would
+        # otherwise be two hundred round trips for one table's contents.
+        bookmarks = (
+            state.bookmarks
+            if supplied
+            else read_installed_bookmarks(session=session, workspace=workspace)
         )
         estate = InstalledEstate.from_catalogue(catalogue)
         _refuse_uninstalled_targets(estate, requested)
 
     with session.step("Build run graph"):
-        if state is None:
-            state = RunState(catalogue=catalogue)
+        if not supplied:
+            state = RunState(catalogue=catalogue, bookmarks=bookmarks)
         runner = Runner(
             state,
             RunRequest.load(
@@ -159,23 +169,50 @@ def run_load(
         )
 
     # A dry run writes nothing durable: a row for work nobody did would be
-    # evidence of a load that never happened.
+    # evidence of a load that never happened, and a bookmark it moved would make
+    # the next real load skip a window nothing had read.
     log = (
         None
         if dry_run
         else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
     )
+    advanced = None if dry_run else open_run_bookmarks(session, workspace=workspace)
     with session.step("Execute"):
         result = runner.run(
             session=session,
             dispatch=dispatch_primitive,
-            on_node=None if log is None else log.submit,
+            on_node=_settled(log, advanced),
         )
+
+    if advanced is not None:
+        # Before the report, and before any failure is raised: a caller told the
+        # load succeeded must be able to rely on the bookmarks being durable.
+        with session.step("Record bookmarks"):
+            advanced.flush()
 
     report = _as_load_report(result, started=started, log=log)
     if not fault_tolerant and not dry_run:
         _raise_for_failure(report)
     return report
+
+
+def _settled(log, advanced):
+    """What to do with each node as it settles: record it, and move its bookmark.
+
+    Both or neither: a dry run opens no sink at all, so there is nothing to call.
+    """
+
+    sinks = [sink for sink in (log, advanced) if sink is not None]
+    if not sinks:
+        return None
+
+    def settled(result) -> None:
+        if log is not None:
+            log.submit(result)
+        if advanced is not None:
+            advanced.advance(result)
+
+    return settled
 
 
 def _as_load_report(result, *, started, log) -> LoadRunReport:
