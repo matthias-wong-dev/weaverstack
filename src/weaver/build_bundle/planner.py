@@ -77,6 +77,7 @@ def generate_item_build_bundle(
     stale_claims: tuple = (),
     catalogue_binding: WarehouseBinding,
     shortcut_sources: Mapping[str, object] | None = None,
+    bookmark_source: object | None = None,
 ) -> BuildBundle:
     """Freeze the one incremental build model into an installable bundle."""
 
@@ -211,6 +212,7 @@ def generate_item_build_bundle(
                 removed=removed,
                 registered=registered,
                 catalogue_target=catalogue_target,
+                bookmark_source=bookmark_source,
             )
             layer_stages.extend(planned.stages)
             omitted.extend(planned.omitted)
@@ -367,6 +369,7 @@ def plan_item_build(
     selected_loads=(),
     removed=(),
     shortcut_sources=None,
+    bookmark_source=None,
 ) -> PlannedItem:
     """One item's physical plan, from prepared inputs.
 
@@ -441,6 +444,8 @@ def plan_item_build(
         target=target,
         inventory=inventory,
         catalogue_target=catalogue_target,
+        selected_for_build=selected_for_build,
+        bookmark_source=bookmark_source,
     )
     if reference is not None:
         stages.append(reference)

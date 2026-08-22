@@ -32,6 +32,7 @@ from ..catalogue.tables import BOOKMARK, BOOKMARK_SENTINEL_TEXT, CATALOGUE_SCHEM
 from ..catalogue.tsql import identifier
 from ..declaration.model import WeaverDocumentId, WeaverItemId
 from ..etl import item_bookmarkable_objects
+from .changes import TABLE as TABLE_KIND
 from .changes import VIEW as VIEW_KIND
 from .changes import added
 from .models import (
@@ -42,7 +43,7 @@ from .models import (
 )
 from .payloads import sha256_hex
 from .stages import CATALOGUE, SHORTCUT, PlannedStage
-from .targets import WAREHOUSE_TARGET
+from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 
 #: The error a build raises when the catalogue holds no ``_.Bookmark`` table.
 #: Checked in the Warehouse rather than during planning, because the Warehouse is
@@ -198,6 +199,12 @@ def bookmark_reference_views(repository, *, item: WeaverItemId, target) -> tuple
     return (f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",)
 
 
+SLUG = "bookmark-reference"
+
+#: Where a Lakehouse presents its ``_.Bookmark``, and how a shortcut spells it.
+LAKEHOUSE_PATH = f"Tables/{CATALOGUE_SCHEMA}"
+
+
 def render_bookmark_reference(
     repository,
     *,
@@ -205,28 +212,48 @@ def render_bookmark_reference(
     target,
     inventory,
     catalogue_target,
+    selected_for_build: Iterable[WeaverDocumentId] = (),
+    bookmark_source=None,
 ) -> PlannedStage | None:
-    """Give a built Warehouse the catalogue's ``_.Bookmark`` under that name.
-
-    A generated load procedure reads and writes its own bookmark, and it says
-    ``[_].[Bookmark]`` to do it. In the Warehouse the catalogue lives in that is
-    already the table; anywhere else it is a view over the catalogue's three-part
-    name, which is how a Fabric Warehouse reaches another item in the workspace.
+    """Give a built target the catalogue's ``_.Bookmark`` under that name.
 
     Weaver runtime infrastructure rather than a declared shortcut: nothing
     authored it and it is not published as a ``_.Shortcut`` row. It is created in
     the shortcut phase for the reason declared shortcuts are — before the
     documents written against the namespace it completes.
 
-    Created when the Warehouse does not already hold it, so an unchanged
-    repository plans nothing and a view somebody removed comes back.
+    A generated Warehouse load procedure reads and writes its own bookmark, and
+    it says ``[_].[Bookmark]`` to do it. In the Warehouse the catalogue lives in
+    that is already the table; in any other it is a view over the catalogue's
+    three-part name, which is how a Fabric Warehouse reaches another item in the
+    workspace.
+
+    A Lakehouse gets a OneLake shortcut instead, so authored Spark SQL can read
+    ``_.Bookmark`` where it runs. Read-only, being a Warehouse's published Delta:
+    a Lakehouse load's bookmark is advanced by the run, not by the object.
     """
 
-    if target.kind != WAREHOUSE_TARGET:
-        return None
     if not item_bookmarkable_objects(repository, item=item):
         return None
-    if target.item_id == catalogue_target.item_id:
+    if target.kind == WAREHOUSE_TARGET:
+        return _warehouse_view(item, target, catalogue_target, inventory)
+    return _lakehouse_shortcut(
+        repository,
+        item=item,
+        target=target,
+        selected_for_build=selected_for_build,
+        source=bookmark_source,
+    )
+
+
+def _warehouse_view(item, target, catalogue_target, inventory) -> PlannedStage | None:
+    """The view, created when the Warehouse does not already hold it.
+
+    Gated on the inventory, so an unchanged repository plans nothing and a view
+    somebody removed comes back.
+    """
+
+    if target.name.casefold() == catalogue_target.name.casefold():
         # The catalogue's own Warehouse: the table is right there, and a view of
         # that name would be a view over itself.
         return None
@@ -239,37 +266,106 @@ def render_bookmark_reference(
         f"{identifier(catalogue_target.name)}.{identifier(CATALOGUE_SCHEMA)}."
         f"{identifier(BOOKMARK.name)};"
     )
-    slug = "bookmark-reference"
     item_slug = str(item).replace("/", "--")
-    filename = f"{slug}-{item_slug}.tsql-batch.json"
+    filename = f"{SLUG}-{item_slug}.tsql-batch.json"
     content = (json.dumps([statement], indent=2, ensure_ascii=False) + "\n").encode(
         "utf-8"
     )
+    return _stage(
+        item_slug,
+        target=target,
+        executor="tsql_batch",
+        filename=filename,
+        content=content,
+        description="present the catalogue's _.Bookmark in this Warehouse",
+    )
+
+
+def _lakehouse_shortcut(
+    repository, *, item, target, selected_for_build, source
+) -> PlannedStage | None:
+    """The OneLake shortcut, asserted whenever a loadable object is installed.
+
+    A Lakehouse's ``Tables/_`` is Weaver's own and is outside what an item's
+    inventory reports, so there is nothing to compare against; the shortcut is
+    re-pointed at the same place instead, which is what creating one already
+    means. An idle build installs nothing and so plans nothing.
+    """
+
+    if source is None:
+        return None
+    selected = set(selected_for_build)
+    if not any(
+        identity in selected
+        for identity in item_bookmarkable_objects(repository, item=item)
+    ):
+        return None
+
+    item_slug = str(item).replace("/", "--")
+    frozen = {
+        "shortcuts": [
+            {
+                "shortcut": f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",
+                "type": "table",
+                "path": LAKEHOUSE_PATH,
+                "name": BOOKMARK.name,
+                "source": f"{source.item_name}/{source.path}",
+                "source_workspace_id": source.workspace_id,
+                "source_item_id": source.item_id,
+                "source_item_name": source.item_name,
+                "source_path": source.path,
+            }
+        ]
+    }
+    filename = f"{SLUG}-{item_slug}.shortcut.json"
+    content = (json.dumps(frozen, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    return _stage(
+        item_slug,
+        target=target,
+        executor="shortcut",
+        filename=filename,
+        content=content,
+        description="present the catalogue's _.Bookmark in this Lakehouse",
+    )
+
+
+def _stage(
+    item_slug: str, *, target, executor: str, filename: str, content: bytes, description: str
+) -> PlannedStage:
     action = InstallAction(
-        id=f"{slug}-{item_slug}",
+        id=f"{SLUG}-{item_slug}",
         kind=CREATE_BOOKMARK_REFERENCE,
         resource_node_id=None,
-        executor="tsql_batch",
+        executor=executor,
         payload=filename,
         payload_sha256=sha256_hex(content),
     )
     return PlannedStage(
         phase=SHORTCUT,
         index=1,
-        slug=slug,
-        description="present the catalogue's _.Bookmark in this Warehouse",
+        slug=SLUG,
+        description=description,
         payloads={filename: content},
         batches=(
-            BuildBatch(id=f"{slug}-{item_slug}", target_id=target.id, actions=(action,)),
+            BuildBatch(id=f"{SLUG}-{item_slug}", target_id=target.id, actions=(action,)),
         ),
-        # Declared alongside the action, as every physical change is: the view
-        # this leaves is part of what the Warehouse holds afterwards.
+        # Declared alongside the action, as every physical change is: what this
+        # leaves is part of what the target holds afterwards.
         changes={
             target.id: (
-                added(VIEW_KIND, f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}", action.id),
+                added(_CHANGE_KIND[target.kind], _qualified(), action.id),
             )
         },
     )
+
+
+#: What the reference physically is, by target kind. A Warehouse view and a
+#: Lakehouse table shortcut both answer to ``_.Bookmark``.
+_CHANGE_KIND = {WAREHOUSE_TARGET: VIEW_KIND, LAKEHOUSE_TARGET: TABLE_KIND}
+
+
+def _qualified() -> str:
+    return f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}"
 
 
 def _is_builtin(item: WeaverItemId) -> bool:

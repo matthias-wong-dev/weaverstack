@@ -76,6 +76,7 @@ class Builder:
             stale_claims=reconciliation.stale_claims,
             catalogue_binding=self.catalogue_binding,
             shortcut_sources=self.state.shortcut_sources,
+            bookmark_source=self.state.bookmark_source,
         )
 
     def build_in_temporary(self, prefix: str = "weaver-build-"):

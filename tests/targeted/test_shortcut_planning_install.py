@@ -585,6 +585,9 @@ def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_p
         patch(
             "weaver.build_bundle.workflow.read_shortcut_sources", side_effect=_refuse
         ),
+        # This session has no catalogue Warehouse to resolve, and where the
+        # catalogue's bookmark table lives is not what this test is about.
+        patch("weaver.build_bundle.workflow.read_bookmark_source", return_value=None),
     ):
         state = read_build_state(
             bindings,
