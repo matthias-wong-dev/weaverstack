@@ -149,8 +149,13 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
     Both come from `create_ddl()` and `create_load()` rather than from
     hand-written SQL: a fixture that built the table by hand would prove the
     procedure works against a table Weaver does not actually generate.
+
+    The catalogue is built because a procedure reads and writes its own
+    bookmark: `_.Bookmark` has to be there for the reference to resolve, and
+    another module's wipe may have taken the whole `_` schema with it.
     """
 
+    fabric_initialise_catalogue()
     built = _install(
         clean_disposable_warehouse.executor,
         OBJECT,
@@ -167,6 +172,7 @@ def static_estate(
 ):
     """The same table declared static, under a name of its own."""
 
+    fabric_initialise_catalogue()
     built = _install(
         clean_disposable_warehouse.executor,
         STATIC_OBJECT,
@@ -755,6 +761,7 @@ def _reject_reasons(estate: WideEstate) -> dict:
 def constrained_estate(
     clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
 ):
+    fabric_initialise_catalogue()
     built = _install_wide(
         clean_disposable_warehouse.executor,
         CONSTRAINED_OBJECT,
@@ -769,6 +776,7 @@ def constrained_estate(
 def merge_estate(
     clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
 ):
+    fabric_initialise_catalogue()
     built = _install_wide(
         clean_disposable_warehouse.executor,
         MERGE_OBJECT,

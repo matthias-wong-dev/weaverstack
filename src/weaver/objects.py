@@ -142,21 +142,25 @@ class WeaverObject:
             is_files=self._is_files,
         )
 
-    def _require_catalogue_for_static(self) -> None:
-        """A Static object needs to be able to read whether it has been loaded.
+    def _require_catalogue(self) -> None:
+        """Refuse to load without the catalogue a load has to record itself in.
 
-        Its own message, because the missing thing is the same but the reason is
-        not: an author who never touched ``self.bookmark`` should not be told
-        their read uses one.
+        A clean load moves this object's bookmark, and a ``Static`` object's gate
+        reads it. Neither is optional, so a load that could reach neither is
+        refused rather than performed and left unrecorded.
+
+        An orchestrated run supplies the same thing itself, so this is about a
+        load nothing is orchestrating.
         """
 
         context = self._bookmarks
         if context is not None and (context.supplied or context.catalogue):
             return
         raise LoadError(
-            f"{self.object_id} is Static, so whether it has already been loaded "
-            "is recorded in the Weaver catalogue rather than in the target. "
-            'Supply catalogue="Warehouse/<name>".'
+            f"{self.object_id} cannot load without the Weaver catalogue: a clean "
+            "load records how far it got, and a Static object reads that record "
+            "to decide whether to run at all. Construct it as "
+            f'{type(self).__name__}(spark, catalogue="Warehouse/<name>").'
         )
 
     def _bookmarked(self, result, began):
@@ -384,26 +388,18 @@ class Folder(WeaverObject):
         destination = self.path()
         return destination.with_name(f"{destination.name}{STAGING_SUFFIX}")
 
-    def load(
-        self, fault_tolerant: bool = False, *, catalogue: str | None = None
-    ) -> "LoadResult":
+    def load(self, fault_tolerant: bool = False) -> "LoadResult":
         """Run this folder's ``read()`` and publish what it staged.
 
-        Independently runnable, needing no repository or bundle::
+        Independently runnable, needing no repository or bundle — but not without
+        the catalogue, which is where a load records how far it got::
 
-            Sales__Export(spark).load(fault_tolerant=False)
-
-        ``catalogue`` is needed by a folder whose ``read()`` uses
-        ``self.bookmark``, and by one that should record a clean load so the next
-        one reads from there::
-
-            Sales__Export(spark).load(catalogue="Warehouse/Weaver")
+            Sales__Export(spark, catalogue="Warehouse/Weaver").load()
 
         Staging is reset, issued to ``read()``, published, and removed on
         success — retained on failure, as the one directory worth looking at.
         """
 
-        from .runtime.bookmark import with_catalogue
         from .runtime.folder_load import (
             load_folder,
             new_staging_folder,
@@ -412,7 +408,7 @@ class Folder(WeaverObject):
         from .runtime.load_contract import FolderLoadContract
         from .runtime.load_result import LoadResult
 
-        self._bookmarks = with_catalogue(self._bookmarks, catalogue)
+        self._require_catalogue()
         # Before the gate and before read(), so the instant a clean load is
         # bookmarked at precedes everything it read.
         began = datetime.now(timezone.utc)
@@ -420,10 +416,8 @@ class Folder(WeaverObject):
         # A static folder bypasses staging, source reads and file reconciliation.
         # The bookmark decides it, not the folder's contents: Static means "load
         # this once", and a bookmark is the record of whether that has happened.
-        if contract.static:
-            self._require_catalogue_for_static()
-            if self.bookmark > _sentinel():
-                return LoadResult(succeeded=True)
+        if contract.static and self.bookmark > _sentinel():
+            return LoadResult(succeeded=True)
 
         issued = new_staging_folder(self.path(), self._staging_path())
         self._issued_staging = issued
@@ -514,31 +508,23 @@ class Table(WeaverObject):
         self,
         fault_tolerant: bool = False,
         ignore_stability_threshold: bool = False,
-        *,
-        catalogue: str | None = None,
     ) -> "LoadResult":
         """Run this table's ``read()`` and write what it staged.
 
-        Independently runnable, needing no repository or bundle::
+        Independently runnable, needing no repository or bundle — but not without
+        the catalogue, which is where a load records how far it got::
 
-            Sales__Customer(spark).load(fault_tolerant=True)
-
-        ``catalogue`` is needed by a table whose ``read()`` uses
-        ``self.bookmark``, and by one that should record a clean load so the next
-        one reads from there::
-
-            Sales__Customer(spark).load(catalogue="Warehouse/Weaver")
+            Sales__Customer(spark, catalogue="Warehouse/Weaver").load()
 
         ``ignore_stability_threshold`` waives the declared delete and update
         limits for one run, for when a very large change is the correct answer.
         """
 
-        from .runtime.bookmark import with_catalogue
         from .runtime.load_contract import LoadContract
         from .runtime.load_result import LoadResult
         from .runtime.table_load import load_table
 
-        self._bookmarks = with_catalogue(self._bookmarks, catalogue)
+        self._require_catalogue()
         # Before the gate and before read(), so the instant a clean load is
         # bookmarked at precedes everything it read.
         began = datetime.now(timezone.utc)
@@ -548,10 +534,8 @@ class Table(WeaverObject):
         # once", and a bookmark is the record of whether that has happened — so a
         # table somebody populated by hand is still loaded, and a table a clean
         # load emptied is still skipped.
-        if contract.static:
-            self._require_catalogue_for_static()
-            if self.bookmark > _sentinel():
-                return LoadResult(succeeded=True)
+        if contract.static and self.bookmark > _sentinel():
+            return LoadResult(succeeded=True)
 
         # Staging: unvalidated, unreconciled, nothing yet classified as new or
         # changed.

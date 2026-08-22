@@ -171,6 +171,35 @@ def test_no_bookmark_is_read_from_a_lakehouse_name(lakehouse):
     assert str(raised.value) == NO_CATALOGUE_MESSAGE
 
 
+@weaver_test()
+def test_the_catalogue_is_a_constructor_argument_and_not_a_load_one(lakehouse):
+    """Because an authored ``read()`` is called by Weaver and takes nothing.
+
+    Whatever ``read()`` may reach has to be set before the load begins, so the
+    catalogue is named where the object is made.
+    """
+
+    import inspect
+
+    assert "catalogue" in inspect.signature(DWG__Customer.__init__).parameters
+    assert "catalogue" not in inspect.signature(DWG__Customer.load).parameters
+    assert (
+        DWG__Customer(
+            object(), lakehouse=lakehouse, catalogue="Warehouse/Weaver"
+        )._bookmarks.catalogue
+        == "Warehouse/Weaver"
+    )
+
+
+@weaver_test()
+def test_a_child_inherits_the_catalogue_its_parent_was_given(lakehouse):
+    """One object reaches another with ``Other__Thing(self)`` and no arguments."""
+
+    parent = DWG__Customer(object(), lakehouse=lakehouse, catalogue="Warehouse/Weaver")
+
+    assert DWG__Order(parent)._bookmarks.catalogue == "Warehouse/Weaver"
+
+
 # --- what a child inherits -----------------------------------------------------
 
 

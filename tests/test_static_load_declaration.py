@@ -278,21 +278,28 @@ def test_a_static_table_with_no_bookmark_loads(tmp_path):
         table.load()
 
 
+@pytest.mark.parametrize("static", [False, True])
 @weaver_test()
-def test_a_static_table_with_no_catalogue_says_what_is_missing(tmp_path):
-    """Where the record lives is the catalogue, so a load has to read it."""
+def test_a_table_with_no_catalogue_refuses_to_load(tmp_path, static):
+    """Static or not: a load records how far it got, and that lives in the catalogue.
+
+    The catalogue is a constructor argument rather than a ``load()`` one, because
+    an authored ``read()`` is called by Weaver and takes nothing — so anything
+    ``read()`` may reach has to be set before the load begins. It is refused
+    before ``read()`` runs, which this object asserts for itself.
+    """
 
     from weaver.errors import LoadError
 
     class Sales__Country(_TableUnderTest):
-        static = True
+        pass
 
+    Sales__Country.static = static
     table = Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
 
     with pytest.raises(LoadError) as raised:
         table.load()
 
-    assert "Static" in str(raised.value)
     assert "catalogue=" in str(raised.value)
 
 

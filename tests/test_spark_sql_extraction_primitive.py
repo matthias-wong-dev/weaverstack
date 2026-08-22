@@ -14,6 +14,7 @@ and counts are proved once, against Python-authored tables, and inherited.
 from __future__ import annotations
 
 import pytest
+from support.bookmarks import never
 from support.weaver_test import weaver_test
 
 from weaver import Lakehouse, SparkSqlTable
@@ -282,7 +283,7 @@ def test_a_single_query_table_reaches_the_load_as_staging_alone(monkeypatch):
 
     monkeypatch.setattr(table_load, "load_table", load_table)
 
-    result = Sales__Summary(_Session(), lakehouse=LAKEHOUSE).load()
+    result = Sales__Summary(_Session(), lakehouse=LAKEHOUSE, bookmarks=never()).load()
 
     assert result.succeeded, "the load never reached the runtime"
     assert seen["deletes"] is None

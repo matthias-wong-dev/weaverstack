@@ -850,7 +850,12 @@ class WarehousePrimitiveEstate:
 
 
 @pytest.fixture(scope="session")
-def warehouse_primitive_estate(session_disposable_warehouse, tmp_path_factory):
+def warehouse_primitive_estate(
+    session_disposable_warehouse,
+    fabric_workspace,
+    fabric_initialise_catalogue,
+    tmp_path_factory,
+):
     """Build one Warehouse primitive estate shared by three claim modules."""
 
     from factories import (
@@ -872,7 +877,17 @@ def warehouse_primitive_estate(session_disposable_warehouse, tmp_path_factory):
     from weaver.targets import ItemRef
 
     warehouse = session_disposable_warehouse
+    # A build gives this Warehouse the catalogue's `_.Bookmark`, so the catalogue
+    # has to hold the table that reference points at.
+    fabric_initialise_catalogue()
     wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
+    catalogue = bound_target(
+        id="catalogue",
+        kind="warehouse",
+        item_id=fabric_workspace.catalogue_item.name,
+        logical_item_name="_weaver",
+        logical_item_type="Warehouse",
+    )
     target = ResolvedTarget(
         bound=bound_target(
             id="target-1",
@@ -909,9 +924,7 @@ def warehouse_primitive_estate(session_disposable_warehouse, tmp_path_factory):
             registered=(
                 {key: registered_document(key) for key in selected} if rebuild else {}
             ),
-            # This Warehouse *is* the catalogue's, so no local `_.Bookmark`
-            # reference is planned: the table itself is already there.
-            catalogue_target=target.bound,
+            catalogue_target=catalogue,
         )
         context = InstallationContext(
             resolver=None,
