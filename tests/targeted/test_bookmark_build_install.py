@@ -328,6 +328,48 @@ def test_both_items_of_one_build_are_one_scoped_statement(estate):
     assert "N'Sales'" in delete and "N'Reporting'" in delete
 
 
+# --- it is never dropped -------------------------------------------------------
+
+
+@weaver_test()
+def test_a_catalogue_table_cannot_be_dropped_by_a_managed_drop():
+    """It holds installed state no declaration reproduces.
+
+    Every catalogue table declares ``Prohibit rebuild``, so selection never
+    offers one. This is the guard behind that declaration, and it is at the
+    renderer because there the resource is known by its identity — an installer
+    would have to read it back out of SQL.
+    """
+
+    from weaver.build_bundle.physical import _refuse_protected
+    from weaver.errors import BuildError
+
+    for name in ("Bookmark", "Log", "Registry"):
+        with pytest.raises(BuildError) as raised:
+            _refuse_protected("_", name, f"Warehouse/_weaver/_.{name}")
+        assert "cannot be dropped" in str(raised.value)
+
+    # And nothing else is spared by it.
+    _refuse_protected("Sales", "Customer", "Lakehouse/Sales/Sales.Customer")
+
+
+@weaver_test()
+def test_prune_spares_the_catalogue_table_and_not_the_local_reference():
+    """One name, two things, and the difference decides the lifecycle.
+
+    ``_.Bookmark`` is the catalogue's own table in the catalogue Warehouse and a
+    view over it everywhere else. The table is never prune's to remove; the view
+    has the ordinary lifecycle of the keep-set it is in, so it goes when the
+    item's last loadable object does.
+    """
+
+    from weaver.catalogue.tables import is_protected
+
+    assert is_protected("_", "Bookmark")
+    assert is_protected("_", "bookmark")
+    assert not is_protected("Sales", "Bookmark")
+
+
 # --- fixtures ------------------------------------------------------------------
 
 

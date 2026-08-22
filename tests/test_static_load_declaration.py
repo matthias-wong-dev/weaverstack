@@ -392,6 +392,35 @@ def test_a_static_skip_advances_no_bookmark():
 
 
 @weaver_test()
+def test_a_procedure_run_by_hand_maintains_its_own_bookmark():
+    """The default is 1, so running it directly keeps the object's history right.
+
+    An orchestrated run passes 0 and advances the row itself, beside the record
+    of the node that settled — see ``tests/targeted/test_run_dispatch_representation.py``.
+    """
+
+    payload = _procedure(static=False)
+
+    assert "@update_catalogue bit = 1" in payload
+    assert "if @update_catalogue = 1" in payload
+    # Keyed by the logical item that declares it, baked in: which row it means is
+    # a fact about the procedure rather than an argument to it.
+    assert "N''Warehouse'' as [Item type]" in payload
+    assert "N''Reporting'' as [Item name]" in payload
+    assert "N''Sales'' as [Schema name]" in payload
+    assert "N''Country'' as [Object name]" in payload
+
+
+@weaver_test()
+def test_only_a_clean_load_records_a_bookmark():
+    """A rejecting load has not read its window, so it establishes no instant."""
+
+    payload = _procedure(static=False)
+
+    assert "@weaver_error is null and @weaver_rows_rejected = 0" in payload
+
+
+@weaver_test()
 def test_a_non_static_warehouse_load_carries_no_gate_at_all():
     """Emitting a disabled branch would leave a reader guessing which way it went."""
 

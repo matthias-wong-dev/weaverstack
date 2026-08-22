@@ -26,6 +26,9 @@ from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
 from weaver import Table
+from weaver.catalogue.state import Catalogue
+from weaver.declaration.metadata import ObjectId
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.errors import LoadError
 from weaver.run.bookmarks import RunBookmarks
 from weaver.run.result import (
@@ -281,6 +284,11 @@ def _settled(status, *, result=None, logical="Lakehouse/Sales/DWG.Customer"):
 
 BEGAN = datetime(2026, 8, 22, 7, 8, 9, tzinfo=timezone.utc)
 
+IDENTITY = WeaverDocumentId(
+    WeaverItemId("Lakehouse", "Sales"), ObjectId("DWG", "Customer")
+)
+OTHER = WeaverDocumentId(WeaverItemId("Lakehouse", "Sales"), ObjectId("DWG", "Order"))
+
 
 @weaver_test()
 def test_a_clean_load_advances_to_the_instant_the_primitive_reported():
@@ -375,6 +383,37 @@ def test_an_endpoint_refresh_advances_nothing():
     )
 
     assert flusher.rows == []
+
+
+@weaver_test()
+def test_a_run_reads_every_bookmark_once_and_hands_the_map_down():
+    """Not per node: a run of two hundred objects is not two hundred round trips.
+
+    The map travels with the run's scope, which has the same lifetime, and every
+    object the run dispatches reads its own bookmark out of it.
+    """
+
+    from weaver.run.runtime_boundary import DirectRunScope
+    from weaver.run.state import RunState
+
+    state = RunState(catalogue=Catalogue({}), bookmarks={IDENTITY: LOADED_AT})
+    scope = DirectRunScope(None, bookmarks=state.bookmarks)
+
+    assert scope._bookmarks is state.bookmarks
+    assert state.bookmark(IDENTITY) == LOADED_AT
+    # An object with no row reads the sentinel rather than being absent.
+    assert state.bookmark(OTHER) == sentinel()
+
+
+@weaver_test()
+def test_a_run_state_survives_the_crossing_that_carries_it():
+    """It crosses to the far side as text, so an instant has to come back whole."""
+
+    from weaver.run.state import RunState
+
+    state = RunState(catalogue=Catalogue({}), bookmarks={IDENTITY: LOADED_AT})
+
+    assert RunState.from_mapping(state.to_mapping()).bookmark(IDENTITY) == LOADED_AT
 
 
 @weaver_test()
