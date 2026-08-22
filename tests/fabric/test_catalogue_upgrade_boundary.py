@@ -44,17 +44,27 @@ def _failures(report):
 
 
 @pytest.fixture
-def catalogue_of_its_own(clean_disposable_warehouse):
-    """The disposable Warehouse, and its ``_`` removed when the test is done.
+def catalogue_of_its_own(fabric_workspace, clean_disposable_warehouse):
+    """The disposable Warehouse, emptied of the catalogue it held, afterwards.
 
-    Every other Warehouse test uses this item as an ordinary target, where
-    ``_.Bookmark`` is a *view* over the catalogue's table. A real table of that
-    name left behind is one the next ``create or alter view`` cannot replace, so
-    the catalogue this test installs goes whether or not the test passed.
+    Every other Warehouse test uses this item as an ordinary target, recorded in
+    the shared catalogue: there ``_.Bookmark`` is a *view* over the catalogue's
+    table, and a real table of that name is one the next ``create or alter view``
+    cannot replace. What this test installs is recorded in the item's own ``_``
+    instead, so nothing else would ever remove it.
+
+    Emptied whether or not the test passed, and in that order: through Weaver
+    while the catalogue recording the objects is still there, then of the
+    catalogue itself.
     """
 
-    yield clean_disposable_warehouse
-    _forget_the_catalogue_schema(clean_disposable_warehouse.executor)
+    warehouse = clean_disposable_warehouse
+    yield warehouse
+    own = replace(fabric_workspace, catalogue=f"Warehouse/{warehouse.item.name}")
+    with ConsoleSession(workspace=own) as session:
+        register_session(session)
+        weaver.wipe([f"Warehouse/{warehouse.item.name}"], session=session)
+    _forget_the_catalogue_schema(warehouse.executor)
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
