@@ -577,6 +577,7 @@ def warehouse_table(
     select: str = "select cast(1 as int) as CustomerId",
     primary_key: str = "CustomerId",
     identity: str | None = None,
+    has_load_procedure: bool = True,
 ) -> str:
     """A Warehouse table, whose *query* defines its schema.
 
@@ -591,6 +592,9 @@ def warehouse_table(
     """
 
     identity_line = f"Identity: {identity}\n\n" if identity else ""
+    # A table something other than Weaver populates says so, and then has no
+    # load artefact and no bookmark.
+    load_line = "" if has_load_procedure else "Has load procedure: false\n\n"
     return f"""\
 /*
 Table ID: {object_id}
@@ -601,7 +605,7 @@ Lineage: A source system.
 
 Primary key: {primary_key}
 
-{identity_line}*/
+{load_line}{identity_line}*/
 {select}
 """
 

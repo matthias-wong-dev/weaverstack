@@ -15,12 +15,17 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.catalogue.tables import (
+    BOOKMARK,
+    BOOKMARK_SENTINEL,
+    BOOKMARK_SENTINEL_TEXT,
     CATALOGUE_TABLES,
     KEY_TYPE_VOCABULARY,
     LOG,
     OBJECT_ROLE_VOCABULARY,
     OBJECT_TYPE_VOCABULARY,
+    REGISTRY,
     RESULT_VOCABULARY,
+    RUNTIME_TABLES,
     TEST_TYPE_VOCABULARY,
     public_column_name,
 )
@@ -192,9 +197,79 @@ LOG_COLUMNS = (
 )
 
 
+BOOKMARK_COLUMNS = (
+    "Item type",
+    "Item name",
+    "Schema name",
+    "Object name",
+    "Bookmark datetime",
+    *AUDIT,
+)
+
+
 @weaver_test()
 def test_the_catalogue_publishes_exactly_these_tables():
     assert {table.name for table in CATALOGUE_TABLES} == set(PUBLIC_SCHEMA)
+
+
+# --- the runtime-maintained tables --------------------------------------------
+
+
+@weaver_test()
+def test_the_bookmark_publishes_its_frozen_columns():
+    assert BOOKMARK.public_columns == BOOKMARK_COLUMNS
+
+
+@weaver_test()
+def test_a_bookmark_is_keyed_by_the_identity_the_registry_uses():
+    """One object seen twice, so the two rows have to agree about what it is.
+
+    Not "the same four names" — the same four *columns*: a Registry row and a
+    Bookmark row are the same installed object, and a key that drifted would
+    leave a bookmark standing for something else.
+    """
+
+    assert BOOKMARK.key == REGISTRY.key[:4]
+    assert BOOKMARK.key == ("item_type", "item_name", "schema_name", "object_name")
+    assert BOOKMARK.public_columns[: len(BOOKMARK.key)] == (
+        "Item type",
+        "Item name",
+        "Schema name",
+        "Object name",
+    )
+
+
+@weaver_test()
+def test_a_bookmark_datetime_is_microsecond_precision_and_not_null():
+    """A bookmark is compared with source timestamps, so precision is contract."""
+
+    column = BOOKMARK.column("bookmark_datetime")
+
+    assert column.warehouse_type == "datetime2(6)"
+    assert column.not_null
+
+
+@weaver_test()
+def test_the_sentinel_is_one_instant_spelled_two_ways():
+    """T-SQL renders the text and Python compares the value; they must agree."""
+
+    from datetime import datetime, timezone
+
+    assert BOOKMARK_SENTINEL == datetime(1900, 1, 1, tzinfo=timezone.utc)
+    assert BOOKMARK_SENTINEL_TEXT == "1900-01-01 00:00:00.000000"
+    assert BOOKMARK_SENTINEL == datetime.fromisoformat(BOOKMARK_SENTINEL_TEXT).replace(
+        tzinfo=timezone.utc
+    )
+
+
+@weaver_test()
+def test_the_runtime_tables_are_not_catalogue_dictionaries():
+    """Nothing projects them, so nothing reconciles them against a declaration."""
+
+    projected = {table.name for table in CATALOGUE_TABLES}
+
+    assert {table.name for table in RUNTIME_TABLES} == {"Log", "Bookmark"}
+    assert not projected & {table.name for table in RUNTIME_TABLES}
 
 
 @pytest.mark.parametrize("name", sorted(PUBLIC_SCHEMA))
@@ -221,7 +296,7 @@ def test_the_log_is_not_a_catalogue_dictionary():
 def test_internal_keys_stay_snake_case():
     """The mapping is a persistence boundary, not a rename of Python."""
 
-    for table in (*CATALOGUE_TABLES, LOG):
+    for table in (*CATALOGUE_TABLES, *RUNTIME_TABLES):
         for column in table.columns:
             assert column.name == column.name.lower(), column.name
             assert " " not in column.name, column.name
