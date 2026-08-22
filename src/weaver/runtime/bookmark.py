@@ -88,10 +88,11 @@ def bookmark_of(
     if not context.catalogue:
         raise LoadError(NO_CATALOGUE_MESSAGE)
     with catalogue_scope(context.catalogue) as scope:
-        identity = scope.identity(
-            lakehouse=lakehouse, schema=schema, object=object, is_files=is_files
+        return scope.bookmark(
+            scope.identity(
+                lakehouse=lakehouse, schema=schema, object=object, is_files=is_files
+            )
         )
-        return scope.bookmark(identity)
 
 
 def advance(
@@ -113,10 +114,12 @@ def advance(
     if context is None or context.supplied or not context.catalogue:
         return
     with catalogue_scope(context.catalogue) as scope:
-        identity = scope.identity(
-            lakehouse=lakehouse, schema=schema, object=object, is_files=is_files
+        scope.write(
+            scope.identity(
+                lakehouse=lakehouse, schema=schema, object=object, is_files=is_files
+            ),
+            at,
         )
-        scope.write(identity, at)
 
 
 def _from_map(

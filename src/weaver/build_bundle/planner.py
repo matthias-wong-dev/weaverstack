@@ -32,12 +32,12 @@ from typing import Mapping
 
 from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
+from ..catalogue.tables import BOOKMARK
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
-from ..catalogue.tables import BOOKMARK
 from .bookmarks import render_bookmark_reconciliation, render_bookmark_reference
 from .bundle import (
     SUPPORTED_FORMAT_VERSION,

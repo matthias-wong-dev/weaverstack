@@ -580,18 +580,32 @@ def resolve_installed_object(
     Exactly one match, or a failure saying which. Two items may be bound to one
     physical target, so a name that resolves twice is genuinely ambiguous and a
     load that guessed would advance the wrong object's bookmark.
+
+    Two tables read, not the whole catalogue: this is asked from inside a
+    standalone load, where the eleven-table read the installed catalogue needs
+    would be paid for one answer about one object.
     """
 
     stored = f"{_FILES_PREFIX}{schema}" if is_files else schema
-    installed = read_installed_catalogue(catalogue)
-    found = [
-        identity
-        for identity, document in installed.registered.items()
-        if document.object_role == ROLE_DATA
-        and catalogue_schema(identity).casefold() == stored.casefold()
-        and identity.object_id.object.casefold() == object.casefold()
-        and _bound_to(installed, identity.item, target_name)
-    ]
+    bound = {
+        WeaverItemId(
+            str(row.get(SCOPE_ITEM_TYPE) or ""), str(row.get(SCOPE_ITEM_NAME) or "")
+        )
+        for row in read_table(catalogue, INSTALLATION)
+        if str(row.get("target_name") or "").casefold() == target_name.casefold()
+    }
+    found = []
+    for row in read_table(catalogue, REGISTRY):
+        item = WeaverItemId(
+            str(row.get(SCOPE_ITEM_TYPE) or ""), str(row.get(SCOPE_ITEM_NAME) or "")
+        )
+        if item not in bound or str(row.get("object_role") or "") != ROLE_DATA:
+            continue
+        if str(row.get("schema_name") or "").casefold() != stored.casefold():
+            continue
+        if str(row.get("object_name") or "").casefold() != object.casefold():
+            continue
+        found.append(_row_identity(item, row, str(row.get("object_type") or "")))
     if len(found) == 1:
         return found[0]
     where = f"{stored}.{object} in {target_name}"
@@ -607,15 +621,6 @@ def resolve_installed_object(
         + ". Two logical items are bound to this target, so which bookmark is "
         "meant cannot be settled here."
     )
-
-
-def _bound_to(installed: "Catalogue", item: WeaverItemId, target_name: str) -> bool:
-    """Whether ``item``'s installation records this physical target."""
-
-    for row in installed.rows.get(item, {}).get(INSTALLATION.name, ()):
-        if str(row.get("target_name") or "").casefold() == target_name.casefold():
-            return True
-    return False
 
 
 def read_installed_bookmarks(catalogue: Any) -> Mapping[WeaverDocumentId, datetime]:
