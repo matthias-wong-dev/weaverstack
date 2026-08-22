@@ -93,6 +93,32 @@ def test_a_read_materialises_what_it_was_asked_for_and_no_more():
     assert catalogue.materialised == {INSTALLATION.name, REGISTRY.name}
 
 
+@weaver_test()
+def test_a_session_gives_a_catalogue_that_can_be_written():
+    """One construction: what an operation reads, and the way back."""
+
+    from support.sessions import given_session
+    from support.workspaces import given_workspace
+
+    workspace = given_workspace(catalogue="Warehouse/Weaver_LH")
+    with given_session(workspace=workspace) as session:
+        from weaver.catalogue.state import catalogue_for
+
+        catalogue = catalogue_for(session, workspace)
+        catalogue.submit(LOG, {"log_sk": "a", "task_type": "load"})
+        catalogue.flush()
+
+    assert LOG.name not in catalogue.materialised
+    assert BOOKMARK.name in catalogue.materialised
+    assert [
+        statement
+        for call in session.calls
+        if call.kind == "tsql"
+        for statement in call.body
+        if "INSERT INTO [_].[Log]" in statement
+    ]
+
+
 # --- which installed object a name is ------------------------------------------
 
 

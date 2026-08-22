@@ -164,6 +164,21 @@ class _Minimal:
         return LoadResult(succeeded=True)
 
 
+@weaver_test()
+def test_anchoring_by_name_outside_a_fabric_session_says_so(lakehouse):
+    """A name is resolved where authored code runs, which is a Fabric session.
+
+    The workspace is the one the process is in; a process that is in none has no
+    workspace to name and says so rather than reaching for a default.
+    """
+
+    with pytest.raises(ConfigError) as raised:
+        DWG__Customer(object(), lakehouse=lakehouse, catalogue="Warehouse/Weaver")
+
+    assert "not in one" in str(raised.value)
+    assert "weaver load" in str(raised.value)
+
+
 # --- what a child inherits -----------------------------------------------------
 
 
