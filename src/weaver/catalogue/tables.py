@@ -891,10 +891,10 @@ class RuntimeTable:
     lifecycle.
 
     ``key`` is the identity the table is declared with, and it is what a keyed
-    write merges on. ``_.Log`` carries a surrogate, so its key is meaningless to
-    a reader and never merged against; ``_.Bookmark`` carries the same logical
-    identity the Registry does, so a bookmark row and a Registry row are the same
-    object seen twice.
+    write merges on. ``_.Log`` carries a surrogate, because a settled unit of
+    work is only ever appended; ``_.Bookmark`` carries the same logical identity
+    the Registry does, so a bookmark row and a Registry row are the same object
+    seen twice.
     """
 
     name: str

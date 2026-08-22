@@ -49,7 +49,7 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
-from weaver.declaration.model import WAREHOUSE
+from weaver.declaration.model import WAREHOUSE, WeaverItemId
 from weaver.declaration.tsql_load import RESULT_PARAMETERS
 from weaver.runtime import LoadResult
 from weaver.runtime.load_contract import (
@@ -126,7 +126,7 @@ def _install(executor, object_name: str, *, static: bool) -> Estate:
         "([Customer id] varchar(50) null, [Customer name] varchar(200) null);"
     )
     executor.execute_script(document.create_ddl().content)
-    executor.execute_script(document.create_load().payload.decode("utf-8"))
+    executor.execute_script(document.create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode("utf-8"))
     return estate
 
 
@@ -530,7 +530,7 @@ def _install_wide(executor, object_name: str, *, incremental: bool) -> WideEstat
             "([Customer id] varchar(50) null);"
         )
     executor.execute_script(document.create_ddl().content)
-    executor.execute_script(document.create_load().payload.decode("utf-8"))
+    executor.execute_script(document.create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode("utf-8"))
     return estate
 
 

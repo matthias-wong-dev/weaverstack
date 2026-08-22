@@ -26,7 +26,7 @@ from support.workspaces import mounted_lakehouse
 
 from weaver import Table
 from weaver.declaration import read_source_document
-from weaver.declaration.model import LAKEHOUSE, WAREHOUSE
+from weaver.declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from weaver.runtime.load_contract import FolderLoadContract, LoadContract
 from weaver.runtime.load_result import RESULT_COLUMNS
 
@@ -262,22 +262,33 @@ def test_a_static_table_does_ask(monkeypatch, tmp_path):
 
 def _procedure(*, static: bool) -> str:
     document = _document(WAREHOUSE_TABLE, "Sales.Country.sql", WAREHOUSE, static=static)
-    return document.create_load().payload.decode("utf-8")
+    return document.create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode("utf-8")
 
 
 @weaver_test()
-def test_a_static_warehouse_load_returns_early_when_the_target_holds_a_row():
+def test_a_static_warehouse_load_returns_early_when_it_is_already_bookmarked():
     """Baked into the artefact, not performed by whoever calls it.
 
     The procedure is independently runnable — someone can execute it by hand —
     so a caller-side check would be a rule that only applied when Weaver was
     driving.
+
+    The bookmark decides it, not the target's contents: ``Static`` means "load
+    this once", and the bookmark is the record of whether that has happened. A
+    table somebody populated by hand is still loaded, and a table a clean load
+    emptied is still skipped.
     """
 
     payload = _procedure(static=True)
 
-    assert "if exists (select 1 from [Sales].[Country])" in payload
+    # The installer carries the procedure as a SQL literal, so its own quotes
+    # are doubled.
+    assert (
+        "if @weaver_bookmark > convert(datetime2(6), ''1900-01-01 00:00:00.000000'')"
+        in payload
+    )
     assert "return;" in payload
+    assert "if exists (select 1 from [Sales].[Country])" not in payload
 
 
 @weaver_test()
@@ -299,13 +310,37 @@ def test_the_static_gate_reports_the_same_result_contract_as_a_real_load():
 
 @weaver_test()
 def test_the_static_gate_precedes_the_staging_query():
-    """So a populated static table costs an existence check, not a source read."""
+    """So a seeded static table costs one bookmark read, not a source read."""
 
     payload = _procedure(static=True)
 
-    assert payload.index("if exists (select 1 from [Sales].[Country])") < payload.index(
-        "Data transformation"
+    assert payload.index("if @weaver_bookmark >") < payload.index("Data transformation")
+
+
+@weaver_test()
+def test_the_bookmark_is_read_before_the_static_gate_that_reads_it():
+    """The gate compares a local, so the local has to be filled first."""
+
+    payload = _procedure(static=True)
+
+    assert payload.index("select @weaver_bookmark =") < payload.index(
+        "if @weaver_bookmark >"
     )
+
+
+@weaver_test()
+def test_a_static_skip_advances_no_bookmark():
+    """A skip is a clean success, so the null is what stops it advancing.
+
+    The gate reports ``succeeded``, which is exactly what a caller advances a
+    bookmark on. What keeps a static object's bookmark still is that the exit
+    reports no bookmark instant at all.
+    """
+
+    payload = _procedure(static=True)
+    gate = payload[: payload.index("Pre-processing")]
+
+    assert "set @bookmark_datetime = null;" in gate
 
 
 @weaver_test()
@@ -315,4 +350,4 @@ def test_a_non_static_warehouse_load_carries_no_gate_at_all():
     payload = _procedure(static=False)
 
     assert "Not static: this object is loaded on every run." in payload
-    assert "if exists (select 1 from [Sales].[Country])" not in payload
+    assert "if @weaver_bookmark >" not in payload

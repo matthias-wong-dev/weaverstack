@@ -107,7 +107,14 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     sql = session.sql_executor(target, workspace=workspace)
     row = sql.call_procedure(
         load_procedure_name(node.logical_id.object_id),
-        inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
+        inputs=(
+            ("fault_tolerant", 1 if fault_tolerant else 0),
+            # The run advances the bookmark itself, alongside its own record of
+            # what happened, so the procedure does not also write it. Run by
+            # hand the parameter defaults to 1 and the procedure keeps its own
+            # object's history correct.
+            ("update_catalogue", 0),
+        ),
         outputs=RESULT_PARAMETERS,
     )
     return LoadResult.from_row(row)

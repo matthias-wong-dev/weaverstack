@@ -331,7 +331,7 @@ def _warehouse_artefacts(
         # other than Weaver, so there is no procedure to install for it.
         if not has_generated_load(source):
             continue
-        generated = source.create_load()
+        generated = source.create_load(item=item)
         artefacts.append(
             RuntimeArtefact(
                 identity=load_procedure_id(item, identity.object_id),
@@ -384,7 +384,7 @@ def _lakehouse_artefacts(
                 continue
             _object_type, template_version = load_identity(source)
             generated = (
-                source.create_load(destination=destination)
+                source.create_load(destination=destination, item=item)
                 if destination is not None
                 else None
             )

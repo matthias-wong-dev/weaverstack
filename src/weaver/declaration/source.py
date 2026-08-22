@@ -362,7 +362,7 @@ class SourceDocument:
 
         return generate_ddl(self, destination=destination)
 
-    def create_load(self, *, destination=None) -> "GeneratedLoad":
+    def create_load(self, *, destination=None, item=None) -> "GeneratedLoad":
         """The generated, installable load definition for this source.
 
         The sibling of :meth:`create_ddl`, and owned here for the same reason:
@@ -373,7 +373,7 @@ class SourceDocument:
 
         from .load import generate_load
 
-        return generate_load(self, destination=destination)
+        return generate_load(self, destination=destination, item=item)
 
     def create_validation(self, *, destination=None) -> "GeneratedValidation":
         """The generated, installable primitive for this validation declaration.

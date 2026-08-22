@@ -1,6 +1,12 @@
-"""Asynchronous batch append to a Warehouse table.
+"""Asynchronous batched writes to a Warehouse table.
 
 Rows are queued to one worker. Session close is the durability barrier.
+
+Two ways to write, and a row carries which it is. ``submit`` appends, for
+evidence a run accumulates. ``update`` upserts by the table's key, for state a
+run maintains — ``_.Bookmark``, where the row for an object is the same row
+every time. The two never share a statement, because one is an INSERT and the
+other a MERGE.
 """
 
 from __future__ import annotations
@@ -14,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from ..errors import WeaverError
+from .render import render_keyed_merge
 from .tables import TIMESTAMP, RuntimeTable
 from .tsql import identifier, literal, qualified_name, typed_literal
 
@@ -73,7 +80,7 @@ class WarehouseFlusher:
 
     # --- the contract ---------------------------------------------------------
 
-    def submit(self, row: Mapping[str, Any]) -> None:
+    def submit(self, row: Mapping[str, Any], *, keyed: bool = False) -> None:
         """Accept one row for writing. Does not wait for the Warehouse.
 
         Accepting and queueing happen under one lock, so ``close`` cannot put
@@ -93,7 +100,21 @@ class WarehouseFlusher:
             context = (
                 self._capture_context() if self._capture_context is not None else None
             )
-            self._queue.put(_QueuedRow(row, context))
+            self._queue.put(_QueuedRow(row, context, keyed=keyed))
+
+    def update(self, row: Mapping[str, Any]) -> None:
+        """Accept one keyed row, to be merged rather than appended.
+
+        For state whose row already exists as often as not. The write is an
+        upsert, so a row nothing has written yet is inserted rather than lost.
+        """
+
+        if not self.table.key:
+            raise FlushError(
+                f"{self.table.qualified} declares no key, so a row cannot be "
+                "merged into it — append it with submit()"
+            )
+        self.submit(row, keyed=True)
 
     def flush(self, *, timeout: float = DRAIN_TIMEOUT) -> None:
         """Wait for every accepted row to be written, and surface any failure."""
@@ -171,24 +192,29 @@ class WarehouseFlusher:
 
         batch: list[dict] = []
         context = None
+        keyed = False
         while True:
             item = self._queue.get()
             if item is _STOP:
-                self._write(batch, context)
+                self._write(batch, context, keyed=keyed)
                 self._settle(len(batch))
                 return
             row, item_context = item, item.context
-            if batch and item_context != context:
-                self._write(batch, context)
+            # A batch is one statement, so a row that would need the other kind
+            # of statement closes the one being accumulated.
+            if batch and (item_context != context or item.keyed != keyed):
+                self._write(batch, context, keyed=keyed)
                 self._settle(len(batch))
                 batch = []
             context = item_context
+            keyed = item.keyed
             batch.append(row)
             if len(batch) >= self._batch_rows or self._queue.empty():
-                self._write(batch, context)
+                self._write(batch, context, keyed=keyed)
                 self._settle(len(batch))
                 batch = []
                 context = None
+                keyed = False
 
     def _settle(self, count: int) -> None:
         if not count:
@@ -196,8 +222,8 @@ class WarehouseFlusher:
         with self._lock:
             self._pending -= count
 
-    def _write(self, rows: list[dict], context=None) -> None:
-        """One INSERT for a batch, in the order the rows were submitted.
+    def _write(self, rows: list[dict], context=None, *, keyed: bool = False) -> None:
+        """One statement for a batch, in the order the rows were submitted.
 
         A failure is remembered and the rows are dropped rather than retried:
         retrying a batch whose statement the engine refused would fail the same
@@ -213,10 +239,22 @@ class WarehouseFlusher:
                 else nullcontext()
             )
             with activation:
-                self._execute(self._insert(rows))
+                statement = self._merge(rows) if keyed else self._insert(rows)
+                if statement is not None:
+                    self._execute(statement)
         except BaseException as exc:  # noqa: BLE001 - re-raised from flush/close
             if self._failure is None:
                 self._failure = exc
+
+    def _merge(self, rows: list[dict]) -> str | None:
+        """One MERGE carrying the batch, keyed on the table's own key.
+
+        The audit trio is supplied by the renderer: an inserted row is dated
+        now, and a matched row's update datetime moves only when a value
+        actually changed.
+        """
+
+        return render_keyed_merge(self.table, rows)
 
     def _insert(self, rows: list[dict]) -> str:
         """One INSERT carrying the batch, audit columns supplied here.
@@ -279,11 +317,12 @@ _STOP = _Stop()
 
 
 class _QueuedRow(dict):
-    """A row carrying the reporting context that caused it to be queued."""
+    """A row carrying the reporting context and the statement it needs."""
 
-    def __init__(self, row: Mapping[str, Any], context) -> None:
+    def __init__(self, row: Mapping[str, Any], context, *, keyed: bool = False) -> None:
         super().__init__(row)
         self.context = context
+        self.keyed = keyed
 
 
 __all__ = ["BATCH_ROWS", "FlushError", "FlusherKey", "WarehouseFlusher"]

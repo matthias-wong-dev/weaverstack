@@ -7,7 +7,7 @@ storage or schema errors.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -23,6 +23,7 @@ from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_typ
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
+    BOOKMARK,
     BUILD_DATETIME,
     CATALOGUE_TABLES,
     INSTALLATION,
@@ -557,6 +558,44 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
         rows=MappingProxyType(rows),
         present_tables=frozenset(present),
     )
+
+
+def read_installed_bookmarks(catalogue: Any) -> Mapping[WeaverDocumentId, datetime]:
+    """Every bookmark the catalogue holds, keyed as the Registry keys an object.
+
+    Read unscoped and once, for the same reason the installed catalogue is: a
+    run knows physical targets and discovers which logical items are installed,
+    so it cannot name the scopes in advance. One read serves every node.
+
+    An absent table reads as no bookmarks, which is the sentinel for every
+    object — so an estate whose catalogue predates ``_.Bookmark`` reloads rather
+    than skipping. A failed read stays a failure: :func:`read_table` recognises
+    absence from what the ``_`` schema says it holds, never from an error.
+    """
+
+    bookmarks: dict[WeaverDocumentId, datetime] = {}
+    for row in read_table(catalogue, BOOKMARK):
+        schema = str(row.get("schema_name") or "")
+        is_files = schema.startswith(_FILES_PREFIX)
+        identity = WeaverDocumentId(
+            WeaverItemId(
+                str(row.get(SCOPE_ITEM_TYPE) or ""),
+                str(row.get(SCOPE_ITEM_NAME) or ""),
+            ),
+            ObjectId(
+                schema[len(_FILES_PREFIX) :] if is_files else schema,
+                str(row.get("object_name") or ""),
+            ),
+            is_files=is_files,
+        )
+        at = row.get("bookmark_datetime")
+        if not isinstance(at, datetime):
+            raise BuildError(
+                f"{BOOKMARK.qualified} row for {identity} holds "
+                f"{at!r} rather than a datetime"
+            )
+        bookmarks[identity] = at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+    return MappingProxyType(bookmarks)
 
 
 def read_installed_catalogue(catalogue: Any) -> Catalogue:

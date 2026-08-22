@@ -14,6 +14,7 @@ milliseconds.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -61,6 +62,10 @@ def _dispatch(fault_tolerant: bool, row):
     return result, sql
 
 
+#: The instant the procedure reported having begun. A clean load reports one;
+#: the run advances the object's bookmark to it.
+BEGAN = datetime(2026, 8, 22, 3, 4, 5, tzinfo=timezone.utc)
+
 ROW = {
     "succeeded": True,
     "rows_read": 4,
@@ -69,6 +74,7 @@ ROW = {
     "rows_deleted": 0,
     "rows_rejected": 0,
     "error_message": None,
+    "bookmark_datetime": BEGAN,
 }
 
 
@@ -82,11 +88,28 @@ def test_a_warehouse_load_asks_for_its_result_by_name():
 
     procedure, inputs, outputs = sql.calls[0]
     assert procedure == "[_].[Load Sales.Customer]"
-    assert inputs == (("fault_tolerant", 0),)
+    assert inputs == (("fault_tolerant", 0), ("update_catalogue", 0))
     assert outputs == RESULT_PARAMETERS
     assert result == LoadResult(
-        succeeded=True, rows_read=4, rows_inserted=1, rows_updated=2
+        succeeded=True,
+        rows_read=4,
+        rows_inserted=1,
+        rows_updated=2,
+        bookmark_datetime=BEGAN,
     )
+
+
+@weaver_test()
+def test_an_orchestrated_warehouse_load_does_not_maintain_its_own_bookmark():
+    """The run advances it, with the same record that says the load happened.
+
+    Two writers for one row would be two decisions about when it moved, and the
+    run's is the one that also knows whether the node it belongs to settled.
+    """
+
+    _result, sql = _dispatch(False, ROW)
+
+    assert ("update_catalogue", 0) in sql.calls[0][1]
 
 
 @weaver_test()
@@ -95,7 +118,7 @@ def test_fault_tolerance_reaches_the_procedure_as_an_input():
         True, dict(ROW, rows_read=0, rows_inserted=0, rows_updated=0)
     )
 
-    assert sql.calls[0][1] == (("fault_tolerant", 1),)
+    assert sql.calls[0][1] == (("fault_tolerant", 1), ("update_catalogue", 0))
 
 
 @weaver_test()

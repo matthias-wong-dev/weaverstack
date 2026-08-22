@@ -358,6 +358,75 @@ def _source_relation(table: Table, rows: Sequence[Row]) -> str:
     )
 
 
+def render_keyed_merge(table: Table, rows: Sequence[Row]) -> str | None:
+    """A ``MERGE`` that updates rows by their whole key, or inserts them.
+
+    For runtime state a run writes as it goes — ``_.Bookmark`` — rather than for
+    a build's projection, so there is no installation scope: the key carries the
+    item, so the ``ON`` clause identifies exactly the rows named and nothing
+    wider. That is the whole difference from :func:`render_merge`, which narrows
+    the target to the installation it is publishing.
+
+    Later rows win where a batch names one key twice. An earlier value for the
+    same object is superseded rather than a conflict, and T-SQL refuses a
+    ``MERGE`` whose source matches one target row twice.
+
+    Returns None when there is nothing to write.
+    """
+
+    latest: dict[tuple, Row] = {}
+    for row in rows:
+        latest[tuple(row.get(name) for name in table.key)] = row
+    ordered = sorted_rows(table, latest.values())
+    if not ordered:
+        return None
+    if len(ordered) > VALUES_ROWS:
+        chunks = [
+            ordered[start : start + VALUES_ROWS]
+            for start in range(0, len(ordered), VALUES_ROWS)
+        ]
+        return "".join(_keyed_merge_statement(table, chunk) for chunk in chunks)
+    return _keyed_merge_statement(table, ordered)
+
+
+def _keyed_merge_statement(table: Table, rows: Sequence[Row]) -> str:
+    on = " AND ".join(
+        _same(f"target.{_public(table, name)}", f"source.{_public(table, name)}")
+        for name in table.key
+    )
+    comparison = table.comparison_columns
+    changed = " OR ".join(
+        _differs(f"target.{_public(table, name)}", f"source.{_public(table, name)}")
+        for name in comparison
+    )
+    updates = ", ".join(
+        [
+            f"target.{_public(table, name)} = source.{_public(table, name)}"
+            for name in comparison
+        ]
+        + [f"target.{_public(table, AUDIT_UPDATE_COLUMN)} = {NOW}"]
+    )
+    supplied = {
+        AUDIT_INSERT_COLUMN: NOW,
+        AUDIT_UPDATE_COLUMN: NOW,
+        AUDIT_DELETE_COLUMN: literal(AUDIT_LIVE_DELETE_DATETIME, "timestamp"),
+    }
+    insert_columns = ", ".join(_public(table, name) for name in table.physical_columns)
+    insert_values = ", ".join(
+        supplied[name] if name in supplied else f"source.{_public(table, name)}"
+        for name in table.physical_columns
+    )
+    return (
+        f"MERGE INTO {qualified_name(table)} AS target\n"
+        f"USING (\n"
+        f"        {_source_relation(table, rows)}\n"
+        f") AS source\n"
+        f"   ON {on}\n"
+        f"WHEN MATCHED AND ({changed}) THEN UPDATE SET {updates}\n"
+        f"WHEN NOT MATCHED THEN INSERT ({insert_columns}) VALUES ({insert_values});\n"
+    )
+
+
 def render_delete_obsolete(
     table: Table,
     rows: Sequence[Row],

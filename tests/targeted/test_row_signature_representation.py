@@ -33,6 +33,7 @@ from weaver.declaration.metadata import PYTHON, SPARK_SQL, parse_document
 from weaver.declaration.model import WAREHOUSE
 from weaver.runtime.delta_sql import NULL_MARKER, row_signature
 from weaver.runtime.load_contract import LoadContract
+from weaver.declaration.model import WeaverItemId
 
 HEADER = """Table ID: Sales.Customer
 
@@ -93,7 +94,7 @@ def _warehouse_installer(source: str = WAREHOUSE_TABLE) -> str:
     document = read_source_document(
         "Sales.Customer.sql", source.encode("utf-8"), WAREHOUSE
     )
-    return document.create_load().payload.decode()
+    return document.create_load(item=WeaverItemId("Warehouse", "Reporting")).payload.decode()
 
 
 # --- what is hashed ----------------------------------------------------------
