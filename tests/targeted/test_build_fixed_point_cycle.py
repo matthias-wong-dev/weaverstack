@@ -43,7 +43,7 @@ from weaver.build_bundle import (
 from weaver.build_bundle.catalogue_actions import desired_catalogue
 from weaver.build_bundle.planner import certifiable_identities
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import CATALOGUE_TABLES
+from weaver.catalogue.tables import PROJECTED_TABLES
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
 from weaver.spark import FabricSparkTarget
@@ -113,7 +113,7 @@ def installed_catalogue(repository) -> Catalogue:
     # claim against a table that is there.
     return Catalogue(
         rows=state.rows,
-        present_tables=frozenset(table.name for table in CATALOGUE_TABLES),
+        present_tables=frozenset(table.name for table in PROJECTED_TABLES),
     )
 
 

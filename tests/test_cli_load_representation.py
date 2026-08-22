@@ -347,7 +347,7 @@ class _FakeTds:
     @classmethod
     def answer(cls, statement: str) -> list[dict]:
         from weaver.catalogue.tables import (
-            CATALOGUE_TABLES,
+            PROJECTED_TABLES,
             INSTALLATION,
             REGISTRY,
         )
@@ -355,7 +355,7 @@ class _FakeTds:
         if "INFORMATION_SCHEMA.COLUMNS" in statement:
             return [
                 {"TABLE_NAME": table.name, "COLUMN_NAME": table.public_name_of(column)}
-                for table in CATALOGUE_TABLES
+                for table in PROJECTED_TABLES
                 for column in table.physical_columns
             ]
         item_type, item_name = cls.ITEM

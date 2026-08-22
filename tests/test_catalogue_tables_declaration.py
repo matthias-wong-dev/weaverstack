@@ -18,7 +18,7 @@ from support.weaver_test import weaver_test
 from weaver.catalogue import (
     AUDIT_COLUMN_NAMES,
     CATALOGUE_SCHEMA,
-    CATALOGUE_TABLES,
+    PROJECTED_TABLES,
     COLUMN_DICTIONARY,
     DEPENDENCY,
     DICTIONARY_TABLES,
@@ -36,7 +36,7 @@ from weaver.catalogue import (
     table,
 )
 
-ALL = CATALOGUE_TABLES
+ALL = PROJECTED_TABLES
 
 
 @weaver_test()

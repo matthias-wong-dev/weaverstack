@@ -10,11 +10,10 @@ Dictionary and Registry rows add object identity within the Item scope. Their
 signatures drive incremental comparison. The ordinary build appends Weaver's
 audit columns to every table.
 
-The ``_`` schema holds two groups of table, and they are maintained differently.
-:data:`CATALOGUE_TABLES` are projected from the repository and reconciled against
-it. :data:`RUNTIME_TABLES` are not projected from anything: ``_.Log`` is appended
-as work settles and ``_.Bookmark`` is maintained by the build and load lifecycle.
-Both groups are declared as ordinary Weaver documents and built by Weaver itself.
+The ``_`` schema *is* the Weaver catalogue, and every table in it is a catalogue
+table. There are two kinds: :data:`PROJECTED_TABLES` are maintained from
+repository and build state and reconciled against it, and :data:`RUNTIME_TABLES`
+are maintained during execution. :data:`CATALOGUE_TABLES` is both.
 """
 
 from __future__ import annotations
@@ -855,15 +854,16 @@ DICTIONARY_TABLES = (
     SHORTCUT,
 )
 
-#: Every catalogue table, dictionaries first, then Installation, then Registry.
-#: The order is the reconciliation order: dictionaries describe, Installation
-#: records the binding, and Registry certifies — so Registry is last.
-CATALOGUE_TABLES = DICTIONARY_TABLES + (INSTALLATION, REGISTRY)
+#: The catalogue tables projected from repository state, dictionaries first, then
+#: Installation, then Registry. The order is the reconciliation order:
+#: dictionaries describe, Installation records the binding, and Registry
+#: certifies — so Registry is last.
+PROJECTED_TABLES = DICTIONARY_TABLES + (INSTALLATION, REGISTRY)
 
-TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}
+TABLES_BY_NAME = {table.name: table for table in PROJECTED_TABLES}
 
 
-# --- runtime-maintained tables ------------------------------------------------
+# --- the catalogue tables maintained at runtime -------------------------------
 
 #: How a settled unit of work ended.
 RESULT_VOCABULARY = {
@@ -883,12 +883,10 @@ BOOKMARK_SENTINEL = datetime(1900, 1, 1, tzinfo=timezone.utc)
 
 @dataclass(frozen=True)
 class RuntimeTable:
-    """A Weaver-owned table maintained by runtime rather than by projection.
+    """A catalogue table maintained during execution rather than by projection.
 
-    Declared and built like any other catalogue table, but nothing projects its
-    rows from the repository, so it is outside reconciliation: ``_.Log`` is
-    appended as work settles and ``_.Bookmark`` is written by the build and load
-    lifecycle.
+    Declared and built like any other, and reconciled against nothing: its rows
+    come from what Weaver did, not from what a repository declares.
 
     ``key`` is the identity the table is declared with, and it is what a keyed
     write merges on. ``_.Log`` carries a surrogate, because a settled unit of
@@ -1045,13 +1043,11 @@ BOOKMARK = RuntimeTable(
     ),
 )
 
-#: Every table the ``_`` schema holds that runtime maintains rather than
-#: projection. Ordinary Weaver documents, built by the built-in item, and never
-#: reconciled against a declaration.
+#: The catalogue tables maintained during execution.
 RUNTIME_TABLES = (LOG, BOOKMARK)
 
-#: Every table the ``_`` schema holds, however it is maintained.
-BUILT_TABLES = CATALOGUE_TABLES + RUNTIME_TABLES
+#: Every catalogue table, however it is maintained.
+CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
 
 #: The ``_`` schema tables no build may drop, folded for comparison. Every
@@ -1061,7 +1057,7 @@ BUILT_TABLES = CATALOGUE_TABLES + RUNTIME_TABLES
 #: declared ``Prohibit rebuild``, so selection never offers one; this is the
 #: guard behind that declaration.
 _PROTECTED = frozenset(
-    f"{CATALOGUE_SCHEMA}.{table.name}".casefold() for table in BUILT_TABLES
+    f"{CATALOGUE_SCHEMA}.{table.name}".casefold() for table in CATALOGUE_TABLES
 )
 
 

@@ -28,7 +28,7 @@ from support.weaver_test import weaver_test
 
 from weaver.catalogue.render import InstallationScope, InstallationScopes
 from weaver.catalogue.state import read_catalogue_state
-from weaver.catalogue.tables import CATALOGUE_TABLES, REGISTRY
+from weaver.catalogue.tables import PROJECTED_TABLES, REGISTRY
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import BuildError
 
@@ -77,7 +77,7 @@ class CountingCatalogue:
 
 def _table_of(statement: str) -> str:
     return next(
-        table.name for table in CATALOGUE_TABLES if f"[{table.name}]" in statement
+        table.name for table in PROJECTED_TABLES if f"[{table.name}]" in statement
     )
 
 
@@ -107,7 +107,7 @@ def test_two_items_cause_one_read_per_table_not_two():
 
     read_catalogue_state(catalogue, _items("Lakehouse/Sales", "Lakehouse/Inventory"))
 
-    for table in CATALOGUE_TABLES:
+    for table in PROJECTED_TABLES:
         assert catalogue.read_count(table.name) == 1, (
             f"{table.name} was read {catalogue.read_count(table.name)} times"
         )
@@ -123,7 +123,7 @@ def test_twenty_items_still_cause_one_read_per_table():
         catalogue, _items(*[f"Lakehouse/Item{index}" for index in range(20)])
     )
 
-    assert len(catalogue.statements) == len(CATALOGUE_TABLES)
+    assert len(catalogue.statements) == len(PROJECTED_TABLES)
 
 
 @weaver_test()
@@ -175,7 +175,7 @@ def test_an_item_with_no_rows_is_still_present_in_the_catalogue():
 
     assert inventory in state.rows
     assert state.rows[inventory][REGISTRY.name] == ()
-    assert set(state.rows[inventory]) == {table.name for table in CATALOGUE_TABLES}
+    assert set(state.rows[inventory]) == {table.name for table in PROJECTED_TABLES}
 
 
 @weaver_test()

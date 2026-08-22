@@ -41,7 +41,7 @@ from support.workspaces import WORKSPACE
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
 from weaver.build_bundle.bookmarks import bookmark_statements
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import BOOKMARK_SENTINEL_TEXT, BUILT_TABLES
+from weaver.catalogue.tables import BOOKMARK_SENTINEL_TEXT, CATALOGUE_TABLES
 from weaver.declaration import parse_item_repository
 from weaver.etl import item_bookmarkable_objects
 from weaver.locations import Location
@@ -60,7 +60,7 @@ def estate(tmp_path):
 #: is the distinction the bookmark stage turns on: a catalogue without the table
 #: is one this bundle is creating it in, and it can hold no row anything could
 #: have written.
-EMPTY = Catalogue({}, present_tables=frozenset(table.name for table in BUILT_TABLES))
+EMPTY = Catalogue({}, present_tables=frozenset(table.name for table in CATALOGUE_TABLES))
 
 
 def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
@@ -213,7 +213,7 @@ def test_a_build_that_changes_one_object_resets_only_that_one(estate, tmp_path):
     [
         pytest.param(frozenset(), id="bootstrap"),
         pytest.param(
-            frozenset(table.name for table in BUILT_TABLES if table.name != "Bookmark"),
+            frozenset(table.name for table in CATALOGUE_TABLES if table.name != "Bookmark"),
             id="upgrade",
         ),
     ],
@@ -399,7 +399,7 @@ def _installed(repository) -> Catalogue:
     )
     return Catalogue(
         rows=state.rows,
-        present_tables=frozenset(table.name for table in BUILT_TABLES),
+        present_tables=frozenset(table.name for table in CATALOGUE_TABLES),
     )
 
 

@@ -8,7 +8,7 @@ from dataclasses import replace
 from ..declaration.model import WAREHOUSE, WeaverItemId
 from .tables import (
     BOOKMARK,
-    BUILT_TABLES,
+    CATALOGUE_TABLES,
     CATALOGUE_SCHEMA,
     LOG,
     RUNTIME_TABLES,
@@ -146,7 +146,7 @@ def render_source(table, *, lineage: str = LINEAGE) -> str:
 def render_item_sources() -> dict[str, str]:
     sources = {SCHEMA_PATH: render_schema_file()}
     runtime = {table.name for table in RUNTIME_TABLES}
-    for table in BUILT_TABLES:
+    for table in CATALOGUE_TABLES:
         documented = replace(
             table,
             columns=tuple(

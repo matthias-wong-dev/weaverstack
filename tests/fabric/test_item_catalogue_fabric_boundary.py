@@ -50,7 +50,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "WarehouseBinding, build_item_repository_source, "
         "effective_item_bindings)\n"
         "from weaver.sessions import NotebookSession\n"
-        "from weaver.catalogue.tables import CATALOGUE_TABLES, LOG\n"
+        "from weaver.catalogue.tables import PROJECTED_TABLES, LOG\n"
         "from weaver.catalogue.connection import catalogue_connection\n"
         "from weaver.resolution import resolver_for, store_for\n"
         f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
@@ -91,10 +91,10 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "        for action in report.action_results() if action.status == 'failed'],\n"
         "    'tables': sorted(catalogue.shape()),\n"
         "    'expected': sorted(\n"
-        "        table.name.casefold() for table in (*CATALOGUE_TABLES, LOG)),\n"
+        "        table.name.casefold() for table in (*PROJECTED_TABLES, LOG)),\n"
         "    'target_names': [dict(row)['Target name'] for row in installation],\n"
         "    'registry_count': dict(registry[0])['n'],\n"
-        "    'table_count': len(CATALOGUE_TABLES),\n"
+        "    'table_count': len(PROJECTED_TABLES),\n"
         "})\n"
     )
 

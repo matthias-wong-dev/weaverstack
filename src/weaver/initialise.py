@@ -20,7 +20,7 @@ from .build_bundle.models import BuildPlan
 from .build_bundle.report import InstallationReport
 from .build_bundle.targets import ItemBinding, ItemBindings, WarehouseBinding
 from .build_bundle.workflow import build_item_repository_source
-from .catalogue.tables import BUILT_TABLES
+from .catalogue.tables import CATALOGUE_TABLES
 from .declaration.model import WeaverItemId
 from .errors import CommandError
 from .locations import Location
@@ -45,7 +45,7 @@ class InitialiseResult:
     def tables(self) -> tuple[str, ...]:
         """Every ``_`` table this created, however each one is maintained."""
 
-        return tuple(table.qualified for table in BUILT_TABLES)
+        return tuple(table.qualified for table in CATALOGUE_TABLES)
 
     def to_mapping(self) -> dict[str, Any]:
         """A plain structure, for a CLI to serialise. The CLI owns no semantics."""

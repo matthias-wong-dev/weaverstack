@@ -18,7 +18,7 @@ from weaver.catalogue.tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
     BOOKMARK_SENTINEL_TEXT,
-    CATALOGUE_TABLES,
+    PROJECTED_TABLES,
     KEY_TYPE_VOCABULARY,
     LOG,
     OBJECT_ROLE_VOCABULARY,
@@ -209,7 +209,7 @@ BOOKMARK_COLUMNS = (
 
 @weaver_test()
 def test_the_catalogue_publishes_exactly_these_tables():
-    assert {table.name for table in CATALOGUE_TABLES} == set(PUBLIC_SCHEMA)
+    assert {table.name for table in PROJECTED_TABLES} == set(PUBLIC_SCHEMA)
 
 
 # --- the runtime-maintained tables --------------------------------------------
@@ -266,7 +266,7 @@ def test_the_sentinel_is_one_instant_spelled_two_ways():
 def test_the_runtime_tables_are_not_catalogue_dictionaries():
     """Nothing projects them, so nothing reconciles them against a declaration."""
 
-    projected = {table.name for table in CATALOGUE_TABLES}
+    projected = {table.name for table in PROJECTED_TABLES}
 
     assert {table.name for table in RUNTIME_TABLES} == {"Log", "Bookmark"}
     assert not projected & {table.name for table in RUNTIME_TABLES}
@@ -275,7 +275,7 @@ def test_the_runtime_tables_are_not_catalogue_dictionaries():
 @pytest.mark.parametrize("name", sorted(PUBLIC_SCHEMA))
 @weaver_test()
 def test_every_public_column_has_its_frozen_name(name):
-    table = next(table for table in CATALOGUE_TABLES if table.name == name)
+    table = next(table for table in PROJECTED_TABLES if table.name == name)
 
     assert table.public_columns == PUBLIC_SCHEMA[name]
 
@@ -289,14 +289,14 @@ def test_the_log_publishes_its_frozen_columns():
 def test_the_log_is_not_a_catalogue_dictionary():
     """It records what happened, not what is installed, so nothing reconciles it."""
 
-    assert LOG.name not in {table.name for table in CATALOGUE_TABLES}
+    assert LOG.name not in {table.name for table in PROJECTED_TABLES}
 
 
 @weaver_test()
 def test_internal_keys_stay_snake_case():
     """The mapping is a persistence boundary, not a rename of Python."""
 
-    for table in (*CATALOGUE_TABLES, *RUNTIME_TABLES):
+    for table in (*PROJECTED_TABLES, *RUNTIME_TABLES):
         for column in table.columns:
             assert column.name == column.name.lower(), column.name
             assert " " not in column.name, column.name
@@ -307,12 +307,12 @@ def test_index_dictionary_is_gone():
     """``KeyDictionary`` records logical keys; nothing builds an index."""
 
     assert "IndexDictionary" not in PUBLIC_SCHEMA
-    assert "IndexDictionary" not in {table.name for table in CATALOGUE_TABLES}
+    assert "IndexDictionary" not in {table.name for table in PROJECTED_TABLES}
 
 
 @weaver_test()
 def test_build_datetime_replaced_the_public_build_epoch():
-    registry = next(table for table in CATALOGUE_TABLES if table.name == "Registry")
+    registry = next(table for table in PROJECTED_TABLES if table.name == "Registry")
 
     assert "Build datetime" in registry.public_columns
     assert not any("epoch" in column.lower() for column in registry.public_columns)
@@ -366,7 +366,7 @@ def test_result_vocabulary_is_frozen():
 
 @weaver_test()
 def test_a_stored_value_round_trips_through_its_vocabulary():
-    registry = next(table for table in CATALOGUE_TABLES if table.name == "Registry")
+    registry = next(table for table in PROJECTED_TABLES if table.name == "Registry")
     column = registry.column("object_type")
 
     assert column.to_public("stored_procedure") == "Stored procedure"
@@ -376,7 +376,7 @@ def test_a_stored_value_round_trips_through_its_vocabulary():
 
 @weaver_test()
 def test_an_unknown_internal_value_is_refused_rather_than_written():
-    registry = next(table for table in CATALOGUE_TABLES if table.name == "Registry")
+    registry = next(table for table in PROJECTED_TABLES if table.name == "Registry")
 
     with pytest.raises(ValueError, match="object_type does not accept"):
         registry.column("object_type").to_public("sproc")
@@ -386,7 +386,7 @@ def test_an_unknown_internal_value_is_refused_rather_than_written():
 def test_an_unknown_stored_value_reads_as_written():
     """A newer catalogue may hold a value this Weaver has no name for."""
 
-    registry = next(table for table in CATALOGUE_TABLES if table.name == "Registry")
+    registry = next(table for table in PROJECTED_TABLES if table.name == "Registry")
 
     assert registry.column("object_type").from_public("Materialised view") == (
         "Materialised view"

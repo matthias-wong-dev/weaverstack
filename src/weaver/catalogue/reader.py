@@ -111,11 +111,11 @@ def read_installation(
     projection without repeating the scope — which it could otherwise forget.
     """
 
-    from .tables import CATALOGUE_TABLES
+    from .tables import PROJECTED_TABLES
 
     return {
         table.name: read_table(catalogue, table, scope=scope)
-        for table in (tables if tables is not None else CATALOGUE_TABLES)
+        for table in (tables if tables is not None else PROJECTED_TABLES)
     }
 
 
@@ -133,9 +133,9 @@ def read_installations(
     Still scoped: nothing outside ``scopes`` is returned.
     """
 
-    from .tables import CATALOGUE_TABLES
+    from .tables import PROJECTED_TABLES
 
-    wanted = tables if tables is not None else CATALOGUE_TABLES
+    wanted = tables if tables is not None else PROJECTED_TABLES
     if not scopes:
         # Nothing was asked for. Reading with no predicate would return the whole
         # catalogue, so the answer is stated rather than queried.

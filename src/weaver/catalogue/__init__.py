@@ -30,7 +30,7 @@ from .state import (
 from .tables import (
     AUDIT_COLUMN_NAMES,
     CATALOGUE_SCHEMA,
-    CATALOGUE_TABLES,
+    PROJECTED_TABLES,
     COLUMN_DICTIONARY,
     DEPENDENCY,
     DICTIONARY_TABLES,
@@ -59,7 +59,7 @@ __all__ = [
     "SHORTCUT",
     "AUDIT_COLUMN_NAMES",
     "CATALOGUE_SCHEMA",
-    "CATALOGUE_TABLES",
+    "PROJECTED_TABLES",
     "COLUMN_DICTIONARY",
     "CatalogueColumn",
     "CatalogueTable",

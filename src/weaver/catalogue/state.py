@@ -25,7 +25,7 @@ from .render import InstallationScope, InstallationScopes
 from .tables import (
     BOOKMARK,
     BUILD_DATETIME,
-    CATALOGUE_TABLES,
+    PROJECTED_TABLES,
     INSTALLATION,
     OBJECT_ROLES,
     OBJECT_TYPES,
@@ -388,7 +388,7 @@ INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name, BOOKMARK.name})
 #: ``_.Bookmark``, because whether a build reconciles bookmarks at all turns on
 #: whether it already exists. ``_.Log`` is absent: nothing reads it to decide
 #: anything, so asking would only give a new way to refuse an old estate.
-CHECKED_TABLES = CATALOGUE_TABLES + (BOOKMARK,)
+CHECKED_TABLES = PROJECTED_TABLES + (BOOKMARK,)
 
 
 def _encode_json_value(value):
@@ -535,7 +535,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     # to compare, reconcile and publish. An item that fell out here would look
     # like an item the build was never pointed at.
     grouped: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {
-        item: {table.name: [] for table in CATALOGUE_TABLES} for item in wanted
+        item: {table.name: [] for table in PROJECTED_TABLES} for item in wanted
     }
     for table_name, table_rows in by_table.items():
         for row in table_rows:
@@ -680,7 +680,7 @@ def read_installed_catalogue(catalogue: Any) -> Catalogue:
 
     rows: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {}
     present: set[str] = set()
-    for table in CATALOGUE_TABLES:
+    for table in PROJECTED_TABLES:
         table_rows = read_table(catalogue, table)
         if table_rows:
             present.add(table.name)
@@ -735,7 +735,7 @@ def reconcile_catalogue_state(
                 ):
                     stale[identity] = document
         filtered = {}
-        for table in CATALOGUE_TABLES:
+        for table in PROJECTED_TABLES:
             rows = tables.get(table.name, ())
             rules = {
                 rule
