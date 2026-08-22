@@ -143,6 +143,13 @@ runs, not how a run behaves when one of them fails.
 execution supplies the estate-backed dispatcher; tests can supply a controlled
 dispatcher for the same state machine.
 
+What a run *records* is downstream of it, on purpose. A Runner with no sinks runs
+correctly; the operation that wants durable evidence and up-to-date bookmarks
+opens them and feeds each settled node to both. The two are not treated alike: a
+lost `_.Log` row loses evidence, and a lost bookmark makes the next load read a
+window it has already read, so the bookmark writer flushes before the operation
+reports and a failure there fails the load.
+
 ---
 
 ## The representations
@@ -156,7 +163,7 @@ The handoff points, roughly in the order you meet them.
 | `TargetInventory` | what a physical target actually holds right now |
 | `BuildState` | `Catalogue` + inventories, as one snapshot the Builder is handed |
 | `BuildBundle` | the plan: sequences → batches → `InstallAction`s, plus frozen payloads |
-| `RunState` | the catalogue snapshot handed to a run |
+| `RunState` | the catalogue snapshot handed to a run, plus every bookmark, read once |
 | `RunGraph` | the selected nodes and their edges |
 | `RunResult` / reports | what happened, per node, per action |
 
@@ -359,8 +366,15 @@ render.py       those statements as T-SQL
 tsql.py         identifier quoting, literals and types — the only module that
                 knows SQL syntax
 connection.py   reading `_` over TDS, and what an absent table means
-flusher.py      appending to `_.Log` without waiting for the Warehouse
+flusher.py      writing `_.Log` and `_.Bookmark` without waiting for the
+                Warehouse — appended and merged respectively
+claims.py       which rows a document owns, and how a bookmark row is keyed
 ```
+
+Bookmarks are written from three places, and each has its own module because
+each is a different moment: `build_bundle/bookmarks.py` for the reset and prune a
+build freezes, `run/bookmarks.py` for the advance a run makes, and
+`runtime/bookmark.py` for what authored Python reaches through `self.bookmark`.
 
 Everything above `render.py` holds plain Python values under internal
 snake-case keys. The public sentence-case names and the stored vocabularies the
