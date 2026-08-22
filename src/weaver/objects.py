@@ -252,7 +252,7 @@ class WeaverObject:
 
 
 def _sentinel():
-    """The bookmark of an object no clean load has run for."""
+    """What an object no clean load has run for reads as. See `Catalogue.bookmark`."""
 
     from .catalogue.tables import BOOKMARK_SENTINEL
 

@@ -1,13 +1,24 @@
-"""What a build does about bookmarks: reconcile the rows, present the table.
+"""What a build does about bookmarks: invalidate rows, present the table.
 
-**Reconciling the rows.** One action against the catalogue Warehouse, carrying a
-scoped delete of rows whose object this build no longer loads and a scoped merge
-resetting to the sentinel every loadable object it rebuilds. It runs **before**
-any physical work, and the ordering is the safety property: a bookmark at the
-sentinel makes the next load read the whole source, while one left advanced over
-a table that was dropped and recreated makes it read almost nothing. So the reset
-is written first and the rebuild follows it, and a build that fails in between
-leaves work to repeat rather than rows that will never arrive.
+**Invalidating rows.** A bookmark row means "a clean load has run for this
+object's current physical incarnation". A build ends that for two kinds of object,
+and both lose their row:
+
+.. code-block:: text
+
+    no longer declared, or no longer loaded    the object is going
+    dropped and rebuilt                        the incarnation is going
+
+One scoped delete does both, keeping the rows of objects this build still loads
+and is not replacing. It runs **before** any physical work, and the ordering is
+the safety property: an absent bookmark makes the next load read the whole
+source, while one left in place over a table that was dropped and recreated makes
+it read almost nothing. So the row goes first and the rebuild follows it, and a
+build that fails in between leaves work to repeat rather than rows that will
+never arrive.
+
+Deleted rather than reset to a stored sentinel, because absence already means
+what a sentinel would: nothing has been loaded since this incarnation began.
 
 The scope is the items this build reconciles, and nothing wider. Rows belonging
 to an item the build was not pointed at are another build's to maintain.
@@ -15,8 +26,7 @@ to an item the build was not pointed at are another build's to maintain.
 **Presenting the table.** Every target the build installs a load into gets the
 catalogue's ``_.Bookmark`` under that name — a view in a Warehouse, a OneLake
 shortcut in a Lakehouse — because a generated procedure says ``[_].[Bookmark]``
-and authored Spark SQL may too. That happens in the load phase, with the
-artefacts it exists for.
+and authored Spark SQL may too.
 """
 
 from __future__ import annotations
@@ -30,9 +40,8 @@ from ..catalogue.render import (
     InstallationScopes,
     Row,
     render_delete_obsolete,
-    render_merge,
 )
-from ..catalogue.tables import BOOKMARK, BOOKMARK_SENTINEL_TEXT, CATALOGUE_SCHEMA
+from ..catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA
 from ..catalogue.tsql import identifier
 from ..declaration.model import WeaverDocumentId, WeaverItemId
 from ..etl import item_bookmarkable_objects
@@ -71,14 +80,14 @@ def _precondition() -> str:
     )
 
 
-def _row(identity: WeaverDocumentId, *, bookmark: str | None = None) -> dict:
+def _row(identity: WeaverDocumentId) -> dict:
     """One bookmark row's identity, spelled as the Registry spells it.
 
     A Folder keeps its ``Files/`` prefix: without it a Folder and a Table of the
     same name are one key, and one bookmark would stand for both.
     """
 
-    return bookmark_row(identity, bookmark)
+    return bookmark_row(identity)
 
 
 def bookmark_statements(
@@ -105,9 +114,9 @@ def bookmark_statements(
     installs is new. Not a silent skip: there is no row to reset and none to
     prune, because nothing has ever been installed.
 
-    When they are issued the prune is a full reconciliation of the scope rather
-    than a delete of the objects this build noticed, so a row left behind by an
-    earlier failure goes too.
+    One statement when they are issued, and it is a full reconciliation of the
+    scope rather than a delete of the objects this build noticed, so a row left
+    behind by an earlier failure goes too.
     """
 
     scoped = tuple(item for item in items if not _is_builtin(item))
@@ -115,29 +124,23 @@ def bookmark_statements(
     if not scoped or not installed or not (selected or set(removed)):
         return ()
 
-    declared: dict[WeaverItemId, tuple[WeaverDocumentId, ...]] = {
-        item: item_bookmarkable_objects(repository, item=item) for item in scoped
-    }
+    # What keeps its bookmark: an object this build still loads and is *not*
+    # replacing. Everything else loses its row — the ones the repository no
+    # longer declares, and the ones this build is about to drop and rebuild,
+    # whose history belongs to a physical incarnation that is going.
     keep: list[Row] = [
-        _row(identity) for objects in declared.values() for identity in objects
+        _row(identity)
+        for item in scoped
+        for identity in item_bookmarkable_objects(repository, item=item)
+        if identity not in selected
     ]
-    reset: list[Row] = [
-        _row(identity, bookmark=BOOKMARK_SENTINEL_TEXT)
-        for objects in declared.values()
-        for identity in objects
-        if identity in selected
-    ]
-
     scopes = InstallationScopes(
         tuple(InstallationScope(item.item_type, item.item_name) for item in scoped)
     )
     statements = [_precondition()]
-    prune = render_delete_obsolete(BOOKMARK, keep, scope=scopes)
-    if prune is not None:
-        statements.append(prune)
-    merge = render_merge(BOOKMARK, reset, scope=scopes)
-    if merge is not None:
-        statements.append(merge)
+    invalidate = render_delete_obsolete(BOOKMARK, keep, scope=scopes)
+    if invalidate is not None:
+        statements.append(invalidate)
     return tuple(statements)
 
 

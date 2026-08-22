@@ -284,7 +284,7 @@ def _procedure(*, static: bool) -> str:
 
 
 @weaver_test()
-def test_a_static_warehouse_load_returns_early_when_it_is_already_bookmarked():
+def test_a_static_warehouse_load_returns_early_when_it_has_a_bookmark_row():
     """Baked into the artefact, not performed by whoever calls it.
 
     The procedure is independently runnable — someone can execute it by hand —
@@ -299,14 +299,11 @@ def test_a_static_warehouse_load_returns_early_when_it_is_already_bookmarked():
 
     payload = _procedure(static=True)
 
-    # The installer carries the procedure as a SQL literal, so its own quotes
-    # are doubled.
-    assert (
-        "if @weaver_bookmark > convert(datetime2(6), ''1900-01-01 00:00:00.000000'')"
-        in payload
-    )
+    assert "if @weaver_bookmark is not null" in payload
     assert "return;" in payload
     assert "if exists (select 1 from [Sales].[Country])" not in payload
+    # No stored sentinel: absence is the answer, so nothing coalesces to 1900.
+    assert "1900-01-01" not in payload
 
 
 @weaver_test()
@@ -332,7 +329,9 @@ def test_the_static_gate_precedes_the_staging_query():
 
     payload = _procedure(static=True)
 
-    assert payload.index("if @weaver_bookmark >") < payload.index("Data transformation")
+    assert payload.index("if @weaver_bookmark is not null") < payload.index(
+        "Data transformation"
+    )
 
 
 @weaver_test()
@@ -342,7 +341,7 @@ def test_the_bookmark_is_read_before_the_static_gate_that_reads_it():
     payload = _procedure(static=True)
 
     assert payload.index("select @weaver_bookmark =") < payload.index(
-        "if @weaver_bookmark >"
+        "if @weaver_bookmark is not null"
     )
 
 
@@ -397,4 +396,4 @@ def test_a_non_static_warehouse_load_carries_no_gate_at_all():
     payload = _procedure(static=False)
 
     assert "Not static: this object is loaded on every run." in payload
-    assert "if @weaver_bookmark >" not in payload
+    assert "if @weaver_bookmark is not null" not in payload

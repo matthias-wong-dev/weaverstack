@@ -41,7 +41,7 @@ from support.workspaces import WORKSPACE
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
 from weaver.build_bundle.bookmarks import bookmark_statements
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import BOOKMARK_SENTINEL_TEXT, CATALOGUE_TABLES
+from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration import parse_item_repository
 from weaver.etl import item_bookmarkable_objects
 from weaver.locations import Location
@@ -178,20 +178,28 @@ def test_a_build_with_nothing_to_do_says_nothing_about_bookmarks(estate):
 
 
 @weaver_test()
-def test_a_first_build_resets_every_loadable_object_it_installs(estate, tmp_path):
-    statements = _statements(_bundle(estate, tmp_path))
-    merge = [one for one in statements if one.startswith("MERGE")]
+def test_a_first_build_invalidates_every_loadable_object_it_installs(estate, tmp_path):
+    """It is building all of them, so none of their histories survives.
 
-    assert len(merge) == 1
-    assert BOOKMARK_SENTINEL_TEXT in merge[0]
-    assert "N'DWG', N'Customer'" in merge[0]
-    # The Folder keeps its `Files/` prefix, so it is not the table of that name.
-    assert "N'Files/Raw', N'CustomerCsv'" in merge[0]
+    The keep-set is empty, which the renderer turns into a plain scoped delete:
+    nothing in these items keeps a bookmark.
+    """
+
+    statements = _statements(_bundle(estate, tmp_path))
+    delete = [one for one in statements if one.startswith("DELETE")]
+
+    assert len(delete) == 1
+    assert "NOT EXISTS" not in delete[0]
+    assert not [one for one in statements if one.startswith("MERGE")]
 
 
 @weaver_test()
-def test_a_build_that_changes_one_object_resets_only_that_one(estate, tmp_path):
-    """An unchanged object keeps the bookmark it has, or every build reloads it."""
+def test_a_build_that_changes_one_object_invalidates_only_that_one(estate, tmp_path):
+    """An unchanged object keeps the bookmark it has, or every build reloads it.
+
+    The keep-set is what survives, so the object being rebuilt is *absent* from
+    it and the one left alone is in it.
+    """
 
     installed = _installed(estate)
     changed = _with_changed_customer(tmp_path)
@@ -204,10 +212,10 @@ def test_a_build_that_changes_one_object_resets_only_that_one(estate, tmp_path):
             inventories=estate_inventories(changed),
         )
     )
-    merge = "".join(one for one in statements if one.startswith("MERGE"))
+    keep = next(one for one in statements if one.startswith("DELETE"))
 
-    assert "N'DWG', N'Customer'" in merge
-    assert "N'Files/Raw', N'CustomerCsv'" not in merge
+    assert "N'DWG', N'Customer'" not in keep
+    assert "N'Files/Raw', N'CustomerCsv'" in keep
 
 
 @pytest.mark.parametrize(
@@ -263,13 +271,13 @@ def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_p
 
 
 @weaver_test()
-def test_the_reset_and_the_prune_are_one_action(estate, tmp_path):
-    """One statement each, in one batch: this is one decision about one table."""
+def test_invalidation_is_one_statement(estate, tmp_path):
+    """One decision about one table, so one statement in one action."""
 
     statements = _statements(_bundle(estate, tmp_path))
 
     assert len([one for one in statements if one.startswith("DELETE")]) == 1
-    assert len([one for one in statements if one.startswith("MERGE")]) == 1
+    assert not [one for one in statements if one.startswith("MERGE")]
 
 
 @weaver_test()
@@ -286,32 +294,36 @@ def test_the_batch_refuses_to_run_without_the_table_it_maintains(estate, tmp_pat
 
 
 @weaver_test()
-def test_the_prune_keeps_every_object_the_repository_still_declares(estate):
+def test_an_object_left_alone_keeps_its_bookmark(estate):
+    """Nothing selected, one object removed: the untouched ones stay in the keep-set."""
+
     statements = bookmark_statements(
         estate,
         items=(item_id(ITEM),),
-        selected_for_build={one for one in estate.source_documents},
+        selected_for_build=(),
+        removed={document_id_of(estate, "DWG.Summary")},
     )
-    delete = next(one for one in statements if one.startswith("DELETE"))
+    keep = next(one for one in statements if one.startswith("DELETE"))
 
-    assert "N'DWG', N'Customer'" in delete
-    assert "N'Files/Raw', N'CustomerCsv'" in delete
+    assert "N'DWG', N'Customer'" in keep
+    assert "N'Files/Raw', N'CustomerCsv'" in keep
 
 
 @weaver_test()
-def test_an_object_the_repository_no_longer_declares_is_pruned(estate, tmp_path):
+def test_an_object_the_repository_no_longer_declares_loses_its_row(estate, tmp_path):
     """Its key is absent from the keep-set, so the anti-join removes the row."""
 
     smaller = _without_the_folder(tmp_path)
     statements = bookmark_statements(
         smaller,
         items=(item_id(ITEM),),
-        selected_for_build={one for one in smaller.source_documents},
+        selected_for_build=(),
+        removed={document_id_of(estate, "Files/Raw.CustomerCsv")},
     )
-    delete = next(one for one in statements if one.startswith("DELETE"))
+    keep = next(one for one in statements if one.startswith("DELETE"))
 
-    assert "N'DWG', N'Customer'" in delete
-    assert "N'Files/Raw', N'CustomerCsv'" not in delete
+    assert "N'DWG', N'Customer'" in keep
+    assert "N'Files/Raw', N'CustomerCsv'" not in keep
 
 
 @weaver_test()
@@ -386,6 +398,16 @@ def test_prune_spares_the_catalogue_table_and_not_the_local_reference():
 
 
 # --- fixtures ------------------------------------------------------------------
+
+
+def document_id_of(repository, qualified: str):
+    """One declared identity by its ``Schema.Object``, as the repository holds it."""
+
+    return next(
+        identity
+        for identity in repository.source_documents
+        if str(identity).endswith(f"/{qualified}")
+    )
 
 
 def _installed(repository) -> Catalogue:

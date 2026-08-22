@@ -18,7 +18,6 @@ from __future__ import annotations
 from ..catalogue.tables import (
     AUDIT_UPDATE_COLUMN,
     BOOKMARK,
-    BOOKMARK_SENTINEL_TEXT,
     CATALOGUE_SCHEMA,
 )
 from ..catalogue.tsql import identifier
@@ -263,7 +262,7 @@ def _static_gate(contract: LoadContract) -> str:
     "load this once", and the record of whether that has happened is the
     bookmark — so a table somebody populated by hand is still loaded, and a
     table a clean load emptied is still skipped. Before the staging query, so a
-    seeded object costs no source read.
+    loaded object costs no source read.
 
     A non-static object gets a comment rather than a disabled branch.
     """
@@ -272,9 +271,9 @@ def _static_gate(contract: LoadContract) -> str:
         return "-- Not static: this object is loaded on every run."
     seeded = _result_assignment(succeeded="cast(1 as bit)")
     return (
-        "-- Static: loaded once. Already bookmarked means a clean load has run,\n"
-        "-- so this reports a successful load of nothing and advances nothing.\n"
-        f"if @weaver_bookmark > {_sentinel()}\n"
+        "-- Static: loaded once. A bookmark row means a clean load has run for\n"
+        "-- this incarnation, so this reports a successful load of nothing.\n"
+        "if @weaver_bookmark is not null\n"
         "begin\n"
         f"{_indent(seeded, 4)}\n"
         "    return;\n"
@@ -282,19 +281,14 @@ def _static_gate(contract: LoadContract) -> str:
     )
 
 
-def _sentinel() -> str:
-    """The bookmark of an object no clean load has run for, as a literal."""
-
-    return f"convert(datetime2(6), '{BOOKMARK_SENTINEL_TEXT}')"
-
-
 def _bookmark_key(document: SesDocument, item) -> str:
     """This object's bookmark row, read into a local before anything else.
 
     The identity is baked in: the procedure is one object's, so which row it
-    means is a fact about the procedure rather than an argument to it. An absent
-    row reads as the sentinel, which is what an object that has never had a
-    clean load has.
+    means is a fact about the procedure rather than an argument to it.
+
+    No row leaves the local null, and that is the answer rather than a missing
+    one: no clean load has run since this object's current physical incarnation.
     """
 
     predicate = " and ".join(
@@ -302,11 +296,10 @@ def _bookmark_key(document: SesDocument, item) -> str:
         for column, value in _bookmark_identity(document, item).items()
     )
     return (
-        f"select @weaver_bookmark = {identifier(BOOKMARK.public_name_of('bookmark_datetime'))}\n"
+        f"select @weaver_bookmark = "
+        f"{identifier(BOOKMARK.public_name_of('bookmark_datetime'))}\n"
         f"  from {_bookmark_table()}\n"
-        f" where {predicate};\n"
-        "\n"
-        f"if @weaver_bookmark is null set @weaver_bookmark = {_sentinel()};"
+        f" where {predicate};"
     )
 
 
