@@ -1,0 +1,400 @@
+"""What a build does about bookmarks: invalidate rows, present the table.
+
+**Invalidating rows.** A bookmark row means "a clean load has run for this
+object's current physical incarnation". A build ends that for two kinds of object,
+and both lose their row:
+
+.. code-block:: text
+
+    no longer declared, or no longer loaded    the object is going
+    dropped and rebuilt                        the incarnation is going
+
+One scoped delete does both, keeping the rows of objects this build still loads
+and is not replacing. It runs **before** any physical work, and the ordering is
+the safety property: an absent bookmark makes the next load read the whole
+source, while one left in place over a table that was dropped and recreated makes
+it read almost nothing. So the row goes first and the rebuild follows it, and a
+build that fails in between leaves work to repeat rather than rows that will
+never arrive.
+
+Deleted rather than reset to a stored sentinel, because absence already means
+what a sentinel would: nothing has been loaded since this incarnation began.
+
+The scope is the items this build reconciles, and nothing wider. Rows belonging
+to an item the build was not pointed at are another build's to maintain.
+
+**Presenting the table.** Every target the build installs a load into gets the
+catalogue's ``_.Bookmark`` under that name — a view in a Warehouse, a OneLake
+shortcut in a Lakehouse — because a generated procedure says ``[_].[Bookmark]``
+and authored Spark SQL may too.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Iterable, Sequence
+
+from ..catalogue.claims import bookmark_row
+from ..catalogue.render import (
+    InstallationScope,
+    InstallationScopes,
+    Row,
+    render_delete_obsolete,
+)
+from ..catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA
+from ..declaration.model import WAREHOUSE, WeaverDocumentId, WeaverItemId
+from ..etl import item_bookmarkable_objects
+from .changes import TABLE as TABLE_KIND
+from .changes import VIEW as VIEW_KIND
+from .changes import added
+from .models import (
+    CREATE_BOOKMARK_REFERENCE,
+    RECONCILE_BOOKMARKS,
+    BuildBatch,
+    InstallAction,
+)
+from .payloads import sha256_hex
+from .shortcuts import Reference, declaration_key, shortcut_payload, view_statement
+from .stages import CATALOGUE, LOAD, PlannedStage
+from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
+
+#: The error a build raises when the catalogue holds no ``_.Bookmark`` table.
+#: Checked in the Warehouse rather than during planning, because the Warehouse is
+#: where the answer is, and raised rather than skipped: a build that quietly did
+#: no bookmark work would leave the next load reading from a bookmark nothing
+#: maintains.
+MISSING_TABLE_ERROR = 51030
+
+MISSING_TABLE_MESSAGE = (
+    "weaver: the Weaver catalogue has no _.Bookmark table. Build "
+    "Warehouse/_weaver to create it, then build again."
+)
+
+
+def _precondition() -> str:
+    """Refuse the batch unless the table the rest of it maintains is there."""
+
+    return (
+        "if object_id(N'[_].[Bookmark]', N'U') is null\n"
+        f"    throw {MISSING_TABLE_ERROR}, '{MISSING_TABLE_MESSAGE}', 1;\n"
+    )
+
+
+def _row(identity: WeaverDocumentId) -> dict:
+    """One bookmark row's identity, spelled as the Registry spells it.
+
+    A Folder keeps its ``Files/`` prefix: without it a Folder and a Table of the
+    same name are one key, and one bookmark would stand for both.
+    """
+
+    return bookmark_row(identity)
+
+
+def bookmark_statements(
+    repository,
+    *,
+    items: Sequence[WeaverItemId],
+    selected_for_build: Iterable[WeaverDocumentId],
+    removed: Iterable[WeaverDocumentId] = (),
+    installed: bool = True,
+) -> tuple[str, ...]:
+    """The bookmark reconciliation statements for one build, in execution order.
+
+    Empty in three cases, and each matters.
+
+    A build of the built-in catalogue item reconciles nothing that can hold a
+    bookmark.
+
+    A build with nothing to build and nothing to remove has nothing to say about
+    bookmarks: an unchanged repository produces an empty bundle, so the
+    statements are issued when the build acts, not on every run.
+
+    And a build against a catalogue that holds nothing has no bookmarks to
+    reconcile — it is creating the table in this same bundle, and every object it
+    installs is new. Not a silent skip: there is no row to reset and none to
+    prune, because nothing has ever been installed.
+
+    One statement when they are issued, and it is a full reconciliation of the
+    scope rather than a delete of the objects this build noticed, so a row left
+    behind by an earlier failure goes too.
+    """
+
+    scoped = tuple(item for item in items if not _is_builtin(item))
+    selected = set(selected_for_build)
+    if not scoped or not installed or not (selected or set(removed)):
+        return ()
+
+    # What keeps its bookmark: an object this build still loads and is *not*
+    # replacing. Everything else loses its row — the ones the repository no
+    # longer declares, and the ones this build is about to drop and rebuild,
+    # whose history belongs to a physical incarnation that is going.
+    keep: list[Row] = [
+        _row(identity)
+        for item in scoped
+        for identity in item_bookmarkable_objects(repository, item=item)
+        if identity not in selected
+    ]
+    scopes = InstallationScopes(
+        tuple(InstallationScope(item.item_type, item.item_name) for item in scoped)
+    )
+    statements = [_precondition()]
+    invalidate = render_delete_obsolete(BOOKMARK, keep, scope=scopes)
+    if invalidate is not None:
+        statements.append(invalidate)
+    return tuple(statements)
+
+
+def render_bookmark_reconciliation(
+    repository,
+    *,
+    items: Sequence[WeaverItemId],
+    selected_for_build: Iterable[WeaverDocumentId],
+    removed: Iterable[WeaverDocumentId] = (),
+    installed: bool = True,
+    catalogue_target,
+) -> PlannedStage | None:
+    """The one stage that reconciles ``_.Bookmark`` ahead of physical work."""
+
+    statements = bookmark_statements(
+        repository,
+        items=items,
+        selected_for_build=selected_for_build,
+        removed=removed,
+        installed=installed,
+    )
+    if not statements:
+        return None
+
+    slug = "bookmark-reconciliation"
+    filename = f"{slug}.tsql-batch.json"
+    content = (
+        json.dumps(list(statements), indent=2, ensure_ascii=False) + "\n"
+    ).encode("utf-8")
+    action = InstallAction(
+        id=slug,
+        kind=RECONCILE_BOOKMARKS,
+        resource_node_id=None,
+        executor="tsql_batch",
+        payload=filename,
+        payload_sha256=sha256_hex(content),
+    )
+    return PlannedStage(
+        phase=CATALOGUE,
+        index=0,
+        slug=slug,
+        description="reset and prune bookmarks before physical work",
+        payloads={filename: content},
+        batches=(
+            BuildBatch(id=slug, target_id=catalogue_target.id, actions=(action,)),
+        ),
+    )
+
+
+# --- the local name a generated statement uses --------------------------------
+
+
+#: What the reference's action and payload are named after.
+SLUG = "bookmark-reference"
+
+
+def _reference(item: WeaverItemId, catalogue: str) -> Reference:
+    """``_.Bookmark`` as the reference it is: a shortcut nobody authored.
+
+    Weaver's own infrastructure, so it is not published as a ``_.Shortcut`` row —
+    but *what it becomes* is exactly what a declared shortcut becomes, so it is
+    expressed as one and rendered by the same code. A Warehouse gets the view, a
+    Lakehouse the OneLake shortcut.
+    """
+
+    from ..declaration.metadata import ObjectId
+    from ..declaration.model import TABLE_SHORTCUT, VIEW_SHORTCUT
+
+    qualified = f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}"
+    return Reference(
+        owner=item,
+        name=qualified,
+        destination=WeaverDocumentId(item, ObjectId(CATALOGUE_SCHEMA, BOOKMARK.name)),
+        shortcut_type=(
+            VIEW_SHORTCUT if item.item_type == WAREHOUSE else TABLE_SHORTCUT
+        ),
+        target=f"{WAREHOUSE}/{catalogue}/{qualified}",
+        target_item_name=catalogue,
+        target_object=ObjectId(CATALOGUE_SCHEMA, BOOKMARK.name),
+    )
+
+
+def bookmark_reference_views(
+    repository, *, item: WeaverItemId, target
+) -> tuple[str, ...]:
+    """``_.Bookmark`` where this item's target presents it as a view.
+
+    For the keep-set, so prune spares the reference this build creates. It goes
+    when the item's last loadable object goes, exactly as the ``_`` schema holding
+    the load procedures does.
+    """
+
+    if target.kind != WAREHOUSE_TARGET:
+        return ()
+    if not item_bookmarkable_objects(repository, item=item):
+        return ()
+    return (f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",)
+
+
+def render_bookmark_reference(
+    repository,
+    *,
+    item: WeaverItemId,
+    target,
+    inventory,
+    catalogue_target,
+    bookmark_source=None,
+) -> PlannedStage | None:
+    """Give a built target the catalogue's ``_.Bookmark`` under that name.
+
+    A generated Warehouse load procedure says ``[_].[Bookmark]``, and authored
+    Spark SQL may too, so every target holding loadable objects presents it.
+
+    Created in the load phase, with the artefacts it exists for — not with the
+    declared shortcuts, which precede an item's documents. Nothing built reads a
+    bookmark, and on the build that creates the catalogue the table this points at
+    is built in the same bundle and is not there yet when the shortcut phase runs.
+    """
+
+    if not item_bookmarkable_objects(repository, item=item):
+        return None
+    reference = _reference(item, catalogue_target.name)
+    if target.kind == WAREHOUSE_TARGET:
+        return _warehouse_view(reference, item, target, catalogue_target, inventory)
+    return _lakehouse_shortcut(
+        reference,
+        item=item,
+        target=target,
+        inventory=inventory,
+        source=bookmark_source,
+    )
+
+
+def _warehouse_view(
+    reference, item, target, catalogue_target, inventory
+) -> PlannedStage | None:
+    """The view, created when the Warehouse does not already hold it.
+
+    Gated on the inventory, so an unchanged repository plans nothing and a view
+    somebody removed comes back.
+    """
+
+    if target.name.casefold() == catalogue_target.name.casefold():
+        # The catalogue's own Warehouse: the table is right there, and a view of
+        # that name would be a view over itself.
+        return None
+    if inventory.has_object(CATALOGUE_SCHEMA, BOOKMARK.name, "view"):
+        return None
+
+    statement = view_statement(reference, catalogue_target)
+    item_slug = str(item).replace("/", "--")
+    filename = f"{SLUG}-{item_slug}.tsql-batch.json"
+    content = (json.dumps([statement], indent=2, ensure_ascii=False) + "\n").encode(
+        "utf-8"
+    )
+    return _stage(
+        item_slug,
+        target=target,
+        executor="tsql_batch",
+        filename=filename,
+        content=content,
+        description="present the catalogue's _.Bookmark in this Warehouse",
+    )
+
+
+def _lakehouse_shortcut(
+    reference, *, item, target, inventory, source
+) -> PlannedStage | None:
+    """The OneLake shortcut, created when the Lakehouse does not already hold it.
+
+    Gated the way the Warehouse's view is: on what is physically there, so an
+    unchanged repository plans nothing and a reference somebody removed comes
+    back. ``Tables/_`` is Weaver's own rather than the item's, so the inventory
+    reports it as a fact of its own instead of as one of the item's schemas.
+    """
+
+    if source is None or inventory.bookmark_reference:
+        return None
+
+    item_slug = str(item).replace("/", "--")
+    content = shortcut_payload(
+        [(reference, target)], sources={declaration_key(reference): source}
+    )
+    return _stage(
+        item_slug,
+        target=target,
+        executor="shortcut",
+        filename=f"{SLUG}-{item_slug}.shortcut.json",
+        content=content,
+        description="present the catalogue's _.Bookmark in this Lakehouse",
+    )
+
+
+def _stage(
+    item_slug: str,
+    *,
+    target,
+    executor: str,
+    filename: str,
+    content: bytes,
+    description: str,
+) -> PlannedStage:
+    action = InstallAction(
+        id=f"{SLUG}-{item_slug}",
+        kind=CREATE_BOOKMARK_REFERENCE,
+        resource_node_id=None,
+        executor=executor,
+        payload=filename,
+        payload_sha256=sha256_hex(content),
+    )
+    return PlannedStage(
+        phase=LOAD,
+        # Behind the artefacts, which share this phase at index 0. Order within
+        # it does not matter: nothing here runs, and a procedure's reference to
+        # ``[_].[Bookmark]`` resolves when it is called rather than installed.
+        index=1,
+        slug=SLUG,
+        description=description,
+        payloads={filename: content},
+        batches=(
+            BuildBatch(
+                id=f"{SLUG}-{item_slug}", target_id=target.id, actions=(action,)
+            ),
+        ),
+        # Declared alongside the action, as every physical change is: what this
+        # leaves is part of what the target holds afterwards.
+        changes={
+            target.id: (
+                added(
+                    _CHANGE_KIND[target.kind],
+                    f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",
+                    action.id,
+                ),
+            )
+        },
+    )
+
+
+#: What the reference physically is, by target kind. A Warehouse view and a
+#: Lakehouse table shortcut both answer to ``_.Bookmark``.
+_CHANGE_KIND = {WAREHOUSE_TARGET: VIEW_KIND, LAKEHOUSE_TARGET: TABLE_KIND}
+
+
+def _is_builtin(item: WeaverItemId) -> bool:
+    from ..catalogue.builtin import BUILTIN_ITEM
+
+    return item == BUILTIN_ITEM
+
+
+__all__ = [
+    "MISSING_TABLE_ERROR",
+    "MISSING_TABLE_MESSAGE",
+    "bookmark_reference_views",
+    "bookmark_statements",
+    "render_bookmark_reconciliation",
+    "render_bookmark_reference",
+]

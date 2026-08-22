@@ -107,7 +107,14 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     sql = session.sql_executor(target, workspace=workspace)
     row = sql.call_procedure(
         load_procedure_name(node.logical_id.object_id),
-        inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
+        inputs=(
+            ("fault_tolerant", 1 if fault_tolerant else 0),
+            # The run advances the bookmark itself, alongside its own record of
+            # what happened, so the procedure does not also write it. Run by
+            # hand the parameter defaults to 1 and the procedure keeps its own
+            # object's history correct.
+            ("update_catalogue", 0),
+        ),
         outputs=RESULT_PARAMETERS,
     )
     return LoadResult.from_row(row)
@@ -156,6 +163,8 @@ def python_primitive(
     runtime_scope,
     session,
     workspace=None,
+    catalogue=None,
+    node_identity=None,
 ):
     """Import the deployed module, construct its object, and load it.
 
@@ -195,9 +204,20 @@ def python_primitive(
         context, within, expected=expected_class, node_id=node_id
     )
     cls = getattr(module, expected_class)
-    return cls(session.spark(workspace), lakehouse=lakehouse).load(
-        fault_tolerant=fault_tolerant
-    )
+    primitive = cls(session.spark(workspace), lakehouse=lakehouse)
+    # The run's catalogue, and the identity the run already resolved. An object
+    # this one constructs inherits the same catalogue and resolves its own
+    # identity against it, so `Other__Thing(self)` needs no argument.
+    #
+    # Asked for rather than passed to the constructor, because `cls(spark,
+    # lakehouse=...)` is the whole contract a deployed primitive has to meet. One
+    # with nowhere to put a catalogue records nothing and is left alone.
+    take = getattr(primitive, "with_catalogue", None)
+    if take is not None and catalogue is not None:
+        take(catalogue, identity=node_identity)
+        # The run records what settled, so the primitive does not record itself.
+        return primitive.load(fault_tolerant=fault_tolerant, update_catalogue=False)
+    return primitive.load(fault_tolerant=fault_tolerant)
 
 
 def _endpoint_refresh(node, session, workspace):

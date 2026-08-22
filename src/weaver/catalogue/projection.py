@@ -41,7 +41,6 @@ from ..etl import PROCEDURE_TYPE, artefacts_by_identity, item_runtime_artefacts
 from .claims import catalogue_schema
 from .render import InstallationScope, Row, column_set
 from .tables import (
-    CATALOGUE_TABLES,
     COLUMN_DICTIONARY,
     DEPENDENCY,
     FOLDER_DICTIONARY,
@@ -49,6 +48,7 @@ from .tables import (
     KEY_DICTIONARY,
     KEY_PRIMARY,
     KEY_UNIQUE,
+    PROJECTED_TABLES,
     REGISTRY,
     ROLE_DATA,
     ROLE_SHORTCUT,
@@ -159,7 +159,7 @@ def project_item_catalogue(
     )
     documents = [repository.source_documents[identity] for identity in retained]
     all_documents = tuple(repository.source_documents.values())
-    rows: dict[str, list[dict]] = {table.name: [] for table in CATALOGUE_TABLES}
+    rows: dict[str, list[dict]] = {table.name: [] for table in PROJECTED_TABLES}
 
     for identity, source in zip(retained, documents):
         common = _identity(scope, identity)

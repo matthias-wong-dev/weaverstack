@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"build {built.status}: bundle {built.bundle_id}")
         if built.status != "succeeded":
             for failure in built.errors:
-                print(f"  {failure.action_id}: {failure.error_message}")
+                print(f"  {failure.action_id}: {failure.message}")
             return 1
 
         loaded = weaver.load([lakehouse, warehouse], session=session)

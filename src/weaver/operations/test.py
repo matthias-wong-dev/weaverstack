@@ -157,7 +157,12 @@ def run_test(
     log = (
         None
         if dry_run
-        else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
+        else open_run_log(
+            state.catalogue,
+            workspace=workspace,
+            task_type=TASK_TYPE,
+            session=session,
+        )
     )
     with session.step("Execute"):
         result = runner.run(
@@ -167,6 +172,9 @@ def run_test(
             dispatch=_dispatch_collecting(collect=name is not None),
             on_node=None if log is None else log.submit,
         )
+    if log is not None:
+        with session.step("Record what the run did"):
+            state.catalogue.flush()
 
     return _reported(
         nodes=tuple(_as_validation_node(node) for node in result.nodes),

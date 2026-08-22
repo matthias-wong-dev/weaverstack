@@ -235,10 +235,49 @@ def plan_item_shortcuts(
     )
 
 
-def _key(declaration) -> str:
+def declaration_key(declaration) -> str:
     """How a declaration names its resolved source, where one is frozen."""
 
     return f"{declaration.owner}/{declaration.name}"
+
+
+@dataclass(frozen=True)
+class Reference:
+    """What a shortcut *is*, without being authored.
+
+    A declaration is an author's intent and carries a name written in the
+    ``Schema__Object`` convention. Weaver's own infrastructure references have no
+    author and live in the reserved ``_`` schema, which that convention cannot
+    spell — so they carry the destination directly and satisfy the same renderers.
+
+    :class:`~weaver.declaration.model.ShortcutDeclaration` already answers all of
+    this, so both go through :func:`view_statement` and :func:`shortcut_payload`
+    and there is one implementation of what each becomes.
+    """
+
+    owner: WeaverItemId
+    name: str
+    destination: WeaverDocumentId
+    shortcut_type: str
+    target: str
+    target_item_name: str
+    target_object: object
+    is_logical: bool = False
+
+    @property
+    def is_schema(self) -> bool:
+        return False
+
+    @property
+    def is_files(self) -> bool:
+        return self.destination.is_files
+
+    @property
+    def target_item(self):
+        from ..declaration.model import WAREHOUSE
+        from ..declaration.model import WeaverItemId as Item
+
+        return Item(WAREHOUSE, self.target_item_name)
 
 
 def _unsupported(
@@ -253,7 +292,7 @@ def _unsupported(
     if not declaration.is_logical:
         if declaration.is_view:
             return None
-        if _key(declaration) not in sources:
+        if declaration_key(declaration) not in sources:
             return (
                 "the physical target was not resolved when this bundle was "
                 "generated, so there is no address to point at"
@@ -326,7 +365,7 @@ def _shortcut_action(
         content = (
             json.dumps(
                 [
-                    _view_statement(declaration, source_target, logical_sources)
+                    view_statement(declaration, source_target, logical_sources)
                     for declaration, source_target in supported
                 ],
                 indent=2,
@@ -337,7 +376,7 @@ def _shortcut_action(
         filename = f"shortcuts-{item_slug}.tsql-batch.json"
         executor = "tsql_batch"
     else:
-        content = _shortcut_payload(
+        content = shortcut_payload(
             supported, sources=sources, logical_sources=logical_sources
         )
         filename = f"shortcuts-{item_slug}.shortcut.json"
@@ -355,8 +394,12 @@ def _shortcut_action(
     )
 
 
-def _view_statement(declaration, source_target, logical_sources) -> str:
+def view_statement(declaration, source_target, logical_sources=None) -> str:
     """A Warehouse shortcut, as the one statement that materialises it.
+
+    Public because Weaver's own infrastructure references become the same thing:
+    ``_.Bookmark`` in a built Warehouse is this statement over the catalogue's
+    table, and one implementation of "what a view shortcut is" is the point.
 
     The source is named by its three-part spelling, which is how a Fabric
     Warehouse reaches another item in the same workspace, and is frozen here for
@@ -376,11 +419,11 @@ def _view_statement(declaration, source_target, logical_sources) -> str:
     schema = _tsql_ident(destination.object_id.schema)
     name = _tsql_ident(destination.object_id.object)
     if declaration.is_logical:
-        source = logical_sources[destination]
+        source = (logical_sources or {})[destination]
         item_name = source_target.name
         source_object = source.object_id
     else:
-        item_name = declaration.target_item.item_name
+        item_name = _target_item_name(declaration)
         source_object = declaration.target_object
     source_sql = ".".join(
         _tsql_ident(part)
@@ -389,8 +432,11 @@ def _view_statement(declaration, source_target, logical_sources) -> str:
     return f"create or alter view {schema}.{name} as select * from {source_sql};"
 
 
-def _shortcut_payload(supported, *, sources, logical_sources) -> bytes:
+def shortcut_payload(supported, *, sources, logical_sources=None) -> bytes:
     """This item's Lakehouse shortcuts, as the frozen addresses they stand for.
+
+    Public for the reason :func:`view_statement` is: an infrastructure reference
+    is frozen the same way a declared one is.
 
     A bound source is named by target id: the installer already resolves every
     target the plan declares through its own environment, so it is addressed
@@ -410,7 +456,7 @@ def _shortcut_payload(supported, *, sources, logical_sources) -> bytes:
             "name": _destination_name(declaration),
         }
         if declaration.is_logical:
-            source = logical_sources[destination]
+            source = (logical_sources or {})[destination]
             entry.update(
                 {
                     "source": str(source),
@@ -421,7 +467,7 @@ def _shortcut_payload(supported, *, sources, logical_sources) -> bytes:
                 }
             )
         else:
-            resolved = sources[_key(declaration)]
+            resolved = sources[declaration_key(declaration)]
             entry.update(
                 {
                     "source": declaration.target,
@@ -456,6 +502,13 @@ def _destination_name(declaration) -> str:
     if declaration.is_schema:
         return declaration.name
     return declaration.destination.object_id.object
+
+
+def _target_item_name(declaration) -> str:
+    """The item a physical target names, however the reference spells it."""
+
+    named = getattr(declaration, "target_item_name", None)
+    return named if named is not None else declaration.target_item.item_name
 
 
 def _tsql_ident(name: str) -> str:

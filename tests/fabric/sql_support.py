@@ -19,6 +19,38 @@ class CatalogObject:
     kind: str
 
 
+#: The logical item a hand-installed load procedure belongs to. A procedure is
+#: keyed by it — its bookmark row carries the Registry's four-part identity — so
+#: a test names it rather than leaving it to a default.
+PROCEDURE_ITEM = ("Warehouse", "Reporting")
+
+
+def install_bookmark_reference(executor: SqlExecutor, catalogue: str) -> None:
+    """What a build gives every Warehouse it installs a load into.
+
+    The catalogue's ``_.Bookmark`` under that name. A procedure reads and writes
+    its own bookmark through it, so one installed by hand needs the same
+    reference a built one is given.
+    """
+
+    executor.execute_script("if schema_id(N'_') is null exec('create schema [_]');")
+    executor.execute_script(
+        "create or alter view [_].[Bookmark] as "
+        f"select * from [{catalogue}].[_].[Bookmark];"
+    )
+
+
+def forget_bookmark(schema: str, name: str) -> str:
+    """A statement removing one object's bookmark row, keyed as Registry keys it."""
+
+    item_type, item_name = PROCEDURE_ITEM
+    return (
+        "delete from [_].[Bookmark] "
+        f"where [Item type] = N'{item_type}' and [Item name] = N'{item_name}' "
+        f"and [Schema name] = N'{schema}' and [Object name] = N'{name}';\n"
+    )
+
+
 def populate_warehouse(executor: SqlExecutor, fixture: Path) -> None:
     executor.execute_script(fixture.read_text(encoding="utf-8"))
 

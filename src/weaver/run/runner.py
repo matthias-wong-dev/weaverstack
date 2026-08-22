@@ -195,7 +195,12 @@ class Runner:
             from .runtime_boundary import LazyRunScope, open_runtime_scope
 
             self._runtime_scope = LazyRunScope(
-                lambda: open_runtime_scope(session, workspace=self.workspace)
+                lambda: open_runtime_scope(
+                    session,
+                    workspace=self.workspace,
+                    # Read once for the run, handed to whatever imports a module.
+                    catalogue=self.state.catalogue,
+                )
             )
         return self._runtime_scope
 

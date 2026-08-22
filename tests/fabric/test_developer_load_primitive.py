@@ -70,8 +70,10 @@ results["imported"] = Raw__CustomerCsv.__name__
 # a helper module's data file arrives beside the module that reads it.
 results["lib"] = sorted(os.listdir(os.path.join(root, "lib", "data")))
 
-# The folder load, writing ordinary files to OneLake through the mount.
-export = Raw__CustomerCsv(spark, lakehouse=destination)
+# The folder load, writing ordinary files to OneLake through the mount. The
+# catalogue is named because a load records how far it got, and the workspace is
+# what says where it lives — nothing infers it.
+export = Raw__CustomerCsv(spark, lakehouse=destination, catalogue=workspace.catalogue)
 results["folder"] = export.load().as_row()
 # Two spellings of one location, and only one of them is a filesystem path.
 results["folder_path_is_mounted"] = not str(export.path()).startswith("abfss://")
@@ -88,7 +90,11 @@ results["sql_authored_module"] = DWG__NamedCustomer.__name__
 results["sql_authored_is_generated"] = (
     sys.modules[DWG__NamedCustomer.__module__].__doc__ or ""
 ).lstrip().startswith("Table ID: DWG.NamedCustomer")
-results["sql_authored_load"] = DWG__NamedCustomer(spark, lakehouse=destination).load().as_row()
+results["sql_authored_load"] = (
+    DWG__NamedCustomer(spark, lakehouse=destination, catalogue=workspace.catalogue)
+    .load()
+    .as_row()
+)
 
 emit(results)
 """
@@ -134,6 +140,8 @@ Incremental: true
         return staging, type(self).deletes
 
 
+# Freestanding: this probe is not part of the built estate, so it has no place in
+# the catalogue's record and needs none — it uses no bookmark.
 folder = Raw__ChangeFeedProbe(spark, lakehouse=destination)
 reject = folder.path().with_name(folder.path().name + "_Reject")
 
@@ -243,6 +251,7 @@ File key: "*.csv"
         return staging, []
 
 
+# Freestanding, as above: an ad-hoc probe the estate does not record.
 folder = Raw__FileKeyProbe(spark, lakehouse=destination)
 reject = folder.path().with_name(folder.path().name + "_Reject")
 

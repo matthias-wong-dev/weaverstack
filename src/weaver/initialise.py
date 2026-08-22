@@ -43,6 +43,8 @@ class InitialiseResult:
 
     @property
     def tables(self) -> tuple[str, ...]:
+        """Every ``_`` table this created, however each one is maintained."""
+
         return tuple(table.qualified for table in CATALOGUE_TABLES)
 
     def to_mapping(self) -> dict[str, Any]:

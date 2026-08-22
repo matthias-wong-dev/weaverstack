@@ -445,7 +445,12 @@ def test_a_warehouse_only_run_never_opens_a_runtime_scope():
 
     class Sql:
         def call_procedure(self, name, *, inputs, outputs):
-            return {column: 0 for column, *_ in outputs}
+            # Zero for every count, and no bookmark instant: this stub stands in
+            # for the transport, so it answers in the shapes the transport does.
+            return {
+                column: None if type_name.startswith("datetime") else 0
+                for column, type_name in outputs
+            }
 
     class Session(_Recording):
         def sql_executor(self, target, *, workspace=None):

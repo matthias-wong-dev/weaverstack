@@ -144,6 +144,14 @@ def physical_bundle(
         selected_for_build=selected,
         selected_loads=loads,
         registered={},
+        catalogue_target=bound_target(
+            id="catalogue",
+            kind="warehouse",
+            item_id="Weaver",
+            workspace_name=workspace_name,
+            logical_item_name="_weaver",
+            logical_item_type="Warehouse",
+        ),
     )
     sequences, payloads, target_changes = enumerate_stages(list(planned.stages))
     plan = BuildPlan(

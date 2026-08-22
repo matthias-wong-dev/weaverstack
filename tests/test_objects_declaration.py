@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from support.catalogues import never
 from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
@@ -280,7 +281,11 @@ def _loaded(spark, monkeypatch, table):
         return LoadResult(succeeded=True)
 
     monkeypatch.setattr(table_load, "load_table", load_table)
-    result = table(spark, lakehouse=LAKEHOUSE).load()
+    result = (
+        table(spark, lakehouse=LAKEHOUSE)
+        .with_catalogue(never(table.__name__.replace("__", ".")))
+        .load()
+    )
     return result, seen
 
 
@@ -333,7 +338,9 @@ def test_a_non_incremental_table_returning_a_tuple_is_refused(spark, monkeypatch
     table = _customer((object(), []), incremental=False)
 
     with pytest.raises(LoadError, match="returns staging on its own"):
-        table(spark, lakehouse=LAKEHOUSE).load()
+        table(spark, lakehouse=LAKEHOUSE).with_catalogue(
+            never(table.__name__.replace("__", "."))
+        ).load()
 
 
 # --- views ------------------------------------------------------------------

@@ -58,6 +58,19 @@ RETIRED = (
     "_build_desktop_fabric",
     # Compatibility wrappers, deleted with the migration they spanned.
     "build_uploaded_item_repository",
+    # What Static used to ask. The record of whether an object has been loaded is
+    # its bookmark, not its contents: a table somebody populated by hand has not
+    # been loaded, and a table a clean load emptied has been.
+    "table_is_populated",
+    "folder_is_populated",
+    # Bookmark-specific state, carried and resolved beside the catalogue it is a
+    # table of. The `_` schema is one thing, so one object reads and writes it
+    # and one payload carries it: see `weaver.catalogue.state.Catalogue`.
+    "BookmarkContext",
+    "RunBookmarks",
+    "with_bookmarks",
+    "read_installed_bookmarks",
+    "resolve_installed_object",
 )
 
 

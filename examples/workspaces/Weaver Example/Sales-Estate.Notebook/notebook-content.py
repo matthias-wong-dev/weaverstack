@@ -216,9 +216,16 @@ else:
 
 # ## Or run one primitive on its own
 #
-# Every deployed object is independently runnable — no orchestrator, no
-# catalogue, no bundle. `Sales__OrderSummary` is the generated form of the
-# authored `Sales.OrderSummary.sql`, and nothing about calling it differs.
+# Every deployed object is independently runnable — no orchestrator and no
+# bundle. `Sales__OrderSummary` is the generated form of the authored
+# `Sales.OrderSummary.sql`, and nothing about calling it differs.
+#
+# Naming the catalogue makes the object *catalogue-anchored*: it has a place in
+# the estate's own record of itself, so a clean load advances its bookmark and a
+# `Static` object can read that record. `Sales__OrderSummary(spark)` would be
+# freestanding — it runs, and records nothing. A constructor argument rather than
+# a `load()` one, because an authored `read()` is called by Weaver and takes
+# nothing, so whatever it may reach is set before the load begins.
 
 # CELL ********************
 
@@ -236,7 +243,11 @@ sys.path.insert(0, f"{destination.files_root()}/_/Load")
 
 from Sales__OrderSummary import Sales__OrderSummary
 
-print(Sales__OrderSummary(spark, lakehouse=destination).load().as_row())
+print(
+    Sales__OrderSummary(spark, lakehouse=destination, catalogue="Warehouse/Weaver")
+    .load()
+    .as_row()
+)
 
 # METADATA ********************
 

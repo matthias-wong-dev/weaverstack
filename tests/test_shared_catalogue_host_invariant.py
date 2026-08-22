@@ -27,7 +27,7 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.catalogue import (
-    CATALOGUE_TABLES,
+    PROJECTED_TABLES,
     InstallationScope,
     render_delete_obsolete,
     render_delete_scope,
@@ -79,7 +79,7 @@ def _statements(table) -> list[str]:
     return [statement for statement in found if statement]
 
 
-@pytest.mark.parametrize("table", CATALOGUE_TABLES, ids=lambda table: table.name)
+@pytest.mark.parametrize("table", PROJECTED_TABLES, ids=lambda table: table.name)
 @weaver_test()
 def test_every_rendered_statement_addresses_only_the_reserved_schema(table):
     """The whole of the shared-host guarantee, per table."""
@@ -94,7 +94,7 @@ def test_every_rendered_statement_addresses_only_the_reserved_schema(table):
 def test_no_rendered_statement_names_a_neighbouring_schema(neighbour):
     """A user's own schemas in the same Warehouse are not Weaver's to touch."""
 
-    for table in CATALOGUE_TABLES:
+    for table in PROJECTED_TABLES:
         for statement in _statements(table):
             assert f"[{neighbour}]." not in statement
 
@@ -123,7 +123,7 @@ def test_nothing_the_catalogue_renders_drops_a_schema_or_a_table():
     """
 
     rendered = [
-        statement for table in CATALOGUE_TABLES for statement in _statements(table)
+        statement for table in PROJECTED_TABLES for statement in _statements(table)
     ] + list(prune_installation(InstallationScopes((SCOPE,))))
 
     for statement in rendered:
@@ -139,7 +139,7 @@ def test_the_reserved_schema_is_the_one_weaver_claims():
     """Stated once, so the rest of this module has something to compare against."""
 
     assert CATALOGUE_SCHEMA == "_"
-    assert all(table.qualified.startswith("_.") for table in CATALOGUE_TABLES)
+    assert all(table.qualified.startswith("_.") for table in PROJECTED_TABLES)
 
 
 # --- what the catalogue item's inventory may see ------------------------------

@@ -8,8 +8,8 @@ from support.weaver_test import weaver_test
 from weaver.build_bundle.catalogue_actions import _claim_statements
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue import (
-    CATALOGUE_TABLES,
     FOLDER_DICTIONARY,
+    PROJECTED_TABLES,
     REGISTRY,
     TABLE_DICTIONARY,
 )
@@ -55,7 +55,7 @@ def _state(*rows):
                 ),
             }
         },
-        present_tables=frozenset(table.name for table in CATALOGUE_TABLES),
+        present_tables=frozenset(table.name for table in PROJECTED_TABLES),
     )
 
 

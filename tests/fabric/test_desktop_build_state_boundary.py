@@ -49,11 +49,19 @@ def recorded_session(fabric_workspace, livy_session):
         yield session
 
 
-@weaver_test(remote=True, resources={"livy", "onelake", "rest", "tds"})
+@weaver_test(remote=True, resources={"onelake", "rest", "tds"})
 def test_build_state_is_read_without_importing_weaver_in_fabric(
     recorded_session, fabric_workspace, fabric_target_lakehouse
 ):
-    """The acceptance condition: state read from a desktop, planning-ready."""
+    """The acceptance condition: state read from a desktop, planning-ready.
+
+    Spark is not declared, and that is a fact about the estate rather than about
+    the read: the read asks Spark for a Lakehouse's views once per schema
+    storage discovered, so a target left empty by an earlier module has none to
+    ask about. That the views come over Spark is
+    `test_a_lakehouse_inventory_lists_views_over_spark_sql`, which asks for a
+    named schema and so does not depend on what is there.
+    """
 
     bindings = item_bindings(("Lakehouse/Sales", fabric_target_lakehouse.name))
     state = read_build_state(

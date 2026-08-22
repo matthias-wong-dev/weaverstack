@@ -50,7 +50,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "WarehouseBinding, build_item_repository_source, "
         "effective_item_bindings)\n"
         "from weaver.sessions import NotebookSession\n"
-        "from weaver.catalogue.tables import CATALOGUE_TABLES, LOG\n"
+        "from weaver.catalogue.tables import CATALOGUE_TABLES\n"
         "from weaver.catalogue.connection import catalogue_connection\n"
         "from weaver.resolution import resolver_for, store_for\n"
         f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
@@ -91,7 +91,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "        for action in report.action_results() if action.status == 'failed'],\n"
         "    'tables': sorted(catalogue.shape()),\n"
         "    'expected': sorted(\n"
-        "        table.name.casefold() for table in (*CATALOGUE_TABLES, LOG)),\n"
+        "        table.name.casefold() for table in CATALOGUE_TABLES),\n"
         "    'target_names': [dict(row)['Target name'] for row in installation],\n"
         "    'registry_count': dict(registry[0])['n'],\n"
         "    'table_count': len(CATALOGUE_TABLES),\n"
@@ -100,10 +100,10 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
 
     payload = livy_session.run(body).payload
     assert payload["status"] == "succeeded", payload["errors"]
-    # Every catalogue table and `_.Log`, physically present in the Warehouse.
+    # Every catalogue table, physically present in the Warehouse.
     assert payload["tables"] == payload["expected"]
     # The Installation row records the *item*: which Warehouse holds `_`.
     assert payload["target_names"] == [str(fabric_workspace.catalogue_item)]
-    # Every catalogue table, plus `_.Log`.
-    assert payload["registry_count"] == payload["table_count"] + 1
+    # One Registry row per catalogue table it built.
+    assert payload["registry_count"] == payload["table_count"]
     assert payload["version"]

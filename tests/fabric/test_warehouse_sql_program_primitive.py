@@ -28,10 +28,15 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from sql_support import (
+    PROCEDURE_ITEM,
+    forget_bookmark,
+    install_bookmark_reference,
+)
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
-from weaver.declaration.model import WAREHOUSE
+from weaver.declaration.model import WAREHOUSE, WeaverItemId
 from weaver.declaration.tsql_load import RESULT_PARAMETERS
 from weaver.runtime import LoadResult
 
@@ -146,18 +151,26 @@ def _drop_object(executor, name: str) -> None:
 
 
 @pytest.fixture(scope="module")
-def warehouse(clean_disposable_warehouse):
+def warehouse(
+    clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
+):
     """The schemas and source tables every case here reads from.
 
     Module-scoped and shared: each test installs its own object and empties the
     sources it uses, so one wipe serves all of them.
+
+    The catalogue is asked for because a generated procedure reads and writes its
+    own bookmark: ``_.Bookmark`` has to be there for the reference to resolve,
+    and another module's wipe may have taken the whole ``_`` schema with it.
     """
 
+    fabric_initialise_catalogue()
     executor = clean_disposable_warehouse.executor
     executor.execute_script(
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
+    install_bookmark_reference(executor, fabric_workspace.catalogue_item.name)
     for table, columns in (
         (
             "ProgramCustomer",
@@ -184,7 +197,11 @@ def _install(executor, name: str, source: str):
     document = _document(name, source)
     _drop_object(executor, name)
     executor.execute_script(document.create_ddl().content)
-    executor.execute_script(document.create_load().payload.decode("utf-8"))
+    executor.execute_script(
+        document.create_load(item=WeaverItemId(*PROCEDURE_ITEM)).payload.decode("utf-8")
+    )
+    # Each case starts from "never cleanly loaded", whatever the last one left.
+    executor.execute_script(forget_bookmark(SCHEMA, name))
     return document
 
 

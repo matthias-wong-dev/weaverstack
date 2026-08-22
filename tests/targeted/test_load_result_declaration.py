@@ -61,6 +61,7 @@ def test_a_row_is_read_back_whatever_the_transport_called_its_types():
         "rows_deleted": 0,
         "rows_rejected": 2,
         "error_message": None,
+        "bookmark_datetime": None,
     }
 
     result = LoadResult.from_row(row)
@@ -68,6 +69,42 @@ def test_a_row_is_read_back_whatever_the_transport_called_its_types():
     assert result.succeeded is True
     assert result.rows_read == 10
     assert result.rows_rejected == 2
+
+
+@weaver_test()
+def test_the_reported_bookmark_instant_is_always_aware_utc():
+    """Neither transport carries a zone, and both took the instant in UTC.
+
+    A Warehouse procedure reports a ``datetime2`` from ``sysutcdatetime()`` and a
+    Python primitive reports ISO text through a Livy payload. A naive value read
+    as local time would move a bookmark by hours.
+    """
+
+    from datetime import datetime, timezone
+
+    def row(value):
+        return {
+            "succeeded": 1,
+            "rows_read": 0,
+            "rows_inserted": 0,
+            "rows_updated": 0,
+            "rows_deleted": 0,
+            "rows_rejected": 0,
+            "error_message": None,
+            "bookmark_datetime": value,
+        }
+
+    expected = datetime(2026, 8, 22, 4, 5, 6, tzinfo=timezone.utc)
+
+    assert LoadResult.from_row(
+        row(datetime(2026, 8, 22, 4, 5, 6))
+    ).bookmark_datetime == (expected)
+    assert LoadResult.from_row(row("2026-08-22T04:05:06")).bookmark_datetime == expected
+    assert (
+        LoadResult.from_row(row("2026-08-22T04:05:06+00:00")).bookmark_datetime
+        == expected
+    )
+    assert LoadResult.from_row(row(None)).bookmark_datetime is None
 
 
 @weaver_test()
