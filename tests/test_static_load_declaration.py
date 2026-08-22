@@ -201,50 +201,6 @@ class _TableUnderTest(Table):
         raise AssertionError("read() must not run when the gate closed")
 
 
-def _counting(monkeypatch, module_name: str, attribute: str, answer: bool):
-    """Replace a population check with one that records being asked."""
-
-    import importlib
-
-    module = importlib.import_module(module_name)
-    calls = []
-
-    def counted(*args, **kwargs):
-        calls.append(True)
-        return answer
-
-    monkeypatch.setattr(module, attribute, counted)
-    return calls
-
-
-@weaver_test()
-def test_no_table_asks_whether_its_target_is_populated(monkeypatch, tmp_path):
-    """What the target holds decides nothing, static or not.
-
-    A table somebody populated by hand has not been loaded, and a table a clean
-    load emptied has been. The bookmark is the record, so the target is never
-    counted to answer the question — which also removes a Spark action from every
-    ordinary load in an estate.
-    """
-
-    calls = _counting(
-        monkeypatch, "weaver.runtime.table_load", "table_is_populated", True
-    )
-
-    class Sales__Country(_TableUnderTest):
-        static = False
-
-    table = Sales__Country(
-        _Session(), lakehouse=mounted_lakehouse("LH", tmp_path), bookmarks=never()
-    )
-    # It goes on to read(), which this double refuses — the point is only that
-    # it got there without asking the target anything.
-    with pytest.raises(AssertionError, match="read\\(\\) must not run"):
-        table.load()
-
-    assert calls == []
-
-
 @weaver_test()
 def test_a_bookmarked_static_table_reports_a_successful_load_of_nothing(tmp_path):
     class Sales__Country(_TableUnderTest):

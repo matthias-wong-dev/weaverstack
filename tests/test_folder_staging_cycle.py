@@ -674,32 +674,3 @@ def test_a_non_static_folder_reloads_whatever_the_destination_holds(export):
 
     assert result.rows_updated == 1
     assert (export.path() / "seed.csv").read_text(encoding="utf-8") == "second run"
-
-
-@weaver_test()
-def test_no_load_asks_whether_the_destination_is_populated(export, monkeypatch):
-    """What the destination holds decides nothing, static or not.
-
-    A folder somebody populated by hand has not been loaded, and a folder a
-    clean load emptied has been. The bookmark is the record, so the managed tree
-    is never walked to answer the question.
-    """
-
-    import weaver.runtime.folder_load as module
-
-    asked = []
-    monkeypatch.setattr(
-        module,
-        "folder_is_populated",
-        lambda *a, **k: asked.append(True) or True,
-    )
-    export.files = {"a.csv": "x"}
-
-    assert export.load().rows_inserted == 1
-
-    export.static = True
-    Sales__Export.seen = []
-    export.files = {"b.csv": "y"}
-    export.load()
-
-    assert asked == []

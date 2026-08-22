@@ -111,18 +111,6 @@ MERGE_CONFLICT_MESSAGE = (
 )
 
 
-def table_is_populated(spark, *, contract: LoadContract, lakehouse) -> bool:
-    """Whether the target already holds a row.
-
-    A static object's load asks whether it has been seeded, so the query stops
-    at one row rather than counting. An empty table is not populated: a build
-    guarantees the table exists, and a static load puts the first rows in it.
-    """
-
-    target = lakehouse.qualify(contract.object_id.schema, contract.object_id.object)
-    return bool(spark.sql(f"SELECT 1 FROM {target} LIMIT 1").take(1))
-
-
 def load_table(
     spark,
     *,

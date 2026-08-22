@@ -58,6 +58,11 @@ RETIRED = (
     "_build_desktop_fabric",
     # Compatibility wrappers, deleted with the migration they spanned.
     "build_uploaded_item_repository",
+    # What Static used to ask. The record of whether an object has been loaded is
+    # its bookmark, not its contents: a table somebody populated by hand has not
+    # been loaded, and a table a clean load emptied has been.
+    "table_is_populated",
+    "folder_is_populated",
 )
 
 

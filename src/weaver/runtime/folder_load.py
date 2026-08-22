@@ -113,12 +113,6 @@ class StagingFolder:
         return False
 
 
-def folder_is_populated(destination: str | Path, patterns) -> bool:
-    """Whether the destination contains a file matching this folder's file key."""
-
-    return bool(managed_relative_files(Path(destination), patterns))
-
-
 def new_staging_folder(destination: str | Path, staging: str | Path) -> StagingFolder:
     """Reset and issue the object-local staging directory."""
 
@@ -707,7 +701,6 @@ __all__ = [
     "StagingFolder",
     "deleted_since",
     "files_since",
-    "folder_is_populated",
     "latest_files",
     "load_folder",
     "managed_relative_files",
