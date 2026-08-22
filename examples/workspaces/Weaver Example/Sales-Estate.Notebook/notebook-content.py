@@ -244,9 +244,7 @@ sys.path.insert(0, f"{destination.files_root()}/_/Load")
 from Sales__OrderSummary import Sales__OrderSummary
 
 print(
-    Sales__OrderSummary(
-        spark, lakehouse=destination, catalogue="Warehouse/Weaver"
-    )
+    Sales__OrderSummary(spark, lakehouse=destination, catalogue="Warehouse/Weaver")
     .load()
     .as_row()
 )
