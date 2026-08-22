@@ -180,6 +180,9 @@ def generate_item_build_bundle(
         items=tuple(target_by_item),
         selected_for_build=selected_for_build,
         removed=removed,
+        # A catalogue holding nothing is one this bundle is creating, so there is
+        # no bookmark to reset and none to prune.
+        installed=bool(catalogue.present_tables),
         catalogue_target=catalogue_target,
     )
     if bookmarks is not None:
@@ -438,17 +441,6 @@ def plan_item_build(
         stages.append(schemas)
     if shortcuts.stage is not None:
         stages.append(shortcuts.stage)
-    reference = render_bookmark_reference(
-        repository,
-        item=item,
-        target=target,
-        inventory=inventory,
-        catalogue_target=catalogue_target,
-        selected_for_build=selected_for_build,
-        bookmark_source=bookmark_source,
-    )
-    if reference is not None:
-        stages.append(reference)
     stages.extend(
         item_build_stages(
             repository,
@@ -470,6 +462,19 @@ def plan_item_build(
     stages.extend(
         item_load_removals(removed, item=item, target=target, registered=registered)
     )
+    # Behind the artefacts, in the phase they are installed in: the reference
+    # exists for them, and nothing built reads a bookmark.
+    reference = render_bookmark_reference(
+        repository,
+        item=item,
+        target=target,
+        inventory=inventory,
+        catalogue_target=catalogue_target,
+        selected_for_build=selected_for_build,
+        bookmark_source=bookmark_source,
+    )
+    if reference is not None:
+        stages.append(reference)
     return PlannedItem(
         stages=tuple(stages),
         omitted=shortcuts.omitted,

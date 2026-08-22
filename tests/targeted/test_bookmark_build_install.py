@@ -41,7 +41,7 @@ from support.workspaces import WORKSPACE
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
 from weaver.build_bundle.bookmarks import bookmark_statements
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import BOOKMARK_SENTINEL_TEXT
+from weaver.catalogue.tables import BOOKMARK_SENTINEL_TEXT, CATALOGUE_TABLES
 from weaver.declaration import parse_item_repository
 from weaver.etl import item_bookmarkable_objects
 from weaver.locations import Location
@@ -56,6 +56,14 @@ def estate(tmp_path):
     return full_estate(tmp_path / "repo")
 
 
+#: A catalogue holding no rows but every table. The distinction is the one the
+#: bookmark stage turns on: a catalogue holding *nothing* is one the same bundle
+#: is creating, and has no bookmarks to reconcile.
+EMPTY = Catalogue(
+    {}, present_tables=frozenset(table.name for table in CATALOGUE_TABLES)
+)
+
+
 def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
     return generate_item_build_bundle(
         repository,
@@ -65,7 +73,7 @@ def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
         target_inventories=inventories
         if inventories is not None
         else estate_inventories(repository, empty=True),
-        catalogue=catalogue if catalogue is not None else Catalogue({}),
+        catalogue=catalogue if catalogue is not None else EMPTY,
         catalogue_binding=CATALOGUE,
     )
 
@@ -199,6 +207,19 @@ def test_a_build_that_changes_one_object_resets_only_that_one(estate, tmp_path):
 
     assert "N'DWG', N'Customer'" in merge
     assert "N'Files/Raw', N'CustomerCsv'" not in merge
+
+
+@weaver_test()
+def test_a_build_creating_the_catalogue_reconciles_no_bookmarks(estate, tmp_path):
+    """The bootstrap case: the table this would write is in the same bundle.
+
+    Not a silent skip. A catalogue holding nothing has never had anything
+    installed into it, so there is no row to reset and none to prune.
+    """
+
+    bundle = _bundle(estate, tmp_path, catalogue=Catalogue({}))
+
+    assert _bookmark_actions(bundle) == []
 
 
 # --- where they sit ------------------------------------------------------------

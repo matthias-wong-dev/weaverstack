@@ -175,7 +175,12 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
     )
     actions = actions_of(planned, "load")
 
-    assert [action.kind for action in actions] == ["build_procedure"]
+    # The reference to the catalogue's `_.Bookmark` shares this phase, because
+    # it exists for the procedure rather than for anything the build made.
+    assert [action.kind for action in actions] == [
+        "build_procedure",
+        "create_bookmark_reference",
+    ]
     assert actions[0].executor == "tsql"
     assert actions[0].resource_node_id.endswith("procedure:_/Load Sales.Customer")
 
@@ -260,7 +265,12 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
         if actions[0].payload in stage.payloads
     ).decode()
 
-    assert [action.kind for action in actions] == ["drop_procedure"]
+    # The reference to the catalogue's `_.Bookmark` shares this phase; the item
+    # still declares a loadable object, so it is still wanted.
+    assert [action.kind for action in actions] == [
+        "drop_procedure",
+        "create_bookmark_reference",
+    ]
     assert statement == "drop procedure if exists [_].[Load Sales.Retired];\n"
 
 

@@ -42,7 +42,7 @@ from .models import (
     InstallAction,
 )
 from .payloads import sha256_hex
-from .stages import CATALOGUE, SHORTCUT, PlannedStage
+from .stages import CATALOGUE, LOAD, PlannedStage
 from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 
 #: The error a build raises when the catalogue holds no ``_.Bookmark`` table.
@@ -83,14 +83,23 @@ def bookmark_statements(
     items: Sequence[WeaverItemId],
     selected_for_build: Iterable[WeaverDocumentId],
     removed: Iterable[WeaverDocumentId] = (),
+    installed: bool = True,
 ) -> tuple[str, ...]:
     """The bookmark reconciliation statements for one build, in execution order.
 
-    Empty in two cases, and both matter. A build of the built-in catalogue item
-    reconciles nothing that can hold a bookmark. And a build with nothing to
-    build and nothing to remove has nothing to say about bookmarks: an
-    unchanged repository produces an empty bundle, so the statements are issued
-    when the build acts, not on every run.
+    Empty in three cases, and each matters.
+
+    A build of the built-in catalogue item reconciles nothing that can hold a
+    bookmark.
+
+    A build with nothing to build and nothing to remove has nothing to say about
+    bookmarks: an unchanged repository produces an empty bundle, so the
+    statements are issued when the build acts, not on every run.
+
+    And a build against a catalogue that holds nothing has no bookmarks to
+    reconcile — it is creating the table in this same bundle, and every object it
+    installs is new. Not a silent skip: there is no row to reset and none to
+    prune, because nothing has ever been installed.
 
     When they are issued the prune is a full reconciliation of the scope rather
     than a delete of the objects this build noticed, so a row left behind by an
@@ -99,7 +108,7 @@ def bookmark_statements(
 
     scoped = tuple(item for item in items if not _is_builtin(item))
     selected = set(selected_for_build)
-    if not scoped or not (selected or set(removed)):
+    if not scoped or not installed or not (selected or set(removed)):
         return ()
 
     declared: dict[WeaverItemId, tuple[WeaverDocumentId, ...]] = {
@@ -134,6 +143,7 @@ def render_bookmark_reconciliation(
     items: Sequence[WeaverItemId],
     selected_for_build: Iterable[WeaverDocumentId],
     removed: Iterable[WeaverDocumentId] = (),
+    installed: bool = True,
     catalogue_target,
 ) -> PlannedStage | None:
     """The one stage that reconciles ``_.Bookmark`` ahead of physical work."""
@@ -143,6 +153,7 @@ def render_bookmark_reconciliation(
         items=items,
         selected_for_build=selected_for_build,
         removed=removed,
+        installed=installed,
     )
     if not statements:
         return None
@@ -212,8 +223,11 @@ def render_bookmark_reference(
 
     Weaver runtime infrastructure rather than a declared shortcut: nothing
     authored it and it is not published as a ``_.Shortcut`` row. It is created in
-    the shortcut phase for the reason declared shortcuts are — before the
-    documents written against the namespace it completes.
+    the load phase, with the artefacts it exists for. Not with the declared
+    shortcuts, which precede an item's documents: nothing built reads a bookmark,
+    only a load does — and on the build that creates the catalogue, the table
+    this points at is built in the same bundle and is not there yet when the
+    shortcut phase runs.
 
     A generated Warehouse load procedure reads and writes its own bookmark, and
     it says ``[_].[Bookmark]`` to do it. In the Warehouse the catalogue lives in
@@ -340,7 +354,10 @@ def _stage(
         payload_sha256=sha256_hex(content),
     )
     return PlannedStage(
-        phase=SHORTCUT,
+        phase=LOAD,
+        # Behind the artefacts, which share this phase at index 0. Order within
+        # it does not matter: nothing here runs, and a procedure's reference to
+        # ``[_].[Bookmark]`` resolves when it is called rather than installed.
         index=1,
         slug=SLUG,
         description=description,

@@ -20,6 +20,8 @@ Build does not populate those objects with source data. It never calls an
 object's `read()` implementation, samples operational input, executes merge
 policy, or advances a bookmark. Those are load responsibilities.
 
+It does *reset* a bookmark, which is the opposite decision — section 11d.
+
 > Build creates and reconciles structure. Load moves and transforms data.
 
 Installing an item's load *code* is on the build side of that line, and the
@@ -627,6 +629,39 @@ behind for a diff to notice.
 > are deterministic proxies, and the template versions exist so replacing them
 > later invalidates precisely what changed.
 
+### 11d. Bookmarks
+
+`_.Bookmark` records how far each loadable object has been loaded, and a build
+invalidates that record for anything it replaces. Two statements against the
+catalogue Warehouse, in one action:
+
+```text
+delete the rows of objects this build no longer loads
+reset to the sentinel every loadable object it rebuilds
+```
+
+They run **before any physical action**, and that ordering is the safety
+property. A reset makes the next load read everything; a bookmark left advanced
+over a table that was dropped and recreated makes it read almost nothing. A build
+that fails in between leaves work to repeat rather than rows that will never
+arrive.
+
+Which objects can hold a bookmark comes from the load artefacts the item installs,
+so it cannot drift from what has something to run: a Weaver-loadable Table or
+Folder, never a view, never a table declaring `Has load procedure: false`, never a
+runtime artefact, never a validation.
+
+The statements are issued when a build acts rather than on every run, so an
+unchanged repository still produces an empty bundle. The scope is the items the
+build reconciles: rows belonging to an item the build was not pointed at are
+another build's to maintain. The batch refuses to run at all if the catalogue
+holds no `_.Bookmark`, rather than quietly doing no bookmark work.
+
+A build also gives every target it installs a load into the catalogue's
+`_.Bookmark` under that name — a view in a Warehouse, a OneLake shortcut in a
+Lakehouse — created in the shortcut phase with the declared shortcuts, and in the
+prune keep-set so it goes when the item's last loadable object does.
+
 ## 12. Bundle execution order
 
 A build is an ordered series of **item** builds. The item graph is the outer
@@ -634,6 +669,7 @@ structure; the document graph orders work inside each item:
 
 ```text
 catalogue claim removal, when required
+bookmark reconciliation, when the build acts
 
 item layer 0
     producer item A

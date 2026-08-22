@@ -23,8 +23,12 @@ Notes: |
   missing from tonight's file has not been cancelled, it is simply older than
   the window. Cancellations arrive as an explicit delete instead.
 
+  The read is incremental too: it opens only the export files that arrived
+  since this table last loaded cleanly, rather than every file ever kept.
+
 Revision notes:
   - 2026-08-03 Created.
+  - 2026-08-22 Read only the exports that arrived since the last clean load.
 """
 
 from Files.Sales__OrderExport import Sales__OrderExport
@@ -34,13 +38,26 @@ from weaver import Table
 
 class Sales__Order(Table):
     def read(self):
-        # spark_path(), because Spark is what reads it: on Fabric that is
-        # the abfss:// form, which pathlib cannot express. path() is the
-        # mounted Path for ordinary Python — see the folder's own module.
-        exported = Sales__OrderExport(self).spark_path()
+        export = Sales__OrderExport(self)
+        # `self.bookmark` is the UTC instant immediately before this table's most
+        # recent clean load began, and the folder records when each of its files
+        # changed — so the two compose into "what has arrived since". A table
+        # that has never loaded cleanly carries the sentinel, and every file is
+        # newer than that, so the first load reads the lot.
+        arrived = export.files_since(self.bookmark)
+        if not arrived:
+            # Nothing new. An incremental table's no-op is its own shape with no
+            # rows, and no order to retire.
+            return self.empty_dataframe(), None
+
+        # spark_path(), because Spark is what reads it: on Fabric that is the
+        # abfss:// form, which pathlib cannot express. The keys of files_since()
+        # are the mounted paths for ordinary Python, so only the names carry
+        # across — see the folder's own module.
+        root = export.spark_path()
         rows = (
             self.spark.read.option("header", True)
-            .csv(exported)
+            .csv([f"{root}/{path.name}" for path in sorted(arrived)])
             .selectExpr(
                 "`Order id`",
                 "`Customer id`",
