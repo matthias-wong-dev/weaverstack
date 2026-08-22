@@ -206,11 +206,11 @@ def test_a_bookmarked_static_table_reports_a_successful_load_of_nothing(tmp_path
     class Sales__Country(_TableUnderTest):
         static = True
 
-    result = Sales__Country(
-        _Session(),
-        lakehouse=mounted_lakehouse("LH", tmp_path),
-        bookmarks=loaded("Sales.Country"),
-    ).load()
+    result = (
+        Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
+        .with_bookmarks(loaded("Sales.Country"))
+        .load()
+    )
 
     assert result.succeeded
     assert result.rows_read == 0
@@ -227,8 +227,8 @@ def test_a_static_table_with_no_bookmark_loads(tmp_path):
         static = True
 
     table = Sales__Country(
-        _Session(), lakehouse=mounted_lakehouse("LH", tmp_path), bookmarks=never()
-    )
+        _Session(), lakehouse=mounted_lakehouse("LH", tmp_path)
+    ).with_bookmarks(never())
 
     with pytest.raises(AssertionError, match="read\\(\\) must not run"):
         table.load()

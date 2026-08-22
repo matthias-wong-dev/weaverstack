@@ -60,8 +60,8 @@ def landing(tmp_path):
     Sales__Landing.incremental = True
     Sales__Landing.static = False
     return Sales__Landing(
-        object(), lakehouse=mounted_lakehouse("Sales", tmp_path), bookmarks=never()
-    )
+        object(), lakehouse=mounted_lakehouse("Sales", tmp_path)
+    ).with_bookmarks(never())
 
 
 def _documents(folder: Folder) -> list[Path]:
@@ -272,10 +272,8 @@ def test_a_bookmarked_static_folder_creates_no_later_event(landing):
     landing.load()
     before = _documents(landing)
 
-    already = Sales__Landing(
-        object(),
-        lakehouse=landing.lakehouse,
-        bookmarks=loaded("Sales.Landing", files=True),
+    already = Sales__Landing(object(), lakehouse=landing.lakehouse).with_bookmarks(
+        loaded("Sales.Landing", files=True)
     )
     already.static = True
     already.files = {"seed.csv": "changed"}

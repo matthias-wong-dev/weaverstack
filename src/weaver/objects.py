@@ -40,7 +40,9 @@ class WeaverObject:
 
     ``catalogue`` names the Weaver catalogue in the ordinary target grammar,
     ``"Warehouse/Weaver"``. It is what makes ``self.bookmark`` answerable for a
-    load nothing is orchestrating; a run supplies the same thing itself.
+    load nothing is orchestrating; a run supplies the same thing through
+    :meth:`with_bookmarks` instead, because what a run knows is not something an
+    author should have to accept an argument for.
     """
 
     def __init__(
@@ -49,7 +51,6 @@ class WeaverObject:
         *,
         lakehouse: Lakehouse | None = None,
         catalogue: str | None = None,
-        bookmarks: Any = None,
     ) -> None:
         inherited = None
         if isinstance(spark, WeaverObject):
@@ -92,7 +93,7 @@ class WeaverObject:
 
         #: What this object needs to answer :attr:`bookmark`, or None. Private:
         #: authored code asks for the bookmark, not for how it was obtained.
-        self._bookmarks = with_catalogue(bookmarks or inherited, catalogue)
+        self._bookmarks = with_catalogue(inherited, catalogue)
         #: The bookmark resolved for the load in progress. One resolution per
         #: load, so a ``read()`` that mentions ``self.bookmark`` twice reaches
         #: the catalogue once — and so the Static gate and the read can never
@@ -114,6 +115,20 @@ class WeaverObject:
         return "{}.{}".format(*self.identity)
 
     # --- how far this object has been loaded ------------------------------
+
+    def with_bookmarks(self, context: Any) -> "WeaverObject":
+        """Take the bookmarks a run read, and return this object.
+
+        How an orchestrated run supplies what a standalone load names with
+        ``catalogue=``. Set after construction rather than passed to it, because
+        a deployed primitive's constructor is a contract — ``cls(spark,
+        lakehouse=...)`` — and a class meeting only that contract must keep
+        working.
+        """
+
+        self._bookmarks = context
+        self._resolved_bookmark = None
+        return self
 
     #: Whether this object's catalogue identity carries the ``Files/`` prefix. A
     #: Folder and a Table of the same name are two objects, and one bookmark

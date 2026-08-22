@@ -203,16 +203,20 @@ def python_primitive(
         context, within, expected=expected_class, node_id=node_id
     )
     cls = getattr(module, expected_class)
+    primitive = cls(session.spark(workspace), lakehouse=lakehouse)
     # The item and the run's bookmarks, never one object's value: an object this
     # one constructs resolves its own bookmark by its own identity, from the same
     # map, so `Other__Thing(self)` needs no argument of its own.
-    from ..runtime.bookmark import BookmarkContext
+    #
+    # Asked for rather than passed to the constructor, because `cls(spark,
+    # lakehouse=...)` is the whole contract a deployed primitive has to meet. A
+    # primitive with nowhere to put bookmarks has no `self.bookmark` to answer.
+    take = getattr(primitive, "with_bookmarks", None)
+    if take is not None:
+        from ..runtime.bookmark import BookmarkContext
 
-    return cls(
-        session.spark(workspace),
-        lakehouse=lakehouse,
-        bookmarks=BookmarkContext(item=logical_item, bookmarks=bookmarks or {}),
-    ).load(fault_tolerant=fault_tolerant)
+        take(BookmarkContext(item=logical_item, bookmarks=bookmarks or {}))
+    return primitive.load(fault_tolerant=fault_tolerant)
 
 
 def _endpoint_refresh(node, session, workspace):

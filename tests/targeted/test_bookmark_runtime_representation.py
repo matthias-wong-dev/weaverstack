@@ -88,8 +88,8 @@ def lakehouse(tmp_path):
 
 @weaver_test()
 def test_a_supplied_bookmark_is_read_by_the_objects_own_identity(lakehouse):
-    table = DWG__Customer(
-        object(), lakehouse=lakehouse, bookmarks=loaded("DWG.Customer")
+    table = DWG__Customer(object(), lakehouse=lakehouse).with_bookmarks(
+        loaded("DWG.Customer")
     )
 
     assert table.bookmark == LOADED_AT
@@ -99,7 +99,7 @@ def test_a_supplied_bookmark_is_read_by_the_objects_own_identity(lakehouse):
 def test_an_object_with_no_row_reads_the_sentinel(lakehouse):
     """A run reads the whole table, so absent means it has never loaded cleanly."""
 
-    table = DWG__Customer(object(), lakehouse=lakehouse, bookmarks=never())
+    table = DWG__Customer(object(), lakehouse=lakehouse).with_bookmarks(never())
 
     assert table.bookmark == sentinel()
     assert table.bookmark == datetime(1900, 1, 1, tzinfo=timezone.utc)
@@ -110,8 +110,8 @@ def test_a_bookmark_is_always_aware_utc(lakehouse):
     """A naive value compared against source timestamps moves a window by hours."""
 
     naive = datetime(2026, 8, 20, 6, 0)
-    table = DWG__Customer(
-        object(), lakehouse=lakehouse, bookmarks=loaded("DWG.Customer", at=naive)
+    table = DWG__Customer(object(), lakehouse=lakehouse).with_bookmarks(
+        loaded("DWG.Customer", at=naive)
     )
 
     assert table.bookmark.tzinfo is not None
@@ -122,12 +122,11 @@ def test_a_bookmark_is_always_aware_utc(lakehouse):
 def test_another_objects_bookmark_is_not_this_ones(lakehouse):
     context = loaded("DWG.Order")
 
-    assert DWG__Customer(object(), lakehouse=lakehouse, bookmarks=context).bookmark == (
-        sentinel()
-    )
-    assert DWG__Order(object(), lakehouse=lakehouse, bookmarks=context).bookmark == (
-        LOADED_AT
-    )
+    customer = DWG__Customer(object(), lakehouse=lakehouse).with_bookmarks(context)
+    order = DWG__Order(object(), lakehouse=lakehouse).with_bookmarks(context)
+
+    assert customer.bookmark == sentinel()
+    assert order.bookmark == LOADED_AT
 
 
 # --- what it answers given no context ------------------------------------------
@@ -162,16 +161,50 @@ def test_nothing_falls_back_to_the_sentinel(lakehouse):
 def test_no_bookmark_is_read_from_a_lakehouse_name(lakehouse):
     """A physical name is not a logical identity, and two items may share one."""
 
-    table = DWG__Customer(
-        object(),
-        lakehouse=lakehouse,
-        bookmarks=BookmarkContext(item=None, bookmarks={}),
+    table = DWG__Customer(object(), lakehouse=lakehouse).with_bookmarks(
+        BookmarkContext(item=None, bookmarks={})
     )
 
     with pytest.raises(LoadError) as raised:
         table.bookmark
 
     assert str(raised.value) == NO_CATALOGUE_MESSAGE
+
+
+@weaver_test()
+def test_a_run_supplies_bookmarks_without_widening_the_primitive_contract():
+    """What a deployed primitive must accept is ``cls(spark, lakehouse=...)``.
+
+    A run knows the item and every bookmark, and an author should not have to
+    accept an argument for either — so the run *asks* the primitive to take them
+    after it is built. A class meeting only the minimal contract has no
+    ``self.bookmark`` to answer and is left alone.
+    """
+
+    import inspect
+
+    assert "bookmarks" not in inspect.signature(DWG__Customer.__init__).parameters
+
+    class Minimal:
+        """The whole contract, and nothing else — as `tests/support/thin.py` has."""
+
+        def __init__(self, spark, lakehouse=None):
+            self.spark = spark
+
+        def load(self, fault_tolerant=False):
+            return LoadResult(succeeded=True)
+
+    # Nothing to take them, so nothing is offered: the run reads the attribute
+    # rather than assuming the class is one of Weaver's.
+    assert not hasattr(Minimal(object()), "with_bookmarks")
+    assert Minimal(object()).load().succeeded
+
+
+@weaver_test()
+def test_taking_bookmarks_returns_the_object_so_it_chains(lakehouse):
+    table = DWG__Customer(object(), lakehouse=lakehouse)
+
+    assert table.with_bookmarks(never()) is table
 
 
 @weaver_test()
@@ -223,8 +256,8 @@ def test_a_bookmark_is_resolved_once_for_a_load(lakehouse, monkeypatch):
         return real(*args, **kwargs)
 
     monkeypatch.setattr(module, "bookmark_of", counted)
-    table = DWG__Customer(
-        object(), lakehouse=lakehouse, bookmarks=loaded("DWG.Customer")
+    table = DWG__Customer(object(), lakehouse=lakehouse).with_bookmarks(
+        loaded("DWG.Customer")
     )
 
     assert table.bookmark == table.bookmark == LOADED_AT
@@ -236,8 +269,8 @@ def test_a_bookmark_is_resolved_once_for_a_load(lakehouse, monkeypatch):
 
 @weaver_test()
 def test_a_child_object_inherits_the_context(lakehouse):
-    parent = DWG__Customer(
-        object(), lakehouse=lakehouse, bookmarks=loaded("DWG.Customer", "DWG.Order")
+    parent = DWG__Customer(object(), lakehouse=lakehouse).with_bookmarks(
+        loaded("DWG.Customer", "DWG.Order")
     )
 
     assert DWG__Order(parent).bookmark == LOADED_AT
@@ -247,8 +280,8 @@ def test_a_child_object_inherits_the_context(lakehouse):
 def test_a_child_resolves_its_own_bookmark_and_not_its_parents(lakehouse):
     """The context travels; the value does not."""
 
-    parent = DWG__Customer(
-        object(), lakehouse=lakehouse, bookmarks=loaded("DWG.Customer")
+    parent = DWG__Customer(object(), lakehouse=lakehouse).with_bookmarks(
+        loaded("DWG.Customer")
     )
 
     assert parent.bookmark == LOADED_AT

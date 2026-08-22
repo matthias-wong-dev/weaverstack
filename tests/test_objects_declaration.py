@@ -281,7 +281,7 @@ def _loaded(spark, monkeypatch, table):
         return LoadResult(succeeded=True)
 
     monkeypatch.setattr(table_load, "load_table", load_table)
-    result = table(spark, lakehouse=LAKEHOUSE, bookmarks=never()).load()
+    result = table(spark, lakehouse=LAKEHOUSE).with_bookmarks(never()).load()
     return result, seen
 
 
@@ -334,7 +334,7 @@ def test_a_non_incremental_table_returning_a_tuple_is_refused(spark, monkeypatch
     table = _customer((object(), []), incremental=False)
 
     with pytest.raises(LoadError, match="returns staging on its own"):
-        table(spark, lakehouse=LAKEHOUSE, bookmarks=never()).load()
+        table(spark, lakehouse=LAKEHOUSE).with_bookmarks(never()).load()
 
 
 # --- views ------------------------------------------------------------------

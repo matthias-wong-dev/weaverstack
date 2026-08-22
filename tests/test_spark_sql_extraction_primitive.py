@@ -283,7 +283,9 @@ def test_a_single_query_table_reaches_the_load_as_staging_alone(monkeypatch):
 
     monkeypatch.setattr(table_load, "load_table", load_table)
 
-    result = Sales__Summary(_Session(), lakehouse=LAKEHOUSE, bookmarks=never()).load()
+    result = (
+        Sales__Summary(_Session(), lakehouse=LAKEHOUSE).with_bookmarks(never()).load()
+    )
 
     assert result.succeeded, "the load never reached the runtime"
     assert seen["deletes"] is None

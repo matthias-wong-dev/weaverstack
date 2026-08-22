@@ -87,19 +87,15 @@ def export(tmp_path):
     # Nothing loaded yet, which is the state every load here starts from. A
     # static test says otherwise by rebuilding the object with `loaded(...)`.
     return Sales__Export(
-        object(),
-        lakehouse=mounted_lakehouse("Sales_LH", tmp_path),
-        bookmarks=never(),
-    )
+        object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
+    ).with_bookmarks(never())
 
 
 def _already_loaded(export):
     """The same folder, as a run that had already loaded it cleanly sees it."""
 
-    return Sales__Export(
-        object(),
-        lakehouse=export.lakehouse,
-        bookmarks=loaded("Sales.Export", files=True),
+    return Sales__Export(object(), lakehouse=export.lakehouse).with_bookmarks(
+        loaded("Sales.Export", files=True)
     )
 
 
@@ -135,7 +131,7 @@ def test_repeated_calls_within_one_load_hand_back_the_same_object(export):
             seen.append(self.staging_folder())
             return seen[0], []
 
-    Sales__Twice(object(), lakehouse=export.lakehouse, bookmarks=never()).load()
+    Sales__Twice(object(), lakehouse=export.lakehouse).with_bookmarks(never()).load()
 
     assert seen[0] is seen[1]
 
@@ -314,10 +310,8 @@ def test_an_explicit_folder_delete_is_applied_through_the_load_runtime(tmp_path)
             return staging, self.deletes
 
     export = Sales__Export(
-        object(),
-        lakehouse=mounted_lakehouse("Sales_LH", tmp_path),
-        bookmarks=never(),
-    )
+        object(), lakehouse=mounted_lakehouse("Sales_LH", tmp_path)
+    ).with_bookmarks(never())
     export.files = {"keep.csv": "keep", "remove.csv": "remove"}
     export.load()
 
