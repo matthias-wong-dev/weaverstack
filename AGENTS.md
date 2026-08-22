@@ -182,8 +182,8 @@ Fabric Environment either: its Spark statements run on the workspace default.
 `--environment` is asked for by `load`, `test` and `install`.
 
 Because the catalogue is a Warehouse, a Warehouse-only workflow performs **zero
-Livy submissions**. Catalogue reads, publication and `_.Log` writes must never be
-the reason a Spark session starts.
+Livy submissions**. Catalogue reads, publication, `_.Log` writes and `_.Bookmark`
+reads and writes must never be the reason a Spark session starts.
 
 What crosses as a program is a run's Python primitives, which are deployed
 modules imported where Spark is. `weaver load` therefore requires the published

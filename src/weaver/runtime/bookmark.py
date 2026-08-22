@@ -5,7 +5,7 @@ recent clean load began, and an incremental read asks its source for changes
 after it::
 
     def read(self):
-        return Source__Thing(self).changes_since(self.bookmark)
+        return Source__Export(self).files_since(self.bookmark)
 
 There are two ways an object comes to have one, and they are the two positions a
 load runs from.

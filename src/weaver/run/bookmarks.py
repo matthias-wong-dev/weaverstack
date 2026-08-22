@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
+from ..catalogue.claims import bookmark_row
 from ..catalogue.tables import BOOKMARK
 from ..declaration.model import WeaverDocumentId, parse_installed_identity
 from .result import SUCCEEDED, RunError
@@ -52,9 +53,9 @@ class RunBookmarks:
             return
         identity = parse_installed_identity(result.logical_id)
         if not isinstance(identity, WeaverDocumentId):
+            # A schema shortcut presents a namespace rather than an object, so
+            # there is nothing for it to be far into.
             return
-        from ..catalogue.claims import bookmark_row
-
         at = at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
         self._advanced[identity] = at
         self.flusher.update(bookmark_row(identity, at))

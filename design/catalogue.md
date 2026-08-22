@@ -437,7 +437,7 @@ An **incremental read** asks its source for changes after it:
 
 ```python
 def read(self):
-    return Source__Thing(self).changes_since(self.bookmark)
+    return Source__Export(self).files_since(self.bookmark)
 ```
 
 A **`Static`** object is skipped once it holds anything other than the sentinel.

@@ -128,7 +128,7 @@ class WeaverObject:
         carries the sentinel, so an incremental read asks for everything::
 
             def read(self):
-                return Source__Thing(self).changes_since(self.bookmark)
+                return Source__Export(self).files_since(self.bookmark)
 
         Answerable only where a catalogue was supplied — by a run, or by
         ``catalogue="Warehouse/Weaver"``. Nothing is inferred from the physical
