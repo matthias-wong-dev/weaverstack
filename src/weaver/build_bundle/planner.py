@@ -176,19 +176,29 @@ def generate_item_build_bundle(
 
     # Bookmarks are reconciled here, between decertification and the first
     # physical action, and never after it — see :mod:`weaver.build_bundle.bookmarks`.
+    # A catalogue with no `_.Bookmark` is one this bundle is creating it in: every
+    # build binds the built-in item, so the table arrives with this bundle and can
+    # hold no row anything could have written.
+    bookmark_installed = BOOKMARK.name in catalogue.present_tables
     bookmarks = render_bookmark_reconciliation(
         repository,
         items=tuple(target_by_item),
         selected_for_build=selected_for_build,
         removed=removed,
-        # A catalogue with no `_.Bookmark` is one this bundle is creating it in:
-        # every build binds the built-in item, so the table arrives with this
-        # bundle and can hold no row anything could have written.
-        installed=BOOKMARK.name in catalogue.present_tables,
+        installed=bookmark_installed,
         catalogue_target=catalogue_target,
     )
     if bookmarks is not None:
         stages.append(bookmarks)
+
+    # A Lakehouse's shortcut points at the table's Delta directory, and a
+    # Warehouse publishes a table to OneLake some time after creating it — so the
+    # build that creates the catalogue has nothing to point at and Fabric refuses
+    # a shortcut whose target does not exist. The build after it installs the
+    # reference, which is when a Lakehouse first has a loadable object able to
+    # read one.
+    if not bookmark_installed:
+        bookmark_source = None
 
     # Shortcut destinations this build wanted but could not materialise. They must
     # not reach the Registry: a row there means the object's work succeeded, and

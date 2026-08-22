@@ -62,14 +62,25 @@ results["in_memory"] = first.bookmark().isoformat()
 second = Raw__CustomerCsv(spark, lakehouse=destination, catalogue=workspace.catalogue)
 results["persisted"] = second.bookmark().isoformat()
 
-# The Lakehouse's own reference to `_.Bookmark`, named in full and read by Spark.
-# What the build installed here is a shortcut to the catalogue Warehouse's table,
-# so this is the local reference resolving rather than a table of its own.
+# The Lakehouse's own reference to `_.Bookmark`. What the build installed here is
+# a shortcut to the catalogue Warehouse's table, so this is the local reference
+# rather than a table of its own — read first as storage, which says what is
+# actually there, and then by the four-part name a statement would use.
+from weaver.locations import Location
+
+tables = Location(destination.spark_root) / "Tables"
+results["tables"] = sorted(entry.name for entry in store.list(tables))
 reference = destination.qualify("_", "Bookmark")
 results["reference"] = reference
-results["reference_rows"] = spark.sql(
-    f"select count(*) as n from {reference}"
-).collect()[0]["n"]
+try:
+    results["reference_rows"] = spark.sql(
+        f"select count(*) as n from {reference}"
+    ).collect()[0]["n"]
+except Exception as refused:
+    # Reported rather than raised, so the payload still carries what storage
+    # holds — which is what says whether the reference was installed at all.
+    results["reference_rows"] = None
+    results["reference_error"] = str(refused).splitlines()[0]
 
 emit(results)
 """
@@ -105,8 +116,9 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
     assert datetime.fromisoformat(seen["in_memory"]) == began
     assert datetime.fromisoformat(seen["persisted"]) == began
 
-    # And the Lakehouse's local reference resolves, named in full. What it counts
+    # And the Lakehouse's local reference is there, and resolves. What it counts
     # is the catalogue Warehouse's own table, so the number belongs to the estate
     # rather than to this test; that a count came back at all is the claim.
+    assert "_" in seen["tables"], seen["tables"]
     assert seen["reference"].endswith("`_`.`Bookmark`")
     assert isinstance(seen["reference_rows"], int)

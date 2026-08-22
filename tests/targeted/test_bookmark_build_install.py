@@ -65,7 +65,9 @@ EMPTY = Catalogue(
 )
 
 
-def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
+def _bundle(
+    repository, tmp_path, *, catalogue=None, inventories=None, bookmark_source=None
+):
     return generate_item_build_bundle(
         repository,
         bindings=estate_bindings(),
@@ -76,6 +78,7 @@ def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
         else estate_inventories(repository, empty=True),
         catalogue=catalogue if catalogue is not None else EMPTY,
         catalogue_binding=CATALOGUE,
+        bookmark_source=bookmark_source,
     )
 
 
@@ -395,6 +398,79 @@ def test_prune_spares_the_catalogue_table_and_not_the_local_reference():
     assert is_protected("_", "Bookmark")
     assert is_protected("_", "bookmark")
     assert not is_protected("Sales", "Bookmark")
+
+
+# --- where the Lakehouse reference points --------------------------------------
+
+
+@weaver_test()
+def test_the_source_is_the_catalogue_tables_own_delta_directory():
+    """A Warehouse publishes each table as a Delta directory a shortcut can read."""
+
+    from weaver.build_bundle.shortcut_sources import read_bookmark_source
+
+    class _Item:
+        workspace_id = "ws-1"
+        id = "item-1"
+        name = "Weaver"
+
+    class _Resolver:
+        def warehouse(self, target):
+            return _Item()
+
+    source = read_bookmark_source(resolver=_Resolver(), catalogue="Weaver")
+
+    assert source.path == "Tables/_/Bookmark"
+    assert source.item_id == "item-1"
+
+
+@weaver_test()
+def test_the_build_that_creates_the_table_points_no_shortcut_at_it(estate, tmp_path):
+    """Fabric publishes a Warehouse table to OneLake after creating it.
+
+    So the build that creates the catalogue has nothing for a shortcut to point
+    at, and Fabric refuses one whose target does not exist. The build after it
+    installs the reference, which is also when a Lakehouse first has a loadable
+    object able to read one.
+    """
+
+    from weaver.build_bundle.shortcuts import ResolvedShortcutSource
+
+    source = ResolvedShortcutSource(
+        workspace_id="ws-1",
+        item_id="item-1",
+        item_name="Weaver",
+        path="Tables/_/Bookmark",
+    )
+    present = frozenset(table.name for table in CATALOGUE_TABLES)
+
+    creating = _bundle(
+        estate, tmp_path, catalogue=Catalogue({}), bookmark_source=source
+    )
+    installed = _bundle(
+        estate,
+        tmp_path,
+        catalogue=Catalogue({}, present_tables=present),
+        bookmark_source=source,
+    )
+
+    assert _references(creating, "Lakehouse") == []
+    assert _references(installed, "Lakehouse")
+    # The Warehouse's view needs no address in storage, so it is installed by the
+    # build that creates the table as readily as by any other.
+    assert _references(creating, "Warehouse")
+    assert _references(installed, "Warehouse")
+
+
+def _references(bundle, item_type: str) -> list[str]:
+    """The bookmark-reference actions one bundle installs, per kind of item."""
+
+    wanted = f"bookmark-reference-{item_type}"
+    return [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.id.startswith(wanted)
+    ]
 
 
 # --- fixtures ------------------------------------------------------------------
