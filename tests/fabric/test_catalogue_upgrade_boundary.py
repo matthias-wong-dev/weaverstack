@@ -1,4 +1,6 @@
-"""Building against a catalogue that is missing a table Weaver now owns.
+"""What a build does about catalogue tables: introduce one, and reference one.
+
+Two claims that need a real Warehouse and nothing else.
 
 Adding a table to ``_`` makes every existing installation older than the Weaver
 building against it. The build that introduces the table has to plan against a
@@ -7,16 +9,21 @@ then on — and it has to do all three in one bundle, because every build binds
 ``_weaver`` and so gets the new table from the same bundle it would have needed
 it for.
 
+The other is the reference: a Warehouse that is not the catalogue holds a view
+over the catalogue's ``_.Bookmark``, which is how a generated load procedure
+reaches its own row.
+
 ``remote`` and Warehouse-only: the catalogue is a Warehouse, the estate's objects
-are T-SQL, so nothing here starts Spark. It runs against a disposable Warehouse
-that is its own catalogue, so dropping a catalogue table cannot touch the shared
-estate the rest of the suite depends on.
+are T-SQL, so nothing here starts Spark. The upgrade runs against a disposable
+Warehouse that is its own catalogue, so dropping a catalogue table cannot touch
+the shared estate the rest of the suite depends on.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
 
+from sql_support import CatalogObject, user_objects
 from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
 from support.weaver_test import register_session, weaver_test
 
@@ -93,3 +100,33 @@ def _catalogue_shape(workspace) -> set[str]:
         connection = catalogue_connection(session, workspace)
         connection.forget_shape()
         return {name.casefold() for name in connection.shape()}
+
+
+@weaver_test(remote=True, resources={"rest", "tds"})
+def test_a_built_warehouse_is_given_a_view_over_the_catalogues_bookmark(
+    fabric_workspace, clean_disposable_warehouse, tmp_path_factory
+):
+    """What a generated load procedure says ``[_].[Bookmark]`` to reach.
+
+    Installed by the ordinary build into a Warehouse that is *not* the catalogue,
+    which is the case that needs a reference: the catalogue Warehouse holds the
+    table itself and is given nothing.
+    """
+
+    warehouse = clean_disposable_warehouse
+    name = warehouse.item.name
+    estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("reference"))
+
+    built = _built(fabric_workspace, estate.path, f"Warehouse/{name}=Reporting")
+    assert built.status == "succeeded", _failures(built)
+
+    # A view rather than a table: the rows live in the catalogue Warehouse, and
+    # this Warehouse reads and merges them across the boundary through it.
+    assert CatalogObject(schema="_", name=BOOKMARK.name, kind="V") in user_objects(
+        warehouse.executor
+    )
+    # And it resolves — a three-part name in another database, selected here.
+    counted = warehouse.executor.query(
+        f"select count(*) as n from [_].[{BOOKMARK.name}]"
+    )
+    assert int(dict(counted[0])["n"]) >= 0

@@ -1189,7 +1189,7 @@ def _fabric_build_context(
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
             "from weaver.build_bundle.shortcut_sources import ("
-            "physical_shortcuts, read_shortcut_sources)\n"
+            "physical_shortcuts, read_bookmark_source, read_shortcut_sources)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1215,6 +1215,10 @@ def _fabric_build_context(
             "shortcut_sources = read_shortcut_sources(\n"
             "    physical_shortcuts(repository.shortcuts, bindings=bindings),\n"
             "    resolver=resolver, store=store)\n"
+            # The same for the catalogue's own table, so a target built here is
+            # given the `_.Bookmark` reference a target built by the product is.
+            "bookmark_source = read_bookmark_source(\n"
+            "    resolver=resolver, catalogue=workspace.catalogue_item)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
@@ -1222,7 +1226,8 @@ def _fabric_build_context(
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims,\n"
-            "    shortcut_sources=shortcut_sources)\n"
+            "    shortcut_sources=shortcut_sources,\n"
+            "    bookmark_source=bookmark_source)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
@@ -1542,7 +1547,7 @@ def _warehouse_build_env(
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
             "from weaver.build_bundle.shortcut_sources import ("
-            "physical_shortcuts, read_shortcut_sources)\n"
+            "physical_shortcuts, read_bookmark_source, read_shortcut_sources)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1568,6 +1573,10 @@ def _warehouse_build_env(
             "shortcut_sources = read_shortcut_sources(\n"
             "    physical_shortcuts(repository.shortcuts, bindings=bindings),\n"
             "    resolver=resolver, store=store)\n"
+            # The same for the catalogue's own table, so a target built here is
+            # given the `_.Bookmark` reference a target built by the product is.
+            "bookmark_source = read_bookmark_source(\n"
+            "    resolver=resolver, catalogue=workspace.catalogue_item)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
             "    bindings=bindings,\n"
@@ -1575,7 +1584,8 @@ def _warehouse_build_env(
             "    store=store, catalogue_binding=control,\n"
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims,\n"
-            "    shortcut_sources=shortcut_sources)\n"
+            "    shortcut_sources=shortcut_sources,\n"
+            "    bookmark_source=bookmark_source)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
