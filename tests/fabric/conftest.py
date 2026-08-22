@@ -909,6 +909,9 @@ def warehouse_primitive_estate(session_disposable_warehouse, tmp_path_factory):
             registered=(
                 {key: registered_document(key) for key in selected} if rebuild else {}
             ),
+            # This Warehouse *is* the catalogue's, so no local `_.Bookmark`
+            # reference is planned: the table itself is already there.
+            catalogue_target=target.bound,
         )
         context = InstallationContext(
             resolver=None,

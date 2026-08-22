@@ -46,6 +46,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from sql_support import (
+    PROCEDURE_ITEM,
+    forget_bookmark,
+    install_bookmark_reference,
+)
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
@@ -112,21 +117,7 @@ class Estate:
 #: The logical item the installed procedures belong to. A load procedure is keyed
 #: by it — its bookmark row carries the Registry's four-part identity — so it is
 #: named here rather than left to a default.
-ITEM = WeaverItemId("Warehouse", "Reporting")
-
-
-def _install_bookmark_reference(executor, catalogue: str) -> None:
-    """What a build gives every Warehouse it installs a load into.
-
-    The catalogue's ``_.Bookmark`` under that name. A procedure reads and writes
-    its own bookmark through it, so one installed without it could neither answer
-    Static nor record having run.
-    """
-
-    executor.execute_script(
-        "create or alter view [_].[Bookmark] as "
-        f"select * from [{catalogue}].[_].[Bookmark];"
-    )
+ITEM = WeaverItemId(*PROCEDURE_ITEM)
 
 
 def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Estate:
@@ -139,7 +130,7 @@ def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Est
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
-    _install_bookmark_reference(executor, catalogue)
+    install_bookmark_reference(executor, catalogue)
     estate = Estate(executor, object_name)
     _drop(estate)
     executor.execute_script(
@@ -152,7 +143,7 @@ def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Est
 
 
 @pytest.fixture(scope="module")
-def estate(clean_disposable_warehouse, fabric_workspace):
+def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue):
     """The built table and its installed load, from the generators themselves.
 
     Both come from `create_ddl()` and `create_load()` rather than from
@@ -171,7 +162,9 @@ def estate(clean_disposable_warehouse, fabric_workspace):
 
 
 @pytest.fixture(scope="module")
-def static_estate(clean_disposable_warehouse, fabric_workspace):
+def static_estate(
+    clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
+):
     """The same table declared static, under a name of its own."""
 
     built = _install(
@@ -212,29 +205,12 @@ def _reset(estate: Estate) -> None:
     estate.executor.execute_script(
         f"delete from [{SCHEMA}].[{name}];\n"
         f"delete from [{SCHEMA}].[{estate.raw}];\n"
-        + _forget_bookmark(name)
+        + forget_bookmark(SCHEMA, name)
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
             f"drop table [{SCHEMA}].[{name}{suffix}];"
             for suffix in ("_Reject", "_Upsert", "_Delete", "_Staging")
         )
-    )
-
-
-def _forget_bookmark(name: str) -> str:
-    """Remove one object's bookmark row, keyed as the Registry keys it.
-
-    Through the view a build installs, so a sequence starts from "never cleanly
-    loaded" however the last one left it — and so the delete itself proves a
-    delete reaches the catalogue's table through that view.
-    """
-
-    return (
-        "delete from [_].[Bookmark] "
-        f"where [Item type] = N'{ITEM.item_type}' "
-        f"and [Item name] = N'{ITEM.item_name}' "
-        f"and [Schema name] = N'{SCHEMA}' "
-        f"and [Object name] = N'{name}';\n"
     )
 
 
@@ -671,7 +647,7 @@ def _install_wide(
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
-    _install_bookmark_reference(executor, catalogue)
+    install_bookmark_reference(executor, catalogue)
     estate = WideEstate(executor, object_name, retires=incremental)
     _drop_wide(estate)
     executor.execute_script(f"create table [{SCHEMA}].[{estate.raw}] ({WIDE_RAW_DDL});")
@@ -701,7 +677,7 @@ def _reset_wide(estate: WideEstate) -> None:
     statements = [
         f"delete from [{SCHEMA}].[{name}];",
         f"delete from [{SCHEMA}].[{estate.raw}];",
-        _forget_bookmark(name),
+        forget_bookmark(SCHEMA, name),
     ]
     if estate.retires:
         statements.append(f"delete from [{SCHEMA}].[{estate.retire}];")
@@ -776,7 +752,9 @@ def _reject_reasons(estate: WideEstate) -> dict:
 
 
 @pytest.fixture(scope="module")
-def constrained_estate(clean_disposable_warehouse, fabric_workspace):
+def constrained_estate(
+    clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
+):
     built = _install_wide(
         clean_disposable_warehouse.executor,
         CONSTRAINED_OBJECT,
@@ -788,7 +766,9 @@ def constrained_estate(clean_disposable_warehouse, fabric_workspace):
 
 
 @pytest.fixture(scope="module")
-def merge_estate(clean_disposable_warehouse, fabric_workspace):
+def merge_estate(
+    clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
+):
     built = _install_wide(
         clean_disposable_warehouse.executor,
         MERGE_OBJECT,
