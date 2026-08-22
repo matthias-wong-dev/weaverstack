@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from ..catalogue.tables import CATALOGUE_SCHEMA, is_protected
+from ..catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA, is_protected
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import PROCEDURE_SHAPE, WeaverDocumentId
 from ..declaration.source import SourceDocument
@@ -98,6 +98,10 @@ class TargetInventory:
     files: tuple[str, ...] = ()
     #: Generated load procedures, as ``<schema>.<name>``.
     procedures: tuple[str, ...] = ()
+    #: Whether this target already presents the catalogue's ``_.Bookmark``. Its
+    #: own field because ``_`` is Weaver's rather than the item's, and so is
+    #: outside the schemas the rest of this inventory reports.
+    bookmark_reference: bool = False
 
     def to_mapping(self) -> dict[str, object]:
         """A versioned JSON-safe representation for remote state handover."""
@@ -114,6 +118,7 @@ class TargetInventory:
             "views": list(self.views),
             "files": list(self.files),
             "procedures": list(self.procedures),
+            "bookmark_reference": self.bookmark_reference,
         }
 
     @classmethod
@@ -136,6 +141,7 @@ class TargetInventory:
             views=tuple(mapping.get("views", ())),
             files=tuple(mapping.get("files", ())),
             procedures=tuple(mapping.get("procedures", ())),
+            bookmark_reference=bool(mapping.get("bookmark_reference", False)),
         )
 
     def update_using(self, plan) -> "TargetInventory":
@@ -255,6 +261,12 @@ def read_lakehouse_inventory(
         views = tuple(
             f"{schema}.{view}" for schema in schemas for view in catalogue.views(schema)
         )
+    # Storage, not the Spark catalogue: the reference is a shortcut, and a
+    # shortcut is a directory under `Tables/_` whether or not anything has
+    # registered it as a table. Read here because `_` is dropped from `schemas`
+    # above, so nothing downstream could tell it apart from a schema the item
+    # does not declare.
+    reference = store.exists(tables_root / CATALOGUE_SCHEMA / BOOKMARK.name)
     files = () if control_item else _load_files(store, files_root)
     return TargetInventory(
         target_id=target.id,
@@ -268,6 +280,7 @@ def read_lakehouse_inventory(
         tables=tuple(sorted(tables, key=str.casefold)),
         views=tuple(sorted(views, key=str.casefold)),
         files=files,
+        bookmark_reference=reference,
     )
 
 

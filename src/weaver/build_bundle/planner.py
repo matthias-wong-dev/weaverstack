@@ -482,7 +482,6 @@ def plan_item_build(
         target=target,
         inventory=inventory,
         catalogue_target=catalogue_target,
-        selected_for_build=selected_for_build,
         bookmark_source=bookmark_source,
     )
     if reference is not None:

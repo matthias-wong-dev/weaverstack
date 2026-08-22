@@ -247,7 +247,6 @@ def render_bookmark_reference(
     target,
     inventory,
     catalogue_target,
-    selected_for_build: Iterable[WeaverDocumentId] = (),
     bookmark_source=None,
 ) -> PlannedStage | None:
     """Give a built target the catalogue's ``_.Bookmark`` under that name.
@@ -267,11 +266,10 @@ def render_bookmark_reference(
     if target.kind == WAREHOUSE_TARGET:
         return _warehouse_view(reference, item, target, catalogue_target, inventory)
     return _lakehouse_shortcut(
-        repository,
         reference,
         item=item,
         target=target,
-        selected_for_build=selected_for_build,
+        inventory=inventory,
         source=bookmark_source,
     )
 
@@ -309,23 +307,17 @@ def _warehouse_view(
 
 
 def _lakehouse_shortcut(
-    repository, reference, *, item, target, selected_for_build, source
+    reference, *, item, target, inventory, source
 ) -> PlannedStage | None:
-    """The OneLake shortcut, asserted whenever a loadable object is installed.
+    """The OneLake shortcut, created when the Lakehouse does not already hold it.
 
-    A Lakehouse's ``Tables/_`` is Weaver's own and is outside what an item's
-    inventory reports, so there is nothing to compare against; the shortcut is
-    re-pointed at the same place instead, which is what creating one already
-    means. An idle build installs nothing and so plans nothing.
+    Gated the way the Warehouse's view is: on what is physically there, so an
+    unchanged repository plans nothing and a reference somebody removed comes
+    back. ``Tables/_`` is Weaver's own rather than the item's, so the inventory
+    reports it as a fact of its own instead of as one of the item's schemas.
     """
 
-    if source is None:
-        return None
-    selected = set(selected_for_build)
-    if not any(
-        identity in selected
-        for identity in item_bookmarkable_objects(repository, item=item)
-    ):
+    if source is None or inventory.bookmark_reference:
         return None
 
     item_slug = str(item).replace("/", "--")

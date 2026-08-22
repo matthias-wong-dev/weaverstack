@@ -462,6 +462,53 @@ def test_the_build_that_creates_the_table_points_no_shortcut_at_it(estate, tmp_p
     assert _references(installed, "Warehouse")
 
 
+@weaver_test()
+def test_a_lakehouse_already_holding_the_reference_is_given_no_other(estate, tmp_path):
+    """Gated on what is there, the way the Warehouse's view is.
+
+    So an unchanged repository plans nothing, and a reference somebody removed
+    comes back on the next build rather than on the next change to an object.
+    """
+
+    from dataclasses import replace
+
+    from weaver.build_bundle.shortcuts import ResolvedShortcutSource
+
+    source = ResolvedShortcutSource(
+        workspace_id="ws-1",
+        item_id="item-1",
+        item_name="Weaver",
+        path="Tables/_/Bookmark",
+    )
+    present = frozenset(table.name for table in CATALOGUE_TABLES)
+    catalogue = Catalogue({}, present_tables=present)
+    inventories = estate_inventories(estate, empty=True)
+    holding = {
+        item: replace(inventory, bookmark_reference=True)
+        if inventory.kind == "lakehouse"
+        else inventory
+        for item, inventory in inventories.items()
+    }
+
+    absent = _bundle(
+        estate,
+        tmp_path,
+        catalogue=catalogue,
+        inventories=inventories,
+        bookmark_source=source,
+    )
+    already = _bundle(
+        estate,
+        tmp_path,
+        catalogue=catalogue,
+        inventories=holding,
+        bookmark_source=source,
+    )
+
+    assert _references(absent, "Lakehouse")
+    assert _references(already, "Lakehouse") == []
+
+
 def _references(bundle, item_type: str) -> list[str]:
     """The bookmark-reference actions one bundle installs, per kind of item."""
 

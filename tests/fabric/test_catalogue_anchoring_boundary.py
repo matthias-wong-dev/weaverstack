@@ -119,6 +119,11 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
     # And the Lakehouse's local reference is there, and resolves. What it counts
     # is the catalogue Warehouse's own table, so the number belongs to the estate
     # rather than to this test; that a count came back at all is the claim.
-    assert "_" in seen["tables"], seen["tables"]
+    planned = [
+        action.id
+        for _sequence, _batch, action in fabric_lakehouse_estate.bundle.plan.actions()
+        if "bookmark-reference" in action.id
+    ]
+    assert "_" in seen["tables"], (seen["tables"], planned)
     assert seen["reference"].endswith("`_`.`Bookmark`")
     assert isinstance(seen["reference_rows"], int)
