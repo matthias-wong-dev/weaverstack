@@ -220,11 +220,12 @@ else:
 # bundle. `Sales__OrderSummary` is the generated form of the authored
 # `Sales.OrderSummary.sql`, and nothing about calling it differs.
 #
-# The catalogue is named, because a load records how far it got: a clean one
-# advances the object's bookmark, and a `Static` object reads that record to
-# decide whether to run at all. It is a constructor argument rather than a
-# `load()` one, because an authored `read()` is called by Weaver and takes
-# nothing — so whatever `read()` may reach has to be set before the load begins.
+# Naming the catalogue makes the object *catalogue-anchored*: it has a place in
+# the estate's own record of itself, so a clean load advances its bookmark and a
+# `Static` object can read that record. `Sales__OrderSummary(spark)` would be
+# freestanding — it runs, and records nothing. A constructor argument rather than
+# a `load()` one, because an authored `read()` is called by Weaver and takes
+# nothing, so whatever it may reach is set before the load begins.
 
 # CELL ********************
 

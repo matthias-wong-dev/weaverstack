@@ -632,35 +632,36 @@ behind for a diff to notice.
 ### 11d. Bookmarks
 
 `_.Bookmark` records how far each loadable object has been loaded, and a build
-invalidates that record for anything it replaces. Two statements against the
-catalogue Warehouse, in one action:
+invalidates that for anything whose physical incarnation it is ending. One scoped
+delete, keeping the rows of objects this build still loads and is not replacing:
 
 ```text
-delete the rows of objects this build no longer loads
-reset to the sentinel every loadable object it rebuilds
+no longer declared, or no longer loaded    the object is going
+dropped and rebuilt                        the incarnation is going
 ```
 
-They run **before any physical action**, and that ordering is the safety
-property. A reset makes the next load read everything; a bookmark left advanced
-over a table that was dropped and recreated makes it read almost nothing. A build
-that fails in between leaves work to repeat rather than rows that will never
-arrive.
+It runs **before any physical action**, and that ordering is the safety property.
+An absent bookmark makes the next load read everything; one left in place over a
+recreated table makes it read almost nothing. A build that fails in between
+leaves work to repeat.
 
-Which objects can hold a bookmark comes from the load artefacts the item installs,
-so it cannot drift from what has something to run: a Weaver-loadable Table or
-Folder, never a view, never a table declaring `Has load procedure: false`, never a
-runtime artefact, never a validation.
+Which objects can hold one comes from the load artefacts the item installs, so it
+cannot drift from what has something to run: a Weaver-loadable Table or Folder,
+never a view, a table declaring `Has load procedure: false`, a runtime artefact,
+or a validation.
 
-The statements are issued when a build acts rather than on every run, so an
-unchanged repository still produces an empty bundle. The scope is the items the
-build reconciles: rows belonging to an item the build was not pointed at are
-another build's to maintain. The batch refuses to run at all if the catalogue
-holds no `_.Bookmark`, rather than quietly doing no bookmark work.
+The statement is issued when a build acts rather than on every run, so an
+unchanged repository still produces an empty bundle. Its scope is the items the
+build reconciles. A catalogue without `_.Bookmark` gets it from this build —
+every build binds the built-in item — and a table nothing could have written to
+has nothing to invalidate.
 
 A build also gives every target it installs a load into the catalogue's
-`_.Bookmark` under that name — a view in a Warehouse, a OneLake shortcut in a
-Lakehouse — created in the shortcut phase with the declared shortcuts, and in the
-prune keep-set so it goes when the item's last loadable object does.
+`_.Bookmark` under that name: a view in a Warehouse, a OneLake shortcut in a
+Lakehouse, rendered by the same code a declared shortcut is. In the load phase,
+with the artefacts it exists for — on the build that creates the catalogue the
+table it points at arrives in the same bundle. It is in the prune keep-set, so it
+goes when the item's last loadable object does.
 
 ## 12. Bundle execution order
 

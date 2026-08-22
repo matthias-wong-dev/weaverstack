@@ -39,12 +39,12 @@ from weaver import Table
 class Sales__Order(Table):
     def read(self):
         export = Sales__OrderExport(self)
-        # `self.bookmark` is the UTC instant immediately before this table's most
+        # `self.bookmark()` is the UTC instant immediately before this table's most
         # recent clean load began, and the folder records when each of its files
         # changed — so the two compose into "what has arrived since". A table
         # that has never loaded cleanly carries the sentinel, and every file is
         # newer than that, so the first load reads the lot.
-        arrived = export.files_since(self.bookmark)
+        arrived = export.files_since(self.bookmark())
         if not arrived:
             # Nothing new. An incremental table's no-op is its own shape with no
             # rows, and no order to retire.

@@ -141,10 +141,12 @@ Sales__Order(spark, catalogue=catalogue).load()
 Sales__OrderSummary(spark, catalogue=catalogue).load()
 ```
 
-The catalogue is named because a load records how far it got: a clean one
-advances the object's bookmark. It is a constructor argument rather than a
-`load()` one, because an authored `read()` is called by Weaver and takes
-nothing — so whatever `read()` may reach has to be set before the load begins.
+Naming the catalogue makes each object *catalogue-anchored*: it has a place in
+the estate's own record of itself, so a clean load advances its bookmark.
+`Sales__Customer(spark)` would be freestanding — it runs, and records nothing. A
+constructor argument rather than a `load()` one, because an authored `read()` is
+called by Weaver and takes nothing, so whatever it may reach is set before the
+load begins.
 
 `Sales.OrderSummary` is authored as `Sales.OrderSummary.sql` and
 installed as `Sales__OrderSummary.py` — a `SparkSqlTable` carrying the
@@ -163,7 +165,7 @@ weaver load Lakehouse/Sales Warehouse/Reporting \
 
 # Reading only what has arrived
 
-`Sales.Order` is incremental, and it reads incrementally. `self.bookmark` is the
+`Sales.Order` is incremental, and it reads incrementally. `self.bookmark()` is the
 UTC instant immediately before its most recent clean load began, and the folder
 records when each of its files changed, so the two compose into "what has
 arrived since":
@@ -172,7 +174,7 @@ arrived since":
 class Sales__Order(Table):
     def read(self):
         export = Sales__OrderExport(self)
-        arrived = export.files_since(self.bookmark)
+        arrived = export.files_since(self.bookmark())
         if not arrived:
             return self.empty_dataframe(), None
         ...
