@@ -389,7 +389,6 @@ def _installed(repository) -> Catalogue:
 
     from weaver.build_bundle.catalogue_actions import desired_catalogue
     from weaver.build_bundle.planner import certifiable_identities
-    from weaver.catalogue.tables import CATALOGUE_TABLES
 
     bindings = estate_bindings()
     by_item = {binding.item: binding for binding in bindings.entries}

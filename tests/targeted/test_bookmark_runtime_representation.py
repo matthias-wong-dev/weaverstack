@@ -255,6 +255,161 @@ def test_a_child_resolves_its_own_bookmark_and_not_its_parents(lakehouse):
     assert DWG__Order(parent).bookmark == sentinel()
 
 
+# --- what a standalone load resolves -------------------------------------------
+
+
+class _Catalogue:
+    """A catalogue connection over canned rows.
+
+    The reader aliases the public spelling back to the internal one, so what a
+    query hands back is keyed the way Python holds it — which is what these rows
+    are.
+    """
+
+    def __init__(self, installation, registry) -> None:
+        self._rows = {"Installation": installation, "Registry": registry}
+        self.statements: list = []
+
+    def columns_of(self, table):
+        return {name.casefold(): name for name in table.public_columns}
+
+    def rows(self, statement: str):
+        self.statements.append(statement)
+        name = next(one for one in self._rows if f"[{one}]" in statement)
+        return self._rows[name]
+
+    def execute(self, statement: str) -> None:
+        self.statements.append(statement)
+
+
+def _installation(item_name: str, target: str) -> dict:
+    return {
+        "item_type": "Lakehouse",
+        "item_name": item_name,
+        "target_name": target,
+        "weaver_version": "0.1",
+        "signature": "s",
+    }
+
+
+def _registry(item_name: str, schema: str, object: str, role: str = "data") -> dict:
+    return {
+        "item_type": "Lakehouse",
+        "item_name": item_name,
+        "schema_name": schema,
+        "object_name": object,
+        "object_type": "table",
+        "object_role": role,
+        "signature": "s",
+        "build_datetime": None,
+    }
+
+
+def _resolve(catalogue, **kwargs):
+    from weaver.catalogue.state import resolve_installed_object
+
+    return resolve_installed_object(
+        catalogue,
+        target_name=kwargs.get("target", "Sales_LH"),
+        schema=kwargs.get("schema", "DWG"),
+        object=kwargs.get("object", "Customer"),
+        is_files=kwargs.get("is_files", False),
+    )
+
+
+@weaver_test()
+def test_a_standalone_load_resolves_its_item_through_the_catalogue():
+    """Installation says which item is bound here; Registry says what it holds.
+
+    Not the Lakehouse's name: a physical name is not a logical identity.
+    """
+
+    catalogue = _Catalogue(
+        [_installation("Sales", "Sales_LH"), _installation("Other", "Other_LH")],
+        [_registry("Sales", "DWG", "Customer"), _registry("Other", "DWG", "Customer")],
+    )
+
+    assert str(_resolve(catalogue)) == "Lakehouse/Sales/DWG.Customer"
+
+
+@weaver_test()
+def test_a_folder_resolves_under_its_files_identity():
+    catalogue = _Catalogue(
+        [_installation("Sales", "Sales_LH")],
+        [_registry("Sales", "Files/Raw", "CustomerCsv")],
+    )
+
+    resolved = _resolve(catalogue, schema="Raw", object="CustomerCsv", is_files=True)
+
+    assert str(resolved) == "Lakehouse/Sales/Files/Raw.CustomerCsv"
+
+
+@weaver_test()
+def test_an_object_the_catalogue_does_not_record_says_so():
+    """It has no bookmark because Weaver has not installed it."""
+
+    from weaver.errors import BuildError
+
+    catalogue = _Catalogue([_installation("Sales", "Sales_LH")], [])
+
+    with pytest.raises(BuildError) as raised:
+        _resolve(catalogue)
+
+    assert "not an object the Weaver catalogue records as installed" in str(
+        raised.value
+    )
+
+
+@weaver_test()
+def test_a_name_two_bound_items_both_claim_is_refused():
+    """A load that guessed would advance the wrong object's bookmark."""
+
+    from weaver.errors import BuildError
+
+    catalogue = _Catalogue(
+        [_installation("Sales", "Sales_LH"), _installation("Archive", "Sales_LH")],
+        [
+            _registry("Sales", "DWG", "Customer"),
+            _registry("Archive", "DWG", "Customer"),
+        ],
+    )
+
+    with pytest.raises(BuildError) as raised:
+        _resolve(catalogue)
+
+    assert "more than one installed object" in str(raised.value)
+
+
+@weaver_test()
+def test_a_runtime_artefact_is_not_the_object_it_loads():
+    """The module that does the loading is not the thing being loaded."""
+
+    from weaver.errors import BuildError
+
+    catalogue = _Catalogue(
+        [_installation("Sales", "Sales_LH")],
+        [_registry("Sales", "DWG", "Customer", role="load")],
+    )
+
+    with pytest.raises(BuildError):
+        _resolve(catalogue)
+
+
+@weaver_test()
+def test_resolution_reads_the_two_tables_that_carry_the_answer():
+    """Asked from inside a load, so the other nine would be paid for nothing."""
+
+    catalogue = _Catalogue(
+        [_installation("Sales", "Sales_LH")], [_registry("Sales", "DWG", "Customer")]
+    )
+
+    _resolve(catalogue)
+
+    assert len(catalogue.statements) == 2
+    assert any("[Installation]" in one for one in catalogue.statements)
+    assert any("[Registry]" in one for one in catalogue.statements)
+
+
 # --- what a run advances -------------------------------------------------------
 
 
