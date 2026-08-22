@@ -399,8 +399,8 @@ collision fails rather than being hidden.
 The `_` schema is the Weaver catalogue. Its tables are either **projected** from
 repository state during build and reconciled against it, or **maintained at
 runtime**. Two are runtime tables: `_.Log` and `_.Bookmark`. Both are declared as
-ordinary Weaver documents in `Warehouse/_weaver` and built like any other, so
-`weaver initialise` reports thirteen tables.
+ordinary Weaver documents in `Warehouse/_weaver` and built like any other, so a
+first build of the control item creates thirteen tables.
 
 Nothing projects them and nothing reconciles them. They differ in what a lost
 write costs, and that decides how a failure is treated.

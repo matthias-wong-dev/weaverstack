@@ -179,6 +179,78 @@ def test_anchoring_by_name_outside_a_fabric_session_says_so(lakehouse):
     assert "weaver load" in str(raised.value)
 
 
+@weaver_test()
+def test_anchoring_by_name_holds_the_session_its_catalogue_writes_through(monkeypatch):
+    """A load records its own bookmark, so the reading Session has to survive.
+
+    Closed at the end of the anchor, an object could read the catalogue and not
+    record in it — which is what the first version of this did, and what a Fabric
+    session reported as a closed Session on the first merge.
+    """
+
+    from weaver.catalogue.state import catalogue_for
+    from weaver.catalogue.tables import LOG
+    from weaver.runtime import anchor
+
+    opened = _anchoring_in(monkeypatch, "Sales_WS")
+
+    session, workspace = anchor._session_for("Warehouse/Weaver")
+
+    assert session.closed is False
+    catalogue = catalogue_for(session, workspace, tables=())
+    catalogue.submit(LOG, {"log_sk": "a", "task_type": "load"})
+    catalogue.flush()
+    assert opened == [workspace]
+
+    # And the next object anchored to the same catalogue reaches the same one,
+    # rather than paying for a Session of its own.
+    again, _ = anchor._session_for("Warehouse/Weaver")
+
+    assert again is session
+    assert opened == [workspace]
+
+
+@weaver_test()
+def test_a_session_that_has_been_closed_is_not_handed_out_again(monkeypatch):
+    """A notebook can close one, and the next anchor opens another."""
+
+    from weaver.runtime import anchor
+
+    _anchoring_in(monkeypatch, "Sales_WS")
+
+    first, _ = anchor._session_for("Warehouse/Weaver")
+    first.close()
+    second, _ = anchor._session_for("Warehouse/Weaver")
+
+    assert second is not first
+    assert second.closed is False
+
+
+def _anchoring_in(monkeypatch, workspace_name: str) -> list:
+    """Anchor as though this process were in ``workspace_name``.
+
+    The workspace a name is resolved in is the one the process runs in, which
+    off a tenant is nowhere — so the two things anchoring asks its host are
+    supplied here, and the Sessions it opens are recorded.
+    """
+
+    from support.sessions import given_session
+
+    import weaver.sessions.host as host
+    from weaver.runtime import anchor
+
+    opened = []
+
+    def session_for(workspace, **kwargs):
+        opened.append(workspace)
+        return given_session(workspace=workspace)
+
+    monkeypatch.setattr(host, "current_workspace_name", lambda: workspace_name)
+    monkeypatch.setattr(host, "session_for", session_for)
+    monkeypatch.setattr(anchor, "_SESSIONS", {})
+    return opened
+
+
 # --- what a child inherits -----------------------------------------------------
 
 

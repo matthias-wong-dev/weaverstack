@@ -51,6 +51,14 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     own_catalogue = replace(fabric_workspace, catalogue=f"Warehouse/{name}")
     estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("upgrade"))
     bind = f"Warehouse/{name}=Reporting"
+    target = f"Warehouse/{name}"
+
+    # The fixture wipes this Warehouse as an ordinary target, which spares `_`
+    # because `_` is the catalogue's. Here it *is* the catalogue, so wiping it
+    # again under that name is what leaves nothing for the first build to find.
+    with ConsoleSession(workspace=own_catalogue) as session:
+        register_session(session)
+        weaver.wipe([target], session=session)
 
     # One Warehouse holding both `_` and the user's own schemas, which is a
     # supported arrangement: Weaver owns `_` there and nothing else.
@@ -59,13 +67,13 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
 
     # Older than this Weaver, as an installation predating the table would be.
     warehouse.executor.execute_script(f"drop table [_].[{BOOKMARK.name}];")
-    shape = _catalogue_shape(own_catalogue, warehouse)
+    shape = _catalogue_shape(own_catalogue)
     assert BOOKMARK.name.casefold() not in shape
 
     second = _built(own_catalogue, estate.path, bind)
     assert second.status == "succeeded", _failures(second)
 
-    upgraded = _catalogue_shape(own_catalogue, warehouse)
+    upgraded = _catalogue_shape(own_catalogue)
     assert BOOKMARK.name.casefold() in upgraded
 
     # A third build reconciles against the table rather than introducing it, so
@@ -75,7 +83,7 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     assert third.status == "succeeded", _failures(third)
 
 
-def _catalogue_shape(workspace, warehouse) -> set[str]:
+def _catalogue_shape(workspace) -> set[str]:
     """Which catalogue tables physically exist, as the catalogue reports them."""
 
     from weaver.catalogue.connection import catalogue_connection
