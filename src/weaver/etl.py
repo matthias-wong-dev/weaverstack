@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from .declaration.metadata import PYTHON, SPARK_SQL, TABLE, ObjectId
+from .declaration.metadata import FOLDER, PYTHON, SPARK_SQL, TABLE, ObjectId
 from .declaration.model import (
     FILE_SHAPE,
     PROCEDURE_SHAPE,
@@ -169,6 +169,33 @@ def runtime_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ..
     for model in repository.items:
         artefacts.extend(item_runtime_artefacts(repository, item=model.identity))
     return tuple(sorted(artefacts, key=lambda artefact: str(artefact.identity)))
+
+
+def item_bookmarkable_objects(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    """The objects in one item Weaver loads, and therefore bookmarks.
+
+    Derived from the load artefacts the item installs, so what carries a bookmark
+    cannot drift from what has something to run. A View has no load; a Table
+    declaring ``Has load procedure: false`` is populated by something other than
+    Weaver; a helper module under ``lib/`` declares no object; and a Test or an
+    Assumption is a validation rather than a load.
+
+    Listed without a destination, because an artefact's identity is the same
+    wherever its item is bound and no payload is needed to answer this.
+    """
+
+    bookmarkable = {FOLDER, TABLE}
+    found = set()
+    for artefact in item_load_artefacts(repository, item=item):
+        origin = artefact.origin
+        if origin is None or artefact.role != ROLE_LOAD:
+            continue
+        source = repository.source_documents.get(origin)
+        if source is not None and source.kind in bookmarkable:
+            found.add(origin)
+    return tuple(sorted(found, key=str))
 
 
 def item_runtime_artefacts(
@@ -747,6 +774,7 @@ __all__ = [
     "LOAD_ROOT",
     "RuntimeArtefact",
     "PROCEDURE_TYPE",
+    "item_bookmarkable_objects",
     "item_load_artefacts",
     "load_artefacts",
     "artefacts_by_identity",

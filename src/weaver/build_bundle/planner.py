@@ -61,6 +61,7 @@ from .physical import (
 )
 from .prune import TargetInventory
 from .shortcuts import plan_item_shortcuts
+from .bookmarks import render_bookmark_reconciliation
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
 from .targets import WAREHOUSE_TARGET, ItemBindings, WarehouseBinding
 
@@ -170,6 +171,18 @@ def generate_item_build_bundle(
     )
     if catalogue_before is not None:
         stages.append(catalogue_before)
+
+    # Bookmarks are reconciled here, between decertification and the first
+    # physical action, and never after it — see :mod:`weaver.build_bundle.bookmarks`.
+    bookmarks = render_bookmark_reconciliation(
+        repository,
+        items=tuple(target_by_item),
+        selected_for_build=selected_for_build,
+        removed=removed,
+        catalogue_target=catalogue_target,
+    )
+    if bookmarks is not None:
+        stages.append(bookmarks)
 
     # Shortcut destinations this build wanted but could not materialise. They must
     # not reach the Registry: a row there means the object's work succeeded, and

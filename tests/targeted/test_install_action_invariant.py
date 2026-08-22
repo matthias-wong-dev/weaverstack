@@ -79,7 +79,12 @@ COVERED = {
 #: catalogue round trip rather than per action, because what matters about them
 #: is the rows they leave, not the statement that left them.
 CATALOGUE_KINDS = frozenset(
-    {"delete_catalogue_claims", "publish_catalogue", "publish_registry"}
+    {
+        "delete_catalogue_claims",
+        "publish_catalogue",
+        "publish_registry",
+        "reconcile_bookmarks",
+    }
 )
 
 

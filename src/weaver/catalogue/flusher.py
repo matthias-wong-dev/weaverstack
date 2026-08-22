@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 from ..errors import WeaverError
-from .tables import TIMESTAMP, EvidenceTable
+from .tables import TIMESTAMP, RuntimeTable
 from .tsql import identifier, literal, qualified_name, typed_literal
 
 #: How many rows one INSERT carries. Large enough that a busy run writes a
@@ -50,7 +50,7 @@ class WarehouseFlusher:
 
     def __init__(
         self,
-        table: EvidenceTable,
+        table: RuntimeTable,
         *,
         execute,
         key: FlusherKey,

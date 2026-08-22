@@ -9,11 +9,18 @@ remain distinct.
 Dictionary and Registry rows add object identity within the Item scope. Their
 signatures drive incremental comparison. The ordinary build appends Weaver's
 audit columns to every table.
+
+The ``_`` schema holds two groups of table, and they are maintained differently.
+:data:`CATALOGUE_TABLES` are projected from the repository and reconciled against
+it. :data:`RUNTIME_TABLES` are not projected from anything: ``_.Log`` is appended
+as work settles and ``_.Bookmark`` is maintained by the build and load lifecycle.
+Both groups are declared as ordinary Weaver documents and built by Weaver itself.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Mapping
 
 from ..declaration.metadata import AUDIT_COLUMNS, SPARK_SQL, audit_column_name
@@ -856,7 +863,7 @@ CATALOGUE_TABLES = DICTIONARY_TABLES + (INSTALLATION, REGISTRY)
 TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}
 
 
-# --- operational evidence -----------------------------------------------------
+# --- runtime-maintained tables ------------------------------------------------
 
 #: How a settled unit of work ended.
 RESULT_VOCABULARY = {
@@ -866,14 +873,45 @@ RESULT_VOCABULARY = {
     "blocked": "Blocked",
 }
 
+#: The bookmark of an object that has never had a clean load. A sentinel rather
+#: than a null, so the Static gate and an incremental read are one comparison
+#: rather than a comparison and a null check. Rendered text and Python value are
+#: the same instant, and ``tests/test_bookmark_declaration.py`` asserts it.
+BOOKMARK_SENTINEL_TEXT = "1900-01-01 00:00:00.000000"
+BOOKMARK_SENTINEL = datetime(1900, 1, 1, tzinfo=timezone.utc)
+
 
 @dataclass(frozen=True)
-class EvidenceTable:
-    """An append-oriented Weaver-owned table outside reconciliation."""
+class RuntimeTable:
+    """A Weaver-owned table maintained by runtime rather than by projection.
+
+    Declared and built like any other catalogue table, but nothing projects its
+    rows from the repository, so it is outside reconciliation: ``_.Log`` is
+    appended as work settles and ``_.Bookmark`` is written by the build and load
+    lifecycle.
+
+    ``key`` is the identity the table is declared with, and it is what a keyed
+    write merges on. ``_.Log`` carries a surrogate, so its key is meaningless to
+    a reader and never merged against; ``_.Bookmark`` carries the same logical
+    identity the Registry does, so a bookmark row and a Registry row are the same
+    object seen twice.
+    """
 
     name: str
     description: str
     columns: tuple[CatalogueColumn, ...]
+    key: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        names = [column.name for column in self.columns]
+        if len(set(names)) != len(names):
+            raise ValueError(f"{self.name}: duplicate column")
+        if list(self.key) != names[: len(self.key)]:
+            raise ValueError(f"{self.name}: key columns must lead, in key order")
+        not_nullable = {column.name for column in self.columns if column.not_null}
+        missing = [name for name in self.key if name not in not_nullable]
+        if missing:
+            raise ValueError(f"{self.name}: key columns must be not null: {missing}")
 
     @property
     def qualified(self) -> str:
@@ -884,6 +922,18 @@ class EvidenceTable:
         """The declared columns — those a caller supplies."""
 
         return tuple(column.name for column in self.columns)
+
+    @property
+    def comparison_columns(self) -> tuple[str, ...]:
+        """The non-key columns a keyed write updates when the row already exists."""
+
+        return tuple(name for name in self.column_names if name not in self.key)
+
+    @property
+    def published_column_names(self) -> tuple[str, ...]:
+        """Empty: nothing here is supplied at publication."""
+
+        return ()
 
     @property
     def physical_columns(self) -> tuple[str, ...]:
@@ -902,8 +952,9 @@ class EvidenceTable:
         return tuple(self.public_name_of(name) for name in self.physical_columns)
 
 
-LOG = EvidenceTable(
+LOG = RuntimeTable(
     name="Log",
+    key=("log_sk",),
     description=(
         "One row per settled unit of Weaver work. Operational evidence rather "
         "than installed state, so it is append-oriented and is not reconciled "
@@ -963,6 +1014,44 @@ LOG = EvidenceTable(
         ),
     ),
 )
+
+
+BOOKMARK = RuntimeTable(
+    name="Bookmark",
+    description=(
+        "How far each loadable object has been loaded: the UTC instant "
+        "immediately before its most recent clean load began. An incremental "
+        "read asks for source changes after it, and a Static object is skipped "
+        "once it holds anything other than the sentinel. Weaver's own build and "
+        "load lifecycle maintain it; no declaration projects it and no load "
+        "populates it."
+    ),
+    # The Registry's identity exactly, and for the reason a shared key exists at
+    # all: a bookmark row and a Registry row describe the same installed object.
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "bookmark_datetime",
+            TIMESTAMP,
+            not_null=True,
+            description=(
+                "The UTC instant immediately before the most recent clean load "
+                f"began, or {BOOKMARK_SENTINEL_TEXT} for an object that has not "
+                "had one."
+            ),
+        ),
+    ),
+)
+
+#: Every table the ``_`` schema holds that runtime maintains rather than
+#: projection. Ordinary Weaver documents, built by the built-in item, and never
+#: reconciled against a declaration.
+RUNTIME_TABLES = (LOG, BOOKMARK)
+
+#: Every table the ``_`` schema holds, however it is maintained.
+BUILT_TABLES = CATALOGUE_TABLES + RUNTIME_TABLES
 
 
 def table(name: str) -> CatalogueTable:

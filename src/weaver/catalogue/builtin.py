@@ -7,11 +7,12 @@ from dataclasses import replace
 
 from ..declaration.model import WAREHOUSE, WeaverItemId
 from .tables import (
+    BOOKMARK,
+    BUILT_TABLES,
     CATALOGUE_SCHEMA,
-    CATALOGUE_TABLES,
     LOG,
+    RUNTIME_TABLES,
     CatalogueColumn,
-    CatalogueTable,
 )
 
 #: The reserved Item that owns the catalogue declaration.
@@ -30,6 +31,17 @@ LOG_LINEAGE = (
     "authored, never projected from a declaration, and never populated by a "
     "load."
 )
+
+BOOKMARK_LINEAGE = (
+    "Maintained by Weaver's own build and load lifecycle: a build resets the "
+    "objects it rebuilds and removes the rows of objects it no longer loads, and "
+    "a clean load advances the object it loaded. Never authored, never projected "
+    "from a declaration, and never populated by a load."
+)
+
+#: What each runtime-maintained table says about where its rows come from. Held
+#: here rather than on the table, because a lineage is declaration prose.
+RUNTIME_LINEAGE = {LOG.name: LOG_LINEAGE, BOOKMARK.name: BOOKMARK_LINEAGE}
 
 SCHEMA_DESCRIPTION = (
     "Weaver's own catalogue. These tables record what Weaver has built and "
@@ -70,7 +82,7 @@ def render_schema_file() -> str:
     )
 
 
-def _body(table: CatalogueTable) -> str:
+def _body(table) -> str:
     """A T-SQL query that declares the shape and returns no rows."""
 
     def line(column: CatalogueColumn, first: bool) -> str:
@@ -81,8 +93,13 @@ def _body(table: CatalogueTable) -> str:
     return "\n".join(lines) + "\n where 1 = 0\n"
 
 
-def render_source(table: CatalogueTable) -> str:
-    """The complete Weaver document source file for one catalogue table."""
+def render_source(table, *, lineage: str = LINEAGE) -> str:
+    """The complete Weaver document source file for one ``_`` schema table.
+
+    Projected and runtime-maintained tables are declared the same way and differ
+    only in what their lineage says, because what differs between them is where
+    their rows come from rather than what they are.
+    """
 
     not_null = [
         column.public_name
@@ -93,7 +110,7 @@ def render_source(table: CatalogueTable) -> str:
     sections: list[str] = [
         f"Table ID: {table.qualified}",
         _folded("Description", table.description),
-        _folded("Lineage", LINEAGE),
+        _folded("Lineage", lineage),
         "Dependencies: []",
         "Static: true",
         "Prohibit rebuild: true",
@@ -126,45 +143,10 @@ def render_source(table: CatalogueTable) -> str:
     return f"/*\n{header}\n*/\n{_body(table)}"
 
 
-def render_log_source() -> str:
-    """The ordinary Weaver-built ``_.Log`` table declaration."""
-
-    sections = [
-        f"Table ID: {LOG.qualified}",
-        _folded("Description", LOG.description),
-        _folded("Lineage", LOG_LINEAGE),
-        "Dependencies: []",
-        "Static: true",
-        "Prohibit rebuild: true",
-        "Has load procedure: false",
-        f"Primary key: {LOG.public_name_of('log_sk')}",
-        "Not null:\n"
-        + "\n".join(
-            f"  - {column.public_name}"
-            for column in LOG.columns
-            # The key is already not null by being the key.
-            if column.not_null and column.name != "log_sk"
-        ),
-        "Schema:\n"
-        + "\n".join(
-            f"  {column.public_name}: {column.warehouse_type}" for column in LOG.columns
-        ),
-        "Column notes:\n"
-        + "\n".join(
-            _folded(column.public_name, column.description, indent=2)
-            for column in LOG.columns
-        ),
-    ]
-    header = "\n\n".join(sections)
-    return f"/*\n{header}\n*/\n{_body(LOG)}"
-
-
 def render_item_sources() -> dict[str, str]:
-    sources = {
-        SCHEMA_PATH: render_schema_file(),
-        f"{ITEM_ROOT}/{LOG.qualified}.sql": render_log_source(),
-    }
-    for table in CATALOGUE_TABLES:
+    sources = {SCHEMA_PATH: render_schema_file()}
+    runtime = {table.name for table in RUNTIME_TABLES}
+    for table in BUILT_TABLES:
         documented = replace(
             table,
             columns=tuple(
@@ -176,7 +158,10 @@ def render_item_sources() -> dict[str, str]:
                 for column in table.columns
             ),
         )
-        sources[f"{ITEM_ROOT}/{table.qualified}.sql"] = render_source(documented)
+        sources[f"{ITEM_ROOT}/{table.qualified}.sql"] = render_source(
+            documented,
+            lineage=RUNTIME_LINEAGE[table.name] if table.name in runtime else LINEAGE,
+        )
     return sources
 
 

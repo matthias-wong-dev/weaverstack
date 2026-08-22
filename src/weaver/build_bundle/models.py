@@ -64,11 +64,17 @@ REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 DELETE_CATALOGUE_CLAIMS = "delete_catalogue_claims"
 PUBLISH_CATALOGUE = "publish_catalogue"
 PUBLISH_REGISTRY = "publish_registry"
+#: Bring ``_.Bookmark`` into line with what this build will leave installed:
+#: remove the rows of objects it no longer loads, and reset the ones it rebuilds.
+#: It leads physical work for the reason claim deletion does — see
+#: :mod:`weaver.build_bundle.bookmarks`.
+RECONCILE_BOOKMARKS = "reconcile_bookmarks"
 CATALOGUE_KINDS = frozenset(
     {
         DELETE_CATALOGUE_CLAIMS,
         PUBLISH_CATALOGUE,
         PUBLISH_REGISTRY,
+        RECONCILE_BOOKMARKS,
     }
 )
 

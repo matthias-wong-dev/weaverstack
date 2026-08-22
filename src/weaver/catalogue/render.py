@@ -25,9 +25,16 @@ from .tables import (
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
     CatalogueTable,
+    RuntimeTable,
     public_column_name,
 )
+
 from .tsql import TIMESTAMP_TYPE, identifier, literal, qualified_name, typed_literal
+
+#: What these renderers work on. A projected catalogue table and a
+#: runtime-maintained one are merged, deleted and compared identically; what
+#: differs is which side decides the rows, not how a statement is written.
+Table = CatalogueTable | RuntimeTable
 
 #: A row as projected: column name to value. Values are ``str``, ``bool`` or
 #: ``None`` — nothing needing a renderer of its own.
@@ -185,7 +192,7 @@ def _differs(left: str, right: str) -> str:
 # --- statements ---------------------------------------------------------------
 
 
-def sorted_rows(table: CatalogueTable, rows: Iterable[Row]) -> tuple[Row, ...]:
+def sorted_rows(table: Table, rows: Iterable[Row]) -> tuple[Row, ...]:
     """Rows in key order — the canonical order every statement renders in."""
 
     def sort_key(row: Row) -> tuple[str, ...]:
@@ -194,7 +201,7 @@ def sorted_rows(table: CatalogueTable, rows: Iterable[Row]) -> tuple[Row, ...]:
     return tuple(sorted(rows, key=sort_key))
 
 
-def _public(table: CatalogueTable, name: str) -> str:
+def _public(table: Table, name: str) -> str:
     return identifier(table.public_name_of(name))
 
 
@@ -206,7 +213,7 @@ VALUES_ROWS = 1000
 
 
 def render_merge(
-    table: CatalogueTable,
+    table: Table,
     rows: Sequence[Row],
     *,
     scope: InstallationScope | InstallationScopes,
@@ -248,7 +255,7 @@ def render_merge(
 
 
 def _merge_statement(
-    table: CatalogueTable,
+    table: Table,
     rows: Sequence[Row],
     *,
     scope: InstallationScope | InstallationScopes,
@@ -316,7 +323,7 @@ def _merge_statement(
     )
 
 
-def _source_relation(table: CatalogueTable, rows: Sequence[Row]) -> str:
+def _source_relation(table: Table, rows: Sequence[Row]) -> str:
     """The merge source: one table value constructor, cast by a projection over it.
 
     The casts sit outside rather than in every row. A ``VALUES`` constructor
@@ -352,7 +359,7 @@ def _source_relation(table: CatalogueTable, rows: Sequence[Row]) -> str:
 
 
 def render_delete_obsolete(
-    table: CatalogueTable,
+    table: Table,
     rows: Sequence[Row],
     *,
     scope: InstallationScope | InstallationScopes,
@@ -420,7 +427,7 @@ def render_delete_obsolete(
 
 
 def _keep_relation(
-    table: CatalogueTable, rows: Sequence[Row], identity: Sequence[str]
+    table: Table, rows: Sequence[Row], identity: Sequence[str]
 ) -> str:
     """The rows a build still claims, as one relation.
 
@@ -457,7 +464,7 @@ def _keep_relation(
 
 
 def render_delete_scope(
-    table: CatalogueTable,
+    table: Table,
     *,
     scope: InstallationScope | InstallationScopes,
 ) -> str:
@@ -471,7 +478,7 @@ def render_delete_scope(
     return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
 
 
-def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:
+def _check_unique_keys(table: Table, rows: Sequence[Row]) -> None:
     """Refuse a merge whose source holds two rows with one key.
 
     T-SQL refuses a ``MERGE`` when several source rows match one target row, and
@@ -495,7 +502,7 @@ def _check_unique_keys(table: CatalogueTable, rows: Sequence[Row]) -> None:
 
 
 def _check_scope(
-    table: CatalogueTable,
+    table: Table,
     rows: Iterable[Row],
     scope: InstallationScope | InstallationScopes,
 ) -> None:
