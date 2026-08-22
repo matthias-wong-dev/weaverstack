@@ -860,8 +860,6 @@ DICTIONARY_TABLES = (
 #: certifies — so Registry is last.
 PROJECTED_TABLES = DICTIONARY_TABLES + (INSTALLATION, REGISTRY)
 
-TABLES_BY_NAME = {table.name: table for table in PROJECTED_TABLES}
-
 
 # --- the catalogue tables maintained at runtime -------------------------------
 
@@ -955,8 +953,8 @@ LOG = RuntimeTable(
     key=("log_sk",),
     description=(
         "One row per settled unit of Weaver work. Operational evidence rather "
-        "than installed state, so it is append-oriented and is not reconciled "
-        "against a declaration."
+        "than installed state, so it is appended as work settles and no "
+        "declaration is reconciled against it."
     ),
     columns=(
         CatalogueColumn(
@@ -1053,6 +1051,8 @@ CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 #: appended and never consulted, and reading it would grow with the estate's age.
 READABLE_TABLES = PROJECTED_TABLES + (BOOKMARK,)
 
+TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}
+
 
 #: The ``_`` schema tables no build may drop, folded for comparison. Every
 #: catalogue table holds state a rebuild cannot reproduce: projected rows belong
@@ -1071,8 +1071,8 @@ def is_protected(schema: str, name: str) -> bool:
     return f"{schema}.{name}".casefold() in _PROTECTED
 
 
-def table(name: str) -> CatalogueTable:
-    """One catalogue table by its object name."""
+def table(name: str) -> CatalogueTable | RuntimeTable:
+    """One catalogue table by its object name, projected or runtime."""
 
     try:
         return TABLES_BY_NAME[name]

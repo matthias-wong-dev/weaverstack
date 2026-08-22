@@ -331,6 +331,12 @@ def test_the_schema_dictionary_describes_a_schema_within_one_installation():
 @weaver_test()
 def test_a_table_is_reachable_by_name():
     assert table("Registry") is REGISTRY
+    # Every catalogue table, not only the projected ones: the `_` schema is the
+    # catalogue, and a runtime table is one of its tables.
+    from weaver.catalogue.tables import BOOKMARK, LOG
+
+    assert table("Bookmark") is BOOKMARK
+    assert table("Log") is LOG
 
 
 @weaver_test()
