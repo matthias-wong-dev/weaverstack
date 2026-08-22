@@ -63,6 +63,14 @@ RETIRED = (
     # been loaded, and a table a clean load emptied has been.
     "table_is_populated",
     "folder_is_populated",
+    # Bookmark-specific state, carried and resolved beside the catalogue it is a
+    # table of. The `_` schema is one thing, so one object reads and writes it
+    # and one payload carries it: see `weaver.catalogue.state.Catalogue`.
+    "BookmarkContext",
+    "RunBookmarks",
+    "with_bookmarks",
+    "read_installed_bookmarks",
+    "resolve_installed_object",
 )
 
 

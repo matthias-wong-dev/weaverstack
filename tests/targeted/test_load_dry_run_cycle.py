@@ -284,8 +284,8 @@ def test_load_dry_run_appends_nothing_to_the_log(session, tmp_path):
 def test_a_dry_run_moves_no_bookmark(session):
     """A bookmark it advanced would make the next real load skip a window.
 
-    Nothing read it, so nothing has been read. Proven by the statements, not by
-    a flag: a dry run opens no bookmark writer at all.
+    Nothing read it, so nothing has been read. Proven by the statements rather
+    than by a flag: no statement touching the table is submitted at all.
     """
 
     dry_run(session)
