@@ -280,6 +280,26 @@ def test_load_dry_run_appends_nothing_to_the_log(session, tmp_path):
 
 
 @weaver_test()
+def test_a_dry_run_moves_no_bookmark(session):
+    """A bookmark it advanced would make the next real load skip a window.
+
+    Nothing read it, so nothing has been read. Proven by the statements, not by
+    a flag: a dry run opens no bookmark writer at all.
+    """
+
+    dry_run(session)
+    session.session.flush()
+
+    assert not [
+        statement
+        for call in session.session.calls
+        if call.kind == "tsql"
+        for statement in call.body
+        if "[_].[Bookmark]" in statement
+    ]
+
+
+@weaver_test()
 def test_a_dry_run_never_reports_an_execution_status(session):
     """A validated node has not run, and no word for a thing that ran fits it."""
 
