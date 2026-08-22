@@ -16,6 +16,7 @@ from factories import (
     ITEM,
     WAREHOUSE_ITEM,
     bound_target,
+    catalogue_target,
     document_id,
     item_id,
     lakehouse_table,
@@ -73,6 +74,7 @@ def plan(repository, *, item=None, target=None, **overrides):
         "removed": set(),
         "registered": {},
         "inventory": target_inventory(),
+        "catalogue_target": catalogue_target(),
     }
     arguments.update(overrides)
     return plan_item_build(

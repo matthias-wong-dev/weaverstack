@@ -28,12 +28,21 @@ from ..catalogue.render import (
     render_merge,
 )
 from ..catalogue.claims import catalogue_schema
-from ..catalogue.tables import BOOKMARK, BOOKMARK_SENTINEL_TEXT
+from ..catalogue.tables import BOOKMARK, BOOKMARK_SENTINEL_TEXT, CATALOGUE_SCHEMA
+from ..catalogue.tsql import identifier
 from ..declaration.model import WeaverDocumentId, WeaverItemId
 from ..etl import item_bookmarkable_objects
-from .models import RECONCILE_BOOKMARKS, BuildBatch, InstallAction
+from .changes import VIEW as VIEW_KIND
+from .changes import added
+from .models import (
+    CREATE_BOOKMARK_REFERENCE,
+    RECONCILE_BOOKMARKS,
+    BuildBatch,
+    InstallAction,
+)
 from .payloads import sha256_hex
-from .stages import CATALOGUE, PlannedStage
+from .stages import CATALOGUE, SHORTCUT, PlannedStage
+from .targets import WAREHOUSE_TARGET
 
 #: The error a build raises when the catalogue holds no ``_.Bookmark`` table.
 #: Checked in the Warehouse rather than during planning, because the Warehouse is
@@ -171,6 +180,98 @@ def render_bookmark_reconciliation(
     )
 
 
+# --- the local name a generated statement uses --------------------------------
+
+
+def bookmark_reference_views(repository, *, item: WeaverItemId, target) -> tuple[str, ...]:
+    """``_.Bookmark`` where this item's target presents it as a view.
+
+    For the keep-set, so prune spares the reference this build creates. It goes
+    when the item's last loadable object goes, exactly as the ``_`` schema holding
+    the load procedures does.
+    """
+
+    if target.kind != WAREHOUSE_TARGET:
+        return ()
+    if not item_bookmarkable_objects(repository, item=item):
+        return ()
+    return (f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",)
+
+
+def render_bookmark_reference(
+    repository,
+    *,
+    item: WeaverItemId,
+    target,
+    inventory,
+    catalogue_target,
+) -> PlannedStage | None:
+    """Give a built Warehouse the catalogue's ``_.Bookmark`` under that name.
+
+    A generated load procedure reads and writes its own bookmark, and it says
+    ``[_].[Bookmark]`` to do it. In the Warehouse the catalogue lives in that is
+    already the table; anywhere else it is a view over the catalogue's three-part
+    name, which is how a Fabric Warehouse reaches another item in the workspace.
+
+    Weaver runtime infrastructure rather than a declared shortcut: nothing
+    authored it and it is not published as a ``_.Shortcut`` row. It is created in
+    the shortcut phase for the reason declared shortcuts are — before the
+    documents written against the namespace it completes.
+
+    Created when the Warehouse does not already hold it, so an unchanged
+    repository plans nothing and a view somebody removed comes back.
+    """
+
+    if target.kind != WAREHOUSE_TARGET:
+        return None
+    if not item_bookmarkable_objects(repository, item=item):
+        return None
+    if target.item_id == catalogue_target.item_id:
+        # The catalogue's own Warehouse: the table is right there, and a view of
+        # that name would be a view over itself.
+        return None
+    if inventory.has_object(CATALOGUE_SCHEMA, BOOKMARK.name, "view"):
+        return None
+
+    statement = (
+        f"create or alter view {identifier(CATALOGUE_SCHEMA)}."
+        f"{identifier(BOOKMARK.name)} as select * from "
+        f"{identifier(catalogue_target.name)}.{identifier(CATALOGUE_SCHEMA)}."
+        f"{identifier(BOOKMARK.name)};"
+    )
+    slug = "bookmark-reference"
+    item_slug = str(item).replace("/", "--")
+    filename = f"{slug}-{item_slug}.tsql-batch.json"
+    content = (json.dumps([statement], indent=2, ensure_ascii=False) + "\n").encode(
+        "utf-8"
+    )
+    action = InstallAction(
+        id=f"{slug}-{item_slug}",
+        kind=CREATE_BOOKMARK_REFERENCE,
+        resource_node_id=None,
+        executor="tsql_batch",
+        payload=filename,
+        payload_sha256=sha256_hex(content),
+    )
+    return PlannedStage(
+        phase=SHORTCUT,
+        index=1,
+        slug=slug,
+        description="present the catalogue's _.Bookmark in this Warehouse",
+        payloads={filename: content},
+        batches=(
+            BuildBatch(id=f"{slug}-{item_slug}", target_id=target.id, actions=(action,)),
+        ),
+        # Declared alongside the action, as every physical change is: the view
+        # this leaves is part of what the Warehouse holds afterwards.
+        changes={
+            target.id: (
+                added(VIEW_KIND, f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}", action.id),
+            )
+        },
+    )
+
+
 def _is_builtin(item: WeaverItemId) -> bool:
     from ..catalogue.builtin import BUILTIN_ITEM
 
@@ -180,6 +281,8 @@ def _is_builtin(item: WeaverItemId) -> bool:
 __all__ = [
     "MISSING_TABLE_ERROR",
     "MISSING_TABLE_MESSAGE",
+    "bookmark_reference_views",
     "bookmark_statements",
     "render_bookmark_reconciliation",
+    "render_bookmark_reference",
 ]

@@ -52,6 +52,12 @@ PRUNE_VIEW = "prune_view"
 PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
 
+#: Present the catalogue's ``_.Bookmark`` in a built Warehouse under that name,
+#: so a generated load procedure can read and write its own bookmark. Weaver
+#: runtime infrastructure rather than a declared shortcut — see
+#: :mod:`weaver.build_bundle.bookmarks`.
+CREATE_BOOKMARK_REFERENCE = "create_bookmark_reference"
+
 #: Refresh the SQL analytics endpoint for one Lakehouse after its Delta tables
 #: have changed. The action is target-bound and payloadless: the planner decides
 #: which Lakehouses need it, while the executor performs or explicitly skips it

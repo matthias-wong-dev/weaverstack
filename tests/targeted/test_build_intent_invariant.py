@@ -46,6 +46,7 @@ PHYSICAL_KINDS = frozenset(
     {
         "create_schema",
         "create_shortcut",
+        "create_bookmark_reference",
         "build_folder",
         "build_table",
         "build_view",

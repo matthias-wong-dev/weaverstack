@@ -1054,6 +1054,23 @@ RUNTIME_TABLES = (LOG, BOOKMARK)
 BUILT_TABLES = CATALOGUE_TABLES + RUNTIME_TABLES
 
 
+#: The ``_`` schema tables no build may drop, folded for comparison. Every
+#: catalogue table holds state a rebuild cannot reproduce: projected rows belong
+#: to installations a scoped build has no authority over, and the runtime tables
+#: hold a run's own record of what it did and how far it got. All of them are
+#: declared ``Prohibit rebuild``, so selection never offers one; this is the
+#: guard behind that declaration.
+_PROTECTED = frozenset(
+    f"{CATALOGUE_SCHEMA}.{table.name}".casefold() for table in BUILT_TABLES
+)
+
+
+def is_protected(schema: str, name: str) -> bool:
+    """Whether ``schema.name`` is a catalogue table a build must not drop."""
+
+    return f"{schema}.{name}".casefold() in _PROTECTED
+
+
 def table(name: str) -> CatalogueTable:
     """One catalogue table by its object name."""
 

@@ -61,7 +61,7 @@ from .physical import (
 )
 from .prune import TargetInventory
 from .shortcuts import plan_item_shortcuts
-from .bookmarks import render_bookmark_reconciliation
+from .bookmarks import render_bookmark_reconciliation, render_bookmark_reference
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
 from .targets import WAREHOUSE_TARGET, ItemBindings, WarehouseBinding
 
@@ -210,6 +210,7 @@ def generate_item_build_bundle(
                 selected_loads=selected_for_build & selected_loads,
                 removed=removed,
                 registered=registered,
+                catalogue_target=catalogue_target,
             )
             layer_stages.extend(planned.stages)
             omitted.extend(planned.omitted)
@@ -362,6 +363,7 @@ def plan_item_build(
     selected_for_drop,
     selected_for_build,
     registered,
+    catalogue_target,
     selected_loads=(),
     removed=(),
     shortcut_sources=None,
@@ -433,6 +435,15 @@ def plan_item_build(
         stages.append(schemas)
     if shortcuts.stage is not None:
         stages.append(shortcuts.stage)
+    reference = render_bookmark_reference(
+        repository,
+        item=item,
+        target=target,
+        inventory=inventory,
+        catalogue_target=catalogue_target,
+    )
+    if reference is not None:
+        stages.append(reference)
     stages.extend(
         item_build_stages(
             repository,

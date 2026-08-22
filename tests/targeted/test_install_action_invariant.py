@@ -49,6 +49,10 @@ DEFERRED = {
 #: for the test that gives it one. Recorded here rather than quietly dropped,
 #: because a checklist that lost an entry would read as covered.
 AWAITING_FABRIC = {
+    "create_bookmark_reference": (
+        "the local _.Bookmark view needs a real Warehouse beside the catalogue "
+        "Warehouse; covered by tests/fabric/test_bookmark_lifecycle.py"
+    ),
     "build_folder": "the Delta-side folder execution test needs a real Lakehouse",
     "drop_folder": "as above",
     "drop_table": "the rebuild drop needs a real Delta table to clear",

@@ -14,6 +14,7 @@ from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from ..errors import BuildError
 from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_runtime_artefacts
+from .bookmarks import bookmark_reference_views
 from .changes import (
     FILE as FILE_KIND,
 )
@@ -135,6 +136,10 @@ def item_prune_stage(
             artefact.identity
             for artefact in item_runtime_artefacts(repository, item=item)
         ],
+        # The local `_.Bookmark` a built Warehouse presents. Derived from the
+        # item's loadable objects as the `_` schema is, so the reference goes
+        # when the last of them does.
+        extra_views=bookmark_reference_views(repository, item=item, target=target),
     )
 
     payloads: dict[str, bytes] = {}
@@ -172,6 +177,25 @@ def _prefixed(action: InstallAction, item_slug: str) -> InstallAction:
         id=f"{item_slug}-{action.id}",
         payload=None if action.payload is None else f"{item_slug}-{action.payload}",
     )
+
+
+def _refuse_protected(schema: str, name: str, what: str) -> None:
+    """Stop a destructive action against a catalogue table before it is frozen.
+
+    Reached only if selection went wrong: every catalogue table declares
+    ``Prohibit rebuild``, and prune keeps what the built-in item declares. The
+    check is here rather than in the installer because here the resource is known
+    by its identity, and an installer would have to read it back out of SQL.
+    """
+
+    from ..catalogue.tables import is_protected
+
+    if is_protected(schema, name):
+        raise BuildError(
+            f"{what} is a Weaver catalogue table and cannot be dropped. It holds "
+            "installed state no declaration reproduces, so a build may create it "
+            "and write it but never replace it."
+        )
 
 
 def item_drop_stages(
@@ -227,6 +251,7 @@ def item_drop_stages(
 
 
 def _drop_action(identity, installed_type, target, payloads) -> InstallAction:
+    _refuse_protected(identity.object_id.schema, identity.object_id.object, str(identity))
     try:
         installed_kind = _DECLARATION_KIND[installed_type]
     except KeyError as exc:

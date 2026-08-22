@@ -21,6 +21,7 @@ from __future__ import annotations
 import pytest
 from factories import (
     bound_target,
+    catalogue_target,
     document_id,
     item_id,
     registered_document,
@@ -147,6 +148,7 @@ def test_an_unmaterialisable_shortcut_is_withheld_from_certification(estate):
         selected_for_drop=set(),
         selected_for_build=selected,
         registered={},
+        catalogue_target=catalogue_target(),
     )
 
     assert document_id(SHORTCUT) in planned.uncertified
@@ -174,6 +176,7 @@ def test_the_consumer_builds_its_view_after_the_shortcut_it_reads(estate):
         selected_for_drop=set(),
         selected_for_build=selected,
         registered={},
+        catalogue_target=catalogue_target(),
     )
 
     kinds = [
@@ -203,6 +206,7 @@ def test_the_consumer_gets_its_own_endpoint_refresh(estate):
         selected_for_drop=set(),
         selected_for_build={document_id(SHORTCUT), document_id(VIEW)},
         registered={},
+        catalogue_target=catalogue_target(),
     )
 
     assert planned.stages[-1].phase == "refresh"

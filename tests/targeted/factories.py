@@ -37,13 +37,14 @@ from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.prune import TargetInventory
 from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.state import Catalogue, RegisteredDocument
-from weaver.catalogue.tables import REGISTRY
+from weaver.catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA, REGISTRY
 from weaver.declaration import parse_item_repository
 from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.etl import (
     FILE_TYPE,
     PROCEDURE_TYPE,
+    item_bookmarkable_objects,
     item_runtime_artefacts,
     load_schemas,
 )
@@ -437,12 +438,22 @@ class FixtureInventory(TargetInventory):
         views = qualified(of_kind="View", files=False)
         folders = qualified(of_kind="Folder", files=True)
         artefacts = item_runtime_artefacts(repository, item=item)
+        if target_kind == SQL_TARGET and item_bookmarkable_objects(
+            repository, item=item
+        ):
+            # A built Warehouse holds the catalogue's `_.Bookmark` under that
+            # name, so a generated load procedure can reach its own bookmark.
+            views = tuple(sorted(views + (f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",)))
         return cls(
             target_id=target_id,
             kind=kind,
             target_name=target_name,
-            schemas=schemas_of(tables + views)
-            + tuple(load_schemas(artefacts) if target_kind == SQL_TARGET else ()),
+            schemas=tuple(
+                sorted(
+                    set(schemas_of(tables + views))
+                    | set(load_schemas(artefacts) if target_kind == SQL_TARGET else ())
+                )
+            ),
             folder_schemas=schemas_of(folders),
             folders=folders,
             tables=tables,
@@ -486,6 +497,21 @@ def bound_target(
         workspace_name=workspace_name,
         logical_item_name=logical_item_name,
         logical_item_type=logical_item_type,
+        **extra,
+    )
+
+
+def catalogue_target(
+    *, id: str = "control-warehouse-Weaver", item_id: str = "Weaver", **extra
+) -> BoundTarget:
+    """The Warehouse the Weaver catalogue lives in, as the planner receives it."""
+
+    return bound_target(
+        id=id,
+        kind="warehouse",
+        item_id=item_id,
+        logical_item_name="_weaver",
+        logical_item_type="Warehouse",
         **extra,
     )
 

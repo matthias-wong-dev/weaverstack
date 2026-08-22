@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from ..catalogue.tables import CATALOGUE_SCHEMA
+from ..catalogue.tables import CATALOGUE_SCHEMA, is_protected
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import PROCEDURE_SHAPE, WeaverDocumentId
 from ..declaration.source import SourceDocument
@@ -401,6 +401,21 @@ def render_inventory_prune(
         folded = qualified.casefold()
         return folded in same_kind or folded in managed.declared_objects
 
+    def protected(qualified: str) -> bool:
+        """Whether this *table* is a catalogue table, which prune never removes.
+
+        Asked of a table and not of a view, because the two answer differently
+        for one name: ``_.Bookmark`` is the catalogue's own table in the
+        catalogue Warehouse and a local reference to it everywhere else, and the
+        reference has the ordinary lifecycle of the keep-set it is in.
+
+        The built-in item declares every catalogue table, so a table reaching
+        here means its declaration went missing rather than that the table did.
+        """
+
+        schema, _, name = qualified.partition(".")
+        return is_protected(schema, name)
+
     if target.kind == "warehouse":
         for qualified in inventory.views:
             if not spared(qualified, managed.views):
@@ -419,7 +434,7 @@ def render_inventory_prune(
                 )
                 changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
         for qualified in inventory.tables:
-            if not spared(qualified, managed.tables):
+            if not spared(qualified, managed.tables) and not protected(qualified):
                 schema, name = qualified.split(".", 1)
                 actions.append(
                     _drop_action(
@@ -473,8 +488,10 @@ def render_inventory_prune(
                 changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
         for qualified in inventory.tables:
             schema, name = qualified.split(".", 1)
-            if schema.casefold() not in orphan_schemas and not spared(
-                qualified, managed.tables
+            if (
+                schema.casefold() not in orphan_schemas
+                and not spared(qualified, managed.tables)
+                and not protected(qualified)
             ):
                 actions.append(
                     _drop_action(
@@ -522,6 +539,7 @@ def managed_sets(
     *,
     shortcut_destinations: Iterable[WeaverDocumentId] = (),
     load_identities: Iterable[WeaverDocumentId] = (),
+    extra_views: Iterable[str] = (),
 ) -> _Managed:
     """The keep-set for one physical side: Delta objects, or Warehouse ones.
 
@@ -536,6 +554,9 @@ def managed_sets(
     drop the schema it had just created. Derived from the artefacts rather than
     added unconditionally, so the schema goes when the last procedure does. The
     Lakehouse runtime tree needs nothing here, being a declared folder.
+
+    ``extra_views`` are qualified views the build creates that no document
+    declares — the local ``_.Bookmark`` a built Warehouse presents.
     """
 
     tables = {
@@ -551,9 +572,11 @@ def managed_sets(
     folders = {
         d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET
     }
-    # Taken before the shortcuts join, because these are the names a managed drop
-    # can remove by their registered type. See :class:`_Managed`.
+    # Taken before the shortcuts and the build's own views join, because these
+    # are the names a managed drop can remove by their registered type. See
+    # :class:`_Managed`.
     declared_objects = tables | views
+    views.update(extra_views)
     #: The namespaces a schema shortcut presents. Kept, and never looked inside:
     #: what is in one belongs to the item it points at, and OneLake makes a
     #: shortcut a read-write window, so enumerating it to decide what to remove
