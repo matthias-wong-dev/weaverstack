@@ -199,9 +199,9 @@ def _assert_load_state(session, workspace, report) -> None:
     """
 
     loaded = {
-        (schema, object_name)
-        for _type, _name, schema, object_name in map(_node_identity, report.nodes)
-        if object_name
+        identity
+        for identity in map(_recorded_identity, report.nodes)
+        if identity is not None
     }
 
     status = _rows(
@@ -245,9 +245,9 @@ def _assert_test_state(session, workspace, report) -> None:
     """What the validation run left, and which kind each validation was."""
 
     validated = {
-        (schema, object_name)
-        for _type, _name, schema, object_name in map(_node_identity, report.nodes)
-        if object_name
+        identity
+        for identity in map(_recorded_identity, report.nodes)
+        if identity is not None
     }
 
     status = _rows(
@@ -299,9 +299,38 @@ def _workflow_task_types(session, workspace) -> dict[str, set[str]]:
 
 
 def _node_identity(node) -> tuple[str | None, str | None, str | None, str | None]:
+    """One node's identity as ``_.Log`` records it: the target, and the object.
+
+    ``_.Log`` carries the object's ``Schema.Object`` as the run reports it, which
+    for a Folder is the display spelling without its ``Files/`` prefix. The
+    current-state tables key on the Registry's identity instead, which keeps the
+    prefix — see :func:`_recorded_identity`.
+    """
+
     target_type, _, target_name = str(node.physical_target).partition("/")
     logical = str(node.logical_id or "").rsplit("/", 1)[-1]
     schema, separator, object_name = logical.rpartition(".")
     if not separator:
         schema, object_name = None, logical or None
     return target_type or None, target_name or None, schema or None, object_name
+
+
+def _recorded_identity(node) -> tuple[str, str] | None:
+    """One node's ``(schema, object)`` as a current-state table keys it.
+
+    Through the production functions, not by splitting the display id: a Folder's
+    catalogue identity carries its ``Files/`` prefix, so a Folder and a Table of
+    the same name stay apart, and a test that spelled it itself would disagree
+    with the row.
+    """
+
+    from weaver.catalogue.claims import bookmark_row
+    from weaver.declaration.model import WeaverDocumentId, parse_installed_identity
+
+    if not node.logical_id:
+        return None
+    identity = parse_installed_identity(str(node.logical_id))
+    if not isinstance(identity, WeaverDocumentId):
+        return None
+    row = bookmark_row(identity)
+    return str(row["schema_name"]), str(row["object_name"])

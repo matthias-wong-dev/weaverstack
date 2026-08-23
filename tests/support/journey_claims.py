@@ -927,10 +927,16 @@ def _assert_warehouse_installed(env, step) -> None:
     # A Warehouse table carries a generated load procedure, and its Test one of
     # its own — which is what gives the run graph something to dispatch on this
     # side of the crossing rather than only on the Lakehouse's.
+    #
+    # Beside them, the two generic entry points a person calls to run one by hand
+    # and have the outcome recorded. The whole set, so a procedure that arrived
+    # without being intended is a failure rather than a thing nobody noticed.
     procedures = {name for name, kind in held.items() if kind == "SQL_STORED_PROCEDURE"}
     assert procedures == {
         "_.Load Rpt.CustomerReport",
         "_.Test Rpt.ReportReconciles",
+        "_.Load",
+        "_.Test",
     }, held
 
 
