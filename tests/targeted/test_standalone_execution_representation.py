@@ -337,6 +337,62 @@ def test_a_validation_returns_its_counts_rather_than_its_rows(lakehouse):
     assert "_Rows" not in written
 
 
+def _test(sides):
+    """A Test whose two sides are whatever a case hands it.
+
+    ``read()`` is Weaver's comparison and may not be overridden, so the sides are
+    what a case controls — which is also what an author controls.
+    """
+
+    from weaver.declaration.metadata import PYTHON, parse_document
+
+    class DWG__CustomerReconcile(Test):
+        def _document(self):
+            return parse_document(
+                """
+                Test ID: DWG.CustomerReconcile
+
+                Description: Customers reconcile to the source.
+                """,
+                language=PYTHON,
+            )
+
+        def _sides(self):
+            return sides
+
+    return DWG__CustomerReconcile
+
+
+@weaver_test()
+def test_a_test_takes_the_same_catalogue_the_others_do(lakehouse):
+    """One constructor model across every authored object.
+
+    A Test resolves its identity where a Table does, through the catalogue it was
+    handed — and through ``_.TestDictionary``, because a Test materialises
+    nothing.
+    """
+
+    catalogue = validating("DWG.CustomerReconcile")
+
+    unanchored = _test((None, None))(MockSpark(), lakehouse=lakehouse)
+    anchored = _test((None, None))(
+        MockSpark(), lakehouse=lakehouse, catalogue=catalogue
+    )
+
+    assert unanchored.installed is None
+    assert str(anchored.installed) == "Lakehouse/Sales/DWG.CustomerReconcile"
+
+
+@weaver_test()
+def test_an_unanchored_test_refuses_the_operational_interface(lakehouse):
+    """Recording what it found needs the catalogue that records it."""
+
+    validation = _test((None, None))(MockSpark(), lakehouse=lakehouse)
+
+    with pytest.raises(LoadError, match="not anchored"):
+        validation.run()
+
+
 # --- the two kinds are both validations -----------------------------------------
 
 
