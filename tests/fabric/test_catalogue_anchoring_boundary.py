@@ -121,29 +121,29 @@ emit(results)
 
 
 @weaver_test(hosted=True)
-def test_the_build_after_the_catalogue_installs_the_lakehouse_reference(
+def test_one_build_installs_the_lakehouse_reference_and_the_next_plans_none(
     fabric_lakehouse_estate,
 ):
-    """The documented two-build behaviour, and the shortcut it ends with.
+    """One pass, and the shortcut it ends with.
 
-    A Warehouse publishes a table to OneLake after creating it, so the build that
-    creates the catalogue has nothing for a shortcut to point at. This estate's
-    first build was that build. The one here is the next, which finds the table
-    installed and gives the Lakehouse its reference — and then Spark reads
-    ``_.Bookmark`` in the Lakehouse by the four-part name a statement would use.
+    This estate's own build created the catalogue table and pointed at it — the
+    item graph orders the two, and the source wait carries the moment between
+    Fabric creating a Warehouse table and publishing it to OneLake. So the build
+    here has nothing left to do, and Spark reads ``_.Bookmark`` in the Lakehouse
+    by the four-part name a statement would use.
     """
 
     env = fabric_lakehouse_estate.env
 
     bundle = env.generate("reference")
-    installed = [
+    planned = [
         action.id
         for _sequence, _batch, action in bundle.plan.actions()
         if "bookmark-reference" in action.id
     ]
     outcome = env.install(bundle)
     assert outcome.status == "succeeded", outcome.action_error
-    assert installed, "the build after the catalogue plans the reference"
+    assert planned == [], "the reference was installed by the build that made it"
 
     seen = env.run_python(REFERENCE, label="read the bookmark reference")
 
