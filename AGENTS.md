@@ -294,8 +294,15 @@ ResolvedLoadPlan                   SparkNaming / SparkDestination
 execute_load_plan orchestration    is_fabric
 separate load/test engines         a per-position build
 old/new action terminology         build_uploaded_item_repository
-operation-local resource ownership
+operation-local resource ownership update_catalogue / @update_catalogue
+Bookmark-specific build plumbing   a bespoke write per runtime table
 ```
+
+**Who records is the interface, not a flag.** A lower execution primitive never
+writes operational catalogue state; a run records centrally; a standalone wrapper
+records synchronously. In Python that is `_load()` against `load()` and `read()`
+against `run()`; in T-SQL, `_.[Load X.Y]` and `_.[Test X.Y]` against `_.Load` and
+`_.Test`. Nothing takes a parameter about it.
 
 `tests/test_fabric_only_invariant.py`, `tests/test_public_api_invariant.py` and
 `tests/test_remote_program_invariant.py` name them and fail if one comes back.
