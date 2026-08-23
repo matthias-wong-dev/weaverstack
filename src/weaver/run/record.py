@@ -6,10 +6,14 @@ and beside it the operational state that unit left behind:
 .. code-block:: text
 
     every settled node       _.Log                append
-    a load that executed     _.LoadStatus         merge on the object's identity
-                             _.LoadStatistic      append
+    a load about an object   _.LoadStatus         merge on the object's identity
+    a load that executed     _.LoadStatistic      append
     a clean load             _.Bookmark           merge, to the instant it began
-    a validation that ran    _.TestStatus         merge on the validation's identity
+    a validation             _.TestStatus         merge on the validation's identity
+
+A blocked node has a status and no statistics: it did nothing, and a row of
+zeroes for it would read as a load that moved nothing. A node about no object at
+all — an endpoint refresh — has evidence and no state.
 
 There is no plan row and no completion row: a workflow is its rows, correlated by
 ``[Workflow ID]``, and a reader asking what a run did reads them rather than
