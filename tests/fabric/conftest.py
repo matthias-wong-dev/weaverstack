@@ -56,9 +56,9 @@ def _timed_session_run(session, label: str, body: str, *, phase: str | None = No
 
     ``phase`` names a provisioning phase, whose cost goes to the harness's own
     ledger (``support.provisioning``) and appears in the terminal summary. It is
-    the harness's crossing rather than a Weaver Session's, so it is deliberately
-    not recorded on one: a test's declared resources are what its subject
-    crossed, and fixture plumbing does not belong in that comparison.
+    the harness's crossing rather than a Weaver Session's, so it is not recorded
+    on one: a test's declared resources are what its subject crossed, and fixture
+    plumbing does not belong in that comparison.
     """
 
     started = time.monotonic()
