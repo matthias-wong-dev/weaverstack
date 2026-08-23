@@ -494,6 +494,41 @@ def render_delete_obsolete(
     )
 
 
+def render_delete_rows(table: Table, rows: Sequence[Row]) -> str | None:
+    """A ``DELETE`` of exactly these rows, identified by the table's own key.
+
+    The counterpart to :func:`render_delete_obsolete`, for a caller that has read
+    the table and knows which rows are going. It names what it removes rather
+    than what it keeps, so the statement grows with the rows removed instead of
+    with the estate — and a reader of the bundle can see which rows those are.
+
+    Needs no installation scope: the key of a runtime table carries the scope
+    already, so the rows name themselves in full.
+    """
+
+    rows = sorted_rows(table, rows)
+    if not rows:
+        return None
+
+    matched = "\n                     AND ".join(
+        _same(
+            f"gone.{_public(table, name)}",
+            f"{qualified_name(table)}.{_public(table, name)}",
+        )
+        for name in table.key
+    )
+    return (
+        f"DELETE FROM {qualified_name(table)}\n"
+        f" WHERE EXISTS (\n"
+        f"           SELECT 1\n"
+        f"             FROM (\n"
+        f"                  {_keep_relation(table, rows, table.key)}\n"
+        f"                  ) AS gone\n"
+        f"            WHERE {matched}\n"
+        f"       )\n"
+    )
+
+
 def _keep_relation(table: Table, rows: Sequence[Row], identity: Sequence[str]) -> str:
     """The rows a build still claims, as one relation.
 

@@ -32,7 +32,6 @@ from typing import Mapping
 
 from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
-from ..catalogue.tables import BOOKMARK
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
@@ -174,19 +173,15 @@ def generate_item_build_bundle(
     if catalogue_before is not None:
         stages.append(catalogue_before)
 
-    # Bookmarks are reconciled here, between decertification and the first
+    # Bookmarks are invalidated here, between decertification and the first
     # physical action, and never after it — see :mod:`weaver.build_bundle.bookmarks`.
-    # Rows are reconciled before any physical work, so a catalogue whose
-    # `_.Bookmark` this bundle is still creating has none to reconcile: the table
-    # arrives with this bundle and can hold no row anything could have written.
-    # Whether it is physically there is the catalogue Warehouse's inventory to
-    # answer, the way it answers for every other object in it.
+    # Against the catalogue this build read: which rows are obsolete is arithmetic
+    # over rows it holds, and a build creating `_.Bookmark` read none.
     bookmarks = render_bookmark_reconciliation(
         repository,
         items=tuple(target_by_item),
         selected_for_build=selected_for_build,
-        removed=removed,
-        installed=_holds_bookmark_table(inventories, catalogue_target),
+        catalogue=catalogue,
         catalogue_target=catalogue_target,
     )
     if bookmarks is not None:
@@ -484,23 +479,6 @@ def plan_item_build(
         uncertified=frozenset(shortcuts.omitted_destinations)
         & frozenset(selected_for_build),
     )
-
-
-def _holds_bookmark_table(inventories, catalogue_target) -> bool:
-    """Whether the catalogue Warehouse physically holds ``_.Bookmark``.
-
-    Asked of the inventory rather than of the catalogue: what a catalogue holds
-    is rows, and what a target holds is objects. Absent inventory reads as absent
-    table, which is the bootstrap answer and the safe one — the reference and the
-    reconciliation it gates are installed by the next build either way.
-    """
-
-    from ..catalogue.tables import CATALOGUE_SCHEMA
-
-    for inventory in (inventories or {}).values():
-        if inventory.target_id == catalogue_target.id:
-            return inventory.has_object(CATALOGUE_SCHEMA, BOOKMARK.name, "table")
-    return False
 
 
 def _catalogue_target(binding: WarehouseBinding, targets):

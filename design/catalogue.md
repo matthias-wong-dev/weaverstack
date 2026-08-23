@@ -450,6 +450,13 @@ no longer declared or loaded   DELETE
 unchanged object               left alone
 ```
 
+A build reads `_.Bookmark` with the rest of the catalogue and works out which
+rows are obsolete from the rows it holds: those whose object it is about to
+replace, and those whose object the repository no longer declares as something
+Weaver loads. It then deletes exactly those. So the statement names what goes
+rather than everything it keeps, an unchanged repository emits none, and a build
+creating the table read no rows and has nothing to remove.
+
 The governing rule: too old means replay, too advanced can omit data, so prefer
 replay.
 

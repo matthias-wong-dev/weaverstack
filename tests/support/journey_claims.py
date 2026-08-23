@@ -60,15 +60,6 @@ BOOKKEEPING = {
     "refresh_sql_endpoint",
 }
 
-#: What the build that creates the catalogue cannot do, and the next one does.
-#: Bookmark rows are reconciled before any physical work, so the build that
-#: creates `_.Bookmark` has no table to reconcile against — and nothing to
-#: reconcile either, since no row can exist yet. See `design/catalogue.md`.
-#:
-#: An idle build says nothing about bookmarks, so this is empty of anything an
-#: unchanged repository would repeat.
-DEFERRED_TO_THE_NEXT_BUILD = {"reconcile_bookmarks"}
-
 
 def _folder(env, schema, name):
     return env.resolver.folder_object(FolderTarget(lakehouse=env.target), schema, name)
@@ -341,21 +332,13 @@ def _assert_authored_objects_reach_the_build(env) -> None:
 
 
 def _assert_unchanged(env, step) -> None:
-    """Building an already-correct estate must cost nothing and break nothing.
-
-    This is the build after the one that created the catalogue, and one thing
-    waits for it: bookmark rows are reconciled ahead of any physical work, so the
-    previous build planned that stage against a table it had not created yet.
-    Reconciling rows is not rebuilding a declared object, which is what this step
-    is about. The strict claim — an installed catalogue plans nothing at all — is
-    `tests/targeted/test_build_fixed_point_cycle.py`.
-    """
+    """Building an already-correct estate must cost nothing and break nothing."""
 
     _raise_if_the_transition_broke(step)
 
     assert step.outcome.status == "succeeded", step.outcome.action_error
 
-    physical = step.kinds() - BOOKKEEPING - DEFERRED_TO_THE_NEXT_BUILD
+    physical = step.kinds() - BOOKKEEPING
     assert physical == set(), (
         f"a build with nothing to do performed {sorted(physical)} — something was "
         "rebuilt that did not need to be"

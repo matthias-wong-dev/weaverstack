@@ -539,12 +539,15 @@ class RegisteredDocument:
 #: silent partial rebuild.
 INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name, BOOKMARK.name})
 
-#: The tables whose presence a build has to know about. The reconciled ones,
-#: because a claim may only be raised against a table that is there — and
-#: ``_.Bookmark``, because whether a build reconciles bookmarks at all turns on
-#: whether it already exists. ``_.Log`` is absent: nothing reads it to decide
-#: anything, so asking would only give a new way to refuse an old estate.
-CHECKED_TABLES = PROJECTED_TABLES + (BOOKMARK,)
+#: What a build reads. The projected tables, which it compares and republishes,
+#: and ``_.Bookmark``, whose rows it decides the obsolete ones from. ``_.Log`` is
+#: absent: it is history, nothing reads it to decide anything, and reading it
+#: would grow with the estate's age.
+READ_FOR_BUILD = PROJECTED_TABLES + (BOOKMARK,)
+
+#: The tables whose presence a build has to know about — the ones it reads, since
+#: a claim may only be raised against a table that is there.
+CHECKED_TABLES = READ_FOR_BUILD
 
 
 def _encode_json_value(value):
@@ -703,7 +706,11 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     scopes = InstallationScopes(
         tuple(InstallationScope(item.item_type, item.item_name) for item in wanted)
     )
-    by_table = read_installations(catalogue, scopes=scopes)
+    # `_.Bookmark` as well as the projected tables. Nothing projects it, so it
+    # takes no part in publication — but a build decides which rows are obsolete,
+    # and deciding from rows it has read is the same arithmetic every other
+    # catalogue decision uses. An absent table reads as no rows.
+    by_table = read_installations(catalogue, scopes=scopes, tables=READ_FOR_BUILD)
 
     # Seeded before grouping, and that is not tidiness. An item with no rows yet
     # is an ordinary state — it has never been built — and it must still appear,
@@ -711,7 +718,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     # to compare, reconcile and publish. An item that fell out here would look
     # like an item the build was never pointed at.
     grouped: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {
-        item: {table.name: [] for table in PROJECTED_TABLES} for item in wanted
+        item: {table.name: [] for table in READ_FOR_BUILD} for item in wanted
     }
     for table_name, table_rows in by_table.items():
         for row in table_rows:
@@ -740,7 +747,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     return Catalogue(
         rows=MappingProxyType(rows),
         materialised=frozenset(
-            table.name for table in PROJECTED_TABLES if table.name in present
+            table.name for table in READ_FOR_BUILD if table.name in present
         ),
     )
 

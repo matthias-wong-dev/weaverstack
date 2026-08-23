@@ -35,13 +35,13 @@ import json
 from typing import Iterable, Sequence
 
 from ..catalogue.claims import bookmark_row
-from ..catalogue.render import (
-    InstallationScope,
-    InstallationScopes,
-    Row,
-    render_delete_obsolete,
+from ..catalogue.render import Row, render_delete_rows
+from ..catalogue.tables import (
+    BOOKMARK,
+    CATALOGUE_SCHEMA,
+    SCOPE_ITEM_NAME,
+    SCOPE_ITEM_TYPE,
 )
-from ..catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA
 from ..declaration.model import WAREHOUSE, WeaverDocumentId, WeaverItemId
 from ..etl import item_bookmarkable_objects
 from .changes import TABLE as TABLE_KIND
@@ -58,28 +58,8 @@ from .shortcuts import Reference, declaration_key, shortcut_payload, view_statem
 from .stages import CATALOGUE, LOAD, PlannedStage
 from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 
+
 #: The error a build raises when the catalogue holds no ``_.Bookmark`` table.
-#: Checked in the Warehouse rather than during planning, because the Warehouse is
-#: where the answer is, and raised rather than skipped: a build that quietly did
-#: no bookmark work would leave the next load reading from a bookmark nothing
-#: maintains.
-MISSING_TABLE_ERROR = 51030
-
-MISSING_TABLE_MESSAGE = (
-    "weaver: the Weaver catalogue has no _.Bookmark table. Build "
-    "Warehouse/_weaver to create it, then build again."
-)
-
-
-def _precondition() -> str:
-    """Refuse the batch unless the table the rest of it maintains is there."""
-
-    return (
-        "if object_id(N'[_].[Bookmark]', N'U') is null\n"
-        f"    throw {MISSING_TABLE_ERROR}, '{MISSING_TABLE_MESSAGE}', 1;\n"
-    )
-
-
 def _row(identity: WeaverDocumentId) -> dict:
     """One bookmark row's identity, spelled as the Registry spells it.
 
@@ -95,63 +75,57 @@ def bookmark_statements(
     *,
     items: Sequence[WeaverItemId],
     selected_for_build: Iterable[WeaverDocumentId],
-    removed: Iterable[WeaverDocumentId] = (),
-    installed: bool = True,
+    catalogue,
 ) -> tuple[str, ...]:
-    """The bookmark reconciliation statements for one build, in execution order.
+    """The bookmark invalidation statements for one build, in execution order.
 
-    Empty in three cases, and each matters.
+    The build has read ``_.Bookmark``, so which rows are obsolete is arithmetic
+    over rows it holds: every row in the scope whose object this build is about
+    to replace, and every row whose object the repository no longer declares as
+    something Weaver loads. What is left keeps its history.
 
-    A build of the built-in catalogue item reconciles nothing that can hold a
-    bookmark.
+    Empty whenever that set is empty, which is most builds — an unchanged
+    repository has nothing to invalidate, and a build creating the table has read
+    no rows because there were none. Nothing is skipped for a reason that has to
+    be stated: the statement is absent because there is no row to remove.
 
-    A build with nothing to build and nothing to remove has nothing to say about
-    bookmarks: an unchanged repository produces an empty bundle, so the
-    statements are issued when the build acts, not on every run.
-
-    And a build against a catalogue that holds nothing has no bookmarks to
-    reconcile — it is creating the table in this same bundle, and every object it
-    installs is new. Not a silent skip: there is no row to remove, because
-    nothing has ever been installed.
-
-    One statement when they are issued, and it is a full reconciliation of the
-    scope rather than a delete of the objects this build noticed, so a row left
-    behind by an earlier failure goes too.
+    One statement, naming the rows that go. A build that touched one object says
+    so in one row rather than restating every object it kept.
     """
 
-    scoped = tuple(item for item in items if not _is_builtin(item))
+    scoped = {item for item in items if not _is_builtin(item)}
+    if not scoped:
+        return ()
     selected = set(selected_for_build)
-    if not scoped or not installed:
-        return ()
-    bookmarkable = {
-        identity
-        for item in scoped
-        for identity in item_bookmarkable_objects(repository, item=item)
-    }
-    # Only an object that can hold a bookmark can cost one. A build that selected
-    # nothing else — a Test, a view, an object Weaver does not load — has nothing
-    # to say here, and saying it anyway would make an idle build do work.
-    if not (bookmarkable & selected) and not set(removed):
-        return ()
-
     # What keeps its bookmark: an object this build still loads and is *not*
-    # replacing. Everything else loses its row — the ones the repository no
-    # longer declares, and the ones this build is about to drop and rebuild,
-    # whose history belongs to a physical incarnation that is going.
-    keep: list[Row] = [
-        _row(identity)
+    # replacing. Everything else loses its row.
+    keep = {
+        _key(_row(identity))
         for item in scoped
         for identity in item_bookmarkable_objects(repository, item=item)
         if identity not in selected
+    }
+    obsolete = [
+        {name: row.get(name) for name in BOOKMARK.key}
+        for row in catalogue.table_rows(BOOKMARK)
+        if _item_of(row) in scoped and _key(row) not in keep
     ]
-    scopes = InstallationScopes(
-        tuple(InstallationScope(item.item_type, item.item_name) for item in scoped)
+    statement = render_delete_rows(BOOKMARK, obsolete)
+    return () if statement is None else (statement,)
+
+
+def _key(row: Row) -> tuple:
+    """One bookmark row's identity, as the table keys it."""
+
+    return tuple(row.get(name) for name in BOOKMARK.key)
+
+
+def _item_of(row: Row) -> WeaverItemId:
+    """Which logical item a bookmark row belongs to."""
+
+    return WeaverItemId(
+        str(row.get(SCOPE_ITEM_TYPE) or ""), str(row.get(SCOPE_ITEM_NAME) or "")
     )
-    statements = [_precondition()]
-    invalidate = render_delete_obsolete(BOOKMARK, keep, scope=scopes)
-    if invalidate is not None:
-        statements.append(invalidate)
-    return tuple(statements)
 
 
 def render_bookmark_reconciliation(
@@ -159,18 +133,16 @@ def render_bookmark_reconciliation(
     *,
     items: Sequence[WeaverItemId],
     selected_for_build: Iterable[WeaverDocumentId],
-    removed: Iterable[WeaverDocumentId] = (),
-    installed: bool = True,
+    catalogue,
     catalogue_target,
 ) -> PlannedStage | None:
-    """The one stage that reconciles ``_.Bookmark`` ahead of physical work."""
+    """The one stage that invalidates ``_.Bookmark`` rows ahead of physical work."""
 
     statements = bookmark_statements(
         repository,
         items=items,
         selected_for_build=selected_for_build,
-        removed=removed,
-        installed=installed,
+        catalogue=catalogue,
     )
     if not statements:
         return None
@@ -401,8 +373,6 @@ def _is_builtin(item: WeaverItemId) -> bool:
 
 
 __all__ = [
-    "MISSING_TABLE_ERROR",
-    "MISSING_TABLE_MESSAGE",
     "bookmark_reference_views",
     "bookmark_statements",
     "render_bookmark_reconciliation",

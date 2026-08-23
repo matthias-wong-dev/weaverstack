@@ -37,6 +37,7 @@ from factories import (
     schema_document,
     warehouse_table,
 )
+from support.catalogues import LOADED_AT
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -183,6 +184,7 @@ def test_the_catalogue_item_holds_no_bookmarks(estate):
             estate,
             items=(item_id("Warehouse/_weaver"),),
             selected_for_build={item_id(ITEM)},
+            catalogue=_holding("_.Bookmark", item="Warehouse/_weaver"),
         )
         == ()
     )
@@ -191,12 +193,43 @@ def test_the_catalogue_item_holds_no_bookmarks(estate):
 # --- when the statements are issued -------------------------------------------
 
 
+def _holding(*qualified: str, item: str = ITEM, repository=None) -> Catalogue:
+    """A catalogue holding a bookmark row for each of these objects.
+
+    What a build reads and decides from. ``_.Bookmark`` is read like any other
+    catalogue table now, so a test says which rows are there rather than which
+    rows a statement should have kept.
+    """
+
+    owner = item_id(item)
+    rows = tuple(
+        {
+            "item_type": owner.item_type,
+            "item_name": owner.item_name,
+            "schema_name": schema,
+            "object_name": name,
+            "bookmark_datetime": LOADED_AT,
+        }
+        for schema, _, name in (one.rpartition(".") for one in qualified)
+    )
+    return Catalogue({owner: {"Bookmark": rows}})
+
+
 @weaver_test()
 def test_a_build_with_nothing_to_do_says_nothing_about_bookmarks(estate):
-    """An unchanged repository produces an empty bundle, bookmarks included."""
+    """An unchanged repository produces an empty bundle, bookmarks included.
+
+    Every row belongs to an object this build keeps, so nothing is obsolete.
+    """
 
     assert (
-        bookmark_statements(estate, items=(item_id(ITEM),), selected_for_build=()) == ()
+        bookmark_statements(
+            estate,
+            items=(item_id(ITEM),),
+            selected_for_build=(),
+            catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
+        )
+        == ()
     )
 
 
@@ -205,9 +238,8 @@ def test_a_build_of_objects_that_hold_no_bookmark_says_nothing_either(estate):
     """Only an object that can hold a bookmark can cost one.
 
     A view here, and a validation in a real estate: both carry an ordinary
-    ``Schema.Object`` identity and neither has a load. A stage that fired on *any*
-    selection would fire whenever one of those was selected, and an idle build
-    would not be idle.
+    ``Schema.Object`` identity and neither has a load. Selecting one leaves every
+    row where it was.
     """
 
     view = next(
@@ -217,67 +249,44 @@ def test_a_build_of_objects_that_hold_no_bookmark_says_nothing_either(estate):
     )
 
     assert (
-        bookmark_statements(estate, items=(item_id(ITEM),), selected_for_build={view})
+        bookmark_statements(
+            estate,
+            items=(item_id(ITEM),),
+            selected_for_build={view},
+            catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
+        )
         == ()
     )
 
 
 @weaver_test()
-def test_a_first_build_invalidates_every_loadable_object_it_installs(estate, tmp_path):
-    """It is building all of them, so none of their histories survives.
+def test_a_catalogue_holding_no_rows_has_nothing_to_invalidate(estate, tmp_path):
+    """A first build, and the one case that needed a special gate before.
 
-    The keep-set is empty, which the renderer turns into a plain scoped delete:
-    nothing in these items keeps a bookmark.
+    The table arrives with this bundle, so the read found no rows and there is
+    nothing to remove. Nothing is skipped for a stated reason: the statement is
+    absent because the set of obsolete rows is empty.
     """
 
-    statements = _statements(_bundle(estate, tmp_path))
-    delete = [one for one in statements if one.startswith("DELETE")]
-
-    assert len(delete) == 1
-    assert "NOT EXISTS" not in delete[0]
-    assert not [one for one in statements if one.startswith("MERGE")]
+    assert _bookmark_actions(_bundle(estate, tmp_path)) == []
 
 
 @weaver_test()
-def test_a_build_that_changes_one_object_invalidates_only_that_one(estate, tmp_path):
-    """An unchanged object keeps the bookmark it has, or every build reloads it.
-
-    The keep-set is what survives, so the object being rebuilt is *absent* from
-    it and the one left alone is in it.
-    """
-
-    installed = _installed(estate)
-    changed = _with_changed_customer(tmp_path)
+def test_a_rebuild_invalidates_the_rows_of_what_it_replaces(estate, tmp_path):
+    """Every loadable object rebuilt, so every row it had goes."""
 
     statements = _statements(
         _bundle(
-            changed,
-            tmp_path / "second",
-            catalogue=installed,
-            inventories=_inventories_over(estate_inventories(changed)),
+            estate,
+            tmp_path,
+            catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
         )
     )
-    keep = next(one for one in statements if one.startswith("DELETE"))
+    (delete,) = [one for one in statements if one.startswith("DELETE")]
 
-    assert "N'DWG', N'Customer'" not in keep
-    assert "N'Files/Raw', N'CustomerCsv'" in keep
-
-
-@weaver_test()
-def test_a_build_creating_the_table_reconciles_no_bookmarks(estate, tmp_path):
-    """The table this would write is arriving in the same bundle.
-
-    Every build binds the built-in item, so a catalogue Warehouse without
-    `_.Bookmark` gets it from this build — whether that Warehouse is empty or is
-    an older estate being upgraded. Not a silent skip: a table nothing could ever
-    have written to has no row to reset and none to prune.
-    """
-
-    bundle = _bundle(
-        estate, tmp_path, inventories=_inventories(estate, holding_bookmark=False)
-    )
-
-    assert _bookmark_actions(bundle) == []
+    assert "N'DWG', N'Customer'" in delete
+    assert "N'Files/Raw', N'CustomerCsv'" in delete
+    assert not [one for one in statements if one.startswith("MERGE")]
 
 
 # --- where they sit ------------------------------------------------------------
@@ -285,9 +294,11 @@ def test_a_build_creating_the_table_reconciles_no_bookmarks(estate, tmp_path):
 
 @weaver_test()
 def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_path):
-    """The safety property: a reset that failed to happen is the silent case."""
+    """The safety property: an invalidation that failed to happen is silent."""
 
-    bundle = _bundle(estate, tmp_path)
+    bundle = _bundle(
+        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
+    )
     physical = {
         "create_schema",
         "build_table",
@@ -309,83 +320,141 @@ def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_p
 def test_invalidation_is_one_statement(estate, tmp_path):
     """One decision about one table, so one statement in one action."""
 
-    statements = _statements(_bundle(estate, tmp_path))
+    statements = _statements(
+        _bundle(
+            estate,
+            tmp_path,
+            catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
+        )
+    )
 
     assert len([one for one in statements if one.startswith("DELETE")]) == 1
     assert not [one for one in statements if one.startswith("MERGE")]
-
-
-@weaver_test()
-def test_the_batch_refuses_to_run_without_the_table_it_maintains(estate, tmp_path):
-    """A build that quietly did no bookmark work would leave the next load wrong."""
-
-    statements = _statements(_bundle(estate, tmp_path))
-
-    assert "object_id(N'[_].[Bookmark]', N'U') is null" in statements[0]
-    assert "throw 51030" in statements[0]
 
 
 # --- scope ---------------------------------------------------------------------
 
 
 @weaver_test()
-def test_an_object_left_alone_keeps_its_bookmark(estate):
-    """Nothing selected, one object removed: the untouched ones stay in the keep-set."""
+def test_an_object_left_alone_keeps_its_row(estate):
+    """One object rebuilt, and only its row is named."""
 
     statements = bookmark_statements(
         estate,
         items=(item_id(ITEM),),
-        selected_for_build=(),
-        removed={document_id_of(estate, "DWG.Summary")},
+        selected_for_build={document_id_of(estate, "DWG.Customer")},
+        catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
     )
-    keep = next(one for one in statements if one.startswith("DELETE"))
+    (delete,) = statements
 
-    assert "N'DWG', N'Customer'" in keep
-    assert "N'Files/Raw', N'CustomerCsv'" in keep
+    assert "N'DWG', N'Customer'" in delete
+    assert "N'Files/Raw', N'CustomerCsv'" not in delete
 
 
 @weaver_test()
-def test_an_object_the_repository_no_longer_declares_loses_its_row(estate, tmp_path):
-    """Its key is absent from the keep-set, so the anti-join removes the row."""
+def test_a_row_the_repository_no_longer_declares_goes(estate, tmp_path):
+    """Nothing declares it as something Weaver loads, so nothing keeps it.
+
+    A row left behind by an earlier failure goes the same way, and for the same
+    reason: what keeps a row is a declaration, not the row's own existence.
+    """
 
     smaller = _without_the_folder(tmp_path)
-    statements = bookmark_statements(
+
+    (delete,) = bookmark_statements(
         smaller,
         items=(item_id(ITEM),),
         selected_for_build=(),
-        removed={document_id_of(estate, "Files/Raw.CustomerCsv")},
+        catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
     )
-    keep = next(one for one in statements if one.startswith("DELETE"))
 
-    assert "N'DWG', N'Customer'" in keep
-    assert "N'Files/Raw', N'CustomerCsv'" not in keep
+    assert "N'Files/Raw', N'CustomerCsv'" in delete
+    assert "N'DWG', N'Customer'" not in delete
 
 
 @weaver_test()
 def test_an_unrelated_item_is_outside_the_scope_that_prunes(estate):
-    """A build maintains the items it reconciles and no others."""
+    """A build maintains the items it was pointed at and no others.
 
-    statements = bookmark_statements(
+    A row belonging to an item this build does not name is not its to remove,
+    even though the table is shared.
+    """
+
+    catalogue = Catalogue(
+        {
+            item_id(ITEM): {
+                "Bookmark": (
+                    {
+                        "item_type": "Lakehouse",
+                        "item_name": "Sales",
+                        "schema_name": "DWG",
+                        "object_name": "Customer",
+                        "bookmark_datetime": LOADED_AT,
+                    },
+                )
+            },
+            item_id(WAREHOUSE_ITEM): {
+                "Bookmark": (
+                    {
+                        "item_type": "Warehouse",
+                        "item_name": "Reporting",
+                        "schema_name": "Rpt",
+                        "object_name": "Customer",
+                        "bookmark_datetime": LOADED_AT,
+                    },
+                )
+            },
+        }
+    )
+
+    (delete,) = bookmark_statements(
         estate,
         items=(item_id(ITEM),),
         selected_for_build={one for one in estate.source_documents},
+        catalogue=catalogue,
     )
-    delete = next(one for one in statements if one.startswith("DELETE"))
 
-    assert "N'Lakehouse' AND [Item name] = N'Sales'" in delete
-    assert "Reporting" not in delete
+    assert "N'Sales'" in delete
+    assert "N'Reporting'" not in delete
 
 
 @weaver_test()
-def test_both_items_of_one_build_are_one_scoped_statement(estate):
+def test_both_items_of_one_build_are_one_statement(estate):
     """Bound items share the table, so addressing them separately is round trips."""
 
-    statements = bookmark_statements(
+    catalogue = Catalogue(
+        {
+            item_id(ITEM): {
+                "Bookmark": (
+                    {
+                        "item_type": "Lakehouse",
+                        "item_name": "Sales",
+                        "schema_name": "DWG",
+                        "object_name": "Customer",
+                        "bookmark_datetime": LOADED_AT,
+                    },
+                )
+            },
+            item_id(WAREHOUSE_ITEM): {
+                "Bookmark": (
+                    {
+                        "item_type": "Warehouse",
+                        "item_name": "Reporting",
+                        "schema_name": "Rpt",
+                        "object_name": "Customer",
+                        "bookmark_datetime": LOADED_AT,
+                    },
+                )
+            },
+        }
+    )
+
+    (delete,) = bookmark_statements(
         estate,
         items=(item_id(ITEM), item_id(WAREHOUSE_ITEM)),
         selected_for_build={one for one in estate.source_documents},
+        catalogue=catalogue,
     )
-    delete = next(one for one in statements if one.startswith("DELETE"))
 
     assert "N'Sales'" in delete and "N'Reporting'" in delete
 
