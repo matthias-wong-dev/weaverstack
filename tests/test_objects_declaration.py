@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from support.catalogues import never
+from support.spark import MockSpark
 from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
@@ -341,6 +342,204 @@ def test_a_non_incremental_table_returning_a_tuple_is_refused(spark, monkeypatch
         table(spark, lakehouse=LAKEHOUSE).with_catalogue(
             never(table.__name__.replace("__", "."))
         ).load()
+
+
+# --- an incremental source with nothing to do -------------------------------
+
+
+@weaver_test()
+def test_an_incremental_table_returning_none_is_a_successful_no_op(monkeypatch):
+    """``return None`` means there is no work, and costs nothing to say.
+
+    Constructed with a session that fails on any use, so this proves no Spark
+    call happened rather than asserting against a stand-in that answered one.
+    An authored source that already knows its window is empty should not launch
+    a job to rediscover that.
+    """
+
+    import weaver.runtime.table_load as table_load
+
+    monkeypatch.setattr(
+        table_load,
+        "load_table",
+        lambda *_a, **_k: pytest.fail("the load reached the runtime"),
+    )
+    table = _customer(None, incremental=True)
+
+    result = (
+        table(MockSpark(), lakehouse=LAKEHOUSE)
+        .with_catalogue(never("Sales.Customer"))
+        .load()
+    )
+
+    assert result.succeeded
+    assert result == LoadResult(succeeded=True, bookmark_datetime=result.bookmark_datetime)
+
+
+@weaver_test()
+def test_a_no_op_load_still_advances_the_bookmark(monkeypatch):
+    """It read its window and found nothing, which is a clean load of nothing.
+
+    Leaving the bookmark where it was would make the next load read the same
+    window again, and go on doing so for as long as the source stayed quiet.
+    """
+
+    import weaver.runtime.table_load as table_load
+
+    monkeypatch.setattr(
+        table_load, "load_table", lambda *_a, **_k: pytest.fail("reached the runtime")
+    )
+    table = _customer(None, incremental=True)
+    catalogue = never("Sales.Customer")
+
+    result = table(MockSpark(), lakehouse=LAKEHOUSE).with_catalogue(catalogue).load()
+
+    assert result.bookmark_datetime is not None
+
+
+@weaver_test()
+def test_none_and_none_deletes_are_the_same_no_op(monkeypatch):
+    """``(None, None)`` is what ``None`` normalises to, so it means the same."""
+
+    import weaver.runtime.table_load as table_load
+
+    monkeypatch.setattr(
+        table_load, "load_table", lambda *_a, **_k: pytest.fail("reached the runtime")
+    )
+    table = _customer((None, None), incremental=True)
+
+    result = (
+        table(MockSpark(), lakehouse=LAKEHOUSE)
+        .with_catalogue(never("Sales.Customer"))
+        .load()
+    )
+
+    assert result.succeeded
+
+
+@weaver_test()
+def test_an_incremental_table_may_claim_deletes_without_staging(spark, monkeypatch):
+    """Deletion-only work: nothing arrived, and some rows are retired.
+
+    The target's own empty shape stands in for staging, so the reconciliation
+    retires exactly what was claimed and inserts nothing.
+    """
+
+    claimed = ["Customer id"]
+
+    result, seen = _loaded(
+        spark, monkeypatch, _customer((None, claimed), incremental=True)
+    )
+
+    assert result.succeeded
+    assert seen["deletes"] == claimed
+    # `empty_dataframe()` is the target's shape with no rows.
+    assert seen["staging_frame"].rows == ()
+
+
+@weaver_test()
+def test_a_non_incremental_table_returning_none_is_refused(monkeypatch):
+    """An explicitly empty source retires every row, which is a load.
+
+    So there is nothing ``None`` could be read as, and the author is told what
+    to write instead. Refused before Spark is asked anything.
+    """
+
+    import weaver.runtime.table_load as table_load
+
+    monkeypatch.setattr(
+        table_load, "load_table", lambda *_a, **_k: pytest.fail("reached the runtime")
+    )
+    table = _customer(None, incremental=False)
+
+    with pytest.raises(LoadError, match="cannot return None"):
+        table(MockSpark(), lakehouse=LAKEHOUSE).with_catalogue(
+            never("Sales.Customer")
+        ).load()
+
+
+def _export(returned, *, incremental: bool):
+    """One folder whose ``read()`` returns whatever a case wants it to."""
+
+    from weaver.declaration.metadata import PYTHON, parse_document
+
+    # Stated either way: a Folder is incremental unless it says otherwise, so a
+    # case about the non-incremental contract has to say so.
+    declared = "true" if incremental else "false"
+
+    class Raw__Export(Folder):
+        def _document(self):
+            return parse_document(
+                f"""
+                Folder ID: Raw.Export
+
+                Description: One file per export.
+
+                Lineage: The sales system.
+
+                File key: "*.json"
+
+                Incremental: {declared}
+                """,
+                language=PYTHON,
+            )
+
+        def read(self):
+            return returned
+
+    return Raw__Export
+
+
+@weaver_test()
+def test_an_incremental_folder_returning_none_is_a_successful_no_op(tmp_path):
+    """Nothing is staged and nothing is claimed, so nothing is scanned."""
+
+    lakehouse = mounted_lakehouse("Sales_LH", tmp_path)
+    folder = _export(None, incremental=True)
+
+    result = (
+        folder(MockSpark(), lakehouse=lakehouse)
+        .with_catalogue(never("Raw.Export", files=True))
+        .load()
+    )
+
+    assert result.succeeded
+    assert result.rows_read == 0
+    assert result.rows_deleted == 0
+
+
+@weaver_test()
+def test_a_non_incremental_folder_returning_none_is_refused(tmp_path):
+    """An empty staging folder retires every file, which is a load."""
+
+    lakehouse = mounted_lakehouse("Sales_LH", tmp_path)
+    folder = _export(None, incremental=False)
+
+    with pytest.raises(LoadError, match="cannot return None"):
+        folder(MockSpark(), lakehouse=lakehouse).with_catalogue(
+            never("Raw.Export", files=True)
+        ).load()
+
+
+@weaver_test()
+def test_an_incremental_folder_may_claim_deletes_without_staging(tmp_path):
+    """Deletion-only work, with the issued staging standing for "nothing new"."""
+
+    lakehouse = mounted_lakehouse("Sales_LH", tmp_path)
+    destination = lakehouse.folder_path("Raw", "Export")
+    destination.mkdir(parents=True, exist_ok=True)
+    (destination / "old.json").write_text("{}", encoding="utf-8")
+    folder = _export((None, ["old.json"]), incremental=True)
+
+    result = (
+        folder(MockSpark(), lakehouse=lakehouse)
+        .with_catalogue(never("Raw.Export", files=True))
+        .load()
+    )
+
+    assert result.succeeded
+    assert result.rows_deleted == 1
+    assert not (destination / "old.json").exists()
 
 
 # --- views ------------------------------------------------------------------

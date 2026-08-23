@@ -367,9 +367,14 @@ def test_a_child_the_catalogue_does_not_record_is_refused(lakehouse):
 
 
 class DWG__Loading(DWG__Customer):
-    """A table whose read succeeds, so the recording is what is left to look at."""
+    """A table whose read succeeds, so the recording is what is left to look at.
 
-    staged = None
+    ``staged`` stands for whatever the author's frame is: the runtime is
+    replaced, so what it holds is never read. It is not ``None``, which for a
+    non-incremental table is refused — see ``tests/test_objects_declaration.py``.
+    """
+
+    staged = object()
 
     def read(self):
         return self.staged

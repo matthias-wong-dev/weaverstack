@@ -284,6 +284,25 @@ def _sentinel():
     return BOOKMARK_SENTINEL
 
 
+def _refuse_no_staging(contract, what: str, instead: str) -> None:
+    """``None`` from a non-incremental ``read()``, which cannot mean "no work".
+
+    For a non-incremental source, staging is the whole truth: an explicitly
+    empty relation or folder means every row the target holds has been retired,
+    which is a load rather than the absence of one. So there is nothing ``None``
+    could be read as, and an author is told what to write instead.
+    """
+
+    if contract.incremental:
+        return
+    raise LoadError(
+        f"{contract.qualified}: a non-incremental {what}'s read() cannot return "
+        f"None. The source is the whole truth, so an empty one retires every row "
+        f"— which is a load, not the absence of one. Return {instead}, or declare "
+        "Incremental: true and return None for no work."
+    )
+
+
 class Folder(WeaverObject):
     """Files materialised into a Lakehouse Files directory.
 
@@ -476,19 +495,38 @@ class Folder(WeaverObject):
         self._issued_staging = issued
         try:
             staged, deletes = self._read_result()
-            if staged is not issued:
+            if staged is None:
+                _refuse_no_staging(contract, "folder", "self.staging_folder()")
+            if staged is None and deletes is None:
+                # An incremental source that already knows there is nothing to
+                # do: no file is staged and none is claimed, so nothing is
+                # scanned and nothing is published.
+                result = LoadResult(succeeded=True)
+            elif staged is None:
+                # Deletion only. The issued staging is empty, which for an
+                # incremental folder already means "nothing new", so the
+                # reconciliation retires exactly the files claimed.
+                result = load_folder(
+                    contract=contract,
+                    destination=self.path(),
+                    staging=issued.path,
+                    deletes=deletes,
+                    fault_tolerant=fault_tolerant,
+                )
+            elif staged is not issued:
                 raise LoadError(
                     f"{type(self).__name__}.read() returned "
                     f"{type(staged).__name__} {staged!r} rather than the folder "
                     "self.staging_folder() issued. Return self.staging_folder()."
                 )
-            result = load_folder(
-                contract=contract,
-                destination=self.path(),
-                staging=issued.path,
-                deletes=deletes,
-                fault_tolerant=fault_tolerant,
-            )
+            else:
+                result = load_folder(
+                    contract=contract,
+                    destination=self.path(),
+                    staging=issued.path,
+                    deletes=deletes,
+                    fault_tolerant=fault_tolerant,
+                )
         finally:
             # Cleared whatever happened, so a second load cannot be handed the
             # first one's directory.
@@ -546,7 +584,10 @@ class Table(WeaverObject):
                 "from it is what retires the row. Return the staging frame, or "
                 "declare Incremental: true."
             )
-        return normalise_read_result(returned)
+        staged, deletes = normalise_read_result(returned)
+        if staged is None:
+            _refuse_no_staging(contract, "table", "the staging frame")
+        return staged, deletes
 
     def empty_dataframe(self) -> Any:
         """This table's shape with no rows — an incremental load's no-op result.
@@ -599,6 +640,17 @@ class Table(WeaverObject):
         # Staging: unvalidated, unreconciled, nothing yet classified as new or
         # changed.
         staged, deletes = self._staged(contract)
+        if staged is None and deletes is None:
+            # An incremental source that already knows there is nothing to do.
+            # Nothing is staged and nothing is claimed, so no Spark job runs to
+            # establish that a frame the author never built would have been empty.
+            return self._bookmarked(
+                LoadResult(succeeded=True), began, update_catalogue=update_catalogue
+            )
+        if staged is None:
+            # Deletion only. The target's own shape stands in for staging, so the
+            # reconciliation retires exactly the rows claimed and inserts none.
+            staged = self.empty_dataframe()
         return self._bookmarked(
             load_table(
                 self.spark,
