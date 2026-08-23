@@ -41,15 +41,17 @@ from weaver.catalogue.tables import (
 from weaver.errors import LoadError
 
 
-def _table(returned):
-    """An incremental table whose ``read()`` returns whatever a case wants."""
+def _table(returned, *, incremental: bool = True):
+    """A table whose ``read()`` returns whatever a case wants."""
 
     from weaver.declaration.metadata import PYTHON, parse_document
+
+    declared = "true" if incremental else "false"
 
     class DWG__Customer(Table):
         def _document(self):
             return parse_document(
-                """
+                f"""
                 Table ID: DWG.Customer
 
                 Description: One row per customer.
@@ -58,7 +60,7 @@ def _table(returned):
 
                 Primary key: Customer id
 
-                Incremental: true
+                Incremental: {declared}
 
                 Schema:
                   Customer id: string
@@ -152,6 +154,30 @@ def test_an_anchored_load_records_and_flushes(lakehouse):
         LOAD_STATUS.name,
         BOOKMARK.name,
     ]
+    assert catalogue.writer.flushes == 1
+
+
+@weaver_test()
+def test_a_refused_load_is_recorded_and_then_raised(lakehouse):
+    """A refusal is an outcome, so the estate's record of it is not silent.
+
+    Which is what the generated ``_.Load`` does inside its own TRY/CATCH: a load
+    that produced an unacceptable result is Failed rather than absent.
+    """
+
+    catalogue = never("DWG.Customer")
+    # A non-incremental table returning None: staging is the whole truth, so an
+    # empty one retires everything, and Weaver refuses rather than guessing.
+    table = _table(None, incremental=False)(
+        MockSpark(), lakehouse=lakehouse, catalogue=catalogue
+    )
+
+    with pytest.raises(LoadError, match="cannot return None"):
+        table.load()
+
+    assert catalogue.writer.rows(LOAD_STATUS.name)[0]["result"] == "failed"
+    assert catalogue.writer.rows(LOG.name)[0]["result"] == "failed"
+    assert catalogue.writer.rows(BOOKMARK.name) == []
     assert catalogue.writer.flushes == 1
 
 

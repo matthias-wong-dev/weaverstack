@@ -52,6 +52,12 @@ class Outcome:
     #: one that ran and reported failure, and the difference is what tells "the
     #: check could not be evaluated" from "the check found something wrong".
     raised: bool = False
+    #: Whether this outcome is Weaver's own decision about the work. A refused
+    #: breach and a validation's finding are; an exception nothing named is not.
+    #: A load that refused ran under Weaver's control and produced an
+    #: unacceptable result, so the catalogue records it as Failed rather than as
+    #: Error — see :func:`weaver.run.record.result_for`.
+    refused: bool = False
 
 
 def settle(node, *, returned=None, raised: BaseException | None = None) -> Outcome:
@@ -68,6 +74,8 @@ def settle(node, *, returned=None, raised: BaseException | None = None) -> Outco
     return Outcome(
         status=status_of(returned),
         result=returned,
+        # It ran and reported, so whatever it says is Weaver's own decision.
+        refused=True,
         messages=_messages(node, returned),
     )
 
@@ -98,6 +106,7 @@ def _raised(node, exc: BaseException) -> Outcome:
     return Outcome(
         status=FAILED,
         raised=True,
+        refused=named,
         result=result,
         messages=(
             error(

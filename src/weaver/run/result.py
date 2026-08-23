@@ -193,6 +193,9 @@ class RunNodeResult:
     #: raised was never evaluated, which a reader asking "did this check run?"
     #: needs to know.
     raised: bool = False
+    #: Whether this outcome is Weaver's own decision about the work rather than
+    #: the dispatch coming apart. What tells a refused breach from a crash.
+    refused: bool = False
     executed: bool = False
     messages: tuple = ()
     result: Any = None

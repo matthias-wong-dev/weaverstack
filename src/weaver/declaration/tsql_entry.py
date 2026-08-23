@@ -80,8 +80,7 @@ def generate_load_entry(item, objects: Sequence[ObjectId]) -> str:
 
     if not objects:
         raise DiscoveryError(
-            f"{item}: an entry point is generated for an item that installs "
-            "something to run, and this one installs no loads"
+            f"{item} installs no loads, so it is given no _.Load to wrap them"
         )
     return _procedure(
         name=_qualified(LOAD_ENTRY),
@@ -113,8 +112,7 @@ def generate_test_entry(item, validations: Mapping[ObjectId, str]) -> str:
 
     if not validations:
         raise DiscoveryError(
-            f"{item}: an entry point is generated for an item that installs "
-            "something to run, and this one installs no validations"
+            f"{item} installs no validations, so it is given no _.Test to wrap them"
         )
     return _procedure(
         name=_qualified(TEST_ENTRY),

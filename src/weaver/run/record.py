@@ -84,13 +84,22 @@ RESULT_FOR_STATUS = {
 }
 
 
-def result_for(node) -> str:
+def result_for(node, *, task_type: str = LOAD_TASK) -> str:
     """How one settled node's outcome is spelled in the ``_`` schema.
 
-    A node that *raised* is an Error rather than a Failure whatever its status
-    says. The two are not the same thing to act on: a validation that found
-    discrepancies has told you something about the data, and one whose procedure
-    threw has told you nothing at all.
+    Failed and Error are not the same thing to act on, and the line between them
+    is drawn twice because the two kinds of work fail differently.
+
+    A **validation** that raised is an Error whatever it was carrying: it
+    produced no judgement at all, and one that found discrepancies has told you
+    something about the data while one whose procedure threw has told you
+    nothing.
+
+    A **load** that raised *Weaver's own refusal* is Failed: it ran under
+    Weaver's control and produced an unacceptable result — rows refused, a
+    stability threshold breached — and the target was left as it was. Anything
+    else it raised is the dispatch coming apart, which is an Error. The generated
+    ``_.Load`` draws the same line from ``error_number()``.
     """
 
     status = node.status
@@ -101,9 +110,11 @@ def result_for(node) -> str:
             f"{status!r} has no place in the public Result vocabulary; add one "
             "deliberately rather than letting a run write an unknown value"
         ) from None
-    if result == FAILED and getattr(node, "raised", False):
+    if result != FAILED or not getattr(node, "raised", False):
+        return result
+    if task_type == TEST_TASK:
         return ERROR
-    return result
+    return FAILED if getattr(node, "refused", False) else ERROR
 
 
 # --- the rows ------------------------------------------------------------------
@@ -123,7 +134,7 @@ def log_row(node, *, workflow_id: str, task_type: str) -> dict:
         "target_name": target_name or None,
         "schema_name": schema,
         "object_name": name,
-        "result": result_for(node),
+        "result": result_for(node, task_type=task_type),
         "started_datetime": started,
         "completed_datetime": completed,
         "duration_milliseconds": _duration(started, completed),
@@ -144,7 +155,7 @@ def load_status_row(node, identity, *, workflow_id: str) -> dict:
     return {
         **_identity(identity),
         "workflow_id": workflow_id,
-        "result": result_for(node),
+        "result": result_for(node, task_type=LOAD_TASK),
         "started_datetime": started,
         "completed_datetime": completed,
         "duration_milliseconds": _duration(started, completed),
@@ -193,7 +204,7 @@ def test_status_row(node, identity, *, workflow_id: str) -> dict:
         **_identity(identity),
         "test_type": _test_type(node),
         "workflow_id": workflow_id,
-        "result": result_for(node),
+        "result": result_for(node, task_type=TEST_TASK),
         "started_datetime": started,
         "completed_datetime": completed,
         "duration_milliseconds": _duration(started, completed),
@@ -322,7 +333,14 @@ class RunRecord:
 
 
 def settled_load(
-    identity, result, *, physical_target: str, started, completed
+    identity,
+    result,
+    *,
+    physical_target: str,
+    started,
+    completed,
+    raised: bool = False,
+    refused: bool = False,
 ) -> "RunNodeResult":
     """One standalone load, in the terms every runtime table records.
 
@@ -330,17 +348,23 @@ def settled_load(
     are the same kind of thing: a unit of work with an outcome. Presenting the
     second as the first is what lets one implementation build the rows, so a
     column added to a table reaches both paths.
+
+    ``raised`` and ``refused`` carry what a dispatched node's outcome carries: a
+    load that threw Weaver's own refusal is Failed, and one that threw anything
+    else is Error.
     """
 
     from .outcome import status_of
-    from .result import RunNodeResult
+    from .result import FAILED, RunNodeResult
 
     return RunNodeResult(
         node_id=str(identity),
         physical_target=physical_target,
         primitive_kind="standalone",
         logical_id=str(identity),
-        status=status_of(result),
+        status=FAILED if raised else status_of(result),
+        raised=raised,
+        refused=refused or not raised,
         executed=True,
         result=result,
         started_at=_isoformat(started),
@@ -371,6 +395,8 @@ def settled_validation(
         logical_id=str(identity),
         role=kind,
         status=status_of(result),
+        # It ran and reported, so what it says is Weaver's own judgement.
+        refused=True,
         executed=True,
         result=result,
         started_at=_isoformat(started),

@@ -208,13 +208,51 @@ def test_a_load_that_refused_a_change_it_was_declared_not_to_make_failed():
 
 
 @weaver_test()
-def test_a_load_whose_dispatch_threw_is_an_error_and_not_a_failure():
+def test_a_load_whose_dispatch_came_apart_is_an_error():
     """Nothing ran to completion, so nothing was established about the data."""
 
     node = _node(status="failed", raised=True, result=LoadResult.failure("boom"))
 
     assert _one(_recorded(node), LOAD_STATUS)["result"] == "error"
     assert _one(_recorded(node), LOG)["result"] == "error"
+
+
+@weaver_test()
+def test_a_load_that_raised_weavers_own_refusal_is_failed():
+    """It ran under Weaver's control and produced an unacceptable result.
+
+    An intolerant rejection or a breached stability threshold throws, and the
+    target was left as it was. Reading that as Error would say the load could not
+    be evaluated, when in fact Weaver evaluated it and refused. The generated
+    ``_.Load`` draws the same line from ``error_number()``.
+    """
+
+    node = _node(
+        status="failed",
+        raised=True,
+        refused=True,
+        result=LoadResult.failure("rows were rejected and fault_tolerant = 0"),
+    )
+
+    assert _one(_recorded(node), LOAD_STATUS)["result"] == "failed"
+
+
+@weaver_test()
+def test_a_validation_that_raised_is_an_error_whatever_it_carried():
+    """A validation that raised produced no judgement, named error or not.
+
+    Which is where the two kinds of work part: a load can refuse and mean it,
+    and a validation that threw has found nothing at all.
+    """
+
+    node = _validation(
+        status="failed",
+        raised=True,
+        refused=True,
+        result=TestResult.failed_to_run("the declared key repeats"),
+    )
+
+    assert _one(_recorded(node, task_type=TEST_TASK), TEST_STATUS)["result"] == "error"
 
 
 @weaver_test()

@@ -322,40 +322,69 @@ def _recorded_load(object, *arguments) -> "LoadResult":
 
     The whole difference between :meth:`load` and :meth:`_load`, in one place so
     a Table and a Folder cannot come to mean different things by it.
+
+    A refusal is recorded and then raised. It is an outcome, and leaving no row
+    for it would make the estate's account of itself silent about exactly the
+    loads somebody most needs to look at. The generated ``_.Load`` does the same
+    inside its own TRY/CATCH.
     """
+
+    # Before anything, so the refusal to *start* is never recorded: an unanchored
+    # object has no catalogue to record into and no identity to record against.
+    object._anchor()
+    started = datetime.now(timezone.utc)
+    try:
+        result = object._load(*arguments)
+    except LoadError as refused:
+        object._record(
+            _settled(object, _carried(refused), started=started, refused=True)
+        )
+        raise
+    object._record(_settled(object, result, started=started))
+    return result
+
+
+def _settled(object, result, *, started, refused: bool = False):
+    """One standalone load, in the terms every runtime table records."""
 
     from .run.record import settled_load
 
-    started = datetime.now(timezone.utc)
-    result = object._load(*arguments)
-    object._record(
-        settled_load(
-            object._installed,
-            result,
-            physical_target=object._physical_target(),
-            started=started,
-            completed=datetime.now(timezone.utc),
-        )
+    return settled_load(
+        object._installed,
+        result,
+        physical_target=object._physical_target(),
+        started=started,
+        completed=datetime.now(timezone.utc),
+        raised=refused,
+        refused=refused,
     )
-    return result
+
+
+def _carried(refused: LoadError):
+    """Whatever counts the refusal was carrying, or none it can report."""
+
+    from .runtime.load_result import LoadResult
+
+    carried = getattr(refused, "result", None)
+    return carried if carried is not None else LoadResult.failure(str(refused))
 
 
 def _refuse_no_staging(contract, what: str, instead: str) -> None:
     """``None`` from a non-incremental ``read()``, which cannot mean "no work".
 
     For a non-incremental source, staging is the whole truth: an explicitly
-    empty relation or folder means every row the target holds has been retired,
-    which is a load rather than the absence of one. So there is nothing ``None``
-    could be read as, and an author is told what to write instead.
+    empty relation or folder retires everything the target holds, which is a
+    load. So there is nothing ``None`` could be read as, and an author is told
+    what to write instead.
     """
 
     if contract.incremental:
         return
     raise LoadError(
         f"{contract.qualified}: a non-incremental {what}'s read() cannot return "
-        f"None. The source is the whole truth, so an empty one retires every row "
-        f"— which is a load, not the absence of one. Return {instead}, or declare "
-        "Incremental: true and return None for no work."
+        "None. The source is the whole truth, so an empty one retires everything "
+        f"the target holds. Return {instead}, or declare Incremental: true, where "
+        "None means there is no work."
     )
 
 
