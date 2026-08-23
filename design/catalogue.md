@@ -402,8 +402,7 @@ runtime**. Two are runtime tables: `_.Log` and `_.Bookmark`. Both are declared a
 ordinary Weaver documents in `Warehouse/_weaver` and built like any other, so a
 first build of the control item creates thirteen tables.
 
-Nothing projects them and nothing reconciles them. They differ in what a lost
-write costs, and that decides how a failure is treated.
+Nothing projects them and nothing reconciles them.
 
 | | `_.Log` | `_.Bookmark` |
 |---|---|---|
@@ -411,11 +410,18 @@ write costs, and that decides how a failure is treated.
 | written by | a run, as each node settles | a build, and a run's clean successes |
 | key | a meaningless surrogate | the Registry's four-part identity |
 | a lost write | loses evidence | makes the next load re-read a window |
-| so a failure | is tolerated | fails the operation |
+
+Both go through the catalogue, and a flush that did not land fails the operation
+either way. The costs differ — evidence against a window read twice — and telling
+them apart is worth doing, but it is not done yet.
 
 A `Catalogue` is *selectively materialised*: it holds the tables it was asked
-for. `_.Log` is never one of them — it is history, nothing consults it, and
-reading it would grow with the estate's age.
+for, and `materialised` says which those are. `_.Log` is never one of them — it
+is history, nothing consults it, and reading it would grow with the estate's age.
+
+What is loaded and what physically exists are different questions. A catalogue
+answers the first; a target's inventory answers the second, the way it does for
+every other object in that target.
 
 ### `_.Bookmark`
 

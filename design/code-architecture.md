@@ -374,10 +374,14 @@ claims.py       which rows a document owns, and how a bookmark row is keyed
 
 `state.py` holds `Catalogue`, which owns catalogue I/O: it is selectively
 materialised, it answers which installed object a physical name is, and runtime
-rows are submitted, updated and flushed through it. Two other modules decide
-*when*: `build_bundle/bookmarks.py` for what a build invalidates, and
-`runtime/anchor.py` for how an authored object anchors itself to a catalogue by
-name.
+rows are submitted, updated and flushed through it. It is live mutable state, not
+a snapshot, and it reaches its Warehouse through a Session — borrowed when it was
+handed one, owned and closed when it opened one for itself. What a target
+physically holds is not its question; a `TargetInventory` answers that.
+
+Two other modules decide *when*: `build_bundle/bookmarks.py` for what a build
+invalidates, and `runtime/anchor.py` for how an authored object anchors itself to
+a catalogue by name.
 
 Everything above `render.py` holds plain Python values under internal
 snake-case keys. The public sentence-case names and the stored vocabularies the
