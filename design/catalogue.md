@@ -514,9 +514,10 @@ refuses without it: a load reads a window and records how far it read, and one
 that recorded nothing would leave the next load to read the same window and
 report success either way.
 
-Named by name, the catalogue opens the Session it reads and writes through and
-owns it; given a Session or an existing `Catalogue`, it borrows and leaves it
-open.
+`catalogue=` takes the name of the Warehouse, or a `Catalogue` already read.
+Named, it opens the Session it reads and writes through and owns it — closing the
+catalogue closes that Session. Handed one, it reuses whatever that one already
+has and closes nothing.
 
 **It is never dropped.** Every catalogue table holds state no declaration
 reproduces, so all of them declare `Prohibit rebuild`, the managed-drop renderer

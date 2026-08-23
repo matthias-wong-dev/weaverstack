@@ -14,6 +14,7 @@ from .errors import LoadError
 from .lakehouse import Lakehouse, default_lakehouse
 
 if TYPE_CHECKING:  # pragma: no cover - for type readers only
+    from .catalogue.state import Catalogue
     from .runtime.folder_load import StagingFolder
     from .runtime.load_result import LoadResult
 
@@ -55,10 +56,15 @@ class WeaverObject:
     read, and one that recorded nothing would leave the next load to read the
     same window and report success either way.
 
-    An orchestrated run supplies an already-populated catalogue through
-    :meth:`with_catalogue` instead, because a deployed primitive's constructor is
-    a contract — ``cls(spark, lakehouse=...)`` — and a class meeting only that
-    contract must keep working.
+    ``catalogue`` takes the name of the Warehouse the catalogue lives in, or a
+    :class:`~weaver.catalogue.state.Catalogue` already read. Named, the catalogue
+    opens the Session it reads and writes through and owns it; handed one, it
+    reuses whatever that one already has.
+
+    An orchestrated run supplies its catalogue through :meth:`with_catalogue`
+    instead, because a deployed primitive's constructor is a contract —
+    ``cls(spark, lakehouse=...)`` — and a class meeting only that contract must
+    keep working.
     """
 
     def __init__(
@@ -66,7 +72,7 @@ class WeaverObject:
         spark: Any,
         *,
         lakehouse: Lakehouse | None = None,
-        catalogue: str | None = None,
+        catalogue: "str | Catalogue | None" = None,
     ) -> None:
         inherited = None
         if isinstance(spark, WeaverObject):
@@ -111,7 +117,13 @@ class WeaverObject:
         self._catalogue = None
         #: This object's installed identity, resolved once with the anchor.
         self._installed = None
-        if catalogue is not None:
+        from .catalogue.state import Catalogue as _Catalogue
+
+        if isinstance(catalogue, _Catalogue):
+            # One already read, and its Session with it: a run and an authored
+            # notebook that has one both hand it over rather than pay again.
+            self.with_catalogue(catalogue)
+        elif catalogue is not None:
             from .runtime.anchor import anchored
 
             self._catalogue, self._installed = anchored(self, catalogue)

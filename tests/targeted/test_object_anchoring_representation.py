@@ -320,6 +320,21 @@ def test_a_child_inherits_the_catalogue_and_resolves_its_own_identity(lakehouse)
 
 
 @weaver_test()
+def test_the_constructor_takes_a_catalogue_as_readily_as_a_name(monkeypatch, lakehouse):
+    """A caller that has one hands it over, and nothing is read or opened again."""
+
+    opened = _sessions_opened(monkeypatch)
+    catalogue = loaded("DWG.Customer")
+
+    table = DWG__Customer(object(), lakehouse=lakehouse, catalogue=catalogue)
+
+    assert table._catalogue is catalogue
+    assert table.installed == identity("DWG.Customer")
+    assert table.bookmark() == LOADED_AT
+    assert opened == []
+
+
+@weaver_test()
 def test_a_supplied_catalogue_is_reused_rather_than_read_again(monkeypatch, lakehouse):
     """A run and a child object both hand one over, and neither pays for a read.
 
