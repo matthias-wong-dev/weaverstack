@@ -1332,12 +1332,14 @@ PRESENTED_RUNTIME_TABLES = tuple(table for table in RUNTIME_TABLES if table.pres
 #: Every catalogue table, however it is maintained.
 CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
-#: The catalogue tables an operation reads. The history tables are not among
-#: them: they are appended and never consulted, and reading one would grow with
-#: the estate's age. The current-state tables are, because a build decides which
-#: of their rows its own work has made obsolete, and a build planning blind
-#: cannot prune what it cannot see.
-READABLE_TABLES = PROJECTED_TABLES + CURRENT_STATE_TABLES
+#: What a *run* reads. The projected tables, which say what is installed and
+#: where, and ``_.Bookmark``, which says how far each object has been loaded.
+#:
+#: The other current-state tables are absent, and that is the asymmetry worth
+#: knowing: a run *writes* a load status and a test status and never asks what
+#: they were, while a build reads all three to decide which rows its own work has
+#: made obsolete. See :data:`weaver.catalogue.state.READ_FOR_BUILD`.
+READABLE_TABLES = PROJECTED_TABLES + (BOOKMARK,)
 
 TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}
 

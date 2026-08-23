@@ -60,17 +60,39 @@ class _Connection:
 
 
 @weaver_test()
-def test_the_readable_tables_are_every_table_but_the_history():
-    """History is appended and never consulted, and it grows with the estate.
+def test_a_run_reads_the_bookmark_and_writes_the_rest():
+    """The asymmetry worth knowing about the current-state tables.
 
-    Current state is read, because a build decides which of its rows its own
-    work has made obsolete and cannot prune what it cannot see.
+    A run writes a load status and a test status and never asks what they were,
+    so reading them would be round trips for an answer nothing uses. It does read
+    bookmarks, because an incremental load asks how far it got.
     """
 
-    assert set(READABLE_TABLES) == set(CATALOGUE_TABLES) - set(HISTORY_TABLES)
-    assert set(HISTORY_TABLES) <= set(RUNTIME_TABLES)
-    assert set(CURRENT_STATE_TABLES) <= set(RUNTIME_TABLES)
+    assert set(READABLE_TABLES) == set(PROJECTED_TABLES) | {BOOKMARK}
+    assert not set(READABLE_TABLES) & set(HISTORY_TABLES)
+
+
+@weaver_test()
+def test_a_build_reads_every_current_state_table_it_can_invalidate():
+    """It decides obsolete rows from the rows it holds, so it holds all of them.
+
+    A tripwire: a current-state table the build could name in an invalidation
+    but could not see would keep a row describing an incarnation that no longer
+    exists.
+    """
+
+    from weaver.catalogue.state import READ_FOR_BUILD
+
+    assert set(CURRENT_STATE_TABLES) <= set(READ_FOR_BUILD)
+    assert not set(READ_FOR_BUILD) & set(HISTORY_TABLES)
+
+
+@weaver_test()
+def test_the_runtime_tables_are_one_of_the_two_kinds_and_no_other():
+    assert set(HISTORY_TABLES) | set(CURRENT_STATE_TABLES) == set(RUNTIME_TABLES)
+    assert not set(HISTORY_TABLES) & set(CURRENT_STATE_TABLES)
     assert not set(RUNTIME_TABLES) & set(PROJECTED_TABLES)
+    assert set(CATALOGUE_TABLES) == set(PROJECTED_TABLES) | set(RUNTIME_TABLES)
 
 
 @weaver_test()
@@ -84,8 +106,7 @@ def test_an_installed_read_does_not_read_the_history():
     for table in HISTORY_TABLES:
         assert table.name not in connection.read
         assert table.name not in catalogue.materialised
-    for table in CURRENT_STATE_TABLES:
-        assert table.name in connection.read
+    assert BOOKMARK.name in connection.read
 
 
 @weaver_test()

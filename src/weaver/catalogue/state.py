@@ -26,7 +26,9 @@ from .tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
     BUILD_DATETIME,
+    CURRENT_STATE_TABLES,
     INSTALLATION,
+    LOAD_STATUS,
     OBJECT_ROLES,
     OBJECT_TYPES,
     PROJECTED_TABLES,
@@ -37,6 +39,7 @@ from .tables import (
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
     TEST_DICTIONARY,
+    TEST_STATUS,
     VALIDATION_ROLES,
 )
 
@@ -626,13 +629,19 @@ class RegisteredDocument:
 #: Add a name here in the same change that adds the table, and only then: a table
 #: listed here that *was* in an older release would turn a repair case into a
 #: silent partial rebuild.
-INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name, BOOKMARK.name})
+INTRODUCED_TABLES = frozenset(
+    {TEST_DICTIONARY.name, BOOKMARK.name, LOAD_STATUS.name, TEST_STATUS.name}
+)
 
 #: What a build reads. The projected tables, which it compares and republishes,
-#: and ``_.Bookmark``, whose rows it decides the obsolete ones from. ``_.Log`` is
-#: absent: it is history, nothing reads it to decide anything, and reading it
-#: would grow with the estate's age.
-READ_FOR_BUILD = PROJECTED_TABLES + (BOOKMARK,)
+#: and every current-state table, whose obsolete rows it decides from the rows it
+#: holds. All of them and not only ``_.Bookmark``: a build invalidates whichever
+#: current-state tables the object it is replacing has rows in, and one it could
+#: not see would keep a row describing an incarnation that no longer exists.
+#:
+#: The history tables are absent. Nothing reads them to decide anything, and
+#: reading one would grow with the estate's age.
+READ_FOR_BUILD = PROJECTED_TABLES + CURRENT_STATE_TABLES
 
 #: The tables whose presence a build has to know about — the ones it reads, since
 #: a claim may only be raised against a table that is there.
