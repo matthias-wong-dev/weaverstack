@@ -129,6 +129,9 @@ def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
         f"{ITEM}/file:{LOAD_ROOT}/Files/Raw__Export.py",
         f"{ITEM}/file:{LOAD_ROOT}/lib/data/holidays.csv",
         f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py",
+        # The Warehouse's own procedure for the one table it loads, and the entry
+        # point a person calls to run it and have the outcome recorded.
+        f"{WAREHOUSE_ITEM}/procedure:_/Load",
         f"{WAREHOUSE_ITEM}/procedure:_/Load Sales.Customer",
     ]
 

@@ -124,6 +124,48 @@ def installed(
     )
 
 
+def validating(
+    *validations: str,
+    item: str = ITEM,
+    target: str = TARGET,
+    kind: str = "test",
+    writer=None,
+) -> Catalogue:
+    """A catalogue recording these ``Schema.Object`` names as declared validations.
+
+    A validation materialises nothing, so it has no Registry row: what records it
+    is ``_.TestDictionary``, and its compiled artefact is what Registry certifies.
+    """
+
+    owner = WeaverItemId.parse(item)
+    tables = {
+        "Installation": (
+            {
+                "item_type": owner.item_type,
+                "item_name": owner.item_name,
+                "target_name": target,
+                "weaver_version": "0.1",
+                "signature": "s",
+            },
+        ),
+        "TestDictionary": tuple(
+            {
+                "item_type": owner.item_type,
+                "item_name": owner.item_name,
+                "schema_name": name.split(".", 1)[0],
+                "object_name": name.split(".", 1)[1],
+                "test_type": kind,
+                "signature": "s",
+            }
+            for name in validations
+        ),
+    }
+    return Catalogue(
+        MappingProxyType({owner: MappingProxyType(tables)}),
+        writer=writer if writer is not None else Recording(),
+    )
+
+
 def never(*objects: str, **kwargs) -> Catalogue:
     """A catalogue in which these objects are installed and never cleanly loaded."""
 
@@ -153,4 +195,5 @@ __all__ = [
     "installed",
     "loaded",
     "never",
+    "validating",
 ]

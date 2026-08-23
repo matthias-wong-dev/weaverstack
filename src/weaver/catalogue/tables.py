@@ -45,11 +45,23 @@ ROLE_ASSUMPTION = "assumption"
 #: role rather than a type, because what it physically *is* still varies: a
 #: table, a folder, a view, or the schema a schema shortcut presents.
 ROLE_SHORTCUT = "shortcut"
-OBJECT_ROLES = (ROLE_DATA, ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_SHORTCUT)
+#: A generic entry point a *person* calls: ``_.Load`` and ``_.Test``, which wrap
+#: one object's own procedure and record what it did. A role of its own because
+#: nothing schedules one — a load procedure with this role would be run by
+#: ``weaver load``, and there is no object for it to load.
+ROLE_ENTRY = "entry"
+OBJECT_ROLES = (
+    ROLE_DATA,
+    ROLE_LOAD,
+    ROLE_TEST,
+    ROLE_ASSUMPTION,
+    ROLE_SHORTCUT,
+    ROLE_ENTRY,
+)
 
 #: The roles a runtime artefact carries — everything installed to be *run*
 #: rather than to hold rows. Asked where a selection has to be partitioned.
-RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION)
+RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_ENTRY)
 
 #: The roles a validation carries, by the kind that declares it.
 VALIDATION_ROLES = (ROLE_TEST, ROLE_ASSUMPTION)
@@ -76,6 +88,7 @@ OBJECT_ROLE_VOCABULARY = {
     ROLE_TEST: "Test",
     ROLE_ASSUMPTION: "Assumption",
     ROLE_SHORTCUT: "Shortcut",
+    ROLE_ENTRY: "Entry point",
 }
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}

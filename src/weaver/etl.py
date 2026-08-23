@@ -87,6 +87,9 @@ PROCEDURE_TYPE = "stored_procedure"
 ROLE_LOAD = "load"
 ROLE_TEST = "test"
 ROLE_ASSUMPTION = "assumption"
+#: A generic entry point a person calls, wrapping one object's own procedure and
+#: recording what it did. Its own role because nothing schedules one.
+ROLE_ENTRY = "entry"
 
 #: Which role a validation kind's artefact carries.
 VALIDATION_ROLE = {"Test": ROLE_TEST, "Assumption": ROLE_ASSUMPTION}
@@ -368,7 +371,24 @@ def item_load_artefacts(
 def _warehouse_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[RuntimeArtefact, ...]:
-    """One generated load procedure per Warehouse table."""
+    """One generated load procedure per Warehouse table, and the entry points.
+
+    ``_.Load`` and ``_.Test`` are installed beside them: the object procedures
+    are execution primitives that record nothing, and the entry points are what a
+    person calls to run one and have the outcome recorded. Registered like any
+    other artefact, so they are signed, selected incrementally and pruned when
+    the item's last load or validation goes.
+    """
+
+    return _load_procedures(repository, item=item) + _entry_artefacts(
+        repository, item=item
+    )
+
+
+def _load_procedures(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[RuntimeArtefact, ...]:
+    """One generated load procedure per Warehouse table Weaver loads."""
 
     from .declaration.load import has_generated_load
 
@@ -394,6 +414,73 @@ def _warehouse_artefacts(
             )
         )
     return tuple(artefacts)
+
+
+def _entry_artefacts(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[RuntimeArtefact, ...]:
+    """``_.Load`` and ``_.Test``, where the item installs something they wrap.
+
+    Signed by their own bytes rather than by a source signature and a template
+    version, because the dispatch chain is derived from the whole set of objects
+    the item installs: adding one object changes the entry point, and nothing
+    else would say so.
+    """
+
+    from .declaration.tsql_entry import (
+        LOAD_ENTRY,
+        TEST_ENTRY,
+        generate_load_entry,
+        generate_test_entry,
+    )
+
+    found = []
+    loadable = [
+        artefact.origin.object_id
+        for artefact in _load_procedures(repository, item=item)
+        if artefact.origin is not None
+    ]
+    if loadable:
+        found.append(
+            _entry_artefact(item, LOAD_ENTRY, generate_load_entry(item, loadable))
+        )
+    validations = {
+        artefact.origin.object_id: repository.source_documents[
+            artefact.origin
+        ].document.kind
+        for artefact in item_validation_artefacts(repository, item=item)
+        if artefact.origin is not None
+    }
+    if validations:
+        found.append(
+            _entry_artefact(item, TEST_ENTRY, generate_test_entry(item, validations))
+        )
+    return tuple(found)
+
+
+def _entry_artefact(item: WeaverItemId, name: str, script: str) -> RuntimeArtefact:
+    payload = script.encode("utf-8")
+    return RuntimeArtefact(
+        identity=entry_procedure_id(item, name),
+        object_type=PROCEDURE_TYPE,
+        signature=content_hash(payload),
+        payload=payload,
+        role=ROLE_ENTRY,
+    )
+
+
+def entry_procedure_id(item: WeaverItemId, name: str) -> WeaverDocumentId:
+    """The identity of one of an item's generic entry points."""
+
+    return WeaverDocumentId(
+        item, ObjectId(schema=ETL_SCHEMA, object=name), shape=PROCEDURE_SHAPE
+    )
+
+
+def entry_procedure_name(name: str) -> str:
+    """How an entry point spells its own name in T-SQL."""
+
+    return f"{_tsql_ident(ETL_SCHEMA)}.{_tsql_ident(name)}"
 
 
 def _lakehouse_artefacts(
@@ -840,4 +927,6 @@ __all__ = [
     "load_schemas",
     "load_procedure_id",
     "load_procedure_name",
+    "entry_procedure_id",
+    "entry_procedure_name",
 ]

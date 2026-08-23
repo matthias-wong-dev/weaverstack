@@ -238,11 +238,18 @@ def test_a_deployed_module_is_claimed_once(estate):
 
 @weaver_test()
 def test_the_role_travels_with_the_artefact(estate):
-    """Nothing downstream may recover it from a file or procedure shape."""
+    """Nothing downstream may recover it from a file or procedure shape.
+
+    Four roles reach the Registry from here, and the shapes do not distinguish
+    them: a load module and a Test module are both files, and a load procedure, a
+    Test procedure and an entry point are all procedures.
+    """
+
+    from weaver.etl import ROLE_ENTRY
 
     for artefact in runtime_artefacts(estate):
-        assert artefact.role in (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION)
-        assert artefact.is_validation == (artefact.role != ROLE_LOAD)
+        assert artefact.role in (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_ENTRY)
+        assert artefact.is_validation == (artefact.role in (ROLE_TEST, ROLE_ASSUMPTION))
 
 
 @weaver_test()

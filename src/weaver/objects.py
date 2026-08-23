@@ -30,6 +30,13 @@ STAGING_SUFFIX = "_Staging"
 #: surface must not import the parser.
 CLASS_ID_SEPARATOR = "__"
 
+#: The two kinds of validation, as their declarations spell them. Repeated from
+#: :mod:`weaver.declaration.metadata` for the same reason: this module is
+#: imported by authored code and pulls in no parser.
+#: ``tests/test_objects_declaration.py`` asserts the two are identical.
+TEST = "Test"
+ASSUMPTION = "Assumption"
+
 
 class WeaverObject:
     """Base for every authored object.
@@ -217,29 +224,55 @@ class WeaverObject:
             f'{type(self).__name__}(spark, catalogue="Warehouse/<name>").'
         )
 
-    def _bookmarked(self, result, began, *, update_catalogue: bool):
+    def _bookmarked(self, result, began):
         """One load's result, carrying the instant a clean run of it began.
 
-        Always reported, so whoever records it has the instant this engine took.
-        Written here only when this load owns that decision: a run passes
-        ``update_catalogue=False`` and records the node itself, beside the
-        evidence that it settled.
+        Reported and never written: whoever records the load advances the
+        bookmark, and this is where the instant they advance it to comes from.
+        Taken by the engine that ran the load rather than by whatever happened to
+        be orchestrating it.
 
-        Only a clean success, either way. A load that rejected a row has not read
-        its window.
+        Only a clean success. A load that rejected a row has not read its window.
         """
 
         from dataclasses import replace as _replace
 
         if not result.succeeded or result.rows_rejected:
             return result
-        if update_catalogue:
-            from .catalogue.claims import bookmark_row
-            from .catalogue.tables import BOOKMARK
-
-            self._catalogue.update(BOOKMARK, bookmark_row(self._installed, began))
-            self._catalogue.flush()
         return _replace(result, bookmark_datetime=began)
+
+    def _physical_target(self) -> str:
+        """The physical target this object materialises into, as a log names it.
+
+        A Python object materialises into a Lakehouse: its rows are Delta files
+        and its files are in the Files area, both under the destination it
+        resolved.
+        """
+
+        return f"Lakehouse/{self.lakehouse.name}"
+
+    def _record(self, settled) -> None:
+        """Record one settled unit of this object's own work, and wait for it.
+
+        Synchronous, which is the difference between the two interfaces rather
+        than a setting on one of them: an orchestrated run records every node
+        through one queue and flushes once at the end, and a caller who ran this
+        object by hand is told it finished only once the record has landed.
+        """
+
+        from .run.record import RunRecord, new_workflow_id
+
+        record = RunRecord(
+            workflow_id=new_workflow_id(),
+            task_type=self._task_type,
+            catalogue=self._anchor(),
+        )
+        record.settled(settled)
+        record.flush()
+
+    #: What this object's work is recorded as. A load unless a subclass says
+    #: otherwise; a validation says otherwise.
+    _task_type = "load"
 
     def read(self):
         raise NotImplementedError(f"{type(self).__name__} must implement read()")
@@ -282,6 +315,29 @@ def _sentinel():
     from .catalogue.tables import BOOKMARK_SENTINEL
 
     return BOOKMARK_SENTINEL
+
+
+def _recorded_load(object, *arguments) -> "LoadResult":
+    """One object's load, with its operational record written before it returns.
+
+    The whole difference between :meth:`load` and :meth:`_load`, in one place so
+    a Table and a Folder cannot come to mean different things by it.
+    """
+
+    from .run.record import settled_load
+
+    started = datetime.now(timezone.utc)
+    result = object._load(*arguments)
+    object._record(
+        settled_load(
+            object._installed,
+            result,
+            physical_target=object._physical_target(),
+            started=started,
+            completed=datetime.now(timezone.utc),
+        )
+    )
+    return result
 
 
 def _refuse_no_staging(contract, what: str, instead: str) -> None:
@@ -454,18 +510,26 @@ class Folder(WeaverObject):
         destination = self.path()
         return destination.with_name(f"{destination.name}{STAGING_SUFFIX}")
 
-    def load(
-        self, fault_tolerant: bool = False, *, update_catalogue: bool = True
-    ) -> "LoadResult":
-        """Run this folder's ``read()`` and publish what it staged.
+    def load(self, fault_tolerant: bool = False) -> "LoadResult":
+        """Run this folder's load and record what it did.
 
         Independently runnable, needing no repository and no bundle::
 
             Sales__Export(spark, catalogue="Warehouse/Weaver").load()
 
-        ``update_catalogue`` says whether this load records itself. A direct load
-        does; an orchestrated run passes ``False`` and records the node itself,
-        beside the evidence that it settled, so one row has one writer.
+        The standalone interface: it needs the catalogue, records this folder's
+        operational state, and flushes before returning. An orchestrated run
+        calls :meth:`_load` and records what settled itself, so one row has one
+        writer.
+        """
+
+        return _recorded_load(self, fault_tolerant)
+
+    def _load(self, fault_tolerant: bool = False) -> "LoadResult":
+        """Run this folder's ``read()`` and publish what it staged.
+
+        The load itself and nothing else: it writes no operational state, so
+        whoever called it owns the record.
 
         Staging is reset, issued to ``read()``, published, and removed on
         success — retained on failure, as the one directory worth looking at.
@@ -532,7 +596,7 @@ class Folder(WeaverObject):
             # first one's directory.
             self._issued_staging = None
         remove_staging(issued.path)
-        return self._bookmarked(result, began, update_catalogue=update_catalogue)
+        return self._bookmarked(result, began)
 
 
 class Table(WeaverObject):
@@ -602,18 +666,30 @@ class Table(WeaverObject):
         self,
         fault_tolerant: bool = False,
         ignore_stability_threshold: bool = False,
-        *,
-        update_catalogue: bool = True,
     ) -> "LoadResult":
-        """Run this table's ``read()`` and write what it staged.
+        """Run this table's load and record what it did.
 
         Independently runnable, needing no repository and no bundle::
 
             Sales__Customer(spark, catalogue="Warehouse/Weaver").load()
 
-        ``update_catalogue`` says whether this load records itself. A direct load
-        does; an orchestrated run passes ``False`` and records the node itself,
-        beside the evidence that it settled, so one row has one writer.
+        The standalone interface: it needs the catalogue, records this table's
+        operational state, and flushes before returning. An orchestrated run
+        calls :meth:`_load` and records what settled itself, so one row has one
+        writer.
+        """
+
+        return _recorded_load(self, fault_tolerant, ignore_stability_threshold)
+
+    def _load(
+        self,
+        fault_tolerant: bool = False,
+        ignore_stability_threshold: bool = False,
+    ) -> "LoadResult":
+        """Run this table's ``read()`` and write what it staged.
+
+        The load itself and nothing else: it writes no operational state, so
+        whoever called it owns the record.
 
         ``ignore_stability_threshold`` waives the declared delete and update
         limits for one run, for when a very large change is the correct answer.
@@ -644,9 +720,7 @@ class Table(WeaverObject):
             # An incremental source that already knows there is nothing to do.
             # Nothing is staged and nothing is claimed, so no Spark job runs to
             # establish that a frame the author never built would have been empty.
-            return self._bookmarked(
-                LoadResult(succeeded=True), began, update_catalogue=update_catalogue
-            )
+            return self._bookmarked(LoadResult(succeeded=True), began)
         if staged is None:
             # Deletion only. The target's own shape stands in for staging, so the
             # reconciliation retires exactly the rows claimed and inserts none.
@@ -662,7 +736,6 @@ class Table(WeaverObject):
                 ignore_stability_threshold=ignore_stability_threshold,
             ),
             began,
-            update_catalogue=update_catalogue,
         )
 
 
@@ -739,7 +812,62 @@ class View(WeaverObject):
         return self.spark.table(self.lakehouse.qualify(*self.identity))
 
 
-class Assumption(WeaverObject):
+class _Validation(WeaverObject):
+    """What a Test and an Assumption share: they judge rather than materialise.
+
+    A validation has two interfaces, and they divide the same way a loadable
+    object's do.
+
+    ``read()`` is the primitive: it evaluates the validation and returns the rows
+    that are the evidence — the discrepancies for a Test, the contradicting rows
+    for an Assumption. It records nothing and needs no catalogue, so an author
+    can call it and look at what came back. An orchestrated run calls it and
+    records centrally.
+
+    ``run()`` is the standalone interface: it needs the catalogue, calls
+    ``read()``, records what the validation found, and flushes before returning::
+
+        Sales__OrdersReconcile(spark, catalogue="Warehouse/Weaver").run()
+    """
+
+    #: A validation's work is recorded as a test, whichever kind it is: the two
+    #: are told apart by the row's own ``Test type``.
+    _task_type = "test"
+
+    #: Which kind of validation this is, as its declaration spells it.
+    _validation_kind = ""
+
+    def run(self):
+        """Evaluate this validation and record what it found.
+
+        Returns the validation's own result — discrepancy counts for a Test,
+        violation counts for an Assumption — rather than the rows. The rows are
+        what ``read()`` gives; a durable record of them would put whatever the
+        validation selected into the estate's own evidence.
+        """
+
+        from datetime import datetime as _datetime
+
+        from .run.record import settled_validation
+        from .runtime.validation_result import result_from_rows
+
+        self._anchor()
+        started = _datetime.now(timezone.utc)
+        result, _rows = result_from_rows(self.read(), kind=self._validation_kind)
+        self._record(
+            settled_validation(
+                self._installed,
+                result,
+                physical_target=self._physical_target(),
+                kind=self._validation_kind,
+                started=started,
+                completed=_datetime.now(timezone.utc),
+            )
+        )
+        return result
+
+
+class Assumption(_Validation):
     """A statement about the estate that returns the rows contradicting it.
 
     An Assumption succeeds when it returns nothing::
@@ -765,6 +893,8 @@ class Assumption(WeaverObject):
     way it is an ordinary Weaver object.
     """
 
+    _validation_kind = ASSUMPTION
+
     def read(self):
         raise NotImplementedError(
             f"{type(self).__name__} must implement read(), returning the rows "
@@ -772,7 +902,7 @@ class Assumption(WeaverObject):
         )
 
 
-class Test(WeaverObject):
+class Test(_Validation):
     """A comparison of an expected relation with an actual one.
 
     A Test succeeds when the two are the same set::
@@ -811,6 +941,8 @@ class Test(WeaverObject):
     #: collector recognises only the name, so it would warn about every module
     #: that imports this one into a test.
     __test__ = False
+
+    _validation_kind = TEST
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

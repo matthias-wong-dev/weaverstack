@@ -26,7 +26,13 @@ from support.weaver_test import weaver_test
 from support.workspaces import given_workspace, mounted_lakehouse
 
 from weaver import Table
-from weaver.catalogue.tables import BOOKMARK, BOOKMARK_SENTINEL
+from weaver.catalogue.tables import (
+    BOOKMARK,
+    BOOKMARK_SENTINEL,
+    LOAD_STATISTIC,
+    LOAD_STATUS,
+    LOG,
+)
 from weaver.errors import ConfigError, LoadError
 from weaver.runtime.load_result import LoadResult
 
@@ -281,7 +287,13 @@ def test_anchoring_by_name_asks_for_a_catalogue_that_owns_its_session(monkeypatc
     )
 
     assert table.installed == identity("DWG.Customer")
-    assert asked == [("Warehouse/Weaver", anchor.ANCHOR_TABLES)]
+    (named, tables) = asked[0]
+    assert named == "Warehouse/Weaver"
+    # The catalogue's own order, not the declaration's: what matters is which
+    # tables were read, and one read costs one round trip per table either way.
+    assert {getattr(table, "name", table) for table in tables} == set(
+        anchor.ANCHOR_TABLES
+    )
 
 
 def _sessions_opened(monkeypatch) -> list:
@@ -392,7 +404,13 @@ def _loaded(monkeypatch, table, **load):
 
 
 @weaver_test()
-def test_a_direct_load_records_itself(monkeypatch, lakehouse):
+def test_a_direct_load_records_its_whole_operational_state(monkeypatch, lakehouse):
+    """Everything the load produced, recorded and flushed before it returns.
+
+    A caller told the load succeeded relies on the record having landed, which is
+    what makes the standalone interface synchronous.
+    """
+
     catalogue = never("DWG.Loading")
     table = DWG__Loading(object(), lakehouse=lakehouse).with_catalogue(catalogue)
 
@@ -400,23 +418,40 @@ def test_a_direct_load_records_itself(monkeypatch, lakehouse):
 
     assert result.succeeded
     assert result.bookmark_datetime is not None
-    # Merged and flushed, both: a caller told the load succeeded relies on it.
-    assert [name for name, _row in catalogue.writer.updated] == [BOOKMARK.name]
+    assert [name for name, _row in catalogue.writer.updated] == [
+        LOAD_STATUS.name,
+        BOOKMARK.name,
+    ]
+    assert [name for name, _row in catalogue.writer.submitted] == [
+        LOG.name,
+        LOAD_STATISTIC.name,
+    ]
     assert catalogue.writer.flushes == 1
     # And the catalogue it recorded into now answers with what it recorded.
     assert catalogue.bookmark(identity("DWG.Loading")) == result.bookmark_datetime
 
 
 @weaver_test()
-def test_an_orchestrated_load_leaves_the_recording_to_the_run(monkeypatch, lakehouse):
+def test_the_lower_interface_leaves_the_recording_to_its_caller(monkeypatch, lakehouse):
+    """``_load`` is what an orchestrated run calls, so one row has one writer.
+
+    There is no flag: which interface was called decides who records.
+    """
+
     catalogue = never("DWG.Loading")
     table = DWG__Loading(object(), lakehouse=lakehouse).with_catalogue(catalogue)
 
-    result = _loaded(monkeypatch, table, update_catalogue=False)
+    import weaver.runtime.table_load as runtime
+
+    monkeypatch.setattr(
+        runtime, "load_table", lambda *a, **k: LoadResult(succeeded=True, rows_read=2)
+    )
+    result = table._load()
 
     # It still reports the instant, because the run needs it to record the node.
     assert result.bookmark_datetime is not None
     assert catalogue.writer.updated == []
+    assert catalogue.writer.submitted == []
     assert catalogue.writer.flushes == 0
 
 
@@ -450,7 +485,7 @@ def test_a_freestanding_object_does_not_load(monkeypatch, lakehouse):
 
 
 @weaver_test()
-def test_a_rejecting_load_records_nothing(monkeypatch, lakehouse):
+def test_a_rejecting_load_moves_no_bookmark(monkeypatch, lakehouse):
     """It has not read its window, so there is nothing to record having read."""
 
     import weaver.runtime.table_load as runtime
@@ -466,7 +501,10 @@ def test_a_rejecting_load_records_nothing(monkeypatch, lakehouse):
     result = table.load(fault_tolerant=True)
 
     assert result.bookmark_datetime is None
-    assert catalogue.writer.updated == []
+    # The status and the statistics are recorded — a rejecting load happened —
+    # and the bookmark is not, because the window was not read.
+    assert [name for name, _row in catalogue.writer.updated] == [LOAD_STATUS.name]
+    assert catalogue.writer.rows(LOAD_STATUS.name)[0]["result"] == "rejected"
 
 
 @weaver_test()

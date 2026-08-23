@@ -723,6 +723,23 @@ def test_the_authoring_module_imports_without_spark():
 
 
 @weaver_test()
+def test_the_repeated_constants_match_the_ones_they_are_repeated_from():
+    """The authoring surface pulls in no parser, so it restates a few names."""
+
+    from weaver.declaration.metadata import ASSUMPTION, TEST
+    from weaver.declaration.source import python_id_parts
+    from weaver.objects import ASSUMPTION as AUTHORED_ASSUMPTION
+    from weaver.objects import CLASS_ID_SEPARATOR
+    from weaver.objects import STAGING_SUFFIX as AUTHORED_STAGING
+    from weaver.objects import TEST as AUTHORED_TEST
+    from weaver.runtime.folder_load import STAGING_SUFFIX
+
+    assert (AUTHORED_TEST, AUTHORED_ASSUMPTION) == (TEST, ASSUMPTION)
+    assert AUTHORED_STAGING == STAGING_SUFFIX
+    assert python_id_parts(f"Sales{CLASS_ID_SEPARATOR}Order") == ["Sales", "Order"]
+
+
+@weaver_test()
 def test_the_base_classes_are_registered_by_kind():
     from weaver.objects import BASE_CLASS_NAMES, BASE_CLASSES
 

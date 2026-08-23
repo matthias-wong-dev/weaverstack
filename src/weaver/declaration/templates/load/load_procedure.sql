@@ -1,11 +1,10 @@
--- The load's result is in the output parameters, not in a result set.
+-- One object's load, and nothing else. Its result is in the output parameters
+-- rather than in a result set, and it records nothing: an orchestrated run
+-- records what settled, and `exec _.[Load] @object_name = '...'` is what runs
+-- this by hand and records the outcome.
 create or alter procedure $load_procedure
     @fault_tolerant bit = 0
   , @ignore_stability_threshold bit = 0
-  -- Whether this procedure maintains its own bookmark. An orchestrated run
-  -- passes 0 and writes it with the run's record; running the procedure by hand
-  -- leaves it at 1, so the object's own history stays correct either way.
-  , @update_catalogue bit = 1
 $result_parameters
 as
 begin
@@ -48,8 +47,6 @@ $end_artifact_cleanup
     select @weaver_rows_deleted =
         @weaver_target_before + @weaver_rows_inserted - count(*)
     from $target_table;
-
-$bookmark_update
 
 $result_assignment
 end;

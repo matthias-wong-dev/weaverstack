@@ -27,7 +27,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..catalogue.tables import (
     BLOCKED,
@@ -44,6 +44,9 @@ from ..catalogue.tables import (
     TEST_STATUS,
 )
 from .result import RunError
+
+if TYPE_CHECKING:  # pragma: no cover - for type readers only
+    from .result import RunNodeResult
 
 #: The task types a run records under. A load and a validation need the same
 #: capabilities and are not the same event.
@@ -315,6 +318,74 @@ class RunRecord:
             ) from exc
 
 
+# --- a standalone call, presented as the settled unit of work it is ------------
+
+
+def settled_load(
+    identity, result, *, physical_target: str, started, completed
+) -> "RunNodeResult":
+    """One standalone load, in the terms every runtime table records.
+
+    A run settles a graph node and a direct call settles one object, and the two
+    are the same kind of thing: a unit of work with an outcome. Presenting the
+    second as the first is what lets one implementation build the rows, so a
+    column added to a table reaches both paths.
+    """
+
+    from .outcome import status_of
+    from .result import RunNodeResult
+
+    return RunNodeResult(
+        node_id=str(identity),
+        physical_target=physical_target,
+        primitive_kind="standalone",
+        logical_id=str(identity),
+        status=status_of(result),
+        executed=True,
+        result=result,
+        started_at=_isoformat(started),
+        finished_at=_isoformat(completed),
+        target_type=physical_target.partition("/")[0] or None,
+        target_name=physical_target.partition("/")[2] or None,
+        schema_name=identity.object_id.schema,
+        object_name=identity.object_id.object,
+    )
+
+
+def settled_validation(
+    identity, result, *, physical_target: str, kind: str, started, completed
+) -> "RunNodeResult":
+    """One standalone validation, in the same terms.
+
+    ``kind`` is Test or Assumption, as the declaration says; the status follows
+    from whether the result judged anything.
+    """
+
+    from .outcome import status_of
+    from .result import RunNodeResult
+
+    return RunNodeResult(
+        node_id=str(identity),
+        physical_target=physical_target,
+        primitive_kind="standalone",
+        logical_id=str(identity),
+        role=kind,
+        status=status_of(result),
+        executed=True,
+        result=result,
+        started_at=_isoformat(started),
+        finished_at=_isoformat(completed),
+        target_type=physical_target.partition("/")[0] or None,
+        target_name=physical_target.partition("/")[2] or None,
+        schema_name=identity.object_id.schema,
+        object_name=identity.object_id.object,
+    )
+
+
+def _isoformat(at) -> str | None:
+    return None if at is None else at.isoformat()
+
+
 def _installed(node):
     """The installed object this node was about, or None if it was about none."""
 
@@ -440,5 +511,7 @@ __all__ = [
     "new_workflow_id",
     "open_run_record",
     "result_for",
+    "settled_load",
+    "settled_validation",
     "test_status_row",
 ]

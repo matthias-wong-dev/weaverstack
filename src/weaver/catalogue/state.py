@@ -221,11 +221,7 @@ class Catalogue:
         """
 
         stored = f"{_FILES_PREFIX}{schema}" if is_files else schema
-        bound = {
-            _item_of(row)
-            for row in self.table_rows(INSTALLATION)
-            if str(row.get("target_name") or "").casefold() == target_name.casefold()
-        }
+        bound = self._bound_to(target_name)
         found = [
             identity
             for identity, document in self.registered.items()
@@ -249,6 +245,69 @@ class Catalogue:
             + ". Two logical items are bound to this target, so which one is "
             "meant cannot be settled here."
         )
+
+    def installed_validation(
+        self, *, target_name: str, schema: str, object: str
+    ) -> WeaverDocumentId:
+        """Which declared validation a physical target's ``Schema.Object`` is.
+
+        Answered from ``_.TestDictionary`` rather than from ``_.Registry``,
+        because a validation materialises nothing: what Registry certifies is the
+        module or procedure it compiles to, and the validation's own identity is
+        in the dictionary that describes the declaration.
+
+        Exactly one match, or a failure saying which — the same rule
+        :meth:`installed_object` follows, and for the same reason.
+        """
+
+        bound = self._bound_to(target_name)
+        found = [
+            identity
+            for identity in self._validations()
+            if identity.item in bound
+            and identity.object_id.schema.casefold() == schema.casefold()
+            and identity.object_id.object.casefold() == object.casefold()
+        ]
+        if len(found) == 1:
+            return found[0]
+        where = f"{schema}.{object} in {target_name}"
+        if not found:
+            raise ConfigError(
+                f"{where} is not a validation the Weaver catalogue records as "
+                "installed, so it has no catalogue identity. Build it first, or "
+                "name the target it was built into."
+            )
+        raise ConfigError(
+            f"{where} matches more than one installed validation — "
+            + ", ".join(sorted(str(identity) for identity in found))
+            + ". Two logical items are bound to this target, so which one is "
+            "meant cannot be settled here."
+        )
+
+    def _validations(self):
+        """Every declared validation the catalogue records, by identity."""
+
+        from .tables import TEST_DICTIONARY
+
+        return tuple(
+            WeaverDocumentId(
+                _item_of(row),
+                ObjectId(
+                    str(row.get("schema_name") or ""),
+                    str(row.get("object_name") or ""),
+                ),
+            )
+            for row in self.table_rows(TEST_DICTIONARY)
+        )
+
+    def _bound_to(self, target_name: str) -> set:
+        """The logical items the catalogue binds to one physical target."""
+
+        return {
+            _item_of(row)
+            for row in self.table_rows(INSTALLATION)
+            if str(row.get("target_name") or "").casefold() == target_name.casefold()
+        }
 
     def to_mapping(self) -> dict[str, object]:
         """A versioned JSON-safe representation for a remote state boundary."""

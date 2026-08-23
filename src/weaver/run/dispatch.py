@@ -92,6 +92,9 @@ def _scope(open_runtime, node):
 def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     """The installed load procedure, called by name over the Session's TDS.
 
+    The object's own procedure, not the generic ``_.Load`` wrapper: the run
+    records what settled itself, so one row has one writer.
+
     Asked for by name rather than by result set: the procedure's authored setup
     may run EXEC and return rows of its own, so "the result set it produced" is
     not something a caller can identify. The outputs are, and they are in its
@@ -107,14 +110,7 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     sql = session.sql_executor(target, workspace=workspace)
     row = sql.call_procedure(
         load_procedure_name(node.logical_id.object_id),
-        inputs=(
-            ("fault_tolerant", 1 if fault_tolerant else 0),
-            # The run advances the bookmark itself, alongside its own record of
-            # what happened, so the procedure does not also write it. Run by
-            # hand the parameter defaults to 1 and the procedure keeps its own
-            # object's history correct.
-            ("update_catalogue", 0),
-        ),
+        inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
         outputs=RESULT_PARAMETERS,
     )
     return LoadResult.from_row(row)
@@ -215,9 +211,10 @@ def python_primitive(
     take = getattr(primitive, "with_catalogue", None)
     if take is not None and catalogue is not None:
         take(catalogue, identity=node_identity)
-        # The run records what settled, so the primitive does not record itself.
-        return primitive.load(fault_tolerant=fault_tolerant, update_catalogue=False)
-    return primitive.load(fault_tolerant=fault_tolerant)
+    # `_load` and never `load`: the run records what settled, centrally and
+    # asynchronously, so a primitive that recorded itself would be a second
+    # writer of the same row.
+    return primitive._load(fault_tolerant=fault_tolerant)
 
 
 def _endpoint_refresh(node, session, workspace):

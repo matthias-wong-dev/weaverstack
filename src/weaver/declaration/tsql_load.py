@@ -1,4 +1,4 @@
-"""Generate an independently runnable Warehouse load procedure.
+"""Generate one Warehouse table's load procedure.
 
 The build payload installs a procedure that derives target columns from
 ``sys.columns``. Procedure result counts use output parameters, and rejected
@@ -16,7 +16,6 @@ then the target. What each phase means, and why, is
 from __future__ import annotations
 
 from ..catalogue.tables import (
-    AUDIT_UPDATE_COLUMN,
     BOOKMARK,
     CATALOGUE_SCHEMA,
 )
@@ -185,7 +184,6 @@ def generate_tsql_load_script(
             4,
         ),
         bookmark_key=_indent(_bookmark_key(document, item, contract), 4),
-        bookmark_update=_indent(_bookmark_update(document, item), 4),
         live_delete_datetime=AUDIT_LIVE_DELETE_DATETIME,
         preprocessing_banner=_indent(PREPROCESSING_BANNER, 4),
         postprocessing_banner=_indent(POSTPROCESSING_BANNER, 4),
@@ -317,60 +315,6 @@ def _bookmark_key(document: SesDocument, item, contract: LoadContract) -> str:
         f"{identifier(BOOKMARK.public_name_of('bookmark_datetime'))}\n"
         f"  from {_bookmark_table()}\n"
         f" where {predicate};"
-    )
-
-
-def _bookmark_update(document: SesDocument, item) -> str:
-    """Advance this object's bookmark, when the procedure owns that decision.
-
-    A ``MERGE``, and that is not a style choice. In every Warehouse but the one
-    the catalogue lives in, ``_.Bookmark`` is a view over the catalogue's table:
-    Fabric refuses a plain ``INSERT`` through such a view and accepts a
-    ``MERGE``'s, so one statement is both the upsert this needs and the only
-    form that reaches the table from either side.
-
-    ``@update_catalogue = 0`` is how an orchestrated run says it will advance the
-    bookmark itself, through the catalogue writer that also records the run.
-    """
-
-    identity = _bookmark_identity(document, item)
-    source = ", ".join(
-        f"{_key_literal(value)} as {identifier(BOOKMARK.public_name_of(column))}"
-        for column, value in identity.items()
-    )
-    on = " and ".join(
-        f"target.{identifier(BOOKMARK.public_name_of(column))} = "
-        f"source.{identifier(BOOKMARK.public_name_of(column))}"
-        for column in identity
-    )
-    bookmark = identifier(BOOKMARK.public_name_of("bookmark_datetime"))
-    updated = identifier(BOOKMARK.public_name_of(AUDIT_UPDATE_COLUMN))
-    columns = ", ".join(
-        identifier(BOOKMARK.public_name_of(name)) for name in BOOKMARK.physical_columns
-    )
-    values = ", ".join(
-        [f"source.{identifier(BOOKMARK.public_name_of(column))}" for column in identity]
-        + [
-            "@weaver_load_datetime",
-            "sysdatetime()",
-            "sysdatetime()",
-            f"convert(datetime2(6), '{AUDIT_LIVE_DELETE_DATETIME}')",
-        ]
-    )
-    return (
-        "-- A clean load moved this object's bookmark forward. An orchestrated\n"
-        "-- run passes @update_catalogue = 0 and writes it with the run's record.\n"
-        "if @update_catalogue = 1 and @weaver_error is null "
-        "and @weaver_rows_rejected = 0\n"
-        "begin\n"
-        f"    merge into {_bookmark_table()} as target\n"
-        f"    using (select {source}) as source\n"
-        f"       on {on}\n"
-        f"    when matched then update set target.{bookmark} = @weaver_load_datetime\n"
-        f"                              , target.{updated} = sysdatetime()\n"
-        f"    when not matched then insert ({columns})\n"
-        f"                          values ({values});\n"
-        "end;"
     )
 
 
