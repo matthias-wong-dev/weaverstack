@@ -75,6 +75,8 @@ def test_the_desktop_drives_build_load_and_test_in_one_session(
     weaver_session.flush()
     _assert_evidence(weaver_session, fabric_workspace, loaded, "load")
     _assert_evidence(weaver_session, fabric_workspace, tested, "test")
+    _assert_load_state(weaver_session, fabric_workspace, loaded)
+    _assert_test_state(weaver_session, fabric_workspace, tested)
 
     composition = tmp_path / "compose.yml"
     composition.write_text(
@@ -184,6 +186,91 @@ def _assert_evidence(session, workspace, report, task_type: str) -> None:
     }
     expected = {(*_node_identity(node), "Succeeded") for node in report.nodes}
     assert actual == expected
+
+
+def _assert_load_state(session, workspace, report) -> None:
+    """What the load left in the catalogue's current-state and history tables.
+
+    The Runner's own path, end to end: this is the composition proof that a real
+    load against a real estate leaves the operational record the pure-Python
+    tests decide. Every object the load reported is here with the outcome it
+    reported, and nothing carries a physical target — where an object lives is
+    the Installation's to say.
+    """
+
+    loaded = {
+        (schema, object_name)
+        for _type, _name, schema, object_name in map(_node_identity, report.nodes)
+        if object_name
+    }
+
+    status = _rows(
+        session,
+        workspace,
+        "select [Schema name] as [schema], [Object name] as [object], "
+        "[Result] as result, [Workflow ID] as workflow from [_].[LoadStatus]",
+    )
+    recorded = {(row["schema"], row["object"]) for row in status}
+    assert loaded <= recorded
+    assert {
+        row["result"] for row in status if (row["schema"], row["object"]) in loaded
+    } == {"Succeeded"}
+    assert report.workflow_id in {row["workflow"] for row in status}
+
+    statistics = _rows(
+        session,
+        workspace,
+        "select [Schema name] as [schema], [Object name] as [object], "
+        "[Rows read] as [read], [Is reload] as reload "
+        f"from [_].[LoadStatistic] where [Workflow ID] = N'{report.workflow_id}'",
+    )
+    assert {(row["schema"], row["object"]) for row in statistics} == loaded
+    assert not [row for row in statistics if row["reload"]]
+    # At least one object read something: an estate where every count were zero
+    # would satisfy the shape of this without the load having moved anything.
+    assert [row for row in statistics if (row["read"] or 0) > 0]
+
+    bookmarks = _rows(
+        session,
+        workspace,
+        "select [Schema name] as [schema], [Object name] as [object] "
+        "from [_].[Bookmark]",
+    )
+    # Every clean load advanced its bookmark. Loadable objects only: a view has
+    # no load, so it is in the report's nodes and not here.
+    assert {(row["schema"], row["object"]) for row in bookmarks} <= loaded
+
+
+def _assert_test_state(session, workspace, report) -> None:
+    """What the validation run left, and which kind each validation was."""
+
+    validated = {
+        (schema, object_name)
+        for _type, _name, schema, object_name in map(_node_identity, report.nodes)
+        if object_name
+    }
+
+    status = _rows(
+        session,
+        workspace,
+        "select [Schema name] as [schema], [Object name] as [object], "
+        "[Test type] as kind, [Result] as result, "
+        "[Failure count] as failures from [_].[TestStatus] "
+        f"where [Workflow ID] = N'{report.workflow_id}'",
+    )
+
+    assert {(row["schema"], row["object"]) for row in status} == validated
+    assert {row["result"] for row in status} == {"Succeeded"}
+    assert {row["kind"] for row in status} <= {"Test", "Assumption"}
+    assert {row["failures"] for row in status} == {0}
+
+
+def _rows(session, workspace, statement: str) -> list[dict]:
+    from weaver.catalogue.connection import catalogue_connection
+
+    return [
+        dict(row) for row in catalogue_connection(session, workspace).rows(statement)
+    ]
 
 
 def _log_rows(session, workspace, workflow_id: str) -> list[dict]:

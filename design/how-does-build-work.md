@@ -629,14 +629,16 @@ behind for a diff to notice.
 > are deterministic proxies, and the template versions exist so replacing them
 > later invalidates precisely what changed.
 
-### 11d. Bookmarks
+### 11d. Runtime state
 
-`_.Bookmark` records how far each loadable object has been loaded, and a build
-invalidates that for anything whose physical incarnation it is ending. One scoped
-delete, keeping the rows of objects this build still loads and is not replacing:
+The catalogue's current-state tables — `_.Bookmark`, `_.LoadStatus`,
+`_.TestStatus` — describe one object's *current physical incarnation*, and a build
+ends that for anything it is replacing or no longer installing. One stage
+invalidates all three, keeping the rows of objects this build still runs and is
+not replacing:
 
 ```text
-no longer declared, or no longer loaded    the object is going
+no longer declared, or no longer run       the object is going
 dropped and rebuilt                        the incarnation is going
 ```
 
@@ -645,23 +647,36 @@ An absent bookmark makes the next load read everything; one left in place over a
 recreated table makes it read almost nothing. A build that fails in between
 leaves work to repeat.
 
-Which objects can hold one comes from the load artefacts the item installs, so it
-cannot drift from what has something to run: a Weaver-loadable Table or Folder,
-never a view, a table declaring `Has load procedure: false`, a runtime artefact,
-or a validation.
+History is untouched. `_.Log` and `_.LoadStatistic` record what happened, and a
+rebuild does not unhappen it.
 
-The statement is issued when a build acts rather than on every run, so an
-unchanged repository still produces an empty bundle. Its scope is the items the
-build reconciles. A catalogue without `_.Bookmark` gets it from this build —
-every build binds the built-in item — and a table nothing could have written to
-has nothing to invalidate.
+The two populations are separate. A loadable object carries a bookmark and a load
+status, and comes from the load artefacts the item installs — a Weaver-loadable
+Table or Folder, never a view, a table declaring `Has load procedure: false`, a
+runtime artefact, or a validation. A validation carries a test status, and comes
+from the validation artefacts. So rebuilding a table says nothing about a
+validation's status, and rebuilding the validation says nothing about a bookmark.
 
-A build also gives every target it installs a load into the catalogue's
-`_.Bookmark` under that name: a view in a Warehouse, a OneLake shortcut in a
-Lakehouse, rendered by the same code a declared shortcut is. In the load phase,
-with the artefacts it exists for — on the build that creates the catalogue the
-table it points at arrives in the same bundle. It is in the prune keep-set, so it
-goes when the item's last loadable object does.
+The stage carries the decision as **structured intent** — which table, and which
+keyed rows — rather than as SQL. The installer renders one scoped DELETE per table
+from it, and a `Catalogue` applies the same intent in memory, so what a build
+decided about an object's operational state can be read without parsing DML. The
+plan states the same decision beside the action, as `target_changes` states a
+build's physical effect.
+
+The action is emitted when a build acts rather than on every run, so an unchanged
+repository still produces an empty bundle. Its scope is the items the build
+reconciles. A catalogue without the tables gets them from this build — every build
+binds the built-in item — and tables nothing could have written to have nothing to
+invalidate.
+
+A build also gives every target it installs something runnable into the
+catalogue's runtime tables under their own names: views in a Warehouse, OneLake
+shortcuts in a Lakehouse, rendered by the same code a declared shortcut is. One
+action per target carries every reference it is missing. In the load phase, with
+the artefacts they exist for — on the build that creates the catalogue the tables
+they point at arrive in the same bundle. They are in the prune keep-set, so they go
+when the item's last runnable object does.
 
 ## 12. Bundle execution order
 

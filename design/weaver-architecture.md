@@ -759,8 +759,14 @@ Load
 
 A bookmark is how far an object has been loaded, held in `_.Bookmark` under the
 Registry's own four-part identity. Only a clean success advances one, to the
-instant the primitive itself reported. See [the central
-catalogue](catalogue.md).
+instant the primitive itself reported.
+
+Beside it, a run records how each unit of work ended — `_.Log` and `_.LoadStatus`
+for a load, `_.LoadStatistic` for what it moved, `_.TestStatus` for what a
+validation found. Which interface was called decides who records: an orchestrated
+run records centrally, and `_.Load`, `_.Test`, `Table.load()` and
+`Validation.run()` record synchronously for a developer running one by hand. See
+[the central catalogue](catalogue.md).
 
 A target-scoped load names the physical Lakehouses and Warehouses it may touch:
 
@@ -806,7 +812,7 @@ Execute Runtime Artefacts
 
 ↓
 
-Record Logs and Bookmarks
+Record the operational outcome
 ```
 
 This preserves the same architectural separation used throughout Weaver.

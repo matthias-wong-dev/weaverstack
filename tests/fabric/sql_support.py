@@ -55,6 +55,56 @@ def forget_bookmark(schema: str, name: str) -> str:
     )
 
 
+def forget_validation_state(schema: str, name: str) -> str:
+    """Statements removing what the catalogue records about one validation.
+
+    The two tables a validation touches. A Warehouse holding validations and no
+    loads presents every runtime table, but deleting from the load ones would
+    say a validation had a bookmark.
+    """
+
+    item_type, item_name = PROCEDURE_ITEM
+    scoped = (
+        f"[Item type] = N'{item_type}' and [Item name] = N'{item_name}' "
+        f"and [Schema name] = N'{schema}' and [Object name] = N'{name}'"
+    )
+    return (
+        f"delete from [_].[TestStatus] where {scoped};\n"
+        f"delete from [_].[Log] where [Schema name] = N'{schema}' "
+        f"and [Object name] = N'{name}';\n"
+    )
+
+
+def forget_runtime_state(schema: str, name: str) -> str:
+    """Statements removing everything the catalogue records about one object.
+
+    Every runtime table, history included: a sequence of claims about what one
+    call recorded starts from nothing recorded, and a row an earlier claim left
+    would be counted by the next one.
+    """
+
+    item_type, item_name = PROCEDURE_ITEM
+    scoped = (
+        f"[Item type] = N'{item_type}' and [Item name] = N'{item_name}' "
+        f"and [Schema name] = N'{schema}' and [Object name] = N'{name}'"
+    )
+    # `_.Log` is scoped by the object alone: it records one crossing to one
+    # place, so it carries the physical target rather than the logical item.
+    unscoped = f"[Schema name] = N'{schema}' and [Object name] = N'{name}'"
+    return (
+        "\n".join(
+            [
+                f"delete from [_].[Bookmark] where {scoped};",
+                f"delete from [_].[LoadStatus] where {scoped};",
+                f"delete from [_].[LoadStatistic] where {scoped};",
+                f"delete from [_].[TestStatus] where {scoped};",
+                f"delete from [_].[Log] where {unscoped};",
+            ]
+        )
+        + "\n"
+    )
+
+
 def populate_warehouse(executor: SqlExecutor, fixture: Path) -> None:
     executor.execute_script(fixture.read_text(encoding="utf-8"))
 
