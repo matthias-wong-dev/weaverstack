@@ -360,7 +360,7 @@ def test_a_registry_with_the_epoch_column_is_accepted():
 
     state = read_catalogue_state(_whole(), ())
 
-    assert state.present_tables == {table.name for table in PROJECTED_TABLES}
+    assert state.materialised == {table.name for table in PROJECTED_TABLES}
 
 
 # --- which absences are the first run, and which are damage -------------------
@@ -380,7 +380,7 @@ def test_a_catalogue_with_no_tables_at_all_is_the_bootstrap_state():
 
     state = read_catalogue_state(_Shaped({}), ())
 
-    assert state.present_tables == frozenset()
+    assert state.materialised == frozenset()
     assert not state.rows
 
 

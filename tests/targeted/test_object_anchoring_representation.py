@@ -18,11 +18,12 @@ that it settled, so one row has one writer.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from support.catalogues import LOADED_AT, identity, loaded, never
 from support.weaver_test import weaver_test
-from support.workspaces import mounted_lakehouse
+from support.workspaces import given_workspace, mounted_lakehouse
 
 from weaver import Table
 from weaver.catalogue.tables import BOOKMARK, BOOKMARK_SENTINEL
@@ -83,7 +84,7 @@ def test_a_freestanding_object_has_no_place_in_the_catalogue(lakehouse):
     assert table.installed is None
     with pytest.raises(LoadError) as raised:
         table.bookmark()
-    assert "not anchored" in str(raised.value)
+    assert "cannot read its bookmark or record one" in str(raised.value)
 
 
 @weaver_test()
@@ -180,74 +181,124 @@ def test_anchoring_by_name_outside_a_fabric_session_says_so(lakehouse):
 
 
 @weaver_test()
-def test_anchoring_by_name_holds_the_session_its_catalogue_writes_through(monkeypatch):
-    """A load records its own bookmark, so the reading Session has to survive.
+def test_a_catalogue_named_by_name_owns_the_session_it_opened(monkeypatch):
+    """Nobody handed it one, so it opened one — and closing it closes that.
 
-    Closed at the end of the anchor, an object could read the catalogue and not
-    record in it — which is what the first version of this did, and what a Fabric
-    session reported as a closed Session on the first merge.
+    A load records how far it read, so the catalogue an object anchors to has to
+    be able to write for as long as the object lives. Owning the Session is what
+    makes that true without a cache anywhere.
     """
 
-    from weaver.catalogue.state import catalogue_for
+    from weaver.catalogue.state import catalogue_in
     from weaver.catalogue.tables import LOG
-    from weaver.runtime import anchor
 
-    opened = _anchoring_in(monkeypatch, "Sales_WS")
+    opened = _sessions_opened(monkeypatch)
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
 
-    session, workspace = anchor._session_for("Warehouse/Weaver")
+    catalogue = catalogue_in(workspace, tables=())
 
-    assert session.closed is False
-    catalogue = catalogue_for(session, workspace, tables=())
+    assert catalogue.session is opened[-1]
+    assert catalogue.session.closed is False
+    # And it can write, which is the reason it kept the Session at all.
     catalogue.submit(LOG, {"log_sk": "a", "task_type": "load"})
     catalogue.flush()
-    assert opened == [workspace]
 
-    # And the next object anchored to the same catalogue reaches the same one,
-    # rather than paying for a Session of its own.
-    again, _ = anchor._session_for("Warehouse/Weaver")
+    catalogue.close()
 
-    assert again is session
-    assert opened == [workspace]
+    assert opened[-1].closed is True
+    assert catalogue.session is None
 
 
 @weaver_test()
-def test_a_session_that_has_been_closed_is_not_handed_out_again(monkeypatch):
-    """A notebook can close one, and the next anchor opens another."""
+def test_a_catalogue_given_a_session_borrows_it(monkeypatch):
+    """It belongs to whoever opened it, so closing the catalogue leaves it open."""
+
+    from support.sessions import given_session
+
+    from weaver.catalogue.state import catalogue_for
+
+    opened = _sessions_opened(monkeypatch)
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
+    with given_session(workspace=workspace) as session:
+        catalogue = catalogue_for(session, workspace, tables=())
+
+        assert catalogue.session is session
+        catalogue.close()
+
+        assert session.closed is False
+    # Nothing was opened on the catalogue's behalf, either.
+    assert opened == []
+
+
+@weaver_test()
+def test_a_catalogue_closes_the_session_it_opened_if_the_read_fails(monkeypatch):
+    """A failed construction leaves nothing open behind it."""
+
+    import weaver.catalogue.state as state
+    from weaver.catalogue.state import catalogue_in
+
+    opened = _sessions_opened(monkeypatch)
+
+    def refuse(*_args, **_kwargs):
+        raise RuntimeError("the catalogue could not be read")
+
+    monkeypatch.setattr(state, "catalogue_for", refuse)
+
+    with pytest.raises(RuntimeError, match="could not be read"):
+        catalogue_in(given_workspace(catalogue="Warehouse/Weaver"))
+
+    assert opened[-1].closed is True
+
+
+@weaver_test()
+def test_anchoring_by_name_asks_for_a_catalogue_that_owns_its_session(monkeypatch):
+    """What an authored object gets when it names a catalogue rather than one."""
 
     from weaver.runtime import anchor
 
-    _anchoring_in(monkeypatch, "Sales_WS")
+    asked: list = []
 
-    first, _ = anchor._session_for("Warehouse/Weaver")
-    first.close()
-    second, _ = anchor._session_for("Warehouse/Weaver")
+    class _Owned:
+        session = "the one it opened"
 
-    assert second is not first
-    assert second.closed is False
+        def installed_object(self, **_kwargs):
+            return identity("DWG.Customer")
+
+    def catalogue_in(workspace, *, tables=()):
+        asked.append((workspace.catalogue, tuple(table.name for table in tables)))
+        return _Owned()
+
+    import weaver.catalogue.state as state
+    import weaver.sessions.host as host
+
+    monkeypatch.setattr(host, "current_workspace_name", lambda: "Sales_WS")
+    monkeypatch.setattr(state, "catalogue_in", catalogue_in)
+
+    table = DWG__Customer(
+        object(),
+        lakehouse=mounted_lakehouse("Sales_LH", Path("/tmp")),
+        catalogue="Warehouse/Weaver",
+    )
+
+    assert table.installed == identity("DWG.Customer")
+    assert asked == [("Warehouse/Weaver", anchor.ANCHOR_TABLES)]
 
 
-def _anchoring_in(monkeypatch, workspace_name: str) -> list:
-    """Anchor as though this process were in ``workspace_name``.
-
-    The workspace a name is resolved in is the one the process runs in, which
-    off a tenant is nowhere — so the two things anchoring asks its host are
-    supplied here, and the Sessions it opens are recorded.
-    """
+def _sessions_opened(monkeypatch) -> list:
+    """Record the Sessions opened on a catalogue's behalf, and answer with fakes."""
 
     from support.sessions import given_session
 
     import weaver.sessions.host as host
-    from weaver.runtime import anchor
 
-    opened = []
+    opened: list = []
 
-    def session_for(workspace, **kwargs):
-        opened.append(workspace)
-        return given_session(workspace=workspace)
+    def session_for(workspace, **_kwargs):
+        session = given_session(workspace=workspace)
+        opened.append(session)
+        return session
 
-    monkeypatch.setattr(host, "current_workspace_name", lambda: workspace_name)
     monkeypatch.setattr(host, "session_for", session_for)
-    monkeypatch.setattr(anchor, "_SESSIONS", {})
     return opened
 
 
@@ -266,6 +317,25 @@ def test_a_child_inherits_the_catalogue_and_resolves_its_own_identity(lakehouse)
 
     assert child.installed == identity("DWG.Order")
     assert child.bookmark() == LOADED_AT
+
+
+@weaver_test()
+def test_a_supplied_catalogue_is_reused_rather_than_read_again(monkeypatch, lakehouse):
+    """A run and a child object both hand one over, and neither pays for a read.
+
+    Whatever the catalogue reaches its Warehouse through came with it, so no
+    Session is opened here and none is closed.
+    """
+
+    opened = _sessions_opened(monkeypatch)
+    catalogue = loaded("DWG.Customer", "DWG.Order")
+
+    parent = DWG__Customer(object(), lakehouse=lakehouse).with_catalogue(catalogue)
+    child = DWG__Order(parent)
+
+    assert parent._catalogue is catalogue
+    assert child._catalogue is catalogue
+    assert opened == []
 
 
 @weaver_test()
@@ -331,13 +401,32 @@ def test_an_orchestrated_load_leaves_the_recording_to_the_run(monkeypatch, lakeh
 
 
 @weaver_test()
-def test_a_freestanding_load_runs_and_records_nothing(monkeypatch, lakehouse):
+def test_a_freestanding_object_reads(lakehouse):
+    """``read()`` takes no catalogue, so authored source logic runs on its own."""
+
+    DWG__Loading.staged = "the rows this read produced"
     table = DWG__Loading(object(), lakehouse=lakehouse)
 
-    result = _loaded(monkeypatch, table)
-
-    assert result.succeeded
+    assert table.read() == "the rows this read produced"
     assert table.installed is None
+
+
+@weaver_test()
+def test_a_freestanding_object_does_not_load(monkeypatch, lakehouse):
+    """A load reads a window and records how far it read, so it needs both.
+
+    Refused where the load begins rather than where the row would be written: a
+    load that recorded nothing would leave the next one to read the same window
+    and report success either way.
+    """
+
+    table = DWG__Loading(object(), lakehouse=lakehouse)
+
+    with pytest.raises(LoadError) as raised:
+        _loaded(monkeypatch, table)
+
+    assert "cannot read its bookmark or record one" in str(raised.value)
+    assert "catalogue=" in str(raised.value)
 
 
 @weaver_test()
@@ -386,20 +475,6 @@ def test_a_static_object_reads_the_record_to_decide_whether_to_run(lakehouse):
     )
     with pytest.raises(AssertionError, match="not what this module is about"):
         running.load()
-
-
-@weaver_test()
-def test_a_static_object_with_no_catalogue_cannot_answer_its_gate(lakehouse):
-    class DWG__Static(DWG__Customer):
-        def _document(self):
-            from weaver.declaration.metadata import PYTHON, parse_document
-
-            return parse_document(f"{MODULE_DOC}\nStatic: true\n", language=PYTHON)
-
-    with pytest.raises(LoadError) as raised:
-        DWG__Static(object(), lakehouse=lakehouse).load()
-
-    assert "not anchored" in str(raised.value)
 
 
 @weaver_test()

@@ -81,6 +81,28 @@ def test_an_installed_read_does_not_read_the_log():
 
 
 @weaver_test()
+def test_materialised_says_what_was_loaded_and_not_what_exists():
+    """Two different questions, and the catalogue answers only one of them.
+
+    A table that exists and holds no rows was still loaded, so it is materialised.
+    Whether a table is physically there is a target's, and a target's inventory
+    answers it — see `tests/targeted/test_bookmark_build_install.py`.
+    """
+
+    from weaver.catalogue.state import read_installed_catalogue
+    from weaver.catalogue.tables import INSTALLATION, REGISTRY
+
+    connection = _Connection({REGISTRY.name: []})
+
+    catalogue = read_installed_catalogue(connection, tables=(INSTALLATION, REGISTRY))
+
+    assert catalogue.materialised == {INSTALLATION.name, REGISTRY.name}
+    assert catalogue.table_rows(REGISTRY) == ()
+    # And nothing on it claims to know what the Warehouse physically holds.
+    assert not hasattr(catalogue, "present_tables")
+
+
+@weaver_test()
 def test_a_read_materialises_what_it_was_asked_for_and_no_more():
     from weaver.catalogue.state import read_installed_catalogue
     from weaver.catalogue.tables import INSTALLATION, REGISTRY
@@ -353,6 +375,28 @@ def test_a_write_that_did_not_land_is_raised_by_flush():
 
     with pytest.raises(RuntimeError, match="refused"):
         catalogue.flush()
+
+
+@weaver_test()
+def test_a_catalogue_is_live_state_and_says_so():
+    """Rows are read into it, written through it and read back from it.
+
+    Held as one object rather than replaced by a new one on every write, because
+    a run advancing a bookmark and then asking for it is asking about the load it
+    just did.
+    """
+
+    from dataclasses import fields, is_dataclass
+
+    catalogue = never("DWG.Customer")
+
+    assert is_dataclass(catalogue)
+    assert not getattr(catalogue, "__dataclass_params__").frozen
+    assert {field.name for field in fields(catalogue)} == {
+        "rows",
+        "registered",
+        "materialised",
+    }
 
 
 @weaver_test()

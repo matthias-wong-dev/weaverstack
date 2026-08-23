@@ -143,10 +143,11 @@ Sales__OrderSummary(spark, catalogue=catalogue).load()
 
 Naming the catalogue makes each object *catalogue-anchored*: it has a place in
 the estate's own record of itself, so a clean load advances its bookmark.
-`Sales__Customer(spark)` would be freestanding — it runs, and records nothing. A
-constructor argument rather than a `load()` one, because an authored `read()` is
-called by Weaver and takes nothing, so whatever it may reach is set before the
-load begins.
+`Sales__Customer(spark)` would be freestanding, which is for reading: `read()`
+runs, and `load()` refuses, because a load records how far it read. A constructor
+argument rather than a `load()` one, because an authored `read()` is called by
+Weaver and takes nothing, so whatever it may reach is set before the load
+begins.
 
 `Sales.OrderSummary` is authored as `Sales.OrderSummary.sql` and
 installed as `Sales__OrderSummary.py` — a `SparkSqlTable` carrying the

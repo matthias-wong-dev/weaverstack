@@ -637,35 +637,26 @@ def test_a_static_folder_beside_unmanaged_files_still_loads(export):
 
 
 @weaver_test()
-def test_a_freestanding_folder_loads_and_records_nothing(export):
-    """``Sales__Export(spark)`` runs, with no place in the estate's own record."""
+@pytest.mark.parametrize("static", [False, True], ids=["ordinary", "static"])
+def test_a_freestanding_folder_does_not_load(export, static):
+    """A load records how far it read, so it needs somewhere to record.
 
-    unaware = Sales__Export(object(), lakehouse=export.lakehouse)
-    unaware.static = False
-    unaware.files = {"seed.csv": "x"}
-
-    result = unaware.load()
-
-    assert result.succeeded
-    assert result.rows_inserted == 1
-    assert unaware.installed is None
-
-
-@weaver_test()
-def test_a_freestanding_static_folder_cannot_answer_its_gate(export):
-    """Static asks how far this folder got, and only the catalogue knows."""
+    Refused before anything is staged, static or not: a static folder asks how
+    far this one got, and an ordinary one has a bookmark to move.
+    """
 
     from weaver.errors import LoadError
 
     unaware = Sales__Export(object(), lakehouse=export.lakehouse)
-    unaware.static = True
+    unaware.static = static
     unaware.files = {"seed.csv": "x"}
 
     with pytest.raises(LoadError) as raised:
         unaware.load()
 
-    assert "not anchored" in str(raised.value)
+    assert "cannot read its bookmark or record one" in str(raised.value)
     assert not _staging(unaware).exists()
+    assert unaware.installed is None
 
 
 @weaver_test()

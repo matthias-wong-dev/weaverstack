@@ -100,6 +100,33 @@ emit(results)
 """
 
 
+#: A catalogue for an ad-hoc probe, built in the session that runs it.
+#:
+#: ``load()`` needs a catalogue, because a load records how far it read. A probe
+#: is not part of the built estate, so the estate's own catalogue does not record
+#: it — this is the real :class:`~weaver.catalogue.state.Catalogue`, over the rows
+#: that make one object installed. It has nowhere to write and needs nowhere: the
+#: probes load with ``update_catalogue=False``, which is how a caller says it owns
+#: the recording, and here there is nothing to record.
+PROBE_CATALOGUE = r"""
+from weaver.catalogue.state import Catalogue
+from weaver.declaration.model import WeaverItemId
+
+
+def probe_catalogue(schema, name, *, target):
+    item = WeaverItemId("Lakehouse", "Probe")
+    scope = {"item_type": item.item_type, "item_name": item.item_name}
+    return Catalogue({item: {
+        "Installation": ({**scope, "target_name": target,
+                         "weaver_version": "0", "signature": "s"},),
+        "Registry": ({**scope, "schema_name": "Files/" + schema,
+                      "object_name": name, "object_type": "folder",
+                      "object_role": "data", "signature": "s",
+                      "build_datetime": None},),
+    }})
+"""
+
+
 #: A real Folder state transition and its downstream consumer, in the same
 #: Fabric session. The values brought back are evidence captured by authored
 #: Python; the test process never reads ``_changes`` itself.
@@ -140,9 +167,11 @@ Incremental: true
         return staging, type(self).deletes
 
 
-# Freestanding: this probe is not part of the built estate, so it has no place in
-# the catalogue's record and needs none — it uses no bookmark.
-folder = Raw__ChangeFeedProbe(spark, lakehouse=destination)
+# Anchored to a catalogue this body builds, because `load()` needs one. Nothing
+# is recorded: the load is told the caller owns that, and here nobody does.
+folder = Raw__ChangeFeedProbe(spark, lakehouse=destination).with_catalogue(
+    probe_catalogue("Raw", "ChangeFeedProbe", target=destination.name)
+)
 reject = folder.path().with_name(folder.path().name + "_Reject")
 
 
@@ -175,7 +204,7 @@ try:
         "inserted.csv": "inserted",
     }
     Raw__ChangeFeedProbe.deletes = ("deleted.csv",)
-    result = folder.load()
+    result = folder.load(update_catalogue=False)
 
     # Constructed from another authored object, which is the public downstream
     # spelling: My__Folder(self).files_since(self.bookmark()).
@@ -251,8 +280,10 @@ File key: "*.csv"
         return staging, []
 
 
-# Freestanding, as above: an ad-hoc probe the estate does not record.
-folder = Raw__FileKeyProbe(spark, lakehouse=destination)
+# Anchored as above, and recording nothing.
+folder = Raw__FileKeyProbe(spark, lakehouse=destination).with_catalogue(
+    probe_catalogue("Raw", "FileKeyProbe", target=destination.name)
+)
 reject = folder.path().with_name(folder.path().name + "_Reject")
 
 
@@ -268,7 +299,9 @@ try:
     raised = False
     result = None
     try:
-        result = folder.load(fault_tolerant=FAULT_TOLERANT)
+        result = folder.load(
+            fault_tolerant=FAULT_TOLERANT, update_catalogue=False
+        )
     except LoadError as exc:
         raised = True
         result = exc.result
@@ -356,7 +389,7 @@ def test_authored_code_consumes_folder_changes_through_the_fabric_mount(
     fabric_lakehouse_estate,
 ):
     seen = fabric_lakehouse_estate.env.run_python(
-        CHANGE_FEED, label="consume Folder changes"
+        PROBE_CATALOGUE + CHANGE_FEED, label="consume Folder changes"
     )
 
     assert seen["result"]["succeeded"] is True
@@ -386,7 +419,7 @@ def test_an_intolerant_file_key_rejection_is_enforced_through_the_fabric_mount(
     fabric_lakehouse_estate,
 ):
     seen = fabric_lakehouse_estate.env.run_python(
-        "FAULT_TOLERANT = False\n" + FILE_KEY_REJECTION,
+        "FAULT_TOLERANT = False\n" + PROBE_CATALOGUE + FILE_KEY_REJECTION,
         label="refuse a Folder File-key violation",
     )
 
@@ -405,7 +438,7 @@ def test_a_tolerant_file_key_rejection_is_enforced_through_the_fabric_mount(
     fabric_lakehouse_estate,
 ):
     seen = fabric_lakehouse_estate.env.run_python(
-        "FAULT_TOLERANT = True\n" + FILE_KEY_REJECTION,
+        "FAULT_TOLERANT = True\n" + PROBE_CATALOGUE + FILE_KEY_REJECTION,
         label="tolerate a Folder File-key violation",
     )
 

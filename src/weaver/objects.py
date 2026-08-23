@@ -47,8 +47,13 @@ class WeaverObject:
     itself. It is resolved once, here: the catalogue says which installed object
     this is, and an object it does not record — or records twice — is a
     :class:`~weaver.errors.ConfigError` at construction rather than a surprise
-    inside a load. A freestanding object runs, and has no bookmark to read and
-    nothing to record.
+    inside a load.
+
+    A freestanding object is for reading. ``read()`` needs no catalogue, so an
+    authored ``read()`` can be called and inspected on its own. ``load()`` needs
+    one and refuses without it: a load reads a window and records how far it
+    read, and one that recorded nothing would leave the next load to read the
+    same window and report success either way.
 
     An orchestrated run supplies an already-populated catalogue through
     :meth:`with_catalogue` instead, because a deployed primitive's constructor is
@@ -175,18 +180,28 @@ class WeaverObject:
         place in the estate's record of itself, and says so rather than inventing
         a sentinel: a read that could not see its bookmark and reloaded the world
         instead would look like a slow load rather than a fault.
+
+        A freestanding object can still be constructed and read; it is
+        :meth:`load` that needs the catalogue this answers from.
         """
 
         return self._anchor().bookmark(self._installed)
 
     def _anchor(self):
-        """The catalogue this object is anchored to, or a failure saying it is not."""
+        """The catalogue this object is anchored to, or a failure saying it is not.
+
+        Asked by every load, because a load records how far it read. A load that
+        recorded nothing would leave the next one to read the same window again
+        and report success either way, so the catalogue is required here rather
+        than at the point the row would have been written.
+        """
 
         if self._catalogue is not None:
             return self._catalogue
         raise LoadError(
-            f"{self.object_id} is not anchored to the Weaver catalogue, so it has "
-            "no bookmark and can record none. Construct it as "
+            f"{self.object_id} is not anchored to the Weaver catalogue, so it "
+            "cannot read its bookmark or record one, and a load needs both. "
+            "Construct it as "
             f'{type(self).__name__}(spark, catalogue="Warehouse/<name>").'
         )
 
@@ -206,9 +221,7 @@ class WeaverObject:
 
         if not result.succeeded or result.rows_rejected:
             return result
-        # Anchored *and* asked. A freestanding object has no place in the estate's
-        # record of itself, so there is nothing for it to record.
-        if update_catalogue and self._catalogue is not None:
+        if update_catalogue:
             from .catalogue.claims import bookmark_row
             from .catalogue.tables import BOOKMARK
 
@@ -427,6 +440,8 @@ class Folder(WeaverObject):
         success — retained on failure, as the one directory worth looking at.
         """
 
+        self._anchor()
+
         from .runtime.folder_load import (
             load_folder,
             new_staging_folder,
@@ -550,6 +565,8 @@ class Table(WeaverObject):
         ``ignore_stability_threshold`` waives the declared delete and update
         limits for one run, for when a very large change is the correct answer.
         """
+
+        self._anchor()
 
         from .runtime.load_contract import LoadContract
         from .runtime.load_result import LoadResult

@@ -55,7 +55,7 @@ def _state(*rows):
                 ),
             }
         },
-        present_tables=frozenset(table.name for table in PROJECTED_TABLES),
+        materialised=frozenset(table.name for table in PROJECTED_TABLES),
     )
 
 

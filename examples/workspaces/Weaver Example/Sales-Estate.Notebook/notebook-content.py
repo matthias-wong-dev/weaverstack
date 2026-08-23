@@ -223,8 +223,9 @@ else:
 # Naming the catalogue makes the object *catalogue-anchored*: it has a place in
 # the estate's own record of itself, so a clean load advances its bookmark and a
 # `Static` object can read that record. `Sales__OrderSummary(spark)` would be
-# freestanding — it runs, and records nothing. A constructor argument rather than
-# a `load()` one, because an authored `read()` is called by Weaver and takes
+# freestanding, which is for reading: `read()` runs, and `load()` refuses,
+# because a load records how far it read. A constructor argument rather than a
+# `load()` one, because an authored `read()` is called by Weaver and takes
 # nothing, so whatever it may reach is set before the load begins.
 
 # CELL ********************

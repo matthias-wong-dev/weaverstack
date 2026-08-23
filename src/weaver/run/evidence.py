@@ -5,8 +5,8 @@ plan row and no completion row: a workflow is its rows, correlated by
 ``[Workflow ID]``, and a reader asking what a run did reads them rather than
 reassembling a folder.
 
-The Runner decides what happened and constructs the row; the flusher writes it.
-Nothing here waits for the Warehouse.
+The Runner decides what happened and constructs the row; the catalogue it is
+submitted to writes it. Nothing here waits for the Warehouse.
 """
 
 from __future__ import annotations

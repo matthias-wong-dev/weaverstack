@@ -111,8 +111,8 @@ def bookmark_statements(
 
     And a build against a catalogue that holds nothing has no bookmarks to
     reconcile — it is creating the table in this same bundle, and every object it
-    installs is new. Not a silent skip: there is no row to reset and none to
-    prune, because nothing has ever been installed.
+    installs is new. Not a silent skip: there is no row to remove, because
+    nothing has ever been installed.
 
     One statement when they are issued, and it is a full reconciliation of the
     scope rather than a delete of the objects this build noticed, so a row left
@@ -182,7 +182,7 @@ def render_bookmark_reconciliation(
         phase=CATALOGUE,
         index=0,
         slug=slug,
-        description="reset and prune bookmarks before physical work",
+        description="invalidate bookmarks before physical work",
         payloads={filename: content},
         batches=(
             BuildBatch(id=slug, target_id=catalogue_target.id, actions=(action,)),

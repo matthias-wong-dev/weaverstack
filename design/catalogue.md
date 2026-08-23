@@ -499,10 +499,18 @@ My__Table(spark, catalogue="Warehouse/Weaver")  # anchored
 Anchoring resolves the catalogue and the object's installed identity once, at
 construction, through `_.Installation` and `_.Registry`; a name that resolves to
 none or to more than one is a `ConfigError` there. `self.bookmark()` then answers
-from what was read. A freestanding object runs and records nothing, and a
-freestanding `Static` object cannot answer its gate and says so. An object one
-object constructs inherits the catalogue and resolves its own identity against
-it.
+from what was read. An object one object constructs inherits the catalogue and
+resolves its own identity against it.
+
+A freestanding object is for reading. `read()` needs no catalogue, so authored
+source logic can be called and inspected on its own. `load()` needs one and
+refuses without it: a load reads a window and records how far it read, and one
+that recorded nothing would leave the next load to read the same window and
+report success either way.
+
+Named by name, the catalogue opens the Session it reads and writes through and
+owns it; given a Session or an existing `Catalogue`, it borrows and leaves it
+open.
 
 **It is never dropped.** Every catalogue table holds state no declaration
 reproduces, so all of them declare `Prohibit rebuild`, the managed-drop renderer

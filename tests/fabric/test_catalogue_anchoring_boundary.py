@@ -39,7 +39,8 @@ from Files.Raw__CustomerCsv import Raw__CustomerCsv
 
 results = {}
 
-# Freestanding: it runs, and it has no place in the estate's record of itself.
+# Freestanding: it can be read, and it cannot be loaded. No place in the estate's
+# record of itself means no bookmark to read and none to record.
 free = Raw__CustomerCsv(spark, lakehouse=destination)
 results["freestanding_identity"] = (
     None if free.installed is None else str(free.installed))
@@ -47,6 +48,10 @@ try:
     free.bookmark()
 except LoadError as refused:
     results["freestanding_bookmark"] = str(refused)
+try:
+    free.load()
+except LoadError as refused:
+    results["freestanding_load"] = str(refused)
 
 # Anchored by name. The identity is resolved here, at construction, through the
 # real Installation and Registry rather than from the target's name.
@@ -79,9 +84,10 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
 
     seen = fabric_lakehouse_estate.env.run_python(ANCHORED, label="anchor and load")
 
-    # Freestanding is a whole way to run: no identity, and no bookmark to give.
+    # Freestanding: no identity, no bookmark to give, and no load.
     assert seen["freestanding_identity"] is None
-    assert "not anchored" in seen["freestanding_bookmark"]
+    assert "cannot read its bookmark or record one" in seen["freestanding_bookmark"]
+    assert "cannot read its bookmark or record one" in seen["freestanding_load"]
 
     # Anchored, and the identity is the Registry's — the *item* that declared the
     # folder, under its files identity, rather than the Lakehouse it was built into.

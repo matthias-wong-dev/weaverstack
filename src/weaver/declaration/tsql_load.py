@@ -183,7 +183,7 @@ def generate_tsql_load_script(
             ),
             4,
         ),
-        bookmark_key=_indent(_bookmark_key(document, item), 4),
+        bookmark_key=_indent(_bookmark_key(document, item, contract), 4),
         bookmark_update=_indent(_bookmark_update(document, item), 4),
         live_delete_datetime=AUDIT_LIVE_DELETE_DATETIME,
         preprocessing_banner=_indent(PREPROCESSING_BANNER, 4),
@@ -281,8 +281,14 @@ def _static_gate(contract: LoadContract) -> str:
     )
 
 
-def _bookmark_key(document: SesDocument, item) -> str:
+def _bookmark_key(document: SesDocument, item, contract: LoadContract) -> str:
     """This object's bookmark row, read into a local before anything else.
+
+    Only a ``Static`` object reads it, because only a ``Static`` object decides
+    anything from it: every other load writes its bookmark at the end and never
+    asks what it was. In every Warehouse but the catalogue's, this table is a
+    view across databases, so the read a load does not need is a round trip it
+    should not pay for.
 
     The identity is baked in: the procedure is one object's, so which row it
     means is a fact about the procedure rather than an argument to it.
@@ -291,6 +297,10 @@ def _bookmark_key(document: SesDocument, item) -> str:
     one: no clean load has run since this object's current physical incarnation.
     """
 
+    if not contract.static:
+        return (
+            "-- Not static: nothing here reads a bookmark, so nothing reads the table."
+        )
     predicate = " and ".join(
         f"{identifier(BOOKMARK.public_name_of(column))} = {_key_literal(value)}"
         for column, value in _bookmark_identity(document, item).items()

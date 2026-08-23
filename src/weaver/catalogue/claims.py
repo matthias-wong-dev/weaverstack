@@ -41,7 +41,7 @@ def catalogue_schema(identity: WeaverDocumentId) -> str:
 def bookmark_row(identity: WeaverDocumentId, at=None) -> dict:
     """One ``_.Bookmark`` row for an object, keyed as the Registry keys it.
 
-    One builder for every writer — the build's reset, a run's advance, a
+    One builder for every writer — a build's invalidation, a run's advance, a
     standalone load's — so the four columns are spelled the same way wherever a
     bookmark is written. ``at`` is left out when only the key is wanted.
     """
@@ -179,6 +179,4 @@ def without_claims(catalogue, claims):
                 if not any(claim.rule.owns(row, claim.identity) for claim in owners)
             )
         rows[item] = MappingProxyType(kept)
-    return Catalogue(
-        rows=MappingProxyType(rows), present_tables=catalogue.present_tables
-    )
+    return Catalogue(rows=MappingProxyType(rows), materialised=catalogue.materialised)

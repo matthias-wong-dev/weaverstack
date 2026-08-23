@@ -178,8 +178,10 @@ def generate_item_build_bundle(
     # physical action, and never after it — see :mod:`weaver.build_bundle.bookmarks`.
     # A catalogue with no `_.Bookmark` is one this bundle is creating it in: every
     # build binds the built-in item, so the table arrives with this bundle and can
-    # hold no row anything could have written.
-    bookmark_installed = BOOKMARK.name in catalogue.present_tables
+    # hold no row anything could have written. Whether the table is physically
+    # there is the catalogue Warehouse's inventory to answer, the way it answers
+    # for every other object in it.
+    bookmark_installed = _holds_bookmark_table(inventories, catalogue_target)
     bookmarks = render_bookmark_reconciliation(
         repository,
         items=tuple(target_by_item),
@@ -492,6 +494,23 @@ def plan_item_build(
         uncertified=frozenset(shortcuts.omitted_destinations)
         & frozenset(selected_for_build),
     )
+
+
+def _holds_bookmark_table(inventories, catalogue_target) -> bool:
+    """Whether the catalogue Warehouse physically holds ``_.Bookmark``.
+
+    Asked of the inventory rather than of the catalogue: what a catalogue holds
+    is rows, and what a target holds is objects. Absent inventory reads as absent
+    table, which is the bootstrap answer and the safe one — the reference and the
+    reconciliation it gates are installed by the next build either way.
+    """
+
+    from ..catalogue.tables import CATALOGUE_SCHEMA
+
+    for inventory in (inventories or {}).values():
+        if inventory.target_id == catalogue_target.id:
+            return inventory.has_object(CATALOGUE_SCHEMA, BOOKMARK.name, "table")
+    return False
 
 
 def _catalogue_target(binding: WarehouseBinding, targets):

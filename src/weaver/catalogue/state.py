@@ -45,9 +45,12 @@ from .tables import (
 _FILES_PREFIX = "Files/"
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(init=False)
 class Catalogue:
-    """The catalogue the build reads and reasons about.
+    """The catalogue an operation reads, reasons about, and records into.
+
+    Live runtime state rather than a snapshot: rows are read into it, written
+    through it, and read back from it, so it is mutable and says so.
 
     One class whatever produced it: read from the catalogue Warehouse in
     production, or built directly from Registry rows or a repository in a test.
@@ -58,24 +61,23 @@ class Catalogue:
     documents derived from the Registry rows — identity, type, signature and
     publication build_datetime, without the audit columns, which no build decision reads.
 
-    ``present_tables`` records which catalogue tables physically exist: a claim
-    can only be raised against a table that is there, or reconciliation would
-    emit deletes against tables that are not.
-
     A catalogue is *selectively materialised*. It holds the rows of the tables it
     was asked for and nothing else, because reading everything is not free:
     ``_.Log`` is history and grows with the estate's age, and nothing consults
-    it. What was read is :attr:`materialised`.
+    it. What was read is :attr:`materialised`. Whether a table physically exists
+    is a different question, and a target's inventory answers it.
 
     Runtime rows are written through it — :meth:`submit` appends, :meth:`update`
     merges on the table's key — and an updated row is visible to a reader of this
     catalogue at once, before it has reached the Warehouse. :meth:`flush` is the
     durability barrier and the only place a write failure surfaces.
+
+    A catalogue reaches its Warehouse through a Session. One it was handed is
+    borrowed and left open; one it opened for itself is closed by :meth:`close`.
     """
 
     rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
     registered: Mapping[WeaverDocumentId, "RegisteredDocument"]
-    present_tables: frozenset[str]
     materialised: frozenset[str]
 
     def __init__(
@@ -83,37 +85,56 @@ class Catalogue:
         rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]],
         *,
         registered: Mapping[WeaverDocumentId, "RegisteredDocument"] | None = None,
-        present_tables: frozenset[str] | None = None,
         materialised: frozenset[str] | None = None,
         writer: Any = None,
+        session: Any = None,
+        owns_session: bool = False,
     ) -> None:
-        frozen_rows = MappingProxyType(dict(rows))
-        object.__setattr__(self, "rows", frozen_rows)
-
-        object.__setattr__(
-            self,
-            "registered",
-            _registered_documents(frozen_rows)
+        self.rows = MappingProxyType(dict(rows))
+        self.registered = (
+            _registered_documents(self.rows)
             if registered is None
-            else MappingProxyType(dict(registered)),
+            else MappingProxyType(dict(registered))
         )
-        carried = {table for tables in frozen_rows.values() for table in tables}
         # Defaulting to "every table this catalogue carries rows for" keeps a
         # hand-built catalogue honest without making every caller state it.
-        object.__setattr__(
-            self,
-            "present_tables",
-            frozenset(present_tables if present_tables is not None else carried),
+        carried = {table for tables in self.rows.values() for table in tables}
+        self.materialised = frozenset(
+            materialised if materialised is not None else carried
         )
-        object.__setattr__(
-            self,
-            "materialised",
-            frozenset(materialised if materialised is not None else carried),
-        )
-        object.__setattr__(self, "_writer", writer)
+        self._writer = writer
+        self._session = session
+        self._owns_session = owns_session
         # Rows this catalogue has written, by table and key. Consulted ahead of
         # what was read, so a caller sees its own update immediately.
-        object.__setattr__(self, "_written", {})
+        self._written: dict[str, dict[tuple, dict]] = {}
+
+    # --- the Session it reaches its Warehouse through -----------------------
+
+    @property
+    def session(self):
+        """The Session this catalogue reads and writes through, if it has one."""
+
+        return self._session
+
+    def close(self) -> None:
+        """Close the Session this catalogue opened, if it opened one.
+
+        A borrowed Session belongs to whoever opened it and is left alone. One
+        this catalogue opened for itself is closed here, so the caller that
+        named a catalogue by name has one thing to close.
+        """
+
+        if self._owns_session and self._session is not None:
+            self._session.close()
+            self._session = None
+            self._owns_session = False
+
+    def __enter__(self) -> "Catalogue":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
 
     # --- writing ------------------------------------------------------------
 
@@ -124,10 +145,8 @@ class Catalogue:
         if self._writer is None:
             from .writer import RefusingWriter
 
-            object.__setattr__(
-                self,
-                "_writer",
-                RefusingWriter("it was built without a connection to write through"),
+            self._writer = RefusingWriter(
+                "it was built without a connection to write through"
             )
         return self._writer
 
@@ -254,7 +273,7 @@ class Catalogue:
                     self.rows.items(), key=lambda pair: str(pair[0])
                 )
             ],
-            "present_tables": sorted(self.present_tables),
+            "materialised": sorted(self.materialised),
         }
 
     @classmethod
@@ -280,7 +299,7 @@ class Catalogue:
         }
         return cls(
             rows=MappingProxyType(rows),
-            present_tables=frozenset(mapping.get("present_tables", ())),
+            materialised=frozenset(mapping.get("materialised", ())),
         )
 
     # --- constructors ---------------------------------------------------------
@@ -720,12 +739,14 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     }
     return Catalogue(
         rows=MappingProxyType(rows),
-        present_tables=frozenset(present),
+        materialised=frozenset(
+            table.name for table in PROJECTED_TABLES if table.name in present
+        ),
     )
 
 
 def read_installed_catalogue(
-    catalogue: Any, *, tables=READABLE_TABLES, writer=None
+    catalogue: Any, *, tables=READABLE_TABLES, writer=None, session=None
 ) -> Catalogue:
     """Read the installed catalogue, without being told what is in it.
 
@@ -746,11 +767,8 @@ def read_installed_catalogue(
     """
 
     rows: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {}
-    present: set[str] = set()
     for table in tables:
         table_rows = read_table(catalogue, table)
-        if table_rows:
-            present.add(table.name)
         for row in table_rows:
             item = _item_of(row)
             if not item.item_type or not item.item_name:
@@ -768,18 +786,21 @@ def read_installed_catalogue(
                 for item, tables_of in rows.items()
             }
         ),
-        present_tables=frozenset(present),
         materialised=frozenset(table.name for table in tables),
         writer=writer,
+        session=session,
     )
 
 
 def catalogue_for(session, workspace=None, *, tables=READABLE_TABLES) -> Catalogue:
-    """The installed catalogue, read and writable, through one Session.
+    """The installed catalogue, read and writable, through a Session it borrows.
 
     The one construction an operation needs: it reads what it asked for and
     carries the way back, so a caller records a settled unit of work or a moved
     bookmark by telling this catalogue rather than by opening a stream of its own.
+
+    The Session belongs to the caller and is left open. For one the catalogue
+    opens for itself, see :func:`catalogue_in`.
     """
 
     from .connection import catalogue_connection
@@ -790,7 +811,28 @@ def catalogue_for(session, workspace=None, *, tables=READABLE_TABLES) -> Catalog
         catalogue_connection(session, resolved),
         tables=tables,
         writer=writer_for(session, resolved),
+        session=session,
     )
+
+
+def catalogue_in(workspace, *, tables=READABLE_TABLES) -> Catalogue:
+    """The catalogue in one workspace, through a Session it opens for itself.
+
+    For a caller that names a catalogue rather than holding a Session — authored
+    code anchoring an object by name. The Session is the catalogue's, so
+    :meth:`Catalogue.close` closes it and nothing else has to know it exists.
+    """
+
+    from ..sessions.host import session_for
+
+    session = session_for(workspace)
+    try:
+        catalogue = catalogue_for(session, workspace, tables=tables)
+    except BaseException:
+        session.close()
+        raise
+    catalogue._owns_session = True
+    return catalogue
 
 
 def reconcile_catalogue_state(
@@ -842,7 +884,7 @@ def reconcile_catalogue_state(
                     if rule.table == table
                 )
             )
-            if table.name in state.present_tables:
+            if table.name in state.materialised:
                 stale_claims.extend(
                     CatalogueClaim(identity, rule)
                     for identity, document in stale.items()
@@ -860,7 +902,7 @@ def reconcile_catalogue_state(
         catalogue=Catalogue(
             rows=MappingProxyType(reconciled),
             registered=retained,
-            present_tables=state.present_tables,
+            materialised=state.materialised,
         ),
         stale_claims=tuple(dict.fromkeys(stale_claims)),
         stale_objects=tuple(sorted(stale_labels)),

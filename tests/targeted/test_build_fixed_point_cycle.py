@@ -113,7 +113,7 @@ def installed_catalogue(repository) -> Catalogue:
     # claim against a table that is there.
     return Catalogue(
         rows=state.rows,
-        present_tables=frozenset(table.name for table in PROJECTED_TABLES),
+        materialised=frozenset(table.name for table in PROJECTED_TABLES),
     )
 
 
@@ -353,7 +353,7 @@ def test_the_claim_view_only_ever_removes_rows(estate):
     for item, tables in state.rows.items():
         for name, rows in tables.items():
             assert len(remaining.rows[item].get(name, ())) <= len(rows)
-    assert remaining.present_tables == state.present_tables
+    assert remaining.materialised == state.materialised
 
 
 @weaver_test()

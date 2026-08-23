@@ -159,7 +159,7 @@ class FixtureCatalogue(Catalogue):
             item = item_id(item)
         return cls(
             rows={item: {REGISTRY.name: tuple(rows)}},
-            present_tables=frozenset({REGISTRY.name}),
+            materialised=frozenset({REGISTRY.name}),
         )
 
     @classmethod
@@ -177,7 +177,7 @@ class FixtureCatalogue(Catalogue):
             item = item_id(item)
         return cls(
             rows={item: {name: tuple(rows) for name, rows in tables.items()}},
-            present_tables=frozenset(tables),
+            materialised=frozenset(tables),
         )
 
     @classmethod
@@ -526,6 +526,37 @@ def catalogue_target(
         logical_item_type="Warehouse",
         **extra,
     )
+
+
+def catalogue_inventory(
+    *, holding: bool = True, target_id: str = "control-warehouse-Weaver"
+):
+    """The catalogue Warehouse's own inventory, as the planner receives it.
+
+    ``holding`` says whether it physically holds ``_.Bookmark``. That is what
+    decides the two things the build that *creates* the catalogue cannot do: a
+    Lakehouse shortcut has nothing to point at, and bookmark reconciliation has
+    no table to reconcile.
+    """
+
+    from weaver.catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA, PROJECTED_TABLES
+
+    held = tuple(
+        f"{CATALOGUE_SCHEMA}.{table.name}"
+        for table in (*PROJECTED_TABLES, *((BOOKMARK,) if holding else ()))
+    )
+    return target_inventory(
+        target_id=target_id,
+        kind="warehouse",
+        target_name="Weaver",
+        schemas=(CATALOGUE_SCHEMA,),
+        tables=held,
+    )
+
+
+#: The logical item the Weaver catalogue is built as, which is what the planner
+#: keys its inventory by.
+CATALOGUE_ITEM = WeaverItemId("Warehouse", "_weaver")
 
 
 # --- repositories -------------------------------------------------------------

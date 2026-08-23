@@ -235,42 +235,29 @@ def test_a_static_table_with_no_bookmark_loads(tmp_path):
 
 
 @weaver_test()
-def test_a_freestanding_table_loads_and_records_nothing(tmp_path):
-    """``My__Table(spark)`` runs. It has no place in the estate's record of itself.
+@pytest.mark.parametrize("static", [False, True], ids=["ordinary", "static"])
+def test_a_freestanding_table_does_not_load(tmp_path, static):
+    """A load reads a window and records how far it read, so it needs both.
 
-    The catalogue is a constructor argument rather than a ``load()`` one, because
-    an authored ``read()`` is called by Weaver and takes nothing — so anything
-    ``read()`` may reach has to be set before the load begins.
+    Static or not: a static object asks how far this one got, and an ordinary one
+    has a bookmark to move when it succeeds. Refused before ``read()``, which
+    this object proves by refusing to run.
     """
-
-    class Sales__Country(_TableUnderTest):
-        static = False
-
-    table = Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
-
-    # It reaches read(), which this object refuses — the point is that it got
-    # there rather than being turned away for having no catalogue.
-    with pytest.raises(AssertionError, match="read\\(\\) must not run"):
-        table.load()
-    assert table.installed is None
-
-
-@weaver_test()
-def test_a_freestanding_static_table_cannot_answer_its_gate(tmp_path):
-    """Static asks how far this object got, and only the catalogue knows."""
 
     from weaver.errors import LoadError
 
     class Sales__Country(_TableUnderTest):
-        static = True
+        pass
 
+    Sales__Country.static = static
     table = Sales__Country(_Session(), lakehouse=mounted_lakehouse("LH", tmp_path))
 
     with pytest.raises(LoadError) as raised:
         table.load()
 
-    assert "not anchored" in str(raised.value)
+    assert "cannot read its bookmark or record one" in str(raised.value)
     assert "catalogue=" in str(raised.value)
+    assert table.installed is None
 
 
 # --- the Warehouse procedure carries it ---------------------------------------
@@ -397,3 +384,21 @@ def test_a_non_static_warehouse_load_carries_no_gate_at_all():
 
     assert "Not static: this object is loaded on every run." in payload
     assert "if @weaver_bookmark is not null" not in payload
+
+
+@weaver_test()
+def test_only_a_static_warehouse_load_reads_the_bookmark_table():
+    """Nothing else decides anything from it, and the read is a round trip.
+
+    In every Warehouse but the catalogue's, ``_.Bookmark`` is a view across
+    databases. A load that writes its bookmark at the end and never asks what it
+    was should not pay to read it.
+    """
+
+    ordinary = _procedure(static=False)
+    static = _procedure(static=True)
+
+    assert "select @weaver_bookmark =" not in ordinary
+    assert "select @weaver_bookmark =" in static
+    # It still records one: the write is what every load does.
+    assert "merge into [_].[Bookmark]" in ordinary

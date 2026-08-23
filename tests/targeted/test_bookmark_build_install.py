@@ -25,8 +25,10 @@ import json
 
 import pytest
 from factories import (
+    CATALOGUE_ITEM,
     ITEM,
     WAREHOUSE_ITEM,
+    catalogue_inventory,
     estate_bindings,
     estate_inventories,
     full_estate,
@@ -56,13 +58,31 @@ def estate(tmp_path):
     return full_estate(tmp_path / "repo")
 
 
-#: A catalogue holding no rows but every table, `_.Bookmark` included. That last
-#: is the distinction the bookmark stage turns on: a catalogue without the table
-#: is one this bundle is creating it in, and it can hold no row anything could
-#: have written.
-EMPTY = Catalogue(
-    {}, present_tables=frozenset(table.name for table in CATALOGUE_TABLES)
-)
+#: A catalogue holding no rows at all, which is every state these tests start
+#: from: what a build says about bookmarks turns on whether the *table* is there,
+#: and a target's inventory answers that.
+EMPTY = Catalogue({})
+
+
+def _inventories_over(inventories, *, holding_bookmark: bool = True):
+    """These target inventories, plus the catalogue Warehouse's own."""
+
+    with_catalogue = dict(inventories)
+    with_catalogue[CATALOGUE_ITEM] = catalogue_inventory(holding=holding_bookmark)
+    return with_catalogue
+
+
+def _inventories(repository, *, holding_bookmark: bool = True):
+    """Every target this estate binds, including the catalogue's own Warehouse.
+
+    ``holding_bookmark`` is the distinction the bookmark stages turn on: a
+    catalogue Warehouse without the table is one this bundle is creating it in,
+    and the table can hold no row anything could have written.
+    """
+
+    return _inventories_over(
+        estate_inventories(repository, empty=True), holding_bookmark=holding_bookmark
+    )
 
 
 def _bundle(
@@ -75,7 +95,7 @@ def _bundle(
         store=FilesystemStore(),
         target_inventories=inventories
         if inventories is not None
-        else estate_inventories(repository, empty=True),
+        else _inventories(repository),
         catalogue=catalogue if catalogue is not None else EMPTY,
         catalogue_binding=CATALOGUE,
         bookmark_source=bookmark_source,
@@ -212,7 +232,7 @@ def test_a_build_that_changes_one_object_invalidates_only_that_one(estate, tmp_p
             changed,
             tmp_path / "second",
             catalogue=installed,
-            inventories=estate_inventories(changed),
+            inventories=_inventories_over(estate_inventories(changed)),
         )
     )
     keep = next(one for one in statements if one.startswith("DELETE"))
@@ -221,29 +241,19 @@ def test_a_build_that_changes_one_object_invalidates_only_that_one(estate, tmp_p
     assert "N'Files/Raw', N'CustomerCsv'" in keep
 
 
-@pytest.mark.parametrize(
-    "present",
-    [
-        pytest.param(frozenset(), id="bootstrap"),
-        pytest.param(
-            frozenset(
-                table.name for table in CATALOGUE_TABLES if table.name != "Bookmark"
-            ),
-            id="upgrade",
-        ),
-    ],
-)
 @weaver_test()
-def test_a_build_creating_the_table_reconciles_no_bookmarks(estate, tmp_path, present):
+def test_a_build_creating_the_table_reconciles_no_bookmarks(estate, tmp_path):
     """The table this would write is arriving in the same bundle.
 
-    Every build binds the built-in item, so a catalogue without `_.Bookmark` gets
-    it from this build — whether that catalogue is empty or is an older estate
-    being upgraded. Not a silent skip: a table nothing could ever have written to
-    has no row to reset and none to prune.
+    Every build binds the built-in item, so a catalogue Warehouse without
+    `_.Bookmark` gets it from this build — whether that Warehouse is empty or is
+    an older estate being upgraded. Not a silent skip: a table nothing could ever
+    have written to has no row to reset and none to prune.
     """
 
-    bundle = _bundle(estate, tmp_path, catalogue=Catalogue({}, present_tables=present))
+    bundle = _bundle(
+        estate, tmp_path, inventories=_inventories(estate, holding_bookmark=False)
+    )
 
     assert _bookmark_actions(bundle) == []
 
@@ -442,17 +452,13 @@ def test_the_build_that_creates_the_table_points_no_shortcut_at_it(estate, tmp_p
         item_name="Weaver",
         path="Tables/_/Bookmark",
     )
-    present = frozenset(table.name for table in CATALOGUE_TABLES)
-
     creating = _bundle(
-        estate, tmp_path, catalogue=Catalogue({}), bookmark_source=source
-    )
-    installed = _bundle(
         estate,
         tmp_path,
-        catalogue=Catalogue({}, present_tables=present),
+        inventories=_inventories(estate, holding_bookmark=False),
         bookmark_source=source,
     )
+    installed = _bundle(estate, tmp_path, bookmark_source=source)
 
     assert _references(creating, "Lakehouse") == []
     assert _references(installed, "Lakehouse")
@@ -480,9 +486,7 @@ def test_a_lakehouse_already_holding_the_reference_is_given_no_other(estate, tmp
         item_name="Weaver",
         path="Tables/_/Bookmark",
     )
-    present = frozenset(table.name for table in CATALOGUE_TABLES)
-    catalogue = Catalogue({}, present_tables=present)
-    inventories = estate_inventories(estate, empty=True)
+    inventories = _inventories(estate)
     holding = {
         item: replace(inventory, bookmark_reference=True)
         if inventory.kind == "lakehouse"
@@ -490,20 +494,8 @@ def test_a_lakehouse_already_holding_the_reference_is_given_no_other(estate, tmp
         for item, inventory in inventories.items()
     }
 
-    absent = _bundle(
-        estate,
-        tmp_path,
-        catalogue=catalogue,
-        inventories=inventories,
-        bookmark_source=source,
-    )
-    already = _bundle(
-        estate,
-        tmp_path,
-        catalogue=catalogue,
-        inventories=holding,
-        bookmark_source=source,
-    )
+    absent = _bundle(estate, tmp_path, inventories=inventories, bookmark_source=source)
+    already = _bundle(estate, tmp_path, inventories=holding, bookmark_source=source)
 
     assert _references(absent, "Lakehouse")
     assert _references(already, "Lakehouse") == []
@@ -548,7 +540,7 @@ def _installed(repository) -> Catalogue:
     )
     return Catalogue(
         rows=state.rows,
-        present_tables=frozenset(table.name for table in CATALOGUE_TABLES),
+        materialised=frozenset(table.name for table in CATALOGUE_TABLES),
     )
 
 
