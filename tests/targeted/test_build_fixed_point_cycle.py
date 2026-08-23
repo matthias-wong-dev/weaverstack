@@ -24,6 +24,8 @@ structures — and are much too slow to be where this property is iterated on.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from factories import (
     ITEM,
@@ -42,6 +44,7 @@ from weaver.build_bundle import (
 )
 from weaver.build_bundle.catalogue_actions import desired_catalogue
 from weaver.build_bundle.planner import certifiable_identities
+from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import PROJECTED_TABLES
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
@@ -117,19 +120,45 @@ def installed_catalogue(repository) -> Catalogue:
     )
 
 
-def build(repository, tmp_path, *, catalogue):
+#: Where the catalogue's ``_.Bookmark`` sits, as a build resolves it before
+#: planning. Supplied here because the reference a built target is given is a
+#: stage like any other, and a fixed point that never planned one would be a
+#: fixed point over a smaller build than the one that runs.
+BOOKMARK_SOURCE = ResolvedShortcutSource(
+    workspace_id="ws-1",
+    item_id="item-1",
+    item_name="Weaver_Control",
+    path="Tables/_/Bookmark",
+)
+
+
+def build(repository, tmp_path, *, catalogue, bookmark_reference: bool = True):
+    """One bundle for this estate.
+
+    ``bookmark_reference`` says whether the built targets already present the
+    catalogue's ``_.Bookmark``. An estate a build has finished with does; that is
+    what makes the second build's reference stage empty rather than absent.
+    """
+
     bindings = _bindings()
     bound = {binding.item: binding.to_bound_target() for binding in bindings.entries}
+    inventories = {
+        item: replace(inventory, bookmark_reference=bookmark_reference)
+        if inventory.kind == "lakehouse"
+        else inventory
+        for item, inventory in _inventories(repository, bound).items()
+    }
     return generate_item_build_bundle(
         repository,
         bindings=bindings,
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
-        target_inventories=_inventories(repository, bound),
+        target_inventories=inventories,
         catalogue=catalogue,
         catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
+        bookmark_source=BOOKMARK_SOURCE,
     )
 
 
@@ -160,6 +189,38 @@ def test_the_first_build_against_an_empty_catalogue_does_do_work(estate, tmp_pat
     first = build(estate, tmp_path, catalogue=Catalogue(rows={}))
 
     assert actions(first)
+
+
+@weaver_test()
+def test_the_first_build_installs_the_bookmark_reference_and_the_second_does_not():
+    """The stage that is easiest to leave out of a fixed point, named here.
+
+    A reference the first build did not install is one the second has to, and
+    then the second build is not a no-op. Both halves are asserted, because a
+    plan that never contains the stage satisfies the second half for the wrong
+    reason — which is how this went unnoticed.
+    """
+
+    import tempfile
+    from pathlib import Path as _Path
+
+    from factories import full_estate
+
+    with tempfile.TemporaryDirectory() as directory:
+        root = _Path(directory)
+        estate = full_estate(root / "repo")
+        first = build(
+            estate,
+            root / "first",
+            catalogue=Catalogue(rows={}),
+            bookmark_reference=False,
+        )
+        second = build(estate, root / "second", catalogue=installed_catalogue(estate))
+
+    assert [action.id for action in actions(first) if "bookmark-reference" in action.id]
+    assert not [
+        action.id for action in actions(second) if "bookmark-reference" in action.id
+    ]
 
 
 # --- and each thing it must not do, named ------------------------------------

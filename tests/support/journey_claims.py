@@ -61,10 +61,10 @@ BOOKKEEPING = {
 }
 
 #: What the build that creates the catalogue cannot do, and the next one does.
-#: Bookmark reconciliation plans against a table that did not exist yet, and the
-#: Lakehouse reference points at a Delta directory the Warehouse publishes to
-#: OneLake shortly after creating it. See `design/catalogue.md`.
-DEFERRED_TO_THE_NEXT_BUILD = {"reconcile_bookmarks", "create_bookmark_reference"}
+#: Bookmark rows are reconciled before any physical work, so the build that
+#: creates `_.Bookmark` has no table to reconcile against — and nothing to
+#: reconcile either, since no row can exist yet. See `design/catalogue.md`.
+DEFERRED_TO_THE_NEXT_BUILD = {"reconcile_bookmarks"}
 
 
 def _folder(env, schema, name):
@@ -340,13 +340,12 @@ def _assert_authored_objects_reach_the_build(env) -> None:
 def _assert_unchanged(env, step) -> None:
     """Building an already-correct estate must cost nothing and break nothing.
 
-    This is the build after the one that created the catalogue, and two things
-    wait for it. Bookmarks are reconciled against a table that did not exist when
-    the previous build planned, and the Lakehouse's ``_.Bookmark`` reference
-    points at a Delta directory the Warehouse had not published yet. Neither
-    rebuilds a declared object, which is what this step is about; the strict
-    claim — an installed catalogue and a present reference plan nothing at all —
-    is `tests/targeted/test_bookmark_build_install.py`.
+    This is the build after the one that created the catalogue, and one thing
+    waits for it: bookmark rows are reconciled ahead of any physical work, so the
+    previous build planned that stage against a table it had not created yet.
+    Reconciling rows is not rebuilding a declared object, which is what this step
+    is about. The strict claim — an installed catalogue plans nothing at all — is
+    `tests/targeted/test_build_fixed_point_cycle.py`.
     """
 
     _raise_if_the_transition_broke(step)

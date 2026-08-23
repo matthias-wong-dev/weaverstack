@@ -486,11 +486,9 @@ three-part name in any other Warehouse, and a read-only OneLake shortcut at
 `Tables/_` in a Lakehouse. Both are gated on what the target physically holds, so
 an unchanged repository plans neither and one somebody removed comes back.
 
-The shortcut points at the table's Delta directory, and a Warehouse publishes a
-table to OneLake some time after creating it — so the build that creates the
-catalogue installs no shortcut and the next one does, which is also when a
-Lakehouse first has a loadable object able to read it. A view needs no such
-address and is installed by either build. Weaver infrastructure, not a published `_.Shortcut`
+The reference reads a document the built-in item owns, so the item graph puts
+that item first — the same edge a declared shortcut's source item gets. One build
+creates the table and then points at it, in that order. Weaver infrastructure, not a published `_.Shortcut`
 row, and rendered by the same code a declared shortcut is. Fabric accepts
 `SELECT`, `UPDATE`, `DELETE` and a `MERGE`'s insert through such a view and
 refuses a plain `INSERT`, which is why the procedure upserts with one `MERGE`.

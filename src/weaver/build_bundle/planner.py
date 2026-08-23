@@ -176,31 +176,21 @@ def generate_item_build_bundle(
 
     # Bookmarks are reconciled here, between decertification and the first
     # physical action, and never after it — see :mod:`weaver.build_bundle.bookmarks`.
-    # A catalogue with no `_.Bookmark` is one this bundle is creating it in: every
-    # build binds the built-in item, so the table arrives with this bundle and can
-    # hold no row anything could have written. Whether the table is physically
-    # there is the catalogue Warehouse's inventory to answer, the way it answers
-    # for every other object in it.
-    bookmark_installed = _holds_bookmark_table(inventories, catalogue_target)
+    # Rows are reconciled before any physical work, so a catalogue whose
+    # `_.Bookmark` this bundle is still creating has none to reconcile: the table
+    # arrives with this bundle and can hold no row anything could have written.
+    # Whether it is physically there is the catalogue Warehouse's inventory to
+    # answer, the way it answers for every other object in it.
     bookmarks = render_bookmark_reconciliation(
         repository,
         items=tuple(target_by_item),
         selected_for_build=selected_for_build,
         removed=removed,
-        installed=bookmark_installed,
+        installed=_holds_bookmark_table(inventories, catalogue_target),
         catalogue_target=catalogue_target,
     )
     if bookmarks is not None:
         stages.append(bookmarks)
-
-    # A Lakehouse's shortcut points at the table's Delta directory, and a
-    # Warehouse publishes a table to OneLake some time after creating it — so the
-    # build that creates the catalogue has nothing to point at and Fabric refuses
-    # a shortcut whose target does not exist. The build after it installs the
-    # reference, which is when a Lakehouse first has a loadable object able to
-    # read one.
-    if not bookmark_installed:
-        bookmark_source = None
 
     # Shortcut destinations this build wanted but could not materialise. They must
     # not reach the Registry: a row there means the object's work succeeded, and

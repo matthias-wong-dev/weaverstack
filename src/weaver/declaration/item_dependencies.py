@@ -241,11 +241,37 @@ def _item_graph(
         # Repository parsing rejects a same-item shortcut, so every shortcut is an
         # edge between two distinct items.
         edges.add((str(shortcut.source.item), str(shortcut.destination.item)))
+    edges |= _bookmark_reference_edges(repository)
 
     try:
         return Graph((str(item.identity) for item in repository.items), sorted(edges))
     except GraphError as exc:
         raise GraphError(f"item {exc}") from exc
+
+
+def _bookmark_reference_edges(repository: WeaverRepository) -> set[tuple[str, str]]:
+    """The built-in item before any item that reaches its ``_.Bookmark``.
+
+    A built target presents the catalogue's ``_.Bookmark`` under that name, so a
+    generated load procedure and authored Spark SQL can say ``[_].[Bookmark]``.
+    That reference reads a document the built-in item owns, which is the same
+    shape as any other cross-item reference and gets the same edge — so one build
+    creates the table and then points at it, in that order.
+
+    Weaver's own reference rather than a declared shortcut: it publishes no
+    ``_.Shortcut`` row and takes no catalogue identity, and only the ordering is
+    shared with one.
+    """
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+    from ..etl import item_bookmarkable_objects
+
+    return {
+        (str(BUILTIN_ITEM), str(item.identity))
+        for item in repository.items
+        if item.identity != BUILTIN_ITEM
+        and item_bookmarkable_objects(repository, item=item.identity)
+    }
 
 
 def _resolve_destination(

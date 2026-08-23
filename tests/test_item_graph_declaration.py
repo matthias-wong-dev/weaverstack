@@ -69,10 +69,24 @@ def test_an_unused_shortcut_still_orders_its_two_items(tmp_path):
 
 @weaver_test()
 def test_independent_items_share_one_layer(tmp_path):
+    """Every authored item together, behind the built-in item they all reach.
+
+    Nothing here declares a relationship with anything else, so the only order is
+    the one the catalogue imposes: an item whose objects Weaver loads presents the
+    catalogue's `_.Bookmark`, and that is a document the built-in item owns.
+    """
+
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
 
     assert _layers(repository) == [
-        sorted(str(item.identity) for item in repository.items)
+        [str(BUILTIN_ITEM)],
+        sorted(
+            str(item.identity)
+            for item in repository.items
+            if item.identity != BUILTIN_ITEM
+        ),
     ]
 
 
@@ -125,7 +139,15 @@ def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
 
 @weaver_test()
 def test_a_within_item_dependency_creates_no_item_edge(tmp_path):
+    """An item cannot wait for itself: the document graph already orders those.
+
+    The built-in item is upstream and is not one of these edges — every item
+    whose objects Weaver loads reaches the catalogue's `_.Bookmark`.
+    """
+
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     raw = WeaverItemId.parse("Lakehouse/Raw")
 
-    assert repository.item_graph.upstream_of(str(raw)) == ()
+    assert repository.item_graph.upstream_of(str(raw)) == (str(BUILTIN_ITEM),)

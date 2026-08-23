@@ -435,13 +435,13 @@ def test_the_source_is_the_catalogue_tables_own_delta_directory():
 
 
 @weaver_test()
-def test_the_build_that_creates_the_table_points_no_shortcut_at_it(estate, tmp_path):
-    """Fabric publishes a Warehouse table to OneLake after creating it.
+def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
+    """One build, and the graph orders it: the table, then the reference to it.
 
-    So the build that creates the catalogue has nothing for a shortcut to point
-    at, and Fabric refuses one whose target does not exist. The build after it
-    installs the reference, which is also when a Lakehouse first has a loadable
-    object able to read one.
+    The reference reads a document the built-in item owns, so the item graph puts
+    that item first — the same edge a declared shortcut's source item gets. A
+    build that installed the table and deferred the reference would not converge
+    in one pass, and the build after it would not be a no-op.
     """
 
     from weaver.build_bundle.shortcuts import ResolvedShortcutSource
@@ -452,53 +452,42 @@ def test_the_build_that_creates_the_table_points_no_shortcut_at_it(estate, tmp_p
         item_name="Weaver",
         path="Tables/_/Bookmark",
     )
-    creating = _bundle(
+
+    from weaver.build_bundle import effective_item_bindings
+
+    # The catalogue item bound as every real build binds it, so the bundle holds
+    # the table as well as the references to it.
+    bindings = effective_item_bindings(
+        estate_bindings(), control_item=ItemRef("Weaver"), workspace_name=WORKSPACE
+    )
+    inventories = _inventories(estate, holding_bookmark=False)
+    inventories[CATALOGUE_ITEM] = catalogue_inventory(
+        holding=False,
+        target_id=next(
+            binding.to_bound_target().id
+            for binding in bindings.entries
+            if binding.item == CATALOGUE_ITEM
+        ),
+    )
+
+    creating = generate_item_build_bundle(
         estate,
-        tmp_path,
-        inventories=_inventories(estate, holding_bookmark=False),
+        bindings=bindings,
+        output=Location(str(tmp_path / "bundle")),
+        store=FilesystemStore(),
+        target_inventories=inventories,
+        catalogue=EMPTY,
+        catalogue_binding=CATALOGUE,
         bookmark_source=source,
     )
-    installed = _bundle(estate, tmp_path, bookmark_source=source)
 
-    assert _references(creating, "Lakehouse") == []
-    assert _references(installed, "Lakehouse")
-    # The Warehouse's view needs no address in storage, so it is installed by the
-    # build that creates the table as readily as by any other.
+    assert _references(creating, "Lakehouse")
     assert _references(creating, "Warehouse")
-    assert _references(installed, "Warehouse")
-
-
-@weaver_test()
-def test_a_lakehouse_already_holding_the_reference_is_given_no_other(estate, tmp_path):
-    """Gated on what is there, the way the Warehouse's view is.
-
-    So an unchanged repository plans nothing, and a reference somebody removed
-    comes back on the next build rather than on the next change to an object.
-    """
-
-    from dataclasses import replace
-
-    from weaver.build_bundle.shortcuts import ResolvedShortcutSource
-
-    source = ResolvedShortcutSource(
-        workspace_id="ws-1",
-        item_id="item-1",
-        item_name="Weaver",
-        path="Tables/_/Bookmark",
-    )
-    inventories = _inventories(estate)
-    holding = {
-        item: replace(inventory, bookmark_reference=True)
-        if inventory.kind == "lakehouse"
-        else inventory
-        for item, inventory in inventories.items()
-    }
-
-    absent = _bundle(estate, tmp_path, inventories=inventories, bookmark_source=source)
-    already = _bundle(estate, tmp_path, inventories=holding, bookmark_source=source)
-
-    assert _references(absent, "Lakehouse")
-    assert _references(already, "Lakehouse") == []
+    # And each comes after the catalogue table it points at, in the same bundle.
+    order = [action.id for _sequence, _batch, action in creating.plan.actions()]
+    table = order.index("object-Warehouse--_weaver--_.Bookmark")
+    assert table < order.index(_references(creating, "Lakehouse")[0])
+    assert table < order.index(_references(creating, "Warehouse")[0])
 
 
 def _references(bundle, item_type: str) -> list[str]:
