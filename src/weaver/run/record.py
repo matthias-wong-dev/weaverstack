@@ -488,13 +488,19 @@ def _duration(started: datetime | None, completed: datetime | None) -> int | Non
 
 
 def _message(node) -> str | None:
-    """One concise line, from the node's own messages."""
+    """One concise line: the node's own messages, or the result's own error.
+
+    The fallback is what a standalone call has. A dispatched node carries the
+    messages the run composed; a direct call carries only the result, and a
+    recorded failure with no message says nothing about what failed.
+    """
 
     for message in getattr(node, "messages", ()):
         text = getattr(message, "message", None) or str(message)
         if text:
             return text[:4000]
-    return None
+    carried = getattr(node.result, "error_message", None)
+    return str(carried)[:4000] if carried else None
 
 
 def _details(node) -> str | None:

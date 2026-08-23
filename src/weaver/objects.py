@@ -10,7 +10,7 @@ from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .errors import LoadError
+from .errors import LoadError, WeaverError
 from .lakehouse import Lakehouse, default_lakehouse
 
 if TYPE_CHECKING:  # pragma: no cover - for type readers only
@@ -320,31 +320,33 @@ def _sentinel():
 def _recorded_load(object, *arguments) -> "LoadResult":
     """One object's load, with its operational record written before it returns.
 
-    The whole difference between :meth:`load` and :meth:`_load`, in one place so
-    a Table and a Folder cannot come to mean different things by it.
-
-    A refusal is recorded and then raised. It is an outcome, and leaving no row
-    for it would make the estate's account of itself silent about exactly the
-    loads somebody most needs to look at. The generated ``_.Load`` does the same
-    inside its own TRY/CATCH.
+    Anything the load raises is recorded and then re-raised unchanged. A refusal
+    Weaver itself named is Failed and anything else is Error, which is the line
+    ``_.Load`` draws from ``error_number()``.
     """
 
-    # Before anything, so the refusal to *start* is never recorded: an unanchored
+    # Before the try, so the refusal to *start* is never recorded: an unanchored
     # object has no catalogue to record into and no identity to record against.
     object._anchor()
     started = datetime.now(timezone.utc)
     try:
         result = object._load(*arguments)
-    except LoadError as refused:
+    except Exception as raised:
         object._record(
-            _settled(object, _carried(refused), started=started, refused=True)
+            _settled(
+                object,
+                _carried(raised),
+                started=started,
+                raised=True,
+                refused=isinstance(raised, WeaverError),
+            )
         )
         raise
     object._record(_settled(object, result, started=started))
     return result
 
 
-def _settled(object, result, *, started, refused: bool = False):
+def _settled(object, result, *, started, raised: bool = False, refused: bool = False):
     """One standalone load, in the terms every runtime table records."""
 
     from .run.record import settled_load
@@ -355,18 +357,22 @@ def _settled(object, result, *, started, refused: bool = False):
         physical_target=object._physical_target(),
         started=started,
         completed=datetime.now(timezone.utc),
-        raised=refused,
+        raised=raised,
         refused=refused,
     )
 
 
-def _carried(refused: LoadError):
-    """Whatever counts the refusal was carrying, or none it can report."""
+def _carried(raised: BaseException):
+    """Whatever counts the failure was carrying, or none it can report."""
 
     from .runtime.load_result import LoadResult
 
-    carried = getattr(refused, "result", None)
-    return carried if carried is not None else LoadResult.failure(str(refused))
+    carried = getattr(raised, "result", None)
+    return (
+        carried
+        if carried is not None
+        else LoadResult.failure(f"{type(raised).__name__}: {raised}")
+    )
 
 
 def _refuse_no_staging(contract, what: str, instead: str) -> None:

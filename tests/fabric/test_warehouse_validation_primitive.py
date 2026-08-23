@@ -483,21 +483,36 @@ def test_one_entry_point_serves_both_kinds_of_validation(estate):
 
 
 @weaver_test(remote=True, resources={"tds"})
-def test_a_validation_that_could_not_be_evaluated_is_an_error(estate):
+def test_a_validation_that_could_not_be_evaluated_is_recorded_and_raised(estate):
     """It found nothing, and zero discrepancies is the answer it must not give.
 
     A duplicate key is a broken Test rather than a failing one: the procedure
-    throws, the entry point catches it, and the row says Error with no count.
+    throws, the entry point records Error with no count, and then raises — a
+    validation that could not run must not read as a call that succeeded.
     """
 
     _forget(estate, "OrdersReconcile")
     _sides(estate, [(1, 10), (1, 11)], [(1, 10)])
 
-    _standalone(estate, f"{SCHEMA}.OrdersReconcile")
+    with pytest.raises(Exception) as raised:
+        _standalone(estate, f"{SCHEMA}.OrdersReconcile")
 
+    assert "primary key" in str(raised.value).casefold()
     status = _test_status(estate, "OrdersReconcile")
     assert status["result"] == "Error"
     assert status["failures"] is None
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_validation_that_found_something_is_an_answer_rather_than_a_failure(estate):
+    """It ran and reported, so the call returns and the row says Failed."""
+
+    _forget(estate, "OrdersReconcile")
+    _sides(estate, [(1, 10)], [(1, 11)])
+
+    _standalone(estate, f"{SCHEMA}.OrdersReconcile")
+
+    assert _test_status(estate, "OrdersReconcile")["result"] == "Failed"
 
 
 @weaver_test(remote=True, resources={"tds"})

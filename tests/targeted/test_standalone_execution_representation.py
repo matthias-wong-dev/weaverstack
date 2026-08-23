@@ -69,6 +69,8 @@ def _table(returned, *, incremental: bool = True):
             )
 
         def read(self):
+            if isinstance(returned, BaseException):
+                raise returned
             return returned
 
     return DWG__Customer
@@ -179,6 +181,46 @@ def test_a_refused_load_is_recorded_and_then_raised(lakehouse):
     assert catalogue.writer.rows(LOG.name)[0]["result"] == "failed"
     assert catalogue.writer.rows(BOOKMARK.name) == []
     assert catalogue.writer.flushes == 1
+
+
+@weaver_test()
+def test_an_unexpected_failure_is_recorded_as_an_error_and_re_raised(lakehouse):
+    """A Spark or filesystem failure is not a judgement Weaver made.
+
+    So the row says Error where a refusal says Failed, and the exception reaches
+    the caller unchanged rather than being turned into a return value.
+    """
+
+    catalogue = never("DWG.Customer")
+    table = _table(RuntimeError("the cluster went away"))(
+        MockSpark(), lakehouse=lakehouse, catalogue=catalogue
+    )
+
+    with pytest.raises(RuntimeError, match="cluster went away"):
+        table.load()
+
+    assert catalogue.writer.rows(LOG.name)[0]["result"] == "error"
+    assert catalogue.writer.rows(LOAD_STATUS.name)[0]["result"] == "error"
+    assert catalogue.writer.rows(BOOKMARK.name) == []
+    assert catalogue.writer.flushes == 1
+
+
+@weaver_test()
+def test_a_failure_that_carried_no_counts_still_reports_what_it_was(lakehouse):
+    """The statistic describes a load that ran, and a load that threw ran."""
+
+    catalogue = never("DWG.Customer")
+    table = _table(RuntimeError("the cluster went away"))(
+        MockSpark(), lakehouse=lakehouse, catalogue=catalogue
+    )
+
+    with pytest.raises(RuntimeError):
+        table.load()
+
+    (statistic,) = catalogue.writer.rows(LOAD_STATISTIC.name)
+    assert statistic["rows_read"] == 0
+    assert statistic["is_static_skip"] is False
+    assert "RuntimeError" in catalogue.writer.rows(LOG.name)[0]["message"]
 
 
 @weaver_test()

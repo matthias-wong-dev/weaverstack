@@ -70,6 +70,11 @@ WEAVER_ERROR_MAX = 51999
 LOAD_ENTRY = "Load"
 TEST_ENTRY = "Test"
 
+#: What a rethrow uses when the original number is below THROW's floor of 50000.
+#: A Fabric error such as *Invalid object name* carries its own low number, and
+#: the message still travels.
+RETHROW_ERROR = 51031
+
 #: How wide a ``Schema.Object`` argument may be. Both halves are Weaver logical
 #: names, which are identifier-width.
 _OBJECT_NAME_TYPE = "varchar(261)"
@@ -99,6 +104,7 @@ def generate_load_entry(item, objects: Sequence[ObjectId]) -> str:
                 _write(LOAD_STATUS, _load_status_values(item), keyed=True),
                 _write(LOAD_STATISTIC, _load_statistic_values(item), keyed=False),
                 _bookmark_advance(item),
+                _rethrow(),
             ]
         ),
     )
@@ -126,6 +132,7 @@ def generate_test_entry(item, validations: Mapping[ObjectId, str]) -> str:
                 _test_result(),
                 _write(LOG, _log_values(task_type="test"), keyed=False),
                 _write(TEST_STATUS, _test_status_values(item), keyed=True),
+                _rethrow(),
             ]
         ),
     )
@@ -181,6 +188,7 @@ def _common_declarations() -> tuple[str, ...]:
         "declare @weaver_object varchar(128) = null;",
         "declare @weaver_error varchar(4000) = null;",
         "declare @weaver_error_number int = null;",
+        "declare @weaver_rethrow nvarchar(2048) = null;",
         "declare @weaver_result varchar(128) = null;",
         "declare @weaver_message varchar(4000) = null;",
     )
@@ -296,6 +304,33 @@ def _unknown(what: str) -> str:
         "begin\n"
         f"    set @weaver_unmatched = concat(@object_name, "
         f"N' is not a {what} in this Warehouse');\n"
+        "end;"
+    )
+
+
+def _rethrow() -> str:
+    """Raise again what the lower procedure raised, once the record is written.
+
+    Recording first and raising after is the whole shape: the row is what the
+    estate knows, and the exception is what the caller needs. Returning normally
+    would make a failure look like a successful call.
+
+    Only what was *thrown*. A returned outcome — a validation finding
+    discrepancies, a load whose rejections were tolerated — is an answer rather
+    than a failure, and travels back as one.
+
+    The original number is kept where THROW accepts it, so a caller can still
+    match on Weaver's own refusal codes.
+    """
+
+    return (
+        "if @weaver_error is not null\n"
+        "begin\n"
+        "    set @weaver_rethrow = cast(@weaver_error as nvarchar(2048));\n"
+        "    declare @weaver_number int =\n"
+        "        case when @weaver_error_number >= 50000 then @weaver_error_number\n"
+        f"             else {RETHROW_ERROR} end;\n"
+        "    throw @weaver_number, @weaver_rethrow, 1;\n"
         "end;"
     )
 

@@ -209,6 +209,30 @@ def test_a_validation_that_threw_is_an_error_whatever_threw_it(
 
 
 @weaver_test()
+def test_what_the_lower_procedure_raised_is_raised_again_after_the_record(
+    load_script, validation_script
+):
+    """Recording first and raising after: the row is what the estate knows, and
+    the exception is what the caller needs.
+
+    Returning normally would make a failure look like a successful call.
+    """
+
+    from weaver.declaration.tsql_entry import RETHROW_ERROR
+
+    for script in (load_script, validation_script):
+        raising = script.index("throw @weaver_number, @weaver_rethrow, 1;")
+        assert raising > script.rindex("merge into")
+        # Only what was thrown. A returned outcome is an answer, not a failure.
+        assert "if @weaver_error is not null" in script
+        assert "@rows_rejected" not in script[raising:]
+        # The original number where THROW accepts it, so a caller can still match
+        # on Weaver's own refusal codes.
+        assert "case when @weaver_error_number >= 50000" in script
+        assert str(RETHROW_ERROR) in script
+
+
+@weaver_test()
 def test_a_load_writes_its_whole_operational_record(load_script):
     for table in (LOG, LOAD_STATUS, LOAD_STATISTIC, BOOKMARK):
         assert f"merge into [_].[{table.name}]" in load_script, table.name

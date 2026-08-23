@@ -620,21 +620,40 @@ def test_a_load_that_rejected_rows_is_rejected_and_keeps_its_bookmark(estate):
 
 
 @weaver_test(remote=True, resources={"tds"})
-def test_a_refusal_the_entry_point_caught_is_failed_and_still_recorded(estate):
-    """An intolerant refusal throws inside the wrapper and is recorded there.
+def test_a_refusal_is_recorded_and_then_raised_to_the_caller(estate):
+    """Both halves, because either alone is the wrong behaviour.
 
-    Weaver's own refusal ran under Weaver's control and produced an unacceptable
-    result, so it is Failed rather than Error — and it leaves a row, because a
-    refusal is an outcome and not a reason to leave no record.
+    A refusal that left no row would make the estate silent about exactly the
+    loads somebody needs to look at. A refusal that returned normally would make
+    a failed load indistinguishable from a successful call.
     """
+
+    from weaver.sql.errors import SqlError
 
     _reset(estate)
     _source_rows(estate, REJECTABLE)
 
-    _standalone(estate, fault_tolerant=False)
+    with pytest.raises((SqlError, Exception)) as raised:
+        _standalone(estate, fault_tolerant=False)
 
+    assert "rejected" in str(raised.value).casefold()
+    # Weaver's own refusal ran under Weaver's control and produced an
+    # unacceptable result, so it is Failed rather than Error.
     assert _status(estate)["result"] == "Failed"
+    assert _log(estate)[0]["result"] == "Failed"
     assert _bookmark(estate) is None
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_tolerated_rejection_is_an_answer_rather_than_a_failure(estate):
+    """It returned rather than threw, so the call returns too."""
+
+    _reset(estate)
+    _source_rows(estate, REJECTABLE)
+
+    _standalone(estate, fault_tolerant=True)
+
+    assert _status(estate)["result"] == "Rejected"
 
 
 @weaver_test(remote=True, resources={"tds"})
