@@ -201,6 +201,28 @@ def test_a_build_with_nothing_to_do_says_nothing_about_bookmarks(estate):
 
 
 @weaver_test()
+def test_a_build_of_objects_that_hold_no_bookmark_says_nothing_either(estate):
+    """Only an object that can hold a bookmark can cost one.
+
+    A view here, and a validation in a real estate: both carry an ordinary
+    ``Schema.Object`` identity and neither has a load. A stage that fired on *any*
+    selection would fire whenever one of those was selected, and an idle build
+    would not be idle.
+    """
+
+    view = next(
+        identity
+        for identity in estate.source_documents
+        if identity.item == item_id(ITEM) and "ActiveCustomer" in str(identity)
+    )
+
+    assert (
+        bookmark_statements(estate, items=(item_id(ITEM),), selected_for_build={view})
+        == ()
+    )
+
+
+@weaver_test()
 def test_a_first_build_invalidates_every_loadable_object_it_installs(estate, tmp_path):
     """It is building all of them, so none of their histories survives.
 

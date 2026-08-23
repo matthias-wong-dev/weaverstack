@@ -121,7 +121,17 @@ def bookmark_statements(
 
     scoped = tuple(item for item in items if not _is_builtin(item))
     selected = set(selected_for_build)
-    if not scoped or not installed or not (selected or set(removed)):
+    if not scoped or not installed:
+        return ()
+    bookmarkable = {
+        identity
+        for item in scoped
+        for identity in item_bookmarkable_objects(repository, item=item)
+    }
+    # Only an object that can hold a bookmark can cost one. A build that selected
+    # nothing else — a Test, a view, an object Weaver does not load — has nothing
+    # to say here, and saying it anyway would make an idle build do work.
+    if not (bookmarkable & selected) and not set(removed):
         return ()
 
     # What keeps its bookmark: an object this build still loads and is *not*

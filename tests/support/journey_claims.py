@@ -64,6 +64,9 @@ BOOKKEEPING = {
 #: Bookmark rows are reconciled before any physical work, so the build that
 #: creates `_.Bookmark` has no table to reconcile against — and nothing to
 #: reconcile either, since no row can exist yet. See `design/catalogue.md`.
+#:
+#: An idle build says nothing about bookmarks, so this is empty of anything an
+#: unchanged repository would repeat.
 DEFERRED_TO_THE_NEXT_BUILD = {"reconcile_bookmarks"}
 
 
