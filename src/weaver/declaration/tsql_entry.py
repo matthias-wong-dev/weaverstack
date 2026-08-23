@@ -169,7 +169,8 @@ def _declarations(*lines: str) -> str:
 
 def _common_declarations() -> tuple[str, ...]:
     return (
-        "declare @weaver_unmatched varchar(2048) = null;",
+        # nvarchar, because that is what THROW takes for a message variable.
+        "declare @weaver_unmatched nvarchar(2048) = null;",
         "declare @weaver_started datetime2(6) = sysutcdatetime();",
         "declare @weaver_completed datetime2(6) = null;",
         # One correlation identity per standalone call. A workflow is its rows,
