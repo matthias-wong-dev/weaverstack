@@ -429,6 +429,33 @@ def test_a_catalogue_is_live_state_and_says_so():
 
 
 @weaver_test()
+def test_no_table_has_a_write_method_of_its_own():
+    """Two verbs, whatever the table. A tripwire for the next table added.
+
+    ``advance_bookmark()``, ``set_load_status()``, ``record_test_status()``: each
+    would be a place for one table's rules to diverge from the rest, and the
+    reason the mechanism is generic is that a table declares how its rows are
+    maintained and everything reads that declaration.
+    """
+
+    writing = {
+        name
+        for name in vars(Catalogue)
+        if not name.startswith("_")
+        and callable(getattr(Catalogue, name, None))
+        and any(
+            verb in name
+            for verb in ("write", "record", "advance", "set_", "merge", "append")
+        )
+    }
+
+    assert writing == set()
+    # `bookmark()` is a read and stays: absence coalescing to the sentinel is a
+    # meaning the caller would otherwise have to know, and it writes nothing.
+    assert callable(Catalogue.bookmark)
+
+
+@weaver_test()
 def test_a_catalogue_with_nowhere_to_write_says_so():
     """What a catalogue reconstructed from a payload has: it crossed as data."""
 
