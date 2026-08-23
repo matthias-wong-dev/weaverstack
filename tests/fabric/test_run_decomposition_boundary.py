@@ -29,14 +29,9 @@ what is imported over there is the published package.
 from __future__ import annotations
 
 import pytest
-from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
 from support.weaver_test import weaver_test
 
 from weaver.load_report import LoadRunReport
-
-pytestmark = pytest.mark.parametrize(
-    "weaver_repo_fixture", [LAKEHOUSE_JOURNEY_FIXTURE], indirect=True
-)
 
 
 @pytest.fixture(scope="module")

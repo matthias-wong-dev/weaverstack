@@ -37,7 +37,11 @@ from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
-from .bookmarks import render_bookmark_reconciliation, render_bookmark_reference
+from .bookmarks import (
+    bookmark_invalidation,
+    render_bookmark_reconciliation,
+    render_bookmark_reference,
+)
 from .bundle import (
     SUPPORTED_FORMAT_VERSION,
     BuildBundle,
@@ -177,12 +181,14 @@ def generate_item_build_bundle(
     # physical action, and never after it — see :mod:`weaver.build_bundle.bookmarks`.
     # Against the catalogue this build read: which rows are obsolete is arithmetic
     # over rows it holds, and a build creating `_.Bookmark` read none.
-    bookmarks = render_bookmark_reconciliation(
+    runtime_state = bookmark_invalidation(
         repository,
         items=tuple(target_by_item),
         selected_for_build=selected_for_build,
         catalogue=catalogue,
-        catalogue_target=catalogue_target,
+    )
+    bookmarks = render_bookmark_reconciliation(
+        runtime_state, catalogue_target=catalogue_target
     )
     if bookmarks is not None:
         stages.append(bookmarks)
@@ -256,6 +262,7 @@ def generate_item_build_bundle(
             sorted(omitted, key=lambda node: (node.node_id, node.reason))
         ),
         target_changes=target_changes,
+        runtime_state=runtime_state,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(

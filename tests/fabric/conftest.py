@@ -51,16 +51,22 @@ WAREHOUSE_READY_TIMEOUT = 600.0
 WAREHOUSE_POLL_INTERVAL = 5.0
 
 
-def _timed_session_run(session, label: str, body: str):
+def _timed_session_run(session, label: str, body: str, *, recorder=None):
     """Run one meaningful Fabric phase and leave a compact timing breadcrumb.
 
-    Labels remain a fixture-level timing aid; resource events come from the
-    production Livy boundary.
+    ``recorder`` is the Weaver Session whose telemetry the crossing is recorded
+    on. A raw Livy submission is not one of that Session's own operations, so
+    without this the estate a fixture provisions costs Livy time that only the
+    wall clock sees. Estate provisioning is the suite's largest single cost, and
+    a cost nothing measures cannot be reduced on evidence.
     """
 
     started = time.monotonic()
     try:
-        return session.run(body)
+        if recorder is None:
+            return session.run(body)
+        with recorder.step(label), recorder.telemetry.external("livy", label):
+            return session.run(body)
     finally:
         print(f"Fabric {label}: {time.monotonic() - started:.2f}s")
 
@@ -1081,8 +1087,8 @@ def _fabric_build_context(
     staging_lh,
     session,
     weaver_repo_fixture,
+    recorder,
     warehouse=None,
-    before_reset=None,
 ):
     """A build environment run entirely inside Fabric over Livy.
 
@@ -1121,7 +1127,9 @@ def _fabric_build_context(
     # Nothing is torn down here. The catalogue, the target and the session all
     # outlive this context; the next one empties the target again on its way in.
     resolver = FabricResolver(workspace, client=fabric_client)
-    store = OneLakeDfsClient()
+    # Given the recorder's telemetry, so a repository upload is a measured
+    # crossing rather than time the wall clock alone accounts for.
+    store = OneLakeDfsClient(telemetry=recorder.telemetry)
     weaver = workspace.catalogue_item
     target = ItemRef(target_lh.name)
     staging = ItemRef(staging_lh.name)
@@ -1133,8 +1141,9 @@ def _fabric_build_context(
     repository_root = resolver.files_root(staging).join(*repository_relative)
 
     destination = resolver.spark_destination(target)
-    if before_reset is not None:
-        before_reset()
+    # Everything the previous module queued is written before the target is
+    # emptied, so a late row cannot land in an estate the next module owns.
+    recorder.flush()
     _empty_the_target(
         session,
         store,
@@ -1146,9 +1155,10 @@ def _fabric_build_context(
 
     def install_repo() -> None:
         destination = repository_root
-        if store.exists(destination):
-            store.delete(destination, recursive=True)
-        _upload_tree(store, weaver_repo_fixture.path, destination)
+        with recorder.step("Stage the repository"):
+            if store.exists(destination):
+                store.delete(destination, recursive=True)
+            _upload_tree(store, weaver_repo_fixture.path, destination)
 
     def remove_repo() -> None:
         store.delete(repository_root, recursive=True)
@@ -1232,7 +1242,7 @@ def _fabric_build_context(
             "'plan': bundle.plan.to_mapping()})\n"
         )
         payload = _timed_session_run(
-            session, "Lakehouse bundle generation", body
+            session, "Lakehouse bundle generation", body, recorder=recorder
         ).payload
         plan = BuildPlan.from_mapping(payload["plan"])
         # A desktop-addressed (https) handle to the same physical bundle, so the
@@ -1267,7 +1277,7 @@ def _fabric_build_context(
             "for a in report.action_results()]})\n"
         )
         payload = _timed_session_run(
-            session, "Lakehouse bundle installation", body
+            session, "Lakehouse bundle installation", body, recorder=recorder
         ).payload
         outcome = InstallOutcome(
             status=payload["status"],
@@ -1322,7 +1332,9 @@ def _fabric_build_context(
                 else ""
             )
         )
-        return _timed_session_run(session, label, preamble + body).payload
+        return _timed_session_run(
+            session, label, preamble + body, recorder=recorder
+        ).payload
 
     def seed_orphans() -> None:
         # Seeded in the *destination*, by its four-part name, exactly as a
@@ -1474,13 +1486,13 @@ def fabric_build_env(
         fabric_staging_lakehouse,
         livy_session,
         weaver_repo_fixture,
-        before_reset=weaver_session.flush,
+        recorder=weaver_session,
     ) as env:
         yield env
 
 
 def _warehouse_build_env(
-    fabric_workspace, staging, warehouse, weaver_repo_fixture, session
+    fabric_workspace, staging, warehouse, weaver_repo_fixture, session, recorder
 ) -> "BuildEnv":
     """A Warehouse BuildEnv that runs **inside Fabric**, like the Lakehouse one.
 
@@ -1498,7 +1510,7 @@ def _warehouse_build_env(
     from weaver.targets import ItemRef as _ItemRef
 
     resolver = FabricResolver(fabric_workspace, client=None)
-    store = OneLakeDfsClient()
+    store = OneLakeDfsClient(telemetry=recorder.telemetry)
     # Staged in a Lakehouse's Files, because that is the only OneLake area
     # there is. The catalogue is a Warehouse and has none — and no reason to
     # hold a repository, which is staging for a build that reads it.
@@ -1590,7 +1602,7 @@ def _warehouse_build_env(
             "'plan': bundle.plan.to_mapping()})\n"
         )
         payload = _timed_session_run(
-            session, "Warehouse bundle generation", body
+            session, "Warehouse bundle generation", body, recorder=recorder
         ).payload
         plan = BuildPlan.from_mapping(payload["plan"])
         return BuildBundle(
@@ -1620,7 +1632,7 @@ def _warehouse_build_env(
             "for a in report.action_results()]})\n"
         )
         payload = _timed_session_run(
-            session, "Warehouse bundle installation", body
+            session, "Warehouse bundle installation", body, recorder=recorder
         ).payload
         outcome = InstallOutcome(
             status=payload["status"],
@@ -1704,6 +1716,7 @@ def warehouse_estate(
     clean_disposable_warehouse,
     weaver_repo_fixture,
     livy_session,
+    weaver_session,
 ):
     """The Warehouse estate, built **in Fabric** and installed once per module.
 
@@ -1718,6 +1731,7 @@ def warehouse_estate(
         clean_disposable_warehouse,
         weaver_repo_fixture,
         livy_session,
+        weaver_session,
     )
     yield _install_estate(env)
 
@@ -1748,7 +1762,7 @@ def fabric_lakehouse_journey(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
-        before_reset=request.getfixturevalue("weaver_session").flush,
+        recorder=request.getfixturevalue("weaver_session"),
     ) as env:
         yield Journey(env, "lakehouse")
 
@@ -1774,7 +1788,7 @@ def fabric_cross_item_journey(request, weaver_repo_fixture):
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
         warehouse=warehouse,
-        before_reset=request.getfixturevalue("weaver_session").flush,
+        recorder=request.getfixturevalue("weaver_session"),
     ) as env:
         env.warehouse = warehouse
         yield Journey(env, "cross-item")
@@ -1792,7 +1806,7 @@ def fabric_lakehouse_estate(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
-        before_reset=request.getfixturevalue("weaver_session").flush,
+        recorder=request.getfixturevalue("weaver_session"),
     ) as env:
         yield _install_estate(env)
 
@@ -1821,7 +1835,7 @@ def fabric_mixed_estate(request, weaver_repo_fixture):
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
         warehouse=warehouse,
-        before_reset=request.getfixturevalue("weaver_session").flush,
+        recorder=request.getfixturevalue("weaver_session"),
     ) as env:
         env.warehouse = warehouse
         yield _install_estate(env)

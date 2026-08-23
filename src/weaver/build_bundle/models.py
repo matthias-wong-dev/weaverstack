@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from ..catalogue.runtime_state import RuntimeStateInvalidation
 from .changes import TargetChange
 from .incremental import BuildSelection
 from .targets import BoundTarget
@@ -260,6 +261,13 @@ class BuildPlan:
     #: edited after certification, which is the thing frozen payloads exist to
     #: prevent.
     target_changes: Mapping[str, tuple[TargetChange, ...]] = field(default_factory=dict)
+    #: The catalogue's current-state rows this plan ends the life of, by table.
+    #: Declared beside the action that performs it, as ``target_changes`` is
+    #: declared beside the actions that change a target: the reconciliation
+    #: action's payload is what runs, and this is what it means. A reader — or a
+    #: :class:`~weaver.catalogue.state.Catalogue` applying the plan in memory —
+    #: gets the decision without parsing DML.
+    runtime_state: tuple[RuntimeStateInvalidation, ...] = ()
 
     def to_mapping(self) -> dict[str, Any]:
         mapping = {
@@ -274,6 +282,7 @@ class BuildPlan:
                 target_id: [change.to_mapping() for change in changes]
                 for target_id, changes in sorted(self.target_changes.items())
             },
+            "runtime_state": [one.to_mapping() for one in self.runtime_state],
         }
         mapping["selection"] = self.selection.to_mapping()
         return mapping
@@ -299,6 +308,10 @@ class BuildPlan:
                 target_id: tuple(TargetChange.from_mapping(c) for c in changes)
                 for target_id, changes in mapping.get("target_changes", {}).items()
             },
+            runtime_state=tuple(
+                RuntimeStateInvalidation.from_mapping(one)
+                for one in mapping.get("runtime_state", ())
+            ),
         )
 
     # --- convenience views ------------------------------------------------

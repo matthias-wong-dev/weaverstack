@@ -35,7 +35,11 @@ import json
 from typing import Iterable, Sequence
 
 from ..catalogue.claims import bookmark_row
-from ..catalogue.render import Row, render_delete_rows
+from ..catalogue.render import Row, sorted_rows
+from ..catalogue.runtime_state import (
+    RuntimeStateInvalidation,
+    invalidation_payload,
+)
 from ..catalogue.tables import (
     BOOKMARK,
     CATALOGUE_SCHEMA,
@@ -70,14 +74,14 @@ def _row(identity: WeaverDocumentId) -> dict:
     return bookmark_row(identity)
 
 
-def bookmark_statements(
+def bookmark_invalidation(
     repository,
     *,
     items: Sequence[WeaverItemId],
     selected_for_build: Iterable[WeaverDocumentId],
     catalogue,
-) -> tuple[str, ...]:
-    """The bookmark invalidation statements for one build, in execution order.
+) -> tuple[RuntimeStateInvalidation, ...]:
+    """The ``_.Bookmark`` rows this build ends the life of, as structured intent.
 
     The build has read ``_.Bookmark``, so which rows are obsolete is arithmetic
     over rows it holds: every row in the scope whose object this build is about
@@ -86,11 +90,11 @@ def bookmark_statements(
 
     Empty whenever that set is empty, which is most builds — an unchanged
     repository has nothing to invalidate, and a build creating the table has read
-    no rows because there were none. Nothing is skipped for a reason that has to
-    be stated: the statement is absent because there is no row to remove.
+    no rows because there were none.
 
-    One statement, naming the rows that go. A build that touched one object says
-    so in one row rather than restating every object it kept.
+    Keyed rows rather than rendered SQL. The installer renders one scoped DELETE
+    from this, and a Catalogue applies the same intent in memory, so what a build
+    decided about an object's operational state can be read without parsing DML.
     """
 
     scoped = {item for item in items if not _is_builtin(item)}
@@ -105,13 +109,20 @@ def bookmark_statements(
         for identity in item_bookmarkable_objects(repository, item=item)
         if identity not in selected
     }
-    obsolete = [
+    obsolete = tuple(
         {name: row.get(name) for name in BOOKMARK.key}
-        for row in catalogue.table_rows(BOOKMARK)
-        if _item_of(row) in scoped and _key(row) not in keep
-    ]
-    statement = render_delete_rows(BOOKMARK, obsolete)
-    return () if statement is None else (statement,)
+        for row in sorted_rows(
+            BOOKMARK,
+            [
+                row
+                for row in catalogue.table_rows(BOOKMARK)
+                if _item_of(row) in scoped and _key(row) not in keep
+            ],
+        )
+    )
+    if not obsolete:
+        return ()
+    return (RuntimeStateInvalidation(table=BOOKMARK.name, rows=obsolete),)
 
 
 def _key(row: Row) -> tuple:
@@ -129,34 +140,27 @@ def _item_of(row: Row) -> WeaverItemId:
 
 
 def render_bookmark_reconciliation(
-    repository,
+    invalidation: Sequence[RuntimeStateInvalidation],
     *,
-    items: Sequence[WeaverItemId],
-    selected_for_build: Iterable[WeaverDocumentId],
-    catalogue,
     catalogue_target,
 ) -> PlannedStage | None:
-    """The one stage that invalidates ``_.Bookmark`` rows ahead of physical work."""
+    """The one stage that invalidates ``_.Bookmark`` rows ahead of physical work.
 
-    statements = bookmark_statements(
-        repository,
-        items=items,
-        selected_for_build=selected_for_build,
-        catalogue=catalogue,
-    )
-    if not statements:
+    One action carrying the intent, not one action per table or per row: the
+    invalidation is one lifecycle decision, taken once and reported once.
+    """
+
+    if not any(one.rows for one in invalidation):
         return None
 
     slug = "bookmark-reconciliation"
-    filename = f"{slug}.tsql-batch.json"
-    content = (
-        json.dumps(list(statements), indent=2, ensure_ascii=False) + "\n"
-    ).encode("utf-8")
+    filename = f"{slug}.runtime-state.json"
+    content = invalidation_payload(tuple(invalidation))
     action = InstallAction(
         id=slug,
         kind=RECONCILE_BOOKMARKS,
         resource_node_id=None,
-        executor="tsql_batch",
+        executor="runtime_state",
         payload=filename,
         payload_sha256=sha256_hex(content),
     )
@@ -373,8 +377,8 @@ def _is_builtin(item: WeaverItemId) -> bool:
 
 
 __all__ = [
+    "bookmark_invalidation",
     "bookmark_reference_views",
-    "bookmark_statements",
     "render_bookmark_reconciliation",
     "render_bookmark_reference",
 ]

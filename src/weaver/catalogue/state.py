@@ -354,6 +354,36 @@ class Catalogue:
 
     # --- transformations ------------------------------------------------------
 
+    def update_using(self, plan) -> "Catalogue":
+        """This catalogue as the plan intends to leave its current-state tables.
+
+        The catalogue twin of
+        :meth:`weaver.build_bundle.prune.TargetInventory.update_using`, and it
+        exists for the same reason: a build's declared effect, applied, is a
+        *prediction* that can be checked. An estate built from a repository and
+        read back should hold the operational rows the plan said it would.
+
+        Reads the plan's stated intent rather than parsing the DML its
+        reconciliation action carries. What a rebuild means for an object's
+        operational state is a lifecycle decision, and a decision that could
+        only be recovered from a statement would be one nothing could reason
+        about.
+
+        The historical tables are untouched, because nothing invalidates them.
+        """
+
+        from .runtime_state import without_invalidated
+
+        invalidation = tuple(getattr(plan, "runtime_state", ()))
+        if not invalidation:
+            return self
+        return Catalogue(
+            rows=without_invalidated(self.rows, invalidation),
+            materialised=self.materialised,
+            writer=self._writer,
+            session=self._session,
+        )
+
     def diff(self, desired: "Catalogue") -> "CatalogueChanges":
         """How this catalogue would move toward the one ``desired`` describes.
 

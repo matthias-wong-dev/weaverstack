@@ -142,6 +142,22 @@ def pytest_runtest_teardown(item):
         end_test(token)
 
 
+def _semantic(event) -> tuple:
+    """One event's semantic address, as the summary groups it.
+
+    Provisioning an estate is the most expensive thing this suite does and it
+    happens in fixture setup, so the setup half of the ledger is grouped the
+    same way the claim half is.
+    """
+
+    return (
+        event.task or "<unattributed>",
+        event.step or "<no step>",
+        event.substep,
+        event.resource,
+    )
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """Report declared topology and the external cost observed by Sessions."""
 
@@ -169,10 +185,13 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     by_setup_resource = defaultdict(lambda: [0, 0.0])
     by_test = defaultdict(lambda: [0, 0.0, defaultdict(float)])
     by_context = defaultdict(lambda: [0, 0.0])
+    by_setup_context = defaultdict(lambda: [0, 0.0])
     for item in items:
         for event in getattr(item, "_weaver_setup_telemetry_events", ()):
             by_setup_resource[event.resource][0] += 1
             by_setup_resource[event.resource][1] += event.seconds
+            by_setup_context[_semantic(event)][0] += 1
+            by_setup_context[_semantic(event)][1] += event.seconds
         for event in getattr(item, "_weaver_telemetry_events", ()):
             by_resource[event.resource][0] += 1
             by_resource[event.resource][1] += event.seconds
@@ -209,6 +228,18 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         ):
             terminalreporter.write_line(
                 f"  {resource:<10} {calls:>4} operations {seconds:>8.1f}s"
+            )
+    if by_setup_context:
+        terminalreporter.write_line("")
+        terminalreporter.write_line("Top fixture-setup crossings")
+        for (task, step, substep, resource), (calls, seconds) in sorted(
+            by_setup_context.items(), key=lambda item: item[1][1], reverse=True
+        )[:12]:
+            semantic = " / ".join(
+                part for part in (task, step, substep) if part is not None
+            )
+            terminalreporter.write_line(
+                f"  {semantic} / {resource}: {calls} operations / {seconds:.1f}s"
             )
     terminalreporter.write_line("")
     terminalreporter.write_line("Top tests by external time")
