@@ -81,6 +81,9 @@ import importlib.util
 _spec = importlib.util.spec_from_file_location(
     "DWG__OrderAmounts", root + "/tests/DWG__OrderAmounts.py")
 _module = importlib.util.module_from_spec(_spec)
+# Registered before it is executed, because a Weaver object reads its own
+# contract from the module it was defined in: sys.modules is where it looks.
+sys.modules[_spec.name] = _module
 _spec.loader.exec_module(_module)
 DWG__OrderAmounts = _module.DWG__OrderAmounts
 
