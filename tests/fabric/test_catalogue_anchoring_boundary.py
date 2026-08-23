@@ -161,7 +161,12 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
 
     # And the rest of the operational record the standalone interface wrote. A
     # developer who ran this by hand can read what it did from the estate.
-    assert seen["status"] == ["Succeeded"]
+    #
+    # Internal values, because this read the rows back through a `Catalogue`:
+    # the public sentence-case spellings exist at the persistence boundary and
+    # nothing above it sees them. A reader selecting from the view gets
+    # `Succeeded` — see ``tests/fabric/test_warehouse_load_primitive.py``.
+    assert seen["status"] == ["succeeded"]
     assert seen["statistics"] and seen["statistics"][0][1] is False
 
     # A validation divides the same way: freestanding it has no identity and no
@@ -170,7 +175,7 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
     assert "not anchored" in seen["validation_refused"]
     assert seen["validation_identity"].endswith("/DWG.OrderAmounts")
     assert seen["validation_result"]["failure_count"] == 0
-    assert seen["validation_status"] == [["Succeeded", "Test", 0]]
+    assert seen["validation_status"] == [["succeeded", "test", 0]]
 
 
 #: What the Lakehouse holds under ``Tables/_``, and whether each reference
