@@ -417,4 +417,20 @@ def test_a_write_that_did_not_land_says_what_it_cost():
         record.flush()
 
 
+@weaver_test()
+def test_every_writer_agrees_what_the_task_was():
+    """One vocabulary for ``[Task type]``, whoever wrote the row.
+
+    A run, a standalone Python call and a generated T-SQL entry point all write
+    it, and a reader selecting on it has to get all three.
+    """
+
+    from weaver.objects import Table, _Validation
+    from weaver.operations.load import TASK_TYPE as LOAD_OPERATION
+    from weaver.operations.test import TASK_TYPE as TEST_OPERATION
+
+    assert LOAD_OPERATION == Table._task_type == LOAD_TASK
+    assert TEST_OPERATION == _Validation._task_type == TEST_TASK
+
+
 __all__: tuple = ()

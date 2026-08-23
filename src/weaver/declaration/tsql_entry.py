@@ -383,9 +383,15 @@ def _load_result() -> str:
 def _test_result() -> str:
     """The same mapping for a validation, which has counts rather than rows.
 
-    A validation that could not be evaluated found nothing, and reporting zero
-    discrepancies for it is the one answer a validation must never give — so its
-    failure count is left null rather than defaulted to zero.
+    A validation that threw is an Error whatever threw it, and that is where the
+    two kinds of work part. A load can refuse and mean it: it ran under Weaver's
+    control and produced an unacceptable result, so a refusal Weaver itself named
+    is Failed. A validation that threw produced no judgement at all — a shape
+    mismatch, a key that repeats, a query that would not run — so there is
+    nothing for Failed to mean, and its failure count is left null rather than
+    defaulted to zero.
+
+    :func:`weaver.run.record.result_for` draws the same line on the Python side.
     """
 
     return (
@@ -396,8 +402,7 @@ def _test_result() -> str:
         "         else coalesce(@missing_count, 0) + coalesce(@unexpected_count, 0)\n"
         "              + coalesce(@violation_count, 0) end;\n"
         "set @weaver_result =\n"
-        f"    case when {_weaver_refusal()} then N'Failed'\n"
-        "         when @weaver_error is not null then N'Error'\n"
+        "    case when @weaver_error is not null then N'Error'\n"
         "         when @weaver_failure_count > 0 then N'Failed'\n"
         "         else N'Succeeded' end;"
     )

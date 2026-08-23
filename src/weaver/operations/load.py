@@ -30,7 +30,10 @@ from ..targets import (
     parse_physical_target,
 )
 
-#: The task type this operation records under.
+#: The task type this operation records under. Restated rather than imported,
+#: because this module reaches ``weaver.run`` inside the function that needs it;
+#: ``tests/targeted/test_run_record_representation.py`` asserts it matches
+#: :data:`weaver.run.record.LOAD_TASK`.
 TASK_TYPE = "load"
 
 

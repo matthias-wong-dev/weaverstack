@@ -23,6 +23,9 @@ from ..test_report import (
 )
 from .workspace import operation_workspace
 
+#: The task type this operation records under. Restated rather than imported, as
+#: :data:`weaver.operations.load.TASK_TYPE` is, and asserted equal to
+#: :data:`weaver.run.record.TEST_TASK`.
 TASK_TYPE = "test"
 
 

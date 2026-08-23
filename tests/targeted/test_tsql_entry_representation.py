@@ -43,6 +43,14 @@ RECONCILE = ObjectId("Sales", "OrdersReconcile")
 UP_TO_DATE = ObjectId("Sales", "OrdersUpToDate")
 
 
+#: The branch that calls Weaver's own refusal Failed. A load has it; a validation
+#: does not.
+_WEAVER_RANGE = (
+    f"case when @weaver_error_number between {WEAVER_ERROR_MIN} and "
+    f"{WEAVER_ERROR_MAX} then N'Failed'"
+)
+
+
 @pytest.fixture
 def load_script() -> str:
     return generate_load_entry(ITEM, [CUSTOMER, ORDER])
@@ -163,10 +171,7 @@ def test_a_refusal_weaver_threw_is_failed_and_anything_else_is_an_error(load_scr
     produced an unacceptable result; anything else could not be evaluated.
     """
 
-    assert (
-        f"case when @weaver_error_number between {WEAVER_ERROR_MIN} and "
-        f"{WEAVER_ERROR_MAX} then N'Failed'" in load_script
-    )
+    assert _WEAVER_RANGE in load_script
     assert "when @weaver_error is not null then N'Error'" in load_script
 
 
@@ -185,6 +190,22 @@ def test_a_validation_that_could_not_be_evaluated_reports_no_failure_count(
 
     assert "when @weaver_error is not null then null" in validation_script
     assert "when @weaver_failure_count > 0 then N'Failed'" in validation_script
+
+
+@weaver_test()
+def test_a_validation_that_threw_is_an_error_whatever_threw_it(
+    load_script, validation_script
+):
+    """Where the two kinds of work part, and both halves are asserted.
+
+    A load can refuse and mean it. A validation that threw produced no judgement
+    at all — a shape mismatch, a key that repeats — so there is nothing for
+    Failed to mean, and Weaver's own refusal range has no branch here.
+    """
+
+    assert _WEAVER_RANGE in load_script
+    assert _WEAVER_RANGE not in validation_script
+    assert "case when @weaver_error is not null then N'Error'" in validation_script
 
 
 @weaver_test()
