@@ -79,11 +79,33 @@ def test_there_is_no_generic_assumption_entry_point(validation_script):
 
 @weaver_test()
 def test_which_kind_a_validation_is_comes_from_the_declaration(validation_script):
-    """Settled at generation, never probed from the estate at run time."""
+    """Settled at generation, never probed from the estate at run time.
 
-    assert "set @weaver_test_type = N'test';" in validation_script
-    assert "set @weaver_test_type = N'assumption';" in validation_script
+    Written as the ``_`` schema stores it. Python writes the internal value and
+    the catalogue's renderer maps it at the persistence boundary; generated SQL
+    crosses no such boundary, so it writes what the column holds and the two
+    agree about a row a reader may have got from either.
+    """
+
+    assert "set @weaver_test_type = N'Test';" in validation_script
+    assert "set @weaver_test_type = N'Assumption';" in validation_script
     assert "object_id(" not in validation_script
+
+
+@weaver_test()
+def test_a_name_that_matched_nothing_records_nothing(load_script, validation_script):
+    """The refusal is about the request rather than about a load.
+
+    Nothing ran, so there is no outcome and no object to record one against —
+    and every identity column is not null, so a row would be refused by the
+    catalogue anyway and would hide the message saying what went wrong. So it is
+    remembered inside the TRY and raised after it, ahead of every write.
+    """
+
+    for script in (load_script, validation_script):
+        assert "set @weaver_unmatched = concat(@object_name" in script
+        raised = script.index("throw 51030, @weaver_unmatched, 1;")
+        assert raised < script.index("merge into")
 
 
 @weaver_test()

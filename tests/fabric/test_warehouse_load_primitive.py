@@ -290,7 +290,7 @@ def _status(estate: Estate) -> dict | None:
 
 def _statistics(estate: Estate) -> list:
     rows = estate.executor.query(
-        "select [Rows read] as read, [Rows inserted] as inserted, "
+        "select [Rows read] as [read], [Rows inserted] as inserted, "
         "[Is reload] as reload, [Is static skip] as skip "
         "from [_].[LoadStatistic] " + _identity_predicate(estate)
     )
@@ -298,9 +298,17 @@ def _statistics(estate: Estate) -> list:
 
 
 def _log(estate: Estate) -> list:
+    """This object's evidence rows.
+
+    Scoped by the object alone: ``_.Log`` records one crossing to one place, so
+    it carries the physical target rather than the logical item.
+    """
+
     rows = estate.executor.query(
         "select [Task type] as task, [Result] as result, [Target name] as target "
-        "from [_].[Log] " + _identity_predicate(estate)
+        "from [_].[Log] "
+        f"where [Schema name] = N'{SCHEMA}' "
+        f"and [Object name] = N'{estate.object_name}'"
     )
     return [dict(row) for row in rows]
 
@@ -494,21 +502,32 @@ def test_a_tolerant_run_preserves_valid_rows_and_rejection_evidence(estate):
 
 
 def _static_run(static_estate):
-    """A static load into an empty target, then a second over a changed source."""
+    """A static load into an empty target, then a second over a changed source.
+
+    Both through the entry point. The Static gate reads a bookmark and the
+    object's own procedure does not write one, so what closes the gate is the
+    *record* — and the record belongs to whoever ran the load. Run through the
+    primitive alone, a Static object would seed itself on every call.
+    """
 
     _reset(static_estate)
     _source_rows(static_estate, CLEAN)
-    seed = _load(static_estate, fault_tolerant=False)
-    seeded_contents = _contents(static_estate)
+    _standalone(static_estate)
+    seeded = {
+        "contents": _contents(static_estate),
+        "statistics": _statistics(static_estate),
+        "bookmark": _bookmark(static_estate),
+    }
 
     _source_rows(static_estate, [("c9", "Different")])
-    again = _load(static_estate, fault_tolerant=False)
+    _standalone(static_estate)
     return Ran(
-        result=again,
+        result=None,
         contents=_contents(static_estate),
         extra={
-            "seed": seed,
-            "seeded_contents": seeded_contents,
+            "seeded": seeded,
+            "status": _status(static_estate),
+            "statistics": _statistics(static_estate),
             "leftovers": _leftovers(static_estate),
             "bookmark": _bookmark(static_estate),
         },
@@ -633,26 +652,27 @@ def test_the_entry_point_refuses_an_object_this_warehouse_does_not_load(estate):
 
 @weaver_test(remote=True, resources={"tds"})
 def test_the_static_warehouse_load_seeds_once_and_then_is_a_no_op(static_estate):
-    static_run = _static_run(static_estate)
-    seed = static_run.extra["seed"]
+    """Loaded once, and the record of that is what stops the second one."""
 
-    assert seed.succeeded is True
-    assert seed.rows_inserted == 2
-    assert static_run.extra["seeded_contents"] == CLEAN
-    result = static_run.result
-    assert result.succeeded is True
-    assert (
-        result.rows_read,
-        result.rows_inserted,
-        result.rows_updated,
-        result.rows_deleted,
-        result.rows_rejected,
-    ) == (0, 0, 0, 0, 0)
+    static_run = _static_run(static_estate)
+    seeded = static_run.extra["seeded"]
+
+    # The seed: it ran, it wrote, and it recorded the bookmark that closes the
+    # gate behind it.
+    assert seeded["contents"] == CLEAN
+    assert [row["inserted"] for row in seeded["statistics"]] == [2]
+    assert seeded["statistics"][0]["skip"] is False
+    assert seeded["bookmark"] is not None
+
+    # The second call: skipped, and the changed source never read.
     assert static_run.contents == CLEAN
     assert static_run.extra["leftovers"] == 0
-    # What closed the gate the second time: the bookmark the seed recorded.
-    assert static_run.extra["bookmark"] is not None
-    assert result.bookmark_datetime is None
+    assert static_run.extra["status"]["result"] == "Skipped"
+    skipped = static_run.extra["statistics"][-1]
+    assert skipped["skip"] is True
+    assert skipped["read"] == 0
+    # And nothing moved the bookmark on, because nothing read a window.
+    assert static_run.extra["bookmark"] == seeded["bookmark"]
 
 
 # --- declared constraints, executed ------------------------------------------

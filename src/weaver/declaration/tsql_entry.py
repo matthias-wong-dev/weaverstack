@@ -93,6 +93,7 @@ def generate_load_entry(item, objects: Sequence[ObjectId]) -> str:
             [
                 _load_declarations(),
                 _try_catch(_load_dispatch(objects)),
+                _refuse_unmatched(),
                 _load_result(),
                 _write(LOG, _log_values(task_type="load"), keyed=False),
                 _write(LOAD_STATUS, _load_status_values(item), keyed=True),
@@ -121,6 +122,7 @@ def generate_test_entry(item, validations: Mapping[ObjectId, str]) -> str:
             [
                 _test_declarations(),
                 _try_catch(_test_dispatch(validations)),
+                _refuse_unmatched(),
                 _test_result(),
                 _write(LOG, _log_values(task_type="test"), keyed=False),
                 _write(TEST_STATUS, _test_status_values(item), keyed=True),
@@ -167,6 +169,7 @@ def _declarations(*lines: str) -> str:
 
 def _common_declarations() -> tuple[str, ...]:
     return (
+        "declare @weaver_unmatched varchar(2048) = null;",
         "declare @weaver_started datetime2(6) = sysutcdatetime();",
         "declare @weaver_completed datetime2(6) = null;",
         # One correlation identity per standalone call. A workflow is its rows,
@@ -280,15 +283,35 @@ def _unknown(what: str) -> str:
 
     Refused rather than run, because the branches are what this Warehouse
     installs. A name it does not hold cannot be executed, and reporting a row for
-    it would put an object in the estate's record that the estate has never had.
+    it would put an object in the estate's record the estate has never had.
+
+    Remembered rather than thrown from here, because this sits inside the TRY
+    that turns a refusal into a recorded outcome. It is raised again after the
+    catch — see :func:`_refuse_unmatched`.
     """
 
     return (
         "else\n"
         "begin\n"
-        f"    declare @weaver_unknown varchar(400) = concat(@object_name, "
+        f"    set @weaver_unmatched = concat(@object_name, "
         f"N' is not a {what} in this Warehouse');\n"
-        "    throw 51030, @weaver_unknown, 1;\n"
+        "end;"
+    )
+
+
+def _refuse_unmatched() -> str:
+    """Raise a name that matched nothing, having recorded nothing for it.
+
+    The refusal is about the *request* rather than about a load: nothing ran, so
+    there is no outcome, and there is no object to record one against. Every
+    identity column is not null, so a row here would be refused by the catalogue
+    anyway and would hide the message that says what went wrong.
+    """
+
+    return (
+        "if @weaver_unmatched is not null\n"
+        "begin\n"
+        "    throw 51030, @weaver_unmatched, 1;\n"
         "end;"
     )
 
@@ -313,9 +336,18 @@ def _validation_procedure(kind: str, object_id: ObjectId) -> str:
 
 
 def _stored_kind(kind: str) -> str:
-    from ..catalogue.tables import ROLE_ASSUMPTION, ROLE_TEST
+    """How ``[Test type]`` spells this kind, as the ``_`` schema stores it.
 
-    return {TEST: ROLE_TEST, ASSUMPTION: ROLE_ASSUMPTION}[kind]
+    The public value, because that is what the column holds. Python writes the
+    internal one and the catalogue's own renderer maps it at the persistence
+    boundary; generated SQL has no such boundary to cross, so it writes what the
+    column holds and the two agree.
+    """
+
+    from ..catalogue.tables import ROLE_ASSUMPTION, ROLE_TEST, TEST_STATUS
+
+    internal = {TEST: ROLE_TEST, ASSUMPTION: ROLE_ASSUMPTION}[kind]
+    return TEST_STATUS.column("test_type").to_public(internal)
 
 
 # --- what happened, in the catalogue's own words -------------------------------
