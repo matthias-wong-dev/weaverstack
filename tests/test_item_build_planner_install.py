@@ -29,6 +29,7 @@ from weaver.build_bundle.prune import (
     read_warehouse_inventory,
 )
 from weaver.catalogue.state import Catalogue
+from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import BuildError
@@ -950,7 +951,8 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
         for _sequence, _batch, action in bundle.plan.actions()
         if action.kind == "build_table"
     ]
-    # The catalogue tables, plus the runtime-maintained `_.Log` and `_.Bookmark`.
-    assert len(physical) == 13
+    # Every catalogue table: the projected dictionaries, and the runtime tables
+    # a run maintains rather than projection.
+    assert len(physical) == len(CATALOGUE_TABLES)
     assert bundle.plan.sequences[-1].description == "publish item registry last"
     assert bundle.plan.targets[0].logical_item_name == "_weaver"

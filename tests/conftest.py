@@ -142,19 +142,32 @@ def pytest_runtest_teardown(item):
         end_test(token)
 
 
-def _semantic(event) -> tuple:
-    """One event's semantic address, as the summary groups it.
+def _report_provisioning(terminalreporter) -> None:
+    """What the harness spent standing estates up, phase by phase.
 
-    Provisioning an estate is the most expensive thing this suite does and it
-    happens in fixture setup, so the setup half of the ledger is grouped the
-    same way the claim half is.
+    Reported apart from the resource telemetry because these are the harness's
+    crossings rather than a Weaver Session's: they are the price of having an
+    estate to make a claim about, and reducing that price is a decision this
+    section exists to inform.
     """
 
-    return (
-        event.task or "<unattributed>",
-        event.step or "<no step>",
-        event.substep,
-        event.resource,
+    from support import provisioning
+
+    phases = provisioning.ledger()
+    if not phases:
+        return
+    terminalreporter.write_sep("=", "Estate provisioning")
+    for phase in phases:
+        detail = " ".join(
+            f"{resource}={cost:.1f}s"
+            for resource, cost in sorted(phase.resources.items())
+        )
+        terminalreporter.write_line(
+            f"  {phase.name:<24} {phase.runs:>3} run(s) "
+            f"{phase.seconds:>8.1f}s  {detail}"
+        )
+    terminalreporter.write_line(
+        f"  {'total':<24} {'':>3}         {provisioning.total_seconds():>8.1f}s"
     )
 
 
@@ -185,13 +198,10 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
     by_setup_resource = defaultdict(lambda: [0, 0.0])
     by_test = defaultdict(lambda: [0, 0.0, defaultdict(float)])
     by_context = defaultdict(lambda: [0, 0.0])
-    by_setup_context = defaultdict(lambda: [0, 0.0])
     for item in items:
         for event in getattr(item, "_weaver_setup_telemetry_events", ()):
             by_setup_resource[event.resource][0] += 1
             by_setup_resource[event.resource][1] += event.seconds
-            by_setup_context[_semantic(event)][0] += 1
-            by_setup_context[_semantic(event)][1] += event.seconds
         for event in getattr(item, "_weaver_telemetry_events", ()):
             by_resource[event.resource][0] += 1
             by_resource[event.resource][1] += event.seconds
@@ -207,6 +217,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
             by_context[context][0] += 1
             by_context[context][1] += event.seconds
     startup = getattr(config, "_weaver_livy_startup_seconds", None)
+    _report_provisioning(terminalreporter)
     if not by_resource and not by_setup_resource and startup is None:
         return
     terminalreporter.write_sep("=", "External resource telemetry")
@@ -228,18 +239,6 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
         ):
             terminalreporter.write_line(
                 f"  {resource:<10} {calls:>4} operations {seconds:>8.1f}s"
-            )
-    if by_setup_context:
-        terminalreporter.write_line("")
-        terminalreporter.write_line("Top fixture-setup crossings")
-        for (task, step, substep, resource), (calls, seconds) in sorted(
-            by_setup_context.items(), key=lambda item: item[1][1], reverse=True
-        )[:12]:
-            semantic = " / ".join(
-                part for part in (task, step, substep) if part is not None
-            )
-            terminalreporter.write_line(
-                f"  {semantic} / {resource}: {calls} operations / {seconds:.1f}s"
             )
     terminalreporter.write_line("")
     terminalreporter.write_line("Top tests by external time")

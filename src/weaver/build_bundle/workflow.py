@@ -41,7 +41,7 @@ from .prune import (
 from .report import InstallationReport
 from .shortcut_sources import (
     physical_shortcuts,
-    read_bookmark_source,
+    read_runtime_sources,
     read_shortcut_sources,
 )
 from .shortcuts import ResolvedShortcutSource
@@ -93,17 +93,19 @@ class BuildState:
     #: Where each direct shortcut points, resolved while the estate was
     #: readable. Keyed by ``<owner>/<name>``.
     shortcut_sources: Mapping[str, ResolvedShortcutSource] = field(default_factory=dict)
-    #: Where the catalogue's ``_.Bookmark`` sits in OneLake, so a built Lakehouse
-    #: can hold a shortcut to it. None where the estate could not be read for it.
-    bookmark_source: ResolvedShortcutSource | None = None
+    #: Where each of the catalogue's runtime tables sits in OneLake, by table
+    #: name, so a built Lakehouse can hold shortcuts to them. Empty where the
+    #: estate could not be read for them.
+    runtime_sources: Mapping[str, ResolvedShortcutSource] = field(default_factory=dict)
 
     def to_mapping(self) -> dict[str, object]:
         return {
             "format_version": 1,
             "catalogue": self.catalogue.to_mapping(),
-            "bookmark_source": (
-                None if self.bookmark_source is None else vars(self.bookmark_source)
-            ),
+            "runtime_sources": {
+                name: vars(source)
+                for name, source in sorted(self.runtime_sources.items())
+            },
             "shortcut_sources": {
                 key: vars(source)
                 for key, source in sorted(self.shortcut_sources.items())
@@ -138,11 +140,10 @@ class BuildState:
                 key: ResolvedShortcutSource(**value)
                 for key, value in (mapping.get("shortcut_sources") or {}).items()
             },
-            bookmark_source=(
-                ResolvedShortcutSource(**mapping["bookmark_source"])
-                if mapping.get("bookmark_source")
-                else None
-            ),
+            runtime_sources={
+                name: ResolvedShortcutSource(**value)
+                for name, value in (mapping.get("runtime_sources") or {}).items()
+            },
         )
 
 
@@ -235,15 +236,15 @@ def read_build_state(
                 resolver=session.resolver(workspace),
                 store=session.transport_store(workspace),
             )
-    with session.step("Resolve the catalogue's bookmark table"):
-        bookmark_source = read_bookmark_source(
+    with session.step("Resolve the catalogue's runtime tables"):
+        runtime_sources = read_runtime_sources(
             resolver=session.resolver(workspace), catalogue=workspace.catalogue_item
         )
     return BuildState(
         catalogue=catalogue,
         target_inventories=inventories,
         shortcut_sources=sources,
-        bookmark_source=bookmark_source,
+        runtime_sources=runtime_sources,
     )
 
 

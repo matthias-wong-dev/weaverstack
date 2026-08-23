@@ -49,7 +49,7 @@ import pytest
 from sql_support import (
     PROCEDURE_ITEM,
     forget_bookmark,
-    install_bookmark_reference,
+    install_runtime_references,
 )
 from support.weaver_test import weaver_test
 
@@ -130,7 +130,7 @@ def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Est
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
-    install_bookmark_reference(executor, catalogue)
+    install_runtime_references(executor, catalogue)
     estate = Estate(executor, object_name)
     _drop(estate)
     executor.execute_script(
@@ -653,7 +653,7 @@ def _install_wide(
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
-    install_bookmark_reference(executor, catalogue)
+    install_runtime_references(executor, catalogue)
     estate = WideEstate(executor, object_name, retires=incremental)
     _drop_wide(estate)
     executor.execute_script(f"create table [{SCHEMA}].[{estate.raw}] ({WIDE_RAW_DDL});")

@@ -145,9 +145,7 @@ def without_invalidated(
 def _is_named(row: Row, keys: frozenset[tuple]) -> bool:
     """Whether one row is named by any of these invalidated identities."""
 
-    return any(
-        all(row.get(column) == value for column, value in key) for key in keys
-    )
+    return any(all(row.get(column) == value for column, value in key) for key in keys)
 
 
 __all__ = [

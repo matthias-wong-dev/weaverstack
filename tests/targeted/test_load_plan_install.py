@@ -179,7 +179,7 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
     # it exists for the procedure rather than for anything the build made.
     assert [action.kind for action in actions] == [
         "build_procedure",
-        "create_bookmark_reference",
+        "create_runtime_reference",
     ]
     assert actions[0].executor == "tsql"
     assert actions[0].resource_node_id.endswith("procedure:_/Load Sales.Customer")
@@ -269,7 +269,7 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
     # still declares a loadable object, so it is still wanted.
     assert [action.kind for action in actions] == [
         "drop_procedure",
-        "create_bookmark_reference",
+        "create_runtime_reference",
     ]
     assert statement == "drop procedure if exists [_].[Load Sales.Retired];\n"
 

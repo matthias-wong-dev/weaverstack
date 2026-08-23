@@ -28,6 +28,8 @@ from weaver.catalogue.tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
     CATALOGUE_TABLES,
+    CURRENT_STATE_TABLES,
+    HISTORY_TABLES,
     LOG,
     PROJECTED_TABLES,
     READABLE_TABLES,
@@ -58,26 +60,32 @@ class _Connection:
 
 
 @weaver_test()
-def test_the_readable_tables_are_every_table_but_the_log():
-    """History is appended and never consulted, and it grows with the estate."""
+def test_the_readable_tables_are_every_table_but_the_history():
+    """History is appended and never consulted, and it grows with the estate.
 
-    assert set(READABLE_TABLES) == set(CATALOGUE_TABLES) - {LOG}
-    assert LOG in RUNTIME_TABLES
-    assert BOOKMARK in RUNTIME_TABLES
+    Current state is read, because a build decides which of its rows its own
+    work has made obsolete and cannot prune what it cannot see.
+    """
+
+    assert set(READABLE_TABLES) == set(CATALOGUE_TABLES) - set(HISTORY_TABLES)
+    assert set(HISTORY_TABLES) <= set(RUNTIME_TABLES)
+    assert set(CURRENT_STATE_TABLES) <= set(RUNTIME_TABLES)
     assert not set(RUNTIME_TABLES) & set(PROJECTED_TABLES)
 
 
 @weaver_test()
-def test_an_installed_read_does_not_read_the_log():
+def test_an_installed_read_does_not_read_the_history():
     from weaver.catalogue.state import read_installed_catalogue
 
     connection = _Connection()
 
     catalogue = read_installed_catalogue(connection)
 
-    assert LOG.name not in connection.read
-    assert LOG.name not in catalogue.materialised
-    assert BOOKMARK.name in connection.read
+    for table in HISTORY_TABLES:
+        assert table.name not in connection.read
+        assert table.name not in catalogue.materialised
+    for table in CURRENT_STATE_TABLES:
+        assert table.name in connection.read
 
 
 @weaver_test()

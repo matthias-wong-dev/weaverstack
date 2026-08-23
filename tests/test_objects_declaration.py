@@ -373,7 +373,9 @@ def test_an_incremental_table_returning_none_is_a_successful_no_op(monkeypatch):
     )
 
     assert result.succeeded
-    assert result == LoadResult(succeeded=True, bookmark_datetime=result.bookmark_datetime)
+    assert result == LoadResult(
+        succeeded=True, bookmark_datetime=result.bookmark_datetime
+    )
 
 
 @weaver_test()

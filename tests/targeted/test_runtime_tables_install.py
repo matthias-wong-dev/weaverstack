@@ -1,4 +1,4 @@
-"""What a build decides about ``_.Bookmark``, as the intent it freezes.
+"""What a build decides about the catalogue's runtime tables.
 
 Three claims, and they are separate because they fail separately.
 
@@ -42,9 +42,12 @@ from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
-from weaver.build_bundle.bookmarks import bookmark_invalidation
+from weaver.build_bundle.runtime_tables import runtime_state_invalidation
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import BOOKMARK
+from weaver.catalogue.tables import (
+    BOOKMARK,
+    PRESENTED_RUNTIME_TABLES,
+)
 from weaver.declaration import parse_item_repository
 from weaver.etl import item_bookmarkable_objects
 from weaver.locations import Location
@@ -65,29 +68,30 @@ def estate(tmp_path):
 EMPTY = Catalogue({})
 
 
-def _inventories_over(inventories, *, holding_bookmark: bool = True):
+def _inventories_over(inventories, *, holding_runtime_tables: bool = True):
     """These target inventories, plus the catalogue Warehouse's own."""
 
     with_catalogue = dict(inventories)
-    with_catalogue[CATALOGUE_ITEM] = catalogue_inventory(holding=holding_bookmark)
+    with_catalogue[CATALOGUE_ITEM] = catalogue_inventory(holding=holding_runtime_tables)
     return with_catalogue
 
 
-def _inventories(repository, *, holding_bookmark: bool = True):
+def _inventories(repository, *, holding_runtime_tables: bool = True):
     """Every target this estate binds, including the catalogue's own Warehouse.
 
-    ``holding_bookmark`` is the distinction the bookmark stages turn on: a
-    catalogue Warehouse without the table is one this bundle is creating it in,
-    and the table can hold no row anything could have written.
+    ``holding_runtime_tables`` is the distinction the runtime-table stages turn
+    on: a catalogue Warehouse without them is one this bundle is creating them
+    in, and they can hold no row anything could have written.
     """
 
     return _inventories_over(
-        estate_inventories(repository, empty=True), holding_bookmark=holding_bookmark
+        estate_inventories(repository, empty=True),
+        holding_runtime_tables=holding_runtime_tables,
     )
 
 
 def _bundle(
-    repository, tmp_path, *, catalogue=None, inventories=None, bookmark_source=None
+    repository, tmp_path, *, catalogue=None, inventories=None, runtime_sources=None
 ):
     return generate_item_build_bundle(
         repository,
@@ -99,7 +103,7 @@ def _bundle(
         else _inventories(repository),
         catalogue=catalogue if catalogue is not None else EMPTY,
         catalogue_binding=CATALOGUE,
-        bookmark_source=bookmark_source,
+        runtime_sources=runtime_sources,
     )
 
 
@@ -107,7 +111,7 @@ def _bookmark_actions(bundle):
     return [
         (sequence, action)
         for sequence, _batch, action in bundle.plan.actions()
-        if action.kind == "reconcile_bookmarks"
+        if action.kind == "reconcile_runtime_state"
     ]
 
 
@@ -126,7 +130,7 @@ def _decided(repository, *, items, selected_for_build, catalogue):
     """What a build over these inputs decides about ``_.Bookmark``."""
 
     return _invalidated(
-        bookmark_invalidation(
+        runtime_state_invalidation(
             repository,
             items=items,
             selected_for_build=selected_for_build,
@@ -196,7 +200,7 @@ def test_the_catalogue_item_holds_no_bookmarks(estate):
     """Its tables are written by catalogue DML, never loaded."""
 
     assert (
-        bookmark_invalidation(
+        runtime_state_invalidation(
             estate,
             items=(item_id("Warehouse/_weaver"),),
             selected_for_build={item_id(ITEM)},
@@ -239,7 +243,7 @@ def test_a_build_with_nothing_to_do_says_nothing_about_bookmarks(estate):
     """
 
     assert (
-        bookmark_invalidation(
+        runtime_state_invalidation(
             estate,
             items=(item_id(ITEM),),
             selected_for_build=(),
@@ -265,7 +269,7 @@ def test_a_build_of_objects_that_hold_no_bookmark_says_nothing_either(estate):
     )
 
     assert (
-        bookmark_invalidation(
+        runtime_state_invalidation(
             estate,
             items=(item_id(ITEM),),
             selected_for_build={view},
@@ -337,7 +341,7 @@ def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_p
     }
     kinds = [action.kind for _sequence, _batch, action in bundle.plan.actions()]
 
-    assert kinds.index("reconcile_bookmarks") < min(
+    assert kinds.index("reconcile_runtime_state") < min(
         index for index, kind in enumerate(kinds) if kind in physical
     )
 
@@ -427,7 +431,7 @@ def test_an_unrelated_item_is_outside_the_scope_that_prunes(estate):
 def test_both_items_of_one_build_are_one_intent(estate):
     """Bound items share the table, so addressing them separately is round trips."""
 
-    invalidation = bookmark_invalidation(
+    invalidation = runtime_state_invalidation(
         estate,
         items=(item_id(ITEM), item_id(WAREHOUSE_ITEM)),
         selected_for_build={one for one in estate.source_documents},
@@ -519,10 +523,13 @@ def test_prune_spares_the_catalogue_table_and_not_the_local_reference():
 
 
 @weaver_test()
-def test_the_source_is_the_catalogue_tables_own_delta_directory():
-    """A Warehouse publishes each table as a Delta directory a shortcut can read."""
+def test_each_source_is_the_catalogue_tables_own_delta_directory():
+    """A Warehouse publishes each table as a Delta directory a shortcut can read.
 
-    from weaver.build_bundle.shortcut_sources import read_bookmark_source
+    One resolution serves every table, because they are all in one Warehouse.
+    """
+
+    from weaver.build_bundle.shortcut_sources import read_runtime_sources
 
     class _Item:
         workspace_id = "ws-1"
@@ -533,10 +540,12 @@ def test_the_source_is_the_catalogue_tables_own_delta_directory():
         def warehouse(self, target):
             return _Item()
 
-    source = read_bookmark_source(resolver=_Resolver(), catalogue="Weaver")
+    sources = read_runtime_sources(resolver=_Resolver(), catalogue="Weaver")
 
-    assert source.path == "Tables/_/Bookmark"
-    assert source.item_id == "item-1"
+    assert {name: source.path for name, source in sources.items()} == {
+        table.name: f"Tables/_/{table.name}" for table in PRESENTED_RUNTIME_TABLES
+    }
+    assert all(source.item_id == "item-1" for source in sources.values())
 
 
 @weaver_test()
@@ -551,12 +560,15 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
 
     from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 
-    source = ResolvedShortcutSource(
-        workspace_id="ws-1",
-        item_id="item-1",
-        item_name="Weaver",
-        path="Tables/_/Bookmark",
-    )
+    source = {
+        table.name: ResolvedShortcutSource(
+            workspace_id="ws-1",
+            item_id="item-1",
+            item_name="Weaver",
+            path=f"Tables/_/{table.name}",
+        )
+        for table in PRESENTED_RUNTIME_TABLES
+    }
 
     from weaver.build_bundle import effective_item_bindings
 
@@ -565,7 +577,7 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
     bindings = effective_item_bindings(
         estate_bindings(), control_item=ItemRef("Weaver"), workspace_name=WORKSPACE
     )
-    inventories = _inventories(estate, holding_bookmark=False)
+    inventories = _inventories(estate, holding_runtime_tables=False)
     inventories[CATALOGUE_ITEM] = catalogue_inventory(
         holding=False,
         target_id=next(
@@ -583,7 +595,7 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
         target_inventories=inventories,
         catalogue=EMPTY,
         catalogue_binding=CATALOGUE,
-        bookmark_source=source,
+        runtime_sources=source,
     )
 
     assert _references(creating, "Lakehouse")
@@ -596,9 +608,9 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
 
 
 def _references(bundle, item_type: str) -> list[str]:
-    """The bookmark-reference actions one bundle installs, per kind of item."""
+    """The runtime-reference actions one bundle installs, per kind of item."""
 
-    wanted = f"bookmark-reference-{item_type}"
+    wanted = f"runtime-reference-{item_type}"
     return [
         action.id
         for _sequence, _batch, action in bundle.plan.actions()

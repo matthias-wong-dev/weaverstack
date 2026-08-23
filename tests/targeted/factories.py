@@ -37,14 +37,18 @@ from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.prune import TargetInventory
 from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.state import Catalogue, RegisteredDocument
-from weaver.catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA, REGISTRY
+from weaver.catalogue.tables import (
+    CATALOGUE_SCHEMA,
+    PRESENTED_RUNTIME_TABLES,
+    REGISTRY,
+)
 from weaver.declaration import parse_item_repository
 from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.etl import (
     FILE_TYPE,
     PROCEDURE_TYPE,
-    item_bookmarkable_objects,
+    item_presents_runtime_tables,
     item_runtime_artefacts,
     load_schemas,
 )
@@ -450,12 +454,21 @@ class FixtureInventory(TargetInventory):
         views = qualified(of_kind="View", files=False)
         folders = qualified(of_kind="Folder", files=True)
         artefacts = item_runtime_artefacts(repository, item=item)
-        if target_kind == SQL_TARGET and item_bookmarkable_objects(
+        if target_kind == SQL_TARGET and item_presents_runtime_tables(
             repository, item=item
         ):
-            # A built Warehouse holds the catalogue's `_.Bookmark` under that
-            # name, so a generated load procedure can reach its own bookmark.
-            views = tuple(sorted(views + (f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",)))
+            # A built Warehouse holds the catalogue's runtime tables under their
+            # own names, so a generated procedure can read its own bookmark and
+            # record what it did.
+            views = tuple(
+                sorted(
+                    views
+                    + tuple(
+                        f"{CATALOGUE_SCHEMA}.{table.name}"
+                        for table in PRESENTED_RUNTIME_TABLES
+                    )
+                )
+            )
         return cls(
             target_id=target_id,
             kind=kind,
@@ -533,17 +546,24 @@ def catalogue_inventory(
 ):
     """The catalogue Warehouse's own inventory, as the planner receives it.
 
-    ``holding`` says whether it physically holds ``_.Bookmark``. That is what
+    ``holding`` says whether it physically holds the runtime tables. That is what
     decides the two things the build that *creates* the catalogue cannot do: a
-    Lakehouse shortcut has nothing to point at, and bookmark reconciliation has
-    no table to reconcile.
+    Lakehouse shortcut has nothing to point at, and runtime-state reconciliation
+    has no table to reconcile.
     """
 
-    from weaver.catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA, PROJECTED_TABLES
+    from weaver.catalogue.tables import (
+        CATALOGUE_SCHEMA,
+        PRESENTED_RUNTIME_TABLES,
+        PROJECTED_TABLES,
+    )
 
     held = tuple(
         f"{CATALOGUE_SCHEMA}.{table.name}"
-        for table in (*PROJECTED_TABLES, *((BOOKMARK,) if holding else ()))
+        for table in (
+            *PROJECTED_TABLES,
+            *(PRESENTED_RUNTIME_TABLES if holding else ()),
+        )
     )
     return target_inventory(
         target_id=target_id,

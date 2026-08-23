@@ -207,6 +207,44 @@ def item_bookmarkable_objects(
     return tuple(sorted(found, key=str))
 
 
+def item_validated_objects(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    """The validations in one item, and therefore what carries a test status.
+
+    Derived from the validation artefacts the item installs, as
+    :func:`item_bookmarkable_objects` is derived from its load artefacts, so what
+    carries a status cannot drift from what has something to run.
+
+    The identity is the validation's own ``Schema.Object``, not its compiled
+    artefact's: a test status describes the Test, and the module or procedure it
+    compiles to is how the Test is run.
+    """
+
+    found = {
+        artefact.origin
+        for artefact in item_validation_artefacts(repository, item=item)
+        if artefact.origin is not None
+    }
+    return tuple(sorted(found, key=str))
+
+
+def item_presents_runtime_tables(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> bool:
+    """Whether this item has anything whose operational state Weaver records.
+
+    A loadable object or a validation. An item with neither installs nothing that
+    reads or writes a runtime table, so a build gives it none of them — and the
+    item graph puts no edge from the built-in item to it.
+    """
+
+    return bool(
+        item_bookmarkable_objects(repository, item=item)
+        or item_validated_objects(repository, item=item)
+    )
+
+
 def item_runtime_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
@@ -787,9 +825,11 @@ __all__ = [
     "PROCEDURE_TYPE",
     "item_bookmarkable_objects",
     "item_load_artefacts",
+    "item_presents_runtime_tables",
     "load_artefacts",
     "artefacts_by_identity",
     "item_runtime_artefacts",
+    "item_validated_objects",
     "item_validation_artefacts",
     "runtime_artefacts",
     "validation_artefacts",

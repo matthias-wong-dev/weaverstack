@@ -78,7 +78,9 @@ def test_a_table_the_catalogue_does_not_have_is_refused():
     """A misspelled table would render a DELETE against nothing."""
 
     with pytest.raises(KeyError, match="is not a catalogue table"):
-        render_invalidation((RuntimeStateInvalidation(table="Bookmarks", rows=(CUSTOMER,)),))
+        render_invalidation(
+            (RuntimeStateInvalidation(table="Bookmarks", rows=(CUSTOMER,)),)
+        )
 
 
 # --- the frozen payload -------------------------------------------------------
@@ -135,7 +137,10 @@ def test_applying_the_intent_removes_the_named_rows_and_keeps_the_rest():
 
     rows = {
         "Lakehouse/Sales": {
-            "Bookmark": (dict(CUSTOMER, bookmark_datetime=1), dict(CSV, bookmark_datetime=2)),
+            "Bookmark": (
+                dict(CUSTOMER, bookmark_datetime=1),
+                dict(CSV, bookmark_datetime=2),
+            ),
             "Log": ({"log_sk": "a"},),
         }
     }

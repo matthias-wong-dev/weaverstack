@@ -25,19 +25,23 @@ class CatalogObject:
 PROCEDURE_ITEM = ("Warehouse", "Reporting")
 
 
-def install_bookmark_reference(executor: SqlExecutor, catalogue: str) -> None:
-    """What a build gives every Warehouse it installs a load into.
+def install_runtime_references(executor: SqlExecutor, catalogue: str) -> None:
+    """What a build gives every Warehouse it installs something runnable into.
 
-    The catalogue's ``_.Bookmark`` under that name. A procedure reads and writes
-    its own bookmark through it, so one installed by hand needs the same
-    reference a built one is given.
+    The catalogue's runtime tables under their own names. A generated procedure
+    reads a bookmark and records what it did through these, so one installed by
+    hand needs the same references a built one is given.
     """
 
+    from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES
+
     executor.execute_script("if schema_id(N'_') is null exec('create schema [_]');")
-    executor.execute_script(
-        "create or alter view [_].[Bookmark] as "
-        f"select * from [{catalogue}].[_].[Bookmark];"
-    )
+    for table in PRESENTED_RUNTIME_TABLES:
+        # One statement per batch: T-SQL requires CREATE VIEW to lead its own.
+        executor.execute_script(
+            f"create or alter view [_].[{table.name}] as "
+            f"select * from [{catalogue}].[_].[{table.name}];"
+        )
 
 
 def forget_bookmark(schema: str, name: str) -> str:

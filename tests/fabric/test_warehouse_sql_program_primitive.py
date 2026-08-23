@@ -31,7 +31,7 @@ import pytest
 from sql_support import (
     PROCEDURE_ITEM,
     forget_bookmark,
-    install_bookmark_reference,
+    install_runtime_references,
 )
 from support.weaver_test import weaver_test
 
@@ -170,7 +170,7 @@ def warehouse(
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
-    install_bookmark_reference(executor, fabric_workspace.catalogue_item.name)
+    install_runtime_references(executor, fabric_workspace.catalogue_item.name)
     for table, columns in (
         (
             "ProgramCustomer",

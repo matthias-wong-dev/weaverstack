@@ -53,11 +53,11 @@ PRUNE_VIEW = "prune_view"
 PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
 
-#: Present the catalogue's ``_.Bookmark`` in a built Warehouse under that name,
-#: so a generated load procedure can read and write its own bookmark. Weaver
-#: runtime infrastructure rather than a declared shortcut — see
-#: :mod:`weaver.build_bundle.bookmarks`.
-CREATE_BOOKMARK_REFERENCE = "create_bookmark_reference"
+#: Present the catalogue's runtime tables in a built target under their own
+#: names, so a generated procedure can read a bookmark and record what it did.
+#: Weaver runtime infrastructure rather than declared shortcuts — see
+#: :mod:`weaver.build_bundle.runtime_tables`.
+CREATE_RUNTIME_REFERENCE = "create_runtime_reference"
 
 #: Refresh the SQL analytics endpoint for one Lakehouse after its Delta tables
 #: have changed. The action is target-bound and payloadless: the planner decides
@@ -71,17 +71,17 @@ REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 DELETE_CATALOGUE_CLAIMS = "delete_catalogue_claims"
 PUBLISH_CATALOGUE = "publish_catalogue"
 PUBLISH_REGISTRY = "publish_registry"
-#: Bring ``_.Bookmark`` into line with what this build will leave installed:
-#: remove the rows of objects it no longer loads, and reset the ones it rebuilds.
-#: It leads physical work for the reason claim deletion does — see
-#: :mod:`weaver.build_bundle.bookmarks`.
-RECONCILE_BOOKMARKS = "reconcile_bookmarks"
+#: Bring the catalogue's current-state tables into line with what this build will
+#: leave installed: remove the rows of objects it no longer runs, and the rows of
+#: the incarnations it is replacing. It leads physical work for the reason claim
+#: deletion does — see :mod:`weaver.build_bundle.runtime_tables`.
+RECONCILE_RUNTIME_STATE = "reconcile_runtime_state"
 CATALOGUE_KINDS = frozenset(
     {
         DELETE_CATALOGUE_CLAIMS,
         PUBLISH_CATALOGUE,
         PUBLISH_REGISTRY,
-        RECONCILE_BOOKMARKS,
+        RECONCILE_RUNTIME_STATE,
     }
 )
 

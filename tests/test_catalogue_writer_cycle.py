@@ -28,15 +28,23 @@ import threading
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.catalogue.flusher import FlushError, FlusherKey, WarehouseFlusher
+from weaver.catalogue.flusher import FlusherKey, FlushError, WarehouseFlusher
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import BIGINT, CatalogueColumn, RuntimeTable
+from weaver.catalogue.tables import (
+    BIGINT,
+    BY_LOADABLE,
+    CURRENT_STATE,
+    HISTORY,
+    CatalogueColumn,
+    RuntimeTable,
+)
 from weaver.catalogue.writer import CatalogueWriter
 
 #: An append-only table, keyed by a surrogate nothing merges on.
-HISTORY = RuntimeTable(
+APPENDED = RuntimeTable(
     name="History",
     key=("log_sk",),
+    maintenance=HISTORY,
     description="Stands for any append-only runtime table.",
     columns=(
         CatalogueColumn("log_sk", not_null=True, description="A surrogate row key."),
@@ -50,6 +58,8 @@ HISTORY = RuntimeTable(
 CURRENT = RuntimeTable(
     name="Current",
     key=("item_name", "object_name"),
+    maintenance=CURRENT_STATE,
+    invalidated_by=BY_LOADABLE,
     description="Stands for any keyed current-state runtime table.",
     columns=(
         CatalogueColumn("item_name", not_null=True, description="The logical item."),
@@ -122,10 +132,10 @@ def writer(streams):
 def test_submit_appends(writer, streams):
     """An appended row is an INSERT, whatever table it belongs to."""
 
-    writer.submit(HISTORY, {"log_sk": "a", "workflow_id": "w", "count": 1})
+    writer.submit(APPENDED, {"log_sk": "a", "workflow_id": "w", "count": 1})
     writer.flush()
 
-    (statement,) = streams.statements(HISTORY)
+    (statement,) = streams.statements(APPENDED)
     assert statement.startswith("INSERT INTO")
     assert "[_].[History]" in statement
 
@@ -143,29 +153,29 @@ def test_update_merges_on_the_tables_own_key(writer, streams):
 
 
 @weaver_test()
-def test_a_table_declaring_no_key_cannot_be_merged_into():
-    """Merging needs an identity, and an append-only table declares none."""
+def test_history_cannot_be_merged_into():
+    """A row that records what happened is not a row to be replaced later.
 
-    unkeyed = RuntimeTable(
-        name="History",
-        description="Stands for a table with no identity to merge on.",
-        columns=(CatalogueColumn("workflow_id", description="Anything."),),
-    )
+    Refused on what the table declares rather than on whether it has a key: an
+    append-only table carries a surrogate key too, so the presence of one settles
+    nothing.
+    """
+
     writer = CatalogueWriter(lambda table: _flusher(table, Recorder()))
 
-    with pytest.raises(FlushError, match="declares no key"):
-        writer.update(unkeyed, {"workflow_id": "w"})
+    with pytest.raises(FlushError, match="is history"):
+        writer.update(APPENDED, {"log_sk": "a"})
 
 
 @weaver_test()
 def test_appends_and_merges_never_share_a_statement(writer, streams):
     """One is an INSERT and the other a MERGE, so a batch holds one kind."""
 
-    writer.submit(HISTORY, {"log_sk": "a"})
+    writer.submit(APPENDED, {"log_sk": "a"})
     writer.update(CURRENT, {"item_name": "Sales", "object_name": "Customer"})
     writer.flush()
 
-    assert len(streams.statements(HISTORY)) == 1
+    assert len(streams.statements(APPENDED)) == 1
     assert len(streams.statements(CURRENT)) == 1
 
 
@@ -176,10 +186,10 @@ def test_appends_and_merges_never_share_a_statement(writer, streams):
 def test_each_table_gets_its_own_stream(writer, streams):
     """A busy run writes several tables, and one wedged table is not all of them."""
 
-    writer.submit(HISTORY, {"log_sk": "a"})
+    writer.submit(APPENDED, {"log_sk": "a"})
     writer.update(CURRENT, {"item_name": "Sales", "object_name": "Customer"})
 
-    assert set(streams.recorders) == {HISTORY.name, CURRENT.name}
+    assert set(streams.recorders) == {APPENDED.name, CURRENT.name}
 
 
 @weaver_test()
@@ -195,12 +205,12 @@ def test_a_table_nothing_was_written_to_opens_no_stream(writer, streams):
 def test_flush_waits_for_every_table(writer, streams):
     """The barrier is the whole record, not one table's worth of it."""
 
-    writer.submit(HISTORY, {"log_sk": "a"})
-    writer.submit(HISTORY, {"log_sk": "b"})
+    writer.submit(APPENDED, {"log_sk": "a"})
+    writer.submit(APPENDED, {"log_sk": "b"})
     writer.update(CURRENT, {"item_name": "Sales", "object_name": "Customer"})
     writer.flush()
 
-    assert streams.statements(HISTORY)
+    assert streams.statements(APPENDED)
     assert streams.statements(CURRENT)
 
 
@@ -213,11 +223,11 @@ def test_a_queued_row_does_not_wait_for_the_warehouse():
 
     streams = _Streams()
     writer = CatalogueWriter(streams.flusher_for)
-    writer.submit(HISTORY, {"log_sk": "a"})
-    recorder = streams.recorders[HISTORY.name]
+    writer.submit(APPENDED, {"log_sk": "a"})
+    recorder = streams.recorders[APPENDED.name]
     recorder.block = True
 
-    writer.submit(HISTORY, {"log_sk": "b"})
+    writer.submit(APPENDED, {"log_sk": "b"})
 
     # Returned without the second row having been written.
     assert "b" not in "".join(recorder.statements)
@@ -241,9 +251,9 @@ def test_a_write_that_did_not_land_surfaces_at_flush():
 def test_one_tables_failure_is_reported_even_when_another_succeeded():
     """A run told its record landed must be able to rely on all of it."""
 
-    streams = _Streams(failing={HISTORY.name: RuntimeError("refused")})
+    streams = _Streams(failing={APPENDED.name: RuntimeError("refused")})
     writer = CatalogueWriter(streams.flusher_for)
-    writer.submit(HISTORY, {"log_sk": "a"})
+    writer.submit(APPENDED, {"log_sk": "a"})
     writer.update(CURRENT, {"item_name": "Sales", "object_name": "Customer"})
 
     with pytest.raises(FlushError, match="refused"):
@@ -264,7 +274,8 @@ def test_a_keyed_row_is_visible_through_the_catalogue_at_once(streams):
     catalogue = Catalogue({}, writer=CatalogueWriter(streams.flusher_for))
 
     catalogue.update(
-        CURRENT, {"item_name": "Sales", "object_name": "Customer", "result": "Succeeded"}
+        CURRENT,
+        {"item_name": "Sales", "object_name": "Customer", "result": "Succeeded"},
     )
 
     assert [row["result"] for row in catalogue.table_rows(CURRENT)] == ["Succeeded"]
@@ -289,9 +300,9 @@ def test_an_appended_row_is_not_read_back_through_the_catalogue(streams):
 
     catalogue = Catalogue({}, writer=CatalogueWriter(streams.flusher_for))
 
-    catalogue.submit(HISTORY, {"log_sk": "a"})
+    catalogue.submit(APPENDED, {"log_sk": "a"})
 
-    assert catalogue.table_rows(HISTORY) == ()
+    assert catalogue.table_rows(APPENDED) == ()
 
 
 __all__: tuple = ()

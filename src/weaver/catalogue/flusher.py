@@ -109,10 +109,10 @@ class WarehouseFlusher:
         upsert, so a row nothing has written yet is inserted rather than lost.
         """
 
-        if not self.table.key:
+        if not getattr(self.table, "is_current_state", bool(self.table.key)):
             raise FlushError(
-                f"{self.table.qualified} declares no key, so a row cannot be "
-                "merged into it — append it with submit()"
+                f"{self.table.qualified} is history, so a row cannot be merged "
+                "into it — append it with submit()"
             )
         self.submit(row, keyed=True)
 
