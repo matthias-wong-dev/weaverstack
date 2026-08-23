@@ -242,17 +242,21 @@ subject crossed in its claim body, and putting fixture plumbing into that
 comparison would make every assertion-heavy test declare a resource its subject
 never touched.
 
-Measured over four Lakehouse modules against `PYTEST_WORKSPACE`:
+Measured over the whole `hosted` stratum against `PYTEST_WORKSPACE`, a 21-minute
+run:
 
 ```text
-stage the repository     ~10s   onelake
-generate the bundle      14-21s livy
-install the bundle       43-60s livy
+install the bundle         6 run(s)    366.4s  livy
+generate the bundle        6 run(s)     76.5s  livy
+reset the target           5 run(s)     54.6s  livy
+stage the repository       5 run(s)     30.0s  onelake
+total                                  527.6s
 ```
 
-So one estate costs roughly a minute, and the four modules that share a
-repository fixture paid for three of them out of a 14-minute run — material, and
-not dominant.
+So one estate costs roughly a minute, six of them were built, and provisioning is
+**41% of the stratum**. That is the dominant single cost, and it is worth acting
+on: several of those six installs are the same repository fixture into the same
+target.
 
 **Sharing the build is therefore worth doing and has not been done.** The obstacle
 is the reset, not the build: a module currently gets its estate by *emptying the
@@ -260,8 +264,9 @@ target and the catalogue* and then installing into it, so sharing one installati
 means replacing that with a reset that clears the mutable data and the catalogue's
 runtime rows while leaving the structure and the projected rows. Whether that
 preserves isolation is a claim about execution order, and it can only be settled by
-running the modules in both orders. Until that has been done, the suite pays for
-the builds.
+running the modules in both orders and getting the same answers. Until that has
+been done, the suite pays for the builds — and the ledger above says what it is
+paying.
 
 Two things that were free have been taken. `test_run_decomposition_boundary.py`
 no longer parametrises `weaver_repo_fixture` with the value it already defaults
