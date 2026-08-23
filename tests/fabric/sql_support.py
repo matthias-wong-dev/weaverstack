@@ -44,37 +44,6 @@ def install_runtime_references(executor: SqlExecutor, catalogue: str) -> None:
         )
 
 
-def forget_bookmark(schema: str, name: str) -> str:
-    """A statement removing one object's bookmark row, keyed as Registry keys it."""
-
-    item_type, item_name = PROCEDURE_ITEM
-    return (
-        "delete from [_].[Bookmark] "
-        f"where [Item type] = N'{item_type}' and [Item name] = N'{item_name}' "
-        f"and [Schema name] = N'{schema}' and [Object name] = N'{name}';\n"
-    )
-
-
-def forget_validation_state(schema: str, name: str) -> str:
-    """Statements removing what the catalogue records about one validation.
-
-    The two tables a validation touches. A Warehouse holding validations and no
-    loads presents every runtime table, but deleting from the load ones would
-    say a validation had a bookmark.
-    """
-
-    item_type, item_name = PROCEDURE_ITEM
-    scoped = (
-        f"[Item type] = N'{item_type}' and [Item name] = N'{item_name}' "
-        f"and [Schema name] = N'{schema}' and [Object name] = N'{name}'"
-    )
-    return (
-        f"delete from [_].[TestStatus] where {scoped};\n"
-        f"delete from [_].[Log] where [Schema name] = N'{schema}' "
-        f"and [Object name] = N'{name}';\n"
-    )
-
-
 def forget_runtime_state(schema: str, name: str) -> str:
     """Statements removing everything the catalogue records about one object.
 

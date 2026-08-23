@@ -30,7 +30,7 @@ from types import SimpleNamespace
 import pytest
 from sql_support import (
     PROCEDURE_ITEM,
-    forget_bookmark,
+    forget_runtime_state,
     install_runtime_references,
 )
 from support.weaver_test import weaver_test
@@ -201,7 +201,7 @@ def _install(executor, name: str, source: str):
         document.create_load(item=WeaverItemId(*PROCEDURE_ITEM)).payload.decode("utf-8")
     )
     # Each case starts from "never cleanly loaded", whatever the last one left.
-    executor.execute_script(forget_bookmark(SCHEMA, name))
+    executor.execute_script(forget_runtime_state(SCHEMA, name))
     return document
 
 

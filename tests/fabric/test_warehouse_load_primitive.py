@@ -48,7 +48,6 @@ from typing import Any
 import pytest
 from sql_support import (
     PROCEDURE_ITEM,
-    forget_bookmark,
     forget_runtime_state,
     install_runtime_references,
 )
@@ -794,7 +793,7 @@ def _reset_wide(estate: WideEstate) -> None:
     statements = [
         f"delete from [{SCHEMA}].[{name}];",
         f"delete from [{SCHEMA}].[{estate.raw}];",
-        forget_bookmark(SCHEMA, name),
+        forget_runtime_state(SCHEMA, name),
     ]
     if estate.retires:
         statements.append(f"delete from [{SCHEMA}].[{estate.retire}];")

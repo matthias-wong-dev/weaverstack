@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 
 import pytest
-from sql_support import forget_validation_state, install_runtime_references
+from sql_support import forget_runtime_state, install_runtime_references
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
@@ -220,12 +220,12 @@ def _test_status(executor, name: str) -> dict | None:
 def _forget(executor, *names: str) -> None:
     """Clear what the catalogue records about these validations.
 
-    The two tables a validation touches and no others: a sequence of claims about
-    what one call recorded starts from nothing recorded.
+    A sequence of claims about what one call recorded starts from nothing
+    recorded, and a row an earlier claim left would be counted by the next one.
     """
 
     executor.execute_script(
-        "".join(forget_validation_state(SCHEMA, name) for name in names)
+        "".join(forget_runtime_state(SCHEMA, name) for name in names)
     )
 
 
