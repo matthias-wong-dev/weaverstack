@@ -305,6 +305,32 @@ def test_an_anchored_validation_that_fails_records_how_much_disagreed(lakehouse)
 
 
 @weaver_test()
+def test_a_validation_that_could_not_be_evaluated_is_recorded_as_an_error(lakehouse):
+    """It found nothing, and zero discrepancies is the answer it must not give.
+
+    Recorded and then raised, as the generated ``_.Test`` does inside its own
+    TRY/CATCH: a validation nobody could evaluate is an outcome worth a row.
+    """
+
+    class _Broken:
+        def count(self):
+            raise RuntimeError("the source is not there")
+
+    catalogue = validating("DWG.CustomerHasRows")
+    validation = _assumption(_Broken())(
+        MockSpark(), lakehouse=lakehouse, catalogue=catalogue
+    )
+
+    with pytest.raises(RuntimeError, match="not there"):
+        validation.run()
+
+    row = catalogue.writer.rows(TEST_STATUS.name)[0]
+    assert row["result"] == "error"
+    assert row["failure_count"] is None
+    assert catalogue.writer.flushes == 1
+
+
+@weaver_test()
 def test_a_validation_records_no_load_state(lakehouse):
     """Two populations, and a validation belongs to one of them."""
 

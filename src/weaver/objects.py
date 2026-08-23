@@ -873,27 +873,57 @@ class _Validation(WeaverObject):
         violation counts for an Assumption — rather than the rows. The rows are
         what ``read()`` gives; a durable record of them would put whatever the
         validation selected into the estate's own evidence.
+
+        A validation that could not be evaluated is recorded as an Error and then
+        raised. It found nothing, and reporting zero discrepancies for it is the
+        one answer a validation must never give. The generated ``_.Test`` does
+        the same inside its own TRY/CATCH.
         """
 
-        from datetime import datetime as _datetime
+        self._anchor()
+        started = datetime.now(timezone.utc)
+        try:
+            result = self._evaluated()
+        except Exception as unevaluated:
+            self._record(
+                self._settled_validation(
+                    self._failed_to_run(f"{type(unevaluated).__name__}: {unevaluated}"),
+                    started=started,
+                    raised=True,
+                )
+            )
+            raise
+        self._record(self._settled_validation(result, started=started))
+        return result
 
-        from .run.record import settled_validation
+    def _evaluated(self):
+        """What this validation found, from the rows its ``read()`` returned."""
+
         from .runtime.validation_result import result_from_rows
 
-        self._anchor()
-        started = _datetime.now(timezone.utc)
         result, _rows = result_from_rows(self.read(), kind=self._validation_kind)
-        self._record(
-            settled_validation(
-                self._installed,
-                result,
-                physical_target=self._physical_target(),
-                kind=self._validation_kind,
-                started=started,
-                completed=_datetime.now(timezone.utc),
-            )
-        )
         return result
+
+    def _failed_to_run(self, message: str):
+        """A result in this validation's own vocabulary, carrying no counts."""
+
+        from .runtime.validation_result import AssumptionResult, TestResult
+
+        kind = TestResult if self._validation_kind == TEST else AssumptionResult
+        return kind.failed_to_run(message)
+
+    def _settled_validation(self, result, *, started, raised: bool = False):
+        from .run.record import settled_validation
+
+        return settled_validation(
+            self._installed,
+            result,
+            physical_target=self._physical_target(),
+            kind=self._validation_kind,
+            started=started,
+            completed=datetime.now(timezone.utc),
+            raised=raised,
+        )
 
 
 class Assumption(_Validation):

@@ -377,16 +377,24 @@ def settled_load(
 
 
 def settled_validation(
-    identity, result, *, physical_target: str, kind: str, started, completed
+    identity,
+    result,
+    *,
+    physical_target: str,
+    kind: str,
+    started,
+    completed,
+    raised: bool = False,
 ) -> "RunNodeResult":
     """One standalone validation, in the same terms.
 
     ``kind`` is Test or Assumption, as the declaration says; the status follows
-    from whether the result judged anything.
+    from whether the result judged anything. ``raised`` says it could not be
+    evaluated, which is an Error rather than a finding.
     """
 
     from .outcome import status_of
-    from .result import RunNodeResult
+    from .result import FAILED, RunNodeResult
 
     return RunNodeResult(
         node_id=str(identity),
@@ -394,9 +402,10 @@ def settled_validation(
         primitive_kind="standalone",
         logical_id=str(identity),
         role=kind,
-        status=status_of(result),
+        status=FAILED if raised else status_of(result),
+        raised=raised,
         # It ran and reported, so what it says is Weaver's own judgement.
-        refused=True,
+        refused=not raised,
         executed=True,
         result=result,
         started_at=_isoformat(started),
