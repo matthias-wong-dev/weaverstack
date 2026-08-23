@@ -73,6 +73,7 @@ RESULT_PARAMETERS = (
     ("rows_rejected", "bigint"),
     ("error_message", "varchar(4000)"),
     ("bookmark_datetime", "datetime2(6)"),
+    ("is_static_skip", "bit"),
 )
 
 #: The suffixes of the intermediate tables, in the object's own schema.
@@ -241,6 +242,10 @@ def _result_assignment(**values: str) -> str:
         # a Static skip, a refused breach, a load that rejected rows — reports
         # none and the bookmark it already had stands.
         "bookmark_datetime": "null",
+        # Reported rather than inferred from the counts: a Static skip and a load
+        # that read an empty window are both a success with nothing moved, and
+        # only the procedure knows which of the two happened.
+        "is_static_skip": "cast(0 as bit)",
     }
     defaults.update(values)
     return "\n".join(
@@ -269,7 +274,9 @@ def _static_gate(contract: LoadContract) -> str:
 
     if not contract.static:
         return "-- Not static: this object is loaded on every run."
-    seeded = _result_assignment(succeeded="cast(1 as bit)")
+    seeded = _result_assignment(
+        succeeded="cast(1 as bit)", is_static_skip="cast(1 as bit)"
+    )
     return (
         "-- Static: loaded once. A bookmark row means a clean load has run for\n"
         "-- this incarnation, so this reports a successful load of nothing.\n"

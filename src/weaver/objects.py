@@ -489,7 +489,7 @@ class Folder(WeaverObject):
         # The bookmark decides it, not the folder's contents: Static means "load
         # this once", and a bookmark is the record of whether that has happened.
         if contract.static and self.bookmark() > _sentinel():
-            return LoadResult(succeeded=True)
+            return LoadResult(succeeded=True, is_static_skip=True)
 
         issued = new_staging_folder(self.path(), self._staging_path())
         self._issued_staging = issued
@@ -635,7 +635,7 @@ class Table(WeaverObject):
         # table somebody populated by hand is still loaded, and a table a clean
         # load emptied is still skipped.
         if contract.static and self.bookmark() > _sentinel():
-            return LoadResult(succeeded=True)
+            return LoadResult(succeeded=True, is_static_skip=True)
 
         # Staging: unvalidated, unreconciled, nothing yet classified as new or
         # changed.

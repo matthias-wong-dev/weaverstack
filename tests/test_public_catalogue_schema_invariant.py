@@ -581,7 +581,7 @@ def test_every_node_status_maps_to_a_frozen_result():
     forgotten, and the first thing that noticed was a real workspace.
     """
 
-    from weaver.run.evidence import RESULT_FOR_STATUS
+    from weaver.run.record import RESULT_FOR_STATUS
     from weaver.run.result import (
         BLOCKED,
         FAILED,
@@ -607,4 +607,6 @@ def test_every_node_status_maps_to_a_frozen_result():
     }
 
     assert every <= set(RESULT_FOR_STATUS)
-    assert set(RESULT_FOR_STATUS.values()) <= set(RESULT_VOCABULARY)
+    # _.Log records both kinds of task, so the load vocabulary is the one it has
+    # to fit inside.
+    assert set(RESULT_FOR_STATUS.values()) <= set(LOAD_RESULT_VOCABULARY)

@@ -10,7 +10,7 @@ One Runner for load, test and whatever runtime work comes next. The kinds differ
 in which nodes are selected and which primitive runs; they do not differ in how
 a run behaves.
 
-Seven modules, and each is a step of that line rather than a fragment of one:
+Eight modules, and each is a step of that line rather than a fragment of one:
 
 .. code-block:: text
 
@@ -21,13 +21,14 @@ Seven modules, and each is a step of that line rather than a fragment of one:
     dispatch    the one place a run crosses into a real engine
     outcome     what a primitive's answer means, raised or returned
     result      what happened: the contract, the messages, the statuses
+    record      what the estate is told about it, in the runtime tables
 """
 
 from __future__ import annotations
 
 from .dispatch import can_refresh, dispatch_primitive
-from .evidence import RunLog, new_workflow_id, open_run_log
 from .graph import RunGraph, RunNode, graph_for
+from .record import RunRecord, new_workflow_id, open_run_record
 from .result import (
     RunError,
     RunFailure,
@@ -55,8 +56,8 @@ __all__ = [
     "reports_outcome",
     "dispatch_primitive",
     "graph_for",
-    "RunLog",
+    "RunRecord",
     "new_workflow_id",
-    "open_run_log",
+    "open_run_record",
     "run_status",
 ]

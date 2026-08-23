@@ -152,12 +152,12 @@ def run_test(
             ),
             workspace=workspace,
         )
-    from ..run import open_run_log
+    from ..run import open_run_record
 
-    log = (
+    record = (
         None
         if dry_run
-        else open_run_log(
+        else open_run_record(
             state.catalogue,
             workspace=workspace,
             task_type=TASK_TYPE,
@@ -170,11 +170,11 @@ def run_test(
             # Evidence for a caller who asked about one validation; counts alone
             # for a whole-target run, which must not transfer diagnostic rows.
             dispatch=_dispatch_collecting(collect=name is not None),
-            on_node=None if log is None else log.submit,
+            on_node=None if record is None else record.settled,
         )
-    if log is not None:
+    if record is not None:
         with session.step("Record what the run did"):
-            state.catalogue.flush()
+            record.flush()
 
     return _reported(
         nodes=tuple(_as_validation_node(node) for node in result.nodes),
@@ -182,7 +182,7 @@ def run_test(
         started=started,
         strict=strict,
         selection=name,
-        workflow_id=None if log is None else log.workflow_id,
+        workflow_id=None if record is None else record.workflow_id,
     )
 
 

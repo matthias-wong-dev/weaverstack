@@ -75,6 +75,7 @@ ROW = {
     "rows_rejected": 0,
     "error_message": None,
     "bookmark_datetime": BEGAN,
+    "is_static_skip": False,
 }
 
 

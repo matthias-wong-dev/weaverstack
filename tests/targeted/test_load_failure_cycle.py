@@ -38,6 +38,7 @@ from factories import (
 from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient, given_workspace
 
+from weaver.catalogue.tables import RESULT_VOCABULARY
 from weaver.errors import LoadError
 from weaver.fabric.resolution import FabricResolver
 from weaver.load_plan import PhysicalTargetRef
@@ -187,13 +188,19 @@ def _recorded_nodes(session) -> list[str]:
     return [node for _at, node in sorted(found)]
 
 
+#: Every value the public ``[Result]`` vocabulary holds, so a row carrying a new
+#: one is read as that rather than falling through to whichever value happens to
+#: appear next in the statement.
+RESULTS = tuple(RESULT_VOCABULARY.values()) + ("Rejected",)
+
+
 def _result_for(session, node_id: str) -> str:
     """The public ``[Result]`` value one node's row carries."""
 
     for statement in _log_statements(session):
         for row in statement.split("),\n"):
             if node_id in row:
-                for value in ("Succeeded", "Failed", "Blocked", "Skipped"):
+                for value in RESULTS:
                     if f"N'{value}'" in row:
                         return value
     raise AssertionError(f"no _.Log row was written for {node_id}")
@@ -407,15 +414,20 @@ def test_every_planned_node_receives_exactly_one_final_record(session, dispatche
 
 @weaver_test()
 def test_a_record_says_what_became_of_the_node(session, dispatched):
-    """The frozen public vocabulary, and the node's own detail beside it."""
+    """The frozen public vocabulary, and the node's own detail beside it.
+
+    A dispatch that threw is an Error rather than a Failure: the load produced
+    no judgement about anything, and a reader deciding whether to look at the
+    data or at the code needs the two kept apart.
+    """
 
     dispatched.answers[ORDER] = RuntimeError("boom")
 
     with pytest.raises(LoadError):
         _run(session)
 
-    assert _result_for(session, ORDER) == "Failed"
-    assert _result_for(session, SUMMARY) in ("Blocked", "Skipped")
+    assert _result_for(session, ORDER) == "Error"
+    assert _result_for(session, SUMMARY) == "Blocked"
     # And the detail a reader needs that no single value carries: whether the
     # node touched the target at all.
     statements = "\n".join(_log_statements(session))
@@ -447,7 +459,9 @@ def test_a_pending_node_receives_evidence_of_its_own(session, dispatched):
 
     assert set(pending) <= set(_recorded_nodes(session))
     for node in pending:
-        assert _result_for(session, node) == "Skipped"
+        # Pending rather than Skipped: nothing decided not to run it, and no
+        # outcome was established for this incarnation.
+        assert _result_for(session, node) == "Pending"
 
 
 @weaver_test()
@@ -468,7 +482,7 @@ def test_every_node_is_recorded_before_the_run_raises(session, dispatched):
     assert sorted(_recorded_nodes(session)) == sorted(
         node.node_id for node in raised.value.report.nodes
     )
-    assert _result_for(session, ORDER) == "Failed"
+    assert _result_for(session, ORDER) == "Error"
 
 
 @weaver_test()
