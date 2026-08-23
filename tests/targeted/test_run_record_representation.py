@@ -1,20 +1,7 @@
-"""What a run tells the catalogue about itself, row by row.
+"""Which rows a settled node writes, and what they say.
 
-The Runner dispatches primitives and settles nodes; this is the record that
-settling leaves behind. Five tables, and which of them a node writes to depends
-on what the node was:
-
-.. code-block:: text
-
-    every settled node       _.Log
-    a load about an object   _.LoadStatus
-    a load that executed     _.LoadStatistic
-    a clean load             _.Bookmark
-    a validation             _.TestStatus
-
-Pure Python. A settled node is a value, and the catalogue records into a writer
-that keeps what it was given, so what a run *would* write is exactly what is
-asserted here.
+Pure Python: a settled node is a value, and the catalogue records into a writer
+that keeps what it was given, so what a run would write is what is asserted.
 """
 
 from __future__ import annotations
@@ -129,7 +116,7 @@ def test_a_clean_load_writes_every_table_it_touches():
 
 @weaver_test()
 def test_the_status_row_carries_the_objects_logical_identity_and_nothing_physical():
-    """Where the object lives is the Installation's to say, not a status row's."""
+    """Where the object lives is the Installation's to say."""
 
     row = _one(_recorded(_node()), LOAD_STATUS)
 
@@ -165,10 +152,7 @@ def test_the_statistic_row_carries_what_the_load_did():
 
 @weaver_test()
 def test_a_static_skip_says_so_rather_than_reading_as_a_load_of_nothing():
-    """A skip and a load that read an empty window both move no rows.
-
-    Only the engine that ran it knows which happened, so the result reports it.
-    """
+    """A skip and a load that read an empty window both move no rows."""
 
     node = _node(result=LoadResult(succeeded=True, is_static_skip=True))
     writer = _recorded(node)
@@ -180,7 +164,7 @@ def test_a_static_skip_says_so_rather_than_reading_as_a_load_of_nothing():
 
 @weaver_test()
 def test_a_load_with_rejected_rows_is_rejected_and_keeps_its_bookmark():
-    """Valid rows landed and some did not, which is neither of the other two."""
+    """It has not read its window, so the bookmark stays where it was."""
 
     node = _node(
         status="succeeded_with_rejects",
@@ -197,7 +181,7 @@ def test_a_load_with_rejected_rows_is_rejected_and_keeps_its_bookmark():
 
 @weaver_test()
 def test_a_load_that_refused_a_change_it_was_declared_not_to_make_failed():
-    """Ran under Weaver's control and produced an unacceptable result."""
+    """It ran and reported, so the outcome is a judgement rather than an Error."""
 
     node = _node(
         status="failed",
@@ -219,12 +203,10 @@ def test_a_load_whose_dispatch_came_apart_is_an_error():
 
 @weaver_test()
 def test_a_load_that_raised_weavers_own_refusal_is_failed():
-    """It ran under Weaver's control and produced an unacceptable result.
+    """An intolerant rejection throws, and Weaver decided it.
 
-    An intolerant rejection or a breached stability threshold throws, and the
-    target was left as it was. Reading that as Error would say the load could not
-    be evaluated, when in fact Weaver evaluated it and refused. The generated
-    ``_.Load`` draws the same line from ``error_number()``.
+    Reading that as Error would say the load could not be evaluated, when Weaver
+    evaluated it and refused.
     """
 
     node = _node(
@@ -239,11 +221,7 @@ def test_a_load_that_raised_weavers_own_refusal_is_failed():
 
 @weaver_test()
 def test_a_validation_that_raised_is_an_error_whatever_it_carried():
-    """A validation that raised produced no judgement, named error or not.
-
-    Which is where the two kinds of work part: a load can refuse and mean it,
-    and a validation that threw has found nothing at all.
-    """
+    """Where the two kinds of work part: a load can refuse and mean it."""
 
     node = _validation(
         status="failed",
@@ -307,7 +285,7 @@ def test_a_validation_that_found_nothing_writes_its_evidence_and_its_status():
 
 @weaver_test()
 def test_a_test_status_row_says_which_kind_of_validation_it_was():
-    """A Test and an Assumption are reported apart, as the estate stores them."""
+    """A Test and an Assumption are reported apart."""
 
     assert (
         _one(_recorded(_validation(), task_type=TEST_TASK), TEST_STATUS)["test_type"]
@@ -419,11 +397,7 @@ def test_a_write_that_did_not_land_says_what_it_cost():
 
 @weaver_test()
 def test_every_writer_agrees_what_the_task_was():
-    """One vocabulary for ``[Task type]``, whoever wrote the row.
-
-    A run, a standalone Python call and a generated T-SQL entry point all write
-    it, and a reader selecting on it has to get all three.
-    """
+    """A reader selecting on ``[Task type]`` has to get all three writers."""
 
     from weaver.objects import Table, _Validation
     from weaver.operations.load import TASK_TYPE as LOAD_OPERATION

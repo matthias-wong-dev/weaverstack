@@ -1,25 +1,13 @@
 """A build's effect on the estate *and* on the catalogue's runtime state.
 
-One round trip, and the two halves of state a build leaves behind:
-
 .. code-block:: text
 
     Inventory + Catalogue
         -> apply the build plan
             -> resulting Inventory + Catalogue
 
-The physical half already had this — :meth:`TargetInventory.update_using` — and
-the operational half now has it too, so what a rebuild means for an object's
-operational state is proven as resulting state rather than by reading a DELETE
-statement.
-
-The distinction the whole runtime model rests on is here. An object rebuilt keeps
-existing and loses its *current* state; the estate's history of what happened to
-it is untouched. And the two populations are separate: rebuilding a loadable
-object says nothing about a validation's status, and rebuilding a validation says
-nothing about a bookmark. Every one of those is asserted against the same plan,
-because a change that got one right and another wrong would look correct from
-either side alone.
+Both halves against the same plan, because a change that got one right and the
+other wrong would look correct from either side alone.
 """
 
 from __future__ import annotations
@@ -138,12 +126,7 @@ def _history(table, schema: str, name: str) -> dict:
 
 
 def _operational(repository) -> Catalogue:
-    """The catalogue a built, loaded and tested estate holds.
-
-    Everything Weaver records about the estate: how far each loadable object has
-    been loaded, how its last load ended, what its last validation found, and the
-    history of both.
-    """
+    """The catalogue a built, loaded and tested estate holds, in every table."""
 
     installed = installed_catalogue(repository, estate_bindings())
     rows = {item: dict(tables) for item, tables in installed.rows.items()}
@@ -262,11 +245,7 @@ def _rebuilt_validation(tmp_path):
 
 @weaver_test()
 def test_a_rebuilt_object_survives_and_its_current_state_does_not(estate, tmp_path):
-    """The object is still there; its bookmark and load status are not.
-
-    Which is the lifecycle rule in one assertion. Both rows mean "as of this
-    object's current incarnation", and the rebuild ended that incarnation.
-    """
+    """The object is still there; its bookmark and load status are not."""
 
     catalogue = _operational(estate)
 
@@ -279,11 +258,8 @@ def test_a_rebuilt_object_survives_and_its_current_state_does_not(estate, tmp_pa
 
 @weaver_test()
 def test_rebuilding_a_loadable_object_leaves_a_validation_alone(estate, tmp_path):
-    """Two populations, and a rebuild belongs to one of them.
-
-    The validation was not rebuilt, so what it last found still describes what it
-    would find — and a status silently dropped would read as "never run".
-    """
+    """The validation was not rebuilt, so a status dropped would read as
+    "never run"."""
 
     catalogue = _operational(estate)
 
@@ -321,11 +297,7 @@ def test_history_survives_the_rebuild(estate, tmp_path):
 
 @weaver_test()
 def test_a_rebuilt_validation_loses_its_status_and_nothing_else(estate, tmp_path):
-    """The other direction of the same rule.
-
-    A validation's status belongs to the validation's own incarnation. Rebuilding
-    it says nothing about how far anything has been loaded.
-    """
+    """The other direction: rebuilding it says nothing about a bookmark."""
 
     catalogue = _operational(estate)
 
@@ -357,12 +329,8 @@ def test_history_survives_a_rebuilt_validation(estate, tmp_path):
 
 @weaver_test()
 def test_an_item_this_build_was_not_pointed_at_keeps_its_state(estate, tmp_path):
-    """A build maintains the items it was pointed at and no others.
-
-    The tables are shared across every item in the estate, so a build that
-    reconciled more widely than its own scope would invalidate rows another
-    build is responsible for.
-    """
+    """The tables are shared, so a wider reconciliation would take another
+    build's rows."""
 
     catalogue = _operational(estate)
 
@@ -423,11 +391,7 @@ def test_a_removed_validation_loses_its_status(estate, tmp_path):
 
 @weaver_test()
 def test_an_empty_target_does_not_invalidate_what_it_never_held(tmp_path):
-    """A first build reads no rows, so it has nothing to invalidate.
-
-    Nothing is skipped for a stated reason: the action is absent because the set
-    of obsolete rows is empty.
-    """
+    """A first build reads no rows, so the action is absent rather than empty."""
 
     repository = _estate(tmp_path / "first")
     inventories = {

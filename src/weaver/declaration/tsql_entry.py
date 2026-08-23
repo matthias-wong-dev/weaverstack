@@ -1,28 +1,16 @@
 """The two generic entry points a person calls in a Warehouse.
 
-Every object gets a procedure of its own — ``_.[Load Sales.Customer]``,
-``_.[Test Sales.OrdersReconcile]`` — and those are execution primitives: they do
-the object's work and record nothing. An orchestrated run calls them directly and
-records what it did centrally.
-
-Running one by hand should record too, and this is what does it:
-
 .. code-block:: sql
 
     exec _.[Load] @object_name = 'Sales.Customer', @fault_tolerant = 0;
     exec _.[Test] @object_name = 'Sales.OrdersReconcile';
 
 Each wraps the object's own procedure in ``TRY``/``CATCH``, maps what came back
-into the catalogue's result vocabulary, and writes the operational record —
-``_.Log`` and ``_.LoadStatus``, ``_.LoadStatistic`` and ``_.Bookmark`` for a
-load; ``_.Log`` and ``_.TestStatus`` for a validation. So the ownership model is
-structural rather than a flag: a primitive never records, a run records centrally,
-a wrapper records synchronously.
+into the catalogue's result vocabulary, writes the operational record, and raises
+again anything the procedure raised. ``_.Test`` serves both kinds of validation,
+so a caller need not know which one a name was declared as.
 
-**One generic wrapper for validations, not two.** ``_.Test`` dispatches to a Test
-or an Assumption, because a person asking about ``Sales.OrdersReconcile`` should
-not have to know which it was declared as. Which it is settled here, at
-generation, from the declaration — never probed from the estate at run time.
+Two constraints shape the generated SQL.
 
 **Dispatch is a static chain, not dynamic SQL.** These are generated for one
 item, so the objects it installs are known and each becomes a branch. That is
@@ -32,8 +20,9 @@ a name the item does not install a refusal rather than a failure inside a string
 **Every write is a MERGE**, including the appends. In every Warehouse but the one
 the catalogue lives in these tables are views across databases, and Fabric
 refuses a plain ``INSERT`` through such a view while accepting a ``MERGE``'s. An
-appended row merges on a fresh surrogate, so it never matches and is always
-inserted.
+appended row merges on a fresh surrogate, so it never matches.
+
+See ``design/catalogue.md`` for who records and what the results mean.
 """
 
 from __future__ import annotations
@@ -59,10 +48,9 @@ from .metadata import ASSUMPTION, AUDIT_LIVE_DELETE_DATETIME, TEST, ObjectId
 #: dispatch chain changes with the objects the item installs.
 TSQL_ENTRY_VERSION = 1
 
-#: The error numbers Weaver's own generated code throws with. A refusal inside
-#: this range is a *decision* — rows rejected, a stability threshold breached —
-#: and reads as Failed; anything else could not be evaluated and reads as Error.
-#: The Python side draws the same line with ``isinstance(exc, WeaverError)``.
+#: The error numbers Weaver's own generated code throws with. A load refused
+#: inside this range reads as Failed and anything else as Error; the Python side
+#: draws the same line with ``isinstance(exc, WeaverError)``.
 WEAVER_ERROR_MIN = 51000
 WEAVER_ERROR_MAX = 51999
 
@@ -152,11 +140,9 @@ def _procedure(*, name: str, parameters: Sequence[str], body: str) -> str:
 
 
 def _try_catch(dispatch: str) -> str:
-    """Run the object's own procedure, and keep a failure rather than raising it.
+    """Run the object's own procedure, holding a failure until it is recorded.
 
-    A refusal is an outcome to record, not a reason to leave no record: the
-    caller learns what happened from the row and from the message returned at the
-    end, and the estate's account of itself is complete either way.
+    Raised again by :func:`_rethrow` once the rows are written.
     """
 
     return (
@@ -180,8 +166,7 @@ def _common_declarations() -> tuple[str, ...]:
         "declare @weaver_unmatched nvarchar(2048) = null;",
         "declare @weaver_started datetime2(6) = sysutcdatetime();",
         "declare @weaver_completed datetime2(6) = null;",
-        # One correlation identity per standalone call. A workflow is its rows,
-        # and a call by hand is a workflow of one.
+        # A call by hand is a workflow of one.
         "declare @weaver_workflow varchar(128) = cast(newid() as varchar(36));",
         "declare @weaver_log_sk varchar(128) = cast(newid() as varchar(36));",
         "declare @weaver_schema varchar(128) = null;",
@@ -290,13 +275,8 @@ def _branch(index: int, object_id: ObjectId, body: str) -> str:
 def _unknown(what: str) -> str:
     """What an unrecognised name gets: a refusal naming what it is not.
 
-    Refused rather than run, because the branches are what this Warehouse
-    installs. A name it does not hold cannot be executed, and reporting a row for
-    it would put an object in the estate's record the estate has never had.
-
-    Remembered rather than thrown from here, because this sits inside the TRY
-    that turns a refusal into a recorded outcome. It is raised again after the
-    catch — see :func:`_refuse_unmatched`.
+    Remembered rather than thrown from here, because this sits inside the TRY.
+    Raised by :func:`_refuse_unmatched` ahead of every write.
     """
 
     return (
@@ -310,10 +290,6 @@ def _unknown(what: str) -> str:
 
 def _rethrow() -> str:
     """Raise again what the lower procedure raised, once the record is written.
-
-    Recording first and raising after is the whole shape: the row is what the
-    estate knows, and the exception is what the caller needs. Returning normally
-    would make a failure look like a successful call.
 
     Only what was *thrown*. A returned outcome — a validation finding
     discrepancies, a load whose rejections were tolerated — is an answer rather
@@ -338,10 +314,9 @@ def _rethrow() -> str:
 def _refuse_unmatched() -> str:
     """Raise a name that matched nothing, having recorded nothing for it.
 
-    The refusal is about the *request* rather than about a load: nothing ran, so
-    there is no outcome, and there is no object to record one against. Every
-    identity column is not null, so a row here would be refused by the catalogue
-    anyway and would hide the message that says what went wrong.
+    Nothing ran, so there is no outcome and no object to record one against —
+    and every identity column is not null, so a row would be refused by the
+    catalogue and would hide the message saying what went wrong.
     """
 
     return (
@@ -374,10 +349,8 @@ def _validation_procedure(kind: str, object_id: ObjectId) -> str:
 def _stored_kind(kind: str) -> str:
     """How ``[Test type]`` spells this kind, as the ``_`` schema stores it.
 
-    The public value, because that is what the column holds. Python writes the
-    internal one and the catalogue's own renderer maps it at the persistence
-    boundary; generated SQL has no such boundary to cross, so it writes what the
-    column holds and the two agree.
+    The public value: generated SQL crosses no persistence boundary, so it writes
+    what the column holds rather than the internal value Python writes.
     """
 
     from ..catalogue.tables import ROLE_ASSUMPTION, ROLE_TEST, TEST_STATUS
@@ -396,10 +369,7 @@ def _weaver_refusal() -> str:
 def _load_result() -> str:
     """Map the lower procedure's outcome into the public Result vocabulary.
 
-    The order is the order the cases exclude each other in. A refusal Weaver
-    itself threw ran under Weaver's control and produced an unacceptable result,
-    so it is Failed; anything else that threw could not be evaluated and is
-    Error.
+    The cases are in the order they exclude each other.
     """
 
     return (
@@ -418,15 +388,10 @@ def _load_result() -> str:
 def _test_result() -> str:
     """The same mapping for a validation, which has counts rather than rows.
 
-    A validation that threw is an Error whatever threw it, and that is where the
-    two kinds of work part. A load can refuse and mean it: it ran under Weaver's
-    control and produced an unacceptable result, so a refusal Weaver itself named
-    is Failed. A validation that threw produced no judgement at all — a shape
-    mismatch, a key that repeats, a query that would not run — so there is
-    nothing for Failed to mean, and its failure count is left null rather than
-    defaulted to zero.
-
-    :func:`weaver.run.record.result_for` draws the same line on the Python side.
+    A validation that threw is an Error whatever threw it: it produced no
+    judgement, so there is nothing for Failed to mean and the failure count stays
+    null. No refusal-range branch here, unlike a load's.
+    :func:`weaver.run.record.result_for` draws the same line in Python.
     """
 
     return (
@@ -524,10 +489,9 @@ def _duration() -> str:
 def _write(table: RuntimeTable, values: Mapping[str, str], *, keyed: bool) -> str:
     """One row into one runtime table, as the MERGE the view will accept.
 
-    A MERGE even for an append, because in every Warehouse but the catalogue's
-    own these tables are views across databases: Fabric refuses a plain INSERT
-    through one and accepts a MERGE's. An appended row merges on a surrogate
-    generated a moment ago, so it never matches and is always inserted.
+    A MERGE even for an append: Fabric refuses a plain INSERT through a
+    cross-database view. An appended row merges on a surrogate generated a moment
+    ago, so it never matches.
     """
 
     missing = [name for name in table.column_names if name not in values]
@@ -584,11 +548,7 @@ def _write(table: RuntimeTable, values: Mapping[str, str], *, keyed: bool) -> st
 
 
 def _listed(parts, *, separator: str = "") -> str:
-    """One value per line, so a generated statement is read rather than scanned.
-
-    The first line leads and the rest are continued, which is how T-SQL is
-    conventionally laid out and what makes a diff of generated SQL legible.
-    """
+    """One value per line, so a diff of generated SQL is legible."""
 
     values = list(parts)
     lead = f"  {separator}" if separator else "  "
@@ -604,8 +564,8 @@ def _bookmark_advance(item) -> str:
     """Advance the bookmark, for a clean load that established an instant.
 
     Two conditions, each ruling out a case the other does not: a clean result, so
-    a rejecting or failed load keeps the bookmark it had; and an instant
-    reported, so a Static skip moves nothing.
+    a rejecting load keeps the bookmark it had; and an instant reported, so a
+    Static skip moves nothing.
     """
 
     values = {

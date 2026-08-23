@@ -1,24 +1,11 @@
 """What a build decides about the catalogue's runtime tables.
 
-Three claims, and they are separate because they fail separately.
+Three claims, separate because they fail separately: which objects can hold a
+bookmark, which rows a build ends the life of, and where the action sits.
 
-Which objects can hold a bookmark at all: the ones Weaver loads, derived from
-the load artefacts the item installs, so what carries a bookmark cannot drift
-from what has something to run.
-
-Which rows a build ends the life of: the keyed rows the reconciliation action
-carries. Read as structured intent rather than as SQL text, because the decision
-is which object's operational state is no longer current — a statement is one
-rendering of that, and asserting on the rendering makes a renaming of a keyword
-look like a change of lifecycle.
-
-Where the action sits: before the first physical action. That is the safety
-property and the only one whose failure is silent — an absent bookmark makes the
-next load read everything, while one left in place over a recreated table makes
-it read almost nothing.
-
-Pure Python. What a build decides is a build's own decision, and every input to
-it can be constructed.
+Read as structured intent rather than as SQL text, so a renaming of a keyword
+does not look like a change of lifecycle. The one narrow claim about the DML is
+in ``test_runtime_state_representation.py``.
 """
 
 from __future__ import annotations

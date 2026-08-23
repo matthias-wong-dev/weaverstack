@@ -1,22 +1,15 @@
 """The generic contract every catalogue runtime table is written through.
 
-``_.Log`` and ``_.Bookmark`` were the first two tables to use it, and the whole
-operational-state model rests on the mechanism being *table-generic*: a table
-declares whether its rows are appended or merged on a key, and the writer, the
-flusher and the Catalogue all read that declaration rather than knowing which
-table they are handling.
-
-So the tables here are declared in this module. A claim made only against the
-two tables Weaver ships could pass on code that special-cased them, and the
-tables that will use this next do not exist yet.
-
 .. code-block:: text
 
     submit  -> queued, appended, one INSERT per batch
     update  -> queued, merged on the table's own key
     flush   -> the durability barrier, and the only place a failure surfaces
 
-Pure Python throughout. The write stream is a real
+The tables here are declared in this module, because a claim made only against
+the ones Weaver ships could pass on code that special-cased them.
+
+The write stream is a real
 :class:`~weaver.catalogue.flusher.WarehouseFlusher` over a recorder, so the
 statements asserted on are the statements a Warehouse would be sent.
 """

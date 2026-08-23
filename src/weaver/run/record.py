@@ -1,7 +1,4 @@
-"""What a run records about itself, in the catalogue's runtime tables.
-
-One row per settled unit of work in ``_.Log``, appended as the run settles it,
-and beside it the operational state that unit left behind:
+"""Which rows one settled unit of work leaves in the catalogue.
 
 .. code-block:: text
 
@@ -15,14 +12,8 @@ A blocked node has a status and no statistics: it did nothing, and a row of
 zeroes for it would read as a load that moved nothing. A node about no object at
 all — an endpoint refresh — has evidence and no state.
 
-There is no plan row and no completion row: a workflow is its rows, correlated by
-``[Workflow ID]``, and a reader asking what a run did reads them rather than
-reassembling a folder.
-
-Row construction is separate from writing, and both are separate from flushing.
-The run decides what happened and builds the rows; the catalogue writes them on a
-worker; :meth:`RunRecord.flush` is the durability barrier and the only place a
-failure surfaces.
+Row construction, writing and flushing stay three things. See
+``design/catalogue.md`` for the operational-state model these rows belong to.
 """
 
 from __future__ import annotations
@@ -52,37 +43,28 @@ from .result import RunError
 if TYPE_CHECKING:  # pragma: no cover - for type readers only
     from .result import RunNodeResult
 
-#: The task types a run records under. A load and a validation need the same
-#: capabilities and are not the same event.
+#: The task types a run records under.
 LOAD_TASK = "load"
 TEST_TASK = "test"
 
-#: Run and validation statuses, as the frozen public ``[Result]`` vocabulary
-#: spells them. The distinctions kept here are the ones an operator acts on, so
-#: nothing collapses two of them into one word.
+#: Every run and validation status, in the frozen public ``[Result]``
+#: vocabulary. A status missing from here fails the run at its last step, so a
+#: new one is added here deliberately.
 RESULT_FOR_STATUS = {
     "succeeded": SUCCEEDED,
-    # A load that wrote its valid rows and refused the rest. Neither a success
-    # nor a failure: valid rows landed, and some did not.
     "succeeded_with_rejects": REJECTED,
     # A validation that ran and found nothing.
     "passed": SUCCEEDED,
-    # Ran under Weaver's control and produced an unacceptable result: a
-    # validation found discrepancies, a load refused a change larger than its
-    # declared threshold. A node that *raised* is an Error instead — see
-    # :func:`result_for`.
     "failed": FAILED,
-    # The node could not be evaluated at all: resolution failed before dispatch.
-    # Not a judgement about the data, and it must never be read as one.
+    # Resolution failed before dispatch, so nothing was evaluated.
     "invalid": ERROR,
     "blocked": BLOCKED,
     "skipped": SKIPPED,
-    # Never reached, because the run stopped before scheduling it. No outcome was
-    # established for this incarnation, which is what Pending means.
+    # Never reached, because the run stopped before scheduling it.
     "pending": PENDING,
-    # The two dry-run outcomes. A dry run writes nothing, so neither should reach
-    # a row — they are mapped so that a change of mind about that does not
-    # surface as a run failing at its last step.
+    # The dry-run outcomes. A dry run writes nothing, so neither reaches a row;
+    # they are mapped so a change of mind about that is not a failure at the last
+    # step.
     "validated": PENDING,
     "planned": PENDING,
 }
@@ -91,19 +73,9 @@ RESULT_FOR_STATUS = {
 def result_for(node, *, task_type: str = LOAD_TASK) -> str:
     """How one settled node's outcome is spelled in the ``_`` schema.
 
-    Failed and Error are not the same thing to act on, and the line between them
-    is drawn twice because the two kinds of work fail differently.
-
-    A **validation** that raised is an Error whatever it was carrying: it
-    produced no judgement at all, and one that found discrepancies has told you
-    something about the data while one whose procedure threw has told you
-    nothing.
-
-    A **load** that raised *Weaver's own refusal* is Failed: it ran under
-    Weaver's control and produced an unacceptable result — rows refused, a
-    stability threshold breached — and the target was left as it was. Anything
-    else it raised is the dispatch coming apart, which is an Error. The generated
-    ``_.Load`` draws the same line from ``error_number()``.
+    Failed and Error part company differently for the two kinds of work, and the
+    generated ``_.Load`` and ``_.Test`` draw the same lines from
+    ``error_number()``. See the result vocabulary in ``design/catalogue.md``.
     """
 
     status = node.status
@@ -150,9 +122,8 @@ def log_row(node, *, workflow_id: str, task_type: str) -> dict:
 def load_status_row(node, identity, *, workflow_id: str) -> dict:
     """The ``_.LoadStatus`` row one settled load leaves behind.
 
-    Logical identity only. Where the object is physically installed is the
-    Installation's to say, and duplicating it here would give a reader two places
-    to disagree.
+    Logical identity only: where the object is physically installed is the
+    Installation's to say.
     """
 
     started, completed = _instants(node)
@@ -169,8 +140,8 @@ def load_status_row(node, identity, *, workflow_id: str) -> dict:
 def load_statistic_row(node, identity, *, workflow_id: str) -> dict:
     """The ``_.LoadStatistic`` row one executed load appends.
 
-    The counts describe the target rather than the source: ``rows_read`` is what
-    the source produced, and the rest are what the load did with it.
+    The counts describe the target rather than the source, so ``rows_read`` need
+    not equal the sum of the others.
     """
 
     started, completed = _instants(node)
@@ -187,21 +158,14 @@ def load_statistic_row(node, identity, *, workflow_id: str) -> dict:
         "rows_updated": _count(result, "rows_updated"),
         "rows_deleted": _count(result, "rows_deleted"),
         "rows_rejected": _count(result, "rows_rejected"),
-        # False until reload is available. Written rather than left null, so a
-        # reader counting reloads gets zero rather than nothing.
+        # Written rather than left null, so a reader counting reloads gets zero.
         "is_reload": False,
         "is_static_skip": bool(getattr(result, "is_static_skip", False)),
     }
 
 
 def test_status_row(node, identity, *, workflow_id: str) -> dict:
-    """The ``_.TestStatus`` row one settled validation leaves behind.
-
-    ``failure_count`` is how much disagreed, and it is meaningful only for a
-    validation that was evaluated: one that could not run found nothing, and
-    reporting zero discrepancies for it would be the one answer a validation must
-    never give. The result says which of the two happened.
-    """
+    """The ``_.TestStatus`` row one settled validation leaves behind."""
 
     started, completed = _instants(node)
     return {
@@ -258,13 +222,8 @@ class RunRecord:
     """One workflow's operational record, written through its catalogue.
 
     Downstream of the Runner by construction: a run is correct without one, and
-    this is called by the operation that wants a durable record rather than by
-    the thing doing the work. ``task_type`` is what the record says it was.
-
-    One place, because it is one catalogue: the evidence that a node ran, the
-    status it left and the bookmark a clean load moved are rows in the same ``_``
-    schema, written through the same connection and made durable by the same
-    flush.
+    the operation that wants a durable record opens it. One object, because it is
+    one catalogue, one connection and one flush.
     """
 
     workflow_id: str
@@ -305,8 +264,8 @@ class RunRecord:
         """Advance the bookmark, for a clean load that established an instant.
 
         Two conditions, each ruling out a case the other does not: a clean
-        success, so a rejecting or failed load keeps the bookmark it had; and an
-        instant reported, so a Static skip moves nothing.
+        success, so a rejecting load keeps the bookmark it had; and an instant
+        reported, so a Static skip moves nothing.
         """
 
         if node.status != "succeeded":
@@ -348,14 +307,10 @@ def settled_load(
 ) -> "RunNodeResult":
     """One standalone load, in the terms every runtime table records.
 
-    A run settles a graph node and a direct call settles one object, and the two
-    are the same kind of thing: a unit of work with an outcome. Presenting the
-    second as the first is what lets one implementation build the rows, so a
-    column added to a table reaches both paths.
-
-    ``raised`` and ``refused`` carry what a dispatched node's outcome carries: a
-    load that threw Weaver's own refusal is Failed, and one that threw anything
-    else is Error.
+    A direct call settles one object as a run settles a graph node, so both build
+    their rows through one implementation and a column added to a table reaches
+    both. ``raised`` and ``refused`` carry what a dispatched node's outcome
+    carries — see :func:`result_for`.
     """
 
     from .outcome import status_of
@@ -392,9 +347,8 @@ def settled_validation(
 ) -> "RunNodeResult":
     """One standalone validation, in the same terms.
 
-    ``kind`` is Test or Assumption, as the declaration says; the status follows
-    from whether the result judged anything. ``raised`` says it could not be
-    evaluated, which is an Error rather than a finding.
+    ``kind`` is Test or Assumption, as the declaration says; ``raised`` says it
+    could not be evaluated.
     """
 
     from .outcome import status_of
@@ -506,8 +460,8 @@ def _message(node) -> str | None:
 def _details(node) -> str | None:
     """The node's own mapping, as JSON.
 
-    The mapping rather than the node: a mapping carries no diagnostics, so rows
-    a check happened to select cannot reach the estate's evidence.
+    The mapping rather than the node, so diagnostic rows a check selected cannot
+    reach the estate's evidence.
     """
 
     try:
@@ -528,11 +482,7 @@ def new_workflow_id() -> str:
 def open_run_record(
     catalogue, *, workspace=None, task_type: str, workflow_id=None, session=None
 ) -> RunRecord:
-    """Where this run's operational record goes — the catalogue that owns ``_``.
-
-    It builds rows and does not own a write stream: the catalogue does, and the
-    runtime tables are its.
-    """
+    """Where this run's operational record goes — the catalogue that owns ``_``."""
 
     if workspace is not None and not workspace.catalogue:
         raise RunError("recording what a run did needs a Workspace with a catalogue")

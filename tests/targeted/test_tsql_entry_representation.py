@@ -1,17 +1,8 @@
-"""The two generic entry points a person calls in a Warehouse.
+"""What the generated ``_.Load`` and ``_.Test`` contain.
 
-Every object gets a procedure of its own, and those record nothing: an
-orchestrated run records what settled centrally. ``_.Load`` and ``_.Test`` are
-what runs one by hand and leaves the same record.
-
-.. code-block:: text
-
-    exec _.[Load] @object_name = 'Sales.Customer'
-    exec _.[Test] @object_name = 'Sales.OrdersReconcile'
-
-Pure Python: these are generated from the item's declarations, so what they
-contain is a decision every input to which can be constructed. That a Fabric
-Warehouse accepts them is a claim about Fabric and is made where there is one.
+Pure Python: they are generated from the item's declarations, so every input to
+the decision can be constructed. That a Fabric Warehouse *accepts* them is a
+claim about Fabric and is made where there is one.
 """
 
 from __future__ import annotations
@@ -74,11 +65,7 @@ def test_the_entry_points_are_named_for_what_they_do(load_script, validation_scr
 
 @weaver_test()
 def test_there_is_no_generic_assumption_entry_point(validation_script):
-    """``_.Test`` is the one validation entry point, for both kinds.
-
-    A person asking about a validation by name should not have to know which kind
-    it was declared as.
-    """
+    """``_.Test`` is the one validation entry point, for both kinds."""
 
     assert "create or alter procedure [_].[Assumption]" not in validation_script
     assert "[_].[Test Sales.OrdersReconcile]" in validation_script
@@ -87,12 +74,10 @@ def test_there_is_no_generic_assumption_entry_point(validation_script):
 
 @weaver_test()
 def test_which_kind_a_validation_is_comes_from_the_declaration(validation_script):
-    """Settled at generation, never probed from the estate at run time.
+    """Settled at generation, and written as the ``_`` schema stores it.
 
-    Written as the ``_`` schema stores it. Python writes the internal value and
-    the catalogue's renderer maps it at the persistence boundary; generated SQL
-    crosses no such boundary, so it writes what the column holds and the two
-    agree about a row a reader may have got from either.
+    Generated SQL crosses no persistence boundary, so it writes the public value
+    Python's renderer would have produced.
     """
 
     assert "set @weaver_test_type = N'Test';" in validation_script
@@ -102,12 +87,9 @@ def test_which_kind_a_validation_is_comes_from_the_declaration(validation_script
 
 @weaver_test()
 def test_a_name_that_matched_nothing_records_nothing(load_script, validation_script):
-    """The refusal is about the request rather than about a load.
+    """Nothing ran, so there is no object to record an outcome against.
 
-    Nothing ran, so there is no outcome and no object to record one against —
-    and every identity column is not null, so a row would be refused by the
-    catalogue anyway and would hide the message saying what went wrong. So it is
-    remembered inside the TRY and raised after it, ahead of every write.
+    Remembered inside the TRY and raised after it, ahead of every write.
     """
 
     for script in (load_script, validation_script):
@@ -118,12 +100,7 @@ def test_a_name_that_matched_nothing_records_nothing(load_script, validation_scr
 
 @weaver_test()
 def test_dispatch_is_a_static_chain_and_not_dynamic_sql(load_script, validation_script):
-    """Generated for one item, so the objects it installs are known.
-
-    Which is what lets the lower procedure's output parameters be read directly,
-    and makes a name the item does not install a refusal rather than a failure
-    inside a string.
-    """
+    """What lets the lower procedure's output parameters be read directly."""
 
     for script in (load_script, validation_script):
         assert "sp_executesql" not in script
@@ -134,8 +111,7 @@ def test_dispatch_is_a_static_chain_and_not_dynamic_sql(load_script, validation_
 
 @weaver_test()
 def test_an_object_the_item_does_not_install_is_refused(load_script, validation_script):
-    """Reporting a row for it would put an object in the estate's own record
-    that the estate has never had."""
+    """A name this Warehouse does not hold cannot be executed."""
 
     assert "is not a loadable object in this Warehouse" in load_script
     assert "is not a validation in this Warehouse" in validation_script
@@ -165,11 +141,7 @@ def test_the_lower_procedure_runs_inside_try_catch(load_script, validation_scrip
 
 @weaver_test()
 def test_a_refusal_weaver_threw_is_failed_and_anything_else_is_an_error(load_script):
-    """The same line the Python side draws with ``isinstance(exc, WeaverError)``.
-
-    A stability threshold breached or rows refused ran under Weaver's control and
-    produced an unacceptable result; anything else could not be evaluated.
-    """
+    """The same line the Python side draws with ``isinstance(exc, WeaverError)``."""
 
     assert _WEAVER_RANGE in load_script
     assert "when @weaver_error is not null then N'Error'" in load_script
@@ -212,11 +184,7 @@ def test_a_validation_that_threw_is_an_error_whatever_threw_it(
 def test_what_the_lower_procedure_raised_is_raised_again_after_the_record(
     load_script, validation_script
 ):
-    """Recording first and raising after: the row is what the estate knows, and
-    the exception is what the caller needs.
-
-    Returning normally would make a failure look like a successful call.
-    """
+    """Returning normally would make a failure look like a successful call."""
 
     from weaver.declaration.tsql_entry import RETHROW_ERROR
 
@@ -261,12 +229,7 @@ def test_the_bookmark_advances_only_for_a_clean_load_that_read_a_window(load_scr
 
 @weaver_test()
 def test_every_write_is_a_merge_because_the_tables_may_be_views(load_script):
-    """Fabric refuses a plain INSERT through a cross-database view.
-
-    In every Warehouse but the catalogue's own these tables are exactly that, so
-    an appended row merges on a surrogate generated a moment ago and is never
-    matched.
-    """
+    """Fabric refuses a plain INSERT through a cross-database view."""
 
     assert "insert into" not in load_script.casefold()
     assert load_script.count("merge into") == 4
@@ -286,7 +249,7 @@ def test_the_recorded_identity_is_the_items_own_and_the_dispatched_object(load_s
 
 @weaver_test()
 def test_a_standalone_call_is_its_own_workflow(load_script):
-    """A workflow is its rows, and a call by hand is a workflow of one."""
+    """A call by hand is a workflow of one."""
 
     assert (
         "declare @weaver_workflow varchar(128) = cast(newid() as varchar(36));"
@@ -303,7 +266,7 @@ def test_the_statistic_says_a_reload_is_not_what_this_was(load_script):
 
 
 @weaver_test()
-def test_the_load_script_takes_the_policy_a_caller_may_choose(load_script):
+def test_the_load_entry_takes_the_policy_a_caller_may_choose(load_script):
     """Fault tolerance and the stability waiver, passed straight through."""
 
     assert "@fault_tolerant bit = 0" in load_script
@@ -313,11 +276,7 @@ def test_the_load_script_takes_the_policy_a_caller_may_choose(load_script):
 
 @weaver_test()
 def test_no_column_may_be_left_unsupplied():
-    """A table gaining a column has to be given a value here as well.
-
-    Otherwise the generated MERGE would insert a row missing the column, which
-    reads as a row that had nothing to say about it.
-    """
+    """A table gaining a column has to be given a value here as well."""
 
     from weaver.declaration.tsql_entry import _write
 

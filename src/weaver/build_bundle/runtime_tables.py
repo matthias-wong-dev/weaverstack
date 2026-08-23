@@ -1,39 +1,26 @@
 """What a build does about the catalogue's runtime tables.
 
-Two things, and they are separate.
-
-**Invalidating current state.** A current-state row describes one object's
-*current physical incarnation*: how far it has been loaded, how its last load
-ended, what its last validation found. A build ends that incarnation for two
-kinds of object, and both lose their rows:
+Two separate things: it invalidates the current-state rows whose incarnation it
+is ending, and it gives every target it installs something runnable into the
+runtime tables under their own names — views in a Warehouse, OneLake shortcuts in
+a Lakehouse.
 
 .. code-block:: text
 
     no longer declared, or no longer run       the object is going
     dropped and rebuilt                        the incarnation is going
 
-One stage does it for every current-state table, keeping the rows of objects this
-build still runs and is not replacing. It runs **before** any physical work, and
-the ordering is the safety property: an absent bookmark makes the next load read
-the whole source, while one left in place over a table that was dropped and
-recreated makes it read almost nothing. So the rows go first and the rebuild
-follows them, and a build that fails in between leaves work to repeat rather than
-rows that will never arrive.
+The invalidation runs **before** any physical work, and that ordering is the
+safety property: an absent bookmark makes the next load read the whole source,
+while one left in place over a recreated table makes it read almost nothing. So a
+build that fails in between leaves work to repeat rather than rows that will
+never arrive.
 
-Deleted rather than reset to a stored sentinel, because absence already means
-what a sentinel would: nothing has happened since this incarnation began.
+The scope is the items this build reconciles and nothing wider, because the
+tables are shared across the estate.
 
-The scope is the items this build reconciles, and nothing wider. Rows belonging
-to an item the build was not pointed at are another build's to maintain.
-
-History is absent by construction. ``_.Log`` and ``_.LoadStatistic`` record what
-happened, and what happened does not stop having happened because the object was
-rebuilt.
-
-**Presenting the tables.** Every target the build installs something runnable
-into gets the catalogue's runtime tables under their own names — views in a
-Warehouse, OneLake shortcuts in a Lakehouse — because a generated procedure says
-``[_].[Bookmark]`` and authored Spark SQL may too.
+See ``design/how-does-build-work.md`` for where this sits in a build, and
+``design/catalogue.md`` for the model.
 """
 
 from __future__ import annotations
@@ -94,16 +81,15 @@ REFERENCE_SLUG = "runtime-reference"
 def _identity_row(identity: WeaverDocumentId) -> dict:
     """One current-state row's identity, spelled as the Registry spells it.
 
-    A Folder keeps its ``Files/`` prefix: without it a Folder and a Table of the
-    same name are one key, and one row would stand for both.
+    A Folder keeps its ``Files/`` prefix, so a Folder and a Table of the same
+    name are not one key.
     """
 
     return bookmark_row(identity)
 
 
-#: How each population is read from the repository. A loadable object is one
-#: Weaver loads; a validation is a Test or an Assumption. The table declares
-#: which population invalidates it, so nothing here decides that twice.
+#: How each population is read from the repository. The table declares which one
+#: invalidates it, so nothing here decides that twice.
 _POPULATIONS = {
     BY_LOADABLE: item_bookmarkable_objects,
     BY_VALIDATION: item_validated_objects,
@@ -119,19 +105,13 @@ def runtime_state_invalidation(
 ) -> tuple[RuntimeStateInvalidation, ...]:
     """The current-state rows this build ends the life of, as structured intent.
 
-    The build has read the current-state tables, so which rows are obsolete is
-    arithmetic over rows it holds: every row in scope whose object this build is
-    about to replace, and every row whose object the repository no longer
-    declares as something Weaver runs. What is left keeps its history.
+    Arithmetic over the rows the build read: every row in scope whose object it
+    is about to replace, and every row whose object the repository no longer
+    declares as something Weaver runs. Empty for most builds, because an
+    unchanged repository invalidates nothing.
 
-    Empty whenever that set is empty, which is most builds — an unchanged
-    repository has nothing to invalidate, and a build creating the tables has
-    read no rows because there were none.
-
-    Keyed rows rather than rendered SQL. The installer renders one scoped DELETE
-    per table from this, and a Catalogue applies the same intent in memory, so
-    what a build decided about an object's operational state can be read without
-    parsing DML.
+    Keyed rows rather than rendered SQL, so the installer and a ``Catalogue``
+    read one decision two ways.
     """
 
     scoped = {item for item in items if not _is_builtin(item)}
@@ -188,8 +168,7 @@ def render_runtime_state_reconciliation(
 ) -> PlannedStage | None:
     """The one stage that invalidates current state ahead of physical work.
 
-    One action carrying the whole intent, not one per table or per row: this is
-    one lifecycle decision, taken once and reported once.
+    One action carrying the whole intent: it is one lifecycle decision.
     """
 
     if not any(one.rows for one in invalidation):
@@ -225,10 +204,8 @@ def render_runtime_state_reconciliation(
 def _reference(table, item: WeaverItemId, catalogue: str) -> Reference:
     """One runtime table as the reference it is: a shortcut nobody authored.
 
-    Weaver's own infrastructure, so it is not published as a ``_.Shortcut`` row —
-    but *what it becomes* is exactly what a declared shortcut becomes, so it is
-    expressed as one and rendered by the same code. A Warehouse gets a view, a
-    Lakehouse the OneLake shortcut.
+    Not published as a ``_.Shortcut`` row, but what it becomes is what a declared
+    shortcut becomes, so it is expressed as one and rendered by the same code.
     """
 
     from ..declaration.metadata import ObjectId
@@ -253,9 +230,8 @@ def runtime_reference_views(
 ) -> tuple[str, ...]:
     """The runtime tables this item's target presents as views.
 
-    For the keep-set, so prune spares the references this build creates. They go
-    when the item's last runnable object goes, exactly as the ``_`` schema
-    holding the generated procedures does.
+    For the keep-set, so prune spares them until the item's last runnable object
+    goes, exactly as it spares the ``_`` schema holding the procedures.
     """
 
     if target.kind != WAREHOUSE_TARGET:
@@ -278,19 +254,13 @@ def render_runtime_references(
 ) -> PlannedStage | None:
     """Give a built target the catalogue's runtime tables under their own names.
 
-    A generated Warehouse procedure says ``[_].[Bookmark]`` and writes
-    ``[_].[LoadStatus]``, and authored Spark SQL may read either, so every target
-    holding runnable objects presents them.
-
-    Created in the load phase, with the artefacts they exist for — not with the
-    declared shortcuts, which precede an item's documents. Nothing built reads a
-    runtime table, and on the build that creates the catalogue the tables these
-    point at are built in the same bundle and are not there yet when the shortcut
+    In the load phase, with the artefacts they exist for, rather than with the
+    declared shortcuts: on the build that creates the catalogue the tables these
+    point at arrive in the same bundle and are not there yet when the shortcut
     phase runs.
 
-    One action per target, carrying every reference the target is missing: they
-    are one decision about one item, and a Fabric round trip per table would be
-    five where one does.
+    One action per target, carrying every reference it is missing, because a
+    Fabric round trip per table would be five where one does.
     """
 
     if not item_presents_runtime_tables(repository, item=item):
@@ -350,10 +320,9 @@ def _warehouse_views(item, target, catalogue_target, inventory) -> PlannedStage 
 def _lakehouse_shortcuts(*, item, target, inventory, sources) -> PlannedStage | None:
     """The OneLake shortcuts, for whichever runtime tables the Lakehouse lacks.
 
-    Gated the way the Warehouse's views are: on what is physically there, so an
-    unchanged repository plans nothing and a reference somebody removed comes
-    back. ``Tables/_`` is Weaver's own rather than the item's, so the inventory
-    reports these as facts of their own instead of as the item's schemas.
+    Gated on what is physically there, as the Warehouse's views are.
+    ``Tables/_`` is Weaver's own rather than the item's, so the inventory reports
+    these separately from the item's schemas.
     """
 
     held = {name.casefold() for name in inventory.runtime_references}
@@ -422,8 +391,7 @@ def _stage(
                 actions=(action,),
             ),
         ),
-        # Declared alongside the action, as every physical change is: what this
-        # leaves is part of what the target holds afterwards.
+        # Declared alongside the action, as every physical change is.
         changes={
             target.id: tuple(
                 added(

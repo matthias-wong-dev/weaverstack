@@ -1,22 +1,11 @@
 """The two interfaces an authored object has, and which of them records.
 
-Every authored object divides the same way, and the division is structural rather
-than a setting:
-
 .. code-block:: text
 
     Table, Folder      _load()  the load itself, recording nothing
                        load()   the load, recorded and flushed
     Test, Assumption   read()   the evaluation, recording nothing
                        run()    the evaluation, recorded and flushed
-
-So there is no ``update_catalogue`` to get wrong. An orchestrated run calls the
-lower interface and records every node through one queue; a developer calls the
-upper one and is told it finished only once the record has landed.
-
-Anchoring adds the upper interface and takes nothing away: a freestanding object
-still reads, which is what lets an author call ``read()`` and look at what came
-back.
 
 Pure Python, with :class:`~support.spark.MockSpark`: these paths use no engine,
 and a session that fails on any access proves that rather than asserting it.
@@ -161,11 +150,7 @@ def test_an_anchored_load_records_and_flushes(lakehouse):
 
 @weaver_test()
 def test_a_refused_load_is_recorded_and_then_raised(lakehouse):
-    """A refusal is an outcome, so the estate's record of it is not silent.
-
-    Which is what the generated ``_.Load`` does inside its own TRY/CATCH: a load
-    that produced an unacceptable result is Failed rather than absent.
-    """
+    """A refusal is an outcome, so the estate's record of it is not silent."""
 
     catalogue = never("DWG.Customer")
     # A non-incremental table returning None: staging is the whole truth, so an
@@ -185,10 +170,10 @@ def test_a_refused_load_is_recorded_and_then_raised(lakehouse):
 
 @weaver_test()
 def test_an_unexpected_failure_is_recorded_as_an_error_and_re_raised(lakehouse):
-    """A Spark or filesystem failure is not a judgement Weaver made.
+    """A Spark or storage failure is not a judgement Weaver made.
 
     So the row says Error where a refusal says Failed, and the exception reaches
-    the caller unchanged rather than being turned into a return value.
+    the caller unchanged.
     """
 
     catalogue = never("DWG.Customer")
@@ -240,11 +225,7 @@ def test_the_lower_load_interface_records_nothing(lakehouse):
 
 @weaver_test()
 def test_a_no_op_load_records_what_it_did_without_touching_spark(lakehouse):
-    """The recording path costs no engine call either.
-
-    An incremental source that knows there is nothing to do should be able to say
-    so and still leave a complete record of having said it.
-    """
+    """An incremental source with nothing to do still leaves a complete record."""
 
     catalogue = never("DWG.Customer")
     table = _table(None)(MockSpark(), lakehouse=lakehouse, catalogue=catalogue)
@@ -299,12 +280,7 @@ def test_a_freestanding_validation_refuses_the_operational_interface(lakehouse):
 
 @weaver_test()
 def test_an_anchored_validation_resolves_its_own_identity(lakehouse):
-    """A validation materialises nothing, so Registry does not record it.
-
-    What records it is ``_.TestDictionary``, and anchoring looks there — a
-    validation resolved through Registry would find only the module or procedure
-    it compiles to.
-    """
+    """Through ``_.TestDictionary``: Registry holds only the compiled artefact."""
 
     catalogue = validating("DWG.CustomerHasRows")
     validation = _assumption(_Rows(0))(
@@ -348,11 +324,7 @@ def test_an_anchored_validation_that_fails_records_how_much_disagreed(lakehouse)
 
 @weaver_test()
 def test_a_validation_that_could_not_be_evaluated_is_recorded_as_an_error(lakehouse):
-    """It found nothing, and zero discrepancies is the answer it must not give.
-
-    Recorded and then raised, as the generated ``_.Test`` does inside its own
-    TRY/CATCH: a validation nobody could evaluate is an outcome worth a row.
-    """
+    """It found nothing, and zero discrepancies is the answer it must not give."""
 
     class _Broken:
         def count(self):
@@ -386,11 +358,7 @@ def test_a_validation_records_no_load_state(lakehouse):
 
 @weaver_test()
 def test_a_validation_returns_its_counts_rather_than_its_rows(lakehouse):
-    """The rows are what ``read()`` gives, and they are not recorded anywhere.
-
-    They carry whatever the validation selected, and a durable record of them
-    would put data into the estate's own evidence.
-    """
+    """A durable record of the rows would put data into the estate's evidence."""
 
     catalogue = validating("DWG.CustomerHasRows", writer=Recording())
     validation = _assumption(_Rows(2))(
@@ -433,12 +401,7 @@ def _test(sides):
 
 @weaver_test()
 def test_a_test_takes_the_same_catalogue_the_others_do(lakehouse):
-    """One constructor model across every authored object.
-
-    A Test resolves its identity where a Table does, through the catalogue it was
-    handed — and through ``_.TestDictionary``, because a Test materialises
-    nothing.
-    """
+    """One constructor model across every authored object."""
 
     catalogue = validating("DWG.CustomerReconcile")
 
