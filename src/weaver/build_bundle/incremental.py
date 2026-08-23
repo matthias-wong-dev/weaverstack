@@ -213,6 +213,29 @@ def runtime_artefact_identities(
     return frozenset(artefact.identity for artefact in runtime_artefacts(repository))
 
 
+def _validation_artefacts(
+    repository: WeaverRepository, selected: set[WeaverDocumentId]
+) -> dict[WeaverDocumentId, WeaverDocumentId]:
+    """Each selected validation declaration, and the artefact it compiles to.
+
+    A validation carries an ordinary ``Schema.Object`` identity and is selected so
+    its dictionary row publishes, but nothing is materialised under it: the
+    physical thing is a deployed module or a generated procedure with an identity
+    and a Registry row of its own. Classifying the declaration by that row is what
+    lets an unchanged validation stay unchanged.
+    """
+
+    from ..etl import runtime_artefacts
+
+    return {
+        artefact.origin: artefact.identity
+        for artefact in runtime_artefacts(repository)
+        if artefact.is_validation
+        and artefact.origin is not None
+        and artefact.origin in selected
+    }
+
+
 def determine_impact(
     repository: WeaverRepository,
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
@@ -240,14 +263,28 @@ def determine_impact(
         if identity in selected_set
     }
     declared = declared_signatures(repository, selected_set)
+    # A validation is registered as the artefact it compiles to, not as the
+    # declaration — see :func:`weaver.catalogue.projection.project_item_catalogue`.
+    # So its declaration is classified by that artefact: what a Test *is*
+    # physically is the module or the procedure, and the signature of one already
+    # carries the authored source and the generator's version.
+    by_artefact = _validation_artefacts(repository, selected_set)
 
     new: set[WeaverDocumentId] = set()
     changed: set[WeaverDocumentId] = set()
     for identity in selected_set:
-        signature = installed.get(identity)
+        artefact = by_artefact.get(identity)
+        if artefact is not None:
+            signature = (
+                registered[artefact].signature if artefact in registered else None
+            )
+            wanted = declared.get(artefact, declared[identity])
+        else:
+            signature = installed.get(identity)
+            wanted = declared[identity]
         if signature is None:
             new.add(identity)
-        elif signature != declared[identity]:
+        elif signature != wanted:
             changed.add(identity)
     changed |= {identity for identity in stale_shortcuts if identity in installed}
 
