@@ -70,7 +70,19 @@ results["persisted"] = second.bookmark().isoformat()
 
 # A validation, anchored and run the same way. Its identity comes from
 # `_.TestDictionary` rather than Registry, because it materialises nothing.
-from DWG__OrderAmounts import DWG__OrderAmounts
+#
+# Loaded by path: a compiled validation lands under `tests/` in the deployed
+# tree, so the import root alone does not name it, and `tests` is not a package
+# name worth claiming inside a Spark driver. What it imports in turn — the object
+# modules it was authored against — resolves through the root, which is on the
+# path already.
+import importlib.util
+
+_spec = importlib.util.spec_from_file_location(
+    "DWG__OrderAmounts", root + "/tests/DWG__OrderAmounts.py")
+_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_module)
+DWG__OrderAmounts = _module.DWG__OrderAmounts
 
 free_test = DWG__OrderAmounts(spark, lakehouse=destination)
 results["validation_freestanding"] = (
