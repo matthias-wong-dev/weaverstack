@@ -495,7 +495,14 @@ an unchanged repository plans neither and one somebody removed comes back.
 
 The reference reads a document the built-in item owns, so the item graph puts
 that item first — the same edge a declared shortcut's source item gets. One build
-creates the table and then points at it, in that order. Weaver infrastructure, not a published `_.Shortcut`
+creates the table and then points at it, in that order.
+
+Ordering is necessary and not sufficient: a Warehouse creates a table in its own
+catalogue and publishes the Delta directory behind it a moment later, so the
+shortcut can arrive before there is anything to point at. Fabric validates a
+shortcut's target, and `weaver.fabric.shortcuts.create_shortcut` waits for a
+source it has just been asked to point at — bounded, so a source that will never
+appear still fails. Weaver infrastructure, not a published `_.Shortcut`
 row, and rendered by the same code a declared shortcut is. Fabric accepts
 `SELECT`, `UPDATE`, `DELETE` and a `MERGE`'s insert through such a view and
 refuses a plain `INSERT`, which is why the procedure upserts with one `MERGE`.

@@ -13,6 +13,7 @@ from ..declaration.model import (
     WeaverRepository,
     parse_installed_identity,
 )
+from ..etl import RuntimeArtefact
 
 
 def _ordered(values: Iterable[WeaverDocumentId]) -> tuple[WeaverDocumentId, ...]:
@@ -213,24 +214,27 @@ def runtime_artefact_identities(
     return frozenset(artefact.identity for artefact in runtime_artefacts(repository))
 
 
-def _validation_artefacts(
+def _artefacts_standing_for_their_origin(
     repository: WeaverRepository, selected: set[WeaverDocumentId]
-) -> dict[WeaverDocumentId, WeaverDocumentId]:
-    """Each selected validation declaration, and the artefact it compiles to.
+) -> dict[WeaverDocumentId, "RuntimeArtefact"]:
+    """Each selected declaration whose artefact is its whole physical form.
 
-    A validation carries an ordinary ``Schema.Object`` identity and is selected so
-    its dictionary row publishes, but nothing is materialised under it: the
-    physical thing is a deployed module or a generated procedure with an identity
-    and a Registry row of its own. Classifying the declaration by that row is what
-    lets an unchanged validation stay unchanged.
+    One general relationship: a declaration compiles to a separately installed
+    artefact, nothing is materialised under the declaration's own identity, and so
+    the artefact's row is the only record of it. What kinds of declaration those
+    are is the artefact producer's to know — see
+    :attr:`~weaver.etl.RuntimeArtefact.stands_for_origin`.
+
+    A load artefact is absent: a table and the module that loads it are both
+    installed and both signed, and the table carries a shape version of its own.
     """
 
     from ..etl import runtime_artefacts
 
     return {
-        artefact.origin: artefact.identity
+        artefact.origin: artefact
         for artefact in runtime_artefacts(repository)
-        if artefact.is_validation
+        if artefact.stands_for_origin
         and artefact.origin is not None
         and artefact.origin in selected
     }
@@ -263,22 +267,19 @@ def determine_impact(
         if identity in selected_set
     }
     declared = declared_signatures(repository, selected_set)
-    # A validation is registered as the artefact it compiles to, not as the
-    # declaration — see :func:`weaver.catalogue.projection.project_item_catalogue`.
-    # So its declaration is classified by that artefact: what a Test *is*
-    # physically is the module or the procedure, and the signature of one already
-    # carries the authored source and the generator's version.
-    by_artefact = _validation_artefacts(repository, selected_set)
+    # A declaration whose artefact is its whole physical form is classified by
+    # that artefact's row, because that row is the only record of it. Nothing here
+    # knows which declarations those are; the artefact says so.
+    standing_for = _artefacts_standing_for_their_origin(repository, selected_set)
 
     new: set[WeaverDocumentId] = set()
     changed: set[WeaverDocumentId] = set()
     for identity in selected_set:
-        artefact = by_artefact.get(identity)
+        artefact = standing_for.get(identity)
         if artefact is not None:
-            signature = (
-                registered[artefact].signature if artefact in registered else None
-            )
-            wanted = declared.get(artefact, declared[identity])
+            recorded = registered.get(artefact.identity)
+            signature = None if recorded is None else recorded.signature
+            wanted = artefact.signature
         else:
             signature = installed.get(identity)
             wanted = declared[identity]

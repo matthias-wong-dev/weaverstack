@@ -115,6 +115,14 @@ class RuntimeArtefact:
     ``source_path`` is the authored file, relative to the repository root, and is
     carried rather than reconstructed: by the time an install fails only the
     deployed spelling is left.
+
+    ``stands_for_origin`` says this artefact is the whole physical form of the
+    declaration it came from — nothing is materialised under that declaration's
+    own identity, and nothing records it but this row. A table's load module does
+    not stand for the table: both are installed, both are signed, and the table
+    carries a shape version of its own. Incremental selection reads this to know
+    which row classifies a declaration, and never has to know what kind of
+    declaration it was.
     """
 
     identity: WeaverDocumentId
@@ -127,6 +135,7 @@ class RuntimeArtefact:
     role: str = ROLE_LOAD
     origin: WeaverDocumentId | None = None
     source_path: str | None = None
+    stands_for_origin: bool = False
 
     @property
     def installed_bytes(self) -> bytes:
@@ -269,6 +278,7 @@ def item_validation_artefacts(
                     role=role,
                     origin=identity,
                     source_path=source.relative_path,
+                    stands_for_origin=True,
                 )
             )
             continue
@@ -294,6 +304,7 @@ def item_validation_artefacts(
                 role=role,
                 origin=identity,
                 source_path=source.relative_path,
+                stands_for_origin=True,
             )
         )
     return tuple(artefacts)
