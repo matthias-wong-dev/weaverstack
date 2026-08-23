@@ -10,8 +10,9 @@ to each of the catalogue's runtime tables resolves in Spark.
 object is constructed and loaded by authored code running in Fabric, the way a
 developer in a notebook constructs and loads one.
 
-One submission, one evidence payload — one for the anchored object's own life and
-one for the reference, which needs a build of its own to exist.
+One submission, one evidence payload — one for the anchored objects' own lives,
+a loadable and a validation together, and one for the references, which need a
+build of their own to exist.
 """
 
 from __future__ import annotations
@@ -67,20 +68,45 @@ results["in_memory"] = first.bookmark().isoformat()
 second = Raw__CustomerCsv(spark, lakehouse=destination, catalogue=workspace.catalogue)
 results["persisted"] = second.bookmark().isoformat()
 
-# And the rest of what the standalone load recorded, read back the same way.
+# A validation, anchored and run the same way. Its identity comes from
+# `_.TestDictionary` rather than Registry, because it materialises nothing.
+from DWG__OrderAmounts import DWG__OrderAmounts
+
+free_test = DWG__OrderAmounts(spark, lakehouse=destination)
+results["validation_freestanding"] = (
+    None if free_test.installed is None else str(free_test.installed))
+try:
+    free_test.run()
+except LoadError as refused:
+    results["validation_refused"] = str(refused)
+
+checked = DWG__OrderAmounts(
+    spark, lakehouse=destination, catalogue=workspace.catalogue)
+results["validation_identity"] = str(checked.installed)
+results["validation_result"] = checked.run().to_mapping()
+
+# And the rest of what the standalone calls recorded, read back the same way.
 from weaver.catalogue.state import catalogue_in
-from weaver.catalogue.tables import LOAD_STATISTIC, LOAD_STATUS
+from weaver.catalogue.tables import LOAD_STATISTIC, LOAD_STATUS, TEST_STATUS
 
-def _mine(rows):
-    return [row for row in rows if row.get("object_name") == "CustomerCsv"]
+def _named(rows, wanted):
+    return [row for row in rows if row.get("object_name") == wanted]
 
-with catalogue_in(workspace, tables=(LOAD_STATUS, LOAD_STATISTIC)) as recorded:
+with catalogue_in(
+    workspace, tables=(LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
+) as recorded:
     results["status"] = [
-        str(row.get("result")) for row in _mine(recorded.table_rows(LOAD_STATUS))
+        str(row.get("result"))
+        for row in _named(recorded.table_rows(LOAD_STATUS), "CustomerCsv")
     ]
     results["statistics"] = [
         [int(row.get("rows_read") or 0), bool(row.get("is_static_skip"))]
-        for row in _mine(recorded.table_rows(LOAD_STATISTIC))
+        for row in _named(recorded.table_rows(LOAD_STATISTIC), "CustomerCsv")
+    ]
+    results["validation_status"] = [
+        [str(row.get("result")), str(row.get("test_type")),
+         int(row.get("failure_count") or 0)]
+        for row in _named(recorded.table_rows(TEST_STATUS), "OrderAmounts")
     ]
 
 emit(results)
@@ -122,6 +148,14 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
     # developer who ran this by hand can read what it did from the estate.
     assert seen["status"] == ["Succeeded"]
     assert seen["statistics"] and seen["statistics"][0][1] is False
+
+    # A validation divides the same way: freestanding it has no identity and no
+    # operational interface, anchored it resolves and records what it found.
+    assert seen["validation_freestanding"] is None
+    assert "not anchored" in seen["validation_refused"]
+    assert seen["validation_identity"].endswith("/DWG.OrderAmounts")
+    assert seen["validation_result"]["failure_count"] == 0
+    assert seen["validation_status"] == [["Succeeded", "Test", 0]]
 
 
 #: What the Lakehouse holds under ``Tables/_``, and whether each reference
