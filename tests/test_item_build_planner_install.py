@@ -950,7 +950,7 @@ def test_builtin_weaver_item_builds_through_the_same_planner(tmp_path):
         for _sequence, _batch, action in bundle.plan.actions()
         if action.kind == "build_table"
     ]
-    # The catalogue tables, plus `_.Log`.
-    assert len(physical) == 12
+    # The catalogue tables, plus the runtime-maintained `_.Log` and `_.Bookmark`.
+    assert len(physical) == 13
     assert bundle.plan.sequences[-1].description == "publish item registry last"
     assert bundle.plan.targets[0].logical_item_name == "_weaver"

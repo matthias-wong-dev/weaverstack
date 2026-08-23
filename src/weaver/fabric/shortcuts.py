@@ -20,11 +20,20 @@ from .resources import Item
 REPLACE_TIMEOUT = 30.0
 REPLACE_POLL_INTERVAL = 2.0
 
+#: How long to wait for a source Fabric has accepted but not yet published to
+#: OneLake. A Warehouse creates a table in its own catalogue first and publishes
+#: the Delta directory behind it a moment later, so a shortcut created in the same
+#: build as its source can arrive before there is anything to point at. Bounded,
+#: because a source that is genuinely absent has to fail.
+SOURCE_TIMEOUT = 120.0
+SOURCE_POLL_INTERVAL = 5.0
+
 #: How Fabric distinguishes the two conflicts a create can meet, both of which
 #: are a 409. The first is the shortcut being replaced, still settling. The
 #: second is something else already occupying the path, which waiting will not
 #: change. ``Shorcuts`` is Fabric's spelling.
 _STILL_SETTLING = "ShorcutsOperationNotAllowed"
+_SOURCE_MISSING = "Target path doesn't exist"
 _PATH_OCCUPIED = "NameConflictError"
 
 
@@ -83,6 +92,11 @@ def create_shortcut(
     collision: a shortcut holds no data, and a build has to be able to run twice.
     Fabric settles a deletion a moment after accepting it, so the create is
     retried while it reports the old name as still there.
+
+    Retried for a second reason, and on a longer deadline: Fabric validates the
+    target and a source created earlier in this same build may not be published to
+    OneLake yet. Waiting is what lets one build create a thing and point at it;
+    the deadline is what makes a source that will never appear still fail.
     """
 
     delete_shortcut(destination, path=path, name=name, client=client)
@@ -98,7 +112,8 @@ def create_shortcut(
         },
     }
     endpoint = f"workspaces/{destination.workspace_id}/items/{destination.id}/shortcuts"
-    deadline = time.monotonic() + REPLACE_TIMEOUT
+    settling_deadline = time.monotonic() + REPLACE_TIMEOUT
+    source_deadline = time.monotonic() + SOURCE_TIMEOUT
     while True:
         try:
             response = client.request("POST", endpoint, payload=payload)
@@ -111,7 +126,18 @@ def create_shortcut(
                     "so a shortcut cannot be created there. Remove it, or point "
                     "the shortcut at another name."
                 ) from exc
-            if _STILL_SETTLING not in message or time.monotonic() >= deadline:
+            if _SOURCE_MISSING in message:
+                if time.monotonic() >= source_deadline:
+                    raise CommandError(
+                        f"could not create the shortcut {path}/{name} in "
+                        f"{destination.name}: {source.name}/{source_path} did not "
+                        f"appear in OneLake within {SOURCE_TIMEOUT:.0f}s. A source "
+                        "created in this build is published a moment after it is "
+                        "made; one that never appears is not there."
+                    ) from exc
+                time.sleep(SOURCE_POLL_INTERVAL)
+                continue
+            if _STILL_SETTLING not in message or time.monotonic() >= settling_deadline:
                 raise CommandError(
                     f"could not create the shortcut {path}/{name} in "
                     f"{destination.name}: {exc}"

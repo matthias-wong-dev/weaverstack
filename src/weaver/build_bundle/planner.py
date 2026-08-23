@@ -37,6 +37,7 @@ from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
+from .bookmarks import render_bookmark_reconciliation, render_bookmark_reference
 from .bundle import (
     SUPPORTED_FORMAT_VERSION,
     BuildBundle,
@@ -76,6 +77,7 @@ def generate_item_build_bundle(
     stale_claims: tuple = (),
     catalogue_binding: WarehouseBinding,
     shortcut_sources: Mapping[str, object] | None = None,
+    bookmark_source: object | None = None,
 ) -> BuildBundle:
     """Freeze the one incremental build model into an installable bundle."""
 
@@ -171,6 +173,20 @@ def generate_item_build_bundle(
     if catalogue_before is not None:
         stages.append(catalogue_before)
 
+    # Bookmarks are invalidated here, between decertification and the first
+    # physical action, and never after it — see :mod:`weaver.build_bundle.bookmarks`.
+    # Against the catalogue this build read: which rows are obsolete is arithmetic
+    # over rows it holds, and a build creating `_.Bookmark` read none.
+    bookmarks = render_bookmark_reconciliation(
+        repository,
+        items=tuple(target_by_item),
+        selected_for_build=selected_for_build,
+        catalogue=catalogue,
+        catalogue_target=catalogue_target,
+    )
+    if bookmarks is not None:
+        stages.append(bookmarks)
+
     # Shortcut destinations this build wanted but could not materialise. They must
     # not reach the Registry: a row there means the object's work succeeded, and
     # for these no work was even planned.
@@ -197,6 +213,8 @@ def generate_item_build_bundle(
                 selected_loads=selected_for_build & selected_loads,
                 removed=removed,
                 registered=registered,
+                catalogue_target=catalogue_target,
+                bookmark_source=bookmark_source,
             )
             layer_stages.extend(planned.stages)
             omitted.extend(planned.omitted)
@@ -349,9 +367,11 @@ def plan_item_build(
     selected_for_drop,
     selected_for_build,
     registered,
+    catalogue_target,
     selected_loads=(),
     removed=(),
     shortcut_sources=None,
+    bookmark_source=None,
 ) -> PlannedItem:
     """One item's physical plan, from prepared inputs.
 
@@ -441,6 +461,18 @@ def plan_item_build(
     stages.extend(
         item_load_removals(removed, item=item, target=target, registered=registered)
     )
+    # Behind the artefacts, in the phase they are installed in: the reference
+    # exists for them, and nothing built reads a bookmark.
+    reference = render_bookmark_reference(
+        repository,
+        item=item,
+        target=target,
+        inventory=inventory,
+        catalogue_target=catalogue_target,
+        bookmark_source=bookmark_source,
+    )
+    if reference is not None:
+        stages.append(reference)
     return PlannedItem(
         stages=tuple(stages),
         omitted=shortcuts.omitted,

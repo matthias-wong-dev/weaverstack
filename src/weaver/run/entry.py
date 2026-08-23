@@ -25,13 +25,15 @@ def run_python_primitive(
     object: str,
     expected_class: str,
     fault_tolerant: bool = False,
+    identity: str | None = None,
     session=None,
     workspace=None,
 ) -> dict:
     """Run one deployed Python primitive in a named scope, and report rows."""
 
-    from ..declaration.model import WeaverItemId
+    from ..declaration.model import WeaverItemId, parse_installed_identity
     from ..load_plan import LAKEHOUSE_TARGET, PhysicalTargetRef
+    from ..runtime.session_scopes import scope_catalogue
     from .dispatch import python_primitive
 
     return python_primitive(
@@ -45,6 +47,10 @@ def run_python_primitive(
         runtime_scope=get_scope(run_id),
         session=_session(session, workspace),
         workspace=workspace,
+        # Read where the run opened its scope, not here: the catalogue crossed
+        # once, with the scope, and this is one node of the run that carried it.
+        catalogue=scope_catalogue(run_id),
+        node_identity=parse_installed_identity(identity) if identity else None,
     ).as_row()
 
 

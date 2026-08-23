@@ -24,7 +24,7 @@ from weaver.build_bundle import (
 )
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import CATALOGUE_TABLES
+from weaver.catalogue.tables import PROJECTED_TABLES
 from weaver.declaration.model import WeaverItemId
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
@@ -168,7 +168,7 @@ def test_an_empty_catalogue_plans_every_catalogue_table_as_an_ordinary_action(es
         for _sequence, _batch, action in result.plan.actions()
         if action.resource_node_id
     }
-    for table in CATALOGUE_TABLES:
+    for table in PROJECTED_TABLES:
         assert f"{BUILTIN}/{table.qualified}" in built, (
             f"{table.qualified} was not planned by the ordinary build"
         )

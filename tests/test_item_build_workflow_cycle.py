@@ -240,7 +240,7 @@ def test_build_state_json_round_trip_preserves_epochs_and_inventory():
                     )
                 }
             },
-            present_tables=frozenset({"Registry"}),
+            materialised=frozenset({"Registry"}),
         ),
         target_inventories=_inventories(),
     )

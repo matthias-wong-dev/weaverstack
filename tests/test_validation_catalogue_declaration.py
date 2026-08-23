@@ -323,3 +323,79 @@ def test_a_missing_role_is_refused_rather_than_assumed_to_be_data():
 
     with pytest.raises(BuildError, match="unsupported object_role"):
         _read_back(row)
+
+
+# --- and it converges ---------------------------------------------------------
+#
+# A validation is registered as the artefact it compiles to, so what classifies
+# its declaration is that artefact's row. Without this, a validation is "new" on
+# every build for as long as it exists: an estate that never converges, and a
+# build that always reports having selected something.
+
+
+def _built(repository):
+    """The catalogue a successful build of this repository leaves behind."""
+
+    from weaver.build_bundle.catalogue_actions import desired_catalogue
+    from weaver.build_bundle.planner import certifiable_identities
+    from weaver.build_bundle.targets import LakehouseBinding
+    from weaver.targets import ItemRef
+
+    binding = LakehouseBinding(ItemRef("Sales_LH"), workspace_name="Demo")
+    by_item = {ITEM: binding}
+    return desired_catalogue(
+        repository,
+        certifiable_identities(repository, by_item),
+        {ITEM: binding.to_bound_target()},
+    )
+
+
+@weaver_test()
+def test_an_unchanged_validation_is_not_selected_again(repository):
+    """The property the whole estate's convergence rests on."""
+
+    from weaver.build_bundle.incremental import select_build
+    from weaver.build_bundle.planner import certifiable_identities
+    from weaver.build_bundle.targets import LakehouseBinding
+    from weaver.targets import ItemRef
+
+    installed = _built(repository)
+    selectable = certifiable_identities(
+        repository,
+        {ITEM: LakehouseBinding(ItemRef("Sales_LH"), workspace_name="Demo")},
+    )
+
+    selection = select_build(repository, installed.registered, selected=selectable)
+
+    assert selection.selected_for_build == ()
+
+
+@weaver_test()
+def test_an_edited_validation_is_selected(repository, tmp_path):
+    """Guards the test above from passing by never selecting anything at all."""
+
+    from weaver.build_bundle.incremental import select_build
+    from weaver.build_bundle.planner import certifiable_identities
+    from weaver.build_bundle.targets import LakehouseBinding
+    from weaver.targets import ItemRef
+
+    installed = _built(repository)
+    _write(
+        tmp_path,
+        "Lakehouse/Sales/tests/Sales__OrdersReconcile.py",
+        _python_test("Sales.OrdersReconcile").replace(
+            "Description:", "Description: edited,"
+        ),
+    )
+    edited = parse_item_repository(Location(str(tmp_path)))
+    selectable = certifiable_identities(
+        edited, {ITEM: LakehouseBinding(ItemRef("Sales_LH"), workspace_name="Demo")}
+    )
+
+    selection = select_build(edited, installed.registered, selected=selectable)
+
+    assert [
+        str(identity)
+        for identity in selection.selected_for_build
+        if "OrdersReconcile" in str(identity)
+    ]

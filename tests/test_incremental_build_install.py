@@ -474,7 +474,7 @@ def test_an_shortcut_whose_destination_is_gone_is_remade(tmp_path):
     repository = _repository(_dependency_estate(tmp_path))
     state = Catalogue(
         rows=_shortcut_catalogue(repository),
-        present_tables=frozenset({REGISTRY.name}),
+        materialised=frozenset({REGISTRY.name}),
     )
     reconciled = reconcile_catalogue_state(
         state, inventories=_shortcut_inventories(repository, shortcut_installed=False)
@@ -507,7 +507,7 @@ def test_an_shortcut_destination_installed_as_a_table_is_pruned(tmp_path):
     reconciled = reconcile_catalogue_state(
         Catalogue(
             rows=_shortcut_catalogue(repository),
-            present_tables=frozenset({REGISTRY.name}),
+            materialised=frozenset({REGISTRY.name}),
         ),
         inventories=inventories,
     )

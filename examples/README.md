@@ -133,11 +133,21 @@ from Sales__Customer import Sales__Customer  # a Python table
 from Sales__Order import Sales__Order  # a Python table
 from Sales__OrderSummary import Sales__OrderSummary  # a Spark SQL table
 
-Sales__OrderExport(spark).load()
-Sales__Customer(spark).load()
-Sales__Order(spark).load()
-Sales__OrderSummary(spark).load()
+catalogue = "Warehouse/Weaver"
+
+Sales__OrderExport(spark, catalogue=catalogue).load()
+Sales__Customer(spark, catalogue=catalogue).load()
+Sales__Order(spark, catalogue=catalogue).load()
+Sales__OrderSummary(spark, catalogue=catalogue).load()
 ```
+
+Naming the catalogue makes each object *catalogue-anchored*: it has a place in
+the estate's own record of itself, so a clean load advances its bookmark.
+`Sales__Customer(spark)` would be freestanding, which is for reading: `read()`
+runs, and `load()` refuses, because a load records how far it read. A constructor
+argument rather than a `load()` one, because an authored `read()` is called by
+Weaver and takes nothing, so whatever it may reach is set before the load
+begins.
 
 `Sales.OrderSummary` is authored as `Sales.OrderSummary.sql` and
 installed as `Sales__OrderSummary.py` — a `SparkSqlTable` carrying the
@@ -151,6 +161,54 @@ Or orchestrate the lot, in dependency order, from either mode:
 weaver load Lakehouse/Sales Warehouse/Reporting \
   --workspace-config "examples/weaver_example.yml"
 ```
+
+------------------------------------------------------------------------
+
+# Reading only what has arrived
+
+`Sales.Order` is incremental, and it reads incrementally. `self.bookmark()` is the
+UTC instant immediately before its most recent clean load began, and the folder
+records when each of its files changed, so the two compose into "what has
+arrived since":
+
+``` python
+class Sales__Order(Table):
+    def read(self):
+        export = Sales__OrderExport(self)
+        arrived = export.files_since(self.bookmark())
+        if not arrived:
+            return self.empty_dataframe(), None
+        ...
+```
+
+A table that has never loaded cleanly carries the sentinel,
+`1900-01-01T00:00:00Z`, and every file is newer than that — so the first load
+reads the lot and later ones read the night's delivery. Watch it in the load
+report: `Sales.Customer` reads the whole folder every time because it is the
+whole truth about its customers, and `Sales.Order` reads only what is new.
+
+``` text
+first load, one export file
+  load:Lakehouse/Sales/Sales.Customer  (read 3, +3 ~0 -0 !0)
+  load:Lakehouse/Sales/Sales.Order     (read 4, +4 ~0 -0 !0)
+
+again, nothing delivered
+  load:Lakehouse/Sales/Sales.Customer  (read 3, +0 ~0 -0 !0)
+  load:Lakehouse/Sales/Sales.Order     (read 0, +0 ~0 -0 !0)
+
+a second night's file arrives
+  load:Lakehouse/Sales/Sales.Customer  (read 4, +1 ~0 -0 !0)
+  load:Lakehouse/Sales/Sales.Order     (read 2, +2 ~0 -1 !0)
+```
+
+The `-1` is an order the new file marked cancelled. Absence would not have
+retired it: an incremental source is a window, so a row missing from tonight's
+file is older than the window rather than gone.
+
+One caveat worth knowing: `files_since` refuses a folder that holds managed
+files with no change history, because Weaver never saw those files arrive and
+cannot say when they changed. A folder load that changes nothing appends nothing,
+so a folder whose history was lost stays without one until it next publishes.
 
 ------------------------------------------------------------------------
 

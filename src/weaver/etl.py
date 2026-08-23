@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from .declaration.metadata import PYTHON, SPARK_SQL, TABLE, ObjectId
+from .declaration.metadata import FOLDER, PYTHON, SPARK_SQL, TABLE, ObjectId
 from .declaration.model import (
     FILE_SHAPE,
     PROCEDURE_SHAPE,
@@ -115,6 +115,14 @@ class RuntimeArtefact:
     ``source_path`` is the authored file, relative to the repository root, and is
     carried rather than reconstructed: by the time an install fails only the
     deployed spelling is left.
+
+    ``stands_for_origin`` says this artefact is the whole physical form of the
+    declaration it came from — nothing is materialised under that declaration's
+    own identity, and nothing records it but this row. A table's load module does
+    not stand for the table: both are installed, both are signed, and the table
+    carries a shape version of its own. Incremental selection reads this to know
+    which row classifies a declaration, and never has to know what kind of
+    declaration it was.
     """
 
     identity: WeaverDocumentId
@@ -127,6 +135,7 @@ class RuntimeArtefact:
     role: str = ROLE_LOAD
     origin: WeaverDocumentId | None = None
     source_path: str | None = None
+    stands_for_origin: bool = False
 
     @property
     def installed_bytes(self) -> bytes:
@@ -169,6 +178,33 @@ def runtime_artefacts(repository: WeaverRepository) -> tuple[RuntimeArtefact, ..
     for model in repository.items:
         artefacts.extend(item_runtime_artefacts(repository, item=model.identity))
     return tuple(sorted(artefacts, key=lambda artefact: str(artefact.identity)))
+
+
+def item_bookmarkable_objects(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    """The objects in one item Weaver loads, and therefore bookmarks.
+
+    Derived from the load artefacts the item installs, so what carries a bookmark
+    cannot drift from what has something to run. A View has no load; a Table
+    declaring ``Has load procedure: false`` is populated by something other than
+    Weaver; a helper module under ``lib/`` declares no object; and a Test or an
+    Assumption is a validation rather than a load.
+
+    Listed without a destination, because an artefact's identity is the same
+    wherever its item is bound and no payload is needed to answer this.
+    """
+
+    bookmarkable = {FOLDER, TABLE}
+    found = set()
+    for artefact in item_load_artefacts(repository, item=item):
+        origin = artefact.origin
+        if origin is None or artefact.role != ROLE_LOAD:
+            continue
+        source = repository.source_documents.get(origin)
+        if source is not None and source.kind in bookmarkable:
+            found.add(origin)
+    return tuple(sorted(found, key=str))
 
 
 def item_runtime_artefacts(
@@ -242,6 +278,7 @@ def item_validation_artefacts(
                     role=role,
                     origin=identity,
                     source_path=source.relative_path,
+                    stands_for_origin=True,
                 )
             )
             continue
@@ -267,6 +304,7 @@ def item_validation_artefacts(
                 role=role,
                 origin=identity,
                 source_path=source.relative_path,
+                stands_for_origin=True,
             )
         )
     return tuple(artefacts)
@@ -304,7 +342,7 @@ def _warehouse_artefacts(
         # other than Weaver, so there is no procedure to install for it.
         if not has_generated_load(source):
             continue
-        generated = source.create_load()
+        generated = source.create_load(item=item)
         artefacts.append(
             RuntimeArtefact(
                 identity=load_procedure_id(item, identity.object_id),
@@ -357,7 +395,7 @@ def _lakehouse_artefacts(
                 continue
             _object_type, template_version = load_identity(source)
             generated = (
-                source.create_load(destination=destination)
+                source.create_load(destination=destination, item=item)
                 if destination is not None
                 else None
             )
@@ -747,6 +785,7 @@ __all__ = [
     "LOAD_ROOT",
     "RuntimeArtefact",
     "PROCEDURE_TYPE",
+    "item_bookmarkable_objects",
     "item_load_artefacts",
     "load_artefacts",
     "artefacts_by_identity",

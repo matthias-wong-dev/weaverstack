@@ -99,12 +99,13 @@ def session(tmp_path):
 
             return refuse
 
+    opened = given_session(
+        workspace=workspace, resolver=Refreshing(workspace), store=Refuses()
+    )
     return Prepared(
-        catalogue=installed_catalogue(repository, bindings),
+        catalogue=installed_catalogue(repository, bindings, session=opened),
         workspace=workspace,
-        session=given_session(
-            workspace=workspace, resolver=Refreshing(workspace), store=Refuses()
-        ),
+        session=opened,
     )
 
 
@@ -276,6 +277,26 @@ def test_load_dry_run_appends_nothing_to_the_log(session, tmp_path):
         if call.kind == "tsql"
         for statement in call.body
         if "[_].[Log]" in statement
+    ]
+
+
+@weaver_test()
+def test_a_dry_run_moves_no_bookmark(session):
+    """A bookmark it advanced would make the next real load skip a window.
+
+    Nothing read it, so nothing has been read. Proven by the statements rather
+    than by a flag: no statement touching the table is submitted at all.
+    """
+
+    dry_run(session)
+    session.session.flush()
+
+    assert not [
+        statement
+        for call in session.session.calls
+        if call.kind == "tsql"
+        for statement in call.body
+        if "[_].[Bookmark]" in statement
     ]
 
 

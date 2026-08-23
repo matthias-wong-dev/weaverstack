@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
 from support.weaver_test import weaver_test
 
+from weaver.errors import CommandError
+from weaver.fabric.client import FabricError
 from weaver.fabric.resources import LAKEHOUSE, Item
 from weaver.fabric.shortcuts import create_shortcut, delete_shortcut
 
@@ -29,7 +32,10 @@ class _Client:
     def request(self, method, path, *, payload=None, expected=(200, 201, 202)):
         self.calls.append((method, path, payload))
         if self.responses:
-            return self.responses.pop(0)
+            staged = self.responses.pop(0)
+            if isinstance(staged, Exception):
+                raise staged
+            return staged
         return _Response(200)
 
     def get_json(self, path):
@@ -73,6 +79,68 @@ def test_a_shortcut_is_replaced_rather_than_created_strictly():
     # Fabric honoured that, and distinguishes it from the destination Lakehouse
     # not yet having registered the shortcut as a table.
     assert details["status"] == 200
+
+
+@weaver_test()
+def test_a_source_published_a_moment_later_is_waited_for(monkeypatch):
+    """One build can create a thing and point at it.
+
+    Fabric validates a shortcut's target, and a Warehouse publishes a table to
+    OneLake shortly after creating it in its own catalogue — so the create can
+    arrive before there is anything to point at.
+    """
+
+    import weaver.fabric.shortcuts as shortcuts
+
+    slept: list[float] = []
+    monkeypatch.setattr(shortcuts.time, "sleep", slept.append)
+    client = _Client(
+        responses=[
+            _Response(200),  # the delete
+            FabricError("400: RequestBodyValidationFailed: Target path doesn't exist"),
+            _Response(201),
+        ]
+    )
+
+    details = create_shortcut(
+        _lakehouse("Curated", "dest1"),
+        path="Tables/_",
+        name="Bookmark",
+        source=_lakehouse("Weaver", "src1"),
+        source_path="Tables/_/Bookmark",
+        client=client,
+    )
+
+    assert details["status"] == 201
+    assert slept == [shortcuts.SOURCE_POLL_INTERVAL]
+
+
+@weaver_test()
+def test_a_source_that_never_appears_still_fails(monkeypatch):
+    """Bounded, so a target that is genuinely absent is a failure and not a hang."""
+
+    import weaver.fabric.shortcuts as shortcuts
+
+    monkeypatch.setattr(shortcuts, "SOURCE_TIMEOUT", 0.0)
+    monkeypatch.setattr(shortcuts.time, "sleep", lambda _seconds: None)
+    client = _Client(
+        responses=[
+            _Response(200),
+            FabricError("400: RequestBodyValidationFailed: Target path doesn't exist"),
+        ]
+    )
+
+    with pytest.raises(CommandError) as raised:
+        create_shortcut(
+            _lakehouse("Curated", "dest1"),
+            path="Tables/_",
+            name="Bookmark",
+            source=_lakehouse("Weaver", "src1"),
+            source_path="Tables/_/Bookmark",
+            client=client,
+        )
+
+    assert "did not appear in OneLake" in str(raised.value)
 
 
 @weaver_test()

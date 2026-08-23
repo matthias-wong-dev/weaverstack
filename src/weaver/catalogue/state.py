@@ -7,7 +7,7 @@ storage or schema errors.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -18,16 +18,19 @@ from ..declaration.model import (
     WeaverDocumentId,
     WeaverItemId,
 )
-from ..errors import BuildError
+from ..errors import BuildError, ConfigError
 from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
+    BOOKMARK,
+    BOOKMARK_SENTINEL,
     BUILD_DATETIME,
-    CATALOGUE_TABLES,
     INSTALLATION,
     OBJECT_ROLES,
     OBJECT_TYPES,
+    PROJECTED_TABLES,
+    READABLE_TABLES,
     REGISTRY,
     ROLE_DATA,
     RUNTIME_ROLES,
@@ -42,9 +45,12 @@ from .tables import (
 _FILES_PREFIX = "Files/"
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(init=False)
 class Catalogue:
-    """The catalogue the build reads and reasons about.
+    """The catalogue an operation reads, reasons about, and records into.
+
+    Live runtime state rather than a snapshot: rows are read into it, written
+    through it, and read back from it, so it is mutable and says so.
 
     One class whatever produced it: read from the catalogue Warehouse in
     production, or built directly from Registry rows or a repository in a test.
@@ -55,42 +61,193 @@ class Catalogue:
     documents derived from the Registry rows — identity, type, signature and
     publication build_datetime, without the audit columns, which no build decision reads.
 
-    ``present_tables`` records which catalogue tables physically exist: a claim
-    can only be raised against a table that is there, or reconciliation would
-    emit deletes against tables that are not.
+    A catalogue is *selectively materialised*. It holds the rows of the tables it
+    was asked for and nothing else, because reading everything is not free:
+    ``_.Log`` is history and grows with the estate's age, and nothing consults
+    it. What was read is :attr:`materialised`. Whether a table physically exists
+    is a different question, and a target's inventory answers it.
+
+    Runtime rows are written through it — :meth:`submit` appends, :meth:`update`
+    merges on the table's key — and an updated row is visible to a reader of this
+    catalogue at once, before it has reached the Warehouse. :meth:`flush` is the
+    durability barrier and the only place a write failure surfaces.
+
+    A catalogue reaches its Warehouse through a Session. One it was handed is
+    borrowed and left open; one it opened for itself is closed by :meth:`close`.
     """
 
     rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
     registered: Mapping[WeaverDocumentId, "RegisteredDocument"]
-    present_tables: frozenset[str]
+    materialised: frozenset[str]
 
     def __init__(
         self,
         rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]],
         *,
         registered: Mapping[WeaverDocumentId, "RegisteredDocument"] | None = None,
-        present_tables: frozenset[str] | None = None,
+        materialised: frozenset[str] | None = None,
+        writer: Any = None,
+        session: Any = None,
+        owns_session: bool = False,
     ) -> None:
-        frozen_rows = MappingProxyType(dict(rows))
-        object.__setattr__(self, "rows", frozen_rows)
-
-        object.__setattr__(
-            self,
-            "registered",
-            _registered_documents(frozen_rows)
+        self.rows = MappingProxyType(dict(rows))
+        self.registered = (
+            _registered_documents(self.rows)
             if registered is None
-            else MappingProxyType(dict(registered)),
+            else MappingProxyType(dict(registered))
         )
         # Defaulting to "every table this catalogue carries rows for" keeps a
         # hand-built catalogue honest without making every caller state it.
-        object.__setattr__(
-            self,
-            "present_tables",
-            frozenset(
-                present_tables
-                if present_tables is not None
-                else {table for tables in frozen_rows.values() for table in tables}
-            ),
+        carried = {table for tables in self.rows.values() for table in tables}
+        self.materialised = frozenset(
+            materialised if materialised is not None else carried
+        )
+        self._writer = writer
+        self._session = session
+        self._owns_session = owns_session
+        # Rows this catalogue has written, by table and key. Consulted ahead of
+        # what was read, so a caller sees its own update immediately.
+        self._written: dict[str, dict[tuple, dict]] = {}
+
+    # --- the Session it reaches its Warehouse through -----------------------
+
+    @property
+    def session(self):
+        """The Session this catalogue reads and writes through, if it has one."""
+
+        return self._session
+
+    def close(self) -> None:
+        """Close the Session this catalogue opened, if it opened one.
+
+        A borrowed Session belongs to whoever opened it and is left alone. One
+        this catalogue opened for itself is closed here, so the caller that
+        named a catalogue by name has one thing to close.
+        """
+
+        if self._owns_session and self._session is not None:
+            self._session.close()
+            self._session = None
+            self._owns_session = False
+
+    def __enter__(self) -> "Catalogue":
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
+
+    # --- writing ------------------------------------------------------------
+
+    @property
+    def writer(self):
+        """Where this catalogue's runtime writes go, or a refusal if nowhere."""
+
+        if self._writer is None:
+            from .writer import RefusingWriter
+
+            self._writer = RefusingWriter(
+                "it was built without a connection to write through"
+            )
+        return self._writer
+
+    def submit(self, table, row: Mapping[str, object]) -> None:
+        """Record one appended row — a settled unit of work."""
+
+        self.writer.submit(table, row)
+
+    def update(self, table, row: Mapping[str, object]) -> None:
+        """Record one keyed row, in memory now and in the Warehouse on flush.
+
+        Both, because a caller that just recorded something must not read back
+        what it replaced: a run advancing a bookmark and then asking for it is
+        asking about the load it just did.
+        """
+
+        self._written.setdefault(table.name, {})[
+            tuple(row.get(name) for name in table.key)
+        ] = dict(row)
+        self.writer.update(table, row)
+
+    def flush(self) -> None:
+        """Wait for every row this catalogue wrote. Raises what did not land."""
+
+        self.writer.flush()
+
+    # --- reading ------------------------------------------------------------
+
+    def table_rows(self, table) -> tuple[Mapping[str, object], ...]:
+        """Every row of one table, across the items this catalogue holds.
+
+        Rows this catalogue wrote replace the ones it read, keyed on the table's
+        own key, so a reader sees the catalogue as it now stands.
+        """
+
+        written = self._written.get(table.name, {})
+        found: dict[tuple, Mapping[str, object]] = {}
+        for tables in self.rows.values():
+            for row in tables.get(table.name, ()):
+                found[tuple(row.get(name) for name in table.key)] = row
+        found.update(written)
+        return tuple(found.values())
+
+    def bookmark(self, identity: WeaverDocumentId) -> datetime:
+        """How far ``identity`` has been loaded.
+
+        A missing row is not a failure and not an absence to handle: it means no
+        clean load has run since this object's current physical incarnation, so
+        it reads as the sentinel and an incremental read asks for everything.
+        """
+
+        from .claims import bookmark_row
+
+        wanted = bookmark_row(identity)
+        for row in self.table_rows(BOOKMARK):
+            if all(row.get(name) == value for name, value in wanted.items()):
+                return _aware(row.get("bookmark_datetime")) or BOOKMARK_SENTINEL
+        return BOOKMARK_SENTINEL
+
+    def installed_object(
+        self, *, target_name: str, schema: str, object: str, is_files: bool
+    ) -> WeaverDocumentId:
+        """Which installed object a physical target's ``Schema.Object`` is.
+
+        The catalogue answers it, never the target's name: ``Installation`` says
+        which logical item is bound to a physical one and ``Registry`` says what
+        that item installed.
+
+        Exactly one match, or a failure saying which. Two items may be bound to
+        one physical target, so a name that resolves twice is genuinely ambiguous
+        and anything that guessed would act on the wrong object.
+        """
+
+        stored = f"{_FILES_PREFIX}{schema}" if is_files else schema
+        bound = {
+            _item_of(row)
+            for row in self.table_rows(INSTALLATION)
+            if str(row.get("target_name") or "").casefold() == target_name.casefold()
+        }
+        found = [
+            identity
+            for identity, document in self.registered.items()
+            if identity.item in bound
+            and document.object_role == ROLE_DATA
+            and catalogue_schema(identity).casefold() == stored.casefold()
+            and identity.object_id.object.casefold() == object.casefold()
+        ]
+        if len(found) == 1:
+            return found[0]
+        where = f"{stored}.{object} in {target_name}"
+        if not found:
+            raise ConfigError(
+                f"{where} is not an object the Weaver catalogue records as "
+                "installed, so it has no catalogue identity. Build it first, or "
+                "name the target it was built into."
+            )
+        raise ConfigError(
+            f"{where} matches more than one installed object — "
+            + ", ".join(sorted(str(identity) for identity in found))
+            + ". Two logical items are bound to this target, so which one is "
+            "meant cannot be settled here."
         )
 
     def to_mapping(self) -> dict[str, object]:
@@ -116,7 +273,7 @@ class Catalogue:
                     self.rows.items(), key=lambda pair: str(pair[0])
                 )
             ],
-            "present_tables": sorted(self.present_tables),
+            "materialised": sorted(self.materialised),
         }
 
     @classmethod
@@ -142,7 +299,7 @@ class Catalogue:
         }
         return cls(
             rows=MappingProxyType(rows),
-            present_tables=frozenset(mapping.get("present_tables", ())),
+            materialised=frozenset(mapping.get("materialised", ())),
         )
 
     # --- constructors ---------------------------------------------------------
@@ -380,7 +537,17 @@ class RegisteredDocument:
 #: Add a name here in the same change that adds the table, and only then: a table
 #: listed here that *was* in an older release would turn a repair case into a
 #: silent partial rebuild.
-INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name})
+INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name, BOOKMARK.name})
+
+#: What a build reads. The projected tables, which it compares and republishes,
+#: and ``_.Bookmark``, whose rows it decides the obsolete ones from. ``_.Log`` is
+#: absent: it is history, nothing reads it to decide anything, and reading it
+#: would grow with the estate's age.
+READ_FOR_BUILD = PROJECTED_TABLES + (BOOKMARK,)
+
+#: The tables whose presence a build has to know about — the ones it reads, since
+#: a claim may only be raised against a table that is there.
+CHECKED_TABLES = READ_FOR_BUILD
 
 
 def _encode_json_value(value):
@@ -397,6 +564,26 @@ def _decode_json_value(value):
     if isinstance(value, dict) and value.get("$weaver_type") == "datetime":
         return datetime.fromisoformat(value["value"])
     return value
+
+
+def _aware(at) -> datetime | None:
+    """One stored instant, always aware and always UTC.
+
+    The ``_`` schema holds ``datetime2``, which carries no zone, and every
+    instant Weaver writes there is UTC.
+    """
+
+    if not isinstance(at, datetime):
+        return None
+    return at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
+
+
+def _item_of(row: Mapping[str, object]) -> WeaverItemId:
+    """The logical item one catalogue row belongs to."""
+
+    return WeaverItemId(
+        str(row.get(SCOPE_ITEM_TYPE) or ""), str(row.get(SCOPE_ITEM_NAME) or "")
+    )
 
 
 def _registered_documents(
@@ -460,7 +647,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     present: set[str] = set()
     missing: set[str] = set()
     incompatible: list[str] = []
-    for table in CATALOGUE_TABLES:
+    for table in CHECKED_TABLES:
         columns = catalogue.columns_of(table)
         if columns is None:
             missing.add(table.name)
@@ -519,7 +706,11 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     scopes = InstallationScopes(
         tuple(InstallationScope(item.item_type, item.item_name) for item in wanted)
     )
-    by_table = read_installations(catalogue, scopes=scopes)
+    # `_.Bookmark` as well as the projected tables. Nothing projects it, so it
+    # takes no part in publication — but a build decides which rows are obsolete,
+    # and deciding from rows it has read is the same arithmetic every other
+    # catalogue decision uses. An absent table reads as no rows.
+    by_table = read_installations(catalogue, scopes=scopes, tables=READ_FOR_BUILD)
 
     # Seeded before grouping, and that is not tidiness. An item with no rows yet
     # is an ordinary state — it has never been built — and it must still appear,
@@ -527,7 +718,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     # to compare, reconcile and publish. An item that fell out here would look
     # like an item the build was never pointed at.
     grouped: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {
-        item: {table.name: [] for table in CATALOGUE_TABLES} for item in wanted
+        item: {table.name: [] for table in READ_FOR_BUILD} for item in wanted
     }
     for table_name, table_rows in by_table.items():
         for row in table_rows:
@@ -555,12 +746,16 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
     }
     return Catalogue(
         rows=MappingProxyType(rows),
-        present_tables=frozenset(present),
+        materialised=frozenset(
+            table.name for table in READ_FOR_BUILD if table.name in present
+        ),
     )
 
 
-def read_installed_catalogue(catalogue: Any) -> Catalogue:
-    """Read the whole installed catalogue, without being told what is in it.
+def read_installed_catalogue(
+    catalogue: Any, *, tables=READABLE_TABLES, writer=None, session=None
+) -> Catalogue:
+    """Read the installed catalogue, without being told what is in it.
 
     The sibling of :func:`read_catalogue_state`, for an operation that runs
     after a build. A build knows its items and reads each installation's scope;
@@ -568,39 +763,83 @@ def read_installed_catalogue(catalogue: Any) -> Catalogue:
     logical items are installed and where they are bound. So this reads unscoped
     and groups rows by the scope they carry.
 
+    ``tables`` is what to materialise, and it defaults to everything an operation
+    reads — which is not everything the catalogue owns. ``_.Log`` is left out:
+    it is history, and reading it would grow with the estate's age for an answer
+    nothing asks.
+
     The shape check is weaker than the build's: a missing table reads as no rows
-    rather than a fault, because an estate with no shortcuts has never had an
-    Shortcut table written. Nothing here writes, so nothing needs the guarantee
-    that the catalogue can be written.
+    rather than a fault, because an estate with no shortcuts has never had a
+    Shortcut table written.
     """
 
     rows: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {}
-    present: set[str] = set()
-    for table in CATALOGUE_TABLES:
+    for table in tables:
         table_rows = read_table(catalogue, table)
-        if table_rows:
-            present.add(table.name)
         for row in table_rows:
-            item_type = str(row.get(SCOPE_ITEM_TYPE) or "")
-            item_name = str(row.get(SCOPE_ITEM_NAME) or "")
-            if not item_type or not item_name:
+            item = _item_of(row)
+            if not item.item_type or not item.item_name:
                 raise BuildError(
                     f"{table.qualified} holds a row with no installation scope; "
                     "every catalogue row names the logical item it belongs to"
                 )
-            item = WeaverItemId(item_type, item_name)
             rows.setdefault(item, {}).setdefault(table.name, []).append(row)
     return Catalogue(
         rows=MappingProxyType(
             {
                 item: MappingProxyType(
-                    {name: tuple(table_rows) for name, table_rows in tables.items()}
+                    {name: tuple(table_rows) for name, table_rows in tables_of.items()}
                 )
-                for item, tables in rows.items()
+                for item, tables_of in rows.items()
             }
         ),
-        present_tables=frozenset(present),
+        materialised=frozenset(table.name for table in tables),
+        writer=writer,
+        session=session,
     )
+
+
+def catalogue_for(session, workspace=None, *, tables=READABLE_TABLES) -> Catalogue:
+    """The installed catalogue, read and writable, through a Session it borrows.
+
+    The one construction an operation needs: it reads what it asked for and
+    carries the way back, so a caller records a settled unit of work or a moved
+    bookmark by telling this catalogue rather than by opening a stream of its own.
+
+    The Session belongs to the caller and is left open. For one the catalogue
+    opens for itself, see :func:`catalogue_in`.
+    """
+
+    from .connection import catalogue_connection
+    from .writer import writer_for
+
+    resolved = session.workspace_or_default(workspace)
+    return read_installed_catalogue(
+        catalogue_connection(session, resolved),
+        tables=tables,
+        writer=writer_for(session, resolved),
+        session=session,
+    )
+
+
+def catalogue_in(workspace, *, tables=READABLE_TABLES) -> Catalogue:
+    """The catalogue in one workspace, through a Session it opens for itself.
+
+    For a caller that names a catalogue rather than holding a Session — authored
+    code anchoring an object by name. The Session is the catalogue's, so
+    :meth:`Catalogue.close` closes it and nothing else has to know it exists.
+    """
+
+    from ..sessions.host import session_for
+
+    session = session_for(workspace)
+    try:
+        catalogue = catalogue_for(session, workspace, tables=tables)
+    except BaseException:
+        session.close()
+        raise
+    catalogue._owns_session = True
+    return catalogue
 
 
 def reconcile_catalogue_state(
@@ -631,7 +870,7 @@ def reconcile_catalogue_state(
                 ):
                     stale[identity] = document
         filtered = {}
-        for table in CATALOGUE_TABLES:
+        for table in PROJECTED_TABLES:
             rows = tables.get(table.name, ())
             rules = {
                 rule
@@ -652,7 +891,7 @@ def reconcile_catalogue_state(
                     if rule.table == table
                 )
             )
-            if table.name in state.present_tables:
+            if table.name in state.materialised:
                 stale_claims.extend(
                     CatalogueClaim(identity, rule)
                     for identity, document in stale.items()
@@ -670,7 +909,7 @@ def reconcile_catalogue_state(
         catalogue=Catalogue(
             rows=MappingProxyType(reconciled),
             registered=retained,
-            present_tables=state.present_tables,
+            materialised=state.materialised,
         ),
         stale_claims=tuple(dict.fromkeys(stale_claims)),
         stale_objects=tuple(sorted(stale_labels)),

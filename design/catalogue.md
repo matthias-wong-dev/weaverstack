@@ -62,9 +62,13 @@ The bound item's name is an attribute rather than part of its identity. Rebindin
 an item to a different Lakehouse updates its `_.Installation` row instead of
 adding a second installation.
 
-## The eleven tables
+## The eleven projected tables
 
-Every table carries `signature` — the content hash of whatever the row projects —
+Eleven of the catalogue's thirteen tables are projected from repository state and
+reconciled against it. The other two are [maintained at
+runtime](#runtime-catalogue-tables).
+
+Every table here carries `signature` — the content hash of whatever the row projects —
 plus Weaver's audit columns (`row_insert_datetime`, `row_update_datetime`,
 `row_delete_datetime`), which the ordinary build appends to any table it
 creates. Every physical name is the public sentence-case spelling — `[Item
@@ -390,13 +394,152 @@ replacement of an existing object, while the incoming catalogue projection still
 advances. Planned creates and managed drops are strict, so an unexpected physical
 collision fails rather than being hidden.
 
-## `_.Log` is evidence, not state
+## Runtime catalogue tables
 
-One more table lives under `_`, and it is not a catalogue table. `_.Log` holds
-one row per settled unit of Weaver work: what ran, against which physical
-target, how it ended and how long it took. Nothing reconciles it and nothing
-projects it from a declaration — a build creates the table and a run appends to
-it.
+The `_` schema is the Weaver catalogue. Its tables are either **projected** from
+repository state during build and reconciled against it, or **maintained at
+runtime**. Two are runtime tables: `_.Log` and `_.Bookmark`. Both are declared as
+ordinary Weaver documents in `Warehouse/_weaver` and built like any other, so a
+first build of the control item creates thirteen tables.
+
+Nothing projects them and nothing reconciles them.
+
+| | `_.Log` | `_.Bookmark` |
+|---|---|---|
+| holds | what happened | how far each object has been loaded |
+| written by | a run, as each node settles | a build, and a run's clean successes |
+| key | a meaningless surrogate | the Registry's four-part identity |
+| a lost write | loses evidence | makes the next load re-read a window |
+
+Both go through the catalogue, and a flush that did not land fails the operation
+either way. The costs differ — evidence against a window read twice — and telling
+them apart is worth doing, but it is not done yet.
+
+A `Catalogue` is *selectively materialised*: it holds the tables it was asked
+for, and `materialised` says which those are. `_.Log` is never one of them — it
+is history, nothing consults it, and reading it would grow with the estate's age.
+
+What is loaded and what physically exists are different questions. A catalogue
+answers the first; a target's inventory answers the second, the way it does for
+every other object in that target.
+
+### `_.Bookmark`
+
+```text
+[Item type]              the Registry's identity, exactly
+[Item name]
+[Schema name]            `Files/<schema>` for a Folder, as Registry spells it
+[Object name]
+[Bookmark datetime]      datetime2(6), UTC, never null
+```
+
+One row per Weaver-loadable Table or Folder, holding the UTC instant immediately
+before its most recent clean load began.
+
+**A row means a clean load has run for this object's current physical
+incarnation.** Absence means none has, and readers coalesce it to
+`1900-01-01T00:00:00Z`. There is no stored sentinel: the row is deleted rather
+than reset.
+
+```text
+new object                     no row
+first clean load               MERGE inserts the instant
+later clean load               MERGE updates it
+dropped and rebuilt            DELETE, before the physical work
+no longer declared or loaded   DELETE
+unchanged object               left alone
+```
+
+A build reads `_.Bookmark` with the rest of the catalogue and works out which
+rows are obsolete from the rows it holds: those whose object it is about to
+replace, and those whose object the repository no longer declares as something
+Weaver loads. It then deletes exactly those. So the statement names what goes
+rather than everything it keeps, an unchanged repository emits none, and a build
+creating the table read no rows and has nothing to remove.
+
+The governing rule: too old means replay, too advanced can omit data, so prefer
+replay.
+
+Two things read it, and neither reads the target's contents. An incremental read
+asks its source for changes after it. A `Static` object is skipped once the row
+is there — `Static` means "load this once", and the row is the record of whether
+that has happened, so a table somebody populated by hand is still loaded and a
+table a clean load emptied is still skipped.
+
+**What advances it** is a clean success and nothing else. Every load primitive
+reports `bookmark_datetime`, the instant *it* began, taken by the engine that ran
+it — and reports none unless the load was clean.
+
+```text
+succeeded, zero rejects   advance to the instant the load reported
+succeeded with rejects    unchanged: it has not read its window
+failed, blocked, pending  unchanged
+Static skip               unchanged: a clean success reporting no instant
+endpoint refresh          not an object
+test, assumption          never
+```
+
+A clean load that moved no rows still advances: the row records the window that
+was read, not whether rows moved.
+
+**Who writes it.** `update_catalogue` decides, in Python as in T-SQL: a direct
+load records itself, and an orchestrated run passes `False` and records the node
+itself beside the evidence that it settled. One row has one writer.
+
+**Reaching it from where a load runs.** A generated procedure says
+`[_].[Bookmark]` and authored Spark SQL may too, so every built target presents
+it: the table itself in the catalogue Warehouse, a view over the catalogue's
+three-part name in any other Warehouse, and a read-only OneLake shortcut at
+`Tables/_` in a Lakehouse. Both are gated on what the target physically holds, so
+an unchanged repository plans neither and one somebody removed comes back.
+
+The reference reads a document the built-in item owns, so the item graph puts
+that item first — the same edge a declared shortcut's source item gets. One build
+creates the table and then points at it, in that order.
+
+Ordering is necessary and not sufficient: a Warehouse creates a table in its own
+catalogue and publishes the Delta directory behind it a moment later, so the
+shortcut can arrive before there is anything to point at. Fabric validates a
+shortcut's target, and `weaver.fabric.shortcuts.create_shortcut` waits for a
+source it has just been asked to point at — bounded, so a source that will never
+appear still fails. Weaver infrastructure, not a published `_.Shortcut`
+row, and rendered by the same code a declared shortcut is. Fabric accepts
+`SELECT`, `UPDATE`, `DELETE` and a `MERGE`'s insert through such a view and
+refuses a plain `INSERT`, which is why the procedure upserts with one `MERGE`.
+
+**Authored Python.** An object is freestanding or catalogue-anchored:
+
+```python
+My__Table(spark)                               # freestanding
+My__Table(spark, catalogue="Warehouse/Weaver")  # anchored
+```
+
+Anchoring resolves the catalogue and the object's installed identity once, at
+construction, through `_.Installation` and `_.Registry`; a name that resolves to
+none or to more than one is a `ConfigError` there. `self.bookmark()` then answers
+from what was read. An object one object constructs inherits the catalogue and
+resolves its own identity against it.
+
+A freestanding object is for reading. `read()` needs no catalogue, so authored
+source logic can be called and inspected on its own. `load()` needs one and
+refuses without it: a load reads a window and records how far it read, and one
+that recorded nothing would leave the next load to read the same window and
+report success either way.
+
+`catalogue=` takes the name of the Warehouse, or a `Catalogue` already read.
+Named, it opens the Session it reads and writes through and owns it — closing the
+catalogue closes that Session. Handed one, it reuses whatever that one already
+has and closes nothing.
+
+**It is never dropped.** Every catalogue table holds state no declaration
+reproduces, so all of them declare `Prohibit rebuild`, the managed-drop renderer
+refuses one, and prune spares them — asked of a *table* and not of a view, since
+`_.Bookmark` is the catalogue's own table in one Warehouse and a reference to it
+everywhere else.
+
+### `_.Log`
+
+One row per settled unit of Weaver work.
 
 ```text
 [Log SK]                 a meaningless immutable surrogate
@@ -414,20 +557,15 @@ it.
 [Details]                the node's own record, as JSON
 ```
 
-There is no run row and no completion row: a workflow *is* its rows. A reader
+There is no run row and no completion row: a workflow *is* its rows, and a reader
 asking what a run did selects on `[Workflow ID]`.
-
-Rows are appended asynchronously, through a flusher the Session owns and caches
-per write stream. `submit` does not wait for the Warehouse, writes batch, and
-ordering is preserved; a failure is remembered and raised by `flush` or `close`
-rather than leaving an empty table to read as an empty run. Session close is the
-durability barrier, and the trade is stated rather than hidden:
 
 > `_.Log` is operational evidence, not transactional authority for installed
 > catalogue state.
 
-A dry run writes nothing. A row for work nobody did would be evidence of a load
-that never happened.
+A dry run writes neither table. A row for work nobody did would be evidence of a
+load that never happened, and a bookmark it moved would make the next real load
+skip a window nothing had read.
 
 ## The catalogue lives in a Warehouse
 

@@ -191,7 +191,7 @@ def _installed_state(repository):
     )
     catalogue = Catalogue(
         {ITEM: project_item_catalogue(repository, item=ITEM, retained=retained).rows},
-        present_tables=frozenset({REGISTRY.name}),
+        materialised=frozenset({REGISTRY.name}),
     )
     reconciled = reconcile_catalogue_state(catalogue, inventories={ITEM: inventory})
     return reconciled.catalogue, {ITEM: inventory}

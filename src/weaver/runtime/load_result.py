@@ -20,6 +20,7 @@ whether the run is reported as good (see
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 
 #: The result's columns, in order. The generated T-SQL procedure projects
 #: exactly these names, so a transport's final row can be read straight into
@@ -33,6 +34,7 @@ RESULT_COLUMNS = (
     "rows_deleted",
     "rows_rejected",
     "error_message",
+    "bookmark_datetime",
 )
 
 
@@ -54,6 +56,11 @@ class LoadResult:
     rows_deleted: int = 0
     rows_rejected: int = 0
     error_message: str | None = None
+    #: The UTC instant this load began, captured by the engine that ran it
+    #: immediately before it read anything. A clean load's bookmark advances to
+    #: it, so it comes from the clock the load's own reads were timed by rather
+    #: than from whichever machine happened to be orchestrating.
+    bookmark_datetime: datetime | None = None
 
     @classmethod
     def failure(cls, message: str, **counts: int) -> "LoadResult":
@@ -74,9 +81,16 @@ class LoadResult:
         return replace(self, succeeded=False, error_message=message)
 
     def as_row(self) -> dict:
-        """The result as a mapping keyed by :data:`RESULT_COLUMNS`."""
+        """The result as a mapping keyed by :data:`RESULT_COLUMNS`.
 
-        return {name: getattr(self, name) for name in RESULT_COLUMNS}
+        The bookmark instant crosses as text: the row travels through a Livy
+        submission's JSON, which has no datetime.
+        """
+
+        row = {name: getattr(self, name) for name in RESULT_COLUMNS}
+        if self.bookmark_datetime is not None:
+            row["bookmark_datetime"] = self.bookmark_datetime.isoformat()
+        return row
 
     @classmethod
     def from_row(cls, row) -> "LoadResult":
@@ -96,7 +110,22 @@ class LoadResult:
             rows_deleted=int(values["rows_deleted"]),
             rows_rejected=int(values["rows_rejected"]),
             error_message=values["error_message"],
+            bookmark_datetime=_instant(values["bookmark_datetime"]),
         )
+
+
+def _instant(value) -> datetime | None:
+    """One reported bookmark instant, always aware and always UTC.
+
+    A T-SQL ``datetime2`` and a Livy payload's ISO text arrive differently and
+    neither carries a zone: the procedure took ``sysutcdatetime()`` and Python
+    took ``datetime.now(timezone.utc)``, so an instant with no zone is UTC.
+    """
+
+    if value is None or value == "":
+        return None
+    at = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    return at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
 
 
 __all__ = ["RESULT_COLUMNS", "LoadResult"]

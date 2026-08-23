@@ -40,6 +40,10 @@ Build must never call an object's `read()` implementation, inspect a CSV or
 spreadsheet to discover its runtime data, execute merge policy, advance a
 bookmark, or otherwise perform load work.
 
+Build does *reset* a bookmark, which is the opposite decision. An object it
+rebuilds is an object whose history it invalidated, so it says so — before doing
+the rebuilding. See [the central catalogue](catalogue.md).
+
 An empty Delta table created from a declared schema is a successful build.
 Populating that table is a separate load operation.
 

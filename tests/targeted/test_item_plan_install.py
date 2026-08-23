@@ -16,6 +16,7 @@ from __future__ import annotations
 import pytest
 from factories import (
     bound_target,
+    catalogue_target,
     document_id,
     folder_document,
     item_id,
@@ -42,6 +43,7 @@ def plan(repository, **overrides):
         "selected_for_drop": set(),
         "selected_for_build": set(),
         "registered": {},
+        "catalogue_target": catalogue_target(),
     }
     arguments.update(overrides)
     return plan_item_build(

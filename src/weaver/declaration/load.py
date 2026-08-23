@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 #: Signature salts for generated load output. Increment the corresponding value
 #: whenever that generator changes.
-TSQL_LOAD_VERSION = 9
+TSQL_LOAD_VERSION = 11
 SPARK_LOAD_VERSION = 9
 
 #: What object a generated load installs, in the catalogue's vocabulary. A
@@ -53,7 +53,9 @@ class GeneratedLoad:
     extension: str
 
 
-def generate_load(document: "SourceDocument", *, destination=None) -> GeneratedLoad:
+def generate_load(
+    document: "SourceDocument", *, destination=None, item=None
+) -> GeneratedLoad:
     """The installable load payload for one validated source.
 
     Only a table has one. A Folder's load is its authored module and a View has
@@ -66,7 +68,7 @@ def generate_load(document: "SourceDocument", *, destination=None) -> GeneratedL
             f"{document.relative_path}: a {document.kind} has no generated load"
         )
     if document.language == SQL:
-        return _tsql_load(document)
+        return _tsql_load(document, item)
     if document.language == SPARK_SQL:
         return _spark_load(document, destination)
     raise NotImplementedError(
@@ -102,7 +104,7 @@ def has_generated_load(document: "SourceDocument") -> bool:
     return document.kind == TABLE and document.language in (SQL, SPARK_SQL)
 
 
-def _tsql_load(document: "SourceDocument") -> GeneratedLoad:
+def _tsql_load(document: "SourceDocument", item) -> GeneratedLoad:
     from ..etl import load_procedure_name
     from .tsql_load import generate_tsql_load_script
 
@@ -110,6 +112,7 @@ def _tsql_load(document: "SourceDocument") -> GeneratedLoad:
         document.document,
         document.sql_body or "",
         procedure_name=load_procedure_name(document.object_id),
+        item=item,
     )
     return GeneratedLoad(
         object_type=PROCEDURE_OBJECT,

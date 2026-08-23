@@ -9,11 +9,17 @@ remain distinct.
 Dictionary and Registry rows add object identity within the Item scope. Their
 signatures drive incremental comparison. The ordinary build appends Weaver's
 audit columns to every table.
+
+The ``_`` schema *is* the Weaver catalogue, and every table in it is a catalogue
+table. There are two kinds: :data:`PROJECTED_TABLES` are maintained from
+repository and build state and reconciled against it, and :data:`RUNTIME_TABLES`
+are maintained during execution. :data:`CATALOGUE_TABLES` is both.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Mapping
 
 from ..declaration.metadata import AUDIT_COLUMNS, SPARK_SQL, audit_column_name
@@ -848,15 +854,14 @@ DICTIONARY_TABLES = (
     SHORTCUT,
 )
 
-#: Every catalogue table, dictionaries first, then Installation, then Registry.
-#: The order is the reconciliation order: dictionaries describe, Installation
-#: records the binding, and Registry certifies — so Registry is last.
-CATALOGUE_TABLES = DICTIONARY_TABLES + (INSTALLATION, REGISTRY)
+#: The catalogue tables projected from repository state, dictionaries first, then
+#: Installation, then Registry. The order is the reconciliation order:
+#: dictionaries describe, Installation records the binding, and Registry
+#: certifies — so Registry is last.
+PROJECTED_TABLES = DICTIONARY_TABLES + (INSTALLATION, REGISTRY)
 
-TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}
 
-
-# --- operational evidence -----------------------------------------------------
+# --- the catalogue tables maintained at runtime -------------------------------
 
 #: How a settled unit of work ended.
 RESULT_VOCABULARY = {
@@ -866,14 +871,43 @@ RESULT_VOCABULARY = {
     "blocked": "Blocked",
 }
 
+#: The bookmark of an object that has never had a clean load. A sentinel rather
+#: than a null, so the Static gate and an incremental read are one comparison
+#: rather than a comparison and a null check. Rendered text and Python value are
+#: the same instant, and ``tests/test_bookmark_declaration.py`` asserts it.
+BOOKMARK_SENTINEL_TEXT = "1900-01-01 00:00:00.000000"
+BOOKMARK_SENTINEL = datetime(1900, 1, 1, tzinfo=timezone.utc)
+
 
 @dataclass(frozen=True)
-class EvidenceTable:
-    """An append-oriented Weaver-owned table outside reconciliation."""
+class RuntimeTable:
+    """A catalogue table maintained during execution rather than by projection.
+
+    Declared and built like any other, and reconciled against nothing: its rows
+    come from what Weaver did, not from what a repository declares.
+
+    ``key`` is the identity the table is declared with, and it is what a keyed
+    write merges on. ``_.Log`` carries a surrogate, because a settled unit of
+    work is only ever appended; ``_.Bookmark`` carries the same logical identity
+    the Registry does, so a bookmark row and a Registry row are the same object
+    seen twice.
+    """
 
     name: str
     description: str
     columns: tuple[CatalogueColumn, ...]
+    key: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        names = [column.name for column in self.columns]
+        if len(set(names)) != len(names):
+            raise ValueError(f"{self.name}: duplicate column")
+        if list(self.key) != names[: len(self.key)]:
+            raise ValueError(f"{self.name}: key columns must lead, in key order")
+        not_nullable = {column.name for column in self.columns if column.not_null}
+        missing = [name for name in self.key if name not in not_nullable]
+        if missing:
+            raise ValueError(f"{self.name}: key columns must be not null: {missing}")
 
     @property
     def qualified(self) -> str:
@@ -884,6 +918,18 @@ class EvidenceTable:
         """The declared columns — those a caller supplies."""
 
         return tuple(column.name for column in self.columns)
+
+    @property
+    def comparison_columns(self) -> tuple[str, ...]:
+        """The non-key columns a keyed write updates when the row already exists."""
+
+        return tuple(name for name in self.column_names if name not in self.key)
+
+    @property
+    def published_column_names(self) -> tuple[str, ...]:
+        """Empty: nothing here is supplied at publication."""
+
+        return ()
 
     @property
     def physical_columns(self) -> tuple[str, ...]:
@@ -902,12 +948,13 @@ class EvidenceTable:
         return tuple(self.public_name_of(name) for name in self.physical_columns)
 
 
-LOG = EvidenceTable(
+LOG = RuntimeTable(
     name="Log",
+    key=("log_sk",),
     description=(
         "One row per settled unit of Weaver work. Operational evidence rather "
-        "than installed state, so it is append-oriented and is not reconciled "
-        "against a declaration."
+        "than installed state, so it is appended as work settles and no "
+        "declaration is reconciled against it."
     ),
     columns=(
         CatalogueColumn(
@@ -965,8 +1012,67 @@ LOG = EvidenceTable(
 )
 
 
-def table(name: str) -> CatalogueTable:
-    """One catalogue table by its object name."""
+BOOKMARK = RuntimeTable(
+    name="Bookmark",
+    description=(
+        "How far each loadable object has been loaded: the UTC instant "
+        "immediately before its most recent clean load began. An incremental "
+        "read asks for source changes after it, and a Static object is skipped "
+        "once it holds anything other than the sentinel. Weaver's own build and "
+        "load lifecycle maintain it; no declaration projects it and no load "
+        "populates it."
+    ),
+    # The Registry's identity exactly, and for the reason a shared key exists at
+    # all: a bookmark row and a Registry row describe the same installed object.
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "bookmark_datetime",
+            TIMESTAMP,
+            not_null=True,
+            description=(
+                "The UTC instant immediately before the most recent clean load "
+                f"began, or {BOOKMARK_SENTINEL_TEXT} for an object that has not "
+                "had one."
+            ),
+        ),
+    ),
+)
+
+#: The catalogue tables maintained during execution.
+RUNTIME_TABLES = (LOG, BOOKMARK)
+
+#: Every catalogue table, however it is maintained.
+CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
+
+#: The catalogue tables an operation reads. ``_.Log`` is not one: it is history,
+#: appended and never consulted, and reading it would grow with the estate's age.
+READABLE_TABLES = PROJECTED_TABLES + (BOOKMARK,)
+
+TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}
+
+
+#: The ``_`` schema tables no build may drop, folded for comparison. Every
+#: catalogue table holds state a rebuild cannot reproduce: projected rows belong
+#: to installations a scoped build has no authority over, and the runtime tables
+#: hold a run's own record of what it did and how far it got. All of them are
+#: declared ``Prohibit rebuild``, so selection never offers one; this is the
+#: guard behind that declaration.
+_PROTECTED = frozenset(
+    f"{CATALOGUE_SCHEMA}.{table.name}".casefold() for table in CATALOGUE_TABLES
+)
+
+
+def is_protected(schema: str, name: str) -> bool:
+    """Whether ``schema.name`` is a catalogue table a build must not drop."""
+
+    return f"{schema}.{name}".casefold() in _PROTECTED
+
+
+def table(name: str) -> CatalogueTable | RuntimeTable:
+    """One catalogue table by its object name, projected or runtime."""
 
     try:
         return TABLES_BY_NAME[name]

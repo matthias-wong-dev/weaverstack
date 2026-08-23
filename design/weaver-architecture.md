@@ -377,6 +377,19 @@ datetime.
 Iterating a result gives the files themselves, so a consumer that needs no
 metadata writes `for path in folder.files_since(bookmark)`.
 
+The bookmark an incremental read passes is its own — `self.bookmark()` — and the
+two compose into "what has arrived since":
+
+```python
+class Sales__Order(Table):
+    def read(self):
+        export = Sales__OrderExport(self)
+        arrived = export.files_since(self.bookmark())
+        if not arrived:
+            return self.empty_dataframe(), None
+        ...
+```
+
 `files_since` and `deleted_since` take a timezone-aware bookmark, open only
 documents strictly newer than it, and collapse the event stream by logical file
 path. A file whose latest event is a deletion appears in `deleted_since` and not
@@ -740,9 +753,14 @@ Load
 
     Execute ETL
     Transform data
-    Update bookmarks
+    Advance bookmarks
     Record execution metadata
 ```
+
+A bookmark is how far an object has been loaded, held in `_.Bookmark` under the
+Registry's own four-part identity. Only a clean success advances one, to the
+instant the primitive itself reported. See [the central
+catalogue](catalogue.md).
 
 A target-scoped load names the physical Lakehouses and Warehouses it may touch:
 

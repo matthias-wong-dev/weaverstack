@@ -13,6 +13,7 @@ from ..declaration.model import (
     WeaverRepository,
     parse_installed_identity,
 )
+from ..etl import RuntimeArtefact
 
 
 def _ordered(values: Iterable[WeaverDocumentId]) -> tuple[WeaverDocumentId, ...]:
@@ -213,6 +214,32 @@ def runtime_artefact_identities(
     return frozenset(artefact.identity for artefact in runtime_artefacts(repository))
 
 
+def _artefacts_standing_for_their_origin(
+    repository: WeaverRepository, selected: set[WeaverDocumentId]
+) -> dict[WeaverDocumentId, "RuntimeArtefact"]:
+    """Each selected declaration whose artefact is its whole physical form.
+
+    One general relationship: a declaration compiles to a separately installed
+    artefact, nothing is materialised under the declaration's own identity, and so
+    the artefact's row is the only record of it. What kinds of declaration those
+    are is the artefact producer's to know — see
+    :attr:`~weaver.etl.RuntimeArtefact.stands_for_origin`.
+
+    A load artefact is absent: a table and the module that loads it are both
+    installed and both signed, and the table carries a shape version of its own.
+    """
+
+    from ..etl import runtime_artefacts
+
+    return {
+        artefact.origin: artefact
+        for artefact in runtime_artefacts(repository)
+        if artefact.stands_for_origin
+        and artefact.origin is not None
+        and artefact.origin in selected
+    }
+
+
 def determine_impact(
     repository: WeaverRepository,
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
@@ -240,14 +267,25 @@ def determine_impact(
         if identity in selected_set
     }
     declared = declared_signatures(repository, selected_set)
+    # A declaration whose artefact is its whole physical form is classified by
+    # that artefact's row, because that row is the only record of it. Nothing here
+    # knows which declarations those are; the artefact says so.
+    standing_for = _artefacts_standing_for_their_origin(repository, selected_set)
 
     new: set[WeaverDocumentId] = set()
     changed: set[WeaverDocumentId] = set()
     for identity in selected_set:
-        signature = installed.get(identity)
+        artefact = standing_for.get(identity)
+        if artefact is not None:
+            recorded = registered.get(artefact.identity)
+            signature = None if recorded is None else recorded.signature
+            wanted = artefact.signature
+        else:
+            signature = installed.get(identity)
+            wanted = declared[identity]
         if signature is None:
             new.add(identity)
-        elif signature != declared[identity]:
+        elif signature != wanted:
             changed.add(identity)
     changed |= {identity for identity in stale_shortcuts if identity in installed}
 

@@ -14,9 +14,9 @@ from weaver.catalogue.projection import (
 )
 from weaver.catalogue.reconcile import reconcile
 from weaver.catalogue.tables import (
-    CATALOGUE_TABLES,
     DEPENDENCY,
     INSTALLATION,
+    PROJECTED_TABLES,
     REGISTRY,
     SCHEMA_DICTIONARY,
     SCOPE_ITEM_NAME,
@@ -73,7 +73,7 @@ def _registry_row(projection, schema: str, name: str):
 
 @weaver_test()
 def test_every_catalogue_table_is_keyed_by_exact_item_without_repository():
-    for table in CATALOGUE_TABLES:
+    for table in PROJECTED_TABLES:
         assert table.key[:2] == ("item_type", "item_name")
         assert table.column_names[:2] == table.key[:2]
         assert "repository" not in table.column_names
@@ -110,7 +110,7 @@ def test_no_catalogue_table_keeps_a_hidden_namespace_dimension():
         "source_namespace",
         "reference_namespace",
     }
-    for table in CATALOGUE_TABLES:
+    for table in PROJECTED_TABLES:
         assert namespace_columns.isdisjoint(table.column_names)
 
 
@@ -241,7 +241,7 @@ def test_a_shortcut_describes_nothing_beyond_its_registration(tmp_path):
     )
     destination = ("Sales", "PortableCustomer")
 
-    for table in CATALOGUE_TABLES:
+    for table in PROJECTED_TABLES:
         if table in (REGISTRY, SHORTCUT, SCHEMA_DICTIONARY, INSTALLATION):
             continue
         assert not [
@@ -339,28 +339,28 @@ def test_a_registry_without_the_epoch_column_is_refused_by_name():
 def _shaped(*names: str):
     """A catalogue holding exactly these tables, each with its full shape."""
 
-    from weaver.catalogue.tables import CATALOGUE_TABLES
+    from weaver.catalogue.tables import PROJECTED_TABLES
 
-    by_name = {table.name: table for table in CATALOGUE_TABLES}
+    by_name = {table.name: table for table in PROJECTED_TABLES}
     return _Shaped({name: list(by_name[name].physical_columns) for name in names})
 
 
 def _whole():
     """Every catalogue table present — the only complete state a build accepts."""
 
-    from weaver.catalogue.tables import CATALOGUE_TABLES
+    from weaver.catalogue.tables import PROJECTED_TABLES
 
-    return _shaped(*(table.name for table in CATALOGUE_TABLES))
+    return _shaped(*(table.name for table in PROJECTED_TABLES))
 
 
 @weaver_test()
 def test_a_registry_with_the_epoch_column_is_accepted():
     from weaver.catalogue.state import read_catalogue_state
-    from weaver.catalogue.tables import CATALOGUE_TABLES
+    from weaver.catalogue.tables import PROJECTED_TABLES
 
     state = read_catalogue_state(_whole(), ())
 
-    assert state.present_tables == {table.name for table in CATALOGUE_TABLES}
+    assert state.materialised == {table.name for table in PROJECTED_TABLES}
 
 
 # --- which absences are the first run, and which are damage -------------------
@@ -380,7 +380,7 @@ def test_a_catalogue_with_no_tables_at_all_is_the_bootstrap_state():
 
     state = read_catalogue_state(_Shaped({}), ())
 
-    assert state.present_tables == frozenset()
+    assert state.materialised == frozenset()
     assert not state.rows
 
 
@@ -396,11 +396,11 @@ def test_a_missing_dictionary_table_beside_a_populated_catalogue_is_refused():
     """
 
     from weaver.catalogue.state import read_catalogue_state
-    from weaver.catalogue.tables import CATALOGUE_TABLES
+    from weaver.catalogue.tables import PROJECTED_TABLES
     from weaver.errors import BuildError
 
     all_but_one = [
-        table.name for table in CATALOGUE_TABLES if table.name != "TableDictionary"
+        table.name for table in PROJECTED_TABLES if table.name != "TableDictionary"
     ]
 
     with pytest.raises(BuildError, match="catalogue is incomplete"):
@@ -474,10 +474,10 @@ def test_a_catalogue_predating_an_introduced_table_still_builds():
     """
 
     from weaver.catalogue.state import INTRODUCED_TABLES, read_catalogue_state
-    from weaver.catalogue.tables import CATALOGUE_TABLES
+    from weaver.catalogue.tables import PROJECTED_TABLES
 
     as_an_older_weaver_left_it = [
-        table.name for table in CATALOGUE_TABLES if table.name not in INTRODUCED_TABLES
+        table.name for table in PROJECTED_TABLES if table.name not in INTRODUCED_TABLES
     ]
 
     state = read_catalogue_state(_shaped(*as_an_older_weaver_left_it), ())
@@ -490,12 +490,12 @@ def test_an_introduced_table_does_not_excuse_a_genuinely_damaged_catalogue():
     """The exemption is for that table alone, not for whatever else is gone."""
 
     from weaver.catalogue.state import INTRODUCED_TABLES, read_catalogue_state
-    from weaver.catalogue.tables import CATALOGUE_TABLES
+    from weaver.catalogue.tables import PROJECTED_TABLES
     from weaver.errors import BuildError
 
     damaged = [
         table.name
-        for table in CATALOGUE_TABLES
+        for table in PROJECTED_TABLES
         if table.name not in INTRODUCED_TABLES and table.name != "TableDictionary"
     ]
 

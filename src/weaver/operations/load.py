@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from ..declaration.model import WeaverDocumentId, parse_installed_identity
 from ..errors import CommandError, LoadError
 from ..load_plan import (
     ENDPOINT_REFRESH,
@@ -135,6 +136,9 @@ def run_load(
 
     started = datetime.now(timezone.utc)
     with session.step("Read catalogue"):
+        # One catalogue, read once: what is installed, and how far each object
+        # has been loaded. A run of two hundred objects would otherwise be two
+        # hundred round trips for one table's contents.
         catalogue = (
             state.catalogue
             if state is not None
@@ -159,23 +163,83 @@ def run_load(
         )
 
     # A dry run writes nothing durable: a row for work nobody did would be
-    # evidence of a load that never happened.
-    log = (
+    # evidence of a load that never happened, and a bookmark it moved would make
+    # the next real load skip a window nothing had read.
+    record = (
         None
         if dry_run
-        else open_run_log(session, workspace=workspace, task_type=TASK_TYPE)
+        else _RunRecord(
+            log=open_run_log(
+                catalogue, workspace=workspace, task_type=TASK_TYPE, session=session
+            ),
+            catalogue=catalogue,
+        )
     )
     with session.step("Execute"):
         result = runner.run(
             session=session,
             dispatch=dispatch_primitive,
-            on_node=None if log is None else log.submit,
+            on_node=None if record is None else record.settled,
         )
 
-    report = _as_load_report(result, started=started, log=log)
+    if record is not None:
+        # Before the report, and before any failure is raised: a caller told the
+        # load succeeded must be able to rely on what it recorded being durable.
+        with session.step("Record what the run did"):
+            record.flush()
+
+    report = _as_load_report(
+        result, started=started, log=None if record is None else record.log
+    )
     if not fault_tolerant and not dry_run:
         _raise_for_failure(report)
     return report
+
+
+class _RunRecord:
+    """What a run writes to the catalogue as each node settles.
+
+    One place, because it is one catalogue: the evidence that a node ran and the
+    bookmark a clean load moved are two rows in the same ``_`` schema, written
+    through the same connection and made durable by the same flush.
+    """
+
+    def __init__(self, log, catalogue) -> None:
+        self.log = log
+        self._catalogue = catalogue
+
+    def settled(self, result) -> None:
+        from ..catalogue.claims import bookmark_row
+        from ..catalogue.tables import BOOKMARK
+        from ..run.result import SUCCEEDED
+
+        self.log.submit(result)
+        # Three conditions, each ruling out a case the others do not: a clean
+        # success, so a rejecting or failed load keeps the bookmark it had; an
+        # instant reported, so a Static skip moves nothing; and a logical object,
+        # so an endpoint refresh is not one of these.
+        if result.status != SUCCEEDED or result.logical_id is None:
+            return
+        at = getattr(result.result, "bookmark_datetime", None)
+        if at is None:
+            return
+        identity = parse_installed_identity(result.logical_id)
+        if isinstance(identity, WeaverDocumentId):
+            self._catalogue.update(BOOKMARK, bookmark_row(identity, at))
+
+    def flush(self) -> None:
+        """Wait for what this run recorded, and say what did not land."""
+
+        from ..catalogue.flusher import FlushError
+        from ..run.result import RunError
+
+        try:
+            self._catalogue.flush()
+        except FlushError as exc:
+            raise RunError(
+                "the load ran but what it did was not recorded, so the next load "
+                f"would read a window this one already read: {exc}"
+            ) from exc
 
 
 def _as_load_report(result, *, started, log) -> LoadRunReport:

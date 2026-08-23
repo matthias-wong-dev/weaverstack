@@ -15,6 +15,12 @@ then the target. What each phase means, and why, is
 
 from __future__ import annotations
 
+from ..catalogue.tables import (
+    AUDIT_UPDATE_COLUMN,
+    BOOKMARK,
+    CATALOGUE_SCHEMA,
+)
+from ..catalogue.tsql import identifier
 from ..errors import DiscoveryError
 from ..runtime.load_contract import (
     REASON_BLANK_PK,
@@ -66,6 +72,7 @@ RESULT_PARAMETERS = (
     ("rows_deleted", "bigint"),
     ("rows_rejected", "bigint"),
     ("error_message", "varchar(4000)"),
+    ("bookmark_datetime", "datetime2(6)"),
 )
 
 #: The suffixes of the intermediate tables, in the object's own schema.
@@ -128,12 +135,17 @@ _NULL_MARKER = "~"
 
 
 def generate_tsql_load_script(
-    document: SesDocument, body: str, *, procedure_name: str
+    document: SesDocument, body: str, *, procedure_name: str, item
 ) -> str:
     """The installer script for one Warehouse table's load procedure.
 
     ``body`` is the table's own query — the same text its build materialises to
     settle its shape. A load runs it for real.
+
+    ``item`` is the logical Weaver item the table belongs to. A document knows
+    its ``Schema.Object`` and not which item declares it, and the procedure needs
+    both: its bookmark row is keyed by the same four-part identity the Registry
+    uses, and the procedure maintains that row itself when it is run by hand.
     """
 
     contract = LoadContract.from_document(document)
@@ -159,11 +171,24 @@ def generate_tsql_load_script(
         "load/load_procedure",
         load_procedure=names["procedure"],
         result_parameters=_result_parameters(),
-        result_assignment=_indent(_result_assignment(), 4),
+        result_assignment=_indent(
+            _result_assignment(
+                # The instant this load began, reported only when the load was
+                # clean. A caller advances a bookmark to an instant a load
+                # established, and one that rejected a row established none.
+                bookmark_datetime=(
+                    "case when @weaver_error is null and @weaver_rows_rejected = 0 "
+                    "then @weaver_load_datetime end"
+                )
+            ),
+            4,
+        ),
+        bookmark_key=_indent(_bookmark_key(document, item, contract), 4),
+        bookmark_update=_indent(_bookmark_update(document, item), 4),
         live_delete_datetime=AUDIT_LIVE_DELETE_DATETIME,
         preprocessing_banner=_indent(PREPROCESSING_BANNER, 4),
         postprocessing_banner=_indent(POSTPROCESSING_BANNER, 4),
-        static_gate=_indent(_static_gate(names, contract), 4),
+        static_gate=_indent(_static_gate(contract), 4),
         start_artifact_cleanup=_indent(_cleanup(names, contract, claims_deletes), 4),
         staging_sql=_indent(staging_sql, 4),
         staging_table=names["staging"],
@@ -211,6 +236,11 @@ def _result_assignment(**values: str) -> str:
         "rows_deleted": "@weaver_rows_deleted",
         "rows_rejected": "@weaver_rows_rejected",
         "error_message": "@weaver_error",
+        # Null unless a clean load actually ran. A caller advances a bookmark
+        # only to an instant a load established, so an exit that read nothing —
+        # a Static skip, a refused breach, a load that rejected rows — reports
+        # none and the bookmark it already had stands.
+        "bookmark_datetime": "null",
     }
     defaults.update(values)
     return "\n".join(
@@ -221,16 +251,18 @@ def _result_assignment(**values: str) -> str:
 # --- the pieces of the procedure ---------------------------------------------
 
 
-def _static_gate(names: dict, contract: LoadContract) -> str:
+def _static_gate(contract: LoadContract) -> str:
     """The check a ``Static`` object makes before it does anything else.
 
     Baked into the procedure rather than performed by its caller, because the
     procedure is independently runnable: running it by hand must give the same
     answer an orchestrated run gets.
 
-    Before the staging query, so a populated static table costs one existence
-    check rather than a full source read — and ``exists`` rather than a count,
-    because the question is whether it has been seeded.
+    The bookmark answers it, not the target's contents. What ``Static`` means is
+    "load this once", and the record of whether that has happened is the
+    bookmark — so a table somebody populated by hand is still loaded, and a
+    table a clean load emptied is still skipped. Before the staging query, so a
+    loaded object costs no source read.
 
     A non-static object gets a comment rather than a disabled branch.
     """
@@ -239,14 +271,124 @@ def _static_gate(names: dict, contract: LoadContract) -> str:
         return "-- Not static: this object is loaded on every run."
     seeded = _result_assignment(succeeded="cast(1 as bit)")
     return (
-        "-- Static: seeded once. A populated target reports a successful load of\n"
-        "-- nothing.\n"
-        f"if exists (select 1 from {names['target']})\n"
+        "-- Static: loaded once. A bookmark row means a clean load has run for\n"
+        "-- this incarnation, so this reports a successful load of nothing.\n"
+        "if @weaver_bookmark is not null\n"
         "begin\n"
         f"{_indent(seeded, 4)}\n"
         "    return;\n"
         "end;"
     )
+
+
+def _bookmark_key(document: SesDocument, item, contract: LoadContract) -> str:
+    """This object's bookmark row, read into a local before anything else.
+
+    Only a ``Static`` object reads it, because only a ``Static`` object decides
+    anything from it: every other load writes its bookmark at the end and never
+    asks what it was. In every Warehouse but the catalogue's, this table is a
+    view across databases, so the read a load does not need is a round trip it
+    should not pay for.
+
+    The identity is baked in: the procedure is one object's, so which row it
+    means is a fact about the procedure rather than an argument to it.
+
+    No row leaves the local null, and that is the answer rather than a missing
+    one: no clean load has run since this object's current physical incarnation.
+    """
+
+    if not contract.static:
+        return (
+            "-- Not static: nothing here reads a bookmark, so nothing reads the table."
+        )
+    predicate = " and ".join(
+        f"{identifier(BOOKMARK.public_name_of(column))} = {_key_literal(value)}"
+        for column, value in _bookmark_identity(document, item).items()
+    )
+    return (
+        f"select @weaver_bookmark = "
+        f"{identifier(BOOKMARK.public_name_of('bookmark_datetime'))}\n"
+        f"  from {_bookmark_table()}\n"
+        f" where {predicate};"
+    )
+
+
+def _bookmark_update(document: SesDocument, item) -> str:
+    """Advance this object's bookmark, when the procedure owns that decision.
+
+    A ``MERGE``, and that is not a style choice. In every Warehouse but the one
+    the catalogue lives in, ``_.Bookmark`` is a view over the catalogue's table:
+    Fabric refuses a plain ``INSERT`` through such a view and accepts a
+    ``MERGE``'s, so one statement is both the upsert this needs and the only
+    form that reaches the table from either side.
+
+    ``@update_catalogue = 0`` is how an orchestrated run says it will advance the
+    bookmark itself, through the catalogue writer that also records the run.
+    """
+
+    identity = _bookmark_identity(document, item)
+    source = ", ".join(
+        f"{_key_literal(value)} as {identifier(BOOKMARK.public_name_of(column))}"
+        for column, value in identity.items()
+    )
+    on = " and ".join(
+        f"target.{identifier(BOOKMARK.public_name_of(column))} = "
+        f"source.{identifier(BOOKMARK.public_name_of(column))}"
+        for column in identity
+    )
+    bookmark = identifier(BOOKMARK.public_name_of("bookmark_datetime"))
+    updated = identifier(BOOKMARK.public_name_of(AUDIT_UPDATE_COLUMN))
+    columns = ", ".join(
+        identifier(BOOKMARK.public_name_of(name)) for name in BOOKMARK.physical_columns
+    )
+    values = ", ".join(
+        [f"source.{identifier(BOOKMARK.public_name_of(column))}" for column in identity]
+        + [
+            "@weaver_load_datetime",
+            "sysdatetime()",
+            "sysdatetime()",
+            f"convert(datetime2(6), '{AUDIT_LIVE_DELETE_DATETIME}')",
+        ]
+    )
+    return (
+        "-- A clean load moved this object's bookmark forward. An orchestrated\n"
+        "-- run passes @update_catalogue = 0 and writes it with the run's record.\n"
+        "if @update_catalogue = 1 and @weaver_error is null "
+        "and @weaver_rows_rejected = 0\n"
+        "begin\n"
+        f"    merge into {_bookmark_table()} as target\n"
+        f"    using (select {source}) as source\n"
+        f"       on {on}\n"
+        f"    when matched then update set target.{bookmark} = @weaver_load_datetime\n"
+        f"                              , target.{updated} = sysdatetime()\n"
+        f"    when not matched then insert ({columns})\n"
+        f"                          values ({values});\n"
+        "end;"
+    )
+
+
+def _bookmark_table() -> str:
+    return f"{identifier(CATALOGUE_SCHEMA)}.{identifier(BOOKMARK.name)}"
+
+
+def _bookmark_identity(document: SesDocument, item) -> dict:
+    """The four values that key this object's bookmark row."""
+
+    if item is None:
+        raise DiscoveryError(
+            f"{document.qualified}: a load procedure is keyed by the logical item "
+            "that declares it, and none was supplied"
+        )
+    return {
+        "item_type": item.item_type,
+        "item_name": item.item_name,
+        "schema_name": document.object_id.schema,
+        "object_name": document.object_id.object,
+    }
+
+
+def _key_literal(value: str) -> str:
+    return "N'" + _escape_literal(str(value)) + "'"
 
 
 def _staging_sql(names: dict, program: TsqlProgram, contract: LoadContract) -> str:

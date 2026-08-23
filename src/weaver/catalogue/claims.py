@@ -38,6 +38,25 @@ def catalogue_schema(identity: WeaverDocumentId) -> str:
     return f"{prefix}{identity.object_id.schema}"
 
 
+def bookmark_row(identity: WeaverDocumentId, at=None) -> dict:
+    """One ``_.Bookmark`` row for an object, keyed as the Registry keys it.
+
+    One builder for every writer — a build's invalidation, a run's advance, a
+    standalone load's — so the four columns are spelled the same way wherever a
+    bookmark is written. ``at`` is left out when only the key is wanted.
+    """
+
+    row = {
+        "item_type": identity.item.item_type,
+        "item_name": identity.item.item_name,
+        "schema_name": catalogue_schema(identity),
+        "object_name": identity.object_id.object,
+    }
+    if at is not None:
+        row["bookmark_datetime"] = at
+    return row
+
+
 @dataclass(frozen=True)
 class CatalogueClaimRule:
     """One table a document type may populate and how it owns its rows."""
@@ -160,6 +179,4 @@ def without_claims(catalogue, claims):
                 if not any(claim.rule.owns(row, claim.identity) for claim in owners)
             )
         rows[item] = MappingProxyType(kept)
-    return Catalogue(
-        rows=MappingProxyType(rows), present_tables=catalogue.present_tables
-    )
+    return Catalogue(rows=MappingProxyType(rows), materialised=catalogue.materialised)

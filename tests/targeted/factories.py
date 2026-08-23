@@ -37,13 +37,14 @@ from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.prune import TargetInventory
 from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.state import Catalogue, RegisteredDocument
-from weaver.catalogue.tables import REGISTRY
+from weaver.catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA, REGISTRY
 from weaver.declaration import parse_item_repository
 from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.etl import (
     FILE_TYPE,
     PROCEDURE_TYPE,
+    item_bookmarkable_objects,
     item_runtime_artefacts,
     load_schemas,
 )
@@ -158,7 +159,7 @@ class FixtureCatalogue(Catalogue):
             item = item_id(item)
         return cls(
             rows={item: {REGISTRY.name: tuple(rows)}},
-            present_tables=frozenset({REGISTRY.name}),
+            materialised=frozenset({REGISTRY.name}),
         )
 
     @classmethod
@@ -176,7 +177,7 @@ class FixtureCatalogue(Catalogue):
             item = item_id(item)
         return cls(
             rows={item: {name: tuple(rows) for name, rows in tables.items()}},
-            present_tables=frozenset(tables),
+            materialised=frozenset(tables),
         )
 
     @classmethod
@@ -254,7 +255,9 @@ def _object_type_of(repository, identity) -> str:
     return {"Table": "table", "View": "view", "Folder": "folder"}[str(kind)]
 
 
-def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
+def installed_catalogue(
+    repository, bindings: ItemBindings, *, session=None
+) -> Catalogue:
     """The whole catalogue a successful build of this estate would have left.
 
     Where `FixtureCatalogue.from_repository` gives one item's Registry, this
@@ -330,7 +333,17 @@ def installed_catalogue(repository, bindings: ItemBindings) -> Catalogue:
                 },
             ),
         }
-    return Catalogue(rows=rows)
+    # A catalogue a run writes to, because a run records what it did *into* it.
+    # Through the Session where there is one, so a claim about the statements a
+    # run submits still sees them; a recorder otherwise.
+    from support.catalogues import Recording
+
+    from weaver.catalogue.writer import writer_for
+
+    return Catalogue(
+        rows=rows,
+        writer=Recording() if session is None else writer_for(session),
+    )
 
 
 # --- physical state ---------------------------------------------------------
@@ -437,12 +450,22 @@ class FixtureInventory(TargetInventory):
         views = qualified(of_kind="View", files=False)
         folders = qualified(of_kind="Folder", files=True)
         artefacts = item_runtime_artefacts(repository, item=item)
+        if target_kind == SQL_TARGET and item_bookmarkable_objects(
+            repository, item=item
+        ):
+            # A built Warehouse holds the catalogue's `_.Bookmark` under that
+            # name, so a generated load procedure can reach its own bookmark.
+            views = tuple(sorted(views + (f"{CATALOGUE_SCHEMA}.{BOOKMARK.name}",)))
         return cls(
             target_id=target_id,
             kind=kind,
             target_name=target_name,
-            schemas=schemas_of(tables + views)
-            + tuple(load_schemas(artefacts) if target_kind == SQL_TARGET else ()),
+            schemas=tuple(
+                sorted(
+                    set(schemas_of(tables + views))
+                    | set(load_schemas(artefacts) if target_kind == SQL_TARGET else ())
+                )
+            ),
             folder_schemas=schemas_of(folders),
             folders=folders,
             tables=tables,
@@ -488,6 +511,52 @@ def bound_target(
         logical_item_type=logical_item_type,
         **extra,
     )
+
+
+def catalogue_target(
+    *, id: str = "control-warehouse-Weaver", item_id: str = "Weaver", **extra
+) -> BoundTarget:
+    """The Warehouse the Weaver catalogue lives in, as the planner receives it."""
+
+    return bound_target(
+        id=id,
+        kind="warehouse",
+        item_id=item_id,
+        logical_item_name="_weaver",
+        logical_item_type="Warehouse",
+        **extra,
+    )
+
+
+def catalogue_inventory(
+    *, holding: bool = True, target_id: str = "control-warehouse-Weaver"
+):
+    """The catalogue Warehouse's own inventory, as the planner receives it.
+
+    ``holding`` says whether it physically holds ``_.Bookmark``. That is what
+    decides the two things the build that *creates* the catalogue cannot do: a
+    Lakehouse shortcut has nothing to point at, and bookmark reconciliation has
+    no table to reconcile.
+    """
+
+    from weaver.catalogue.tables import BOOKMARK, CATALOGUE_SCHEMA, PROJECTED_TABLES
+
+    held = tuple(
+        f"{CATALOGUE_SCHEMA}.{table.name}"
+        for table in (*PROJECTED_TABLES, *((BOOKMARK,) if holding else ()))
+    )
+    return target_inventory(
+        target_id=target_id,
+        kind="warehouse",
+        target_name="Weaver",
+        schemas=(CATALOGUE_SCHEMA,),
+        tables=held,
+    )
+
+
+#: The logical item the Weaver catalogue is built as, which is what the planner
+#: keys its inventory by.
+CATALOGUE_ITEM = WeaverItemId("Warehouse", "_weaver")
 
 
 # --- repositories -------------------------------------------------------------
@@ -551,6 +620,7 @@ def warehouse_table(
     select: str = "select cast(1 as int) as CustomerId",
     primary_key: str = "CustomerId",
     identity: str | None = None,
+    has_load_procedure: bool = True,
 ) -> str:
     """A Warehouse table, whose *query* defines its schema.
 
@@ -565,6 +635,9 @@ def warehouse_table(
     """
 
     identity_line = f"Identity: {identity}\n\n" if identity else ""
+    # A table something other than Weaver populates says so, and then has no
+    # load artefact and no bookmark.
+    load_line = "" if has_load_procedure else "Has load procedure: false\n\n"
     return f"""\
 /*
 Table ID: {object_id}
@@ -575,7 +648,7 @@ Lineage: A source system.
 
 Primary key: {primary_key}
 
-{identity_line}*/
+{load_line}{identity_line}*/
 {select}
 """
 

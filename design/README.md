@@ -15,7 +15,7 @@ boundaries covered by the writing uplift.
 | [Weaver architecture](weaver-architecture.md) | Overview | Product model, document model, lifecycle, and authoritative design decisions. |
 | [Code architecture](code-architecture.md) | Architecture | The Session, Builder, Installer, and Runner responsibilities and their handoffs. |
 | [Build philosophy](build-philosophy.md) | Contract | Invariants that build planning and installation must preserve. |
-| [Central catalogue](catalogue.md) | Architecture | Catalogue ownership, tables, reconciliation, and certification. |
+| [Central catalogue](catalogue.md) | Architecture | Catalogue ownership, its projected and runtime tables, reconciliation, and certification. |
 | [Validation](validation.md) | Architecture | Tests, Assumptions, runtime artefacts, and result handling. |
 | [The keyed table load](keyed-load.md) | Architecture | Reconciliation for a table with a primary key, in both engines. |
 | [Warehouse SQL execution](sql-execution.md) | Contract | SQL execution across desktop and Fabric positions. |

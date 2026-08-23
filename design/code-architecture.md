@@ -143,6 +143,13 @@ runs, not how a run behaves when one of them fails.
 execution supplies the estate-backed dispatcher; tests can supply a controlled
 dispatcher for the same state machine.
 
+What a run *records* is downstream of it, on purpose. A Runner with no catalogue
+runs correctly; the operation that wants a durable record feeds each settled node
+into the catalogue and flushes before reporting. Both rows go the same way,
+because both are rows in the same `_` schema — but a lost `_.Log` row loses
+evidence and a lost bookmark makes the next load re-read a window, so only the
+second fails the operation.
+
 ---
 
 ## The representations
@@ -156,7 +163,7 @@ The handoff points, roughly in the order you meet them.
 | `TargetInventory` | what a physical target actually holds right now |
 | `BuildState` | `Catalogue` + inventories, as one snapshot the Builder is handed |
 | `BuildBundle` | the plan: sequences → batches → `InstallAction`s, plus frozen payloads |
-| `RunState` | the catalogue snapshot handed to a run |
+| `RunState` | the catalogue a run plans against and records itself in, read once |
 | `RunGraph` | the selected nodes and their edges |
 | `RunResult` / reports | what happened, per node, per action |
 
@@ -359,8 +366,22 @@ render.py       those statements as T-SQL
 tsql.py         identifier quoting, literals and types — the only module that
                 knows SQL syntax
 connection.py   reading `_` over TDS, and what an absent table means
-flusher.py      appending to `_.Log` without waiting for the Warehouse
+writer.py       where a catalogue's runtime writes go
+flusher.py      batching them without waiting for the Warehouse — appended for
+                `_.Log`, merged for `_.Bookmark`
+claims.py       which rows a document owns, and how a bookmark row is keyed
 ```
+
+`state.py` holds `Catalogue`, which owns catalogue I/O: it is selectively
+materialised, it answers which installed object a physical name is, and runtime
+rows are submitted, updated and flushed through it. It is live mutable state, not
+a snapshot, and it reaches its Warehouse through a Session — borrowed when it was
+handed one, owned and closed when it opened one for itself. What a target
+physically holds is not its question; a `TargetInventory` answers that.
+
+Two other modules decide *when*: `build_bundle/bookmarks.py` for what a build
+invalidates, and `runtime/anchor.py` for how an authored object anchors itself to
+a catalogue by name.
 
 Everything above `render.py` holds plain Python values under internal
 snake-case keys. The public sentence-case names and the stored vocabularies the

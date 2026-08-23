@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from support.catalogues import loaded, never
 from support.weaver_test import weaver_test
 from support.workspaces import mounted_lakehouse
 
@@ -58,7 +59,9 @@ def landing(tmp_path):
     Sales__Landing.deletes = ()
     Sales__Landing.incremental = True
     Sales__Landing.static = False
-    return Sales__Landing(object(), lakehouse=mounted_lakehouse("Sales", tmp_path))
+    return Sales__Landing(
+        object(), lakehouse=mounted_lakehouse("Sales", tmp_path)
+    ).with_catalogue(never("Sales.Landing", target="Sales", files=True))
 
 
 def _documents(folder: Folder) -> list[Path]:
@@ -263,14 +266,18 @@ def test_wholesale_reconciliation_never_inventories_changes(landing):
 
 
 @weaver_test()
-def test_a_populated_static_folder_creates_no_later_event(landing):
+def test_a_bookmarked_static_folder_creates_no_later_event(landing):
     landing.static = True
     landing.files = {"seed.csv": "seed"}
     landing.load()
     before = _documents(landing)
 
-    landing.files = {"seed.csv": "changed"}
-    landing.load()
+    already = Sales__Landing(object(), lakehouse=landing.lakehouse).with_catalogue(
+        loaded("Sales.Landing", target="Sales", files=True)
+    )
+    already.static = True
+    already.files = {"seed.csv": "changed"}
+    already.load()
 
     assert _documents(landing) == before
 
