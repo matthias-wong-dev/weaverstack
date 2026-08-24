@@ -1,0 +1,5 @@
+Schema ID: LAND
+
+Description: |
+  Local copies of the foreign estate, so downstream work reads Weaver-owned
+  Delta rather than a shortcut.

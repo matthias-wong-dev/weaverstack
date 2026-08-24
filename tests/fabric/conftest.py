@@ -373,6 +373,32 @@ def fabric_external_lakehouse(fabric_external_workspace_item, fabric_client):
         )
 
 
+@pytest.fixture(scope="session")
+def fabric_external_warehouse(fabric_external_workspace_item, fabric_client):
+    """The external Warehouse, found rather than made.
+
+    Its tables are written over TDS by the provisioner, so an absent one is a
+    setup step. The skip says which script to run.
+    """
+
+    from weaver.fabric.resources import WAREHOUSE, find_item
+
+    name = _fixed_name_from(external_estate.WAREHOUSE_ROLES, "external_warehouse")
+    try:
+        return find_item(
+            fabric_external_workspace_item,
+            name,
+            item_type=WAREHOUSE,
+            client=fabric_client,
+        )
+    except Exception as exc:
+        pytest.skip(
+            f"the external Warehouse {name!r} is not in "
+            f"{fabric_external_workspace_item.name!r} ({type(exc).__name__}). "
+            "Run tests/fabric/provision_estate.py to create and seed it."
+        )
+
+
 @dataclass(frozen=True)
 class ExternalSource:
     """One external Lakehouse, and how to address what it holds."""

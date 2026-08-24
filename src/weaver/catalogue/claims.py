@@ -38,6 +38,21 @@ def catalogue_schema(identity: WeaverDocumentId) -> str:
     return f"{prefix}{identity.object_id.schema}"
 
 
+def catalogue_columns(identity) -> tuple[str, str]:
+    """The ``schema_name`` and ``object_name`` this identity is stored under.
+
+    A schema shortcut presents a namespace, so it names the schema in both
+    columns. One reader for what :func:`weaver.catalogue.projection._identity`
+    writes, so the two cannot drift.
+    """
+
+    from ..declaration.model import WeaverSchemaId
+
+    if isinstance(identity, WeaverSchemaId):
+        return identity.schema, identity.schema
+    return catalogue_schema(identity), identity.object_id.object
+
+
 def bookmark_row(identity: WeaverDocumentId, at=None) -> dict:
     """One ``_.Bookmark`` row for an object, keyed as the Registry keys it.
 
@@ -64,8 +79,8 @@ class CatalogueClaimRule:
     table: CatalogueTable
     predicate_columns: tuple[str, str] = ("schema_name", "object_name")
 
-    def values(self, identity: WeaverDocumentId) -> tuple[str, str]:
-        return catalogue_schema(identity), identity.object_id.object
+    def values(self, identity) -> tuple[str, str]:
+        return catalogue_columns(identity)
 
     def owns(self, row: Mapping[str, object], identity: WeaverDocumentId) -> bool:
         expected = self.values(identity)

@@ -17,9 +17,15 @@ from ..declaration.model import (
     PROCEDURE_SHAPE,
     WeaverDocumentId,
     WeaverItemId,
+    WeaverSchemaId,
 )
 from ..errors import BuildError, ConfigError
-from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
+from .claims import (
+    CatalogueClaim,
+    catalogue_columns,
+    catalogue_schema,
+    claim_rules_for_object_type,
+)
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
@@ -967,10 +973,9 @@ def reconcile_catalogue_state(
             for identity, document in registered.items():
                 if identity.item != item:
                     continue
+                schema_name, object_name = catalogue_columns(identity)
                 if not inventory.has_object(
-                    catalogue_schema(identity),
-                    identity.object_id.object,
-                    document.object_type,
+                    schema_name, object_name, document.object_type
                 ):
                     stale[identity] = document
         # Reconciliation removes disproved declaration claims. Current runtime
@@ -1025,7 +1030,7 @@ def reconcile_catalogue_state(
 
 def _row_identity(
     item: WeaverItemId, row: Mapping[str, object], object_type: str
-) -> WeaverDocumentId:
+) -> WeaverDocumentId | WeaverSchemaId:
     """One Registry row's identity, built from its own columns.
 
     The row is the identity: item, schema, object and object type are four
@@ -1037,6 +1042,13 @@ def _row_identity(
 
     schema = str(row.get("schema_name") or "")
     name = str(row.get("object_name") or "")
+    if object_type == "schema":
+        # A schema shortcut names the schema in both columns, because the Registry
+        # keys on both (see `weaver.catalogue.projection._identity`). Reading it
+        # back as a two-part object identity would key it differently from the
+        # declaration, so classification would never find its signature and would
+        # rebuild the shortcut on every build.
+        return WeaverSchemaId(item, schema)
     if object_type == "file":
         return WeaverDocumentId(item, ObjectId(schema, name), shape=FILE_SHAPE)
     if object_type == "stored_procedure":

@@ -68,6 +68,39 @@ class SesFixture:
             shutil.copytree(self.path, destination, ignore=_NOT_COPIED)
         return replace(self, path=destination)
 
+    def substituted(self, root: Path, values: Mapping[str, str]) -> "SesFixture":
+        """The same declaration, with ``{{TOKEN}}`` placeholders resolved.
+
+        A physical shortcut names a real Fabric workspace and item, which is this
+        tenant's business rather than the repository's. The fixture on disk holds
+        placeholders so it stays readable and neutral, and the caller supplies
+        the names it resolved.
+        """
+
+        copied = self.disposable(root)
+        for path in sorted(copied.path.rglob("*")):
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:  # a fixture's own binary data
+                continue
+            rewritten = text
+            for token, value in values.items():
+                rewritten = rewritten.replace("{{" + token + "}}", value)
+            if rewritten != text:
+                path.write_text(rewritten, encoding="utf-8")
+        remaining = sorted(
+            path.relative_to(copied.path).as_posix()
+            for path in copied.path.rglob("*")
+            if path.is_file() and "{{" in path.read_text(errors="ignore")
+        )
+        if remaining:
+            raise AssertionError(
+                f"{copied.name}: unresolved placeholders in {', '.join(remaining)}"
+            )
+        return copied
+
     def renamed(self, root: Path, names: Mapping[str, str]) -> "SesFixture":
         """The same declaration, under different logical item names.
 
@@ -195,4 +228,31 @@ CROSS_ITEM_SHORTCUT_FIXTURE = SesFixture(
         "Lakehouse/Raw": "Producer_LH",
         "Lakehouse/Curated": "Consumer_LH",
     },
+)
+
+
+#: The acceptance estate: a realistic architecture, from the foreign workspace
+#: through to a Lakehouse that reads the Warehouse's own output.
+#:
+#: External → Landing → Curated → Serving → Published. Its physical shortcuts
+#: name real Fabric items, so the tree on disk holds ``{{TOKEN}}`` placeholders
+#: and a caller resolves them with :meth:`SesFixture.substituted`.
+ACCEPTANCE_FIXTURE = SesFixture(
+    _FIXTURES / "acceptance",
+    ("Lakehouse/Landing", "Lakehouse/Curated", "Warehouse/Serving"),
+)
+
+#: ``Lakehouse/Published`` is declared and deliberately left unbound. It closes
+#: the chain by reading the Serving Warehouse, and Weaver has no shortcut form
+#: that can name an object the same build creates: a logical Lakehouse shortcut
+#: refuses a Warehouse source, and a physical one resolves against the estate as
+#: it already stands. An unbound item is omitted from the build, so the intended
+#: architecture stays visible in the tree. Bind it when the product allows it.
+
+#: What ``substituted`` resolves in the acceptance estate.
+ACCEPTANCE_TOKENS = (
+    "EXTERNAL_WORKSPACE",
+    "EXTERNAL_LAKEHOUSE",
+    "EXTERNAL_WAREHOUSE",
+    "SERVING_WAREHOUSE",
 )

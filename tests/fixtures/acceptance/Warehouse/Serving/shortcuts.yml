@@ -1,0 +1,5 @@
+logical:
+  Warehouse/Serving/SRC.Customer: Lakehouse/Curated/CUR.Customer
+  Warehouse/Serving/SRC.Transaction: Lakehouse/Curated/CUR.Transaction
+  Warehouse/Serving/SRC.Product: Lakehouse/Curated/CUR.Product
+  Warehouse/Serving/SRC.RetiredCustomer: Lakehouse/Curated/CUR.RetiredCustomer

@@ -20,6 +20,7 @@ from .declaration.model import (
     WAREHOUSE,
     WeaverDocumentId,
     WeaverItemId,
+    WeaverSchemaId,
 )
 from .errors import LoadError
 from .etl import LOAD_ROOT, load_procedure_id
@@ -136,15 +137,19 @@ class InstalledObject:
 
     @property
     def physical(self) -> PhysicalObjectRef:
-        from .catalogue.claims import catalogue_schema
+        from .catalogue.claims import catalogue_columns
+        from .declaration.model import OBJECT_SHAPE
 
+        schema, name = catalogue_columns(self.identity)
         return PhysicalObjectRef(
             target_id=self.target.name,
             target_kind=self.target.kind,
-            schema=catalogue_schema(self.identity),
-            object=self.identity.object_id.object,
+            schema=schema,
+            object=name,
             object_type=self.object_type,
-            shape=self.identity.shape,
+            # A schema identity carries no shape: it names a namespace, and
+            # nothing is installed inside it that this estate owns.
+            shape=getattr(self.identity, "shape", OBJECT_SHAPE),
         )
 
 
@@ -475,6 +480,10 @@ def primitive_candidates(
     it and a hand-written ``Sales__OrderSummary.py`` install to one path.
     """
 
+    # A schema identity names a namespace, so there is no object to load and no
+    # primitive to install for it.
+    if not hasattr(identity, "object_id"):
+        return ()
     item = identity.item
     schema, name = identity.object_id.schema, identity.object_id.object
     if item.item_type == WAREHOUSE:
@@ -957,6 +966,13 @@ class _Planner:
                 beneath_files = replace(producer, is_files=True)
                 if beneath_files in self.estate.objects:
                     producer = beneath_files
+            if producer not in self.estate.objects:
+                # A schema shortcut is keyed by the namespace it presents, so a
+                # two-part spelling of it finds nothing. It orders nothing
+                # either: what appears inside belongs to the item it points at.
+                namespace = WeaverSchemaId(producer.item, producer.object_id.schema)
+                if namespace in self.estate.objects:
+                    return namespace, False
             if producer not in self.estate.objects:
                 raise LoadError(
                     f"{consumer} imports {reference!r}, which resolves to "

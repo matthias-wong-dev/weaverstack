@@ -340,3 +340,42 @@ def test_a_qualified_predicate_qualifies_every_scope():
     rendered = scopes.predicate_for("target")
 
     assert rendered.count("target.") == 4
+
+
+@weaver_test()
+def test_a_schema_shortcuts_row_reads_back_as_the_schema_identity_it_wrote():
+    """
+    Intent: A build recognises the schema shortcut it certified last time, so an
+    unchanged one is not rebuilt on every build.
+
+    Proof: the projection writes a schema shortcut's Registry row with the
+    schema repeated in the object column. Reading it back gives the same
+    WeaverSchemaId the declaration is keyed by, so classification finds its
+    signature.
+    """
+
+    from weaver.declaration.model import WeaverSchemaId
+
+    landing = WeaverItemId.parse("Lakehouse/Landing")
+    catalogue = CountingCatalogue(
+        {
+            REGISTRY.name: (
+                {
+                    "item_type": landing.item_type,
+                    "item_name": landing.item_name,
+                    "schema_name": "Reference",
+                    "object_name": "Reference",
+                    "object_type": "schema",
+                    "object_role": "shortcut",
+                    "signature": "sig-Reference",
+                    "build_datetime": None,
+                },
+            )
+        }
+    )
+
+    state = read_catalogue_state(catalogue, (landing,))
+
+    identity = WeaverSchemaId(landing, "Reference")
+    assert identity in state.registered, sorted(str(one) for one in state.registered)
+    assert state.registered[identity].signature == "sig-Reference"
