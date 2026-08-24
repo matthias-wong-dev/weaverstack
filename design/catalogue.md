@@ -89,10 +89,11 @@ persistence boundary maps between them and nothing above it sees SQL.
 | `_.ForeignKeyDictionary` | declared relationship | An ER model, not constraints. |
 | `_.TestDictionary` | Test or Assumption | The **logical** authored validation — `test_type`, description and the declared `primary_key`. The procedure or module it compiles to is a physical artefact and is certified in `_.Registry`; there is no Registry row under the logical validation ID. See [validation](validation.md). |
 | `_.Dependency` | referencing-owned edge | The spelling the author wrote, kept as `dependency_reference`, plus the edge Weaver resolved it to. |
-| `_.Shortcut` | one authored declaration | Every shortcut an item declares, reproduced from its `shortcuts.py` or `shortcuts.yml`, including whether the target is logical or physical. |
+| `_.Shortcut` | one installed relation | Every shortcut an item declares, plus Weaver's package-owned runtime references. Authored rows reproduce `shortcuts.py` or `shortcuts.yml`; runtime rows carry the same logical producer pair without pretending they were authored. |
 
-A shortcut destination also gets a `_.Registry` row, typed as what it physically
-is: a folder under `Files`, a view in a Warehouse, a table in a Lakehouse, and
+A shortcut destination, including a package-owned runtime reference, also gets a
+`_.Registry` row, typed as what it physically is: a folder under `Files`, a view
+in a Warehouse, a table in a Lakehouse, and
 `schema` for a schema shortcut. There is no `shortcut` object *type*, because to a
 reader of the catalogue a Lakehouse table shortcut is a table. What it is for is
 the object *role*, recorded as `shortcut`, and where it points is `_.Shortcut`. That
@@ -689,8 +690,11 @@ catalogue and publishes the Delta directory behind it a moment later, so a short
 can arrive before there is anything to point at. Fabric validates a shortcut's
 target, and `weaver.fabric.shortcuts.create_shortcut` waits for a source it has just
 been asked to point at — bounded, so a source that will never appear still fails.
-Weaver infrastructure, not published `_.Shortcut` rows, and rendered by the same code
-a declared shortcut is.
+They are Weaver infrastructure rather than authored declarations, but publish the
+same `_.Shortcut` producer pair and `_.Registry` certification. That is what lets
+load planning reconstruct the relation after the source repository is gone. Their
+physical views and OneLake shortcuts are rendered by the same code as declared
+shortcuts.
 
 **Every write through a view is a MERGE**, including the appends. Fabric accepts
 `SELECT`, `UPDATE`, `DELETE` and a `MERGE`'s insert through a cross-database view

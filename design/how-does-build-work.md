@@ -140,7 +140,9 @@ Authored SQL that reads `_.Bookmark` resolves through the local destination, the
 document and item graphs order the catalogue producer first, prune keeps the
 destination, and physical planning renders that same injected pair as a Warehouse
 view or Lakehouse shortcut. The injected relations are package-owned rather than
-authored shortcut declarations, so they publish no Shortcut or Registry rows.
+authored declarations, but publish the same Shortcut producer pair and Registry
+certification. A later load therefore reconstructs the same relation from installed
+state that the build resolved from the repository.
 
 A changed object therefore expands to its descendants wherever they are, and the
 planner needs no cross-item special case. Items *not* in the build are still

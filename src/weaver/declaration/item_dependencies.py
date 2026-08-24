@@ -255,9 +255,10 @@ def _with_runtime_references(repository: WeaverRepository) -> WeaverRepository:
     ``_.Bookmark`` and the other presented runtime tables are ordinary logical
     references from a consuming item's namespace to the built-in catalogue item.
     Holding them as :class:`RepositoryShortcut` pairs gives dependency resolution,
-    both graphs, pruning and physical rendering one object set to work from. They
-    remain absent from authored shortcut declarations and therefore publish no
-    ``_.Shortcut`` or Registry rows of their own.
+    both graphs, pruning, physical rendering and installed-catalogue projection
+    one object set to work from. They remain absent from authored shortcut
+    declarations, but publish through the same Shortcut and Registry contract so
+    a later load can reconstruct the pair without the source repository.
     """
 
     from ..catalogue.builtin import BUILTIN_ITEM

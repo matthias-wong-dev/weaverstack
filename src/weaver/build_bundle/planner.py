@@ -293,6 +293,11 @@ def _selectable(
             declaration.destination
             for declaration in repository.shortcuts
             if declaration.destination.item in by_item
+        }
+        | {
+            shortcut.destination
+            for shortcut in repository.logical_shortcuts
+            if shortcut.destination.item in by_item
         },
         {
             artefact.identity
@@ -458,9 +463,9 @@ def plan_item_build(
         repository,
         item=item,
         target=target,
-        inventory=inventory,
         catalogue_target=catalogue_target,
         runtime_sources=runtime_sources,
+        selected=selected_for_build & selected_shortcuts,
     )
     if references is not None:
         stages.append(references)

@@ -202,8 +202,8 @@ def render_runtime_state_reconciliation(
 def _reference(pair, catalogue: str) -> Reference:
     """One runtime table as the reference it is: a shortcut nobody authored.
 
-    Not published as a ``_.Shortcut`` row, but what it becomes is what a declared
-    shortcut becomes, so it is expressed as one and rendered by the same code.
+    Published through the ordinary installed shortcut contract and physically
+    rendered by the same code as an authored declaration.
     """
 
     from ..declaration.model import TABLE_SHORTCUT, VIEW_SHORTCUT
@@ -244,8 +244,8 @@ def render_runtime_references(
     *,
     item: WeaverItemId,
     target,
-    inventory,
     catalogue_target,
+    selected: Iterable[WeaverDocumentId],
     runtime_sources: Mapping[str, object] | None = None,
 ) -> PlannedStage | None:
     """Give a built target the catalogue's runtime tables under their own names.
@@ -256,59 +256,50 @@ def render_runtime_references(
     puts its source tables in an earlier item layer when both arrive in one
     bundle.
 
-    One action per target, carrying every reference it is missing, because a
-    Fabric round trip per table would be five where one does.
+    One action per target carries every selected reference. Selection already
+    compared Registry with physical inventory, so an unchanged target reaches
+    this function with no work and a missing or uncertified reference is remade.
     """
 
-    references = _runtime_references(repository, item)
+    selected = set(selected)
+    references = tuple(
+        pair
+        for pair in _runtime_references(repository, item)
+        if pair.destination in selected
+    )
     if not references:
         return None
     if target.kind == WAREHOUSE_TARGET:
-        return _warehouse_views(references, target, catalogue_target, inventory)
+        return _warehouse_views(references, target, catalogue_target)
     return _lakehouse_shortcuts(
         references=references,
         target=target,
-        inventory=inventory,
         sources=runtime_sources or {},
     )
 
 
-def _missing_views(references, inventory, catalogue_target, target) -> tuple:
-    """The runtime tables this Warehouse does not already present.
-
-    Gated on the inventory, so an unchanged repository plans nothing and a view
-    somebody removed comes back.
-    """
+def _wanted_views(references, catalogue_target, target) -> tuple:
+    """The selected runtime-table views this Warehouse can present."""
 
     if target.name.casefold() == catalogue_target.name.casefold():
         # The catalogue's own Warehouse: the tables are right there, and a view
         # of that name would be a view over itself.
         return ()
-    return tuple(
-        pair
-        for pair in references
-        if not inventory.has_object(
-            pair.destination.object_id.schema,
-            pair.destination.object_id.object,
-            "view",
-        )
-    )
+    return tuple(references)
 
 
-def _warehouse_views(
-    references, target, catalogue_target, inventory
-) -> PlannedStage | None:
-    """The views, created for whichever runtime tables the Warehouse lacks."""
+def _warehouse_views(references, target, catalogue_target) -> PlannedStage | None:
+    """Create or replace the selected runtime-table views."""
 
-    missing = _missing_views(references, inventory, catalogue_target, target)
-    if not missing:
+    wanted = _wanted_views(references, catalogue_target, target)
+    if not wanted:
         return None
 
     statements = [
         view_statement(_reference(pair, catalogue_target.name), catalogue_target)
-        for pair in missing
+        for pair in wanted
     ]
-    item = missing[0].destination.item
+    item = wanted[0].destination.item
     item_slug = str(item).replace("/", "--")
     filename = f"{REFERENCE_SLUG}-{item_slug}.tsql-batch.json"
     content = (json.dumps(statements, indent=2, ensure_ascii=False) + "\n").encode(
@@ -321,44 +312,33 @@ def _warehouse_views(
         filename=filename,
         content=content,
         description="create views over the catalogue's runtime tables",
-        presented=missing,
+        presented=wanted,
     )
 
 
-def _lakehouse_shortcuts(
-    *, references, target, inventory, sources
-) -> PlannedStage | None:
-    """The OneLake shortcuts, for whichever runtime tables the Lakehouse lacks.
+def _lakehouse_shortcuts(*, references, target, sources) -> PlannedStage | None:
+    """Create or replace the selected OneLake runtime-table shortcuts."""
 
-    Gated on what is physically there, as the Warehouse's views are.
-    ``Tables/_`` is Weaver's own rather than the item's, so the inventory reports
-    these separately from the item's schemas.
-    """
-
-    held = {name.casefold() for name in inventory.runtime_references}
-    missing = tuple(
-        pair
-        for pair in references
-        if pair.destination.object_id.object.casefold() not in held
-        and pair.source.object_id.object in sources
+    wanted = tuple(
+        pair for pair in references if pair.source.object_id.object in sources
     )
-    if not missing:
+    if not wanted:
         return None
 
-    item = missing[0].destination.item
+    item = wanted[0].destination.item
     item_slug = str(item).replace("/", "--")
     rendered = [
         (
             _reference(pair, sources[pair.source.object_id.object].item_name),
             target,
         )
-        for pair in missing
+        for pair in wanted
     ]
     content = shortcut_payload(
         rendered,
         sources={
             declaration_key(reference): sources[pair.source.object_id.object]
-            for pair, (reference, _target) in zip(missing, rendered)
+            for pair, (reference, _target) in zip(wanted, rendered)
         },
     )
     return _stage(
@@ -368,7 +348,7 @@ def _lakehouse_shortcuts(
         filename=f"{REFERENCE_SLUG}-{item_slug}.shortcut.json",
         content=content,
         description="create shortcuts to the catalogue's runtime tables",
-        presented=missing,
+        presented=wanted,
     )
 
 

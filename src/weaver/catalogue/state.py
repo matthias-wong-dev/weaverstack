@@ -387,7 +387,9 @@ class Catalogue:
         It carries no binding — no target name, Weaver version, Installation
         row, publication build_datetime, or Registry certification for a shortcut
         destination, because a shortcut is a view in a Warehouse and a table in a
-        Lakehouse and this does not know which.
+        Lakehouse and this does not know which. It does carry every logical
+        shortcut row, including package-owned runtime references, so installed
+        operations can reconstruct the same graph from the catalogue alone.
         """
 
         from ..etl import item_runtime_artefacts
@@ -561,6 +563,10 @@ def for_targets(
             declaration.destination
             for declaration in repository.shortcuts
             if declaration.owner == item and declaration.destination in certified
+        } | {
+            shortcut.destination
+            for shortcut in repository.logical_shortcuts
+            if shortcut.destination.item == item and shortcut.destination in certified
         }
         if certifiable:
             tables[REGISTRY.name] = tuple(

@@ -49,7 +49,7 @@ from .models import (
     InstallAction,
 )
 from .payloads import sha256_hex
-from .targets import BoundTarget
+from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Weaver-owned Files areas excluded from prune.
 _RESERVED_FILES_AREAS = frozenset({CLI_AREA})
@@ -190,6 +190,12 @@ class TargetInventory:
             if schema.casefold().startswith(prefix.casefold()):
                 physical_schema = schema[len(prefix) :]
             return _holds(self.folders, f"{physical_schema}.{name}")
+        if (
+            schema.casefold() == CATALOGUE_SCHEMA.casefold()
+            and object_type == ("view" if self.kind == WAREHOUSE_TARGET else "table")
+            and _holds(self.runtime_references, name)
+        ):
+            return True
         if object_type == "table":
             return _holds(self.tables, f"{schema}.{name}")
         if object_type == "view":

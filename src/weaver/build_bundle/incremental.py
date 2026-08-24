@@ -181,8 +181,11 @@ def declared_signatures(
     from ..etl import artefacts_by_identity, runtime_artefacts
 
     shortcuts = {
-        declaration.destination: declaration for declaration in repository.shortcuts
+        shortcut.destination: shortcut for shortcut in repository.logical_shortcuts
     }
+    shortcuts.update(
+        {declaration.destination: declaration for declaration in repository.shortcuts}
+    )
     installed = artefacts_by_identity(runtime_artefacts(repository))
     signatures: dict[WeaverDocumentId, str] = {}
     for identity in selected:

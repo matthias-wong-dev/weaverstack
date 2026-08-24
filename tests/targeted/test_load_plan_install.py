@@ -86,6 +86,14 @@ def loads_of(repository, item=None):
     return {a.identity for a in item_load_artefacts(repository, item=item or item_id())}
 
 
+def runtime_references_of(repository, item):
+    return {
+        shortcut.destination
+        for shortcut in repository.logical_shortcuts
+        if shortcut.destination.item == item
+    }
+
+
 def phases(planned) -> list[str]:
     return [stage.phase for stage in planned.stages]
 
@@ -171,6 +179,8 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
         warehouse,
         item=item,
         target=target,
+        selected_shortcuts=runtime_references_of(warehouse, item),
+        selected_for_build=runtime_references_of(warehouse, item),
         selected_loads=loads_of(warehouse, item),
     )
     actions = actions_of(planned, "load")
@@ -260,6 +270,8 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
         warehouse,
         item=item,
         target=target,
+        selected_shortcuts=runtime_references_of(warehouse, item),
+        selected_for_build=runtime_references_of(warehouse, item),
         removed={gone},
         registered={gone: registered_document(gone, object_type="stored_procedure")},
     )

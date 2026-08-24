@@ -33,6 +33,7 @@ derived from the source, and that same source, and it must find nothing to do.
 
 ```text
 Catalogue.from_repository(...)      what the source says should be installed
+for_targets(...)                    binding-specific shortcut certification
 FixtureInventory.from_repository()  what the source says should be there
 generate_item_build_bundle(...)     must produce no physical action at all
 ```
@@ -71,7 +72,8 @@ from weaver.build_bundle import (
     WarehouseBinding,
     generate_item_build_bundle,
 )
-from weaver.catalogue.state import Catalogue
+from weaver.build_bundle.planner import certifiable_identities
+from weaver.catalogue.state import Catalogue, for_targets
 from weaver.declaration import parse_item_repository
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
@@ -89,6 +91,7 @@ PHYSICAL_KINDS = frozenset(
     {
         "create_schema",
         "create_shortcut",
+        "create_runtime_reference",
         "build_folder",
         "build_table",
         "build_view",
@@ -132,6 +135,16 @@ def build(repository, tmp_path):
     # planner refuses an inventory that describes a different target, which is
     # the check that stops a fixture quietly answering for the wrong one.
     bound = {binding.item: binding.to_bound_target() for binding in bindings.entries}
+    # Repository projection carries the logical runtime-reference rows. Binding
+    # adds the Registry certification that makes this a physically correct
+    # estate; Installation remains absent so the catalogue tail still has one
+    # genuine change to publish.
+    catalogue = for_targets(
+        Catalogue.from_repository(repository),
+        repository,
+        certifiable_identities(repository, bindings.by_item),
+        {item: target.kind for item, target in bound.items()},
+    )
     bundle = generate_item_build_bundle(
         repository,
         bindings=bindings,
@@ -155,8 +168,9 @@ def build(repository, tmp_path):
                 target_name=WAREHOUSE_TARGET_NAME,
             ),
         },
-        # Production, not a fixture: the desired catalogue the build itself uses.
-        catalogue=Catalogue.from_repository(repository),
+        # Production, not a fixture: the desired catalogue constructors the
+        # build itself uses, stopped just before Installation is composed.
+        catalogue=catalogue,
         catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
@@ -218,13 +232,12 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
     in under the cover of a quiet plan.
 
     Publication is a difference now, so what appears here depends on what the
-    persisted catalogue already holds. This fixture's state is the repository's
-    own projection — the whole logical catalogue, carrying no Installation row,
-    because a repository does not know which target it was bound to. So the
-    Installation row is genuinely new and the tail genuinely publishes it. A
-    build against a catalogue that has *everything*, Installation included,
-    publishes nothing at all; that is the fixed point, and it is proven in
-    `test_build_fixed_point_cycle`.
+        persisted catalogue already holds. This fixture's state is the repository's
+        logical projection plus binding-specific shortcut certification, but carries
+        no Installation row. So the Installation row is genuinely new and the tail
+        genuinely publishes it. A build against a catalogue that has *everything*,
+        Installation included, publishes nothing at all; that is the fixed point,
+        and it is proven in `test_build_fixed_point_cycle`.
     """
 
     kinds = {
