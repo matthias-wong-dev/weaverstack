@@ -192,23 +192,27 @@ class FabricResolver:
             client=self._rest_client(),
         )
 
-    def external_lakehouse(self, name: str, *, workspace: str | None = None):
-        """One Lakehouse, in this workspace or a named one, resolved to an item.
+    def external_item(
+        self, name: str, *, item_type: str, workspace: str | None = None
+    ):
+        """One item, in this workspace or a named one, resolved by its type.
 
         For a shortcut's *source*, which may sit outside the workspace the build
-        is bound to. Nothing binds it and nothing builds into it: Weaver resolves
-        it so a shortcut can name it, and that is all.
+        is bound to. Nothing binds it and nothing builds into it.
+
+        A Warehouse resolves here as well as a Lakehouse, because a Fabric
+        Warehouse publishes its tables into OneLake.
         """
 
         if workspace is None or workspace == self.workspace.name:
-            return self.resolve(ItemRef(name), item_type=LAKEHOUSE)
+            return self.resolve(ItemRef(name), item_type=item_type)
         # Through this host's own REST client, as every other crossing here is:
         # inside Fabric that is the session's identity, not a desktop credential.
         client = self._rest_client()
         return find_item(
             find_workspace(workspace, client=client),
             name,
-            item_type=LAKEHOUSE,
+            item_type=item_type,
             client=client,
         )
 
