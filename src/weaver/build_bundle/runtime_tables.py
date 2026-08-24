@@ -63,7 +63,7 @@ from .shortcuts import (
     shortcut_payload,
     view_statement,
 )
-from .stages import CATALOGUE, LOAD, PlannedStage
+from .stages import CATALOGUE, SHORTCUT, PlannedStage
 from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 
 #: What the reconciliation stage's action and payload are named after.
@@ -216,9 +216,7 @@ def _reference(pair, catalogue: str) -> Reference:
         name=qualified,
         destination=destination,
         shortcut_type=(
-            VIEW_SHORTCUT
-            if destination.item.item_type == WAREHOUSE
-            else TABLE_SHORTCUT
+            VIEW_SHORTCUT if destination.item.item_type == WAREHOUSE else TABLE_SHORTCUT
         ),
         target=f"{WAREHOUSE}/{catalogue}/{qualified}",
         target_item_name=catalogue,
@@ -252,10 +250,11 @@ def render_runtime_references(
 ) -> PlannedStage | None:
     """Give a built target the catalogue's runtime tables under their own names.
 
-    In the load phase, with the artefacts they exist for, rather than with the
-    declared shortcuts: on the build that creates the catalogue the tables these
-    point at arrive in the same bundle and are not there yet when the shortcut
-    phase runs.
+    After schemas and authored shortcuts, but before documents: building a table
+    may execute authored SQL to discover its shape, and that SQL can read one of
+    these local names. The injected dependency on the built-in catalogue item
+    puts its source tables in an earlier item layer when both arrive in one
+    bundle.
 
     One action per target, carrying every reference it is missing, because a
     Fabric round trip per table would be five where one does.
@@ -296,7 +295,9 @@ def _missing_views(references, inventory, catalogue_target, target) -> tuple:
     )
 
 
-def _warehouse_views(references, target, catalogue_target, inventory) -> PlannedStage | None:
+def _warehouse_views(
+    references, target, catalogue_target, inventory
+) -> PlannedStage | None:
     """The views, created for whichever runtime tables the Warehouse lacks."""
 
     missing = _missing_views(references, inventory, catalogue_target, target)
@@ -390,10 +391,9 @@ def _stage(
         payload_sha256=sha256_hex(content),
     )
     return PlannedStage(
-        phase=LOAD,
-        # Behind the artefacts, which share this phase at index 0. Order within
-        # it does not matter: nothing here runs, and a procedure's reference to
-        # ``[_].[Bookmark]`` resolves when it is called rather than installed.
+        phase=SHORTCUT,
+        # Authored shortcuts occupy index 0. Runtime references follow them in
+        # the same phase and still precede every document build.
         index=1,
         slug=REFERENCE_SLUG,
         description=description,

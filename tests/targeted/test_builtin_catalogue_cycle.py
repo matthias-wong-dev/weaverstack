@@ -210,9 +210,7 @@ def test_empty_registry_recovers_existing_protected_catalogue_tables(estate, tmp
     }
     bundle = Builder(
         repository=repository,
-        state=BuildState(
-            catalogue=Catalogue(rows={}), target_inventories=inventories
-        ),
+        state=BuildState(catalogue=Catalogue(rows={}), target_inventories=inventories),
         bindings=bindings,
         catalogue_binding=WarehouseBinding(
             warehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
@@ -242,9 +240,11 @@ def test_empty_registry_recovers_existing_protected_catalogue_tables(estate, tmp
         for _sequence, _batch, action in bundle.plan.actions()
         if action.kind == "publish_registry"
     )
-    payload = estate["store"].read(
-        bundle.location.join(*registry.payload.split("/"))
-    ).decode()
+    payload = (
+        estate["store"]
+        .read(bundle.location.join(*registry.payload.split("/")))
+        .decode()
+    )
     assert all(
         f"N'_', N'{name.split('.', 1)[1]}'" in payload for name in catalogue_tables
     )

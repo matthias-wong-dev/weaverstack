@@ -13,6 +13,7 @@ from ..declaration.model import (
     WeaverRepository,
     parse_installed_identity,
 )
+from ..errors import BuildError
 from ..etl import RuntimeArtefact
 
 
@@ -245,8 +246,8 @@ def determine_impact(
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
     *,
     selected: Iterable[WeaverDocumentId],
+    physical_types: Mapping[WeaverDocumentId, str],
     stale_shortcuts: Iterable[WeaverDocumentId] = (),
-    physical_types: Mapping[WeaverDocumentId, str] | None = None,
 ) -> Impact:
     """Classify bound nodes and expand changed roots across the whole graph.
 
@@ -262,7 +263,7 @@ def determine_impact(
     """
 
     selected_set = set(selected)
-    physical_types = dict(physical_types or {})
+    physical_types = dict(physical_types)
     installed = {
         identity: document.signature
         for identity, document in registered.items()
@@ -285,13 +286,13 @@ def determine_impact(
         else:
             signature = installed.get(identity)
             wanted = declared[identity]
-        if signature is None and identity not in physical_types:
+        if identity not in physical_types:
             new.add(identity)
         elif signature != wanted:
             changed.add(identity)
-    changed |= {identity for identity in stale_shortcuts if identity in installed}
+    changed |= {identity for identity in stale_shortcuts if identity in physical_types}
 
-    existing = set(installed) | set(physical_types)
+    existing = set(physical_types)
     impacted = set(changed)
     graph = repository.dependency_graph
     if graph is not None:
@@ -325,12 +326,12 @@ def select_build(
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
     *,
     selected: Iterable[WeaverDocumentId],
+    inventories: Mapping[WeaverItemId, object],
     stale_shortcuts: Iterable[WeaverDocumentId] = (),
-    inventories: Mapping[WeaverItemId, object] | None = None,
 ) -> BuildSelection:
     selected = set(selected)
     physical_types = _physical_types(
-        repository, selected=selected, inventories=inventories or {}
+        repository, selected=selected, inventories=inventories
     )
     impact = determine_impact(
         repository,
@@ -360,6 +361,14 @@ def select_build(
 def _physical_types(repository, *, selected, inventories) -> dict:
     """The selected identities physically present in prepared target state."""
 
+    missing = {
+        identity.item for identity in selected if identity.item not in inventories
+    }
+    if missing:
+        raise BuildError(
+            "impact classification requires prepared target inventory for: "
+            + ", ".join(sorted(map(str, missing)))
+        )
     standing_for = _artefacts_standing_for_their_origin(repository, selected)
     present = {}
     for identity in selected:

@@ -11,7 +11,6 @@ from .errors import (
     SqlPoolClosedError,
 )
 from .execution import (
-    OutputParameter,
     PooledSqlExecutor,
     ProcedureResult,
     SqlExecutor,
@@ -37,7 +36,6 @@ __all__ = [
     "SqlPoolClosedError",
     "SqlExecutor",
     "SqlRow",
-    "OutputParameter",
     "ProcedureResult",
     "PooledSqlExecutor",
     "SqlConnectionLease",

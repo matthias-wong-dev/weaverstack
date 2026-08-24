@@ -110,10 +110,55 @@ Primary key: Id
     return root
 
 
+def _write_runtime_reference_estate(root: Path) -> Path:
+    """One incremental load whose authored SQL reads the local Bookmark view."""
+
+    item = root / "Warehouse" / "RuntimeReference"
+    schemas = item / "schemas"
+    schemas.mkdir(parents=True, exist_ok=True)
+    (schemas / "Wh.yml").write_text(
+        "Schema ID: Wh\nDescription: Runtime reference test objects.\n",
+        encoding="utf-8",
+    )
+    (item / "Wh.Customer.sql").write_text(
+        """/*
+Table ID: Wh.Customer
+
+Description: Rows selected after the current bookmark.
+
+Lineage: Deterministic test values.
+
+Primary key: CustomerId
+
+Incremental: true
+*/
+declare @bookmark_datetime datetime2(6);
+declare @rows_read bigint;
+
+set @bookmark_datetime = (
+    select [Bookmark datetime]
+    from _.Bookmark
+    where [Item type] = N'Warehouse'
+      and [Item name] = N'RuntimeReference'
+      and [Schema name] = N'Wh'
+      and [Object name] = N'Customer'
+);
+
+select v.CustomerId, v.CustomerName
+from (values
+    (1, cast('Ada' as varchar(20)), cast('2026-01-01' as datetime2(6))),
+    (2, cast('Bo' as varchar(20)), cast('2026-01-02' as datetime2(6)))
+) as v (CustomerId, CustomerName, Modified)
+where v.Modified > coalesce(@bookmark_datetime, cast('1900-01-01' as datetime2(6)))
+""",
+        encoding="utf-8",
+    )
+    return root
+
+
 def _run_standalone_load(executor) -> None:
     executor.execute_script(
-        "exec [_].[Load] @object_name = N'Wh.AIncremental', "
-        "@fault_tolerant = 0;"
+        "exec [_].[Load] @object_name = N'Wh.AIncremental', @fault_tolerant = 0;"
     )
 
 
@@ -356,6 +401,46 @@ def test_a_built_warehouse_is_given_views_over_the_catalogues_runtime_tables(
             f"select count(*) as n from [_].[{table.name}]"
         )
         assert int(dict(counted[0])["n"]) >= 0, table.name
+
+
+@weaver_test(remote=True, resources={"rest", "tds"})
+def test_a_generated_load_reads_the_catalogue_through_a_consumer_warehouse_view(
+    fabric_workspace, clean_disposable_warehouse, tmp_path_factory
+):
+    """Exercise ``Warehouse/consumer/_.Bookmark -> Warehouse/catalogue``."""
+
+    warehouse = clean_disposable_warehouse
+    name = warehouse.item.name
+    root = tmp_path_factory.mktemp("runtime-reference") / "estate"
+    estate = _write_runtime_reference_estate(root)
+
+    built = _built(
+        fabric_workspace,
+        estate,
+        f"Warehouse/{name}=RuntimeReference",
+    )
+    assert built.status == "succeeded", _failures(built)
+
+    for _ in range(2):
+        warehouse.executor.execute_script(
+            "exec [_].[Load] @object_name = N'Wh.Customer', @fault_tolerant = 0;"
+        )
+
+    evidence = warehouse.executor.query_result_sets(
+        "select count(*) as target_rows from [Wh].[Customer]; "
+        "select count(*) as bookmarks from [_].[Bookmark] "
+        "where [Item type] = N'Warehouse' "
+        "and [Item name] = N'RuntimeReference' "
+        "and [Schema name] = N'Wh' and [Object name] = N'Customer'; "
+        "select top 1 [Rows read] as rows_read from [_].[LoadStatistic] "
+        "where [Item type] = N'Warehouse' "
+        "and [Item name] = N'RuntimeReference' "
+        "and [Schema name] = N'Wh' and [Object name] = N'Customer' "
+        "order by [Completed datetime] desc, [Load statistic SK] desc;"
+    )
+    assert int(evidence[0][0]["target_rows"]) == 2
+    assert int(evidence[1][0]["bookmarks"]) == 1
+    assert int(evidence[2][0]["rows_read"]) == 0
 
 
 #: Which statement drops each kind of object, in the order dependencies allow: a

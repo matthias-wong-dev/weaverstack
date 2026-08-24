@@ -19,6 +19,7 @@ from factories import (
     registered_document,
     single_document_repository,
     spark_view,
+    target_inventory,
 )
 from support.weaver_test import weaver_test
 
@@ -58,9 +59,24 @@ def certified(repository, *identities: str, signature: str | None = None):
     }
 
 
-def impact_of(repository, registered, *selected: str):
+def physical_inventory(*, tables=(), views=()):
+    item = document_id(TABLE).item
+    return {
+        item: target_inventory(
+            tables=tuple(tables),
+            views=tuple(views),
+        )
+    }
+
+
+def impact_of(repository, registered, *selected: str, physical=()):
     return determine_impact(
-        repository, registered, selected={document_id(name) for name in selected}
+        repository,
+        registered,
+        selected={document_id(name) for name in selected},
+        physical_types={
+            document_id(name): "view" if name == VIEW else "table" for name in physical
+        },
     )
 
 
@@ -68,18 +84,26 @@ def impact_of(repository, registered, *selected: str):
 
 
 @weaver_test()
-def test_an_object_the_registry_has_never_seen_is_new(chain):
-    impact = impact_of(chain, {}, TABLE)
+def test_an_object_absent_from_inventory_is_new(chain):
+    impact = impact_of(chain, {}, TABLE, physical=())
 
     assert list(impact.new) == [document_id(TABLE)]
     assert impact.changed == ()
 
 
 @weaver_test()
+def test_an_uncertified_physical_object_is_changed(chain):
+    impact = impact_of(chain, {}, TABLE, physical=(TABLE,))
+
+    assert impact.new == ()
+    assert impact.changed == (document_id(TABLE),)
+
+
+@weaver_test()
 def test_an_object_whose_signature_still_matches_is_neither_new_nor_changed(chain):
     """The unchanged case, and the one that makes a rebuild cost nothing."""
 
-    impact = impact_of(chain, certified(chain, TABLE), TABLE)
+    impact = impact_of(chain, certified(chain, TABLE), TABLE, physical=(TABLE,))
 
     assert impact.new == ()
     assert impact.changed == ()
@@ -92,7 +116,7 @@ def test_an_object_whose_signature_differs_is_changed(chain):
 
     stale = {document_id(TABLE): registered_document(TABLE, signature="an-old-hash")}
 
-    impact = impact_of(chain, stale, TABLE)
+    impact = impact_of(chain, stale, TABLE, physical=(TABLE,))
 
     assert list(impact.changed) == [document_id(TABLE)]
     assert impact.new == ()
@@ -132,7 +156,7 @@ def test_a_changed_table_impacts_the_view_that_reads_it(chain):
         **certified(chain, VIEW),
     }
 
-    impact = impact_of(chain, registered, TABLE, VIEW)
+    impact = impact_of(chain, registered, TABLE, VIEW, physical=(TABLE, VIEW))
 
     assert list(impact.changed) == [document_id(TABLE)]
     assert list(impact.impacted_descendants) == [document_id(VIEW)]
@@ -140,7 +164,13 @@ def test_a_changed_table_impacts_the_view_that_reads_it(chain):
 
 @weaver_test()
 def test_an_unchanged_table_impacts_nothing(chain):
-    impact = impact_of(chain, certified(chain, TABLE, VIEW), TABLE, VIEW)
+    impact = impact_of(
+        chain,
+        certified(chain, TABLE, VIEW),
+        TABLE,
+        VIEW,
+        physical=(TABLE, VIEW),
+    )
 
     assert impact.impacted == ()
 
@@ -158,7 +188,7 @@ def test_a_descendant_left_out_of_the_selection_is_not_reached(chain):
         **certified(chain, VIEW),
     }
 
-    impact = impact_of(chain, registered, TABLE)
+    impact = impact_of(chain, registered, TABLE, physical=(TABLE,))
 
     assert impact.impacted_descendants == ()
 
@@ -170,7 +200,12 @@ def test_a_descendant_left_out_of_the_selection_is_not_reached(chain):
 def test_a_new_object_is_built_but_not_dropped_first(chain):
     """There is nothing to drop: it has never been installed."""
 
-    selection = select_build(chain, {}, selected={document_id(TABLE)})
+    selection = select_build(
+        chain,
+        {},
+        selected={document_id(TABLE)},
+        inventories=physical_inventory(),
+    )
 
     assert document_id(TABLE) in selection.selected_for_build
     assert document_id(TABLE) not in selection.selected_for_drop
@@ -180,7 +215,12 @@ def test_a_new_object_is_built_but_not_dropped_first(chain):
 def test_a_changed_object_is_dropped_and_rebuilt(chain):
     stale = {document_id(TABLE): registered_document(TABLE, signature="an-old-hash")}
 
-    selection = select_build(chain, stale, selected={document_id(TABLE)})
+    selection = select_build(
+        chain,
+        stale,
+        selected={document_id(TABLE)},
+        inventories=physical_inventory(tables=(TABLE,)),
+    )
 
     assert document_id(TABLE) in selection.selected_for_drop
     assert document_id(TABLE) in selection.selected_for_build
@@ -189,7 +229,10 @@ def test_a_changed_object_is_dropped_and_rebuilt(chain):
 @weaver_test()
 def test_an_unchanged_object_is_neither_dropped_nor_rebuilt(chain):
     selection = select_build(
-        chain, certified(chain, TABLE), selected={document_id(TABLE)}
+        chain,
+        certified(chain, TABLE),
+        selected={document_id(TABLE)},
+        inventories=physical_inventory(tables=(TABLE,)),
     )
 
     assert selection.selected_for_drop == ()
@@ -214,7 +257,12 @@ def test_an_object_that_prohibits_rebuild_is_never_dropped(tmp_path):
     )
     stale = {document_id(TABLE): registered_document(TABLE, signature="an-old-hash")}
 
-    selection = select_build(repository, stale, selected={document_id(TABLE)})
+    selection = select_build(
+        repository,
+        stale,
+        selected={document_id(TABLE)},
+        inventories=physical_inventory(tables=(TABLE,)),
+    )
 
     assert document_id(TABLE) in selection.prohibited
     assert selection.selected_for_drop == ()

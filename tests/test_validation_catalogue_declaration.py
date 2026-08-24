@@ -20,6 +20,7 @@ from test_validation_repository_declaration import (
     _write,
 )
 
+from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue.projection import project_item_catalogue
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
@@ -350,6 +351,38 @@ def _built(repository):
     )
 
 
+def _inventory(catalogue):
+    physical = {
+        "file": [],
+        "folder": [],
+        "stored_procedure": [],
+        "table": [],
+        "view": [],
+    }
+    for identity, registered in catalogue.registered.items():
+        schema = identity.object_id.schema
+        name = identity.object_id.object
+        if registered.object_type == "file":
+            value = f"{schema}/{name}"
+        elif registered.object_type == "folder":
+            value = f"{schema.removeprefix('Files/')}.{name}"
+        else:
+            value = f"{schema}.{name}"
+        physical[registered.object_type].append(value)
+    return {
+        ITEM: TargetInventory(
+            target_id="sales",
+            kind="lakehouse",
+            target_name="Sales_LH",
+            files=tuple(physical["file"]),
+            folders=tuple(physical["folder"]),
+            procedures=tuple(physical["stored_procedure"]),
+            tables=tuple(physical["table"]),
+            views=tuple(physical["view"]),
+        )
+    }
+
+
 @weaver_test()
 def test_an_unchanged_validation_is_not_selected_again(repository):
     """The property the whole estate's convergence rests on."""
@@ -365,7 +398,12 @@ def test_an_unchanged_validation_is_not_selected_again(repository):
         {ITEM: LakehouseBinding(ItemRef("Sales_LH"), workspace_name="Demo")},
     )
 
-    selection = select_build(repository, installed.registered, selected=selectable)
+    selection = select_build(
+        repository,
+        installed.registered,
+        selected=selectable,
+        inventories=_inventory(installed),
+    )
 
     assert selection.selected_for_build == ()
 
@@ -392,7 +430,12 @@ def test_an_edited_validation_is_selected(repository, tmp_path):
         edited, {ITEM: LakehouseBinding(ItemRef("Sales_LH"), workspace_name="Demo")}
     )
 
-    selection = select_build(edited, installed.registered, selected=selectable)
+    selection = select_build(
+        edited,
+        installed.registered,
+        selected=selectable,
+        inventories=_inventory(installed),
+    )
 
     assert [
         str(identity)

@@ -452,6 +452,18 @@ def plan_item_build(
         stages.append(schemas)
     if shortcuts.stage is not None:
         stages.append(shortcuts.stage)
+    # Authored SQL may read a runtime table while a Warehouse table build
+    # executes it to discover and materialise its shape.
+    references = render_runtime_references(
+        repository,
+        item=item,
+        target=target,
+        inventory=inventory,
+        catalogue_target=catalogue_target,
+        runtime_sources=runtime_sources,
+    )
+    if references is not None:
+        stages.append(references)
     stages.extend(
         item_build_stages(
             repository,
@@ -473,18 +485,6 @@ def plan_item_build(
     stages.extend(
         item_load_removals(removed, item=item, target=target, registered=registered)
     )
-    # Behind the artefacts, in the phase they are installed in: the references
-    # exist for them, and nothing built reads a runtime table.
-    references = render_runtime_references(
-        repository,
-        item=item,
-        target=target,
-        inventory=inventory,
-        catalogue_target=catalogue_target,
-        runtime_sources=runtime_sources,
-    )
-    if references is not None:
-        stages.append(references)
     return PlannedItem(
         stages=tuple(stages),
         omitted=shortcuts.omitted,

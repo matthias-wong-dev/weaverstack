@@ -74,7 +74,9 @@ def test_prepared_items_contain_every_injected_runtime_relation(estate, item_tex
     assert {pair.destination.object_id.object for pair in references} == {
         table.name for table in PRESENTED_RUNTIME_TABLES
     }
-    assert all(pair.destination.object_id == pair.source.object_id for pair in references)
+    assert all(
+        pair.destination.object_id == pair.source.object_id for pair in references
+    )
 
 
 @weaver_test()
@@ -411,6 +413,20 @@ def test_the_action_carries_the_intent_the_plan_states(estate, tmp_path):
     carried = read_invalidation(bundle.store.read(bundle.location / action.payload))
 
     assert carried == bundle.plan.runtime_state
+
+
+@weaver_test()
+def test_runtime_references_precede_warehouse_documents_that_read_them(
+    estate, tmp_path
+):
+    """A table build may execute authored SQL that selects ``_.Bookmark``."""
+
+    bundle = _bundle(estate, tmp_path)
+    order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
+
+    reference = order.index(_references(bundle, "Warehouse")[0])
+    table = order.index("object-Warehouse--Reporting--Sales.Customer")
+    assert reference < table
 
 
 # --- scope ---------------------------------------------------------------------

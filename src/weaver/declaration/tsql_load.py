@@ -82,12 +82,21 @@ RESULT_PARAMETER_NAMES = {
     logical: f"weaver_{logical}" for logical, _type_name in RESULT_PARAMETERS
 }
 
-#: ``(logical name, physical parameter name, T-SQL type)`` for direct procedure
-#: dispatch through :mod:`weaver.sql.execution`.
+#: The physical names and T-SQL types passed to the generic SQL executor.
 PROCEDURE_RESULT_PARAMETERS = tuple(
-    (logical, RESULT_PARAMETER_NAMES[logical], type_name)
+    (RESULT_PARAMETER_NAMES[logical], type_name)
     for logical, type_name in RESULT_PARAMETERS
 )
+
+
+def logical_result_row(row) -> dict:
+    """Map a generated procedure's private output names to ``LoadResult`` names."""
+
+    return {
+        logical: row[RESULT_PARAMETER_NAMES[logical]]
+        for logical, _type_name in RESULT_PARAMETERS
+    }
+
 
 #: The suffixes of the intermediate tables, in the object's own schema.
 STAGING_SUFFIX = "_Staging"
@@ -1327,5 +1336,6 @@ __all__ = [
     "MERGE_CONFLICT_MESSAGE",
     "RANK_COLUMN",
     "TOLERATED_MESSAGE",
+    "logical_result_row",
     "generate_tsql_load_script",
 ]

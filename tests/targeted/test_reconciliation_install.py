@@ -347,6 +347,7 @@ def test_a_keyed_table_whose_shape_version_moves_is_selected_for_rebuild(tmp_pat
                 )
             },
             selected=selected,
+            physical_types={document_id("DWG.Customer"): "table"},
         )
 
     declared = declared_signatures(repository, selected)

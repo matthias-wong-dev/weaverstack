@@ -94,9 +94,8 @@ def test_the_estate_declares_both_physical_sides(repository):
 
     assert {"Lakehouse/Sales", "Warehouse/Reporting"} <= items
     assert [
-        (str(shortcut.destination), str(shortcut.source))
-        for shortcut in repository.logical_shortcuts
-        if shortcut.destination.object_id.schema != "_"
+        (str(shortcut.destination), shortcut.target)
+        for shortcut in repository.shortcuts
     ] == [("Warehouse/Reporting/Rpt.PortableCustomer", "Lakehouse/Sales/DWG.Customer")]
 
 

@@ -40,6 +40,7 @@ from weaver.declaration.model import WAREHOUSE, WeaverItemId
 from weaver.declaration.tsql_load import (
     PROCEDURE_RESULT_PARAMETERS,
     RESULT_PARAMETER_NAMES,
+    logical_result_row,
 )
 from weaver.runtime import LoadResult
 
@@ -234,10 +235,12 @@ def _literal(value) -> str:
 
 def _load(executor, name: str) -> LoadResult:
     return LoadResult.from_row(
-        executor.call_procedure(
-            f"[_].[Load {SCHEMA}.{name}]",
-            inputs=(("fault_tolerant", 0),),
-            outputs=PROCEDURE_RESULT_PARAMETERS,
+        logical_result_row(
+            executor.call_procedure(
+                f"[_].[Load {SCHEMA}.{name}]",
+                inputs=(("fault_tolerant", 0),),
+                outputs=PROCEDURE_RESULT_PARAMETERS,
+            )
         )
     )
 

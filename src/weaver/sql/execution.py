@@ -10,7 +10,6 @@ from .errors import SqlError, SqlExecutionError
 from .pool import SqlConnectionPool
 
 SqlRow = dict[str, Any]
-OutputParameter = tuple[str, str] | tuple[str, str, str]
 
 
 @dataclass(frozen=True)
@@ -48,7 +47,7 @@ class SqlExecutor(Protocol):
         procedure: str,
         *,
         inputs: Sequence[tuple[str, object]] = (),
-        outputs: Sequence[OutputParameter] = (),
+        outputs: Sequence[tuple[str, str]] = (),
     ) -> SqlRow: ...
 
     def call_procedure_with_results(
@@ -56,7 +55,7 @@ class SqlExecutor(Protocol):
         procedure: str,
         *,
         inputs: Sequence[tuple[str, object]] = (),
-        outputs: Sequence[OutputParameter] = (),
+        outputs: Sequence[tuple[str, str]] = (),
     ) -> ProcedureResult: ...
 
 
@@ -107,7 +106,7 @@ class PooledSqlExecutor:
         procedure: str,
         *,
         inputs: Sequence[tuple[str, object]] = (),
-        outputs: Sequence[OutputParameter] = (),
+        outputs: Sequence[tuple[str, str]] = (),
     ) -> SqlRow:
         """Call a procedure and read back the values it set on its outputs.
 
@@ -146,7 +145,7 @@ class PooledSqlExecutor:
         procedure: str,
         *,
         inputs: Sequence[tuple[str, object]] = (),
-        outputs: Sequence[OutputParameter] = (),
+        outputs: Sequence[tuple[str, str]] = (),
     ) -> "ProcedureResult":
         """Call a procedure and keep *both* its result sets and its outputs.
 
@@ -249,7 +248,7 @@ class PooledSqlExecutor:
 def _output_parameter_batch(
     procedure: str,
     inputs: Sequence[tuple[str, object]],
-    outputs: Sequence[OutputParameter],
+    outputs: Sequence[tuple[str, str]],
 ) -> str:
     """A batch that calls ``procedure`` and hands its outputs back as a row.
 
@@ -260,31 +259,15 @@ def _output_parameter_batch(
     a caller and are the one part of this text that is not Weaver's own.
     """
 
-    parameters = tuple(_output_parameter(value) for value in outputs)
     declares = "\n".join(
-        f"declare @weaver_out_{logical} {type_name};"
-        for logical, _physical, type_name in parameters
+        f"declare @weaver_out_{name} {type_name};" for name, type_name in outputs
     )
     arguments = [f"@{name} = ?" for name, _value in inputs] + [
-        f"@{physical} = @weaver_out_{logical} output"
-        for logical, physical, _type in parameters
+        f"@{name} = @weaver_out_{name} output" for name, _type in outputs
     ]
-    projection = ", ".join(
-        f"@weaver_out_{logical} as {logical}"
-        for logical, _physical, _type in parameters
-    )
+    projection = ", ".join(f"@weaver_out_{name} as {name}" for name, _type in outputs)
     call = f"exec {procedure}\n    " + "\n  , ".join(arguments) + ";"
     return f"{declares}\n\n{call}\n\nselect {projection};"
-
-
-def _output_parameter(value: OutputParameter) -> tuple[str, str, str]:
-    """Normalise a public name and an optional distinct physical parameter."""
-
-    if len(value) == 2:
-        logical, type_name = value
-        return logical, logical, type_name
-    logical, physical, type_name = value
-    return logical, physical, type_name
 
 
 def _rows(cursor) -> list[SqlRow]:

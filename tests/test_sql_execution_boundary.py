@@ -167,22 +167,22 @@ def test_call_procedure_declares_locals_and_passes_them_as_outputs():
 
 
 @weaver_test()
-def test_call_procedure_maps_private_parameters_back_to_public_result_names():
-    cursor = MultiSetCursor([([(True, 4)], ["succeeded", "rows_read"])])
+def test_call_procedure_returns_outputs_under_their_physical_parameter_names():
+    cursor = MultiSetCursor([([(True, 4)], ["weaver_succeeded", "weaver_rows_read"])])
     executor, _ = _executor([Connection(cursor)])
 
     row = executor.call_procedure(
         "[_].[Load Sales.Customer]",
         outputs=(
-            ("succeeded", "weaver_succeeded", "bit"),
-            ("rows_read", "weaver_rows_read", "bigint"),
+            ("weaver_succeeded", "bit"),
+            ("weaver_rows_read", "bigint"),
         ),
     )
 
     batch = cursor.calls[0][0]
-    assert "@weaver_succeeded = @weaver_out_succeeded output" in batch
-    assert "@weaver_rows_read = @weaver_out_rows_read output" in batch
-    assert row == {"succeeded": True, "rows_read": 4}
+    assert "@weaver_succeeded = @weaver_out_weaver_succeeded output" in batch
+    assert "@weaver_rows_read = @weaver_out_weaver_rows_read output" in batch
+    assert row == {"weaver_succeeded": True, "weaver_rows_read": 4}
 
 
 @weaver_test()

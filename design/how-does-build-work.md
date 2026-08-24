@@ -704,10 +704,12 @@ invalidate.
 A build also gives every target it installs something runnable into the
 catalogue's runtime tables under their own names: views in a Warehouse, OneLake
 shortcuts in a Lakehouse, rendered by the same code a declared shortcut is. One
-action per target carries every reference it is missing. In the load phase, with
-the artefacts they exist for — on the build that creates the catalogue the tables
-they point at arrive in the same bundle. They are in the prune keep-set, so they go
-when the item's last runnable object does.
+action per target carries every reference it is missing. The action follows the
+target's schema and authored-shortcut stages and precedes its document builds,
+because building a table can execute authored SQL that reads one of those local
+names. When the same bundle creates the catalogue tables, the injected dependency
+on the built-in item puts them in an earlier item layer. The references are in the
+prune keep-set, so they go when the item's last runnable object does.
 
 ## 12. Bundle execution order
 

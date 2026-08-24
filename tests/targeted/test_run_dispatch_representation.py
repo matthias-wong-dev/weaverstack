@@ -49,8 +49,18 @@ def _dispatch(fault_tolerant: bool, row):
     """One Warehouse node, dispatched through the Session that owns the connection."""
 
     from weaver.declaration.metadata import ObjectId
+    from weaver.declaration.tsql_load import (
+        PROCEDURE_RESULT_PARAMETERS,
+        RESULT_PARAMETERS,
+    )
 
-    sql = RecordingSql(row)
+    physical_row = {
+        physical_name: row[logical_name]
+        for (logical_name, _logical_type), (physical_name, _physical_type) in zip(
+            RESULT_PARAMETERS, PROCEDURE_RESULT_PARAMETERS, strict=True
+        )
+    }
+    sql = RecordingSql(physical_row)
     node = SimpleNamespace(
         node_id="Sales.Customer",
         primitive_kind=WAREHOUSE_PROCEDURE,

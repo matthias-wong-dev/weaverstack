@@ -117,17 +117,23 @@ def _raw_binding(target="Raw_Target"):
 
 
 def _raw_inventory(repository, target="Raw_Target", *, present=None):
+    from weaver.etl import FILE_TYPE, item_runtime_artefacts
+
     item = WeaverItemId.parse("Lakehouse/Raw")
     bound = _raw_binding(target).by_item[item].to_bound_target()
-    present = set(present) if present is not None else {
-        identity
-        for identity in repository.source_documents
-        if identity.item == item
-    }
+    present = (
+        set(present)
+        if present is not None
+        else {
+            identity
+            for identity in repository.source_documents
+            if identity.item == item
+        }
+    )
     documents = [
-        (identity, repository.source_documents[identity])
-        for identity in present
+        (identity, repository.source_documents[identity]) for identity in present
     ]
+    artefacts = item_runtime_artefacts(repository, item=item)
     return {
         item: TargetInventory(
             target_id=bound.id,
@@ -143,7 +149,19 @@ def _raw_inventory(repository, target="Raw_Target", *, present=None):
             folders=tuple(
                 source.qualified for identity, source in documents if identity.is_files
             ),
+            files=tuple(
+                artefact.target_path
+                for artefact in artefacts
+                if artefact.object_type == FILE_TYPE
+            ),
         )
+    }
+
+
+def _present_types(repository, identities):
+    return {
+        identity: str(repository.source_documents[identity].kind).casefold()
+        for identity in identities
     }
 
 
@@ -155,12 +173,19 @@ def test_impact_classifies_new_changed_and_unchanged_documents(tmp_path):
         for identity in repository.source_documents
         if str(identity.item) == "Lakehouse/Raw"
     }
-    empty = determine_impact(repository, Catalogue({}).registered, selected=raw)
+    empty = determine_impact(
+        repository, Catalogue({}).registered, selected=raw, physical_types={}
+    )
     assert set(empty.new) == raw
     assert empty.changed == empty.impacted == ()
 
     installed = _catalogue(repository, "Lakehouse/Raw", old=(("Sales", "Customer"),))
-    impact = determine_impact(repository, installed.registered, selected=raw)
+    impact = determine_impact(
+        repository,
+        installed.registered,
+        selected=raw,
+        physical_types=_present_types(repository, raw),
+    )
     assert [str(value) for value in impact.changed] == ["Lakehouse/Raw/Sales.Customer"]
     assert set(impact.to_mapping()) == {"new", "changed", "impacted_descendants"}
 
@@ -176,7 +201,12 @@ def test_changed_root_expands_through_same_item_descendants(tmp_path):
     catalogue = _catalogue(
         repository, "Lakehouse/Raw", old=(("Files/Sales", "Landing"),)
     )
-    impact = determine_impact(repository, catalogue.registered, selected=raw)
+    impact = determine_impact(
+        repository,
+        catalogue.registered,
+        selected=raw,
+        physical_types=_present_types(repository, raw),
+    )
     assert [str(value) for value in impact.changed] == [
         "Lakehouse/Raw/Files/Sales.Landing"
     ]
@@ -220,7 +250,10 @@ def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
     _stale(rows, "Lakehouse/Curated", "Customer")
     catalogue = Catalogue(rows)
     impact = determine_impact(
-        repository, catalogue.registered, selected=(curated, reporting)
+        repository,
+        catalogue.registered,
+        selected=(curated, reporting),
+        physical_types=_present_types(repository, (curated, reporting)),
     )
     assert impact.changed == (curated,)
     assert reporting in impact.impacted_descendants
@@ -242,7 +275,12 @@ def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
         rows.update(_catalogue(repository, item_text).rows)
     _stale(rows, "Lakehouse/Curated", "Customer")
     catalogue = Catalogue(rows)
-    impact = determine_impact(repository, catalogue.registered, selected=(curated,))
+    impact = determine_impact(
+        repository,
+        catalogue.registered,
+        selected=(curated,),
+        physical_types=_present_types(repository, (curated,)),
+    )
 
     assert impact.changed == (curated,)
     assert reporting not in impact.impacted
@@ -292,7 +330,12 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         if str(identity.item) == "Lakehouse/Raw"
     }
     catalogue = installed
-    selection = select_build(repository, catalogue.registered, selected=selected)
+    selection = select_build(
+        repository,
+        catalogue.registered,
+        selected=selected,
+        inventories=_raw_inventory(installed_repository),
+    )
     existing = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
     new = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Protected")
     assert selection.prohibited == (existing,)
@@ -365,10 +408,12 @@ def test_uncertified_physical_protected_object_is_changed_retained_and_recertifi
     root = _estate(tmp_path)
     path = root / relative
     path.write_text(
-        path.read_text().replace(
+        path.read_text()
+        .replace(
             "Primary key: Id",
             "Primary key: Id\nProhibit rebuild: true",
-        ).replace(
+        )
+        .replace(
             'File key: "*.csv"',
             'File key: "*.csv"\nProhibit rebuild: true',
         ),
@@ -714,6 +759,7 @@ def _consumer_only_selection(repository, rows):
         stale_shortcuts=stale_shortcut_destinations(
             repository, registered, bound_items={consumer}
         ),
+        inventories=_shortcut_inventories(repository),
     )
 
 

@@ -19,6 +19,7 @@ from factories import (
     ITEM,
     WAREHOUSE_ITEM,
     FixtureCatalogue,
+    FixtureInventory,
     folder_document,
     item_id,
     lakehouse_table,
@@ -348,7 +349,14 @@ def selected(repository, *, item: str = ITEM):
     catalogue = FixtureCatalogue.from_repository(repository, item=identity)
     wanted = {key for key in repository.source_documents if key.item == identity}
     wanted |= {a.identity for a in item_load_artefacts(repository, item=identity)}
-    return select_build(repository, catalogue.registered, selected=wanted)
+    return select_build(
+        repository,
+        catalogue.registered,
+        selected=wanted,
+        inventories={
+            identity: FixtureInventory.from_repository(repository, item=identity)
+        },
+    )
 
 
 @weaver_test()
@@ -377,7 +385,12 @@ def test_changing_one_module_rebuilds_that_module_alone(tmp_path):
 
     wanted = {key for key in after.source_documents if key.item == item_id()}
     wanted |= {a.identity for a in item_load_artefacts(after, item=item_id())}
-    selection = select_build(after, catalogue.registered, selected=wanted)
+    selection = select_build(
+        after,
+        catalogue.registered,
+        selected=wanted,
+        inventories={item_id(): FixtureInventory.from_repository(before)},
+    )
 
     assert [str(value) for value in selection.selected_for_build] == [
         f"{ITEM}/file:{LOAD_ROOT}/lib/text.py"
@@ -413,7 +426,10 @@ def test_a_changed_upstream_document_does_not_rebuild_an_unchanged_artefact(tmp_
     rebuilt = {
         str(value)
         for value in select_build(
-            after, catalogue.registered, selected=wanted
+            after,
+            catalogue.registered,
+            selected=wanted,
+            inventories={item_id(): FixtureInventory.from_repository(before)},
         ).selected_for_build
     }
 
