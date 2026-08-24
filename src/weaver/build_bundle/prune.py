@@ -196,9 +196,7 @@ class TargetInventory:
                 physical_schema = schema[len(prefix) :]
             return _holds(self.folders, f"{physical_schema}.{name}")
         if object_type == "schema":
-            return schema.casefold() == name.casefold() and _holds(
-                self.schemas, schema
-            )
+            return schema.casefold() == name.casefold() and _holds(self.schemas, schema)
         if (
             schema.casefold() == CATALOGUE_SCHEMA.casefold()
             and object_type == ("view" if self.kind == WAREHOUSE_TARGET else "table")
