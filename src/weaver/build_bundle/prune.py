@@ -15,7 +15,12 @@ from ..catalogue.tables import (
     is_protected,
 )
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
-from ..declaration.model import FILE_SHAPE, PROCEDURE_SHAPE, WeaverDocumentId
+from ..declaration.model import (
+    FILE_SHAPE,
+    PROCEDURE_SHAPE,
+    WeaverDocumentId,
+    WeaverSchemaId,
+)
 from ..declaration.source import SourceDocument
 from ..errors import BuildError
 from ..etl import LOAD_ROOT
@@ -190,6 +195,10 @@ class TargetInventory:
             if schema.casefold().startswith(prefix.casefold()):
                 physical_schema = schema[len(prefix) :]
             return _holds(self.folders, f"{physical_schema}.{name}")
+        if object_type == "schema":
+            return schema.casefold() == name.casefold() and _holds(
+                self.schemas, schema
+            )
         if (
             schema.casefold() == CATALOGUE_SCHEMA.casefold()
             and object_type == ("view" if self.kind == WAREHOUSE_TARGET else "table")
@@ -202,13 +211,17 @@ class TargetInventory:
             return _holds(self.views, f"{schema}.{name}")
         raise BuildError(f"target inventory cannot inspect object type {object_type!r}")
 
-    def physical_type(self, identity: WeaverDocumentId) -> str | None:
+    def physical_type(self, identity: WeaverDocumentId | WeaverSchemaId) -> str | None:
         """The kind physically installed under one repository identity.
 
-        Inventory answers destructive truth without consulting Registry. A normal
-        relation may currently be either a table or a view; shaped identities
-        name their one physical collection directly.
+        Inventory answers destructive truth without consulting Registry. A schema
+        shortcut names its namespace directly; a normal relation may currently be
+        either a table or a view; shaped identities name their one physical
+        collection directly.
         """
+
+        if isinstance(identity, WeaverSchemaId):
+            return "schema" if _holds(self.schemas, identity.schema) else None
 
         schema = identity.object_id.schema
         name = identity.object_id.object
