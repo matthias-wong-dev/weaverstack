@@ -144,29 +144,27 @@ def event_snapshot() -> dict[int, int]:
     }
 
 
-def was_skipped(outcome) -> bool:
-    """Whether a test body raised a skip rather than making its claim.
+def claim_completed(outcome) -> bool:
+    """Whether a test body ran to the end rather than raising.
 
-    A skipped test crossed nothing, so comparing its declaration with observed
-    telemetry would report every declared resource as unused and turn the skip
-    into a failure.
+    Only a completed claim has a resource set worth comparing. A body that
+    skipped crossed nothing, and one that failed stopped part way — comparing
+    either reports declared resources as unused, and the mismatch is then
+    reported instead of the failure the developer needs to read.
     """
 
-    from _pytest.outcomes import Skipped
-
-    excinfo = getattr(outcome, "excinfo", None)
-    return excinfo is not None and issubclass(excinfo[0], Skipped)
+    return getattr(outcome, "excinfo", None) is None
 
 
 __all__ = [
     "WeaverTestDeclaration",
     "begin_test",
+    "claim_completed",
     "end_test",
     "event_snapshot",
     "observed_resources",
     "register_session",
     "registered_sessions",
     "setup_events",
-    "was_skipped",
     "weaver_test",
 ]

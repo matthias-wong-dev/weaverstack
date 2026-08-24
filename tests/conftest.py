@@ -18,13 +18,13 @@ from pathlib import Path as _Path
 import pytest
 from support.weaver_test import (
     begin_test,
+    claim_completed,
     end_test,
     event_snapshot,
     observed_resources,
     register_session,
     registered_sessions,
     setup_events,
-    was_skipped,
 )
 
 # The narrow fixture constructors are shared by every layer — the core suite
@@ -112,9 +112,10 @@ def pytest_runtest_call(item):
     item._weaver_telemetry_events = tuple(events)
     if declaration is None:
         return
-    # A test that skipped made no claim, so it has no crossings to compare. The
-    # comparison would otherwise turn every skip into a failure.
-    if was_skipped(outcome):
+    # Only a completed claim has a resource set worth comparing. A skip crossed
+    # nothing and a failure stopped part way, and reporting the mismatch would
+    # replace the error the developer needs to read.
+    if not claim_completed(outcome):
         return
     observed = observed_resources(before)
     item._weaver_resource_match = observed == declaration.resources

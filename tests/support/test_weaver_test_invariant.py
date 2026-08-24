@@ -75,22 +75,23 @@ def test_every_declared_resource_generates_its_selection_marker():
 
 
 @weaver_test()
-def test_a_skipped_body_is_not_held_to_its_resource_declaration():
+def test_only_a_completed_claim_is_held_to_its_resource_declaration():
     """
-    Intent: A Fabric test that skips reports as skipped rather than as a failure.
+    Intent: A Fabric test reports why it skipped or failed, rather than
+    reporting a resource declaration mismatch instead.
 
-    Proof: a skip outcome is recognised, so the declaration comparison is not
-    made against a body that crossed nothing. An ordinary failure still is.
+    Proof: a body that raised is recognised, so the comparison is not made
+    against one that crossed nothing or stopped part way.
     """
 
     from _pytest.outcomes import Skipped
 
-    from .weaver_test import was_skipped
+    from .weaver_test import claim_completed
 
     class Outcome:
         def __init__(self, excinfo):
             self.excinfo = excinfo
 
-    assert was_skipped(Outcome((Skipped, Skipped("no estate"), None)))
-    assert not was_skipped(Outcome((AssertionError, AssertionError("x"), None)))
-    assert not was_skipped(Outcome(None))
+    assert claim_completed(Outcome(None))
+    assert not claim_completed(Outcome((Skipped, Skipped("no estate"), None)))
+    assert not claim_completed(Outcome((AssertionError, AssertionError("x"), None)))

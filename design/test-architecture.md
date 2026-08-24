@@ -98,7 +98,11 @@ declared resources == observed resources
 ```
 
 An undeclared crossing and an unused declaration both fail. Add a resource only
-when it is necessary to prove the test's claim. A mismatch is evidence to
+when it is necessary to prove the test's claim.
+
+Only a *completed* claim is compared. A body that skipped crossed nothing and one
+that failed stopped part way, so comparing either would report a mismatch instead
+of the reason the test did not run. A mismatch is evidence to
 investigate: the test may combine claims, a fixture may do unrelated work, or
 production may cross a boundary unnecessarily.
 

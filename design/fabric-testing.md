@@ -63,6 +63,9 @@ Production boundaries record these crossings explicitly on
 resource set to equal the declaration exactly. Unexpected use and unused
 declarations both fail.
 
+Only a completed claim is compared, so a skipped or failed test reports why
+rather than reporting a mismatch.
+
 Use ordinary Weaver behaviour in telemetry tests. A test that calls
 `Session.execute_spark_sql`, for example, proves the normal operation crossed
 Livy and retained its semantic attribution. Manually opening a telemetry event

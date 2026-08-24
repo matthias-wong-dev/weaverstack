@@ -29,7 +29,10 @@ from support.weaver_test import weaver_test
 import weaver
 from weaver.sessions.program import RemoteProgram
 
-RESOURCES = {"livy", "onelake", "rest", "tds"}
+#: A build stages its repository and reads target inventories over OneLake. A
+#: load and a test do neither: they submit programs and record centrally.
+BUILDING = {"livy", "onelake", "rest", "tds"}
+RUNNING = {"livy", "rest", "tds"}
 
 
 @pytest.fixture(scope="module")
@@ -144,6 +147,23 @@ def _warehouse_rows(journey, statement: str) -> list:
     return [dict(row) for row in executor.query(statement)]
 
 
+def _catalogue_rows(journey, statement: str) -> list:
+    """One query against the Weaver catalogue.
+
+    The catalogue's own tables live in the catalogue Warehouse. A built
+    Warehouse gets views over the runtime tables it needs and no others, so
+    Registry and Shortcut are asked of the catalogue itself.
+    """
+
+    from weaver.targets import ItemRef, WarehouseTarget
+
+    catalogue = journey.workspace.catalogue.split("/", 1)[1]
+    executor = journey.session.sql_executor(
+        WarehouseTarget(ItemRef(catalogue)), workspace=journey.workspace
+    )
+    return [dict(row) for row in executor.query(statement)]
+
+
 def _ids(observation, name: str, column: str) -> list:
     return sorted(row[column] for row in observation[name])
 
@@ -151,7 +171,7 @@ def _ids(observation, name: str, column: str) -> list:
 # --- Scenario A: establish the estate ----------------------------------------
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=BUILDING)
 def test_a_realistic_estate_builds_from_nothing(acceptance):
     """
     Intent: A realistic multi-item repository builds from nothing against real
@@ -232,7 +252,7 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
     # catalogue records every shortcut the build made, whichever area it is in.
     shortcuts = {
         (row["item"], row["id"], row["kind"])
-        for row in _warehouse_rows(
+        for row in _catalogue_rows(
             acceptance,
             "select [Item name] as item, [Shortcut ID] as id, "
             "[Shortcut type] as kind from [_].[Shortcut] "
@@ -269,7 +289,7 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
 # --- Scenario B: an unchanged build is a fixed point -------------------------
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=BUILDING)
 def test_an_unchanged_build_is_a_true_fixed_point(acceptance):
     """
     Intent: An unchanged healthy estate causes no physical or catalogue churn.
@@ -306,7 +326,7 @@ def test_an_unchanged_build_is_a_true_fixed_point(acceptance):
 # --- Scenario C: the first end-to-end load ----------------------------------
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=RUNNING)
 def test_seeded_foreign_data_flows_through_every_layer(acceptance):
     """
     Intent: Seeded foreign data flows through every layer and produces the exact
@@ -371,7 +391,7 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
 # --- Scenario D: an unchanged load moves only what should move ---------------
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=RUNNING)
 def test_an_unchanged_load_moves_only_the_appending_branch(acceptance):
     """
     Intent: Incremental state prevents unnecessary movement while a deliberately
@@ -418,7 +438,7 @@ def test_an_unchanged_load_moves_only_the_appending_branch(acceptance):
 # --- Scenario E: the foreign world moves ------------------------------------
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=RUNNING)
 def test_foreign_source_movement_propagates_through_the_whole_chain(acceptance):
     """
     Intent: Real source movement propagates through shortcuts and incremental
@@ -593,7 +613,7 @@ def _edit(journey, edits) -> None:
 def _registry_rows(journey) -> dict:
     """Every certified object, by item and name, with what certified it."""
 
-    rows = _warehouse_rows(
+    rows = _catalogue_rows(
         journey,
         "select [Item name] as item, [Schema name] as [schema], "
         "[Object name] as [object], [Signature] as signature, "
@@ -602,7 +622,7 @@ def _registry_rows(journey) -> dict:
     return {(row["item"], row["schema"], row["object"]): row for row in rows}
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=BUILDING)
 def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
     """
     Intent: Build changes exactly what the desired repository requires, and never
@@ -668,7 +688,7 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
     assert ("Curated", "CUR", "Product") in unchanged
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=BUILDING)
 def test_the_changed_estate_reaches_a_new_fixed_point(acceptance):
     """
     Intent: A changed estate settles, so a build immediately after a successful
@@ -699,7 +719,7 @@ def test_the_changed_estate_reaches_a_new_fixed_point(acceptance):
     assert churned == set(), sorted(churned)
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=RUNNING)
 def test_the_rebuilt_estate_still_loads_and_validates(acceptance):
     """
     Intent: Rebuilt objects reload correctly while unaffected objects keep useful
@@ -779,7 +799,7 @@ REPAIR_EDITS = (
 )
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=BUILDING)
 def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptance):
     """
     Intent: A failed build may leave partial physical state, and a corrected
@@ -864,7 +884,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
 # --- Scenario H: the ownership boundary -------------------------------------
 
 
-@weaver_test(integration=True, resources=RESOURCES)
+@weaver_test(integration=True, resources=BUILDING)
 def test_wipe_removes_the_managed_estate_and_not_the_foreign_one(acceptance):
     """
     Intent: Weaver removes the estate it owns without mutating the foreign source
