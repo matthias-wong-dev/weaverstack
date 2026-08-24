@@ -24,6 +24,7 @@ from support.weaver_test import (
     register_session,
     registered_sessions,
     setup_events,
+    was_skipped,
 )
 
 # The narrow fixture constructors are shared by every layer — the core suite
@@ -102,7 +103,7 @@ def pytest_runtest_call(item):
     declaration = getattr(item.obj, "__weaver_test_declaration__", None)
     before = event_snapshot()
     item._weaver_setup_telemetry_events = setup_events(before)
-    yield
+    outcome = yield
     events = [
         event
         for session in registered_sessions()
@@ -110,6 +111,10 @@ def pytest_runtest_call(item):
     ]
     item._weaver_telemetry_events = tuple(events)
     if declaration is None:
+        return
+    # A test that skipped made no claim, so it has no crossings to compare. The
+    # comparison would otherwise turn every skip into a failure.
+    if was_skipped(outcome):
         return
     observed = observed_resources(before)
     item._weaver_resource_match = observed == declaration.resources

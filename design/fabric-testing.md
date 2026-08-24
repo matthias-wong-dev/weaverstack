@@ -152,9 +152,16 @@ proving that no destructive operation reached it.
 |---|---|---|
 | `PYTEST_WORKSPACE_EXT` | Workspace | external estate, `WEAVER_FABRIC_WORKSPACE_EXT` |
 | `PYTEST_EXT_LH` | Lakehouse | external tables, schema and folder sentinels |
+| `PYTEST_EXT_WH` | Warehouse | external T-SQL tables, read through OneLake |
+
+Both hold two schemas, and the difference is load-bearing. `Reference` is never
+mutated, so tests assert on its exact rows and bytes. `Source` is what the
+acceptance journey mutates and restores, so a load can be shown to move data and
+to leave the rest alone. `tests/support/external_estate.py` defines both.
 
 Its contents are seeded by `tests/fabric/provision_estate.py`, which writes the
-Delta tables through Spark, so a fixture finds them rather than filling them in.
+Delta tables through Spark and the Warehouse tables over TDS, so a fixture finds
+them rather than filling them in.
 
 Lakehouses must be schema-enabled. The suite empties fixed targets between
 estate transitions instead of recreating them. Provision tests separately

@@ -181,6 +181,36 @@ Test modules use `test_<subject>_<claim>.py`. The claim suffix is one of:
 generated markers, the closed resource vocabulary, valid scope combinations,
 and removal of superseded machinery.
 
+## What a test owns
+
+A feature is not covered because its parts are tested. At least one test owns the
+whole intended behaviour, at the cheapest layer that can prove it.
+
+State that behaviour in the test's docstring, as `Intent:` and, where it helps,
+`Proof:`. Write it as a product outcome rather than a mechanism:
+
+```text
+Intent: A corrected build self-heals from physical work a failed build left.
+Intent: A Warehouse developer can load an installed object through _.Load.
+```
+
+rather than:
+
+```text
+Intent: generate_load_entry emits the expected SQL.
+Intent: the fixture crosses TDS.
+```
+
+A narrow test may protect a narrow contract. It still says why that contract
+matters.
+
+Two rules follow, and they are about where a new test goes:
+
+- When Fabric acceptance exposes a defect pure Python can model, strengthen the
+  pure regression rather than adding another Fabric test.
+- An isolated Fabric test names the Fabric-specific fact it establishes beyond
+  the acceptance journey and the standalone developer journeys.
+
 ## Adding a test
 
 1. Write the claim as one sentence and choose the cheapest scope that can prove

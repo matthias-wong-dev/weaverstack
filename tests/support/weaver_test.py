@@ -144,6 +144,20 @@ def event_snapshot() -> dict[int, int]:
     }
 
 
+def was_skipped(outcome) -> bool:
+    """Whether a test body raised a skip rather than making its claim.
+
+    A skipped test crossed nothing, so comparing its declaration with observed
+    telemetry would report every declared resource as unused and turn the skip
+    into a failure.
+    """
+
+    from _pytest.outcomes import Skipped
+
+    excinfo = getattr(outcome, "excinfo", None)
+    return excinfo is not None and issubclass(excinfo[0], Skipped)
+
+
 __all__ = [
     "WeaverTestDeclaration",
     "begin_test",
@@ -153,5 +167,6 @@ __all__ = [
     "register_session",
     "registered_sessions",
     "setup_events",
+    "was_skipped",
     "weaver_test",
 ]
