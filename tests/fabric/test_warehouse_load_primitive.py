@@ -57,7 +57,7 @@ from weaver.declaration import read_source_document
 from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import WAREHOUSE, WeaverItemId
 from weaver.declaration.tsql_entry import generate_load_entry
-from weaver.declaration.tsql_load import RESULT_PARAMETERS
+from weaver.declaration.tsql_load import PROCEDURE_RESULT_PARAMETERS
 from weaver.runtime import LoadResult
 from weaver.runtime.load_contract import (
     REASON_BLANK_PK,
@@ -259,7 +259,7 @@ def _load(estate: Estate, *, fault_tolerant: bool) -> LoadResult:
         estate.executor.call_procedure(
             f"[_].[Load {SCHEMA}.{estate.object_name}]",
             inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
-            outputs=RESULT_PARAMETERS,
+            outputs=PROCEDURE_RESULT_PARAMETERS,
         )
     )
 

@@ -380,7 +380,9 @@ from it loses its catalogue claims and its physical object is pruned. The build
 planner compares effective signatures with the reconciled Registry.
 Unchanged objects receive no physical action; selected changes use an explicit
 drop followed by a strict create. `Prohibit Rebuild` protects an existing
-physical object while allowing its incoming catalogue metadata to advance.
+physical object while allowing its incoming catalogue metadata to advance. Its
+protection comes from target inventory, so losing the object's Registry row does
+not authorize replacing it.
 
 From a desktop, parsing and request validation happen first; the build state is
 then read across — the catalogue and a Lakehouse's views as Spark SQL, its

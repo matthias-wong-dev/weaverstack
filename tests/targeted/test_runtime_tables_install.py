@@ -22,6 +22,7 @@ from factories import (
     item_id,
     lakehouse_table,
     schema_document,
+    single_document_repository,
     warehouse_table,
 )
 from support.catalogues import LOADED_AT
@@ -36,6 +37,7 @@ from weaver.catalogue.tables import (
     PRESENTED_RUNTIME_TABLES,
 )
 from weaver.declaration import parse_item_repository
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.etl import item_bookmarkable_objects
 from weaver.locations import Location
 from weaver.store import FilesystemStore
@@ -53,6 +55,52 @@ def estate(tmp_path):
 #: from: what a build says about bookmarks turns on whether the *table* is there,
 #: and a target's inventory answers that.
 EMPTY = Catalogue({})
+
+
+@pytest.mark.parametrize("item_text", [ITEM, WAREHOUSE_ITEM])
+@weaver_test()
+def test_prepared_items_contain_every_injected_runtime_relation(estate, item_text):
+    """Preparation gives resolution, planning and pruning one relation set."""
+
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+
+    item = WeaverItemId.parse(item_text)
+    references = tuple(
+        pair
+        for pair in estate.logical_shortcuts
+        if pair.destination.item == item and pair.source.item == BUILTIN_ITEM
+    )
+
+    assert {pair.destination.object_id.object for pair in references} == {
+        table.name for table in PRESENTED_RUNTIME_TABLES
+    }
+    assert all(pair.destination.object_id == pair.source.object_id for pair in references)
+
+
+@weaver_test()
+def test_inferred_bookmark_dependency_resolves_through_the_injected_relation(tmp_path):
+    repository = single_document_repository(
+        tmp_path / "repo",
+        item=WAREHOUSE_ITEM,
+        documents={
+            "DWG.BookmarkReader.sql": warehouse_table(
+                "DWG.BookmarkReader",
+                select="select [Object name] as CustomerId from _.Bookmark",
+            )
+        },
+    )
+    consumer = WeaverDocumentId.parse(f"{WAREHOUSE_ITEM}/DWG.BookmarkReader")
+    edge = next(
+        edge
+        for edge in repository.dependency_edges
+        if edge.consumer == consumer and edge.reference == "_.Bookmark"
+    )
+
+    assert edge.resolution_kind == "shortcut"
+    assert str(edge.producer) == "Warehouse/_weaver/_.Bookmark"
+    assert repository.dependency_graph.upstream_of(str(consumer)) == (
+        f"{WAREHOUSE_ITEM}/_.Bookmark",
+    )
 
 
 def _inventories_over(inventories, *, holding_runtime_tables: bool = True):

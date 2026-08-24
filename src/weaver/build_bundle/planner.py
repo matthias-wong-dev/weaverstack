@@ -146,7 +146,11 @@ def generate_item_build_bundle(
         if identity.item in by_item
     }
     selection = select_build(
-        repository, registered, selected=selected_ids, stale_shortcuts=stale_shortcuts
+        repository,
+        registered,
+        selected=selected_ids,
+        stale_shortcuts=stale_shortcuts,
+        inventories=inventories,
     )
     selected_for_drop = set(selection.selected_for_drop)
     selected_for_build = set(selection.selected_for_build)
@@ -430,7 +434,7 @@ def plan_item_build(
             selected_for_drop - selected_shortcuts,
             item=item,
             target=target,
-            registered=registered,
+            inventory=inventory,
         )
     )
     schemas = item_schema_stage(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from ..sql import ProcedureResult, SqlExecutor, SqlRow
+from ..sql import OutputParameter, ProcedureResult, SqlExecutor, SqlRow
 from .telemetry import SessionTelemetry
 
 
@@ -43,7 +43,7 @@ class SessionSqlExecutor:
         procedure: str,
         *,
         inputs: Sequence[tuple[str, object]] = (),
-        outputs: Sequence[tuple[str, str]] = (),
+        outputs: Sequence[OutputParameter] = (),
     ) -> SqlRow:
         with self._telemetry.external("tds", "call_procedure"):
             return self._executor.call_procedure(
@@ -55,7 +55,7 @@ class SessionSqlExecutor:
         procedure: str,
         *,
         inputs: Sequence[tuple[str, object]] = (),
-        outputs: Sequence[tuple[str, str]] = (),
+        outputs: Sequence[OutputParameter] = (),
     ) -> ProcedureResult:
         with self._telemetry.external("tds", "call_procedure_with_results"):
             return self._executor.call_procedure_with_results(

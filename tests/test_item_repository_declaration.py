@@ -482,12 +482,15 @@ def test_external_references_are_item_local_and_one_source_may_repeat(tmp_path):
             f"  {item}/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
         )
     repository = parse_item_repository(Location(str(root)))
-
-    assert len(repository.logical_shortcuts) == 2
-    assert (
-        repository.logical_shortcuts[0].source == repository.logical_shortcuts[1].source
+    authored = tuple(
+        shortcut
+        for shortcut in repository.logical_shortcuts
+        if shortcut.destination.object_id.schema != "_"
     )
-    assert {str(shortcut.destination) for shortcut in repository.logical_shortcuts} == {
+
+    assert len(authored) == 2
+    assert authored[0].source == authored[1].source
+    assert {str(shortcut.destination) for shortcut in authored} == {
         "Warehouse/Reporting/Sales.PortableCustomer",
         "Warehouse/Audit/Sales.PortableCustomer",
     }

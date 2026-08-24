@@ -967,7 +967,10 @@ def reconcile_catalogue_state(
                     document.object_type,
                 ):
                     stale[identity] = document
-        filtered = {}
+        # Reconciliation removes disproved declaration claims. Current runtime
+        # state is not a claim and must survive into build planning, where the
+        # selected physical lifecycle decides whether to invalidate it.
+        filtered = {name: tuple(rows) for name, rows in tables.items()}
         for table in PROJECTED_TABLES:
             rows = tables.get(table.name, ())
             rules = {

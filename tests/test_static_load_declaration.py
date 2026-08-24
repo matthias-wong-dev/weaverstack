@@ -306,8 +306,8 @@ def test_the_static_gate_reports_the_same_result_contract_as_a_real_load():
     gate = payload[: payload.index("Pre-processing")]
 
     for column in RESULT_COLUMNS:
-        assert f"set @{column} = " in gate
-    assert "set @succeeded = cast(1 as bit);" in gate
+        assert f"set @weaver_{column} = " in gate
+    assert "set @weaver_succeeded = cast(1 as bit);" in gate
 
 
 @weaver_test()
@@ -344,7 +344,7 @@ def test_a_static_skip_advances_no_bookmark():
     payload = _procedure(static=True)
     gate = payload[: payload.index("Pre-processing")]
 
-    assert "set @bookmark_datetime = null;" in gate
+    assert "set @weaver_bookmark_datetime = null;" in gate
 
 
 @weaver_test()

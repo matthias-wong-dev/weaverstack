@@ -21,8 +21,10 @@ A row in `_.Registry` means:
 
 > Weaver currently certifies that this object was built successfully.
 
-A physical table may exist with no Registry row. Weaver then does not treat it as
-valid.
+A physical table may exist with no Registry row. Weaver does not treat it as
+certified, but target inventory still proves that it exists and what kind it is.
+The next build classifies that desired object as changed and converges it before
+publishing a new certification.
 
 ## Installation scope is identity
 
@@ -492,6 +494,14 @@ than dynamic SQL. That is what lets the lower procedure's output parameters be
 read directly, makes a name the item does not install a refusal rather than a
 failure inside a string, and settles which kind a validation is at generation from
 the declaration.
+
+Generated load procedures own the `@weaver_*` variable namespace. Their physical
+outputs are `@weaver_succeeded`, `@weaver_rows_read`,
+`@weaver_bookmark_datetime`, and the corresponding names for the rest of the
+logical result. Direct dispatch and `_.Load` map those parameters back to the
+stable `succeeded`, `rows_read`, `bookmark_datetime`, and other `LoadResult`
+fields. Authored SQL can therefore declare natural variables such as
+`@bookmark_datetime` without colliding with the generated procedure signature.
 
 ### `_.Bookmark`
 

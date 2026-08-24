@@ -101,7 +101,7 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     signature.
     """
 
-    from ..declaration.tsql_load import RESULT_PARAMETERS
+    from ..declaration.tsql_load import PROCEDURE_RESULT_PARAMETERS
     from ..etl import load_procedure_name
     from ..runtime.load_result import LoadResult
     from ..targets import ItemRef, WarehouseTarget
@@ -111,7 +111,7 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     row = sql.call_procedure(
         load_procedure_name(node.logical_id.object_id),
         inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
-        outputs=RESULT_PARAMETERS,
+        outputs=PROCEDURE_RESULT_PARAMETERS,
     )
     return LoadResult.from_row(row)
 

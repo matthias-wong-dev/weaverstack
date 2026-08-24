@@ -16,16 +16,19 @@ from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE, given_resolver, given_workspace
 
 from weaver.build_bundle import (
+    Builder,
     ItemBinding,
     ItemBindings,
     WarehouseBinding,
     build_item_repository,
     effective_item_bindings,
 )
+from weaver.build_bundle.models import BUILD_TABLE, DROP_TABLE
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import PROJECTED_TABLES
 from weaver.declaration.model import WeaverItemId
+from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
@@ -172,6 +175,79 @@ def test_an_empty_catalogue_plans_every_catalogue_table_as_an_ordinary_action(es
         assert f"{BUILTIN}/{table.qualified}" in built, (
             f"{table.qualified} was not planned by the ordinary build"
         )
+
+
+@weaver_test()
+def test_empty_registry_recovers_existing_protected_catalogue_tables(estate, tmp_path):
+    """Inventory protects the physical catalogue even when Registry is empty."""
+
+    repository = estate["repository"]
+    bindings = effective_item_bindings(
+        item_bindings(("Lakehouse/Sales", "Sales_LH")),
+        control_item=ItemRef("Weaver"),
+        workspace_name=WORKSPACE,
+    )
+    bound = {entry.item: entry.to_bound_target() for entry in bindings.entries}
+    catalogue_tables = tuple(
+        sorted(
+            identity.object_id.qualified
+            for identity in repository.source_documents
+            if identity.item == BUILTIN
+        )
+    )
+    missing = catalogue_tables[-1]
+    inventories = {
+        item: target_inventory(
+            target_id=target.id,
+            kind=target.kind,
+            target_name=target.name,
+            tables=tuple(name for name in catalogue_tables if name != missing)
+            if item == BUILTIN
+            else (),
+            schemas=("_",) if item == BUILTIN else (),
+        )
+        for item, target in bound.items()
+    }
+    bundle = Builder(
+        repository=repository,
+        state=BuildState(
+            catalogue=Catalogue(rows={}), target_inventories=inventories
+        ),
+        bindings=bindings,
+        catalogue_binding=WarehouseBinding(
+            warehouse=ItemRef("Weaver"), workspace_name=WORKSPACE
+        ),
+        source_store=estate["store"],
+    ).build(output=Location(str(tmp_path / "recovery-bundle")))
+
+    physical = [
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.resource_node_id
+        and action.resource_node_id.startswith(f"{BUILTIN}/")
+        and action.kind in {DROP_TABLE, BUILD_TABLE}
+    ]
+    assert [action.resource_node_id for action in physical] == [f"{BUILTIN}/{missing}"]
+    retained = {
+        identity
+        for identity in bundle.plan.selection.prohibited
+        if identity.item == BUILTIN
+    }
+    assert {identity.object_id.qualified for identity in retained} == set(
+        catalogue_tables
+    ) - {missing}
+
+    registry = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_registry"
+    )
+    payload = estate["store"].read(
+        bundle.location.join(*registry.payload.split("/"))
+    ).decode()
+    assert all(
+        f"N'_', N'{name.split('.', 1)[1]}'" in payload for name in catalogue_tables
+    )
 
 
 @weaver_test()

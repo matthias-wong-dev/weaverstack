@@ -37,7 +37,10 @@ from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE, WeaverItemId
-from weaver.declaration.tsql_load import RESULT_PARAMETERS
+from weaver.declaration.tsql_load import (
+    PROCEDURE_RESULT_PARAMETERS,
+    RESULT_PARAMETER_NAMES,
+)
 from weaver.runtime import LoadResult
 
 SCHEMA = "DWG"
@@ -103,6 +106,9 @@ Lineage: The sales system.
 
 Primary key: Customer id
 */
+declare @bookmark_datetime datetime2(6);
+declare @rows_read bigint;
+
 exec sp_executesql N'select 4000 as [rows_read], ''not the load result'' as [why]';
 
 select c.[Customer id], c.[Customer name]
@@ -231,7 +237,7 @@ def _load(executor, name: str) -> LoadResult:
         executor.call_procedure(
             f"[_].[Load {SCHEMA}.{name}]",
             inputs=(("fault_tolerant", 0),),
-            outputs=RESULT_PARAMETERS,
+            outputs=PROCEDURE_RESULT_PARAMETERS,
         )
     )
 
@@ -370,7 +376,9 @@ def test_noisy_setup_keeps_the_load_result_in_optional_outputs(warehouse):
     assert result.succeeded is True, result.error_message
     assert (result.rows_read, result.rows_inserted) == (2, 2)
     assert noisy_program.contents == [("c1", "One"), ("c2", "Two")]
-    assert noisy_program.outputs == {f"@{name}" for name, _type in RESULT_PARAMETERS}
+    assert noisy_program.outputs == {
+        f"@{physical}" for physical in RESULT_PARAMETER_NAMES.values()
+    }
 
 
 # --- two result queries --------------------------------------------------------

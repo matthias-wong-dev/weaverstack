@@ -97,6 +97,26 @@ def test_a_warehouse_table_generates_a_stored_procedure():
 
 
 @weaver_test()
+def test_authored_natural_result_variables_do_not_collide_with_procedure_outputs():
+    source = WAREHOUSE_TABLE.replace(
+        "select [Customer id]",
+        "declare @bookmark_datetime datetime2(6);\n"
+        "declare @rows_read bigint;\n\n"
+        "select [Customer id]",
+    )
+    payload = (
+        _warehouse(source)
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
+
+    assert "declare @bookmark_datetime datetime2(6);" in payload
+    assert "declare @rows_read bigint;" in payload
+    assert "@weaver_bookmark_datetime datetime2(6) = null output" in payload
+    assert "@weaver_rows_read bigint = null output" in payload
+
+
+@weaver_test()
 def test_warehouse_row_lifecycle_datetimes_use_the_utc_clock():
     procedure = (
         _warehouse()
@@ -142,7 +162,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (12, "1cf3208704c5360cb74b54cf8ee522c53eeeaa029a8a9728a4d8d6d70e9b1582"),
+    "tsql": (13, "a0e41349c6c79761a511eb218c084e5ca0f3ac26f2592fe8da8adee5a583bc2a"),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 
@@ -275,9 +295,9 @@ def test_the_procedure_returns_the_result_contract_through_its_signature():
     )
 
     for column in RESULT_COLUMNS:
-        assert f"@{column} " in payload
+        assert f"@weaver_{column} " in payload
         assert "= null output" in payload
-        assert f"set @{column} = " in payload
+        assert f"set @weaver_{column} = " in payload
     assert "as succeeded" not in payload
 
 
@@ -292,7 +312,7 @@ def test_the_outputs_are_optional_so_the_procedure_stays_runnable_by_hand():
     )
 
     for column in RESULT_COLUMNS:
-        assert f"@{column} " in payload
+        assert f"@weaver_{column} " in payload
     assert payload.count("= null output") == len(RESULT_COLUMNS)
 
 

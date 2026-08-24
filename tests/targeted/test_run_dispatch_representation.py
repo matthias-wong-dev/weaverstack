@@ -83,14 +83,14 @@ ROW = {
 def test_a_warehouse_load_asks_for_its_result_by_name():
     """Never by reading a result set, which authored setup may also produce."""
 
-    from weaver.declaration.tsql_load import RESULT_PARAMETERS
+    from weaver.declaration.tsql_load import PROCEDURE_RESULT_PARAMETERS
 
     result, sql = _dispatch(False, ROW)
 
     procedure, inputs, outputs = sql.calls[0]
     assert procedure == "[_].[Load Sales.Customer]"
     assert inputs == (("fault_tolerant", 0),)
-    assert outputs == RESULT_PARAMETERS
+    assert outputs == PROCEDURE_RESULT_PARAMETERS
     assert result == LoadResult(
         succeeded=True,
         rows_read=4,

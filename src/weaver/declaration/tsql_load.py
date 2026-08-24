@@ -75,6 +75,20 @@ RESULT_PARAMETERS = (
     ("is_static_skip", "bit"),
 )
 
+#: The generated procedure's private parameter namespace, mapped back to the
+#: stable logical result contract above. Callers project the logical names, so
+#: this physical ABI never leaks into :class:`LoadResult`.
+RESULT_PARAMETER_NAMES = {
+    logical: f"weaver_{logical}" for logical, _type_name in RESULT_PARAMETERS
+}
+
+#: ``(logical name, physical parameter name, T-SQL type)`` for direct procedure
+#: dispatch through :mod:`weaver.sql.execution`.
+PROCEDURE_RESULT_PARAMETERS = tuple(
+    (logical, RESULT_PARAMETER_NAMES[logical], type_name)
+    for logical, type_name in RESULT_PARAMETERS
+)
+
 #: The suffixes of the intermediate tables, in the object's own schema.
 STAGING_SUFFIX = "_Staging"
 UPSERT_SUFFIX = "_Upsert"
@@ -214,7 +228,7 @@ def _result_parameters() -> str:
     """
 
     return "\n".join(
-        f"  , @{name} {type_name} = null output"
+        f"  , @{RESULT_PARAMETER_NAMES[name]} {type_name} = null output"
         for name, type_name in RESULT_PARAMETERS
     )
 
@@ -247,7 +261,8 @@ def _result_assignment(**values: str) -> str:
     }
     defaults.update(values)
     return "\n".join(
-        f"set @{name} = {defaults[name]};" for name, _ in RESULT_PARAMETERS
+        f"set @{RESULT_PARAMETER_NAMES[name]} = {defaults[name]};"
+        for name, _ in RESULT_PARAMETERS
     )
 
 

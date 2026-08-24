@@ -201,26 +201,20 @@ def test_an_object_being_rebuilt_is_dropped_before_it_is_built(customer):
 
 
 @weaver_test()
-def test_a_drop_needs_the_registry_to_say_what_type_the_object_is(customer):
-    """Weaver drops what it certified, by the type it certified — not by guessing.
-
-    A registered type that is not a folder, table or view is a corrupt claim, and
-    dropping on a guess would issue the wrong statement against a real object.
-    """
-
-    from weaver.errors import BuildError
+def test_a_drop_uses_inventory_kind_even_when_registry_disagrees(customer):
+    """Destruction follows physical reality, never the remembered type."""
 
     identity = document_id("DWG.Customer")
+    planned = plan(
+        customer,
+        inventory=target_inventory(schemas=("DWG",), views=("DWG.Customer",)),
+        selected_documents={identity},
+        selected_for_drop={identity},
+        registered={identity: registered_document(identity, object_type="table")},
+    )
 
-    with pytest.raises(BuildError, match="unsupported type"):
-        plan(
-            customer,
-            selected_documents={identity},
-            selected_for_drop={identity},
-            registered={
-                identity: registered_document(identity, object_type="procedure")
-            },
-        )
+    assert "drop_view" in kinds(planned)
+    assert "drop_table" not in kinds(planned)
 
 
 @weaver_test()

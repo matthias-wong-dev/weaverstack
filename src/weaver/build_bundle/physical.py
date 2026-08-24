@@ -55,7 +55,6 @@ from .models import (
 )
 from .payloads import sha256_hex
 from .prune import managed_sets, render_inventory_prune
-from .runtime_tables import runtime_reference_views
 from .stages import BUILD, DROP, LOAD, PRUNE, SCHEMA, PlannedStage
 from .targets import WAREHOUSE_TARGET
 
@@ -63,7 +62,7 @@ _OBJECT_KIND = {TABLE: BUILD_TABLE, VIEW: BUILD_VIEW}
 _DROP_KIND = {FOLDER: DROP_FOLDER, TABLE: DROP_TABLE, VIEW: DROP_VIEW}
 _DECLARATION_KIND = {"folder": FOLDER, "table": TABLE, "view": VIEW}
 
-#: A Weaver document kind, and a Registry object type, as the change vocabulary
+#: A Weaver document kind, and an inventory object type, as the change vocabulary
 #: spells them. Two mappings rather than one because the two inputs are
 #: different: a build knows what it declares, a drop knows what is installed.
 _CHANGE_KIND_FOR_KIND = {FOLDER: FOLDER_KIND, TABLE: TABLE_KIND, VIEW: VIEW_KIND}
@@ -127,19 +126,20 @@ def item_prune_stage(
         # Every declared destination, bound or direct, and whether or not this
         # build selected it: a build must not prune the shortcut it is about to
         # create, nor the one it just decided to keep.
-        shortcut_destinations=[
+        shortcut_destinations={
             declaration.destination
             for declaration in repository.shortcuts
             if declaration.destination.item == item
-        ],
+        }
+        | {
+            reference.destination
+            for reference in repository.logical_shortcuts
+            if reference.destination.item == item
+        },
         load_identities=[
             artefact.identity
             for artefact in item_runtime_artefacts(repository, item=item)
         ],
-        # The local `_.Bookmark` a built Warehouse presents. Derived from the
-        # item's loadable objects as the `_` schema is, so the reference goes
-        # when the last of them does.
-        extra_views=runtime_reference_views(repository, item=item, target=target),
     )
 
     payloads: dict[str, bytes] = {}
@@ -204,7 +204,7 @@ def item_drop_stages(
     *,
     item: WeaverItemId,
     target,
-    registered,
+    inventory,
 ) -> tuple[PlannedStage, ...]:
     """One item's managed drops, dependants before dependencies."""
 
@@ -220,7 +220,11 @@ def item_drop_stages(
         actions = []
         for node in sorted(layer):
             identity = identities[node]
-            installed = registered[identity].object_type
+            installed = inventory.physical_type(identity)
+            if installed is None:
+                raise BuildError(
+                    f"selected managed drop {identity} is absent from target inventory"
+                )
             actions.append(_drop_action(identity, installed, target, payloads))
             changes.append(
                 change_removed(

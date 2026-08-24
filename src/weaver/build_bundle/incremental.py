@@ -246,6 +246,7 @@ def determine_impact(
     *,
     selected: Iterable[WeaverDocumentId],
     stale_shortcuts: Iterable[WeaverDocumentId] = (),
+    physical_types: Mapping[WeaverDocumentId, str] | None = None,
 ) -> Impact:
     """Classify bound nodes and expand changed roots across the whole graph.
 
@@ -261,6 +262,7 @@ def determine_impact(
     """
 
     selected_set = set(selected)
+    physical_types = dict(physical_types or {})
     installed = {
         identity: document.signature
         for identity, document in registered.items()
@@ -283,13 +285,13 @@ def determine_impact(
         else:
             signature = installed.get(identity)
             wanted = declared[identity]
-        if signature is None:
+        if signature is None and identity not in physical_types:
             new.add(identity)
         elif signature != wanted:
             changed.add(identity)
     changed |= {identity for identity in stale_shortcuts if identity in installed}
 
-    existing = set(installed)
+    existing = set(installed) | set(physical_types)
     impacted = set(changed)
     graph = repository.dependency_graph
     if graph is not None:
@@ -324,9 +326,18 @@ def select_build(
     *,
     selected: Iterable[WeaverDocumentId],
     stale_shortcuts: Iterable[WeaverDocumentId] = (),
+    inventories: Mapping[WeaverItemId, object] | None = None,
 ) -> BuildSelection:
+    selected = set(selected)
+    physical_types = _physical_types(
+        repository, selected=selected, inventories=inventories or {}
+    )
     impact = determine_impact(
-        repository, registered, selected=selected, stale_shortcuts=stale_shortcuts
+        repository,
+        registered,
+        selected=selected,
+        stale_shortcuts=stale_shortcuts,
+        physical_types=physical_types,
     )
     # A shortcut destination has no source document and therefore no
     # ``prohibit_rebuild``: nothing an author writes can forbid replacing a
@@ -344,3 +355,20 @@ def select_build(
         selected_for_drop=_ordered(selected_for_drop),
         selected_for_build=_ordered(set(impact.new) | selected_for_drop),
     )
+
+
+def _physical_types(repository, *, selected, inventories) -> dict:
+    """The selected identities physically present in prepared target state."""
+
+    standing_for = _artefacts_standing_for_their_origin(repository, selected)
+    present = {}
+    for identity in selected:
+        inventory = inventories.get(identity.item)
+        if inventory is None:
+            continue
+        artefact = standing_for.get(identity)
+        physical_identity = artefact.identity if artefact is not None else identity
+        object_type = inventory.physical_type(physical_identity)
+        if object_type is not None:
+            present[identity] = object_type
+    return present

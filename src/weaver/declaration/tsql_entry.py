@@ -42,6 +42,7 @@ from ..catalogue.tables import (
 from ..catalogue.tsql import identifier
 from ..errors import DiscoveryError
 from .metadata import ASSUMPTION, AUDIT_LIVE_DELETE_DATETIME, TEST, ObjectId
+from .tsql_load import RESULT_PARAMETER_NAMES, RESULT_PARAMETERS
 
 #: Signature salt for the generated entry points. Raise it when this generator
 #: changes — though the payload is signed by its own bytes as well, because the
@@ -183,15 +184,10 @@ def _load_declarations() -> str:
     return _declarations(
         *_common_declarations(),
         "declare @weaver_statistic_sk varchar(128) = cast(newid() as varchar(36));",
-        "declare @succeeded bit = null;",
-        "declare @rows_read bigint = null;",
-        "declare @rows_inserted bigint = null;",
-        "declare @rows_updated bigint = null;",
-        "declare @rows_deleted bigint = null;",
-        "declare @rows_rejected bigint = null;",
-        "declare @error_message varchar(4000) = null;",
-        "declare @bookmark_datetime datetime2(6) = null;",
-        "declare @is_static_skip bit = null;",
+        *(
+            f"declare @{logical} {type_name} = null;"
+            for logical, type_name in RESULT_PARAMETERS
+        ),
     )
 
 
@@ -223,18 +219,21 @@ def _load_dispatch(objects: Sequence[ObjectId]) -> str:
                 + f"exec {_load_procedure(object_id)}\n"
                 "      @fault_tolerant = @fault_tolerant\n"
                 "    , @ignore_stability_threshold = @ignore_stability_threshold\n"
-                "    , @succeeded = @succeeded output\n"
-                "    , @rows_read = @rows_read output\n"
-                "    , @rows_inserted = @rows_inserted output\n"
-                "    , @rows_updated = @rows_updated output\n"
-                "    , @rows_deleted = @rows_deleted output\n"
-                "    , @rows_rejected = @rows_rejected output\n"
-                "    , @error_message = @error_message output\n"
-                "    , @bookmark_datetime = @bookmark_datetime output\n"
-                "    , @is_static_skip = @is_static_skip output;",
+                + _load_output_arguments(),
             )
         )
     return "\n".join(branches) + "\n" + _unknown("loadable object")
+
+
+def _load_output_arguments() -> str:
+    """Map the lower procedure's private outputs into natural wrapper locals."""
+
+    lines = [
+        f"    , @{RESULT_PARAMETER_NAMES[logical]} = @{logical} output"
+        for logical, _type_name in RESULT_PARAMETERS
+    ]
+    lines[-1] += ";"
+    return "\n".join(lines)
 
 
 def _test_dispatch(validations: Mapping[ObjectId, str]) -> str:
