@@ -31,7 +31,8 @@ def test_check_parses_a_valid_repository_without_running_authored_python(tmp_pat
 
     result = check(root)
 
-    assert result.source == str(root)
+    # A Location normalises to "/" on every platform, so compare in that form.
+    assert result.source == root.as_posix()
 
 
 @weaver_test()
