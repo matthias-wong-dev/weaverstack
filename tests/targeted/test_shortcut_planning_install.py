@@ -617,3 +617,50 @@ def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_p
 
     assert resolved == []
     assert state.shortcut_sources == {}
+
+
+@weaver_test()
+def test_a_changed_schema_shortcut_does_not_walk_the_graph(tmp_path):
+    """
+    Intent: A build over an estate holding a schema shortcut selects work rather
+    than failing.
+
+    Proof: a schema shortcut establishes a namespace, so it is not a node in the
+    authored graph. Classified as changed, it ends the impact walk instead of
+    being looked up and refused.
+    """
+
+    from factories import _write, physical_schema_shortcut, schema_document
+
+    from weaver.build_bundle.incremental import determine_impact
+    from weaver.declaration.repository import parse_item_repository
+    from weaver.locations import Location
+
+    root = tmp_path / "repo"
+    item = "Lakehouse/Landing"
+    _write(root, f"{item}/schemas/LAND.yml", schema_document("LAND"))
+    _write(
+        root,
+        *physical_schema_shortcut(
+            item, target="Lakehouse/Foreign/Reference", workspace="Upstream"
+        ),
+    )
+    repository = parse_item_repository(Location(str(root)))
+    destination = repository.shortcuts[0].destination
+
+    impact = determine_impact(
+        repository,
+        {destination: _Registered("a signature from an earlier build")},
+        selected={destination},
+        physical_types={destination: "schema"},
+    )
+
+    assert [str(one) for one in impact.changed] == [f"{item}/Reference"]
+    assert impact.impacted_descendants == ()
+
+
+class _Registered:
+    """One Registry row, as classification reads one."""
+
+    def __init__(self, signature: str) -> None:
+        self.signature = signature

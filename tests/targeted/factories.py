@@ -763,6 +763,26 @@ def logical_shortcuts(consumer: str, **references: str) -> tuple[str, str]:
     )
 
 
+def physical_schema_shortcut(owner: str, *, target: str, workspace: str) -> tuple:
+    """Where a Lakehouse declares a physical schema shortcut, and what it says.
+
+    A schema shortcut must be physical: what appears inside belongs to the item
+    it points at, so Weaver binds objects rather than namespaces.
+    """
+
+    schema = target.rsplit("/", 1)[-1]
+    return (
+        f"{owner}/shortcuts.py",
+        "from weaver import Shortcut\n\n"
+        f"{schema} = Shortcut(\n"
+        '    shortcut_type="schema",\n'
+        '    target_type="physical",\n'
+        f'    target="{target}",\n'
+        f'    workspace="{workspace}",\n'
+        ")\n",
+    )
+
+
 def shortcut_repository(
     root: Path,
     *,

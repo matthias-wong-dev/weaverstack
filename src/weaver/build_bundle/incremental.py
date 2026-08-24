@@ -301,6 +301,15 @@ def determine_impact(
     if graph is not None:
         by_text = {str(identity): identity for identity in selected_set}
         runtime = runtime_artefact_identities(repository)
+        # A schema shortcut establishes a namespace rather than an object, so it
+        # is no more a node than a runtime artefact is: what appears inside
+        # belongs to the item it points at, and nothing in the repository can
+        # name it as a dependency.
+        namespaces = {
+            shortcut.destination
+            for shortcut in repository.shortcuts
+            if shortcut.is_schema
+        }
         for root in changed:
             # A runtime artefact is not a node in the authored graph: nothing
             # depends on a deployed module and it depends on nothing, its
@@ -310,7 +319,7 @@ def determine_impact(
             # Membership is asked of the repository rather than read from the
             # identity's shape, which stopped answering when a Test began
             # compiling to a module and a procedure of its own.
-            if root in runtime:
+            if root in runtime or root in namespaces:
                 continue
             for node in graph.descendants(str(root)):
                 descendant = by_text.get(node)
