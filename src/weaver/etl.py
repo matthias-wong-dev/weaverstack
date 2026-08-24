@@ -87,6 +87,9 @@ PROCEDURE_TYPE = "stored_procedure"
 ROLE_LOAD = "load"
 ROLE_TEST = "test"
 ROLE_ASSUMPTION = "assumption"
+#: A generic entry point a person calls, wrapping one object's own procedure and
+#: recording what it did. Its own role because nothing schedules one.
+ROLE_ENTRY = "entry"
 
 #: Which role a validation kind's artefact carries.
 VALIDATION_ROLE = {"Test": ROLE_TEST, "Assumption": ROLE_ASSUMPTION}
@@ -205,6 +208,44 @@ def item_bookmarkable_objects(
         if source is not None and source.kind in bookmarkable:
             found.add(origin)
     return tuple(sorted(found, key=str))
+
+
+def item_validated_objects(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    """The validations in one item, and therefore what carries a test status.
+
+    Derived from the validation artefacts the item installs, as
+    :func:`item_bookmarkable_objects` is derived from its load artefacts, so what
+    carries a status cannot drift from what has something to run.
+
+    The identity is the validation's own ``Schema.Object``, not its compiled
+    artefact's: a test status describes the Test, and the module or procedure it
+    compiles to is how the Test is run.
+    """
+
+    found = {
+        artefact.origin
+        for artefact in item_validation_artefacts(repository, item=item)
+        if artefact.origin is not None
+    }
+    return tuple(sorted(found, key=str))
+
+
+def item_presents_runtime_tables(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> bool:
+    """Whether this item has anything whose operational state Weaver records.
+
+    A loadable object or a validation. An item with neither installs nothing that
+    reads or writes a runtime table, so a build gives it none of them — and the
+    item graph puts no edge from the built-in item to it.
+    """
+
+    return bool(
+        item_bookmarkable_objects(repository, item=item)
+        or item_validated_objects(repository, item=item)
+    )
 
 
 def item_runtime_artefacts(
@@ -330,7 +371,24 @@ def item_load_artefacts(
 def _warehouse_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[RuntimeArtefact, ...]:
-    """One generated load procedure per Warehouse table."""
+    """One generated load procedure per Warehouse table, and the entry points.
+
+    ``_.Load`` and ``_.Test`` are installed beside them: the object procedures
+    are execution primitives that record nothing, and the entry points are what a
+    person calls to run one and have the outcome recorded. Registered like any
+    other artefact, so they are signed, selected incrementally and pruned when
+    the item's last load or validation goes.
+    """
+
+    return _load_procedures(repository, item=item) + _entry_artefacts(
+        repository, item=item
+    )
+
+
+def _load_procedures(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[RuntimeArtefact, ...]:
+    """One generated load procedure per Warehouse table Weaver loads."""
 
     from .declaration.load import has_generated_load
 
@@ -356,6 +414,73 @@ def _warehouse_artefacts(
             )
         )
     return tuple(artefacts)
+
+
+def _entry_artefacts(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[RuntimeArtefact, ...]:
+    """``_.Load`` and ``_.Test``, where the item installs something they wrap.
+
+    Signed by their own bytes rather than by a source signature and a template
+    version, because the dispatch chain is derived from the whole set of objects
+    the item installs: adding one object changes the entry point, and nothing
+    else would say so.
+    """
+
+    from .declaration.tsql_entry import (
+        LOAD_ENTRY,
+        TEST_ENTRY,
+        generate_load_entry,
+        generate_test_entry,
+    )
+
+    found = []
+    loadable = [
+        artefact.origin.object_id
+        for artefact in _load_procedures(repository, item=item)
+        if artefact.origin is not None
+    ]
+    if loadable:
+        found.append(
+            _entry_artefact(item, LOAD_ENTRY, generate_load_entry(item, loadable))
+        )
+    validations = {
+        artefact.origin.object_id: repository.source_documents[
+            artefact.origin
+        ].document.kind
+        for artefact in item_validation_artefacts(repository, item=item)
+        if artefact.origin is not None
+    }
+    if validations:
+        found.append(
+            _entry_artefact(item, TEST_ENTRY, generate_test_entry(item, validations))
+        )
+    return tuple(found)
+
+
+def _entry_artefact(item: WeaverItemId, name: str, script: str) -> RuntimeArtefact:
+    payload = script.encode("utf-8")
+    return RuntimeArtefact(
+        identity=entry_procedure_id(item, name),
+        object_type=PROCEDURE_TYPE,
+        signature=content_hash(payload),
+        payload=payload,
+        role=ROLE_ENTRY,
+    )
+
+
+def entry_procedure_id(item: WeaverItemId, name: str) -> WeaverDocumentId:
+    """The identity of one of an item's generic entry points."""
+
+    return WeaverDocumentId(
+        item, ObjectId(schema=ETL_SCHEMA, object=name), shape=PROCEDURE_SHAPE
+    )
+
+
+def entry_procedure_name(name: str) -> str:
+    """How an entry point spells its own name in T-SQL."""
+
+    return f"{_tsql_ident(ETL_SCHEMA)}.{_tsql_ident(name)}"
 
 
 def _lakehouse_artefacts(
@@ -787,9 +912,11 @@ __all__ = [
     "PROCEDURE_TYPE",
     "item_bookmarkable_objects",
     "item_load_artefacts",
+    "item_presents_runtime_tables",
     "load_artefacts",
     "artefacts_by_identity",
     "item_runtime_artefacts",
+    "item_validated_objects",
     "item_validation_artefacts",
     "runtime_artefacts",
     "validation_artefacts",
@@ -800,4 +927,6 @@ __all__ = [
     "load_schemas",
     "load_procedure_id",
     "load_procedure_name",
+    "entry_procedure_id",
+    "entry_procedure_name",
 ]

@@ -75,6 +75,7 @@ ROW = {
     "rows_rejected": 0,
     "error_message": None,
     "bookmark_datetime": BEGAN,
+    "is_static_skip": False,
 }
 
 
@@ -88,7 +89,7 @@ def test_a_warehouse_load_asks_for_its_result_by_name():
 
     procedure, inputs, outputs = sql.calls[0]
     assert procedure == "[_].[Load Sales.Customer]"
-    assert inputs == (("fault_tolerant", 0), ("update_catalogue", 0))
+    assert inputs == (("fault_tolerant", 0),)
     assert outputs == RESULT_PARAMETERS
     assert result == LoadResult(
         succeeded=True,
@@ -100,16 +101,21 @@ def test_a_warehouse_load_asks_for_its_result_by_name():
 
 
 @weaver_test()
-def test_an_orchestrated_warehouse_load_does_not_maintain_its_own_bookmark():
-    """The run advances it, with the same record that says the load happened.
+def test_a_run_calls_the_objects_own_procedure_and_not_the_entry_point():
+    """``_.Load`` records; the object's procedure does not.
 
     Two writers for one row would be two decisions about when it moved, and the
-    run's is the one that also knows whether the node it belongs to settled.
+    run's is the one that also knows whether the node it belongs to settled. So
+    the run calls the primitive, and which interface it called is what decides
+    who records.
     """
 
     _result, sql = _dispatch(False, ROW)
+    procedure, inputs, _outputs = sql.calls[0]
 
-    assert ("update_catalogue", 0) in sql.calls[0][1]
+    assert procedure == "[_].[Load Sales.Customer]"
+    assert procedure != "[_].[Load]"
+    assert not [name for name, _value in inputs if "catalogue" in name]
 
 
 @weaver_test()
@@ -118,7 +124,7 @@ def test_fault_tolerance_reaches_the_procedure_as_an_input():
         True, dict(ROW, rows_read=0, rows_inserted=0, rows_updated=0)
     )
 
-    assert sql.calls[0][1] == (("fault_tolerant", 1), ("update_catalogue", 0))
+    assert sql.calls[0][1] == (("fault_tolerant", 1),)
 
 
 @weaver_test()

@@ -23,10 +23,12 @@ from __future__ import annotations
 import re
 
 import pytest
+from sql_support import forget_runtime_state, install_runtime_references
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
-from weaver.declaration.model import WAREHOUSE
+from weaver.declaration.model import WAREHOUSE, WeaverItemId
+from weaver.declaration.tsql_entry import generate_test_entry
 from weaver.declaration.tsql_validation import (
     RESULT_PARAMETERS,
     generate_tsql_validation_batch,
@@ -34,6 +36,10 @@ from weaver.declaration.tsql_validation import (
 from weaver.declaration.validation import generate_validation
 
 SCHEMA = "DWG"
+
+#: The logical item the installed validations belong to. A status row is keyed by
+#: it, so it is named here rather than left to a default.
+ITEM = WeaverItemId("Warehouse", "Reporting")
 
 TEST_SOURCE = f"""/*
 Test ID: {SCHEMA}.OrdersReconcile
@@ -93,35 +99,54 @@ def _document(source: str):
 
 
 @pytest.fixture(scope="module")
-def estate(clean_disposable_warehouse):
-    """Two tables and four installed validation procedures.
+def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue):
+    """Two tables, four installed validation procedures, and the entry point.
 
     The procedures come from the generator rather than from hand-written SQL: a
     fixture that installed a procedure by hand would prove the engine accepts
     SQL somebody wrote for the test, not SQL Weaver produces.
+
+    The catalogue is built and its runtime tables presented here, because the
+    entry point records what a validation found: ``_.TestStatus`` and ``_.Log``
+    have to be there for the references to resolve, and another module's wipe may
+    have taken the whole ``_`` schema with it.
     """
 
+    fabric_initialise_catalogue()
     executor = clean_disposable_warehouse.executor
     executor.execute_script(
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
+    install_runtime_references(executor, fabric_workspace.catalogue_item.name)
     _drop(executor)
     for table in ("ValidationExpected", "ValidationActual"):
         executor.execute_script(
             f"create table [{SCHEMA}].[{table}] "
             "([OrderId] int null, [Amount] int null);"
         )
-    for source in PROCEDURES.values():
-        document = _document(source)
+    documents = [_document(source) for source in PROCEDURES.values()]
+    for document in documents:
         executor.execute_script(generate_validation(document).payload.decode("utf-8"))
+    # And the entry point over them, because the validation procedures record
+    # nothing: `exec _.[Test]` is what runs one by hand and writes the record.
+    executor.execute_script(
+        generate_test_entry(
+            ITEM,
+            {
+                document.document.object_id: document.document.kind
+                for document in documents
+            },
+        )
+    )
     yield executor
     _drop(executor)
 
 
 def _drop(executor) -> None:
     executor.execute_script(
-        "\n".join(f"drop procedure if exists [_].[{name}];" for name in PROCEDURES)
+        "drop procedure if exists [_].[Test];\n"
+        + "\n".join(f"drop procedure if exists [_].[{name}];" for name in PROCEDURES)
         + "\n"
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{table}', N'U') is not null "
@@ -172,6 +197,35 @@ def _counts(executor, procedure: str, *, kind: str = "Test", suppress: int = 1):
         f"[_].[{procedure}]",
         inputs=(("suppress_result_set", suppress),),
         outputs=RESULT_PARAMETERS[kind],
+    )
+
+
+def _standalone(executor, qualified: str) -> None:
+    """``exec _.[Test]``, which is what a person calls and what records."""
+
+    executor.execute_script(f"exec [_].[Test] @object_name = N'{qualified}';")
+
+
+def _test_status(executor, name: str) -> dict | None:
+    rows = executor.query(
+        "select [Test type] as kind, [Result] as result, "
+        "[Failure count] as failures from [_].[TestStatus] "
+        f"where [Item type] = N'{ITEM.item_type}' "
+        f"and [Item name] = N'{ITEM.item_name}' "
+        f"and [Schema name] = N'{SCHEMA}' and [Object name] = N'{name}';"
+    )
+    return dict(rows[0]) if rows else None
+
+
+def _forget(executor, *names: str) -> None:
+    """Clear what the catalogue records about these validations.
+
+    A sequence of claims about what one call recorded starts from nothing
+    recorded, and a row an earlier claim left would be counted by the next one.
+    """
+
+    executor.execute_script(
+        "".join(forget_runtime_state(SCHEMA, name) for name in names)
     )
 
 
@@ -375,3 +429,93 @@ def test_a_direct_run_leaves_no_working_tables_behind(estate):
     sets = estate.query_result_sets(f"{batch}\n{_probe(names)};")
 
     assert {str(row["name"]): row["id"] for row in sets[-1]} == dict.fromkeys(names)
+
+
+# --- the standalone entry point -----------------------------------------------
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_the_entry_point_records_a_test_that_found_nothing(estate):
+    """``exec _.[Test]`` writes the record; the validation procedure does not.
+
+    The status row is a view over the catalogue's table in every Warehouse but
+    the one it lives in, so this is also the claim that a MERGE through that view
+    reaches the table behind it.
+    """
+
+    _forget(estate, "OrdersReconcile")
+    _sides(estate, [(1, 10)], [(1, 10)])
+
+    _standalone(estate, f"{SCHEMA}.OrdersReconcile")
+
+    status = _test_status(estate, "OrdersReconcile")
+    assert status["result"] == "Succeeded"
+    assert status["kind"] == "Test"
+    assert status["failures"] == 0
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_the_entry_point_records_how_much_a_failing_test_found(estate):
+    _forget(estate, "OrdersReconcile")
+    _sides(estate, [(1, 10)], [(1, 11)])
+
+    _standalone(estate, f"{SCHEMA}.OrdersReconcile")
+
+    status = _test_status(estate, "OrdersReconcile")
+    assert status["result"] == "Failed"
+    # A changed row disagrees on both sides, which is two discrepancy rows.
+    assert status["failures"] == 2
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_one_entry_point_serves_both_kinds_of_validation(estate):
+    """A person asking by name should not have to know which it was declared as."""
+
+    _forget(estate, "OrdersArePositive")
+    _sides(estate, [], [(1, -5)])
+
+    _standalone(estate, f"{SCHEMA}.OrdersArePositive")
+
+    status = _test_status(estate, "OrdersArePositive")
+    assert status["kind"] == "Assumption"
+    assert status["result"] == "Failed"
+    assert status["failures"] == 1
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_validation_that_could_not_be_evaluated_is_recorded_and_raised(estate):
+    """It found nothing, and zero discrepancies is the answer it must not give.
+
+    A duplicate key is a broken Test rather than a failing one: the procedure
+    throws, the entry point records Error with no count, and then raises — a
+    validation that could not run must not read as a call that succeeded.
+    """
+
+    _forget(estate, "OrdersReconcile")
+    _sides(estate, [(1, 10), (1, 11)], [(1, 10)])
+
+    with pytest.raises(Exception) as raised:
+        _standalone(estate, f"{SCHEMA}.OrdersReconcile")
+
+    assert "primary key" in str(raised.value).casefold()
+    status = _test_status(estate, "OrdersReconcile")
+    assert status["result"] == "Error"
+    assert status["failures"] is None
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_validation_that_found_something_is_an_answer_rather_than_a_failure(estate):
+    """It ran and reported, so the call returns and the row says Failed."""
+
+    _forget(estate, "OrdersReconcile")
+    _sides(estate, [(1, 10)], [(1, 11)])
+
+    _standalone(estate, f"{SCHEMA}.OrdersReconcile")
+
+    assert _test_status(estate, "OrdersReconcile")["result"] == "Failed"
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_the_entry_point_refuses_a_validation_this_warehouse_does_not_hold(estate):
+    with pytest.raises(Exception, match="is not a validation"):
+        _standalone(estate, f"{SCHEMA}.NotAThing")

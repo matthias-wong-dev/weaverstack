@@ -18,7 +18,12 @@ from weaver.catalogue.tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
     BOOKMARK_SENTINEL_TEXT,
+    CURRENT_STATE_TABLES,
+    HISTORY_TABLES,
     KEY_TYPE_VOCABULARY,
+    LOAD_RESULT_VOCABULARY,
+    LOAD_STATISTIC,
+    LOAD_STATUS,
     LOG,
     OBJECT_ROLE_VOCABULARY,
     OBJECT_TYPE_VOCABULARY,
@@ -26,6 +31,7 @@ from weaver.catalogue.tables import (
     REGISTRY,
     RESULT_VOCABULARY,
     RUNTIME_TABLES,
+    TEST_STATUS,
     TEST_TYPE_VOCABULARY,
     public_column_name,
 )
@@ -206,6 +212,54 @@ BOOKMARK_COLUMNS = (
     *AUDIT,
 )
 
+LOAD_STATUS_COLUMNS = (
+    "Item type",
+    "Item name",
+    "Schema name",
+    "Object name",
+    "Workflow ID",
+    "Result",
+    "Started datetime",
+    "Completed datetime",
+    "Duration milliseconds",
+    *AUDIT,
+)
+
+LOAD_STATISTIC_COLUMNS = (
+    "Load statistic SK",
+    "Workflow ID",
+    "Item type",
+    "Item name",
+    "Schema name",
+    "Object name",
+    "Started datetime",
+    "Completed datetime",
+    "Duration milliseconds",
+    "Rows read",
+    "Rows inserted",
+    "Rows updated",
+    "Rows deleted",
+    "Rows rejected",
+    "Is reload",
+    "Is static skip",
+    *AUDIT,
+)
+
+TEST_STATUS_COLUMNS = (
+    "Item type",
+    "Item name",
+    "Schema name",
+    "Object name",
+    "Test type",
+    "Workflow ID",
+    "Result",
+    "Started datetime",
+    "Completed datetime",
+    "Duration milliseconds",
+    "Failure count",
+    *AUDIT,
+)
+
 
 @weaver_test()
 def test_the_catalogue_publishes_exactly_these_tables():
@@ -268,8 +322,80 @@ def test_the_runtime_tables_are_not_catalogue_dictionaries():
 
     projected = {table.name for table in PROJECTED_TABLES}
 
-    assert {table.name for table in RUNTIME_TABLES} == {"Log", "Bookmark"}
+    assert {table.name for table in RUNTIME_TABLES} == {
+        "Log",
+        "Bookmark",
+        "LoadStatus",
+        "LoadStatistic",
+        "TestStatus",
+    }
     assert not projected & {table.name for table in RUNTIME_TABLES}
+
+
+@weaver_test()
+def test_the_load_status_publishes_its_frozen_columns():
+    assert LOAD_STATUS.public_columns == LOAD_STATUS_COLUMNS
+
+
+@weaver_test()
+def test_the_load_statistic_publishes_its_frozen_columns():
+    assert LOAD_STATISTIC.public_columns == LOAD_STATISTIC_COLUMNS
+
+
+@weaver_test()
+def test_the_test_status_publishes_its_frozen_columns():
+    assert TEST_STATUS.public_columns == TEST_STATUS_COLUMNS
+
+
+@weaver_test()
+def test_a_current_state_table_is_keyed_by_the_identity_the_registry_uses():
+    """Three tables describing one installed object, so all three agree what it is."""
+
+    for table in CURRENT_STATE_TABLES:
+        assert table.key == REGISTRY.key[:4], table.name
+
+
+@weaver_test()
+def test_which_runtime_tables_are_current_state_and_which_are_history():
+    """The distinction the operational model turns on, written out.
+
+    A current-state row belongs to one physical incarnation and goes when a
+    build ends it. History records what happened, and a rebuild does not unhappen
+    it — so moving a table from one group to the other changes whether an
+    estate's record of itself survives a rebuild.
+    """
+
+    assert {table.name for table in CURRENT_STATE_TABLES} == {
+        "Bookmark",
+        "LoadStatus",
+        "TestStatus",
+    }
+    assert {table.name for table in HISTORY_TABLES} == {"Log", "LoadStatistic"}
+
+
+@weaver_test()
+def test_which_population_invalidates_each_current_state_table():
+    """A loadable object carries two; a validation carries one."""
+
+    assert {table.name: table.invalidated_by for table in CURRENT_STATE_TABLES} == {
+        "Bookmark": "loadable",
+        "LoadStatus": "loadable",
+        "TestStatus": "validation",
+    }
+
+
+@weaver_test()
+def test_a_physical_target_type_is_not_duplicated_into_a_status_row():
+    """Logical identity is enough: the Installation says where an item is bound.
+
+    ``_.Log`` carries the physical target because a row there records one
+    crossing to one place; a status row describes the object, and an object's
+    placement is not part of its state.
+    """
+
+    for table in (LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS):
+        assert "Target type" not in table.public_columns, table.name
+        assert "Target name" not in table.public_columns, table.name
 
 
 @pytest.mark.parametrize("name", sorted(PUBLIC_SCHEMA))
@@ -341,6 +467,7 @@ def test_object_role_vocabulary_is_frozen():
         "test": "Test",
         "assumption": "Assumption",
         "shortcut": "Shortcut",
+        "entry": "Entry point",
     }
 
 
@@ -357,11 +484,40 @@ def test_test_type_vocabulary_is_frozen():
 @weaver_test()
 def test_result_vocabulary_is_frozen():
     assert RESULT_VOCABULARY == {
+        "pending": "Pending",
+        "skipped": "Skipped",
         "succeeded": "Succeeded",
         "failed": "Failed",
-        "skipped": "Skipped",
+        "error": "Error",
         "blocked": "Blocked",
     }
+
+
+@weaver_test()
+def test_only_a_load_can_be_rejected():
+    """A load with rejected rows is neither a success nor a failure.
+
+    Nothing else can be one: a validation either ran or could not be evaluated,
+    so ``Rejected`` belongs to the tables a load writes.
+    """
+
+    assert LOAD_RESULT_VOCABULARY == {**RESULT_VOCABULARY, "rejected": "Rejected"}
+    assert LOG.column("result").vocabulary == LOAD_RESULT_VOCABULARY
+    assert LOAD_STATUS.column("result").vocabulary == LOAD_RESULT_VOCABULARY
+    assert TEST_STATUS.column("result").vocabulary == RESULT_VOCABULARY
+
+
+@weaver_test()
+def test_the_log_keeps_error_apart_from_failure():
+    """Work that could not be evaluated is not a judgement about the data.
+
+    Collapsing them would let a Test whose procedure threw read as a Test that
+    found discrepancies, which is the one answer a validation must never give.
+    """
+
+    assert "error" in LOG.column("result").vocabulary
+    assert LOG.column("result").to_public("error") == "Error"
+    assert LOG.column("result").to_public("failed") == "Failed"
 
 
 @weaver_test()
@@ -426,7 +582,7 @@ def test_every_node_status_maps_to_a_frozen_result():
     forgotten, and the first thing that noticed was a real workspace.
     """
 
-    from weaver.run.evidence import RESULT_FOR_STATUS
+    from weaver.run.record import RESULT_FOR_STATUS
     from weaver.run.result import (
         BLOCKED,
         FAILED,
@@ -452,4 +608,6 @@ def test_every_node_status_maps_to_a_frozen_result():
     }
 
     assert every <= set(RESULT_FOR_STATUS)
-    assert set(RESULT_FOR_STATUS.values()) <= set(RESULT_VOCABULARY)
+    # _.Log records both kinds of task, so the load vocabulary is the one it has
+    # to fit inside.
+    assert set(RESULT_FOR_STATUS.values()) <= set(LOAD_RESULT_VOCABULARY)

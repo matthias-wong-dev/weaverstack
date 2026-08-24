@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from ..catalogue.runtime_state import RuntimeStateInvalidation
 from .changes import TargetChange
 from .incremental import BuildSelection
 from .targets import BoundTarget
@@ -52,11 +53,11 @@ PRUNE_VIEW = "prune_view"
 PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
 
-#: Present the catalogue's ``_.Bookmark`` in a built Warehouse under that name,
-#: so a generated load procedure can read and write its own bookmark. Weaver
-#: runtime infrastructure rather than a declared shortcut — see
-#: :mod:`weaver.build_bundle.bookmarks`.
-CREATE_BOOKMARK_REFERENCE = "create_bookmark_reference"
+#: Present the catalogue's runtime tables in a built target under their own
+#: names, so a generated procedure can read a bookmark and record what it did.
+#: Weaver runtime infrastructure rather than declared shortcuts — see
+#: :mod:`weaver.build_bundle.runtime_tables`.
+CREATE_RUNTIME_REFERENCE = "create_runtime_reference"
 
 #: Refresh the SQL analytics endpoint for one Lakehouse after its Delta tables
 #: have changed. The action is target-bound and payloadless: the planner decides
@@ -70,17 +71,17 @@ REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 DELETE_CATALOGUE_CLAIMS = "delete_catalogue_claims"
 PUBLISH_CATALOGUE = "publish_catalogue"
 PUBLISH_REGISTRY = "publish_registry"
-#: Bring ``_.Bookmark`` into line with what this build will leave installed:
-#: remove the rows of objects it no longer loads, and reset the ones it rebuilds.
-#: It leads physical work for the reason claim deletion does — see
-#: :mod:`weaver.build_bundle.bookmarks`.
-RECONCILE_BOOKMARKS = "reconcile_bookmarks"
+#: Bring the catalogue's current-state tables into line with what this build will
+#: leave installed: remove the rows of objects it no longer runs, and the rows of
+#: the incarnations it is replacing. It leads physical work for the reason claim
+#: deletion does — see :mod:`weaver.build_bundle.runtime_tables`.
+RECONCILE_RUNTIME_STATE = "reconcile_runtime_state"
 CATALOGUE_KINDS = frozenset(
     {
         DELETE_CATALOGUE_CLAIMS,
         PUBLISH_CATALOGUE,
         PUBLISH_REGISTRY,
-        RECONCILE_BOOKMARKS,
+        RECONCILE_RUNTIME_STATE,
     }
 )
 
@@ -260,6 +261,13 @@ class BuildPlan:
     #: edited after certification, which is the thing frozen payloads exist to
     #: prevent.
     target_changes: Mapping[str, tuple[TargetChange, ...]] = field(default_factory=dict)
+    #: The catalogue's current-state rows this plan ends the life of, by table.
+    #: Declared beside the action that performs it, as ``target_changes`` is
+    #: declared beside the actions that change a target: the reconciliation
+    #: action's payload is what runs, and this is what it means. A reader — or a
+    #: :class:`~weaver.catalogue.state.Catalogue` applying the plan in memory —
+    #: gets the decision without parsing DML.
+    runtime_state: tuple[RuntimeStateInvalidation, ...] = ()
 
     def to_mapping(self) -> dict[str, Any]:
         mapping = {
@@ -274,6 +282,7 @@ class BuildPlan:
                 target_id: [change.to_mapping() for change in changes]
                 for target_id, changes in sorted(self.target_changes.items())
             },
+            "runtime_state": [one.to_mapping() for one in self.runtime_state],
         }
         mapping["selection"] = self.selection.to_mapping()
         return mapping
@@ -299,6 +308,10 @@ class BuildPlan:
                 target_id: tuple(TargetChange.from_mapping(c) for c in changes)
                 for target_id, changes in mapping.get("target_changes", {}).items()
             },
+            runtime_state=tuple(
+                RuntimeStateInvalidation.from_mapping(one)
+                for one in mapping.get("runtime_state", ())
+            ),
         )
 
     # --- convenience views ------------------------------------------------

@@ -175,14 +175,19 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
     )
     actions = actions_of(planned, "load")
 
-    # The reference to the catalogue's `_.Bookmark` shares this phase, because
-    # it exists for the procedure rather than for anything the build made.
+    # The references to the catalogue's runtime tables share this phase, because
+    # they exist for the procedures rather than for anything the build made.
     assert [action.kind for action in actions] == [
         "build_procedure",
-        "create_bookmark_reference",
+        "build_procedure",
+        "create_runtime_reference",
     ]
-    assert actions[0].executor == "tsql"
-    assert actions[0].resource_node_id.endswith("procedure:_/Load Sales.Customer")
+    assert {action.executor for action in actions[:2]} == {"tsql"}
+    installed = {action.resource_node_id for action in actions[:2]}
+    assert any(one.endswith("procedure:_/Load Sales.Customer") for one in installed)
+    # And the entry point beside it, installed by the same executor: a
+    # create-or-alter is a script whichever procedure it builds.
+    assert any(one.endswith("procedure:_/Load") for one in installed)
 
 
 @weaver_test()
@@ -269,7 +274,7 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
     # still declares a loadable object, so it is still wanted.
     assert [action.kind for action in actions] == [
         "drop_procedure",
-        "create_bookmark_reference",
+        "create_runtime_reference",
     ]
     assert statement == "drop procedure if exists [_].[Load Sales.Retired];\n"
 

@@ -348,27 +348,22 @@ def test_a_static_skip_advances_no_bookmark():
 
 
 @weaver_test()
-def test_a_procedure_run_by_hand_maintains_its_own_bookmark():
-    """The default is 1, so running it directly keeps the object's history right.
+def test_an_object_procedure_writes_no_catalogue_state():
+    """It is an execution primitive: it loads, and it records nothing.
 
-    An orchestrated run passes 0 and advances the row itself, beside the record
-    of the node that settled — see ``tests/targeted/test_run_dispatch_representation.py``.
+    Whoever called it owns the record — an orchestrated run centrally, or
+    ``_.Load`` synchronously. So there is no flag deciding which, and no MERGE
+    here at all.
     """
 
     payload = _procedure(static=False)
 
-    assert "@update_catalogue bit = 1" in payload
-    assert "if @update_catalogue = 1" in payload
-    # Keyed by the logical item that declares it, baked in: which row it means is
-    # a fact about the procedure rather than an argument to it.
-    assert "N''Warehouse'' as [Item type]" in payload
-    assert "N''Reporting'' as [Item name]" in payload
-    assert "N''Sales'' as [Schema name]" in payload
-    assert "N''Country'' as [Object name]" in payload
+    assert "update_catalogue" not in payload
+    assert "merge into [_]." not in payload
 
 
 @weaver_test()
-def test_only_a_clean_load_records_a_bookmark():
+def test_only_a_clean_load_reports_the_instant_it_began():
     """A rejecting load has not read its window, so it establishes no instant."""
 
     payload = _procedure(static=False)
@@ -400,5 +395,7 @@ def test_only_a_static_warehouse_load_reads_the_bookmark_table():
 
     assert "select @weaver_bookmark =" not in ordinary
     assert "select @weaver_bookmark =" in static
-    # It still records one: the write is what every load does.
-    assert "merge into [_].[Bookmark]" in ordinary
+    # And a static procedure reads it keyed by the logical item that declares
+    # it, baked in: which row it means is a fact about the procedure rather than
+    # an argument to it.
+    assert "N''Warehouse''" in static and "N''Reporting''" in static

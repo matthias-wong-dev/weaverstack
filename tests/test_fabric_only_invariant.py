@@ -71,6 +71,31 @@ RETIRED = (
     "with_bookmarks",
     "read_installed_bookmarks",
     "resolve_installed_object",
+    # The switch that said who records. Which interface was called decides it
+    # now — `_load()` against `load()`, `read()` against `run()`, an object's own
+    # procedure against `_.Load` — so there is no flag a caller can get wrong.
+    "update_catalogue",
+    "catalogue_write",
+    # Bookmark-specific build plumbing, generalised into the runtime-table
+    # family: one reconciliation stage over every current-state table, and one
+    # reference stage over every table a target presents.
+    "bookmark_statements",
+    "render_bookmark_reconciliation",
+    "render_bookmark_reference",
+    "bookmark_reference_views",
+    "read_bookmark_source",
+    "bookmark_reference",
+    "reconcile_bookmarks",
+    "create_bookmark_reference",
+    # One record rather than evidence alone: a settled unit of work leaves the
+    # state it produced beside the row that says it settled.
+    "RunLog",
+    "open_run_log",
+    # Bespoke per-table writes. A table declares how its rows are maintained and
+    # the generic verbs read that declaration.
+    "advance_bookmark",
+    "set_load_status",
+    "record_test_status",
 )
 
 

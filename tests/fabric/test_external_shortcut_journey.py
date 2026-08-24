@@ -153,7 +153,7 @@ def external_shortcut_estate(request, tmp_path, fabric_external_lakehouse):
         request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         SesFixture(root, (item,)),
-        before_reset=request.getfixturevalue("weaver_session").flush,
+        weaver_session=request.getfixturevalue("weaver_session"),
     ) as env:
         yield env, item
 

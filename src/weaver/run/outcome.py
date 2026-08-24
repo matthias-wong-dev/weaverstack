@@ -52,6 +52,12 @@ class Outcome:
     #: one that ran and reported failure, and the difference is what tells "the
     #: check could not be evaluated" from "the check found something wrong".
     raised: bool = False
+    #: Whether this outcome is Weaver's own decision about the work. A refused
+    #: breach and a validation's finding are; an exception nothing named is not.
+    #: A load that refused ran under Weaver's control and produced an
+    #: unacceptable result, so the catalogue records it as Failed rather than as
+    #: Error — see :func:`weaver.run.record.result_for`.
+    refused: bool = False
 
 
 def settle(node, *, returned=None, raised: BaseException | None = None) -> Outcome:
@@ -66,8 +72,10 @@ def settle(node, *, returned=None, raised: BaseException | None = None) -> Outco
     if not reports_outcome(returned):
         return _malformed(node, returned)
     return Outcome(
-        status=_status(returned),
+        status=status_of(returned),
         result=returned,
+        # It ran and reported, so whatever it says is Weaver's own decision.
+        refused=True,
         messages=_messages(node, returned),
     )
 
@@ -98,6 +106,7 @@ def _raised(node, exc: BaseException) -> Outcome:
     return Outcome(
         status=FAILED,
         raised=True,
+        refused=named,
         result=result,
         messages=(
             error(
@@ -138,13 +147,21 @@ def _malformed(node, returned) -> Outcome:
     )
 
 
-def _status(result) -> str:
+def status_of(result) -> str:
+    """What one primitive's own answer says became of it.
+
+    Public because a standalone call settles the same way an orchestrated node
+    does — see :func:`weaver.run.record.settled_load` — and the rule must not be
+    written twice.
+
+    A primitive that refused rows and was asked to tolerate them wrote the valid
+    ones and *returned* the refusal. That is not a failed step; a step that
+    failed without refusing anything is. A result with no notion of rejected
+    rows — a validation's judgement — failed.
+    """
+
     if result.succeeded:
         return SUCCEEDED
-    # A primitive that refused rows and was asked to tolerate them wrote the
-    # valid ones and *returned* the refusal. That is not a failed step; a step
-    # that failed without refusing anything is. A result with no notion of
-    # rejected rows — a validation's judgement — simply failed.
     return SUCCEEDED_WITH_REJECTS if getattr(result, "rows_rejected", 0) else FAILED
 
 
@@ -177,4 +194,4 @@ def _failure_code(node) -> str:
     )
 
 
-__all__ = ["Outcome", "settle"]
+__all__ = ["Outcome", "settle", "status_of"]

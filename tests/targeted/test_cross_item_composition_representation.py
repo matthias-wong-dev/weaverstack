@@ -165,6 +165,10 @@ def test_the_warehouse_report_carries_a_load_procedure_and_a_test(plan):
     assert procedures == {
         "load-Warehouse--Reporting--procedure-_--Load-Rpt.CustomerReport",
         "load-Warehouse--Reporting--procedure-_--Test-Rpt.ReportReconciles",
+        # And the two generic entry points, which are what a person calls to run
+        # one of those by hand and have the outcome recorded.
+        "load-Warehouse--Reporting--procedure-_--Load",
+        "load-Warehouse--Reporting--procedure-_--Test",
     }
 
 

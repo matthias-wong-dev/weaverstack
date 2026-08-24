@@ -28,6 +28,8 @@ from weaver.catalogue.tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
     CATALOGUE_TABLES,
+    CURRENT_STATE_TABLES,
+    HISTORY_TABLES,
     LOG,
     PROJECTED_TABLES,
     READABLE_TABLES,
@@ -58,25 +60,52 @@ class _Connection:
 
 
 @weaver_test()
-def test_the_readable_tables_are_every_table_but_the_log():
-    """History is appended and never consulted, and it grows with the estate."""
+def test_a_run_reads_the_bookmark_and_writes_the_rest():
+    """The asymmetry worth knowing about the current-state tables.
 
-    assert set(READABLE_TABLES) == set(CATALOGUE_TABLES) - {LOG}
-    assert LOG in RUNTIME_TABLES
-    assert BOOKMARK in RUNTIME_TABLES
-    assert not set(RUNTIME_TABLES) & set(PROJECTED_TABLES)
+    A run writes a load status and a test status and never asks what they were,
+    so reading them would be round trips for an answer nothing uses. It does read
+    bookmarks, because an incremental load asks how far it got.
+    """
+
+    assert set(READABLE_TABLES) == set(PROJECTED_TABLES) | {BOOKMARK}
+    assert not set(READABLE_TABLES) & set(HISTORY_TABLES)
 
 
 @weaver_test()
-def test_an_installed_read_does_not_read_the_log():
+def test_a_build_reads_every_current_state_table_it_can_invalidate():
+    """It decides obsolete rows from the rows it holds, so it holds all of them.
+
+    A tripwire: a current-state table the build could name in an invalidation
+    but could not see would keep a row describing an incarnation that no longer
+    exists.
+    """
+
+    from weaver.catalogue.state import READ_FOR_BUILD
+
+    assert set(CURRENT_STATE_TABLES) <= set(READ_FOR_BUILD)
+    assert not set(READ_FOR_BUILD) & set(HISTORY_TABLES)
+
+
+@weaver_test()
+def test_the_runtime_tables_are_one_of_the_two_kinds_and_no_other():
+    assert set(HISTORY_TABLES) | set(CURRENT_STATE_TABLES) == set(RUNTIME_TABLES)
+    assert not set(HISTORY_TABLES) & set(CURRENT_STATE_TABLES)
+    assert not set(RUNTIME_TABLES) & set(PROJECTED_TABLES)
+    assert set(CATALOGUE_TABLES) == set(PROJECTED_TABLES) | set(RUNTIME_TABLES)
+
+
+@weaver_test()
+def test_an_installed_read_does_not_read_the_history():
     from weaver.catalogue.state import read_installed_catalogue
 
     connection = _Connection()
 
     catalogue = read_installed_catalogue(connection)
 
-    assert LOG.name not in connection.read
-    assert LOG.name not in catalogue.materialised
+    for table in HISTORY_TABLES:
+        assert table.name not in connection.read
+        assert table.name not in catalogue.materialised
     assert BOOKMARK.name in connection.read
 
 
@@ -397,6 +426,33 @@ def test_a_catalogue_is_live_state_and_says_so():
         "registered",
         "materialised",
     }
+
+
+@weaver_test()
+def test_no_table_has_a_write_method_of_its_own():
+    """Two verbs, whatever the table. A tripwire for the next table added.
+
+    ``advance_bookmark()``, ``set_load_status()``, ``record_test_status()``: each
+    would be a place for one table's rules to diverge from the rest, and the
+    reason the mechanism is generic is that a table declares how its rows are
+    maintained and everything reads that declaration.
+    """
+
+    writing = {
+        name
+        for name in vars(Catalogue)
+        if not name.startswith("_")
+        and callable(getattr(Catalogue, name, None))
+        and any(
+            verb in name
+            for verb in ("write", "record", "advance", "set_", "merge", "append")
+        )
+    }
+
+    assert writing == set()
+    # `bookmark()` is a read and stays: absence coalescing to the sentinel is a
+    # meaning the caller would otherwise have to know, and it writes nothing.
+    assert callable(Catalogue.bookmark)
 
 
 @weaver_test()

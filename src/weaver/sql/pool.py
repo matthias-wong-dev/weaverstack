@@ -12,7 +12,13 @@ from .authentication import SqlAuthentication
 from .connection import SqlEndpoint, connect
 from .errors import SqlPoolClosedError
 
-DEFAULT_MAX_CONNECTIONS = 4
+#: How many physical connections one pool opens. Sized for the work rather than
+#: chosen: a load holds one to run the object's procedure while the catalogue's
+#: runtime tables are written on a worker each — one for the evidence, one for
+#: the status, one for the statistics, one for the bookmark. Fewer than that and
+#: a writer waits for the reader to finish, which costs latency nothing needs to
+#: pay.
+DEFAULT_MAX_CONNECTIONS = 6
 
 #: How long a connection may sit idle before it is checked rather than trusted.
 #: A Fabric SQL endpoint drops connections it considers abandoned, and it does

@@ -25,29 +25,52 @@ class CatalogObject:
 PROCEDURE_ITEM = ("Warehouse", "Reporting")
 
 
-def install_bookmark_reference(executor: SqlExecutor, catalogue: str) -> None:
-    """What a build gives every Warehouse it installs a load into.
+def install_runtime_references(executor: SqlExecutor, catalogue: str) -> None:
+    """What a build gives every Warehouse it installs something runnable into.
 
-    The catalogue's ``_.Bookmark`` under that name. A procedure reads and writes
-    its own bookmark through it, so one installed by hand needs the same
-    reference a built one is given.
+    The catalogue's runtime tables under their own names. A generated procedure
+    reads a bookmark and records what it did through these, so one installed by
+    hand needs the same references a built one is given.
     """
 
+    from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES
+
     executor.execute_script("if schema_id(N'_') is null exec('create schema [_]');")
-    executor.execute_script(
-        "create or alter view [_].[Bookmark] as "
-        f"select * from [{catalogue}].[_].[Bookmark];"
-    )
+    for table in PRESENTED_RUNTIME_TABLES:
+        # One statement per batch: T-SQL requires CREATE VIEW to lead its own.
+        executor.execute_script(
+            f"create or alter view [_].[{table.name}] as "
+            f"select * from [{catalogue}].[_].[{table.name}];"
+        )
 
 
-def forget_bookmark(schema: str, name: str) -> str:
-    """A statement removing one object's bookmark row, keyed as Registry keys it."""
+def forget_runtime_state(schema: str, name: str) -> str:
+    """Statements removing everything the catalogue records about one object.
+
+    Every runtime table, history included: a sequence of claims about what one
+    call recorded starts from nothing recorded, and a row an earlier claim left
+    would be counted by the next one.
+    """
 
     item_type, item_name = PROCEDURE_ITEM
+    scoped = (
+        f"[Item type] = N'{item_type}' and [Item name] = N'{item_name}' "
+        f"and [Schema name] = N'{schema}' and [Object name] = N'{name}'"
+    )
+    # `_.Log` is scoped by the object alone: it records one crossing to one
+    # place, so it carries the physical target rather than the logical item.
+    unscoped = f"[Schema name] = N'{schema}' and [Object name] = N'{name}'"
     return (
-        "delete from [_].[Bookmark] "
-        f"where [Item type] = N'{item_type}' and [Item name] = N'{item_name}' "
-        f"and [Schema name] = N'{schema}' and [Object name] = N'{name}';\n"
+        "\n".join(
+            [
+                f"delete from [_].[Bookmark] where {scoped};",
+                f"delete from [_].[LoadStatus] where {scoped};",
+                f"delete from [_].[LoadStatistic] where {scoped};",
+                f"delete from [_].[TestStatus] where {scoped};",
+                f"delete from [_].[Log] where {unscoped};",
+            ]
+        )
+        + "\n"
     )
 
 

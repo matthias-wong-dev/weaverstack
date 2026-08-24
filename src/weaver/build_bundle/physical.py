@@ -14,7 +14,6 @@ from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from ..errors import BuildError
 from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_runtime_artefacts
-from .bookmarks import bookmark_reference_views
 from .changes import (
     FILE as FILE_KIND,
 )
@@ -56,6 +55,7 @@ from .models import (
 )
 from .payloads import sha256_hex
 from .prune import managed_sets, render_inventory_prune
+from .runtime_tables import runtime_reference_views
 from .stages import BUILD, DROP, LOAD, PRUNE, SCHEMA, PlannedStage
 from .targets import WAREHOUSE_TARGET
 
@@ -139,7 +139,7 @@ def item_prune_stage(
         # The local `_.Bookmark` a built Warehouse presents. Derived from the
         # item's loadable objects as the `_` schema is, so the reference goes
         # when the last of them does.
-        extra_views=bookmark_reference_views(repository, item=item, target=target),
+        extra_views=runtime_reference_views(repository, item=item, target=target),
     )
 
     payloads: dict[str, bytes] = {}

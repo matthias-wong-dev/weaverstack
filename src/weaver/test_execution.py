@@ -13,8 +13,11 @@ from .declaration.metadata import ASSUMPTION
 from .errors import ValidationError
 from .etl import LOAD_ROOT
 from .load_plan import LAKEHOUSE_TARGET
-from .runtime.test_compare import ACTUAL, EXPECTED, SIDE_COLUMN
-from .runtime.validation_result import AssumptionResult, TestResult
+from .runtime.validation_result import (
+    AssumptionResult,
+    TestResult,
+    result_from_rows,
+)
 from .test_plan import InstalledValidation
 
 #: Runtime primitives for installed validations.
@@ -220,47 +223,9 @@ def _dispatch_python(validation: InstalledValidation, environment: Any, collect:
     )
     frame = getattr(module, expected)(environment.spark, lakehouse=lakehouse).read()
 
-    if validation.kind == ASSUMPTION:
-        return AssumptionResult(violation_count=_count(frame)), (
-            _collected(frame) if collect else None
-        )
-
-    # Evaluated once either way: a collected run counts rows it already has, a
-    # suppressed run aggregates by side in one action. Two counts would be two
-    # evaluations of the comparison, between which the tables can move.
-    if collect:
-        rows = _collected(frame)
-        sides = [str(row["_weaver_side"]) for row in rows]
-        return (
-            TestResult(
-                missing_count=sum(1 for side in sides if side == "expected"),
-                unexpected_count=sum(1 for side in sides if side == "actual"),
-            ),
-            rows,
-        )
-
-    # One row per side at most, so this collects counts and never evidence.
-    by_side = {
-        str(row[SIDE_COLUMN]): int(row["count"])
-        for row in frame.groupBy(SIDE_COLUMN).count().collect()
-    }
-    return (
-        TestResult(
-            missing_count=by_side.get(EXPECTED, 0),
-            unexpected_count=by_side.get(ACTUAL, 0),
-        ),
-        None,
-    )
-
-
-def _count(frame: Any) -> int:
-    return int(frame.count())
-
-
-def _collected(frame: Any) -> tuple:
-    return tuple(
-        row.asDict() if hasattr(row, "asDict") else dict(row) for row in frame.collect()
-    )
+    # What the rows mean is the validation runtime's, not this module's: a direct
+    # call reaches the same implementation, so a Test counts the same either way.
+    return result_from_rows(frame, kind=validation.kind, collect=collect)
 
 
 def _class_name(validation: InstalledValidation) -> str:

@@ -102,12 +102,11 @@ emit(results)
 
 #: A catalogue for an ad-hoc probe, built in the session that runs it.
 #:
-#: ``load()`` needs a catalogue, because a load records how far it read. A probe
-#: is not part of the built estate, so the estate's own catalogue does not record
-#: it — this is the real :class:`~weaver.catalogue.state.Catalogue`, over the rows
-#: that make one object installed. It has nowhere to write and needs nowhere: the
-#: probes load with ``update_catalogue=False``, which is how a caller says it owns
-#: the recording, and here there is nothing to record.
+#: A load needs a catalogue, because it reads its bookmark. A probe is not part
+#: of the built estate, so the estate's own catalogue does not record it — this is
+#: the real :class:`~weaver.catalogue.state.Catalogue`, over the rows that make
+#: one object installed. It has nowhere to write and needs nowhere: the probes
+#: call ``_load()``, the interface that records nothing.
 PROBE_CATALOGUE = r"""
 from weaver.catalogue.state import Catalogue
 from weaver.declaration.model import WeaverItemId
@@ -204,7 +203,7 @@ try:
         "inserted.csv": "inserted",
     }
     Raw__ChangeFeedProbe.deletes = ("deleted.csv",)
-    result = folder.load(update_catalogue=False)
+    result = folder._load()
 
     # Constructed from another authored object, which is the public downstream
     # spelling: My__Folder(self).files_since(self.bookmark()).
@@ -299,9 +298,7 @@ try:
     raised = False
     result = None
     try:
-        result = folder.load(
-            fault_tolerant=FAULT_TOLERANT, update_catalogue=False
-        )
+        result = folder._load(fault_tolerant=FAULT_TOLERANT)
     except LoadError as exc:
         raised = True
         result = exc.result

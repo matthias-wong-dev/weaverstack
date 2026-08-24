@@ -48,13 +48,15 @@ from typing import Any
 import pytest
 from sql_support import (
     PROCEDURE_ITEM,
-    forget_bookmark,
-    install_bookmark_reference,
+    forget_runtime_state,
+    install_runtime_references,
 )
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
+from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import WAREHOUSE, WeaverItemId
+from weaver.declaration.tsql_entry import generate_load_entry
 from weaver.declaration.tsql_load import RESULT_PARAMETERS
 from weaver.runtime import LoadResult
 from weaver.runtime.load_contract import (
@@ -130,7 +132,7 @@ def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Est
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
-    install_bookmark_reference(executor, catalogue)
+    install_runtime_references(executor, catalogue)
     estate = Estate(executor, object_name)
     _drop(estate)
     executor.execute_script(
@@ -139,6 +141,9 @@ def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Est
     )
     executor.execute_script(document.create_ddl().content)
     executor.execute_script(document.create_load(item=ITEM).payload.decode("utf-8"))
+    # And the entry point over it, because the object's own procedure records
+    # nothing: `exec _.[Load]` is what runs it by hand and writes the record.
+    executor.execute_script(generate_load_entry(ITEM, [ObjectId(SCHEMA, object_name)]))
     return estate
 
 
@@ -211,7 +216,7 @@ def _reset(estate: Estate) -> None:
     estate.executor.execute_script(
         f"delete from [{SCHEMA}].[{name}];\n"
         f"delete from [{SCHEMA}].[{estate.raw}];\n"
-        + forget_bookmark(SCHEMA, name)
+        + forget_runtime_state(SCHEMA, name)
         + "\n".join(
             f"if object_id(N'{SCHEMA}.{name}{suffix}', N'U') is not null "
             f"drop table [{SCHEMA}].[{name}{suffix}];"
@@ -248,12 +253,71 @@ def _source_rows(estate: Estate, rows) -> None:
 
 
 def _load(estate: Estate, *, fault_tolerant: bool) -> LoadResult:
+    """The object's own procedure, which is what an orchestrated run calls."""
+
     return LoadResult.from_row(
         estate.executor.call_procedure(
             f"[_].[Load {SCHEMA}.{estate.object_name}]",
             inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
             outputs=RESULT_PARAMETERS,
         )
+    )
+
+
+def _standalone(estate: Estate, *, fault_tolerant: bool = False) -> None:
+    """``exec _.[Load]``, which is what a person calls and what records.
+
+    It reports through the catalogue rather than through output parameters: the
+    row it wrote is the answer, and reading that back is the claim.
+    """
+
+    estate.executor.execute_script(
+        f"exec [_].[Load] @object_name = N'{SCHEMA}.{estate.object_name}'"
+        f", @fault_tolerant = {1 if fault_tolerant else 0};"
+    )
+
+
+def _status(estate: Estate) -> dict | None:
+    """This object's row in ``_.LoadStatus``, as the catalogue holds it."""
+
+    rows = estate.executor.query(
+        "select [Result] as result, [Duration milliseconds] as duration "
+        "from [_].[LoadStatus] " + _identity_predicate(estate)
+    )
+    return dict(rows[0]) if rows else None
+
+
+def _statistics(estate: Estate) -> list:
+    rows = estate.executor.query(
+        "select [Rows read] as [read], [Rows inserted] as inserted, "
+        "[Is reload] as reload, [Is static skip] as skip "
+        "from [_].[LoadStatistic] " + _identity_predicate(estate)
+    )
+    return [dict(row) for row in rows]
+
+
+def _log(estate: Estate) -> list:
+    """This object's evidence rows.
+
+    Scoped by the object alone: ``_.Log`` records one crossing to one place, so
+    it carries the physical target rather than the logical item.
+    """
+
+    rows = estate.executor.query(
+        "select [Task type] as task, [Result] as result, [Target name] as target "
+        "from [_].[Log] "
+        f"where [Schema name] = N'{SCHEMA}' "
+        f"and [Object name] = N'{estate.object_name}'"
+    )
+    return [dict(row) for row in rows]
+
+
+def _identity_predicate(estate: Estate) -> str:
+    return (
+        f"where [Item type] = N'{ITEM.item_type}' "
+        f"and [Item name] = N'{ITEM.item_name}' "
+        f"and [Schema name] = N'{SCHEMA}' "
+        f"and [Object name] = N'{estate.object_name}'"
     )
 
 
@@ -437,21 +501,32 @@ def test_a_tolerant_run_preserves_valid_rows_and_rejection_evidence(estate):
 
 
 def _static_run(static_estate):
-    """A static load into an empty target, then a second over a changed source."""
+    """A static load into an empty target, then a second over a changed source.
+
+    Both through the entry point. The Static gate reads a bookmark and the
+    object's own procedure does not write one, so what closes the gate is the
+    *record* — and the record belongs to whoever ran the load. Run through the
+    primitive alone, a Static object would seed itself on every call.
+    """
 
     _reset(static_estate)
     _source_rows(static_estate, CLEAN)
-    seed = _load(static_estate, fault_tolerant=False)
-    seeded_contents = _contents(static_estate)
+    _standalone(static_estate)
+    seeded = {
+        "contents": _contents(static_estate),
+        "statistics": _statistics(static_estate),
+        "bookmark": _bookmark(static_estate),
+    }
 
     _source_rows(static_estate, [("c9", "Different")])
-    again = _load(static_estate, fault_tolerant=False)
+    _standalone(static_estate)
     return Ran(
-        result=again,
+        result=None,
         contents=_contents(static_estate),
         extra={
-            "seed": seed,
-            "seeded_contents": seeded_contents,
+            "seeded": seeded,
+            "status": _status(static_estate),
+            "statistics": _statistics(static_estate),
             "leftovers": _leftovers(static_estate),
             "bookmark": _bookmark(static_estate),
         },
@@ -459,30 +534,52 @@ def _static_run(static_estate):
 
 
 @weaver_test(remote=True, resources={"tds"})
-def test_a_clean_load_records_its_own_bookmark_through_the_view(estate):
-    """Run by hand, the procedure maintains its own object's history.
+def test_the_objects_own_procedure_records_nothing(estate):
+    """It is an execution primitive: whoever called it owns the record.
 
-    ``@update_catalogue`` defaults to 1, and in every Warehouse but the one the
-    catalogue lives in ``_.Bookmark`` is a view over the catalogue's table. So
-    this is also the claim that an update and an insert through that view reach
-    the table behind it.
+    It still reports the instant it began, because that is what a caller
+    advances the bookmark to.
     """
 
     _reset(estate)
     _source_rows(estate, CLEAN)
-    before = _bookmark(estate)
 
     result = _load(estate, fault_tolerant=False)
-    after = _bookmark(estate)
 
-    assert before is None
     assert result.succeeded is True
-    assert after is not None
-    # The instant the procedure took at its own start, reported and recorded.
     assert result.bookmark_datetime is not None
-    assert after.replace(tzinfo=result.bookmark_datetime.tzinfo) == (
-        result.bookmark_datetime
-    )
+    assert _bookmark(estate) is None
+    assert _status(estate) is None
+    assert _log(estate) == []
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_the_entry_point_records_a_clean_load_through_the_views(estate):
+    """``exec _.[Load]`` writes the whole operational record.
+
+    In every Warehouse but the one the catalogue lives in these tables are views
+    over the catalogue's own, so this is also the claim that an insert and an
+    update through such a view reach the table behind it. Fabric refuses a plain
+    INSERT there and accepts a MERGE's, which is why every write is one.
+    """
+
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+
+    _standalone(estate)
+
+    assert _bookmark(estate) is not None
+    assert _status(estate)["result"] == "Succeeded"
+    (logged,) = _log(estate)
+    assert logged["task"] == "load"
+    assert logged["result"] == "Succeeded"
+    # The Warehouse the procedure ran in, taken from the connection rather than
+    # baked into the generated statement.
+    assert logged["target"]
+    (statistic,) = _statistics(estate)
+    assert statistic["read"] == len(CLEAN)
+    assert statistic["reload"] is False
+    assert statistic["skip"] is False
 
 
 @weaver_test(remote=True, resources={"tds"})
@@ -491,77 +588,109 @@ def test_a_second_clean_load_moves_the_bookmark_on(estate):
 
     _reset(estate)
     _source_rows(estate, CLEAN)
-    _load(estate, fault_tolerant=False)
+    _standalone(estate)
     first = _bookmark(estate)
 
     _source_rows(estate, CHANGED)
-    _load(estate, fault_tolerant=False)
+    _standalone(estate)
     second = _bookmark(estate)
 
     assert first is not None and second is not None
     assert second > first
+    # And the status is one row per object, updated rather than accumulated,
+    # while the statistics accumulate.
+    assert _status(estate)["result"] == "Succeeded"
+    assert len(_statistics(estate)) == 2
 
 
 @weaver_test(remote=True, resources={"tds"})
-def test_a_load_that_rejected_rows_leaves_the_bookmark_where_it_was(estate):
+def test_a_load_that_rejected_rows_is_rejected_and_keeps_its_bookmark(estate):
     """It has not read its window, whether or not it was told to tolerate them."""
 
     _reset(estate)
     _source_rows(estate, CLEAN)
-    _load(estate, fault_tolerant=False)
+    _standalone(estate)
     clean = _bookmark(estate)
 
     _source_rows(estate, REJECTABLE)
-    rejected = _load(estate, fault_tolerant=True)
+    _standalone(estate, fault_tolerant=True)
 
-    assert rejected.rows_rejected > 0
-    assert rejected.bookmark_datetime is None
     assert _bookmark(estate) == clean
+    assert _status(estate)["result"] == "Rejected"
 
 
 @weaver_test(remote=True, resources={"tds"})
-def test_an_orchestrated_load_leaves_the_bookmark_to_the_run(estate):
-    """``@update_catalogue = 0`` is how a run says it will write the row itself."""
+def test_a_refusal_is_recorded_and_then_raised_to_the_caller(estate):
+    """Both halves, because either alone is the wrong behaviour.
+
+    A refusal that left no row would make the estate silent about exactly the
+    loads somebody needs to look at. A refusal that returned normally would make
+    a failed load indistinguishable from a successful call.
+    """
+
+    from weaver.sql.errors import SqlError
 
     _reset(estate)
-    _source_rows(estate, CLEAN)
+    _source_rows(estate, REJECTABLE)
 
-    result = LoadResult.from_row(
-        estate.executor.call_procedure(
-            f"[_].[Load {SCHEMA}.{estate.object_name}]",
-            inputs=(("fault_tolerant", 0), ("update_catalogue", 0)),
-            outputs=RESULT_PARAMETERS,
-        )
-    )
+    with pytest.raises((SqlError, Exception)) as raised:
+        _standalone(estate, fault_tolerant=False)
 
-    assert result.succeeded is True
-    # It still reports the instant, because the run needs it to advance the row.
-    assert result.bookmark_datetime is not None
+    assert "rejected" in str(raised.value).casefold()
+    # Weaver's own refusal ran under Weaver's control and produced an
+    # unacceptable result, so it is Failed rather than Error.
+    assert _status(estate)["result"] == "Failed"
+    assert _log(estate)[0]["result"] == "Failed"
     assert _bookmark(estate) is None
 
 
 @weaver_test(remote=True, resources={"tds"})
-def test_the_static_warehouse_load_seeds_once_and_then_is_a_no_op(static_estate):
-    static_run = _static_run(static_estate)
-    seed = static_run.extra["seed"]
+def test_a_tolerated_rejection_is_an_answer_rather_than_a_failure(estate):
+    """It returned rather than threw, so the call returns too."""
 
-    assert seed.succeeded is True
-    assert seed.rows_inserted == 2
-    assert static_run.extra["seeded_contents"] == CLEAN
-    result = static_run.result
-    assert result.succeeded is True
-    assert (
-        result.rows_read,
-        result.rows_inserted,
-        result.rows_updated,
-        result.rows_deleted,
-        result.rows_rejected,
-    ) == (0, 0, 0, 0, 0)
+    _reset(estate)
+    _source_rows(estate, REJECTABLE)
+
+    _standalone(estate, fault_tolerant=True)
+
+    assert _status(estate)["result"] == "Rejected"
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_the_entry_point_refuses_an_object_this_warehouse_does_not_load(estate):
+    """Reporting a row for it would put an object in the record the estate lacks."""
+
+    from weaver.sql.errors import SqlError
+
+    with pytest.raises((SqlError, Exception), match="is not a loadable object"):
+        estate.executor.execute_script(
+            "exec [_].[Load] @object_name = N'Sales.NotAThing';"
+        )
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_the_static_warehouse_load_seeds_once_and_then_is_a_no_op(static_estate):
+    """Loaded once, and the record of that is what stops the second one."""
+
+    static_run = _static_run(static_estate)
+    seeded = static_run.extra["seeded"]
+
+    # The seed: it ran, it wrote, and it recorded the bookmark that closes the
+    # gate behind it.
+    assert seeded["contents"] == CLEAN
+    assert [row["inserted"] for row in seeded["statistics"]] == [2]
+    assert seeded["statistics"][0]["skip"] is False
+    assert seeded["bookmark"] is not None
+
+    # The second call: skipped, and the changed source never read.
     assert static_run.contents == CLEAN
     assert static_run.extra["leftovers"] == 0
-    # What closed the gate the second time: the bookmark the seed recorded.
-    assert static_run.extra["bookmark"] is not None
-    assert result.bookmark_datetime is None
+    assert static_run.extra["status"]["result"] == "Skipped"
+    skipped = static_run.extra["statistics"][-1]
+    assert skipped["skip"] is True
+    assert skipped["read"] == 0
+    # And nothing moved the bookmark on, because nothing read a window.
+    assert static_run.extra["bookmark"] == seeded["bookmark"]
 
 
 # --- declared constraints, executed ------------------------------------------
@@ -653,7 +782,7 @@ def _install_wide(
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
-    install_bookmark_reference(executor, catalogue)
+    install_runtime_references(executor, catalogue)
     estate = WideEstate(executor, object_name, retires=incremental)
     _drop_wide(estate)
     executor.execute_script(f"create table [{SCHEMA}].[{estate.raw}] ({WIDE_RAW_DDL});")
@@ -683,7 +812,7 @@ def _reset_wide(estate: WideEstate) -> None:
     statements = [
         f"delete from [{SCHEMA}].[{name}];",
         f"delete from [{SCHEMA}].[{estate.raw}];",
-        forget_bookmark(SCHEMA, name),
+        forget_runtime_state(SCHEMA, name),
     ]
     if estate.retires:
         statements.append(f"delete from [{SCHEMA}].[{estate.retire}];")

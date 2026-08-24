@@ -10,8 +10,8 @@ then on — and it has to do all three in one bundle, because every build binds
 it for.
 
 The other is the reference: a Warehouse that is not the catalogue holds a view
-over the catalogue's ``_.Bookmark``, which is how a generated load procedure
-reaches its own row.
+over each of the catalogue's runtime tables, which is how a generated procedure
+reaches its own bookmark and records what it did.
 
 ``remote`` and Warehouse-only: the catalogue is a Warehouse, the estate's objects
 are T-SQL, so nothing here starts Spark. The upgrade runs against a disposable
@@ -29,7 +29,7 @@ from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
 from support.weaver_test import register_session, weaver_test
 
 import weaver
-from weaver.catalogue.tables import BOOKMARK
+from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES, RUNTIME_TABLES
 from weaver.sessions import ConsoleSession
 
 
@@ -71,11 +71,13 @@ def catalogue_of_its_own(fabric_workspace, clean_disposable_warehouse):
 def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     fabric_workspace, catalogue_of_its_own, tmp_path_factory
 ):
-    """Bootstrap, drop the table, build again, and read the estate once.
+    """Bootstrap, drop every runtime table, build again, and read the estate once.
 
-    The second build is the upgrade: it reads a catalogue whose shape has no
-    ``_.Bookmark``, so nothing may plan reconciliation against it, and the same
-    bundle must leave it there.
+    The second build is the upgrade: it reads a catalogue whose shape has none of
+    the runtime tables, so nothing may plan reconciliation against them, and the
+    same bundle must leave all of them there. Every one at once rather than one
+    of them, because an installation predating the operational-state model lacks
+    the whole family and the build that catches it up is one build.
     """
 
     warehouse = catalogue_of_its_own
@@ -98,16 +100,20 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     first = _built(own_catalogue, estate.path, bind)
     assert first.status == "succeeded", _failures(first)
 
-    # Older than this Weaver, as an installation predating the table would be.
-    warehouse.executor.execute_script(f"drop table [_].[{BOOKMARK.name}];")
+    # Older than this Weaver, as an installation predating the tables would be.
+    warehouse.executor.execute_script(
+        "\n".join(
+            f"drop table if exists [_].[{table.name}];" for table in RUNTIME_TABLES
+        )
+    )
     shape = _catalogue_shape(own_catalogue)
-    assert BOOKMARK.name.casefold() not in shape
+    assert not {table.name.casefold() for table in RUNTIME_TABLES} & shape
 
     second = _built(own_catalogue, estate.path, bind)
     assert second.status == "succeeded", _failures(second)
 
     upgraded = _catalogue_shape(own_catalogue)
-    assert BOOKMARK.name.casefold() in upgraded
+    assert {table.name.casefold() for table in RUNTIME_TABLES} <= upgraded
 
     # A third build reconciles against the table rather than introducing it, so
     # it is the ordinary case again. That it plans nothing is the core suite's
@@ -129,14 +135,18 @@ def _catalogue_shape(workspace) -> set[str]:
 
 
 @weaver_test(remote=True, resources={"rest", "tds"})
-def test_a_built_warehouse_is_given_a_view_over_the_catalogues_bookmark(
+def test_a_built_warehouse_is_given_views_over_the_catalogues_runtime_tables(
     fabric_workspace, clean_disposable_warehouse, tmp_path_factory
 ):
-    """What a generated load procedure says ``[_].[Bookmark]`` to reach.
+    """What a generated procedure says ``[_].[Bookmark]`` to reach, and the rest.
 
     Installed by the ordinary build into a Warehouse that is *not* the catalogue,
     which is the case that needs a reference: the catalogue Warehouse holds the
-    table itself and is given nothing.
+    tables themselves and is given nothing.
+
+    One assertion over the whole family rather than one per table: they are
+    installed by one action and a reference missing from it would be a gap in the
+    same decision.
     """
 
     warehouse = clean_disposable_warehouse
@@ -146,16 +156,19 @@ def test_a_built_warehouse_is_given_a_view_over_the_catalogues_bookmark(
     built = _built(fabric_workspace, estate.path, f"Warehouse/{name}=Reporting")
     assert built.status == "succeeded", _failures(built)
 
-    # A view rather than a table: the rows live in the catalogue Warehouse, and
-    # this Warehouse reads and merges them across the boundary through it.
-    assert CatalogObject(schema="_", name=BOOKMARK.name, kind="V") in user_objects(
-        warehouse.executor
-    )
-    # And it resolves — a three-part name in another database, selected here.
-    counted = warehouse.executor.query(
-        f"select count(*) as n from [_].[{BOOKMARK.name}]"
-    )
-    assert int(dict(counted[0])["n"]) >= 0
+    # Views rather than tables: the rows live in the catalogue Warehouse, and
+    # this Warehouse reads and merges them across the boundary through them.
+    present = user_objects(warehouse.executor)
+    assert {
+        CatalogObject(schema="_", name=table.name, kind="V")
+        for table in PRESENTED_RUNTIME_TABLES
+    } <= present
+    # And each resolves — a three-part name in another database, selected here.
+    for table in PRESENTED_RUNTIME_TABLES:
+        counted = warehouse.executor.query(
+            f"select count(*) as n from [_].[{table.name}]"
+        )
+        assert int(dict(counted[0])["n"]) >= 0, table.name
 
 
 #: Which statement drops each kind of object, in the order dependencies allow: a

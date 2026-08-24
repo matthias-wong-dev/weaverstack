@@ -23,7 +23,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
-from support import external_estate
+from support import external_estate, provisioning
 from support.build_env import (
     BuildEnv,
     InstallOutcome,
@@ -51,18 +51,24 @@ WAREHOUSE_READY_TIMEOUT = 600.0
 WAREHOUSE_POLL_INTERVAL = 5.0
 
 
-def _timed_session_run(session, label: str, body: str):
+def _timed_session_run(session, label: str, body: str, *, phase: str | None = None):
     """Run one meaningful Fabric phase and leave a compact timing breadcrumb.
 
-    Labels remain a fixture-level timing aid; resource events come from the
-    production Livy boundary.
+    ``phase`` names a provisioning phase, whose cost goes to the harness's own
+    ledger (``support.provisioning``) and appears in the terminal summary. It is
+    the harness's crossing rather than a Weaver Session's, so it is not recorded
+    on one: a test's declared resources are what its subject crossed, and fixture
+    plumbing does not belong in that comparison.
     """
 
     started = time.monotonic()
     try:
         return session.run(body)
     finally:
-        print(f"Fabric {label}: {time.monotonic() - started:.2f}s")
+        elapsed = time.monotonic() - started
+        if phase is not None:
+            provisioning.record(phase, elapsed, resource="livy")
+        print(f"Fabric {label}: {elapsed:.2f}s")
 
 
 @pytest.fixture(scope="session")
@@ -877,8 +883,8 @@ def warehouse_primitive_estate(
     from weaver.targets import ItemRef
 
     warehouse = session_disposable_warehouse
-    # A build gives this Warehouse the catalogue's `_.Bookmark`, so the catalogue
-    # has to hold the table that reference points at.
+    # A build gives this Warehouse the catalogue's runtime tables, so the
+    # catalogue has to hold the tables those references point at.
     fabric_initialise_catalogue()
     wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
     catalogue = bound_target(
@@ -1081,8 +1087,8 @@ def _fabric_build_context(
     staging_lh,
     session,
     weaver_repo_fixture,
+    weaver_session,
     warehouse=None,
-    before_reset=None,
 ):
     """A build environment run entirely inside Fabric over Livy.
 
@@ -1133,22 +1139,25 @@ def _fabric_build_context(
     repository_root = resolver.files_root(staging).join(*repository_relative)
 
     destination = resolver.spark_destination(target)
-    if before_reset is not None:
-        before_reset()
-    _empty_the_target(
-        session,
-        store,
-        target,
-        destination,
-        workspace,
-        warehouse=warehouse_name,
-    )
+    # Everything the previous module queued is written before the target is
+    # emptied, so a late row cannot land in an estate the next module owns.
+    weaver_session.flush()
+    with provisioning.measured(provisioning.RESET, resource="livy"):
+        _empty_the_target(
+            session,
+            store,
+            target,
+            destination,
+            workspace,
+            warehouse=warehouse_name,
+        )
 
     def install_repo() -> None:
         destination = repository_root
-        if store.exists(destination):
-            store.delete(destination, recursive=True)
-        _upload_tree(store, weaver_repo_fixture.path, destination)
+        with provisioning.measured(provisioning.STAGE_REPOSITORY, resource="onelake"):
+            if store.exists(destination):
+                store.delete(destination, recursive=True)
+            _upload_tree(store, weaver_repo_fixture.path, destination)
 
     def remove_repo() -> None:
         store.delete(repository_root, recursive=True)
@@ -1189,7 +1198,7 @@ def _fabric_build_context(
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
             "from weaver.build_bundle.shortcut_sources import ("
-            "physical_shortcuts, read_bookmark_source, read_shortcut_sources)\n"
+            "physical_shortcuts, read_runtime_sources, read_shortcut_sources)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1216,8 +1225,8 @@ def _fabric_build_context(
             "    physical_shortcuts(repository.shortcuts, bindings=bindings),\n"
             "    resolver=resolver, store=store)\n"
             # The same for the catalogue's own table, so a target built here is
-            # given the `_.Bookmark` reference a target built by the product is.
-            "bookmark_source = read_bookmark_source(\n"
+            # given the runtime-table references a target built by the product is.
+            "runtime_sources = read_runtime_sources(\n"
             "    resolver=resolver, catalogue=workspace.catalogue_item)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
@@ -1227,12 +1236,12 @@ def _fabric_build_context(
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims,\n"
             "    shortcut_sources=shortcut_sources,\n"
-            "    bookmark_source=bookmark_source)\n"
+            "    runtime_sources=runtime_sources)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
         payload = _timed_session_run(
-            session, "Lakehouse bundle generation", body
+            session, "Lakehouse bundle generation", body, phase=provisioning.GENERATE
         ).payload
         plan = BuildPlan.from_mapping(payload["plan"])
         # A desktop-addressed (https) handle to the same physical bundle, so the
@@ -1267,7 +1276,7 @@ def _fabric_build_context(
             "for a in report.action_results()]})\n"
         )
         payload = _timed_session_run(
-            session, "Lakehouse bundle installation", body
+            session, "Lakehouse bundle installation", body, phase=provisioning.INSTALL
         ).payload
         outcome = InstallOutcome(
             status=payload["status"],
@@ -1474,7 +1483,7 @@ def fabric_build_env(
         fabric_staging_lakehouse,
         livy_session,
         weaver_repo_fixture,
-        before_reset=weaver_session.flush,
+        weaver_session=weaver_session,
     ) as env:
         yield env
 
@@ -1519,9 +1528,10 @@ def _warehouse_build_env(
 
     def install_repo() -> None:
         destination = repository_root
-        if store.exists(destination):
-            store.delete(destination, recursive=True)
-        _upload_tree(store, weaver_repo_fixture.path, destination)
+        with provisioning.measured(provisioning.STAGE_REPOSITORY, resource="onelake"):
+            if store.exists(destination):
+                store.delete(destination, recursive=True)
+            _upload_tree(store, weaver_repo_fixture.path, destination)
 
     def remove_repo() -> None:
         store.delete(repository_root, recursive=True)
@@ -1547,7 +1557,7 @@ def _warehouse_build_env(
             "from weaver.build_bundle.workflow import (read_target_inventories, "
             "read_reconciled_catalogue)\n"
             "from weaver.build_bundle.shortcut_sources import ("
-            "physical_shortcuts, read_bookmark_source, read_shortcut_sources)\n"
+            "physical_shortcuts, read_runtime_sources, read_shortcut_sources)\n"
             "from weaver.build_bundle.planner import generate_item_build_bundle\n"
             f"workspace = {_workspace_literal()}\n"
             "store = store_for(workspace)\n"
@@ -1574,8 +1584,8 @@ def _warehouse_build_env(
             "    physical_shortcuts(repository.shortcuts, bindings=bindings),\n"
             "    resolver=resolver, store=store)\n"
             # The same for the catalogue's own table, so a target built here is
-            # given the `_.Bookmark` reference a target built by the product is.
-            "bookmark_source = read_bookmark_source(\n"
+            # given the runtime-table references a target built by the product is.
+            "runtime_sources = read_runtime_sources(\n"
             "    resolver=resolver, catalogue=workspace.catalogue_item)\n"
             "bundle = generate_item_build_bundle(\n"
             "    repository,\n"
@@ -1585,12 +1595,12 @@ def _warehouse_build_env(
             "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
             "    stale_claims=reconciled.stale_claims,\n"
             "    shortcut_sources=shortcut_sources,\n"
-            "    bookmark_source=bookmark_source)\n"
+            "    runtime_sources=runtime_sources)\n"
             "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
             "'plan': bundle.plan.to_mapping()})\n"
         )
         payload = _timed_session_run(
-            session, "Warehouse bundle generation", body
+            session, "Warehouse bundle generation", body, phase=provisioning.GENERATE
         ).payload
         plan = BuildPlan.from_mapping(payload["plan"])
         return BuildBundle(
@@ -1620,7 +1630,7 @@ def _warehouse_build_env(
             "for a in report.action_results()]})\n"
         )
         payload = _timed_session_run(
-            session, "Warehouse bundle installation", body
+            session, "Warehouse bundle installation", body, phase=provisioning.INSTALL
         ).payload
         outcome = InstallOutcome(
             status=payload["status"],
@@ -1748,7 +1758,7 @@ def fabric_lakehouse_journey(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
-        before_reset=request.getfixturevalue("weaver_session").flush,
+        weaver_session=request.getfixturevalue("weaver_session"),
     ) as env:
         yield Journey(env, "lakehouse")
 
@@ -1774,7 +1784,7 @@ def fabric_cross_item_journey(request, weaver_repo_fixture):
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
         warehouse=warehouse,
-        before_reset=request.getfixturevalue("weaver_session").flush,
+        weaver_session=request.getfixturevalue("weaver_session"),
     ) as env:
         env.warehouse = warehouse
         yield Journey(env, "cross-item")
@@ -1792,7 +1802,7 @@ def fabric_lakehouse_estate(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
-        before_reset=request.getfixturevalue("weaver_session").flush,
+        weaver_session=request.getfixturevalue("weaver_session"),
     ) as env:
         yield _install_estate(env)
 
@@ -1821,7 +1831,7 @@ def fabric_mixed_estate(request, weaver_repo_fixture):
         request.getfixturevalue("livy_session"),
         weaver_repo_fixture,
         warehouse=warehouse,
-        before_reset=request.getfixturevalue("weaver_session").flush,
+        weaver_session=request.getfixturevalue("weaver_session"),
     ) as env:
         env.warehouse = warehouse
         yield _install_estate(env)

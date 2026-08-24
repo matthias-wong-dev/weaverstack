@@ -87,4 +87,60 @@ class AssumptionResult:
         )
 
 
-__all__ = ["AssumptionResult", "TestResult"]
+def result_from_rows(frame, *, kind: str, collect: bool = False):
+    """One validation's judgement, from the rows its ``read()`` returned.
+
+    One implementation, because "what a validation found" must mean the same
+    thing wherever the validation ran: an orchestrated run and a direct call
+    both reach here.
+
+    Evaluated once either way. A collected run counts rows it already has; a
+    suppressed one aggregates by side in a single action. Two counts would be two
+    evaluations of the comparison, between which the tables can move.
+
+    Returns the result and the diagnostic rows the caller asked for, or None for
+    the rows when it did not: they carry whatever the validation selected, and a
+    durable record of them would put data into the estate's own evidence.
+    """
+
+    from ..declaration.metadata import ASSUMPTION
+    from .test_compare import ACTUAL, EXPECTED, SIDE_COLUMN
+
+    if kind == ASSUMPTION:
+        if collect:
+            rows = _collected(frame)
+            return AssumptionResult(violation_count=len(rows)), rows
+        return AssumptionResult(violation_count=int(frame.count())), None
+
+    if collect:
+        rows = _collected(frame)
+        sides = [str(row[SIDE_COLUMN]) for row in rows]
+        return (
+            TestResult(
+                missing_count=sum(1 for side in sides if side == EXPECTED),
+                unexpected_count=sum(1 for side in sides if side == ACTUAL),
+            ),
+            rows,
+        )
+
+    # One row per side at most, so this collects counts and never evidence.
+    by_side = {
+        str(row[SIDE_COLUMN]): int(row["count"])
+        for row in frame.groupBy(SIDE_COLUMN).count().collect()
+    }
+    return (
+        TestResult(
+            missing_count=by_side.get(EXPECTED, 0),
+            unexpected_count=by_side.get(ACTUAL, 0),
+        ),
+        None,
+    )
+
+
+def _collected(frame) -> tuple:
+    return tuple(
+        row.asDict() if hasattr(row, "asDict") else dict(row) for row in frame.collect()
+    )
+
+
+__all__ = ["AssumptionResult", "TestResult", "result_from_rows"]

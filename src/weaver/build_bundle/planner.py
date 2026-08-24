@@ -37,7 +37,6 @@ from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
 from ..store import Store
-from .bookmarks import render_bookmark_reconciliation, render_bookmark_reference
 from .bundle import (
     SUPPORTED_FORMAT_VERSION,
     BuildBundle,
@@ -61,6 +60,11 @@ from .physical import (
     item_schema_stage,
 )
 from .prune import TargetInventory
+from .runtime_tables import (
+    render_runtime_references,
+    render_runtime_state_reconciliation,
+    runtime_state_invalidation,
+)
 from .shortcuts import plan_item_shortcuts
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
 from .targets import WAREHOUSE_TARGET, ItemBindings, WarehouseBinding
@@ -77,7 +81,7 @@ def generate_item_build_bundle(
     stale_claims: tuple = (),
     catalogue_binding: WarehouseBinding,
     shortcut_sources: Mapping[str, object] | None = None,
-    bookmark_source: object | None = None,
+    runtime_sources: object | None = None,
 ) -> BuildBundle:
     """Freeze the one incremental build model into an installable bundle."""
 
@@ -173,19 +177,22 @@ def generate_item_build_bundle(
     if catalogue_before is not None:
         stages.append(catalogue_before)
 
-    # Bookmarks are invalidated here, between decertification and the first
-    # physical action, and never after it — see :mod:`weaver.build_bundle.bookmarks`.
-    # Against the catalogue this build read: which rows are obsolete is arithmetic
-    # over rows it holds, and a build creating `_.Bookmark` read none.
-    bookmarks = render_bookmark_reconciliation(
+    # Current state is invalidated here, between decertification and the first
+    # physical action, and never after it — see
+    # :mod:`weaver.build_bundle.runtime_tables`. Against the catalogue this build
+    # read: which rows are obsolete is arithmetic over rows it holds, and a build
+    # creating the tables read none.
+    runtime_state = runtime_state_invalidation(
         repository,
         items=tuple(target_by_item),
         selected_for_build=selected_for_build,
         catalogue=catalogue,
-        catalogue_target=catalogue_target,
     )
-    if bookmarks is not None:
-        stages.append(bookmarks)
+    reconciliation = render_runtime_state_reconciliation(
+        runtime_state, catalogue_target=catalogue_target
+    )
+    if reconciliation is not None:
+        stages.append(reconciliation)
 
     # Shortcut destinations this build wanted but could not materialise. They must
     # not reach the Registry: a row there means the object's work succeeded, and
@@ -214,7 +221,7 @@ def generate_item_build_bundle(
                 removed=removed,
                 registered=registered,
                 catalogue_target=catalogue_target,
-                bookmark_source=bookmark_source,
+                runtime_sources=runtime_sources,
             )
             layer_stages.extend(planned.stages)
             omitted.extend(planned.omitted)
@@ -256,6 +263,7 @@ def generate_item_build_bundle(
             sorted(omitted, key=lambda node: (node.node_id, node.reason))
         ),
         target_changes=target_changes,
+        runtime_state=runtime_state,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(
@@ -371,7 +379,7 @@ def plan_item_build(
     selected_loads=(),
     removed=(),
     shortcut_sources=None,
-    bookmark_source=None,
+    runtime_sources=None,
 ) -> PlannedItem:
     """One item's physical plan, from prepared inputs.
 
@@ -461,18 +469,18 @@ def plan_item_build(
     stages.extend(
         item_load_removals(removed, item=item, target=target, registered=registered)
     )
-    # Behind the artefacts, in the phase they are installed in: the reference
-    # exists for them, and nothing built reads a bookmark.
-    reference = render_bookmark_reference(
+    # Behind the artefacts, in the phase they are installed in: the references
+    # exist for them, and nothing built reads a runtime table.
+    references = render_runtime_references(
         repository,
         item=item,
         target=target,
         inventory=inventory,
         catalogue_target=catalogue_target,
-        bookmark_source=bookmark_source,
+        runtime_sources=runtime_sources,
     )
-    if reference is not None:
-        stages.append(reference)
+    if references is not None:
+        stages.append(references)
     return PlannedItem(
         stages=tuple(stages),
         omitted=shortcuts.omitted,

@@ -35,6 +35,7 @@ RESULT_COLUMNS = (
     "rows_rejected",
     "error_message",
     "bookmark_datetime",
+    "is_static_skip",
 )
 
 
@@ -61,6 +62,11 @@ class LoadResult:
     #: it, so it comes from the clock the load's own reads were timed by rather
     #: than from whichever machine happened to be orchestrating.
     bookmark_datetime: datetime | None = None
+    #: Whether a ``Static`` object was skipped because a clean load had already
+    #: run for this incarnation. Reported rather than inferred from the counts: a
+    #: skip and a load that read an empty window are both a success with nothing
+    #: moved, and only the engine that ran it knows which happened.
+    is_static_skip: bool = False
 
     @classmethod
     def failure(cls, message: str, **counts: int) -> "LoadResult":
@@ -111,6 +117,7 @@ class LoadResult:
             rows_rejected=int(values["rows_rejected"]),
             error_message=values["error_message"],
             bookmark_datetime=_instant(values["bookmark_datetime"]),
+            is_static_skip=bool(values["is_static_skip"]),
         )
 
 

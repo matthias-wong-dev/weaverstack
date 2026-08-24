@@ -10,8 +10,11 @@ from .tables import (
     BOOKMARK,
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
+    LOAD_STATISTIC,
+    LOAD_STATUS,
     LOG,
     RUNTIME_TABLES,
+    TEST_STATUS,
     CatalogueColumn,
 )
 
@@ -39,9 +42,34 @@ BOOKMARK_LINEAGE = (
     "from a declaration, and never populated by a load."
 )
 
+LOAD_STATUS_LINEAGE = (
+    "Maintained by Weaver's own build and load lifecycle: a build removes the "
+    "rows of objects it rebuilds or no longer loads, and each settled load "
+    "records how it ended. Never authored, never projected from a declaration, "
+    "and never populated by a load's own query."
+)
+
+LOAD_STATISTIC_LINEAGE = (
+    "Appended by Weaver's own loads as each one settles. Never authored, never "
+    "projected from a declaration, and never removed by a rebuild."
+)
+
+TEST_STATUS_LINEAGE = (
+    "Maintained by Weaver's own build and validation lifecycle: a build removes "
+    "the rows of validations it rebuilds or no longer installs, and each settled "
+    "validation records what it found. Never authored and never projected from a "
+    "declaration."
+)
+
 #: What each runtime-maintained table says about where its rows come from. Held
 #: here rather than on the table, because a lineage is declaration prose.
-RUNTIME_LINEAGE = {LOG.name: LOG_LINEAGE, BOOKMARK.name: BOOKMARK_LINEAGE}
+RUNTIME_LINEAGE = {
+    LOG.name: LOG_LINEAGE,
+    BOOKMARK.name: BOOKMARK_LINEAGE,
+    LOAD_STATUS.name: LOAD_STATUS_LINEAGE,
+    LOAD_STATISTIC.name: LOAD_STATISTIC_LINEAGE,
+    TEST_STATUS.name: TEST_STATUS_LINEAGE,
+}
 
 SCHEMA_DESCRIPTION = (
     "Weaver's own catalogue. These tables record what Weaver has built and "

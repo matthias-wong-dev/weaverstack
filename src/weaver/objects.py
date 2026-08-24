@@ -10,7 +10,7 @@ from functools import wraps
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .errors import LoadError
+from .errors import LoadError, WeaverError
 from .lakehouse import Lakehouse, default_lakehouse
 
 if TYPE_CHECKING:  # pragma: no cover - for type readers only
@@ -29,6 +29,13 @@ STAGING_SUFFIX = "_Staging"
 #: :func:`weaver.declaration.source.object_id_for_filename` because the authoring
 #: surface must not import the parser.
 CLASS_ID_SEPARATOR = "__"
+
+#: The two kinds of validation, as their declarations spell them. Repeated from
+#: :mod:`weaver.declaration.metadata` for the same reason: this module is
+#: imported by authored code and pulls in no parser.
+#: ``tests/test_objects_declaration.py`` asserts the two are identical.
+TEST = "Test"
+ASSUMPTION = "Assumption"
 
 
 class WeaverObject:
@@ -217,29 +224,55 @@ class WeaverObject:
             f'{type(self).__name__}(spark, catalogue="Warehouse/<name>").'
         )
 
-    def _bookmarked(self, result, began, *, update_catalogue: bool):
+    def _bookmarked(self, result, began):
         """One load's result, carrying the instant a clean run of it began.
 
-        Always reported, so whoever records it has the instant this engine took.
-        Written here only when this load owns that decision: a run passes
-        ``update_catalogue=False`` and records the node itself, beside the
-        evidence that it settled.
+        Reported and never written: whoever records the load advances the
+        bookmark, and this is where the instant they advance it to comes from.
+        Taken by the engine that ran the load rather than by whatever happened to
+        be orchestrating it.
 
-        Only a clean success, either way. A load that rejected a row has not read
-        its window.
+        Only a clean success. A load that rejected a row has not read its window.
         """
 
         from dataclasses import replace as _replace
 
         if not result.succeeded or result.rows_rejected:
             return result
-        if update_catalogue:
-            from .catalogue.claims import bookmark_row
-            from .catalogue.tables import BOOKMARK
-
-            self._catalogue.update(BOOKMARK, bookmark_row(self._installed, began))
-            self._catalogue.flush()
         return _replace(result, bookmark_datetime=began)
+
+    def _physical_target(self) -> str:
+        """The physical target this object materialises into, as a log names it.
+
+        A Python object materialises into a Lakehouse: its rows are Delta files
+        and its files are in the Files area, both under the destination it
+        resolved.
+        """
+
+        return f"Lakehouse/{self.lakehouse.name}"
+
+    def _record(self, settled) -> None:
+        """Record one settled unit of this object's own work, and wait for it.
+
+        Synchronous, which is the difference between the two interfaces rather
+        than a setting on one of them: an orchestrated run records every node
+        through one queue and flushes once at the end, and a caller who ran this
+        object by hand is told it finished only once the record has landed.
+        """
+
+        from .run.record import RunRecord, new_workflow_id
+
+        record = RunRecord(
+            workflow_id=new_workflow_id(),
+            task_type=self._task_type,
+            catalogue=self._anchor(),
+        )
+        record.settled(settled)
+        record.flush()
+
+    #: What this object's work is recorded as. A load unless a subclass says
+    #: otherwise; a validation says otherwise.
+    _task_type = "load"
 
     def read(self):
         raise NotImplementedError(f"{type(self).__name__} must implement read()")
@@ -282,6 +315,83 @@ def _sentinel():
     from .catalogue.tables import BOOKMARK_SENTINEL
 
     return BOOKMARK_SENTINEL
+
+
+def _recorded_load(object, *arguments) -> "LoadResult":
+    """One object's load, with its operational record written before it returns.
+
+    Anything the load raises is recorded and then re-raised unchanged. A refusal
+    Weaver itself named is Failed and anything else is Error, which is the line
+    ``_.Load`` draws from ``error_number()``.
+    """
+
+    # Before the try, so the refusal to *start* is never recorded: an unanchored
+    # object has no catalogue to record into and no identity to record against.
+    object._anchor()
+    started = datetime.now(timezone.utc)
+    try:
+        result = object._load(*arguments)
+    except Exception as raised:
+        object._record(
+            _settled(
+                object,
+                _carried(raised),
+                started=started,
+                raised=True,
+                refused=isinstance(raised, WeaverError),
+            )
+        )
+        raise
+    object._record(_settled(object, result, started=started))
+    return result
+
+
+def _settled(object, result, *, started, raised: bool = False, refused: bool = False):
+    """One standalone load, in the terms every runtime table records."""
+
+    from .run.record import settled_load
+
+    return settled_load(
+        object._installed,
+        result,
+        physical_target=object._physical_target(),
+        started=started,
+        completed=datetime.now(timezone.utc),
+        raised=raised,
+        refused=refused,
+    )
+
+
+def _carried(raised: BaseException):
+    """Whatever counts the failure was carrying, or none it can report."""
+
+    from .runtime.load_result import LoadResult
+
+    carried = getattr(raised, "result", None)
+    return (
+        carried
+        if carried is not None
+        else LoadResult.failure(f"{type(raised).__name__}: {raised}")
+    )
+
+
+def _refuse_no_staging(contract, what: str, instead: str) -> None:
+    """``None`` from a non-incremental ``read()``, which cannot mean "no work".
+
+    For a non-incremental source, staging is the whole truth: an explicitly
+    empty relation or folder retires everything the target holds, which is a
+    load. So there is nothing ``None`` could be read as, and an author is told
+    what to write instead.
+    """
+
+    if contract.incremental:
+        return
+    raise LoadError(
+        f"{contract.qualified}: a non-incremental {what}'s read() cannot return "
+        "None. The source is the whole truth, so an empty one retires everything "
+        f"the target holds. Return {instead}, or declare Incremental: true, where "
+        "None means there is no work."
+    )
 
 
 class Folder(WeaverObject):
@@ -435,18 +545,26 @@ class Folder(WeaverObject):
         destination = self.path()
         return destination.with_name(f"{destination.name}{STAGING_SUFFIX}")
 
-    def load(
-        self, fault_tolerant: bool = False, *, update_catalogue: bool = True
-    ) -> "LoadResult":
-        """Run this folder's ``read()`` and publish what it staged.
+    def load(self, fault_tolerant: bool = False) -> "LoadResult":
+        """Run this folder's load and record what it did.
 
         Independently runnable, needing no repository and no bundle::
 
             Sales__Export(spark, catalogue="Warehouse/Weaver").load()
 
-        ``update_catalogue`` says whether this load records itself. A direct load
-        does; an orchestrated run passes ``False`` and records the node itself,
-        beside the evidence that it settled, so one row has one writer.
+        The standalone interface: it needs the catalogue, records this folder's
+        operational state, and flushes before returning. An orchestrated run
+        calls :meth:`_load` and records what settled itself, so one row has one
+        writer.
+        """
+
+        return _recorded_load(self, fault_tolerant)
+
+    def _load(self, fault_tolerant: bool = False) -> "LoadResult":
+        """Run this folder's ``read()`` and publish what it staged.
+
+        The load itself and nothing else: it writes no operational state, so
+        whoever called it owns the record.
 
         Staging is reset, issued to ``read()``, published, and removed on
         success — retained on failure, as the one directory worth looking at.
@@ -470,31 +588,50 @@ class Folder(WeaverObject):
         # The bookmark decides it, not the folder's contents: Static means "load
         # this once", and a bookmark is the record of whether that has happened.
         if contract.static and self.bookmark() > _sentinel():
-            return LoadResult(succeeded=True)
+            return LoadResult(succeeded=True, is_static_skip=True)
 
         issued = new_staging_folder(self.path(), self._staging_path())
         self._issued_staging = issued
         try:
             staged, deletes = self._read_result()
-            if staged is not issued:
+            if staged is None:
+                _refuse_no_staging(contract, "folder", "self.staging_folder()")
+            if staged is None and deletes is None:
+                # An incremental source that already knows there is nothing to
+                # do: no file is staged and none is claimed, so nothing is
+                # scanned and nothing is published.
+                result = LoadResult(succeeded=True)
+            elif staged is None:
+                # Deletion only. The issued staging is empty, which for an
+                # incremental folder already means "nothing new", so the
+                # reconciliation retires exactly the files claimed.
+                result = load_folder(
+                    contract=contract,
+                    destination=self.path(),
+                    staging=issued.path,
+                    deletes=deletes,
+                    fault_tolerant=fault_tolerant,
+                )
+            elif staged is not issued:
                 raise LoadError(
                     f"{type(self).__name__}.read() returned "
                     f"{type(staged).__name__} {staged!r} rather than the folder "
                     "self.staging_folder() issued. Return self.staging_folder()."
                 )
-            result = load_folder(
-                contract=contract,
-                destination=self.path(),
-                staging=issued.path,
-                deletes=deletes,
-                fault_tolerant=fault_tolerant,
-            )
+            else:
+                result = load_folder(
+                    contract=contract,
+                    destination=self.path(),
+                    staging=issued.path,
+                    deletes=deletes,
+                    fault_tolerant=fault_tolerant,
+                )
         finally:
             # Cleared whatever happened, so a second load cannot be handed the
             # first one's directory.
             self._issued_staging = None
         remove_staging(issued.path)
-        return self._bookmarked(result, began, update_catalogue=update_catalogue)
+        return self._bookmarked(result, began)
 
 
 class Table(WeaverObject):
@@ -546,7 +683,10 @@ class Table(WeaverObject):
                 "from it is what retires the row. Return the staging frame, or "
                 "declare Incremental: true."
             )
-        return normalise_read_result(returned)
+        staged, deletes = normalise_read_result(returned)
+        if staged is None:
+            _refuse_no_staging(contract, "table", "the staging frame")
+        return staged, deletes
 
     def empty_dataframe(self) -> Any:
         """This table's shape with no rows — an incremental load's no-op result.
@@ -561,18 +701,30 @@ class Table(WeaverObject):
         self,
         fault_tolerant: bool = False,
         ignore_stability_threshold: bool = False,
-        *,
-        update_catalogue: bool = True,
     ) -> "LoadResult":
-        """Run this table's ``read()`` and write what it staged.
+        """Run this table's load and record what it did.
 
         Independently runnable, needing no repository and no bundle::
 
             Sales__Customer(spark, catalogue="Warehouse/Weaver").load()
 
-        ``update_catalogue`` says whether this load records itself. A direct load
-        does; an orchestrated run passes ``False`` and records the node itself,
-        beside the evidence that it settled, so one row has one writer.
+        The standalone interface: it needs the catalogue, records this table's
+        operational state, and flushes before returning. An orchestrated run
+        calls :meth:`_load` and records what settled itself, so one row has one
+        writer.
+        """
+
+        return _recorded_load(self, fault_tolerant, ignore_stability_threshold)
+
+    def _load(
+        self,
+        fault_tolerant: bool = False,
+        ignore_stability_threshold: bool = False,
+    ) -> "LoadResult":
+        """Run this table's ``read()`` and write what it staged.
+
+        The load itself and nothing else: it writes no operational state, so
+        whoever called it owns the record.
 
         ``ignore_stability_threshold`` waives the declared delete and update
         limits for one run, for when a very large change is the correct answer.
@@ -594,11 +746,20 @@ class Table(WeaverObject):
         # table somebody populated by hand is still loaded, and a table a clean
         # load emptied is still skipped.
         if contract.static and self.bookmark() > _sentinel():
-            return LoadResult(succeeded=True)
+            return LoadResult(succeeded=True, is_static_skip=True)
 
         # Staging: unvalidated, unreconciled, nothing yet classified as new or
         # changed.
         staged, deletes = self._staged(contract)
+        if staged is None and deletes is None:
+            # An incremental source that already knows there is nothing to do.
+            # Nothing is staged and nothing is claimed, so no Spark job runs to
+            # establish that a frame the author never built would have been empty.
+            return self._bookmarked(LoadResult(succeeded=True), began)
+        if staged is None:
+            # Deletion only. The target's own shape stands in for staging, so the
+            # reconciliation retires exactly the rows claimed and inserts none.
+            staged = self.empty_dataframe()
         return self._bookmarked(
             load_table(
                 self.spark,
@@ -610,7 +771,6 @@ class Table(WeaverObject):
                 ignore_stability_threshold=ignore_stability_threshold,
             ),
             began,
-            update_catalogue=update_catalogue,
         )
 
 
@@ -687,7 +847,92 @@ class View(WeaverObject):
         return self.spark.table(self.lakehouse.qualify(*self.identity))
 
 
-class Assumption(WeaverObject):
+class _Validation(WeaverObject):
+    """What a Test and an Assumption share: they judge rather than materialise.
+
+    A validation has two interfaces, and they divide the same way a loadable
+    object's do.
+
+    ``read()`` is the primitive: it evaluates the validation and returns the rows
+    that are the evidence — the discrepancies for a Test, the contradicting rows
+    for an Assumption. It records nothing and needs no catalogue, so an author
+    can call it and look at what came back. An orchestrated run calls it and
+    records centrally.
+
+    ``run()`` is the standalone interface: it needs the catalogue, calls
+    ``read()``, records what the validation found, and flushes before returning::
+
+        Sales__OrdersReconcile(spark, catalogue="Warehouse/Weaver").run()
+    """
+
+    #: A validation's work is recorded as a test, whichever kind it is: the two
+    #: are told apart by the row's own ``Test type``.
+    _task_type = "test"
+
+    #: Which kind of validation this is, as its declaration spells it.
+    _validation_kind = ""
+
+    def run(self):
+        """Evaluate this validation and record what it found.
+
+        Returns the validation's own result — discrepancy counts for a Test,
+        violation counts for an Assumption — rather than the rows. The rows are
+        what ``read()`` gives; a durable record of them would put whatever the
+        validation selected into the estate's own evidence.
+
+        A validation that could not be evaluated is recorded as an Error and then
+        raised. It found nothing, and reporting zero discrepancies for it is the
+        one answer a validation must never give. The generated ``_.Test`` does
+        the same inside its own TRY/CATCH.
+        """
+
+        self._anchor()
+        started = datetime.now(timezone.utc)
+        try:
+            result = self._evaluated()
+        except Exception as unevaluated:
+            self._record(
+                self._settled_validation(
+                    self._failed_to_run(f"{type(unevaluated).__name__}: {unevaluated}"),
+                    started=started,
+                    raised=True,
+                )
+            )
+            raise
+        self._record(self._settled_validation(result, started=started))
+        return result
+
+    def _evaluated(self):
+        """What this validation found, from the rows its ``read()`` returned."""
+
+        from .runtime.validation_result import result_from_rows
+
+        result, _rows = result_from_rows(self.read(), kind=self._validation_kind)
+        return result
+
+    def _failed_to_run(self, message: str):
+        """A result in this validation's own vocabulary, carrying no counts."""
+
+        from .runtime.validation_result import AssumptionResult, TestResult
+
+        kind = TestResult if self._validation_kind == TEST else AssumptionResult
+        return kind.failed_to_run(message)
+
+    def _settled_validation(self, result, *, started, raised: bool = False):
+        from .run.record import settled_validation
+
+        return settled_validation(
+            self._installed,
+            result,
+            physical_target=self._physical_target(),
+            kind=self._validation_kind,
+            started=started,
+            completed=datetime.now(timezone.utc),
+            raised=raised,
+        )
+
+
+class Assumption(_Validation):
     """A statement about the estate that returns the rows contradicting it.
 
     An Assumption succeeds when it returns nothing::
@@ -713,6 +958,8 @@ class Assumption(WeaverObject):
     way it is an ordinary Weaver object.
     """
 
+    _validation_kind = ASSUMPTION
+
     def read(self):
         raise NotImplementedError(
             f"{type(self).__name__} must implement read(), returning the rows "
@@ -720,7 +967,7 @@ class Assumption(WeaverObject):
         )
 
 
-class Test(WeaverObject):
+class Test(_Validation):
     """A comparison of an expected relation with an actual one.
 
     A Test succeeds when the two are the same set::
@@ -759,6 +1006,8 @@ class Test(WeaverObject):
     #: collector recognises only the name, so it would warn about every module
     #: that imports this one into a test.
     __test__ = False
+
+    _validation_kind = TEST
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

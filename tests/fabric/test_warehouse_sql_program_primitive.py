@@ -30,8 +30,8 @@ from types import SimpleNamespace
 import pytest
 from sql_support import (
     PROCEDURE_ITEM,
-    forget_bookmark,
-    install_bookmark_reference,
+    forget_runtime_state,
+    install_runtime_references,
 )
 from support.weaver_test import weaver_test
 
@@ -170,7 +170,7 @@ def warehouse(
         f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
-    install_bookmark_reference(executor, fabric_workspace.catalogue_item.name)
+    install_runtime_references(executor, fabric_workspace.catalogue_item.name)
     for table, columns in (
         (
             "ProgramCustomer",
@@ -201,7 +201,7 @@ def _install(executor, name: str, source: str):
         document.create_load(item=WeaverItemId(*PROCEDURE_ITEM)).payload.decode("utf-8")
     )
     # Each case starts from "never cleanly loaded", whatever the last one left.
-    executor.execute_script(forget_bookmark(SCHEMA, name))
+    executor.execute_script(forget_runtime_state(SCHEMA, name))
     return document
 
 

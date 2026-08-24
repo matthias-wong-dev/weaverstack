@@ -368,8 +368,9 @@ tsql.py         identifier quoting, literals and types — the only module that
 connection.py   reading `_` over TDS, and what an absent table means
 writer.py       where a catalogue's runtime writes go
 flusher.py      batching them without waiting for the Warehouse — appended for
-                `_.Log`, merged for `_.Bookmark`
-claims.py       which rows a document owns, and how a bookmark row is keyed
+                history, merged on the key for current state
+runtime_state.py  which current-state rows a build ends the life of, as intent
+claims.py       which rows a document owns, and how a status row is keyed
 ```
 
 `state.py` holds `Catalogue`, which owns catalogue I/O: it is selectively
@@ -379,9 +380,10 @@ a snapshot, and it reaches its Warehouse through a Session — borrowed when it 
 handed one, owned and closed when it opened one for itself. What a target
 physically holds is not its question; a `TargetInventory` answers that.
 
-Two other modules decide *when*: `build_bundle/bookmarks.py` for what a build
-invalidates, and `runtime/anchor.py` for how an authored object anchors itself to
-a catalogue by name.
+Three other modules decide *when*: `build_bundle/runtime_tables.py` for what a
+build invalidates and which runtime tables a target presents, `run/record.py` for
+what a settled unit of work leaves behind, and `runtime/anchor.py` for how an
+authored object anchors itself to a catalogue by name.
 
 Everything above `render.py` holds plain Python values under internal
 snake-case keys. The public sentence-case names and the stored vocabularies the

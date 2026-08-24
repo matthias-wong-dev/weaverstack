@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.catalogue.tables import CATALOGUE_TABLES, PROJECTED_TABLES
+from weaver.catalogue.tables import (
+    CATALOGUE_TABLES,
+    PROJECTED_TABLES,
+    RUNTIME_TABLES,
+)
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
 from weaver.errors import DiscoveryError
@@ -400,10 +404,10 @@ def test_weaver_catalogue_is_a_generated_builtin_item(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
     builtin = repository["Warehouse/_weaver"]
 
-    # The catalogue tables, plus the two the runtime maintains rather than
-    # projection: `_.Log`, where a run records what it did, and `_.Bookmark`,
-    # which records how far each object has been loaded.
-    assert len(builtin.documents) == len(PROJECTED_TABLES) + 2
+    # The projected dictionaries, plus the runtime tables: the history a run
+    # appends and the current state it maintains. Declared as ordinary Weaver
+    # documents and built by Weaver's own build, whichever they are.
+    assert len(builtin.documents) == len(PROJECTED_TABLES) + len(RUNTIME_TABLES)
     assert WeaverSchemaId.parse("Warehouse/_weaver/_") in repository.schema_documents
     assert {str(identity) for identity in builtin.documents} == {
         f"Warehouse/_weaver/_.{table.name}" for table in CATALOGUE_TABLES

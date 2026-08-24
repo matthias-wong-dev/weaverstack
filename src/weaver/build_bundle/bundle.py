@@ -51,13 +51,16 @@ FOLDER_EXECUTOR = "folder"
 SHORTCUT_EXECUTOR = "shortcut"
 SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 LOAD_FILE_EXECUTOR = "load_file"
+RUNTIME_STATE_EXECUTOR = "runtime_state"
 #: Executors a bundle may carry. ``spark_sql`` runs one finished statement — a
 #: create, a ``CREATE SCHEMA`` or a frozen prune ``DROP``; ``spark_sql_batch``
 #: runs ordered catalogue DML as one action; ``spark_table`` completes a Spark
 #: SQL table's deferred build by running its query and creating the table;
 #: ``tsql`` runs a self-contained Warehouse script and ``tsql_batch`` an
 #: ordered array of them, each as its own batch; ``folder`` makes or removes a
-#: directory; ``shortcut`` points one Lakehouse name at another item's object
+#: directory; ``shortcut`` points one Lakehouse name at another item's object;
+#: ``runtime_state`` invalidates the catalogue's current-state rows a build has
+#: ended the incarnation of
 VALID_EXECUTORS = frozenset(
     {
         SPARK_SQL_EXECUTOR,
@@ -69,6 +72,7 @@ VALID_EXECUTORS = frozenset(
         SHORTCUT_EXECUTOR,
         SQL_ENDPOINT_REFRESH_EXECUTOR,
         LOAD_FILE_EXECUTOR,
+        RUNTIME_STATE_EXECUTOR,
     }
 )
 #: Executors that run a payload, and the extension that payload must carry.
@@ -85,6 +89,7 @@ _EXECUTOR_EXTENSION = {
     # module, a generated statement — so the extension names the *role* rather
     # than the content, which is the one thing every load file has in common.
     LOAD_FILE_EXECUTOR: ".payload",
+    RUNTIME_STATE_EXECUTOR: ".runtime-state.json",
 }
 _PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR})
 #: Kinds that carry no payload even though their executor usually does. Only

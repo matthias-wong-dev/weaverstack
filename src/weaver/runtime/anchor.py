@@ -26,7 +26,11 @@ from ..errors import ConfigError
 
 #: What the catalogue is read into when an object anchors itself. Enough to say
 #: which installed object this is, and how far it has been loaded.
-ANCHOR_TABLES = ("Installation", "Registry", "Bookmark")
+#:
+#: ``TestDictionary`` is here because a validation materialises nothing: Registry
+#: certifies the module or procedure it compiles to, and the validation's own
+#: identity is in the dictionary describing the declaration.
+ANCHOR_TABLES = ("Installation", "Registry", "Bookmark", "TestDictionary")
 
 
 def anchored(object: Any, catalogue: str) -> tuple[Any, Any]:
@@ -51,9 +55,18 @@ def anchored(object: Any, catalogue: str) -> tuple[Any, Any]:
 
 
 def resolved_identity(object: Any, catalogue: Any):
-    """Which installed object this is, according to ``catalogue``."""
+    """Which installed object this is, according to ``catalogue``.
+
+    A validation is looked up as a validation, because that is what the catalogue
+    records it as: it materialises nothing, so it has no Registry row of its own
+    and its identity is in ``_.TestDictionary``.
+    """
 
     schema, name = object.identity
+    if getattr(object, "_validation_kind", ""):
+        return catalogue.installed_validation(
+            target_name=object.lakehouse.name, schema=schema, object=name
+        )
     return catalogue.installed_object(
         target_name=object.lakehouse.name,
         schema=schema,

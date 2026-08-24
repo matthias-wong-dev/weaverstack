@@ -46,7 +46,7 @@ from weaver.build_bundle.catalogue_actions import desired_catalogue
 from weaver.build_bundle.planner import certifiable_identities
 from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import PROJECTED_TABLES
+from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES, PROJECTED_TABLES
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
 from weaver.spark import FabricSparkTarget
@@ -120,30 +120,39 @@ def installed_catalogue(repository) -> Catalogue:
     )
 
 
-#: Where the catalogue's ``_.Bookmark`` sits, as a build resolves it before
-#: planning. Supplied here because the reference a built target is given is a
-#: stage like any other, and a fixed point that never planned one would be a
-#: fixed point over a smaller build than the one that runs.
-BOOKMARK_SOURCE = ResolvedShortcutSource(
-    workspace_id="ws-1",
-    item_id="item-1",
-    item_name="Weaver_Control",
-    path="Tables/_/Bookmark",
-)
+#: Where each of the catalogue's runtime tables sits, as a build resolves them
+#: before planning. Supplied here because the references a built target is given
+#: are stages like any other, and a fixed point that never planned them would be
+#: a fixed point over a smaller build than the one that runs.
+RUNTIME_SOURCES = {
+    table.name: ResolvedShortcutSource(
+        workspace_id="ws-1",
+        item_id="item-1",
+        item_name="Weaver_Control",
+        path=f"Tables/_/{table.name}",
+    )
+    for table in PRESENTED_RUNTIME_TABLES
+}
+
+#: Every runtime table's name, as a Lakehouse inventory reports the references
+#: it already holds.
+PRESENTED = tuple(table.name for table in PRESENTED_RUNTIME_TABLES)
 
 
-def build(repository, tmp_path, *, catalogue, bookmark_reference: bool = True):
+def build(repository, tmp_path, *, catalogue, runtime_references: bool = True):
     """One bundle for this estate.
 
-    ``bookmark_reference`` says whether the built targets already present the
-    catalogue's ``_.Bookmark``. An estate a build has finished with does; that is
+    ``runtime_references`` says whether the built targets already present the
+    catalogue's runtime tables. An estate a build has finished with does; that is
     what makes the second build's reference stage empty rather than absent.
     """
 
     bindings = _bindings()
     bound = {binding.item: binding.to_bound_target() for binding in bindings.entries}
     inventories = {
-        item: replace(inventory, bookmark_reference=bookmark_reference)
+        item: replace(
+            inventory, runtime_references=PRESENTED if runtime_references else ()
+        )
         if inventory.kind == "lakehouse"
         else inventory
         for item, inventory in _inventories(repository, bound).items()
@@ -158,7 +167,7 @@ def build(repository, tmp_path, *, catalogue, bookmark_reference: bool = True):
         catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
-        bookmark_source=BOOKMARK_SOURCE,
+        runtime_sources=RUNTIME_SOURCES,
     )
 
 
@@ -192,7 +201,7 @@ def test_the_first_build_against_an_empty_catalogue_does_do_work(estate, tmp_pat
 
 
 @weaver_test()
-def test_the_first_build_installs_the_bookmark_reference_and_the_second_does_not():
+def test_the_first_build_installs_the_runtime_references_and_the_second_does_not():
     """The stage that is easiest to leave out of a fixed point, named here.
 
     A reference the first build did not install is one the second has to, and
@@ -213,13 +222,13 @@ def test_the_first_build_installs_the_bookmark_reference_and_the_second_does_not
             estate,
             root / "first",
             catalogue=Catalogue(rows={}),
-            bookmark_reference=False,
+            runtime_references=False,
         )
         second = build(estate, root / "second", catalogue=installed_catalogue(estate))
 
-    assert [action.id for action in actions(first) if "bookmark-reference" in action.id]
+    assert [action.id for action in actions(first) if "runtime-reference" in action.id]
     assert not [
-        action.id for action in actions(second) if "bookmark-reference" in action.id
+        action.id for action in actions(second) if "runtime-reference" in action.id
     ]
 
 

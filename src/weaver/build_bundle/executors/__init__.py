@@ -11,6 +11,8 @@ syncs a Lakehouse's SQL analytics endpoint.
 ``load_file`` writes one file of the deployed runtime tree, or removes one the
 source has stopped claiming. A generated load procedure needs no executor of its
 own: a create-or-alter is T-SQL, which ``tsql`` runs.
+``runtime_state`` invalidates the catalogue's current-state rows for objects this
+build has ended the incarnation of.
 
 There is no prune executor — a build freezes its drops as payloads, so the
 installer never enumerates the target.
@@ -24,6 +26,7 @@ from __future__ import annotations
 from .base import ActionExecutor, InstallationContext, ResolvedTarget, SkippedExecution
 from .folder import FolderExecutor
 from .load_file import LoadFileExecutor
+from .runtime_state import RuntimeStateExecutor
 from .shortcut import ShortcutExecutor
 from .spark_sql import SparkSqlExecutor
 from .spark_sql_batch import SparkSqlBatchExecutor
@@ -45,6 +48,7 @@ def default_executors() -> dict[str, ActionExecutor]:
         TSqlBatchExecutor.name: TSqlBatchExecutor(),
         ShortcutExecutor.name: ShortcutExecutor(),
         SqlEndpointRefreshExecutor.name: SqlEndpointRefreshExecutor(),
+        RuntimeStateExecutor.name: RuntimeStateExecutor(),
     }
 
 
@@ -52,6 +56,7 @@ __all__ = [
     "ActionExecutor",
     "InstallationContext",
     "ResolvedTarget",
+    "RuntimeStateExecutor",
     "ShortcutExecutor",
     "SkippedExecution",
     "SparkSqlExecutor",

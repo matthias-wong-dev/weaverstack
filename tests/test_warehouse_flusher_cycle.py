@@ -449,13 +449,13 @@ def test_a_stream_opened_while_the_session_is_closing_is_refused():
 @weaver_test()
 def test_run_logs_inherit_the_session_workflow():
     from weaver.catalogue.state import catalogue_for
-    from weaver.run import open_run_log
+    from weaver.run import open_run_record
 
     with _session() as session:
         with session.workflow("compose-1"):
             catalogue = catalogue_for(session, session.workspace)
-            load = open_run_log(catalogue, task_type="load", session=session)
-            test = open_run_log(catalogue, task_type="test", session=session)
+            load = open_run_record(catalogue, task_type="load", session=session)
+            test = open_run_record(catalogue, task_type="test", session=session)
 
     assert load.workflow_id == "compose-1"
     assert test.workflow_id == "compose-1"

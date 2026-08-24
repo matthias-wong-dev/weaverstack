@@ -70,7 +70,7 @@ COVERED = {
     "prune_view": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_schema": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_folder": ("test_prune_table_action_removes_an_object_nothing_declares",),
-    "create_bookmark_reference": (
+    "create_runtime_reference": (
         "test_a_built_warehouse_reads_back_as_the_fixture_predicts",
     ),
     "refresh_sql_endpoint": (
@@ -86,7 +86,7 @@ CATALOGUE_KINDS = frozenset(
         "delete_catalogue_claims",
         "publish_catalogue",
         "publish_registry",
-        "reconcile_bookmarks",
+        "reconcile_runtime_state",
     }
 )
 

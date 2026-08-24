@@ -1,27 +1,14 @@
-"""What a build does to ``_.Bookmark``, as the statements it freezes.
+"""What a build decides about the catalogue's runtime tables.
 
-Three claims, and they are separate because they fail separately.
+Three claims, separate because they fail separately: which objects can hold a
+bookmark, which rows a build ends the life of, and where the action sits.
 
-Which objects can hold a bookmark at all: the ones Weaver loads, derived from
-the load artefacts the item installs, so what carries a bookmark cannot drift
-from what has something to run.
-
-When the statements are issued: when the build acts, not on every run, because
-an unchanged repository produces an empty bundle and that property is what makes
-an idle build cheap.
-
-Where they sit: before the first physical action. That is the safety property
-and the only one whose failure is silent — a reset makes the next load read
-everything, while a bookmark left advanced over a recreated table makes it read
-almost nothing.
-
-Pure Python. The statements are what a build decides, and every input to that
-decision can be constructed.
+Read as structured intent rather than as SQL text, so a renaming of a keyword
+does not look like a change of lifecycle. The one narrow claim about the DML is
+in ``test_runtime_state_representation.py``.
 """
 
 from __future__ import annotations
-
-import json
 
 import pytest
 from factories import (
@@ -42,9 +29,12 @@ from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
-from weaver.build_bundle.bookmarks import bookmark_statements
+from weaver.build_bundle.runtime_tables import runtime_state_invalidation
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import CATALOGUE_TABLES
+from weaver.catalogue.tables import (
+    BOOKMARK,
+    PRESENTED_RUNTIME_TABLES,
+)
 from weaver.declaration import parse_item_repository
 from weaver.etl import item_bookmarkable_objects
 from weaver.locations import Location
@@ -65,29 +55,30 @@ def estate(tmp_path):
 EMPTY = Catalogue({})
 
 
-def _inventories_over(inventories, *, holding_bookmark: bool = True):
+def _inventories_over(inventories, *, holding_runtime_tables: bool = True):
     """These target inventories, plus the catalogue Warehouse's own."""
 
     with_catalogue = dict(inventories)
-    with_catalogue[CATALOGUE_ITEM] = catalogue_inventory(holding=holding_bookmark)
+    with_catalogue[CATALOGUE_ITEM] = catalogue_inventory(holding=holding_runtime_tables)
     return with_catalogue
 
 
-def _inventories(repository, *, holding_bookmark: bool = True):
+def _inventories(repository, *, holding_runtime_tables: bool = True):
     """Every target this estate binds, including the catalogue's own Warehouse.
 
-    ``holding_bookmark`` is the distinction the bookmark stages turn on: a
-    catalogue Warehouse without the table is one this bundle is creating it in,
-    and the table can hold no row anything could have written.
+    ``holding_runtime_tables`` is the distinction the runtime-table stages turn
+    on: a catalogue Warehouse without them is one this bundle is creating them
+    in, and they can hold no row anything could have written.
     """
 
     return _inventories_over(
-        estate_inventories(repository, empty=True), holding_bookmark=holding_bookmark
+        estate_inventories(repository, empty=True),
+        holding_runtime_tables=holding_runtime_tables,
     )
 
 
 def _bundle(
-    repository, tmp_path, *, catalogue=None, inventories=None, bookmark_source=None
+    repository, tmp_path, *, catalogue=None, inventories=None, runtime_sources=None
 ):
     return generate_item_build_bundle(
         repository,
@@ -99,7 +90,7 @@ def _bundle(
         else _inventories(repository),
         catalogue=catalogue if catalogue is not None else EMPTY,
         catalogue_binding=CATALOGUE,
-        bookmark_source=bookmark_source,
+        runtime_sources=runtime_sources,
     )
 
 
@@ -107,16 +98,32 @@ def _bookmark_actions(bundle):
     return [
         (sequence, action)
         for sequence, _batch, action in bundle.plan.actions()
-        if action.kind == "reconcile_bookmarks"
+        if action.kind == "reconcile_runtime_state"
     ]
 
 
-def _statements(bundle) -> list[str]:
-    """The statements the bookmark action carries, read from its payload."""
+def _invalidated(invalidation, table: str = BOOKMARK.name) -> set[tuple]:
+    """The rows one intent names, as ``(item type, item name, schema, object)``."""
 
-    (_sequence, action), *rest = _bookmark_actions(bundle)
-    assert not rest, "one action reconciles bookmarks, not several"
-    return json.loads(bundle.store.read(bundle.location / action.payload))
+    return {
+        tuple(row[name] for name in BOOKMARK.key)
+        for one in invalidation
+        if one.table == table
+        for row in one.rows
+    }
+
+
+def _decided(repository, *, items, selected_for_build, catalogue):
+    """What a build over these inputs decides about ``_.Bookmark``."""
+
+    return _invalidated(
+        runtime_state_invalidation(
+            repository,
+            items=items,
+            selected_for_build=selected_for_build,
+            catalogue=catalogue,
+        )
+    )
 
 
 # --- which objects can hold one ------------------------------------------------
@@ -180,7 +187,7 @@ def test_the_catalogue_item_holds_no_bookmarks(estate):
     """Its tables are written by catalogue DML, never loaded."""
 
     assert (
-        bookmark_statements(
+        runtime_state_invalidation(
             estate,
             items=(item_id("Warehouse/_weaver"),),
             selected_for_build={item_id(ITEM)},
@@ -190,7 +197,7 @@ def test_the_catalogue_item_holds_no_bookmarks(estate):
     )
 
 
-# --- when the statements are issued -------------------------------------------
+# --- which rows a build ends the life of ---------------------------------------
 
 
 def _holding(*qualified: str, item: str = ITEM, repository=None) -> Catalogue:
@@ -223,7 +230,7 @@ def test_a_build_with_nothing_to_do_says_nothing_about_bookmarks(estate):
     """
 
     assert (
-        bookmark_statements(
+        runtime_state_invalidation(
             estate,
             items=(item_id(ITEM),),
             selected_for_build=(),
@@ -249,7 +256,7 @@ def test_a_build_of_objects_that_hold_no_bookmark_says_nothing_either(estate):
     )
 
     assert (
-        bookmark_statements(
+        runtime_state_invalidation(
             estate,
             items=(item_id(ITEM),),
             selected_for_build={view},
@@ -264,32 +271,42 @@ def test_a_catalogue_holding_no_rows_has_nothing_to_invalidate(estate, tmp_path)
     """A first build, and the one case that needed a special gate before.
 
     The table arrives with this bundle, so the read found no rows and there is
-    nothing to remove. Nothing is skipped for a stated reason: the statement is
+    nothing to remove. Nothing is skipped for a stated reason: the action is
     absent because the set of obsolete rows is empty.
     """
 
-    assert _bookmark_actions(_bundle(estate, tmp_path)) == []
+    bundle = _bundle(estate, tmp_path)
+
+    assert _bookmark_actions(bundle) == []
+    assert bundle.plan.runtime_state == ()
 
 
 @weaver_test()
-def test_a_rebuild_invalidates_the_rows_of_what_it_replaces(estate, tmp_path):
+def test_a_rebuild_ends_the_incarnation_of_what_it_replaces(estate, tmp_path):
     """Every loadable object rebuilt, so every row it had goes."""
 
-    statements = _statements(
-        _bundle(
-            estate,
-            tmp_path,
-            catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
-        )
+    bundle = _bundle(
+        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
     )
-    (delete,) = [one for one in statements if one.startswith("DELETE")]
 
-    assert "N'DWG', N'Customer'" in delete
-    assert "N'Files/Raw', N'CustomerCsv'" in delete
-    assert not [one for one in statements if one.startswith("MERGE")]
+    assert _invalidated(bundle.plan.runtime_state) == {
+        ("Lakehouse", "Sales", "DWG", "Customer"),
+        ("Lakehouse", "Sales", "Files/Raw", "CustomerCsv"),
+    }
 
 
-# --- where they sit ------------------------------------------------------------
+@weaver_test()
+def test_only_current_state_is_invalidated(estate, tmp_path):
+    """``_.Bookmark`` is current state. Nothing historical is named."""
+
+    bundle = _bundle(
+        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
+    )
+
+    assert {one.table for one in bundle.plan.runtime_state} == {BOOKMARK.name}
+
+
+# --- where the action sits -----------------------------------------------------
 
 
 @weaver_test()
@@ -311,25 +328,41 @@ def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_p
     }
     kinds = [action.kind for _sequence, _batch, action in bundle.plan.actions()]
 
-    assert kinds.index("reconcile_bookmarks") < min(
+    assert kinds.index("reconcile_runtime_state") < min(
         index for index, kind in enumerate(kinds) if kind in physical
     )
 
 
 @weaver_test()
-def test_invalidation_is_one_statement(estate, tmp_path):
-    """One decision about one table, so one statement in one action."""
+def test_invalidation_is_one_action(estate, tmp_path):
+    """One lifecycle decision, so one action carrying the whole intent."""
 
-    statements = _statements(
-        _bundle(
-            estate,
-            tmp_path,
-            catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
-        )
+    bundle = _bundle(
+        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
     )
+    (_sequence, action), *rest = _bookmark_actions(bundle)
 
-    assert len([one for one in statements if one.startswith("DELETE")]) == 1
-    assert not [one for one in statements if one.startswith("MERGE")]
+    assert not rest
+    assert action.executor == "runtime_state"
+
+
+@weaver_test()
+def test_the_action_carries_the_intent_the_plan_states(estate, tmp_path):
+    """What runs and what the plan says it means are one computation.
+
+    A summary the planner writes about its own plan proves nothing on its own;
+    this is what makes it prove something.
+    """
+
+    from weaver.catalogue.runtime_state import read_invalidation
+
+    bundle = _bundle(
+        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
+    )
+    (_sequence, action), *_rest = _bookmark_actions(bundle)
+    carried = read_invalidation(bundle.store.read(bundle.location / action.payload))
+
+    assert carried == bundle.plan.runtime_state
 
 
 # --- scope ---------------------------------------------------------------------
@@ -339,16 +372,12 @@ def test_invalidation_is_one_statement(estate, tmp_path):
 def test_an_object_left_alone_keeps_its_row(estate):
     """One object rebuilt, and only its row is named."""
 
-    statements = bookmark_statements(
+    assert _decided(
         estate,
         items=(item_id(ITEM),),
         selected_for_build={document_id_of(estate, "DWG.Customer")},
         catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
-    )
-    (delete,) = statements
-
-    assert "N'DWG', N'Customer'" in delete
-    assert "N'Files/Raw', N'CustomerCsv'" not in delete
+    ) == {("Lakehouse", "Sales", "DWG", "Customer")}
 
 
 @weaver_test()
@@ -361,15 +390,12 @@ def test_a_row_the_repository_no_longer_declares_goes(estate, tmp_path):
 
     smaller = _without_the_folder(tmp_path)
 
-    (delete,) = bookmark_statements(
+    assert _decided(
         smaller,
         items=(item_id(ITEM),),
         selected_for_build=(),
         catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
-    )
-
-    assert "N'Files/Raw', N'CustomerCsv'" in delete
-    assert "N'DWG', N'Customer'" not in delete
+    ) == {("Lakehouse", "Sales", "Files/Raw", "CustomerCsv")}
 
 
 @weaver_test()
@@ -380,49 +406,37 @@ def test_an_unrelated_item_is_outside_the_scope_that_prunes(estate):
     even though the table is shared.
     """
 
-    catalogue = Catalogue(
-        {
-            item_id(ITEM): {
-                "Bookmark": (
-                    {
-                        "item_type": "Lakehouse",
-                        "item_name": "Sales",
-                        "schema_name": "DWG",
-                        "object_name": "Customer",
-                        "bookmark_datetime": LOADED_AT,
-                    },
-                )
-            },
-            item_id(WAREHOUSE_ITEM): {
-                "Bookmark": (
-                    {
-                        "item_type": "Warehouse",
-                        "item_name": "Reporting",
-                        "schema_name": "Rpt",
-                        "object_name": "Customer",
-                        "bookmark_datetime": LOADED_AT,
-                    },
-                )
-            },
-        }
-    )
-
-    (delete,) = bookmark_statements(
+    assert _decided(
         estate,
         items=(item_id(ITEM),),
         selected_for_build={one for one in estate.source_documents},
-        catalogue=catalogue,
-    )
-
-    assert "N'Sales'" in delete
-    assert "N'Reporting'" not in delete
+        catalogue=_two_items(),
+    ) == {("Lakehouse", "Sales", "DWG", "Customer")}
 
 
 @weaver_test()
-def test_both_items_of_one_build_are_one_statement(estate):
+def test_both_items_of_one_build_are_one_intent(estate):
     """Bound items share the table, so addressing them separately is round trips."""
 
-    catalogue = Catalogue(
+    invalidation = runtime_state_invalidation(
+        estate,
+        items=(item_id(ITEM), item_id(WAREHOUSE_ITEM)),
+        selected_for_build={one for one in estate.source_documents},
+        catalogue=_two_items(),
+    )
+    (one,) = invalidation
+
+    assert _invalidated(invalidation) == {
+        ("Lakehouse", "Sales", "DWG", "Customer"),
+        ("Warehouse", "Reporting", "Rpt", "Customer"),
+    }
+    assert one.table == BOOKMARK.name
+
+
+def _two_items() -> Catalogue:
+    """A catalogue holding one bookmark row for each of two items."""
+
+    return Catalogue(
         {
             item_id(ITEM): {
                 "Bookmark": (
@@ -448,15 +462,6 @@ def test_both_items_of_one_build_are_one_statement(estate):
             },
         }
     )
-
-    (delete,) = bookmark_statements(
-        estate,
-        items=(item_id(ITEM), item_id(WAREHOUSE_ITEM)),
-        selected_for_build={one for one in estate.source_documents},
-        catalogue=catalogue,
-    )
-
-    assert "N'Sales'" in delete and "N'Reporting'" in delete
 
 
 # --- it is never dropped -------------------------------------------------------
@@ -505,10 +510,13 @@ def test_prune_spares_the_catalogue_table_and_not_the_local_reference():
 
 
 @weaver_test()
-def test_the_source_is_the_catalogue_tables_own_delta_directory():
-    """A Warehouse publishes each table as a Delta directory a shortcut can read."""
+def test_each_source_is_the_catalogue_tables_own_delta_directory():
+    """A Warehouse publishes each table as a Delta directory a shortcut can read.
 
-    from weaver.build_bundle.shortcut_sources import read_bookmark_source
+    One resolution serves every table, because they are all in one Warehouse.
+    """
+
+    from weaver.build_bundle.shortcut_sources import read_runtime_sources
 
     class _Item:
         workspace_id = "ws-1"
@@ -519,10 +527,12 @@ def test_the_source_is_the_catalogue_tables_own_delta_directory():
         def warehouse(self, target):
             return _Item()
 
-    source = read_bookmark_source(resolver=_Resolver(), catalogue="Weaver")
+    sources = read_runtime_sources(resolver=_Resolver(), catalogue="Weaver")
 
-    assert source.path == "Tables/_/Bookmark"
-    assert source.item_id == "item-1"
+    assert {name: source.path for name, source in sources.items()} == {
+        table.name: f"Tables/_/{table.name}" for table in PRESENTED_RUNTIME_TABLES
+    }
+    assert all(source.item_id == "item-1" for source in sources.values())
 
 
 @weaver_test()
@@ -537,12 +547,15 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
 
     from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 
-    source = ResolvedShortcutSource(
-        workspace_id="ws-1",
-        item_id="item-1",
-        item_name="Weaver",
-        path="Tables/_/Bookmark",
-    )
+    source = {
+        table.name: ResolvedShortcutSource(
+            workspace_id="ws-1",
+            item_id="item-1",
+            item_name="Weaver",
+            path=f"Tables/_/{table.name}",
+        )
+        for table in PRESENTED_RUNTIME_TABLES
+    }
 
     from weaver.build_bundle import effective_item_bindings
 
@@ -551,7 +564,7 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
     bindings = effective_item_bindings(
         estate_bindings(), control_item=ItemRef("Weaver"), workspace_name=WORKSPACE
     )
-    inventories = _inventories(estate, holding_bookmark=False)
+    inventories = _inventories(estate, holding_runtime_tables=False)
     inventories[CATALOGUE_ITEM] = catalogue_inventory(
         holding=False,
         target_id=next(
@@ -569,7 +582,7 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
         target_inventories=inventories,
         catalogue=EMPTY,
         catalogue_binding=CATALOGUE,
-        bookmark_source=source,
+        runtime_sources=source,
     )
 
     assert _references(creating, "Lakehouse")
@@ -582,9 +595,9 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
 
 
 def _references(bundle, item_type: str) -> list[str]:
-    """The bookmark-reference actions one bundle installs, per kind of item."""
+    """The runtime-reference actions one bundle installs, per kind of item."""
 
-    wanted = f"bookmark-reference-{item_type}"
+    wanted = f"runtime-reference-{item_type}"
     return [
         action.id
         for _sequence, _batch, action in bundle.plan.actions()
@@ -603,38 +616,6 @@ def document_id_of(repository, qualified: str):
         for identity in repository.source_documents
         if str(identity).endswith(f"/{qualified}")
     )
-
-
-def _installed(repository) -> Catalogue:
-    """The catalogue a successful build of this estate leaves behind."""
-
-    from weaver.build_bundle.catalogue_actions import desired_catalogue
-    from weaver.build_bundle.planner import certifiable_identities
-
-    bindings = estate_bindings()
-    by_item = {binding.item: binding for binding in bindings.entries}
-    state = desired_catalogue(
-        repository,
-        certifiable_identities(repository, by_item),
-        {binding.item: binding.to_bound_target() for binding in bindings.entries},
-    )
-    return Catalogue(
-        rows=state.rows,
-        materialised=frozenset(table.name for table in CATALOGUE_TABLES),
-    )
-
-
-def _with_changed_customer(tmp_path):
-    """The same estate with one table's source edited, and nothing else."""
-
-    root = tmp_path / "changed"
-    full_estate(root)
-    path = root / f"{ITEM}/DWG__Customer.py"
-    path.write_text(
-        lakehouse_table("DWG.Customer").replace("Description:", "Description: edited,"),
-        encoding="utf-8",
-    )
-    return parse_item_repository(Location(str(root)))
 
 
 def _without_the_folder(tmp_path):

@@ -142,6 +142,35 @@ def pytest_runtest_teardown(item):
         end_test(token)
 
 
+def _report_provisioning(terminalreporter) -> None:
+    """What the harness spent standing estates up, phase by phase.
+
+    Reported apart from the resource telemetry because these are the harness's
+    crossings rather than a Weaver Session's: they are the price of having an
+    estate to make a claim about, and reducing that price is a decision this
+    section exists to inform.
+    """
+
+    from support import provisioning
+
+    phases = provisioning.ledger()
+    if not phases:
+        return
+    terminalreporter.write_sep("=", "Estate provisioning")
+    for phase in phases:
+        detail = " ".join(
+            f"{resource}={cost:.1f}s"
+            for resource, cost in sorted(phase.resources.items())
+        )
+        terminalreporter.write_line(
+            f"  {phase.name:<24} {phase.runs:>3} run(s) "
+            f"{phase.seconds:>8.1f}s  {detail}"
+        )
+    terminalreporter.write_line(
+        f"  {'total':<24} {'':>3}         {provisioning.total_seconds():>8.1f}s"
+    )
+
+
 def pytest_terminal_summary(terminalreporter, exitstatus, config):
     """Report declared topology and the external cost observed by Sessions."""
 
@@ -188,6 +217,7 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
             by_context[context][0] += 1
             by_context[context][1] += event.seconds
     startup = getattr(config, "_weaver_livy_startup_seconds", None)
+    _report_provisioning(terminalreporter)
     if not by_resource and not by_setup_resource and startup is None:
         return
     terminalreporter.write_sep("=", "External resource telemetry")

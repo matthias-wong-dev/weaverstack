@@ -729,7 +729,7 @@ def test_a_node_with_nothing_logical_to_name_keeps_its_id():
 def test_run_evidence_uses_the_nodes_structured_identity():
     from dataclasses import replace
 
-    from weaver.run.evidence import RunLog
+    from weaver.run.record import log_row
 
     result = runner(nodes=[node("a", logical_id=_Logical("Sales.Customer"))]).run(
         dispatch=controlled({"a": Outcome()})
@@ -740,7 +740,7 @@ def test_run_evidence_uses_the_nodes_structured_identity():
         logical_id="neither is this",
     )
 
-    row = RunLog("workflow", "load", catalogue=None).row(settled)
+    row = log_row(settled, workflow_id="workflow", task_type="load")
 
     assert row["target_type"] == "Lakehouse"
     assert row["target_name"] == "Sales_LH"

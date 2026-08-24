@@ -62,6 +62,7 @@ def test_a_row_is_read_back_whatever_the_transport_called_its_types():
         "rows_rejected": 2,
         "error_message": None,
         "bookmark_datetime": None,
+        "is_static_skip": 0,
     }
 
     result = LoadResult.from_row(row)
@@ -92,6 +93,7 @@ def test_the_reported_bookmark_instant_is_always_aware_utc():
             "rows_rejected": 0,
             "error_message": None,
             "bookmark_datetime": value,
+            "is_static_skip": 0,
         }
 
     expected = datetime(2026, 8, 22, 4, 5, 6, tzinfo=timezone.utc)

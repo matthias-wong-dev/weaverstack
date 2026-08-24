@@ -392,6 +392,7 @@ class Runner:
             messages=outcome.messages,
             started_at=started,
             raised=outcome.raised,
+            refused=outcome.refused,
         )
 
     #: Upstream outcomes that permit downstream work.
@@ -417,6 +418,7 @@ class Runner:
         started_at: str | None = None,
         location: str | None = None,
         raised: bool = False,
+        refused: bool = False,
     ) -> RunNodeResult:
         target_type = getattr(node.physical_target, "kind", None)
         if target_type:
@@ -432,6 +434,7 @@ class Runner:
             raised=raised,
             logical_id=str(node.logical_id) if node.logical_id else None,
             status=status,
+            refused=refused,
             executed=executed,
             messages=messages,
             result=result,

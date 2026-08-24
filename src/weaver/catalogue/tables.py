@@ -45,11 +45,23 @@ ROLE_ASSUMPTION = "assumption"
 #: role rather than a type, because what it physically *is* still varies: a
 #: table, a folder, a view, or the schema a schema shortcut presents.
 ROLE_SHORTCUT = "shortcut"
-OBJECT_ROLES = (ROLE_DATA, ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_SHORTCUT)
+#: A generic entry point a *person* calls: ``_.Load`` and ``_.Test``, which wrap
+#: one object's own procedure and record what it did. A role of its own because
+#: nothing schedules one — a load procedure with this role would be run by
+#: ``weaver load``, and there is no object for it to load.
+ROLE_ENTRY = "entry"
+OBJECT_ROLES = (
+    ROLE_DATA,
+    ROLE_LOAD,
+    ROLE_TEST,
+    ROLE_ASSUMPTION,
+    ROLE_SHORTCUT,
+    ROLE_ENTRY,
+)
 
 #: The roles a runtime artefact carries — everything installed to be *run*
 #: rather than to hold rows. Asked where a selection has to be partitioned.
-RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION)
+RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_ENTRY)
 
 #: The roles a validation carries, by the kind that declares it.
 VALIDATION_ROLES = (ROLE_TEST, ROLE_ASSUMPTION)
@@ -76,6 +88,7 @@ OBJECT_ROLE_VOCABULARY = {
     ROLE_TEST: "Test",
     ROLE_ASSUMPTION: "Assumption",
     ROLE_SHORTCUT: "Shortcut",
+    ROLE_ENTRY: "Entry point",
 }
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}
@@ -863,13 +876,39 @@ PROJECTED_TABLES = DICTIONARY_TABLES + (INSTALLATION, REGISTRY)
 
 # --- the catalogue tables maintained at runtime -------------------------------
 
-#: How a settled unit of work ended.
+#: How a settled unit of work ended. One vocabulary across every runtime table
+#: that records an outcome, so a reader comparing a load's result with a
+#: validation's is comparing the same words.
+#:
+#: The distinctions are the ones an operator acts on. *Failed* is work that ran
+#: under Weaver's control and produced an unacceptable result — a validation
+#: found discrepancies, a load refused a change larger than its declared
+#: threshold. *Error* is work that could not be evaluated at all, which is not a
+#: judgement about the data and must never be read as one. *Blocked* is work that
+#: did not happen because something upstream prevented it, and *Skipped* work
+#: deliberately not done. *Pending* is a current state not yet established for
+#: this incarnation.
+PENDING = "pending"
+SKIPPED = "skipped"
+SUCCEEDED = "succeeded"
+FAILED = "failed"
+ERROR = "error"
+BLOCKED = "blocked"
+#: A load that completed with rejected rows. Valid rows may still have landed, so
+#: it is neither a success nor a failure, and only a load can be one.
+REJECTED = "rejected"
+
 RESULT_VOCABULARY = {
-    "succeeded": "Succeeded",
-    "failed": "Failed",
-    "skipped": "Skipped",
-    "blocked": "Blocked",
+    PENDING: "Pending",
+    SKIPPED: "Skipped",
+    SUCCEEDED: "Succeeded",
+    FAILED: "Failed",
+    ERROR: "Error",
+    BLOCKED: "Blocked",
 }
+
+#: The same vocabulary plus ``Rejected``, for the tables a load writes.
+LOAD_RESULT_VOCABULARY = {**RESULT_VOCABULARY, REJECTED: "Rejected"}
 
 #: The bookmark of an object that has never had a clean load. A sentinel rather
 #: than a null, so the Static gate and an incremental read are one comparison
@@ -879,6 +918,24 @@ BOOKMARK_SENTINEL_TEXT = "1900-01-01 00:00:00.000000"
 BOOKMARK_SENTINEL = datetime(1900, 1, 1, tzinfo=timezone.utc)
 
 
+#: How a runtime table's rows are maintained, which is the difference the whole
+#: operational model turns on.
+#:
+#: *History* is appended: a row records that something happened, and nothing that
+#: happens later makes it not have happened. *Current state* is merged on the
+#: table's own key: there is one row per object per incarnation, and when a build
+#: ends that incarnation the row goes with it.
+HISTORY = "history"
+CURRENT_STATE = "current_state"
+MAINTENANCE = (HISTORY, CURRENT_STATE)
+
+#: Which population's rebuild ends a current-state row's life. A loadable object
+#: carries a bookmark and a load status; a validation carries a test status.
+BY_LOADABLE = "loadable"
+BY_VALIDATION = "validation"
+INVALIDATED_BY = (BY_LOADABLE, BY_VALIDATION)
+
+
 @dataclass(frozen=True)
 class RuntimeTable:
     """A catalogue table maintained during execution rather than by projection.
@@ -886,17 +943,41 @@ class RuntimeTable:
     Declared and built like any other, and reconciled against nothing: its rows
     come from what Weaver did, not from what a repository declares.
 
-    ``key`` is the identity the table is declared with, and it is what a keyed
-    write merges on. ``_.Log`` carries a surrogate, because a settled unit of
-    work is only ever appended; ``_.Bookmark`` carries the same logical identity
-    the Registry does, so a bookmark row and a Registry row are the same object
-    seen twice.
+    ``key`` is the identity the table is declared with. ``_.Log`` and
+    ``_.LoadStatistic`` carry a surrogate, because a settled unit of work is only
+    ever appended; the current-state tables carry the same logical identity the
+    Registry does, so a status row and a Registry row are the same object seen
+    twice.
+
+    ``maintenance`` says whether rows are appended or merged, and it is read
+    rather than inferred: an appended table has a key too, so the presence of one
+    settles nothing. ``invalidated_by`` names the population whose rebuild ends a
+    current-state row, and is None for history, which nothing invalidates.
+
+    ``presented`` says whether a built target is given this table under its own
+    name — a view in a Warehouse, a OneLake shortcut in a Lakehouse — so a
+    generated procedure and authored Spark SQL can reach it.
     """
 
     name: str
     description: str
     columns: tuple[CatalogueColumn, ...]
     key: tuple[str, ...] = ()
+    maintenance: str = HISTORY
+    invalidated_by: str | None = None
+    presented: bool = True
+
+    @property
+    def is_current_state(self) -> bool:
+        """Whether one row stands for one object's state now."""
+
+        return self.maintenance == CURRENT_STATE
+
+    @property
+    def is_history(self) -> bool:
+        """Whether rows are appended and never revisited."""
+
+        return self.maintenance == HISTORY
 
     def __post_init__(self) -> None:
         names = [column.name for column in self.columns]
@@ -908,6 +989,27 @@ class RuntimeTable:
         missing = [name for name in self.key if name not in not_nullable]
         if missing:
             raise ValueError(f"{self.name}: key columns must be not null: {missing}")
+        if self.maintenance not in MAINTENANCE:
+            raise ValueError(f"{self.name}: unknown maintenance {self.maintenance!r}")
+        if (
+            self.invalidated_by is not None
+            and self.invalidated_by not in INVALIDATED_BY
+        ):
+            raise ValueError(
+                f"{self.name}: unknown invalidating population {self.invalidated_by!r}"
+            )
+        if self.is_history and self.invalidated_by is not None:
+            raise ValueError(
+                f"{self.name}: history is never invalidated, so it names no "
+                "population that would invalidate it"
+            )
+        if self.is_current_state and self.invalidated_by is None:
+            raise ValueError(
+                f"{self.name}: current state belongs to an incarnation, so it "
+                "names the population whose rebuild ends it"
+            )
+        if self.is_current_state and not self.key:
+            raise ValueError(f"{self.name}: current state is keyed by an identity")
 
     @property
     def qualified(self) -> str:
@@ -951,6 +1053,7 @@ class RuntimeTable:
 LOG = RuntimeTable(
     name="Log",
     key=("log_sk",),
+    maintenance=HISTORY,
     description=(
         "One row per settled unit of Weaver work. Operational evidence rather "
         "than installed state, so it is appended as work settles and no "
@@ -984,8 +1087,11 @@ LOG = RuntimeTable(
         CatalogueColumn(
             "result",
             not_null=True,
-            vocabulary=RESULT_VOCABULARY,
-            description="Succeeded, Failed, Skipped or Blocked.",
+            vocabulary=LOAD_RESULT_VOCABULARY,
+            description=(
+                "How the work ended. A load may also be Rejected, meaning it "
+                "completed with rejected rows."
+            ),
         ),
         CatalogueColumn(
             "started_datetime", TIMESTAMP, description="When the work started."
@@ -1025,6 +1131,8 @@ BOOKMARK = RuntimeTable(
     # The Registry's identity exactly, and for the reason a shared key exists at
     # all: a bookmark row and a Registry row describe the same installed object.
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    maintenance=CURRENT_STATE,
+    invalidated_by=BY_LOADABLE,
     columns=(
         *_scope(),
         *_object(),
@@ -1041,14 +1149,196 @@ BOOKMARK = RuntimeTable(
     ),
 )
 
+
+def _outcome(*, vocabulary) -> tuple[CatalogueColumn, ...]:
+    """What a settled unit of work reports about itself, in one shape.
+
+    The same four columns wherever an outcome is recorded, so a reader comparing
+    a load's with a validation's is comparing the same measurements.
+    """
+
+    return (
+        CatalogueColumn(
+            "result",
+            not_null=True,
+            vocabulary=vocabulary,
+            description="How the work ended.",
+        ),
+        CatalogueColumn(
+            "started_datetime", TIMESTAMP, description="When the work started."
+        ),
+        CatalogueColumn(
+            "completed_datetime", TIMESTAMP, description="When the work settled."
+        ),
+        CatalogueColumn(
+            "duration_milliseconds",
+            BIGINT,
+            description="How long the work took, in milliseconds.",
+        ),
+    )
+
+
+LOAD_STATUS = RuntimeTable(
+    name="LoadStatus",
+    description=(
+        "How each loadable object's most recent load ended. One row per object "
+        "per physical incarnation: a rebuild ends the incarnation and the row "
+        "goes with it, so an absent row means no load has settled since the "
+        "object was last built. Logical identity only — where the object is "
+        "physically installed is the Installation's to say."
+    ),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    maintenance=CURRENT_STATE,
+    invalidated_by=BY_LOADABLE,
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "workflow_id",
+            description=(
+                "The workflow whose load produced this state, so the row can be "
+                "read alongside the evidence in _.Log."
+            ),
+        ),
+        *_outcome(vocabulary=LOAD_RESULT_VOCABULARY),
+    ),
+)
+
+
+LOAD_STATISTIC = RuntimeTable(
+    name="LoadStatistic",
+    description=(
+        "What each load did, as counts. Appended: a load's statistics are a "
+        "fact about a moment, so a later rebuild does not remove them and the "
+        "history of an object's loads accumulates."
+    ),
+    key=("load_statistic_sk",),
+    maintenance=HISTORY,
+    columns=(
+        CatalogueColumn(
+            "load_statistic_sk",
+            not_null=True,
+            description=(
+                "A meaningless immutable surrogate row key. Generated where the "
+                "row is, because a Fabric Warehouse has no identity column and "
+                "several sessions may append at once."
+            ),
+        ),
+        CatalogueColumn(
+            "workflow_id",
+            not_null=True,
+            description="Correlates every row one workflow produced.",
+        ),
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "started_datetime", TIMESTAMP, description="When the load started."
+        ),
+        CatalogueColumn(
+            "completed_datetime", TIMESTAMP, description="When the load settled."
+        ),
+        CatalogueColumn(
+            "duration_milliseconds",
+            BIGINT,
+            description="How long the load took, in milliseconds.",
+        ),
+        CatalogueColumn(
+            "rows_read",
+            BIGINT,
+            description="What the source produced.",
+        ),
+        CatalogueColumn("rows_inserted", BIGINT, description="Rows the target gained."),
+        CatalogueColumn("rows_updated", BIGINT, description="Rows the target changed."),
+        CatalogueColumn("rows_deleted", BIGINT, description="Rows the target lost."),
+        CatalogueColumn(
+            "rows_rejected",
+            BIGINT,
+            description="Incoming rows the load refused, kept in the reject table.",
+        ),
+        CatalogueColumn(
+            "is_reload",
+            BOOLEAN,
+            description=(
+                "Whether the load re-read a window it had already read. False "
+                "until reload is available."
+            ),
+        ),
+        CatalogueColumn(
+            "is_static_skip",
+            BOOLEAN,
+            description=(
+                "Whether a Static object was skipped because a clean load had "
+                "already run for this incarnation."
+            ),
+        ),
+    ),
+)
+
+
+TEST_STATUS = RuntimeTable(
+    name="TestStatus",
+    description=(
+        "How each validation's most recent run ended. One row per validation "
+        "per incarnation, as _.LoadStatus is for a loadable object: rebuilding "
+        "the validation ends the incarnation and the row goes with it."
+    ),
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    maintenance=CURRENT_STATE,
+    invalidated_by=BY_VALIDATION,
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "test_type",
+            vocabulary=TEST_TYPE_VOCABULARY,
+            description="Test or Assumption.",
+        ),
+        CatalogueColumn(
+            "workflow_id",
+            description=(
+                "The workflow whose run produced this state, so the row can be "
+                "read alongside the evidence in _.Log."
+            ),
+        ),
+        *_outcome(vocabulary=RESULT_VOCABULARY),
+        CatalogueColumn(
+            "failure_count",
+            BIGINT,
+            description=(
+                "How much disagreed: discrepancy rows for a Test, contradicting "
+                "rows for an Assumption. Meaningful only for a validation that "
+                "was evaluated."
+            ),
+        ),
+    ),
+)
+
+
 #: The catalogue tables maintained during execution.
-RUNTIME_TABLES = (LOG, BOOKMARK)
+RUNTIME_TABLES = (LOG, BOOKMARK, LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
+
+#: The runtime tables describing one object's state now. A build ends the
+#: incarnation these describe; the rest is history and survives it.
+CURRENT_STATE_TABLES = tuple(
+    table for table in RUNTIME_TABLES if table.is_current_state
+)
+
+#: The runtime tables recording what happened. Never invalidated.
+HISTORY_TABLES = tuple(table for table in RUNTIME_TABLES if table.is_history)
+
+#: The runtime tables a built target is given under their own names.
+PRESENTED_RUNTIME_TABLES = tuple(table for table in RUNTIME_TABLES if table.presented)
 
 #: Every catalogue table, however it is maintained.
 CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
-#: The catalogue tables an operation reads. ``_.Log`` is not one: it is history,
-#: appended and never consulted, and reading it would grow with the estate's age.
+#: What a *run* reads. The projected tables, which say what is installed and
+#: where, and ``_.Bookmark``, which says how far each object has been loaded.
+#:
+#: The other current-state tables are absent, and that is the asymmetry worth
+#: knowing: a run *writes* a load status and a test status and never asks what
+#: they were, while a build reads all three to decide which rows its own work has
+#: made obsolete. See :data:`weaver.catalogue.state.READ_FOR_BUILD`.
 READABLE_TABLES = PROJECTED_TABLES + (BOOKMARK,)
 
 TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}

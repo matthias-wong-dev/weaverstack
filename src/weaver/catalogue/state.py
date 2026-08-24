@@ -26,7 +26,9 @@ from .tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
     BUILD_DATETIME,
+    CURRENT_STATE_TABLES,
     INSTALLATION,
+    LOAD_STATUS,
     OBJECT_ROLES,
     OBJECT_TYPES,
     PROJECTED_TABLES,
@@ -37,6 +39,7 @@ from .tables import (
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
     TEST_DICTIONARY,
+    TEST_STATUS,
     VALIDATION_ROLES,
 )
 
@@ -221,11 +224,7 @@ class Catalogue:
         """
 
         stored = f"{_FILES_PREFIX}{schema}" if is_files else schema
-        bound = {
-            _item_of(row)
-            for row in self.table_rows(INSTALLATION)
-            if str(row.get("target_name") or "").casefold() == target_name.casefold()
-        }
+        bound = self._bound_to(target_name)
         found = [
             identity
             for identity, document in self.registered.items()
@@ -249,6 +248,69 @@ class Catalogue:
             + ". Two logical items are bound to this target, so which one is "
             "meant cannot be settled here."
         )
+
+    def installed_validation(
+        self, *, target_name: str, schema: str, object: str
+    ) -> WeaverDocumentId:
+        """Which declared validation a physical target's ``Schema.Object`` is.
+
+        Answered from ``_.TestDictionary`` rather than from ``_.Registry``,
+        because a validation materialises nothing: what Registry certifies is the
+        module or procedure it compiles to, and the validation's own identity is
+        in the dictionary that describes the declaration.
+
+        Exactly one match, or a failure saying which — the same rule
+        :meth:`installed_object` follows, and for the same reason.
+        """
+
+        bound = self._bound_to(target_name)
+        found = [
+            identity
+            for identity in self._validations()
+            if identity.item in bound
+            and identity.object_id.schema.casefold() == schema.casefold()
+            and identity.object_id.object.casefold() == object.casefold()
+        ]
+        if len(found) == 1:
+            return found[0]
+        where = f"{schema}.{object} in {target_name}"
+        if not found:
+            raise ConfigError(
+                f"{where} is not a validation the Weaver catalogue records as "
+                "installed, so it has no catalogue identity. Build it first, or "
+                "name the target it was built into."
+            )
+        raise ConfigError(
+            f"{where} matches more than one installed validation — "
+            + ", ".join(sorted(str(identity) for identity in found))
+            + ". Two logical items are bound to this target, so which one is "
+            "meant cannot be settled here."
+        )
+
+    def _validations(self):
+        """Every declared validation the catalogue records, by identity."""
+
+        from .tables import TEST_DICTIONARY
+
+        return tuple(
+            WeaverDocumentId(
+                _item_of(row),
+                ObjectId(
+                    str(row.get("schema_name") or ""),
+                    str(row.get("object_name") or ""),
+                ),
+            )
+            for row in self.table_rows(TEST_DICTIONARY)
+        )
+
+    def _bound_to(self, target_name: str) -> set:
+        """The logical items the catalogue binds to one physical target."""
+
+        return {
+            _item_of(row)
+            for row in self.table_rows(INSTALLATION)
+            if str(row.get("target_name") or "").casefold() == target_name.casefold()
+        }
 
     def to_mapping(self) -> dict[str, object]:
         """A versioned JSON-safe representation for a remote state boundary."""
@@ -353,6 +415,36 @@ class Catalogue:
         return cls(rows=MappingProxyType(rows))
 
     # --- transformations ------------------------------------------------------
+
+    def update_using(self, plan) -> "Catalogue":
+        """This catalogue as the plan intends to leave its current-state tables.
+
+        The catalogue twin of
+        :meth:`weaver.build_bundle.prune.TargetInventory.update_using`, and it
+        exists for the same reason: a build's declared effect, applied, is a
+        *prediction* that can be checked. An estate built from a repository and
+        read back should hold the operational rows the plan said it would.
+
+        Reads the plan's stated intent rather than parsing the DML its
+        reconciliation action carries. What a rebuild means for an object's
+        operational state is a lifecycle decision, and a decision that could
+        only be recovered from a statement would be one nothing could reason
+        about.
+
+        The historical tables are untouched, because nothing invalidates them.
+        """
+
+        from .runtime_state import without_invalidated
+
+        invalidation = tuple(getattr(plan, "runtime_state", ()))
+        if not invalidation:
+            return self
+        return Catalogue(
+            rows=without_invalidated(self.rows, invalidation),
+            materialised=self.materialised,
+            writer=self._writer,
+            session=self._session,
+        )
 
     def diff(self, desired: "Catalogue") -> "CatalogueChanges":
         """How this catalogue would move toward the one ``desired`` describes.
@@ -537,13 +629,19 @@ class RegisteredDocument:
 #: Add a name here in the same change that adds the table, and only then: a table
 #: listed here that *was* in an older release would turn a repair case into a
 #: silent partial rebuild.
-INTRODUCED_TABLES = frozenset({TEST_DICTIONARY.name, BOOKMARK.name})
+INTRODUCED_TABLES = frozenset(
+    {TEST_DICTIONARY.name, BOOKMARK.name, LOAD_STATUS.name, TEST_STATUS.name}
+)
 
 #: What a build reads. The projected tables, which it compares and republishes,
-#: and ``_.Bookmark``, whose rows it decides the obsolete ones from. ``_.Log`` is
-#: absent: it is history, nothing reads it to decide anything, and reading it
-#: would grow with the estate's age.
-READ_FOR_BUILD = PROJECTED_TABLES + (BOOKMARK,)
+#: and every current-state table, whose obsolete rows it decides from the rows it
+#: holds. All of them and not only ``_.Bookmark``: a build invalidates whichever
+#: current-state tables the object it is replacing has rows in, and one it could
+#: not see would keep a row describing an incarnation that no longer exists.
+#:
+#: The history tables are absent. Nothing reads them to decide anything, and
+#: reading one would grow with the estate's age.
+READ_FOR_BUILD = PROJECTED_TABLES + CURRENT_STATE_TABLES
 
 #: The tables whose presence a build has to know about — the ones it reads, since
 #: a claim may only be raised against a table that is there.

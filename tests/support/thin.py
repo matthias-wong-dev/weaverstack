@@ -18,6 +18,11 @@ artefacts exactly as it points at production ones, which is what makes the
 Runner unable to tell the difference — and it is why paying for a build to make
 a primitive callable is unnecessary when the claim is about dispatch.
 
+Each meets the contract a deployed load primitive meets — ``cls(spark,
+lakehouse=...)`` and ``_load(fault_tolerant=...)``. The lower interface, because
+that is the one a run calls: ``load()`` is the standalone wrapper that records,
+and a run recording through a primitive would be a second writer of the same row.
+
 Each artefact exists to produce one controlled physical outcome, chosen because
 each is settled by a different rule:
 
@@ -80,7 +85,7 @@ class {name}:
     def __init__(self, spark, lakehouse=None):
         self.spark = spark
 
-    def load(self, fault_tolerant=False):
+    def _load(self, fault_tolerant=False):
         return LoadResult(succeeded=True, rows_read=2, rows_inserted=2)
 ''',
     "Rejects": '''\
@@ -102,7 +107,7 @@ class {name}:
     def __init__(self, spark, lakehouse=None):
         self.spark = spark
 
-    def load(self, fault_tolerant=False):
+    def _load(self, fault_tolerant=False):
         refused = LoadResult.failure(
             "1 row was rejected and this load tolerates none",
             rows_read=3,
@@ -124,7 +129,7 @@ class {name}:
     def __init__(self, spark, lakehouse=None):
         self.spark = spark
 
-    def load(self, fault_tolerant=False):
+    def _load(self, fault_tolerant=False):
         return LoadResult.failure("the source system said no")
 ''',
     "Raises": '''\
@@ -134,7 +139,7 @@ class {name}:
     def __init__(self, spark, lakehouse=None):
         self.spark = spark
 
-    def load(self, fault_tolerant=False):
+    def _load(self, fault_tolerant=False):
         raise RuntimeError("the source system was unreachable")
 ''',
     "Malformed": '''\
@@ -144,7 +149,7 @@ class {name}:
     def __init__(self, spark, lakehouse=None):
         self.spark = spark
 
-    def load(self, fault_tolerant=False):
+    def _load(self, fault_tolerant=False):
         return {{"rows": 4}}
 ''',
 }
