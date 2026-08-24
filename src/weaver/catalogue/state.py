@@ -17,7 +17,6 @@ from ..declaration.model import (
     PROCEDURE_SHAPE,
     WeaverDocumentId,
     WeaverItemId,
-    WeaverSchemaId,
 )
 from ..errors import BuildError, ConfigError
 from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
@@ -1026,7 +1025,7 @@ def reconcile_catalogue_state(
 
 def _row_identity(
     item: WeaverItemId, row: Mapping[str, object], object_type: str
-) -> WeaverDocumentId | WeaverSchemaId:
+) -> WeaverDocumentId:
     """One Registry row's identity, built from its own columns.
 
     The row is the identity: item, schema, object and object type are four
@@ -1038,12 +1037,6 @@ def _row_identity(
 
     schema = str(row.get("schema_name") or "")
     name = str(row.get("object_name") or "")
-    if object_type == "schema":
-        if schema != name:
-            raise BuildError(
-                f"Registry schema shortcut for {item} repeats its schema as its object"
-            )
-        return WeaverSchemaId(item, schema)
     if object_type == "file":
         return WeaverDocumentId(item, ObjectId(schema, name), shape=FILE_SHAPE)
     if object_type == "stored_procedure":

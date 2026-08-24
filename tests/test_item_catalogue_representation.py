@@ -7,15 +7,12 @@ from support.weaver_test import weaver_test
 from test_item_dependencies_declaration import _dependency_estate
 from test_item_repository_declaration import _estate
 
-from weaver.build_bundle.incremental import select_build
-from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue.projection import (
     CatalogueProjection,
     project_item_catalogue,
     project_shortcut_registry,
 )
 from weaver.catalogue.reconcile import reconcile
-from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     DEPENDENCY,
     INSTALLATION,
@@ -27,7 +24,7 @@ from weaver.catalogue.tables import (
     SHORTCUT,
 )
 from weaver.declaration import parse_item_repository
-from weaver.declaration.model import WeaverItemId, WeaverSchemaId
+from weaver.declaration.model import WeaverItemId
 from weaver.locations import Location
 
 
@@ -602,34 +599,6 @@ def test_a_schema_shortcut_is_not_a_schema_the_item_owns(tmp_path):
 
     assert "Sales" in in_use
     assert "Reference" not in in_use
-
-
-@weaver_test()
-def test_a_schema_shortcut_reads_back_as_its_schema_identity(tmp_path):
-    """Selection compares the namespace shortcut with the namespace Fabric has."""
-
-    repository = _shortcut_estate(tmp_path)
-    item = WeaverItemId.parse("Lakehouse/Curated")
-    projection = _project(repository, str(item), "Curated_Dev")
-    catalogue = Catalogue({item: projection.rows})
-    shortcut = WeaverSchemaId(item, "Reference")
-
-    assert shortcut in catalogue.registered
-    selection = select_build(
-        repository,
-        catalogue.registered,
-        selected={shortcut},
-        inventories={
-            item: TargetInventory(
-                target_id="curated",
-                kind="lakehouse",
-                target_name="Curated_Dev",
-                schemas=("Reference",),
-            )
-        },
-    )
-
-    assert not selection.selected_for_build
 
 
 @weaver_test()
