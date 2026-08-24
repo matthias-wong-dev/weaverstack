@@ -11,6 +11,7 @@ from .metadata import ObjectId
 from .model import (
     FILES,
     ItemDependency,
+    RepositoryShortcut,
     WeaverDocumentId,
     WeaverItemId,
     WeaverRepository,
@@ -101,6 +102,7 @@ def _reject_validation_producer(
 def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     """Return ``repository`` with exact item-owned edges and a global DAG."""
 
+    repository = _with_runtime_references(repository)
     native = repository.source_documents
     logical_pairs = {
         pair.destination: pair.source for pair in repository.logical_shortcuts
@@ -241,37 +243,54 @@ def _item_graph(
         # Repository parsing rejects a same-item shortcut, so every shortcut is an
         # edge between two distinct items.
         edges.add((str(shortcut.source.item), str(shortcut.destination.item)))
-    edges |= _runtime_reference_edges(repository)
-
     try:
         return Graph((str(item.identity) for item in repository.items), sorted(edges))
     except GraphError as exc:
         raise GraphError(f"item {exc}") from exc
 
 
-def _runtime_reference_edges(repository: WeaverRepository) -> set[tuple[str, str]]:
-    """The built-in item before any item that reaches its runtime tables.
+def _with_runtime_references(repository: WeaverRepository) -> WeaverRepository:
+    """Inject the package-owned runtime relations before resolving dependencies.
 
-    A built target presents the catalogue's runtime tables under their own names,
-    so a generated procedure and authored Spark SQL can say ``[_].[Bookmark]``.
-    Those references read documents the built-in item owns, which is the same
-    shape as any other cross-item reference and gets the same edge — so one build
-    creates the tables and then points at them, in that order.
-
-    Weaver's own references rather than declared shortcuts: they publish no
-    ``_.Shortcut`` row and take no catalogue identity, and only the ordering is
-    shared with one.
+    ``_.Bookmark`` and the other presented runtime tables are ordinary logical
+    references from a consuming item's namespace to the built-in catalogue item.
+    Holding them as :class:`RepositoryShortcut` pairs gives dependency resolution,
+    both graphs, pruning, physical rendering and installed-catalogue projection
+    one object set to work from. They remain absent from authored shortcut
+    declarations, but publish through the same Shortcut and Registry contract so
+    a later load can reconstruct the pair without the source repository.
     """
 
     from ..catalogue.builtin import BUILTIN_ITEM
+    from ..catalogue.tables import CATALOGUE_SCHEMA, PRESENTED_RUNTIME_TABLES
     from ..etl import item_presents_runtime_tables
 
-    return {
-        (str(BUILTIN_ITEM), str(item.identity))
-        for item in repository.items
-        if item.identity != BUILTIN_ITEM
-        and item_presents_runtime_tables(repository, item=item.identity)
-    }
+    pairs = {pair.destination: pair for pair in repository.logical_shortcuts}
+    for item in repository.items:
+        owner = item.identity
+        if owner == BUILTIN_ITEM or not item_presents_runtime_tables(
+            repository, item=owner
+        ):
+            continue
+        for table in PRESENTED_RUNTIME_TABLES:
+            object_id = ObjectId(CATALOGUE_SCHEMA, table.name)
+            destination = WeaverDocumentId(owner, object_id)
+            source = WeaverDocumentId(BUILTIN_ITEM, object_id)
+            existing = pairs.get(destination)
+            if existing is not None and existing.source != source:
+                raise DiscoveryError(
+                    f"{destination}: Weaver's runtime reference conflicts with "
+                    f"logical shortcut target {existing.source}"
+                )
+            pairs[destination] = RepositoryShortcut(
+                destination=destination, source=source
+            )
+    return replace(
+        repository,
+        logical_shortcuts=tuple(
+            sorted(pairs.values(), key=lambda pair: str(pair.destination))
+        ),
+    )
 
 
 def _resolve_destination(

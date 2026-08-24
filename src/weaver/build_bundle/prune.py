@@ -15,7 +15,12 @@ from ..catalogue.tables import (
     is_protected,
 )
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
-from ..declaration.model import PROCEDURE_SHAPE, WeaverDocumentId
+from ..declaration.model import (
+    FILE_SHAPE,
+    PROCEDURE_SHAPE,
+    WeaverDocumentId,
+    WeaverSchemaId,
+)
 from ..declaration.source import SourceDocument
 from ..errors import BuildError
 from ..etl import LOAD_ROOT
@@ -49,7 +54,7 @@ from .models import (
     InstallAction,
 )
 from .payloads import sha256_hex
-from .targets import BoundTarget
+from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Weaver-owned Files areas excluded from prune.
 _RESERVED_FILES_AREAS = frozenset({CLI_AREA})
@@ -74,7 +79,7 @@ class _Managed:
     views: frozenset[str]
     #: Object names a *document* declares, whatever kind it declares them as. A
     #: document installed under the other kind is a kind change, removed by the
-    #: item's managed drop, which reads the installed type from the Registry, so
+    #: item's managed drop, which reads the installed type from inventory, so
     #: prune spares the name. Shortcut destinations are held out: nothing drops one,
     #: so a shortcut whose name is installed as the other kind is still prune's to
     #: remove.
@@ -184,14 +189,60 @@ class TargetInventory:
             return _holds(self.files, f"{schema}/{name}")
         if object_type == "stored_procedure":
             return _holds(self.procedures, f"{schema}.{name}")
-        physical_schema = schema
-        values = self.views if object_type == "view" else self.tables
         if object_type == "folder":
             prefix = "Files/"
+            physical_schema = schema
             if schema.casefold().startswith(prefix.casefold()):
                 physical_schema = schema[len(prefix) :]
-            values = self.folders
-        return _holds(values, f"{physical_schema}.{name}")
+            return _holds(self.folders, f"{physical_schema}.{name}")
+        if object_type == "schema":
+            return schema.casefold() == name.casefold() and _holds(self.schemas, schema)
+        if (
+            schema.casefold() == CATALOGUE_SCHEMA.casefold()
+            and object_type == ("view" if self.kind == WAREHOUSE_TARGET else "table")
+            and _holds(self.runtime_references, name)
+        ):
+            return True
+        if object_type == "table":
+            return _holds(self.tables, f"{schema}.{name}")
+        if object_type == "view":
+            return _holds(self.views, f"{schema}.{name}")
+        raise BuildError(f"target inventory cannot inspect object type {object_type!r}")
+
+    def physical_type(self, identity: WeaverDocumentId | WeaverSchemaId) -> str | None:
+        """The kind physically installed under one repository identity.
+
+        Inventory answers destructive truth without consulting Registry. A schema
+        shortcut names its namespace directly; a normal relation may currently be
+        either a table or a view; shaped identities name their one physical
+        collection directly.
+        """
+
+        if isinstance(identity, WeaverSchemaId):
+            return "schema" if _holds(self.schemas, identity.schema) else None
+
+        schema = identity.object_id.schema
+        name = identity.object_id.object
+        if identity.shape == FILE_SHAPE:
+            return "file" if self.has_object(schema, name, "file") else None
+        if identity.shape == PROCEDURE_SHAPE:
+            return (
+                "stored_procedure"
+                if self.has_object(schema, name, "stored_procedure")
+                else None
+            )
+        if identity.is_files:
+            return "folder" if self.has_object(schema, name, "folder") else None
+        held = tuple(
+            object_type
+            for object_type in ("table", "view")
+            if self.has_object(schema, name, object_type)
+        )
+        if len(held) > 1:
+            raise BuildError(
+                f"target inventory reports {identity} as both a table and a view"
+            )
+        return held[0] if held else None
 
 
 def _holds(values: Iterable[str], qualified: str) -> bool:
@@ -560,7 +611,6 @@ def managed_sets(
     *,
     shortcut_destinations: Iterable[WeaverDocumentId] = (),
     load_identities: Iterable[WeaverDocumentId] = (),
-    extra_views: Iterable[str] = (),
 ) -> _Managed:
     """The keep-set for one physical side: Delta objects, or Warehouse ones.
 
@@ -576,8 +626,9 @@ def managed_sets(
     added unconditionally, so the schema goes when the last procedure does. The
     Lakehouse runtime tree needs nothing here, being a declared folder.
 
-    ``extra_views`` are qualified views the build creates that no document
-    declares — the local ``_.Bookmark`` a built Warehouse presents.
+    Package-owned runtime references join ``shortcut_destinations`` during
+    repository preparation, so they have the same keep-set lifecycle as any
+    other logical relation.
     """
 
     tables = {
@@ -597,7 +648,6 @@ def managed_sets(
     # are the names a managed drop can remove by their registered type. See
     # :class:`_Managed`.
     declared_objects = tables | views
-    views.update(extra_views)
     #: The namespaces a schema shortcut presents. Kept, and never looked inside:
     #: what is in one belongs to the item it points at, and OneLake makes a
     #: shortcut a read-write window, so enumerating it to decide what to remove

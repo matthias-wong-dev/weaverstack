@@ -79,9 +79,9 @@ tables of the same name, rather than by a second rule.
 It is listed separately on the item:
 
 ```python
-WeaverItem.documents      # what this item materialises
-WeaverItem.validations    # what this item validates
-WeaverItem.declarations   # both, for the readers that genuinely span them
+WeaverItem.documents  # what this item materialises
+WeaverItem.validations  # what this item validates
+WeaverItem.declarations  # both, for the readers that genuinely span them
 ```
 
 Dependency resolution, reference checking and the item signature use

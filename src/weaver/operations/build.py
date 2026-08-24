@@ -306,6 +306,7 @@ def _run_build(
         required_catalogue_items=catalogue_items_for_build(repository, bindings),
         session=session,
         workspace=workspace,
+        shortcuts=repository.shortcuts,
     )
     if bundle_only:
         from ..build_bundle import build_repository_bundle

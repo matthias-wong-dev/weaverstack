@@ -127,6 +127,23 @@ producer to another item's consumer is an ordinary one:
 source document -> shortcut destination -> consumer document
 ```
 
+Repository preparation injects the package-owned runtime relations into this
+same model before dependency resolution. A consuming item therefore holds
+ordinary logical pairs such as:
+
+```text
+Warehouse/_weaver/_.Bookmark -> Warehouse/Reporting/_.Bookmark
+Warehouse/_weaver/_.Log      -> Lakehouse/Sales/_.Log
+```
+
+Authored SQL that reads `_.Bookmark` resolves through the local destination, the
+document and item graphs order the catalogue producer first, prune keeps the
+destination, and physical planning renders that same injected pair as a Warehouse
+view or Lakehouse shortcut. The injected relations are package-owned rather than
+authored declarations, but publish the same Shortcut producer pair and Registry
+certification. A later load therefore reconstructs the same relation from installed
+state that the build resolved from the repository.
+
 A changed object therefore expands to its descendants wherever they are, and the
 planner needs no cross-item special case. Items *not* in the build are still
 deferred, but by construction rather than by rule: they are not selected, so
@@ -193,17 +210,16 @@ that declares something there is refused during discovery, and a wipe removes
 shortcuts through the workspace before it sweeps storage. Removing the shortcut
 root is safe, and it is the only thing Weaver does to one.
 
-A declaration whose logical target item is not bound, whose destination and target
-disagree about the `Files`/table namespace, or whose direct target did not resolve
-has no physical form under the current bindings. It is omitted from the plan with
-the reason `shortcut_unsupported`. That decision belongs to the planner; the
-installer may only run an action already frozen for it.
+A selected declaration whose logical target item is not bound, whose destination
+and target disagree about the `Files`/table namespace, or whose direct target did
+not resolve has no physical form under the current bindings. Bundle generation
+fails before installation and names the unsupported shortcut. A selected object
+owned by a bound item may never be omitted while the build reports success.
 
-**An omitted shortcut is not certified.** A `_.Registry` row means the object's work
-succeeded, and for an omitted shortcut no work was planned at all, so the row is
-withheld. Only for one this build was also asked to build: a shortcut already
-installed by an earlier build, whose source item simply is not bound this time,
-is still physically there and stays certified.
+An unchanged shortcut is not selected for materialisation. It is left installed
+and certified even when its source item is outside the current build's bindings.
+An object owned by an unbound item is outside the build's physical scope and may
+still be recorded as `target_unbound` in the bundle's omissions.
 
 Shortcut destinations join the prune keep-set, *all* of them and not only the ones a
 build selected. They are desired state in the consuming item exactly as a declared
@@ -291,13 +307,21 @@ certification for every selected object.
 ## 7. Signature comparison
 
 For each incoming document in a bound item, Weaver compares its effective build
-signature with the reconciled Registry row:
+signature with the reconciled Registry row and its physical presence in the
+prepared target inventory:
 
 ```text
-no Registry row                 -> new
-different effective signature  -> changed
-matching effective signature   -> unchanged
+absent from inventory                           -> new
+present + no Registry row                       -> changed
+present + different effective signature         -> changed
+present + matching effective signature          -> unchanged
 ```
+
+Repository defines the desired object and signature. Inventory defines physical
+existence and the installed kind. Registry defines the last successfully
+certified signature. A missing Registry row is not evidence of physical absence;
+it is the ordinary state left when a build completed physical work but failed
+before certification.
 
 Signatures are content-derived. They do not use timestamps or mutable target
 metadata. The comparison therefore produces the same decision from the same
@@ -358,10 +382,12 @@ node through its transitive descendants:
 flowchart TD
     R["Incoming documents and shortcut destinations"]
     C["Reconciled Registry"]
+    T["Prepared target inventory"]
     E["Stale shortcuts, by build build_datetime"]
 
     R --> I["determine_impact"]
     C --> I
+    T --> I
     C --> E
     E --> I
 
@@ -387,9 +413,9 @@ Unchanged nodes are implicit rather than copied into the manifest.
 An shortcut destination has no source document and therefore no `prohibit_rebuild`:
 nothing an author writes can forbid replacing a pointer, because replacing one
 destroys nothing.
-`impacted` is a convenience view over changed existing roots plus affected
-existing descendants; new objects stay separate because they need creation but
-no managed drop.
+`impacted` is a convenience view over changed physically existing roots plus
+affected existing descendants; new objects stay separate because they need
+creation but no managed drop.
 
 Only descendants are added. Upstream dependencies are not rebuilt merely
 because one of their consumers changed. Deterministic graph ordering is applied
@@ -397,7 +423,7 @@ after filtering to the selected subset.
 
 ## 9. Prohibit Rebuild
 
-`Prohibit Rebuild` is applied after logical impact is known. For an existing
+`Prohibit Rebuild` is applied after impact is known. For a physically existing
 impacted document it suppresses the physical managed drop and physical rebuild.
 The document remains visible in the impact result and in `plan.yml` under the
 mandatory build selection.
@@ -408,13 +434,17 @@ metadata, dependency claims, installation records, and the Registry signature
 advance to the incoming repository state even while the physical data and its
 security remain unchanged.
 
-A new document marked `Prohibit Rebuild` is still built. There is no existing
-installation to protect.
+A document absent from Registry is not necessarily physically new. If inventory
+also says it is absent, Weaver builds it normally. If inventory says the protected
+object is already present, Weaver classifies it as changed, retains it, and
+republishes its catalogue claims. `Prohibit Rebuild` protects the physical object,
+not Weaver's memory of it; losing or rebuilding the catalogue does not authorize
+replacement.
 
 In set terms:
 
 ```text
-selected_for_drop  = impacted existing - prohibited existing
+selected_for_drop  = impacted physical - prohibited physical
 selected_for_build = new + selected_for_drop
 ```
 
@@ -458,8 +488,10 @@ table, so a table standing at the shortcut's name is prune's to remove.
 A managed drop removes a desired, installed object only because incremental
 selection chose it for rebuild. Its catalogue claims are deleted first, then its
 physical object is dropped strictly. Dependants drop before dependencies. The
-type comes from the Registry, so a declaration that changed from a view to a
-table drops the view that is installed and builds the table that is declared.
+installed type comes from target inventory, so a declaration that changed from a
+view to a table drops the view that is physically present and builds the table
+the repository declares. Registry participates only in signature comparison;
+its remembered type cannot override physical reality.
 
 ## 11. Bundle generation
 
@@ -673,10 +705,12 @@ invalidate.
 A build also gives every target it installs something runnable into the
 catalogue's runtime tables under their own names: views in a Warehouse, OneLake
 shortcuts in a Lakehouse, rendered by the same code a declared shortcut is. One
-action per target carries every reference it is missing. In the load phase, with
-the artefacts they exist for — on the build that creates the catalogue the tables
-they point at arrive in the same bundle. They are in the prune keep-set, so they go
-when the item's last runnable object does.
+action per target carries every reference it is missing. The action follows the
+target's schema and authored-shortcut stages and precedes its document builds,
+because building a table can execute authored SQL that reads one of those local
+names. When the same bundle creates the catalogue tables, the injected dependency
+on the built-in item puts them in an earlier item layer. The references are in the
+prune keep-set, so they go when the item's last runnable object does.
 
 ## 12. Bundle execution order
 
@@ -775,8 +809,7 @@ Weaver fails before mutation where possible:
 - invalid metadata, identity, helper imports, and document or item dependency
   cycles fail parsing;
 - missing bindings or inventories fail planning;
-- a shortcut the current bindings give no physical form is omitted at planning, with
-  its reason recorded;
+- a selected shortcut the current bindings give no physical form fails planning;
 - payload tampering fails bundle validation;
 - unexpected create and managed-drop collisions fail execution;
 - a shortcut that never becomes readable, or an endpoint refresh that settles as

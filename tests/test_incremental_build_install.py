@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+import pytest
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 from test_item_dependencies_declaration import _dependency_estate
@@ -40,7 +41,7 @@ from weaver.catalogue.state import (
     Catalogue,
     reconcile_catalogue_state,
 )
-from weaver.catalogue.tables import REGISTRY
+from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES, REGISTRY
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.locations import Location
@@ -115,14 +116,24 @@ def _raw_binding(target="Raw_Target"):
     )
 
 
-def _raw_inventory(repository, target="Raw_Target"):
+def _raw_inventory(repository, target="Raw_Target", *, present=None):
+    from weaver.etl import FILE_TYPE, item_runtime_artefacts
+
     item = WeaverItemId.parse("Lakehouse/Raw")
     bound = _raw_binding(target).by_item[item].to_bound_target()
+    present = (
+        set(present)
+        if present is not None
+        else {
+            identity
+            for identity in repository.source_documents
+            if identity.item == item
+        }
+    )
     documents = [
-        (identity, repository.source_documents[identity])
-        for identity in repository.source_documents
-        if identity.item == item
+        (identity, repository.source_documents[identity]) for identity in present
     ]
+    artefacts = item_runtime_artefacts(repository, item=item)
     return {
         item: TargetInventory(
             target_id=bound.id,
@@ -138,7 +149,20 @@ def _raw_inventory(repository, target="Raw_Target"):
             folders=tuple(
                 source.qualified for identity, source in documents if identity.is_files
             ),
+            files=tuple(
+                artefact.target_path
+                for artefact in artefacts
+                if artefact.object_type == FILE_TYPE
+            ),
+            runtime_references=tuple(table.name for table in PRESENTED_RUNTIME_TABLES),
         )
+    }
+
+
+def _present_types(repository, identities):
+    return {
+        identity: str(repository.source_documents[identity].kind).casefold()
+        for identity in identities
     }
 
 
@@ -150,12 +174,19 @@ def test_impact_classifies_new_changed_and_unchanged_documents(tmp_path):
         for identity in repository.source_documents
         if str(identity.item) == "Lakehouse/Raw"
     }
-    empty = determine_impact(repository, Catalogue({}).registered, selected=raw)
+    empty = determine_impact(
+        repository, Catalogue({}).registered, selected=raw, physical_types={}
+    )
     assert set(empty.new) == raw
     assert empty.changed == empty.impacted == ()
 
     installed = _catalogue(repository, "Lakehouse/Raw", old=(("Sales", "Customer"),))
-    impact = determine_impact(repository, installed.registered, selected=raw)
+    impact = determine_impact(
+        repository,
+        installed.registered,
+        selected=raw,
+        physical_types=_present_types(repository, raw),
+    )
     assert [str(value) for value in impact.changed] == ["Lakehouse/Raw/Sales.Customer"]
     assert set(impact.to_mapping()) == {"new", "changed", "impacted_descendants"}
 
@@ -171,7 +202,12 @@ def test_changed_root_expands_through_same_item_descendants(tmp_path):
     catalogue = _catalogue(
         repository, "Lakehouse/Raw", old=(("Files/Sales", "Landing"),)
     )
-    impact = determine_impact(repository, catalogue.registered, selected=raw)
+    impact = determine_impact(
+        repository,
+        catalogue.registered,
+        selected=raw,
+        physical_types=_present_types(repository, raw),
+    )
     assert [str(value) for value in impact.changed] == [
         "Lakehouse/Raw/Files/Sales.Landing"
     ]
@@ -215,7 +251,10 @@ def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
     _stale(rows, "Lakehouse/Curated", "Customer")
     catalogue = Catalogue(rows)
     impact = determine_impact(
-        repository, catalogue.registered, selected=(curated, reporting)
+        repository,
+        catalogue.registered,
+        selected=(curated, reporting),
+        physical_types=_present_types(repository, (curated, reporting)),
     )
     assert impact.changed == (curated,)
     assert reporting in impact.impacted_descendants
@@ -237,7 +276,12 @@ def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
         rows.update(_catalogue(repository, item_text).rows)
     _stale(rows, "Lakehouse/Curated", "Customer")
     catalogue = Catalogue(rows)
-    impact = determine_impact(repository, catalogue.registered, selected=(curated,))
+    impact = determine_impact(
+        repository,
+        catalogue.registered,
+        selected=(curated,),
+        physical_types=_present_types(repository, (curated,)),
+    )
 
     assert impact.changed == (curated,)
     assert reporting not in impact.impacted
@@ -251,7 +295,8 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
     # authored below. Deriving it from the edited repository instead would make
     # the persisted state already agree with the desired state, and a
     # publication driven by their difference would correctly write nothing.
-    installed = _catalogue(_repository(root), "Lakehouse/Raw")
+    installed_repository = _repository(root)
+    installed = _catalogue(installed_repository, "Lakehouse/Raw")
 
     existing_path = root / "Lakehouse/Raw/Sales__Customer.py"
     existing_path.write_text(
@@ -286,7 +331,12 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         if str(identity.item) == "Lakehouse/Raw"
     }
     catalogue = installed
-    selection = select_build(repository, catalogue.registered, selected=selected)
+    selection = select_build(
+        repository,
+        catalogue.registered,
+        selected=selected,
+        inventories=_raw_inventory(installed_repository),
+    )
     existing = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
     new = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Protected")
     assert selection.prohibited == (existing,)
@@ -300,7 +350,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         bindings=_raw_binding(),
         output=Location(str(tmp_path / "bundle")),
         store=store,
-        target_inventories=_raw_inventory(repository),
+        target_inventories=_raw_inventory(installed_repository),
         catalogue=catalogue,
         catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
@@ -333,6 +383,113 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         bundle.location.join(*registry_action.payload.split("/"))
     ).decode()
     assert repository.source_documents[existing].effective_signature in registry_payload
+
+
+@pytest.mark.parametrize(
+    ("relative", "identity", "drop_kind", "build_kind"),
+    [
+        (
+            "Lakehouse/Raw/Sales__Customer.py",
+            "Lakehouse/Raw/Sales.Customer",
+            DROP_TABLE,
+            BUILD_TABLE,
+        ),
+        (
+            "Lakehouse/Raw/Files/Sales__Customer.py",
+            "Lakehouse/Raw/Files/Sales.Customer",
+            DROP_FOLDER,
+            BUILD_FOLDER,
+        ),
+    ],
+)
+@weaver_test()
+def test_uncertified_physical_protected_object_is_changed_retained_and_recertified(
+    tmp_path, relative, identity, drop_kind, build_kind
+):
+    root = _estate(tmp_path)
+    path = root / relative
+    path.write_text(
+        path.read_text()
+        .replace(
+            "Primary key: Id",
+            "Primary key: Id\nProhibit rebuild: true",
+        )
+        .replace(
+            'File key: "*.csv"',
+            'File key: "*.csv"\nProhibit rebuild: true',
+        ),
+        encoding="utf-8",
+    )
+    repository = _repository(root)
+    wanted = WeaverDocumentId.parse(identity)
+    store = FilesystemStore()
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=_raw_binding(),
+        output=Location(str(tmp_path / "bundle")),
+        store=store,
+        target_inventories=_raw_inventory(repository),
+        catalogue=Catalogue({}),
+        catalogue_binding=WarehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
+    )
+
+    selection = bundle.plan.selection
+    assert wanted in selection.impact.changed
+    assert wanted not in selection.impact.new
+    assert wanted in selection.prohibited
+    assert wanted not in selection.selected_for_drop
+    assert wanted not in selection.selected_for_build
+    assert not [
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.resource_node_id == identity
+        and action.kind in {drop_kind, build_kind}
+    ]
+    registry = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_registry"
+    )
+    payload = store.read(bundle.location.join(*registry.payload.split("/"))).decode()
+    assert repository.source_documents[wanted].effective_signature in payload
+
+
+@weaver_test()
+def test_uncertified_physical_protected_loadable_keeps_its_runtime_state(tmp_path):
+    root = _estate(tmp_path)
+    path = root / "Lakehouse/Raw/Sales__Customer.py"
+    path.write_text(
+        path.read_text().replace(
+            "Primary key: Id", "Primary key: Id\nProhibit rebuild: true"
+        ),
+        encoding="utf-8",
+    )
+    repository = _repository(root)
+    item = WeaverItemId.parse("Lakehouse/Raw")
+    bookmark = {
+        "item_type": item.item_type,
+        "item_name": item.item_name,
+        "schema_name": "Sales",
+        "object_name": "Customer",
+        "bookmark_datetime": datetime(2026, 8, 24),
+    }
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=_raw_binding(),
+        output=Location(str(tmp_path / "bundle")),
+        store=FilesystemStore(),
+        target_inventories=_raw_inventory(repository),
+        catalogue=Catalogue({item: {"Bookmark": (bookmark,), "Registry": ()}}),
+        catalogue_binding=WarehouseBinding(
+            ItemRef("Weaver_Control"), workspace_name=WORKSPACE
+        ),
+    )
+
+    customer = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+    assert customer in bundle.plan.selection.prohibited
+    assert bundle.plan.runtime_state == ()
 
 
 SHORTCUT_DESTINATION = "Warehouse/Reporting/Sales.PortableCustomer"
@@ -596,13 +753,14 @@ def _consumer_only_selection(repository, rows):
             }
             | {
                 shortcut.destination
-                for shortcut in repository.logical_shortcuts
+                for shortcut in repository.shortcuts
                 if shortcut.destination.item == consumer
             }
         ),
         stale_shortcuts=stale_shortcut_destinations(
             repository, registered, bound_items={consumer}
         ),
+        inventories=_shortcut_inventories(repository),
     )
 
 
@@ -863,7 +1021,26 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
 def test_managed_drop_uses_the_installed_type_when_an_object_changes_type(tmp_path):
     root = _estate(tmp_path)
     installed = _repository(root)
-    catalogue = _catalogue(installed, "Lakehouse/Raw")
+    certified = _catalogue(installed, "Lakehouse/Raw")
+    raw = WeaverItemId.parse("Lakehouse/Raw")
+    catalogue = Catalogue(
+        {
+            raw: {
+                name: tuple(
+                    {
+                        **row,
+                        "object_type": "view",
+                    }
+                    if name == REGISTRY.name
+                    and row.get("schema_name") == "Sales"
+                    and row.get("object_name") == "Customer"
+                    else dict(row)
+                    for row in rows
+                )
+                for name, rows in certified.rows[raw].items()
+            }
+        }
+    )
     (root / "Lakehouse/Raw/Sales__Customer.py").unlink()
     _write(
         root,

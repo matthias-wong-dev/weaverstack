@@ -167,6 +167,25 @@ def test_call_procedure_declares_locals_and_passes_them_as_outputs():
 
 
 @weaver_test()
+def test_call_procedure_returns_outputs_under_their_physical_parameter_names():
+    cursor = MultiSetCursor([([(True, 4)], ["weaver_succeeded", "weaver_rows_read"])])
+    executor, _ = _executor([Connection(cursor)])
+
+    row = executor.call_procedure(
+        "[_].[Load Sales.Customer]",
+        outputs=(
+            ("weaver_succeeded", "bit"),
+            ("weaver_rows_read", "bigint"),
+        ),
+    )
+
+    batch = cursor.calls[0][0]
+    assert "@weaver_succeeded = @weaver_out_weaver_succeeded output" in batch
+    assert "@weaver_rows_read = @weaver_out_weaver_rows_read output" in batch
+    assert row == {"weaver_succeeded": True, "weaver_rows_read": 4}
+
+
+@weaver_test()
 def test_call_procedure_reads_its_own_projection_not_the_procedures_rows():
     """The reason the load result stopped being a result set.
 

@@ -146,7 +146,11 @@ def generate_item_build_bundle(
         if identity.item in by_item
     }
     selection = select_build(
-        repository, registered, selected=selected_ids, stale_shortcuts=stale_shortcuts
+        repository,
+        registered,
+        selected=selected_ids,
+        stale_shortcuts=stale_shortcuts,
+        inventories=inventories,
     )
     selected_for_drop = set(selection.selected_for_drop)
     selected_for_build = set(selection.selected_for_build)
@@ -194,11 +198,6 @@ def generate_item_build_bundle(
     if reconciliation is not None:
         stages.append(reconciliation)
 
-    # Shortcut destinations this build wanted but could not materialise. They must
-    # not reach the Registry: a row there means the object's work succeeded, and
-    # for these no work was even planned.
-    uncertified: set = set()
-
     for layer in _item_layers(repository, target_by_item):
         layer_stages: list[PlannedStage] = []
         for item in layer:
@@ -225,13 +224,14 @@ def generate_item_build_bundle(
             )
             layer_stages.extend(planned.stages)
             omitted.extend(planned.omitted)
-            uncertified |= planned.uncertified
         stages.extend(merge_layer_stages(layer_stages))
+
+    _refuse_selected_omissions(omitted)
 
     stages.extend(
         render_catalogue_after_build(
             repository,
-            selected_ids - uncertified,
+            selected_ids,
             target_by_item,
             catalogue_target=catalogue_target,
             # The catalogue as the claim deletions above will leave it, not as
@@ -274,6 +274,18 @@ def generate_item_build_bundle(
     )
 
 
+def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:
+    """Fail when a bound item's selected object has no materialisation plan."""
+
+    if not omitted:
+        return
+    details = "; ".join(
+        f"{node.node_id}: {node.detail or node.reason}"
+        for node in sorted(omitted, key=lambda node: (node.node_id, node.reason))
+    )
+    raise BuildError(f"selected object(s) could not be materialised: {details}")
+
+
 def _selectable(
     repository: WeaverRepository, by_item: Mapping
 ) -> tuple[set, set, set, set]:
@@ -289,6 +301,11 @@ def _selectable(
             declaration.destination
             for declaration in repository.shortcuts
             if declaration.destination.item in by_item
+        }
+        | {
+            shortcut.destination
+            for shortcut in repository.logical_shortcuts
+            if shortcut.destination.item in by_item
         },
         {
             artefact.identity
@@ -348,18 +365,15 @@ def _item_layers(
 
 @dataclass(frozen=True)
 class PlannedItem:
-    """One item's physical plan: what to do, what was left out, what is uncertified."""
+    """One item's physical plan and any selected nodes it could not plan."""
 
     #: The item's contiguous stages, in the order they must run.
     stages: tuple[PlannedStage, ...]
-    #: Nodes this item could not plan, each carrying why.
+    #: Selected nodes this bound item could not plan, each carrying why. The
+    #: bundle planner refuses any such result before writing a bundle.
     omitted: tuple[OmittedNode, ...]
-    #: Shortcut destinations this item could not materialise *and* was asked to
-    #: build. Withheld from certification: a shortcut whose source item is unbound
-    #: has no physical form under these bindings, and a Registry row for it would
-    #: claim an installation that never happened. One already installed from an
-    #: earlier build is left certified — it is still there — so only the
-    #: intersection with the build selection is withheld.
+    #: Shortcut destinations represented by ``omitted``. This preserves the item
+    #: planning seam's complete result even though whole-bundle generation fails.
     uncertified: frozenset
 
 
@@ -430,7 +444,7 @@ def plan_item_build(
             selected_for_drop - selected_shortcuts,
             item=item,
             target=target,
-            registered=registered,
+            inventory=inventory,
         )
     )
     schemas = item_schema_stage(
@@ -448,6 +462,18 @@ def plan_item_build(
         stages.append(schemas)
     if shortcuts.stage is not None:
         stages.append(shortcuts.stage)
+    # Authored SQL may read a runtime table while a Warehouse table build
+    # executes it to discover and materialise its shape.
+    references = render_runtime_references(
+        repository,
+        item=item,
+        target=target,
+        catalogue_target=catalogue_target,
+        runtime_sources=runtime_sources,
+        selected=selected_for_build & selected_shortcuts,
+    )
+    if references is not None:
+        stages.append(references)
     stages.extend(
         item_build_stages(
             repository,
@@ -469,18 +495,6 @@ def plan_item_build(
     stages.extend(
         item_load_removals(removed, item=item, target=target, registered=registered)
     )
-    # Behind the artefacts, in the phase they are installed in: the references
-    # exist for them, and nothing built reads a runtime table.
-    references = render_runtime_references(
-        repository,
-        item=item,
-        target=target,
-        inventory=inventory,
-        catalogue_target=catalogue_target,
-        runtime_sources=runtime_sources,
-    )
-    if references is not None:
-        stages.append(references)
     return PlannedItem(
         stages=tuple(stages),
         omitted=shortcuts.omitted,

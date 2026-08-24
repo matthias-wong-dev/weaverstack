@@ -12,11 +12,11 @@ begin
 
     declare @weaver_load_datetime datetime2(6) = sysutcdatetime();
     declare @weaver_live_datetime datetime2(6) = convert(datetime2(6), '$live_delete_datetime');
-    declare @weaver_rows_read bigint = 0;
-    declare @weaver_rows_inserted bigint = 0;
-    declare @weaver_rows_updated bigint = 0;
-    declare @weaver_rows_deleted bigint = 0;
-    declare @weaver_rows_rejected bigint = 0;
+    set @weaver_rows_read = 0;
+    set @weaver_rows_inserted = 0;
+    set @weaver_rows_updated = 0;
+    set @weaver_rows_deleted = 0;
+    set @weaver_rows_rejected = 0;
     declare @weaver_duplicate_keys bigint = 0;
     declare @weaver_merge_conflicts bigint = 0;
     declare @weaver_error varchar(4000) = null;

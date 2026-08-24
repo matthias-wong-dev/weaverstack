@@ -10,7 +10,12 @@ from .errors import (
     SqlExecutionError,
     SqlPoolClosedError,
 )
-from .execution import PooledSqlExecutor, ProcedureResult, SqlExecutor, SqlRow
+from .execution import (
+    PooledSqlExecutor,
+    ProcedureResult,
+    SqlExecutor,
+    SqlRow,
+)
 from .pool import (
     DEFAULT_MAX_CONNECTIONS,
     SqlConnectionLease,

@@ -305,6 +305,11 @@ def installed_catalogue(
             for declaration in repository.shortcuts
             if declaration.owner == item
         )
+        identities.update(
+            shortcut.destination
+            for shortcut in repository.logical_shortcuts
+            if shortcut.destination.item == item
+        )
         target_kinds[item] = (
             "warehouse" if item.item_type == "Warehouse" else "lakehouse"
         )
@@ -495,6 +500,17 @@ class FixtureInventory(TargetInventory):
                     artefact.identity.object_id.qualified
                     for artefact in artefacts
                     if artefact.object_type == PROCEDURE_TYPE
+                )
+            ),
+            runtime_references=(
+                ()
+                if target_kind == SQL_TARGET
+                else tuple(
+                    sorted(
+                        table.name
+                        for table in PRESENTED_RUNTIME_TABLES
+                        if item_presents_runtime_tables(repository, item=item)
+                    )
                 )
             ),
         )

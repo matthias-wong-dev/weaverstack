@@ -1,4 +1,4 @@
-"""Projecting one logical item's catalogue rows from a validated declaration.
+"""Projecting one logical item's catalogue rows from a prepared repository.
 
 Nothing here re-reads a source file, imports an object module, or asks a
 physical table what shape it is: every value comes from the validated
@@ -31,6 +31,10 @@ from ..declaration.metadata import (
     Reference,
 )
 from ..declaration.model import (
+    LOGICAL_TARGET,
+    TABLE_SHORTCUT,
+    VIEW_SHORTCUT,
+    WAREHOUSE,
     WeaverDocumentId,
     WeaverItemId,
     WeaverRepository,
@@ -99,19 +103,19 @@ def project_item_catalogue(
     item: WeaverItemId,
     retained: Iterable[WeaverDocumentId],
 ) -> CatalogueProjection:
-    """One item's catalogue rows, from the declaration and nothing else.
+    """One item's catalogue rows, from prepared logical intent and nothing else.
 
-    Every value is a function of source: what the item declares, shortcuts and
-    describes. Nothing about a build, a binding or a target reaches it, so a
-    developer keeps the projection correct by adding a declaration.
+    Every value is a function of repository intent: authored declarations plus
+    package-owned relations introduced during preparation. Nothing about a
+    build, a binding or a target reaches it.
 
     It says what the repository declares; whether any of it is installed, where,
     and by which Weaver are composed at publication.
 
-    No Registry row is written for a shortcut destination. The Shortcut row is a
-    declaration and belongs here; the Registry row certifies that a physical
-    object exists at that name and what it is, which needs a binding — see
-    :func:`project_shortcut_registry`.
+    No Registry row is written for a shortcut destination here. The logical
+    relation belongs in this projection whether it is authored or package-owned;
+    the Registry row certifies that a physical object exists at that name and
+    what it is, which needs a binding — see :func:`project_shortcut_registry`.
     """
 
     scope = InstallationScope(item.item_type, item.item_name)
@@ -130,6 +134,14 @@ def project_item_catalogue(
         for declaration in repository.shortcuts
         if declaration.owner == item
     }
+    logical_shortcut_by_destination = {
+        shortcut.destination: shortcut
+        for shortcut in repository.logical_shortcuts
+        if shortcut.destination.item == item
+    }
+    shortcut_destinations = set(shortcut_by_destination) | set(
+        logical_shortcut_by_destination
+    )
     retained_shortcuts = tuple(
         shortcut_by_destination[identity]
         for identity in retained
@@ -145,7 +157,7 @@ def project_item_catalogue(
     retained_validations = tuple(
         identity
         for identity in retained
-        if identity not in shortcut_by_destination
+        if identity not in shortcut_destinations
         and identity not in installed
         and repository.source_documents[identity].is_validation
     )
@@ -153,7 +165,7 @@ def project_item_catalogue(
     retained = tuple(
         identity
         for identity in retained
-        if identity not in shortcut_by_destination
+        if identity not in shortcut_destinations
         and identity not in installed
         and identity not in validation_set
     )
@@ -342,6 +354,40 @@ def project_item_catalogue(
             }
         )
 
+    # Package-owned logical shortcuts have no authored declaration, but an
+    # installed operation has no repository to recover them from. Persist the
+    # same producer pair an authored logical shortcut persists.
+    for shortcut in sorted(
+        (
+            shortcut
+            for destination, shortcut in logical_shortcut_by_destination.items()
+            if destination not in shortcut_by_destination
+        ),
+        key=lambda shortcut: str(shortcut.destination),
+    ):
+        destination = shortcut.destination
+        source = shortcut.source
+        rows[SHORTCUT.name].append(
+            {
+                **_scope(scope),
+                "shortcut_id": destination.object_id.qualified,
+                "schema_name": destination.object_id.schema,
+                "object_name": destination.object_id.object,
+                "shortcut_type": (
+                    VIEW_SHORTCUT
+                    if destination.item.item_type == WAREHOUSE
+                    else TABLE_SHORTCUT
+                ),
+                "target_type": LOGICAL_TARGET,
+                "target_item_type": source.item.item_type,
+                "target_item_name": source.item.item_name,
+                "target_schema_name": source.object_id.schema,
+                "target_object_name": source.object_id.object,
+                "target_workspace_name": None,
+                "signature": shortcut.signature,
+            }
+        )
+
     used_schemas = sorted(
         {
             (_catalogue_schema(identity), identity.object_id.schema)
@@ -413,7 +459,7 @@ def project_shortcut_registry(
 
     scope = InstallationScope(item.item_type, item.item_name)
     wanted = set(retained)
-    return tuple(
+    authored = tuple(
         {
             **_identity(scope, declaration.destination),
             "object_type": _shortcut_object_type(declaration, target_kind),
@@ -429,6 +475,34 @@ def project_shortcut_registry(
             key=lambda declaration: str(declaration.destination),
         )
     )
+    authored_destinations = {
+        declaration.destination
+        for declaration in repository.shortcuts
+        if declaration.owner == item
+    }
+    injected = tuple(
+        {
+            **_identity(scope, shortcut.destination),
+            "object_type": (
+                OBJECT_TYPE_FOR_KIND[VIEW]
+                if target_kind == WAREHOUSE_TARGET
+                else OBJECT_TYPE_FOR_KIND[TABLE]
+            ),
+            "object_role": ROLE_SHORTCUT,
+            "signature": shortcut.signature,
+        }
+        for shortcut in sorted(
+            (
+                shortcut
+                for shortcut in repository.logical_shortcuts
+                if shortcut.destination.item == item
+                and shortcut.destination in wanted
+                and shortcut.destination not in authored_destinations
+            ),
+            key=lambda shortcut: str(shortcut.destination),
+        )
+    )
+    return authored + injected
 
 
 def _shortcut_object_type(declaration, target_kind: str) -> str:

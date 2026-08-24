@@ -17,18 +17,15 @@ Every test function has one `@weaver_test(...)` declaration:
 
 ```python
 @weaver_test()
-def test_a_plan_is_deterministic():
-    ...
+def test_a_plan_is_deterministic(): ...
 
 
 @weaver_test(remote=True, resources={"tds"})
-def test_a_warehouse_accepts_the_generated_statement():
-    ...
+def test_a_warehouse_accepts_the_generated_statement(): ...
 
 
 @weaver_test(integration=True, resources={"tds", "livy", "onelake"})
-def test_the_lifecycle_composes():
-    ...
+def test_the_lifecycle_composes(): ...
 ```
 
 The declaration stores one scope and one resource set. It is the source of

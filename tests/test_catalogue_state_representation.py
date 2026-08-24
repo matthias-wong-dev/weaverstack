@@ -8,6 +8,7 @@ from support.weaver_test import weaver_test
 from weaver.build_bundle.catalogue_actions import _claim_statements
 from weaver.build_bundle.prune import TargetInventory
 from weaver.catalogue import (
+    BOOKMARK,
     FOLDER_DICTIONARY,
     PROJECTED_TABLES,
     REGISTRY,
@@ -136,6 +137,23 @@ def test_physical_objects_without_catalogue_rows_generate_no_deletes():
     )
     assert result.stale_claims == ()
     assert result.stale_objects == ()
+
+
+@weaver_test()
+def test_reconciliation_preserves_runtime_state_for_build_lifecycle_planning():
+    state = _state(_row("Current"))
+    bookmark = {
+        "item_type": "Lakehouse",
+        "item_name": "Sales",
+        "schema_name": "Sales",
+        "object_name": "Current",
+        "bookmark_datetime": "2026-08-24T00:00:00",
+    }
+    state.rows[ITEM][BOOKMARK.name] = (bookmark,)
+
+    result = reconcile_catalogue_state(state, inventories={ITEM: _inventory("Current")})
+
+    assert result.catalogue.rows[ITEM][BOOKMARK.name] == (bookmark,)
 
 
 @weaver_test()

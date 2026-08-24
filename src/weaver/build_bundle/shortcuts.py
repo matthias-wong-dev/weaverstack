@@ -26,9 +26,9 @@ lands in that item. Nothing is planned inside a schema or folder shortcut, and
 :func:`weaver.declaration.shortcuts.validate_destinations` refuses a repository
 that declares something there.
 
-A declaration the current bindings give no physical form is left out of the plan
-and recorded as an omission. That is the planner's decision: the installer may
-only run an action already frozen for it.
+A selected declaration the current bindings give no physical form is reported to
+the bundle planner, which refuses the build. That is a planning decision: the
+installer may only run an action already frozen for it.
 """
 
 from __future__ import annotations
@@ -105,14 +105,12 @@ def shortcut_node_id(destination) -> str:
 
 @dataclass(frozen=True)
 class ItemShortcutPlan:
-    """One item's planned shortcuts, the schemas they need, and what was left out."""
+    """One item's planned shortcuts, schemas, and selected planning failures."""
 
     stage: PlannedStage | None = None
     schemas: tuple[str, ...] = ()
     omitted: tuple[OmittedNode, ...] = ()
     #: The destinations behind ``omitted``, as identities rather than node ids.
-    #: The caller needs them because a shortcut with no physical form must not be
-    #: certified as installed.
     omitted_destinations: tuple[object, ...] = ()
 
 
@@ -161,6 +159,10 @@ def plan_item_shortcuts(
     }
 
     for declaration in declarations:
+        if not declaration.is_schema:
+            schemas.append(declaration.schema)
+        if declaration.destination not in chosen:
+            continue
         source_target = None
         if declaration.is_logical:
             source = logical_sources.get(declaration.destination)
@@ -183,10 +185,7 @@ def plan_item_shortcuts(
             )
             omitted_destinations.append(declaration.destination)
             continue
-        if not declaration.is_schema:
-            schemas.append(declaration.schema)
-        if declaration.destination in chosen:
-            supported.append((declaration, source_target))
+        supported.append((declaration, source_target))
 
     stage = None
     if supported:

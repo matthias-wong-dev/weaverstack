@@ -191,50 +191,20 @@ def test_at_least_one_binding_is_required(tmp_path):
 
 
 @weaver_test()
-def test_a_shortcut_to_an_unbound_target_item_is_omitted_with_its_reason(tmp_path):
-    """A shortcut needs a bound source: there is otherwise nothing to point at.
-
-    Bindings are deliberately sparse, so this is an omission rather than an
-    error — and a stated one, because the planner is the only thing allowed to
-    decide a shortcut has no physical form.
-    """
+def test_a_selected_shortcut_to_an_unbound_target_item_fails_planning(tmp_path):
+    """A bound consumer's selected shortcut must have a physical form."""
 
     repository = _repository(_dependency_estate(tmp_path))
-    bundle = generate_item_build_bundle(
-        repository,
-        bindings=ItemBindings((_binding("Warehouse/Reporting", "Reporting_Dev"),)),
-        output=Location(str(tmp_path / "bundle")),
-        store=FilesystemStore(),
-    )
-
-    omitted = {
-        node.node_id: node
-        for node in bundle.plan.omitted_nodes
-        if node.reason == "shortcut_unsupported"
-    }
-    assert set(omitted) == {"shortcut:Warehouse/Reporting/Sales.PortableCustomer"}
-    assert (
-        "Lakehouse/Curated is not bound"
-        in omitted["shortcut:Warehouse/Reporting/Sales.PortableCustomer"].detail
-    )
-    assert not any(
-        action.kind == "create_shortcut" for _s, _b, action in bundle.plan.actions()
-    )
-
-    # And it is not certified either. A Registry row means the object's work
-    # succeeded; here no work was even planned, so a row would claim an
-    # installation that never happened.
-    registry = next(
-        action
-        for _s, _b, action in bundle.plan.actions()
-        if action.kind == "publish_registry"
-    )
-    payload = (
-        FilesystemStore()
-        .read(bundle.location.join(*registry.payload.split("/")))
-        .decode()
-    )
-    assert "PortableCustomer" not in payload
+    with pytest.raises(
+        BuildError,
+        match="Lakehouse/Curated is not bound",
+    ):
+        generate_item_build_bundle(
+            repository,
+            bindings=ItemBindings((_binding("Warehouse/Reporting", "Reporting_Dev"),)),
+            output=Location(str(tmp_path / "bundle")),
+            store=FilesystemStore(),
+        )
 
 
 @weaver_test()

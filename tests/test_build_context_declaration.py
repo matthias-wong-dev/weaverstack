@@ -103,6 +103,114 @@ def test_bundle_path_refuses_an_already_populated_directory(tmp_path):
         weaver.operations.build._bundle_output(output)
 
 
+@pytest.fixture
+def public_shortcut_build(tmp_path, monkeypatch):
+    from support.sessions import given_session
+    from support.workspaces import given_resolver, given_workspace
+    from test_item_repository_declaration import _schema, _table, _write
+
+    from weaver.build_bundle import load_bundle
+    from weaver.locations import Location
+    from weaver.store import FilesystemStore
+    from weaver.targets import ItemRef
+
+    root = tmp_path / "Estate"
+    _write(root, "Lakehouse/Play/schemas/Source.yml", _schema("Source"))
+    _write(
+        root,
+        "Lakehouse/Play/shortcuts.py",
+        "from weaver import Shortcut\n\n"
+        "Source__RawData = Shortcut(\n"
+        '    shortcut_type="folder",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/Reference/Files/RawData",\n'
+        ")\n",
+    )
+    _write(root, "Lakehouse/Archive/schemas/History.yml", _schema("History"))
+    _write(
+        root,
+        "Lakehouse/Archive/History__Event.py",
+        _table("History.Event"),
+    )
+
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
+    store = FilesystemStore()
+    resolver = given_resolver(
+        workspace=workspace,
+        lakehouses=("Play_LH", "Reference"),
+        warehouses=("Weaver",),
+        root=tmp_path / "fabric",
+    )
+    for item in ("Play_LH", "Reference"):
+        store.make_directory(resolver.files_root(ItemRef(item)))
+        store.make_directory(resolver.tables_root(ItemRef(item)))
+    store.make_directory(resolver.files_root(ItemRef("Reference")) / "RawData")
+
+    monkeypatch.setattr(weaver.operations.build, "_preflight", lambda *a, **k: None)
+
+    def run(bundle_name="bundle"):
+        class EmptySql:
+            def query(self, _statement, parameters=None):
+                return []
+
+        output = tmp_path / bundle_name
+        with given_session(
+            workspace=workspace, resolver=resolver, store=store
+        ) as session:
+            session.sql_executor = lambda *_args, **_kwargs: EmptySql()
+            result = weaver.build(
+                str(root),
+                bind="Lakehouse/Play_LH=Play",
+                session=session,
+                bundle_only=True,
+                bundle_path=output,
+            )
+        return load_bundle(Location(result.bundle_path), store=FilesystemStore())
+
+    return types.SimpleNamespace(run=run)
+
+
+@weaver_test()
+def test_public_build_resolves_a_physical_folder_shortcut(public_shortcut_build):
+    """Public state preparation freezes the source before planning the bundle."""
+
+    bundle = public_shortcut_build.run()
+    assert any(
+        action.kind == "create_shortcut"
+        for _sequence, _batch, action in bundle.plan.actions()
+    )
+    assert not any(
+        node.reason == "shortcut_unsupported" for node in bundle.plan.omitted_nodes
+    )
+
+
+@weaver_test()
+def test_public_build_refuses_a_selected_shortcut_without_a_resolved_source(
+    public_shortcut_build, monkeypatch
+):
+    """A selected object cannot disappear from a successful public build."""
+
+    monkeypatch.setattr(
+        "weaver.build_bundle.workflow.read_shortcut_sources",
+        lambda *_args, **_kwargs: {},
+    )
+
+    with pytest.raises(
+        BuildError,
+        match="selected object.*physical target was not resolved",
+    ):
+        public_shortcut_build.run()
+
+
+@weaver_test()
+def test_public_partial_build_records_an_unbound_item(public_shortcut_build):
+    """An object outside the requested bindings remains a scope omission."""
+
+    bundle = public_shortcut_build.run()
+    omitted = {node.node_id: node.reason for node in bundle.plan.omitted_nodes}
+    assert omitted["Lakehouse/Archive/History.Event"] == "target_unbound"
+
+
 # --- notebook inference -------------------------------------------------------
 
 

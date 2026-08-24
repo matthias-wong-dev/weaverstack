@@ -122,6 +122,9 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
     # about it is that Weaver installed it and at what signature.
     "file": (CatalogueClaimRule(REGISTRY),),
     "stored_procedure": (CatalogueClaimRule(REGISTRY),),
+    # A schema shortcut claims its repeated Schema/Schema Registry identity and
+    # no dictionary row: it presents a namespace that its source item owns.
+    "schema": (CatalogueClaimRule(REGISTRY),),
 }
 
 

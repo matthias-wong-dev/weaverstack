@@ -57,6 +57,18 @@ def targets():
     }
 
 
+def inventories():
+    return {
+        item_id(PRODUCER): target_inventory(tables=("DWG.Customer",)),
+        item_id(CONSUMER): target_inventory(
+            target_id="curated",
+            target_name="Curated_LH",
+            tables=("DWG.PortableCustomer",),
+            views=("DWG.CustomerName",),
+        ),
+    }
+
+
 def plan_shortcuts(repository, *, selected=(SHORTCUT,)):
     by_item = targets()
     return plan_item_shortcuts(
@@ -324,7 +336,11 @@ def test_a_second_build_over_an_unchanged_estate_plans_no_shortcut_action(estate
     stale = stale_shortcut_destinations(estate, registered, bound_items=set(targets()))
 
     selection = select_build(
-        estate, registered, selected=everything, stale_shortcuts=stale
+        estate,
+        registered,
+        selected=everything,
+        stale_shortcuts=stale,
+        inventories=inventories(),
     )
 
     assert selection.selected_for_build == ()
@@ -341,7 +357,9 @@ def test_a_changed_target_reaches_the_shortcut_and_its_consumer(estate):
         document_id(SOURCE): registered_document(SOURCE, signature="an-old-hash"),
     }
 
-    selection = select_build(estate, registered, selected=everything)
+    selection = select_build(
+        estate, registered, selected=everything, inventories=inventories()
+    )
 
     assert document_id(SOURCE) in selection.selected_for_build
     assert document_id(VIEW) in selection.selected_for_build

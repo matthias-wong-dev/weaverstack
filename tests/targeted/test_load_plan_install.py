@@ -86,6 +86,14 @@ def loads_of(repository, item=None):
     return {a.identity for a in item_load_artefacts(repository, item=item or item_id())}
 
 
+def runtime_references_of(repository, item):
+    return {
+        shortcut.destination
+        for shortcut in repository.logical_shortcuts
+        if shortcut.destination.item == item
+    }
+
+
 def phases(planned) -> list[str]:
     return [stage.phase for stage in planned.stages]
 
@@ -171,19 +179,21 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
         warehouse,
         item=item,
         target=target,
+        selected_shortcuts=runtime_references_of(warehouse, item),
+        selected_for_build=runtime_references_of(warehouse, item),
         selected_loads=loads_of(warehouse, item),
     )
     actions = actions_of(planned, "load")
 
-    # The references to the catalogue's runtime tables share this phase, because
-    # they exist for the procedures rather than for anything the build made.
     assert [action.kind for action in actions] == [
         "build_procedure",
         "build_procedure",
-        "create_runtime_reference",
     ]
-    assert {action.executor for action in actions[:2]} == {"tsql"}
-    installed = {action.resource_node_id for action in actions[:2]}
+    assert [action.kind for action in actions_of(planned, "shortcut")] == [
+        "create_runtime_reference"
+    ]
+    assert {action.executor for action in actions} == {"tsql"}
+    installed = {action.resource_node_id for action in actions}
     assert any(one.endswith("procedure:_/Load Sales.Customer") for one in installed)
     # And the entry point beside it, installed by the same executor: a
     # create-or-alter is a script whichever procedure it builds.
@@ -260,6 +270,8 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
         warehouse,
         item=item,
         target=target,
+        selected_shortcuts=runtime_references_of(warehouse, item),
+        selected_for_build=runtime_references_of(warehouse, item),
         removed={gone},
         registered={gone: registered_document(gone, object_type="stored_procedure")},
     )
@@ -270,11 +282,11 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
         if actions[0].payload in stage.payloads
     ).decode()
 
-    # The reference to the catalogue's `_.Bookmark` shares this phase; the item
-    # still declares a loadable object, so it is still wanted.
-    assert [action.kind for action in actions] == [
-        "drop_procedure",
-        "create_runtime_reference",
+    # The item still declares a loadable object, so the runtime reference remains
+    # wanted, but precedes documents in the shortcut phase now.
+    assert [action.kind for action in actions] == ["drop_procedure"]
+    assert [action.kind for action in actions_of(planned, "shortcut")] == [
+        "create_runtime_reference"
     ]
     assert statement == "drop procedure if exists [_].[Load Sales.Retired];\n"
 

@@ -27,6 +27,7 @@ from factories import (
 from support.weaver_test import weaver_test
 
 from weaver.catalogue.state import reconcile_catalogue_state
+from weaver.declaration.model import WeaverSchemaId
 from weaver.errors import BuildError
 
 
@@ -70,6 +71,32 @@ def test_a_repository_and_its_installed_estate_agree_completely(tmp_path):
     assert result.stale_claims == ()
     assert result.stale_objects == ()
     assert document_id("DWG.Customer") in result.catalogue.registered
+
+
+@weaver_test()
+def test_a_schema_shortcut_is_compared_with_the_inventory_schema():
+    """Both planner and Registry spellings ask about the same namespace."""
+
+    identity = WeaverSchemaId(_item(), "Reference")
+    inventory = target_inventory(schemas=("Reference",))
+
+    assert inventory.physical_type(identity) == "schema"
+    assert inventory.has_object("Reference", "Reference", "schema")
+    assert target_inventory().physical_type(identity) is None
+
+
+@weaver_test()
+def test_a_missing_schema_shortcut_retires_only_its_registry_claim():
+    identity = document_id("Reference.Reference")
+    result = reconcile(
+        FixtureCatalogue.from_registry_rows(
+            registry_row(identity, object_type="schema", object_role="shortcut")
+        ),
+        target_inventory(),
+    )
+
+    assert result.stale_objects == (str(identity),)
+    assert {claim.rule.table.name for claim in result.stale_claims} == {"Registry"}
 
 
 # --- the two disagree ---------------------------------------------------------
@@ -347,6 +374,7 @@ def test_a_keyed_table_whose_shape_version_moves_is_selected_for_rebuild(tmp_pat
                 )
             },
             selected=selected,
+            physical_types={document_id("DWG.Customer"): "table"},
         )
 
     declared = declared_signatures(repository, selected)

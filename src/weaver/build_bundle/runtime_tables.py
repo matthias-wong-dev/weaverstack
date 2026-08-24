@@ -39,14 +39,12 @@ from ..catalogue.tables import (
     BY_VALIDATION,
     CATALOGUE_SCHEMA,
     CURRENT_STATE_TABLES,
-    PRESENTED_RUNTIME_TABLES,
     SCOPE_ITEM_NAME,
     SCOPE_ITEM_TYPE,
 )
 from ..declaration.model import WAREHOUSE, WeaverDocumentId, WeaverItemId
 from ..etl import (
     item_bookmarkable_objects,
-    item_presents_runtime_tables,
     item_validated_objects,
 )
 from .changes import TABLE as TABLE_KIND
@@ -65,7 +63,7 @@ from .shortcuts import (
     shortcut_payload,
     view_statement,
 )
-from .stages import CATALOGUE, LOAD, PlannedStage
+from .stages import CATALOGUE, SHORTCUT, PlannedStage
 from .targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET
 
 #: What the reconciliation stage's action and payload are named after.
@@ -201,45 +199,43 @@ def render_runtime_state_reconciliation(
 # --- the local names a generated statement uses -------------------------------
 
 
-def _reference(table, item: WeaverItemId, catalogue: str) -> Reference:
+def _reference(pair, catalogue: str) -> Reference:
     """One runtime table as the reference it is: a shortcut nobody authored.
 
-    Not published as a ``_.Shortcut`` row, but what it becomes is what a declared
-    shortcut becomes, so it is expressed as one and rendered by the same code.
+    Published through the ordinary installed shortcut contract and physically
+    rendered by the same code as an authored declaration.
     """
 
-    from ..declaration.metadata import ObjectId
     from ..declaration.model import TABLE_SHORTCUT, VIEW_SHORTCUT
 
-    qualified = f"{CATALOGUE_SCHEMA}.{table.name}"
+    destination = pair.destination
+    source = pair.source
+    qualified = destination.object_id.qualified
     return Reference(
-        owner=item,
+        owner=destination.item,
         name=qualified,
-        destination=WeaverDocumentId(item, ObjectId(CATALOGUE_SCHEMA, table.name)),
+        destination=destination,
         shortcut_type=(
-            VIEW_SHORTCUT if item.item_type == WAREHOUSE else TABLE_SHORTCUT
+            VIEW_SHORTCUT if destination.item.item_type == WAREHOUSE else TABLE_SHORTCUT
         ),
         target=f"{WAREHOUSE}/{catalogue}/{qualified}",
         target_item_name=catalogue,
-        target_object=ObjectId(CATALOGUE_SCHEMA, table.name),
+        target_object=source.object_id,
     )
 
 
-def runtime_reference_views(
-    repository, *, item: WeaverItemId, target
-) -> tuple[str, ...]:
-    """The runtime tables this item's target presents as views.
+def _runtime_references(repository, item: WeaverItemId):
+    """The injected logical relations this item presents physically."""
 
-    For the keep-set, so prune spares them until the item's last runnable object
-    goes, exactly as it spares the ``_`` schema holding the procedures.
-    """
+    from ..catalogue.builtin import BUILTIN_ITEM
 
-    if target.kind != WAREHOUSE_TARGET:
-        return ()
-    if not item_presents_runtime_tables(repository, item=item):
-        return ()
     return tuple(
-        f"{CATALOGUE_SCHEMA}.{table.name}" for table in PRESENTED_RUNTIME_TABLES
+        pair
+        for pair in repository.logical_shortcuts
+        if pair.destination.item == item
+        and pair.source.item == BUILTIN_ITEM
+        and pair.destination.object_id == pair.source.object_id
+        and pair.destination.object_id.schema == CATALOGUE_SCHEMA
     )
 
 
@@ -248,59 +244,62 @@ def render_runtime_references(
     *,
     item: WeaverItemId,
     target,
-    inventory,
     catalogue_target,
+    selected: Iterable[WeaverDocumentId],
     runtime_sources: Mapping[str, object] | None = None,
 ) -> PlannedStage | None:
     """Give a built target the catalogue's runtime tables under their own names.
 
-    In the load phase, with the artefacts they exist for, rather than with the
-    declared shortcuts: on the build that creates the catalogue the tables these
-    point at arrive in the same bundle and are not there yet when the shortcut
-    phase runs.
+    After schemas and authored shortcuts, but before documents: building a table
+    may execute authored SQL to discover its shape, and that SQL can read one of
+    these local names. The injected dependency on the built-in catalogue item
+    puts its source tables in an earlier item layer when both arrive in one
+    bundle.
 
-    One action per target, carrying every reference it is missing, because a
-    Fabric round trip per table would be five where one does.
+    One action per target carries every selected reference. Selection already
+    compared Registry with physical inventory, so an unchanged target reaches
+    this function with no work and a missing or uncertified reference is remade.
     """
 
-    if not item_presents_runtime_tables(repository, item=item):
+    selected = set(selected)
+    references = tuple(
+        pair
+        for pair in _runtime_references(repository, item)
+        if pair.destination in selected
+    )
+    if not references:
         return None
     if target.kind == WAREHOUSE_TARGET:
-        return _warehouse_views(item, target, catalogue_target, inventory)
+        return _warehouse_views(references, target, catalogue_target)
     return _lakehouse_shortcuts(
-        item=item, target=target, inventory=inventory, sources=runtime_sources or {}
+        references=references,
+        target=target,
+        sources=runtime_sources or {},
     )
 
 
-def _missing_views(inventory, catalogue_target, target) -> tuple:
-    """The runtime tables this Warehouse does not already present.
-
-    Gated on the inventory, so an unchanged repository plans nothing and a view
-    somebody removed comes back.
-    """
+def _wanted_views(references, catalogue_target, target) -> tuple:
+    """The selected runtime-table views this Warehouse can present."""
 
     if target.name.casefold() == catalogue_target.name.casefold():
         # The catalogue's own Warehouse: the tables are right there, and a view
         # of that name would be a view over itself.
         return ()
-    return tuple(
-        table
-        for table in PRESENTED_RUNTIME_TABLES
-        if not inventory.has_object(CATALOGUE_SCHEMA, table.name, "view")
-    )
+    return tuple(references)
 
 
-def _warehouse_views(item, target, catalogue_target, inventory) -> PlannedStage | None:
-    """The views, created for whichever runtime tables the Warehouse lacks."""
+def _warehouse_views(references, target, catalogue_target) -> PlannedStage | None:
+    """Create or replace the selected runtime-table views."""
 
-    missing = _missing_views(inventory, catalogue_target, target)
-    if not missing:
+    wanted = _wanted_views(references, catalogue_target, target)
+    if not wanted:
         return None
 
     statements = [
-        view_statement(_reference(table, item, catalogue_target.name), catalogue_target)
-        for table in missing
+        view_statement(_reference(pair, catalogue_target.name), catalogue_target)
+        for pair in wanted
     ]
+    item = wanted[0].destination.item
     item_slug = str(item).replace("/", "--")
     filename = f"{REFERENCE_SLUG}-{item_slug}.tsql-batch.json"
     content = (json.dumps(statements, indent=2, ensure_ascii=False) + "\n").encode(
@@ -313,37 +312,33 @@ def _warehouse_views(item, target, catalogue_target, inventory) -> PlannedStage 
         filename=filename,
         content=content,
         description="create views over the catalogue's runtime tables",
-        presented=missing,
+        presented=wanted,
     )
 
 
-def _lakehouse_shortcuts(*, item, target, inventory, sources) -> PlannedStage | None:
-    """The OneLake shortcuts, for whichever runtime tables the Lakehouse lacks.
+def _lakehouse_shortcuts(*, references, target, sources) -> PlannedStage | None:
+    """Create or replace the selected OneLake runtime-table shortcuts."""
 
-    Gated on what is physically there, as the Warehouse's views are.
-    ``Tables/_`` is Weaver's own rather than the item's, so the inventory reports
-    these separately from the item's schemas.
-    """
-
-    held = {name.casefold() for name in inventory.runtime_references}
-    missing = tuple(
-        table
-        for table in PRESENTED_RUNTIME_TABLES
-        if table.name.casefold() not in held and table.name in sources
+    wanted = tuple(
+        pair for pair in references if pair.source.object_id.object in sources
     )
-    if not missing:
+    if not wanted:
         return None
 
+    item = wanted[0].destination.item
     item_slug = str(item).replace("/", "--")
-    references = [
-        (_reference(table, item, sources[table.name].item_name), target)
-        for table in missing
+    rendered = [
+        (
+            _reference(pair, sources[pair.source.object_id.object].item_name),
+            target,
+        )
+        for pair in wanted
     ]
     content = shortcut_payload(
-        references,
+        rendered,
         sources={
-            declaration_key(reference): sources[table.name]
-            for table, (reference, _target) in zip(missing, references)
+            declaration_key(reference): sources[pair.source.object_id.object]
+            for pair, (reference, _target) in zip(wanted, rendered)
         },
     )
     return _stage(
@@ -353,7 +348,7 @@ def _lakehouse_shortcuts(*, item, target, inventory, sources) -> PlannedStage | 
         filename=f"{REFERENCE_SLUG}-{item_slug}.shortcut.json",
         content=content,
         description="create shortcuts to the catalogue's runtime tables",
-        presented=missing,
+        presented=wanted,
     )
 
 
@@ -376,10 +371,9 @@ def _stage(
         payload_sha256=sha256_hex(content),
     )
     return PlannedStage(
-        phase=LOAD,
-        # Behind the artefacts, which share this phase at index 0. Order within
-        # it does not matter: nothing here runs, and a procedure's reference to
-        # ``[_].[Bookmark]`` resolves when it is called rather than installed.
+        phase=SHORTCUT,
+        # Authored shortcuts occupy index 0. Runtime references follow them in
+        # the same phase and still precede every document build.
         index=1,
         slug=REFERENCE_SLUG,
         description=description,
@@ -396,10 +390,10 @@ def _stage(
             target.id: tuple(
                 added(
                     _CHANGE_KIND[target.kind],
-                    f"{CATALOGUE_SCHEMA}.{table.name}",
+                    pair.destination.object_id.qualified,
                     action.id,
                 )
-                for table in presented
+                for pair in presented
             )
         },
     )
@@ -421,6 +415,5 @@ __all__ = [
     "REFERENCE_SLUG",
     "render_runtime_references",
     "render_runtime_state_reconciliation",
-    "runtime_reference_views",
     "runtime_state_invalidation",
 ]

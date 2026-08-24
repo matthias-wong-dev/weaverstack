@@ -49,8 +49,18 @@ def _dispatch(fault_tolerant: bool, row):
     """One Warehouse node, dispatched through the Session that owns the connection."""
 
     from weaver.declaration.metadata import ObjectId
+    from weaver.declaration.tsql_load import (
+        PROCEDURE_RESULT_PARAMETERS,
+        RESULT_PARAMETERS,
+    )
 
-    sql = RecordingSql(row)
+    physical_row = {
+        physical_name: row[logical_name]
+        for (logical_name, _logical_type), (physical_name, _physical_type) in zip(
+            RESULT_PARAMETERS, PROCEDURE_RESULT_PARAMETERS, strict=True
+        )
+    }
+    sql = RecordingSql(physical_row)
     node = SimpleNamespace(
         node_id="Sales.Customer",
         primitive_kind=WAREHOUSE_PROCEDURE,
@@ -83,14 +93,14 @@ ROW = {
 def test_a_warehouse_load_asks_for_its_result_by_name():
     """Never by reading a result set, which authored setup may also produce."""
 
-    from weaver.declaration.tsql_load import RESULT_PARAMETERS
+    from weaver.declaration.tsql_load import PROCEDURE_RESULT_PARAMETERS
 
     result, sql = _dispatch(False, ROW)
 
     procedure, inputs, outputs = sql.calls[0]
     assert procedure == "[_].[Load Sales.Customer]"
     assert inputs == (("fault_tolerant", 0),)
-    assert outputs == RESULT_PARAMETERS
+    assert outputs == PROCEDURE_RESULT_PARAMETERS
     assert result == LoadResult(
         succeeded=True,
         rows_read=4,
