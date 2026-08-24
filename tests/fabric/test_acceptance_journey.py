@@ -13,6 +13,12 @@ a load could not materialise what it points at.
 
 Scenarios run in file order and do not cascade. A failed transition is recorded
 and every later scenario skips naming the step that broke.
+
+**Scenarios A and B pass. C onward is blocked** on the shortcut discovery wait,
+which probes the relation a downstream statement names and not the path an
+authored load reads, so a load in the same run can reach a shortcut Fabric has
+not finished discovering. The scenarios are written and correct; they fail
+intermittently until that is settled.
 """
 
 from __future__ import annotations
@@ -228,6 +234,7 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
     }
     assert seen.values("landing_shortcuts", "tableName") == {
         "customer",
+        "product",
         "transaction",
         "region",
     }

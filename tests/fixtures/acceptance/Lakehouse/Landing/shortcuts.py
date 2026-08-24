@@ -8,8 +8,20 @@ Source__Customer = Shortcut(
     workspace="{{EXTERNAL_WORKSPACE}}",
 )
 
-#: The foreign Lakehouse's stable namespace, presented whole. Landing declares no
-#: schema of this name and owns nothing in it.
+#: The foreign Lakehouse's stable product table.
+Source__Product = Shortcut(
+    shortcut_type="table",
+    target_type="physical",
+    target="Lakehouse/{{EXTERNAL_LAKEHOUSE}}/Reference.Product",
+    workspace="{{EXTERNAL_WORKSPACE}}",
+)
+
+#: The same foreign namespace, presented whole. Landing declares no schema of
+#: this name and owns nothing in it.
+#:
+#: Declared but not read by a load. A build waits until a table shortcut it
+#: created is readable and deliberately does not wait for a schema shortcut, so
+#: a load in the same run can reach one before Fabric has discovered it.
 Reference = Shortcut(
     shortcut_type="schema",
     target_type="physical",
