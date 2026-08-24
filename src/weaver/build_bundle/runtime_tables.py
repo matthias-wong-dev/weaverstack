@@ -312,7 +312,7 @@ def _warehouse_views(item, target, catalogue_target, inventory) -> PlannedStage 
         executor="tsql_batch",
         filename=filename,
         content=content,
-        description="present the catalogue's runtime tables in this Warehouse",
+        description="create views over the catalogue's runtime tables",
         presented=missing,
     )
 
@@ -352,7 +352,7 @@ def _lakehouse_shortcuts(*, item, target, inventory, sources) -> PlannedStage | 
         executor="shortcut",
         filename=f"{REFERENCE_SLUG}-{item_slug}.shortcut.json",
         content=content,
-        description="present the catalogue's runtime tables in this Lakehouse",
+        description="create shortcuts to the catalogue's runtime tables",
         presented=missing,
     )
 
