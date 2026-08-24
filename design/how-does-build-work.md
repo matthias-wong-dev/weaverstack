@@ -210,17 +210,16 @@ that declares something there is refused during discovery, and a wipe removes
 shortcuts through the workspace before it sweeps storage. Removing the shortcut
 root is safe, and it is the only thing Weaver does to one.
 
-A declaration whose logical target item is not bound, whose destination and target
-disagree about the `Files`/table namespace, or whose direct target did not resolve
-has no physical form under the current bindings. It is omitted from the plan with
-the reason `shortcut_unsupported`. That decision belongs to the planner; the
-installer may only run an action already frozen for it.
+A selected declaration whose logical target item is not bound, whose destination
+and target disagree about the `Files`/table namespace, or whose direct target did
+not resolve has no physical form under the current bindings. Bundle generation
+fails before installation and names the unsupported shortcut. A selected object
+owned by a bound item may never be omitted while the build reports success.
 
-**An omitted shortcut is not certified.** A `_.Registry` row means the object's work
-succeeded, and for an omitted shortcut no work was planned at all, so the row is
-withheld. Only for one this build was also asked to build: a shortcut already
-installed by an earlier build, whose source item simply is not bound this time,
-is still physically there and stays certified.
+An unchanged shortcut is not selected for materialisation. It is left installed
+and certified even when its source item is outside the current build's bindings.
+An object owned by an unbound item is outside the build's physical scope and may
+still be recorded as `target_unbound` in the bundle's omissions.
 
 Shortcut destinations join the prune keep-set, *all* of them and not only the ones a
 build selected. They are desired state in the consuming item exactly as a declared
@@ -810,8 +809,7 @@ Weaver fails before mutation where possible:
 - invalid metadata, identity, helper imports, and document or item dependency
   cycles fail parsing;
 - missing bindings or inventories fail planning;
-- a shortcut the current bindings give no physical form is omitted at planning, with
-  its reason recorded;
+- a selected shortcut the current bindings give no physical form fails planning;
 - payload tampering fails bundle validation;
 - unexpected create and managed-drop collisions fail execution;
 - a shortcut that never becomes readable, or an endpoint refresh that settles as

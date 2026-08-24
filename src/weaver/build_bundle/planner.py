@@ -198,11 +198,6 @@ def generate_item_build_bundle(
     if reconciliation is not None:
         stages.append(reconciliation)
 
-    # Shortcut destinations this build wanted but could not materialise. They must
-    # not reach the Registry: a row there means the object's work succeeded, and
-    # for these no work was even planned.
-    uncertified: set = set()
-
     for layer in _item_layers(repository, target_by_item):
         layer_stages: list[PlannedStage] = []
         for item in layer:
@@ -229,13 +224,14 @@ def generate_item_build_bundle(
             )
             layer_stages.extend(planned.stages)
             omitted.extend(planned.omitted)
-            uncertified |= planned.uncertified
         stages.extend(merge_layer_stages(layer_stages))
+
+    _refuse_selected_omissions(omitted)
 
     stages.extend(
         render_catalogue_after_build(
             repository,
-            selected_ids - uncertified,
+            selected_ids,
             target_by_item,
             catalogue_target=catalogue_target,
             # The catalogue as the claim deletions above will leave it, not as
@@ -276,6 +272,18 @@ def generate_item_build_bundle(
         payloads=payloads,
         store=store,
     )
+
+
+def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:
+    """Fail when a bound item's selected object has no materialisation plan."""
+
+    if not omitted:
+        return
+    details = "; ".join(
+        f"{node.node_id}: {node.detail or node.reason}"
+        for node in sorted(omitted, key=lambda node: (node.node_id, node.reason))
+    )
+    raise BuildError(f"selected object(s) could not be materialised: {details}")
 
 
 def _selectable(
@@ -357,18 +365,15 @@ def _item_layers(
 
 @dataclass(frozen=True)
 class PlannedItem:
-    """One item's physical plan: what to do, what was left out, what is uncertified."""
+    """One item's physical plan and any selected nodes it could not plan."""
 
     #: The item's contiguous stages, in the order they must run.
     stages: tuple[PlannedStage, ...]
-    #: Nodes this item could not plan, each carrying why.
+    #: Selected nodes this bound item could not plan, each carrying why. The
+    #: bundle planner refuses any such result before writing a bundle.
     omitted: tuple[OmittedNode, ...]
-    #: Shortcut destinations this item could not materialise *and* was asked to
-    #: build. Withheld from certification: a shortcut whose source item is unbound
-    #: has no physical form under these bindings, and a Registry row for it would
-    #: claim an installation that never happened. One already installed from an
-    #: earlier build is left certified — it is still there — so only the
-    #: intersection with the build selection is withheld.
+    #: Shortcut destinations represented by ``omitted``. This preserves the item
+    #: planning seam's complete result even though whole-bundle generation fails.
     uncertified: frozenset
 
 
