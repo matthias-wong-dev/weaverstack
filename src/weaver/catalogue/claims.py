@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from ..declaration.model import WeaverDocumentId
+from ..declaration.model import WeaverDocumentId, WeaverSchemaId
 from ..errors import BuildError
 from .tables import (
     COLUMN_DICTIONARY,
@@ -24,7 +24,7 @@ from .tables import (
 )
 
 
-def catalogue_schema(identity: WeaverDocumentId) -> str:
+def catalogue_schema(identity: WeaverDocumentId | WeaverSchemaId) -> str:
     """The ``schema_name`` this identity is stored under.
 
     A Folder carries its ``Files/`` prefix because that prefix is part of what
@@ -34,6 +34,8 @@ def catalogue_schema(identity: WeaverDocumentId) -> str:
     that is not the target's own name.
     """
 
+    if isinstance(identity, WeaverSchemaId):
+        return identity.schema
     prefix = "Files/" if identity.is_files else ""
     return f"{prefix}{identity.object_id.schema}"
 
@@ -64,7 +66,9 @@ class CatalogueClaimRule:
     table: CatalogueTable
     predicate_columns: tuple[str, str] = ("schema_name", "object_name")
 
-    def values(self, identity: WeaverDocumentId) -> tuple[str, str]:
+    def values(self, identity: WeaverDocumentId | WeaverSchemaId) -> tuple[str, str]:
+        if isinstance(identity, WeaverSchemaId):
+            return identity.schema, identity.schema
         return catalogue_schema(identity), identity.object_id.object
 
     def owns(self, row: Mapping[str, object], identity: WeaverDocumentId) -> bool:
@@ -122,6 +126,7 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
     # about it is that Weaver installed it and at what signature.
     "file": (CatalogueClaimRule(REGISTRY),),
     "stored_procedure": (CatalogueClaimRule(REGISTRY),),
+    "schema": (CatalogueClaimRule(REGISTRY),),
 }
 
 

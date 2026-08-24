@@ -909,6 +909,11 @@ def warehouse_primitive_estate(
     def run(repository, *, inventory=None, rebuild=False, build=True):
         identity = item_id("Warehouse/Reporting")
         selected = {key for key in repository.source_documents if key.item == identity}
+        selected_shortcuts = {
+            shortcut.destination
+            for shortcut in repository.logical_shortcuts
+            if shortcut.destination.item == identity
+        }
         planned = plan_item_build(
             repository,
             item=identity,
@@ -924,9 +929,9 @@ def warehouse_primitive_estate(
             ),
             target_by_item={identity: target.bound},
             selected_documents=selected,
-            selected_shortcuts=set(),
+            selected_shortcuts=selected_shortcuts,
             selected_for_drop=set(selected) if rebuild else set(),
-            selected_for_build=selected if build else set(),
+            selected_for_build=(selected | selected_shortcuts) if build else set(),
             registered=(
                 {key: registered_document(key) for key in selected} if rebuild else {}
             ),
