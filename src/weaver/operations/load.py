@@ -13,6 +13,7 @@ from typing import Sequence
 from ..errors import CommandError, LoadError
 from ..load_plan import (
     ENDPOINT_REFRESH,
+    ONELAKE_PUBLICATION,
     InstalledEstate,
     PhysicalTargetRef,
     lakehouse_names,
@@ -284,10 +285,14 @@ def _refuse_uninstalled_targets(estate: InstalledEstate, requested) -> None:
     )
 
 
-def _step_type(report: LoadNodeReport) -> str:
-    """The broad kind a step file's name carries: a load, or a refresh."""
+#: What a step file is called, for the kinds that are not a load.
+_STEP_TYPES = {ENDPOINT_REFRESH: "refresh", ONELAKE_PUBLICATION: "publication"}
 
-    return "refresh" if report.primitive_kind == ENDPOINT_REFRESH else "load"
+
+def _step_type(report: LoadNodeReport) -> str:
+    """The broad kind a step file's name carries."""
+
+    return _STEP_TYPES.get(report.primitive_kind, "load")
 
 
 def _completion_document(report: LoadRunReport, timings=()) -> dict:

@@ -110,25 +110,15 @@ def test_a_warehouse_load_asks_for_its_result_by_name():
     )
 
 
-@weaver_test()
-def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
-    tmp_path, monkeypatch
-):
-    """TDS completion precedes readable shortcut files, so both are one load unit.
-
-    The wait opens the files the new commit added rather than counting the
-    snapshot's rows, which Delta answers from the commit's own statistics.
-    """
+def _publication_estate(tmp_path, row):
+    """A Warehouse load, the barrier behind it, and a Session for both."""
 
     from weaver.declaration.metadata import ObjectId
     from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-    from weaver.declaration.tsql_load import (
-        PROCEDURE_RESULT_PARAMETERS,
-        RESULT_PARAMETERS,
-    )
     from weaver.load_plan import OneLakeReadiness, PhysicalObjectRef
     from weaver.locations import Location
     from weaver.run.graph import RunNode
+    from weaver.run.resolution import ONELAKE_PUBLICATION
     from weaver.store import FilesystemStore
 
     root = Location(str(tmp_path / "warehouse"))
@@ -138,35 +128,19 @@ def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
     store.write(
         log / "00000000000000000000.json", b'{"add":{"path":"settled.parquet"}}'
     )
-    published = b"\n".join(
-        (
-            b'{"commitInfo":{"operation":"WRITE"}}',
-            # Percent-encoded in the log, and a path expression needs it decoded.
-            b'{"add":{"path":"part-0001%20a%3Db.parquet"}}',
-            b'{"add":{"path":"part-0002.parquet"}}',
-            b'{"remove":{"path":"part-0002.parquet"}}',
-            b'{"remove":{"path":"settled.parquet"}}',
-        )
-    )
     events = []
-    physical_row = {
-        physical_name: ROW[logical_name]
-        for (logical_name, _logical_type), (physical_name, _physical_type) in zip(
-            RESULT_PARAMETERS, PROCEDURE_RESULT_PARAMETERS, strict=True
-        )
-    }
 
     class Sql:
         def call_procedure(self, _name, *, inputs, outputs):
             events.append("procedure")
-            store.write(log / "00000000000000000001.json", published)
-            return physical_row
+            store.write(
+                log / "00000000000000000001.json", b'{"add":{"path":"new.parquet"}}'
+            )
+            return row
 
     class Resolver:
         def resolve(self, item, *, item_type):
-            return SimpleNamespace(
-                id="warehouse-id", name=item.name, workspace_id="workspace-id"
-            )
+            return SimpleNamespace(id="warehouse-id", name=item.name)
 
         def external_root(self, _item):
             return root
@@ -179,10 +153,7 @@ def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
             )
 
     class Session:
-        attempts = 0
-
         def resolver(self, _workspace=None):
-            events.append("resolve")
             return Resolver()
 
         def transport_store(self, _workspace=None):
@@ -191,17 +162,14 @@ def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
         def sql_executor(self, _target, workspace=None):
             return Sql()
 
-        def execute_spark_sql_batch(self, statements, *, workspace=None):
-            events.append(("spark", tuple(statements)))
-            self.attempts += 1
-            if self.attempts == 1:
-                raise PermissionError("the published Parquet file is not ready")
+        def execute_spark_sql_batch(self, batch, *, workspace=None):
+            events.append(("spark", tuple(batch)))
             return [{"rows": 1}]
 
     identity = WeaverDocumentId(
         WeaverItemId("Warehouse", "Reporting"), ObjectId("Sales", "Customer")
     )
-    node = RunNode(
+    producer = RunNode(
         node_id="load:Warehouse/Reporting_WH/Sales.Customer",
         physical_target=REPORTING,
         primitive_kind=WAREHOUSE_PROCEDURE,
@@ -213,34 +181,95 @@ def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
             object="Customer",
             object_type="table",
         ),
-        await_onelake=(
+    )
+    barrier = RunNode(
+        node_id="publish:Warehouse/Reporting_WH/Sales.Customer",
+        physical_target=REPORTING,
+        primitive_kind=ONELAKE_PUBLICATION,
+        publication_of=identity,
+        publication_targets=(
             OneLakeReadiness(
                 target=PhysicalTargetRef("lakehouse", "Published_LH"),
                 schema="WH",
                 object="Reporting",
             ),
         ),
+        produced_by=producer.node_id,
     )
+    return producer, barrier, Session(), events
 
-    monkeypatch.setattr("weaver.run.publication.PUBLICATION_POLL_INTERVAL", 0.0)
-    result = dispatch_primitive(node, session=Session())
+
+@weaver_test()
+def test_a_warehouse_load_leaves_the_waiting_to_its_publication_barrier(tmp_path):
+    """The load runs its procedure and records what OneLake had already published.
+
+    The wait itself belongs to the barrier behind it, so a load that committed
+    cleanly settles as a load even when the publication never arrives.
+    """
+
+    from weaver.declaration.tsql_load import (
+        PROCEDURE_RESULT_PARAMETERS,
+        RESULT_PARAMETERS,
+    )
+    from weaver.run.publication import PublicationLedger
+
+    row = {
+        physical_name: ROW[logical_name]
+        for (logical_name, _logical_type), (physical_name, _physical_type) in zip(
+            RESULT_PARAMETERS, PROCEDURE_RESULT_PARAMETERS, strict=True
+        )
+    }
+    producer, barrier, session, events = _publication_estate(tmp_path, row)
+    ledger = PublicationLedger(frozenset({producer.node_id}))
+
+    result = dispatch_primitive(producer, session=session, publication=ledger)
 
     assert result.rows_inserted == 1
-    assert [event for event in events if isinstance(event, str)][:2] == [
-        "resolve",
-        "procedure",
+    # The baseline was read before the procedure, and nothing was probed.
+    assert events == ["procedure"]
+    assert ledger.baseline(producer.node_id) == frozenset({"00000000000000000000.json"})
+    assert ledger.moved(producer.node_id)
+
+    dispatch_primitive(barrier, session=session, publication=ledger)
+
+    assert events[1:] == [
+        (
+            "spark",
+            (
+                "select * from parquet."
+                "`abfss://workspace/Published_LH/Tables/WH/Reporting"
+                "/new.parquet` limit 1",
+            ),
+        )
     ]
-    # The file the interval added and kept, and only that one: a file added and
-    # then removed is never read, and one the load did not touch was already
-    # readable.
-    probe = (
-        "select * from parquet.`abfss://workspace/Published_LH/Tables/WH/Reporting"
-        "/part-0001 a=b.parquet` limit 1"
+
+
+@weaver_test()
+def test_a_barrier_behind_a_load_that_moved_nothing_reaches_no_spark(tmp_path):
+    """Nothing was written, so nothing is published and there is nothing to open."""
+
+    from weaver.declaration.tsql_load import (
+        PROCEDURE_RESULT_PARAMETERS,
+        RESULT_PARAMETERS,
     )
-    assert [event for event in events if isinstance(event, tuple)] == [
-        ("spark", (probe,)),
-        ("spark", (probe,)),
-    ]
+    from weaver.run.publication import PublicationLedger
+
+    unchanged = dict(ROW, rows_inserted=0, rows_updated=0, rows_deleted=0)
+    row = {
+        physical_name: unchanged[logical_name]
+        for (logical_name, _logical_type), (physical_name, _physical_type) in zip(
+            RESULT_PARAMETERS, PROCEDURE_RESULT_PARAMETERS, strict=True
+        )
+    }
+    producer, barrier, session, events = _publication_estate(tmp_path, row)
+    ledger = PublicationLedger(frozenset({producer.node_id}))
+
+    dispatch_primitive(producer, session=session, publication=ledger)
+    result = dispatch_primitive(barrier, session=session, publication=ledger)
+
+    assert result.succeeded
+    assert not ledger.moved(producer.node_id)
+    assert events == ["procedure"]
 
 
 @weaver_test()

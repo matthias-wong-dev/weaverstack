@@ -835,21 +835,39 @@ Warehouse producer  →  Lakehouse consumer   the Warehouse's OneLake Delta
                                             publication has to catch up
 ```
 
-The first is the endpoint refresh barrier: a node of its own in the load graph,
-placed behind every selected load in the refreshed Lakehouse.
+Both are nodes in the load graph, and both replace the direct edge they stand on.
+The endpoint refresh barrier sits behind every selected load in the refreshed
+Lakehouse. The publication barrier sits behind the one Warehouse load it waits
+for.
 
-The second is the OneLake publication wait, in `weaver.run.publication`. Fabric
-publishes a Warehouse table's Delta log in the background after the transaction
-commits, so a Lakehouse consumer reading that table through a shortcut can see
-the previous snapshot, or a new snapshot whose Parquet files it cannot open yet.
-The wait proves both: a commit that was not published before the load ran, and an
-opened read of each Parquet file that commit added, through the consuming
+```text
+load:Warehouse/Serving/SERVE.Reporting
+        ↓
+publish:Warehouse/Serving/SERVE.Reporting
+        ↓
+load:Lakehouse/Published/PUB.Reporting
+```
+
+Fabric publishes a Warehouse table's Delta log in the background after the
+transaction commits, so a Lakehouse consumer reading that table through a shortcut
+can see the previous snapshot, or a new snapshot whose Parquet files it cannot open
+yet. The barrier proves both: a commit that was not published before the load ran,
+and an opened read of each Parquet file that commit added, through the consuming
 shortcut's own path. It counts no rows, because Delta answers `count(*)` from the
 commit's statistics and would report a snapshot readable before its files are.
 
-The wait is selective. It happens only where the planner found a real Warehouse
-to Lakehouse shortcut crossing, and only when the load reported changed rows, so
-a Warehouse-only load still submits nothing to Spark.
+Being a node is what gives it a progress line, a timing frame and a step file of
+its own, and what makes a publication timeout fail the boundary rather than the
+load whose T-SQL already committed. It carries no logical identity, so it leaves
+no catalogue state: the Warehouse table it waits on is held in `publication_of`.
+
+A barrier runs after its load and cannot see what was published before it, so the
+load records that in a run-scoped ledger the Runner owns. Only the loads a barrier
+follows are recorded, and a barrier whose load moved no rows settles without
+reaching Spark, so a Warehouse-only load submits nothing to Spark and reads no
+Delta log.
+
+The mechanisms live in `weaver.run.publication`.
 
 ---
 

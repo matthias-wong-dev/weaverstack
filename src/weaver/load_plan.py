@@ -44,12 +44,14 @@ WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
 ENDPOINT_REFRESH = "endpoint_refresh"
+ONELAKE_PUBLICATION = "onelake_publication"
 
 PRIMITIVE_KINDS = (
     WAREHOUSE_PROCEDURE,
     PYTHON_TABLE,
     PYTHON_FOLDER,
     ENDPOINT_REFRESH,
+    ONELAKE_PUBLICATION,
 )
 
 #: What the catalogue calls each physical target kind. The same two words the
@@ -537,9 +539,15 @@ class LoadNode:
     #: ``None`` for a refresh, which is a capability rather than an artefact.
     primitive_id: WeaverDocumentId | None = None
     primitive_object: PhysicalObjectRef | None = None
-    #: Lakehouse shortcut paths that must be able to read this Warehouse load's
-    #: published Delta files before their downstream nodes can begin.
-    await_onelake: tuple[OneLakeReadiness, ...] = ()
+    #: A publication barrier only. The Warehouse table whose OneLake publication
+    #: is waited for, carried apart from ``logical_id`` so the barrier leaves no
+    #: catalogue state of its own.
+    publication_of: WeaverDocumentId | None = None
+    #: A publication barrier only. The Lakehouse shortcut paths that must be able
+    #: to read the published Delta files before the consumers can begin.
+    publication_targets: tuple[OneLakeReadiness, ...] = ()
+    #: A publication barrier only. The load node that publishes what it waits for.
+    produced_by: str | None = None
 
     @property
     def sort_key(self) -> tuple[str, str, str, str]:
@@ -830,13 +838,11 @@ class _Planner:
             if crossed is None:
                 self.edges.add((upstream_id, node.node_id))
             elif isinstance(crossed, OneLakeReadiness):
-                readiness = tuple(
-                    dict.fromkeys((*self.nodes[upstream_id].await_onelake, crossed))
-                )
-                self.nodes[upstream_id] = replace(
-                    self.nodes[upstream_id], await_onelake=readiness
-                )
-                self.edges.add((upstream_id, node.node_id))
+                # OneLake publishes a Warehouse commit after the transaction, so
+                # the barrier replaces the direct edge, as the refresh does.
+                barrier = self._publication_node(self.nodes[upstream_id], crossed)
+                self.edges.add((upstream_id, barrier.node_id))
+                self.edges.add((barrier.node_id, node.node_id))
             else:
                 # A shortcut read as SQL: the producer's endpoint has to catch up
                 # before the consumer can see it, so the barrier replaces the
@@ -861,6 +867,25 @@ class _Planner:
                 primitive_object=primitive.physical,
             )
             self.nodes[node_id] = node
+        return node
+
+    def _publication_node(self, producer: LoadNode, crossed) -> LoadNode:
+        """The one publication barrier behind this Warehouse load."""
+
+        identity = producer.logical_id
+        node_id = f"publish:{producer.physical_target}/{identity.object_id.qualified}"
+        node = self.nodes.get(node_id)
+        readiness = () if node is None else node.publication_targets
+        node = LoadNode(
+            node_id=node_id,
+            logical_id=None,
+            physical_target=producer.physical_target,
+            primitive_kind=ONELAKE_PUBLICATION,
+            publication_of=identity,
+            publication_targets=tuple(dict.fromkeys((*readiness, crossed))),
+            produced_by=producer.node_id,
+        )
+        self.nodes[node_id] = node
         return node
 
     def _refresh_node(self, target: PhysicalTargetRef) -> LoadNode:
@@ -891,7 +916,7 @@ class _Planner:
 
         for node_id, target in self.refresh_sources.items():
             for node in list(self.nodes.values()):
-                if node.primitive_kind == ENDPOINT_REFRESH:
+                if node.primitive_kind in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION):
                     continue
                 if node.physical_target == target:
                     self.edges.add((node.node_id, node_id))

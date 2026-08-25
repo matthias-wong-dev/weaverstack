@@ -32,11 +32,11 @@ PUBLICATION_TIMEOUT = 180.0
 PUBLICATION_POLL_INTERVAL = 5.0
 
 
-def published_commits(node, session, workspace) -> frozenset[str]:
+def published_commits(target_name, object_id, session, workspace) -> frozenset[str]:
     """The commit files published for one Warehouse table at this instant."""
 
     store = session.transport_store(workspace)
-    log = _commit_log(node, session, workspace)
+    log = _commit_log(target_name, object_id, session, workspace)
     if not store.exists(log):
         return frozenset()
     return frozenset(
@@ -58,8 +58,9 @@ def await_publication(
 ) -> None:
     """Block until this load's publication is readable at every consuming path."""
 
+    object_id = node.publication_of.object_id
     store = session.transport_store(workspace)
-    log = _commit_log(node, session, workspace)
+    log = _commit_log(node.physical_target.name, object_id, session, workspace)
     roots = tuple(_shortcut_root(one, session, workspace) for one in readiness)
     deadline = time.monotonic() + timeout
     commits: tuple[str, ...] = ()
@@ -81,7 +82,7 @@ def await_publication(
         time.sleep(poll)
 
 
-def _commit_log(node, session, workspace):
+def _commit_log(target_name, object_id, session, workspace):
     """Where OneLake holds this Warehouse table's Delta log."""
 
     from ..fabric.resources import WAREHOUSE
@@ -89,8 +90,7 @@ def _commit_log(node, session, workspace):
     from ..targets import ItemRef
 
     resolver = session.resolver(workspace)
-    item = resolver.resolve(ItemRef(node.physical_target.name), item_type=WAREHOUSE)
-    object_id = node.logical_id.object_id
+    item = resolver.resolve(ItemRef(target_name), item_type=WAREHOUSE)
     root = resolver.external_root(item)
     return root.join(TABLES_AREA, object_id.schema, object_id.object, "_delta_log")
 
@@ -157,7 +157,7 @@ def _probe_statements(paths, roots) -> list[str]:
 def _not_published(node, commits, last_error, timeout: float) -> RunError:
     """The error for a publication that did not settle within the wait."""
 
-    table = f"{node.physical_target.name}/{node.logical_id.object_id.qualified}"
+    table = f"{node.physical_target.name}/{node.publication_of.object_id.qualified}"
     waited = int(timeout)
     if not commits:
         return RunError(
@@ -171,3 +171,46 @@ def _not_published(node, commits, last_error, timeout: float) -> RunError:
         f"it added were not readable through its Lakehouse shortcuts within "
         f"{waited}s{detail}"
     )
+
+
+class PublicationLedger:
+    """What each publication barrier needs from the load it waits on.
+
+    A barrier runs after its producer, so it cannot see what OneLake had published
+    before the load began. The producer records that here and the barrier reads it.
+    Held for the run, and threaded into dispatch as the runtime scope is.
+
+    Only the producers a barrier follows are recorded, so a Warehouse-only load
+    reads no Delta log.
+    """
+
+    def __init__(self, awaited: frozenset[str]) -> None:
+        self._awaited = frozenset(awaited)
+        self._before: dict[str, frozenset[str]] = {}
+        self._moved: set[str] = set()
+
+    def awaits(self, node_id: str) -> bool:
+        """Whether a barrier follows this load."""
+
+        return node_id in self._awaited
+
+    def observe(self, node, session, workspace) -> None:
+        """Record what was published before this load ran."""
+
+        if not self.awaits(node.node_id):
+            return
+        self._before[node.node_id] = published_commits(
+            node.physical_target.name, node.logical_id.object_id, session, workspace
+        )
+
+    def settled(self, node_id: str, result) -> None:
+        """Record whether the load moved any rows."""
+
+        if result.rows_inserted or result.rows_updated or result.rows_deleted:
+            self._moved.add(node_id)
+
+    def moved(self, node_id: str) -> bool:
+        return node_id in self._moved
+
+    def baseline(self, node_id: str) -> frozenset[str]:
+        return self._before.get(node_id, frozenset())

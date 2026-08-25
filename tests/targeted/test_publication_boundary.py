@@ -20,9 +20,18 @@ from weaver.load_plan import OneLakeReadiness, PhysicalTargetRef
 from weaver.locations import Location
 from weaver.run.graph import RunNode
 from weaver.run.publication import await_publication, published_commits
-from weaver.run.resolution import WAREHOUSE_PROCEDURE
+from weaver.run.resolution import ONELAKE_PUBLICATION
 from weaver.run.result import RunError
 from weaver.store import FilesystemStore
+
+
+def _commits(node, session):
+    """What the producer would have recorded before its load."""
+
+    return published_commits(
+        node.physical_target.name, node.publication_of.object_id, session, None
+    )
+
 
 READINESS = (
     OneLakeReadiness(
@@ -68,13 +77,15 @@ def _estate(tmp_path, *, statements=None):
             return [{"rows": 1}]
 
     node = RunNode(
-        node_id="load:Warehouse/Reporting_WH/Sales.Customer",
+        node_id="publish:Warehouse/Reporting_WH/Sales.Customer",
         physical_target=PhysicalTargetRef("warehouse", "Reporting_WH"),
-        primitive_kind=WAREHOUSE_PROCEDURE,
-        logical_id=WeaverDocumentId(
+        primitive_kind=ONELAKE_PUBLICATION,
+        logical_id=None,
+        publication_of=WeaverDocumentId(
             WeaverItemId("Warehouse", "Reporting"), ObjectId("Sales", "Customer")
         ),
-        await_onelake=READINESS,
+        publication_targets=READINESS,
+        produced_by="load:Warehouse/Reporting_WH/Sales.Customer",
     )
     return node, log, store, Session()
 
@@ -86,7 +97,7 @@ def test_a_table_with_no_published_log_has_no_commits_to_compare(tmp_path):
     node, log, store, session = _estate(tmp_path)
     store.delete(log, recursive=True)
 
-    assert published_commits(node, session, None) == frozenset()
+    assert _commits(node, session) == frozenset()
 
 
 @weaver_test()
@@ -98,7 +109,7 @@ def test_the_wait_opens_only_the_files_the_interval_added(tmp_path):
     store.write(
         log / "00000000000000000000.json", b'{"add":{"path":"settled.parquet"}}'
     )
-    before = published_commits(node, session, None)
+    before = _commits(node, session)
     store.write(
         log / "00000000000000000001.json",
         b'{"add":{"path":"kept.parquet"}}\n{"add":{"path":"gone.parquet"}}',
@@ -120,7 +131,7 @@ def test_a_commit_that_publishes_no_files_needs_no_read(tmp_path):
 
     statements: list = []
     node, log, store, session = _estate(tmp_path, statements=statements)
-    before = published_commits(node, session, None)
+    before = _commits(node, session)
     store.write(log / "00000000000000000000.json", b'{"commitInfo":{"operation":"X"}}')
 
     await_publication(node, session, None, before=before, readiness=READINESS, poll=0.0)
@@ -136,7 +147,7 @@ def test_a_publication_that_never_arrives_names_the_stale_snapshot(tmp_path):
     store.write(
         log / "00000000000000000000.json", b'{"add":{"path":"settled.parquet"}}'
     )
-    before = published_commits(node, session, None)
+    before = _commits(node, session)
 
     with pytest.raises(RunError) as raised:
         await_publication(
@@ -158,7 +169,7 @@ def test_files_that_stay_unreadable_name_the_shortcut_that_cannot_open_them(tmp_
     """A commit that arrived and files that will not open is the other failure."""
 
     node, log, store, session = _estate(tmp_path)
-    before = published_commits(node, session, None)
+    before = _commits(node, session)
     store.write(log / "00000000000000000000.json", b'{"add":{"path":"kept.parquet"}}')
 
     class Refusing:

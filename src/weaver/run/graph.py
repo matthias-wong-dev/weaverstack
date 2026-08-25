@@ -27,9 +27,11 @@ class RunNode:
     #: to the Runner: the Runner decides *when* a node
     #: runs, and only dispatch needs to know what it is.
     installed: object | None = None
-    #: Lakehouse shortcut paths that consume this Warehouse load's OneLake
-    #: publication later in the graph.
-    await_onelake: tuple[object, ...] = ()
+    #: A publication barrier only: the Warehouse table it waits on, the consuming
+    #: shortcut paths, and the load node that publishes what it waits for.
+    publication_of: object | None = None
+    publication_targets: tuple[object, ...] = ()
+    produced_by: str | None = None
 
     @property
     def sort_key(self) -> tuple[str, str, str, str, str]:
@@ -155,7 +157,9 @@ def _load_graph(request, state) -> RunGraph:
                 physical_object=node.physical_object,
                 primitive_id=node.primitive_id,
                 primitive_object=node.primitive_object,
-                await_onelake=node.await_onelake,
+                publication_of=node.publication_of,
+                publication_targets=node.publication_targets,
+                produced_by=node.produced_by,
                 role="load",
             )
             for node in dag.nodes

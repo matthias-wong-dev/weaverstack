@@ -27,11 +27,17 @@ from .state import RunState
 def node_label(node) -> str:
     """Return a display label that includes the target and logical object."""
 
-    from .resolution import ENDPOINT_REFRESH
+    from .resolution import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 
     target = getattr(node, "physical_target", None)
     if node.primitive_kind == ENDPOINT_REFRESH:
         return f"Refresh {target} SQL endpoint"
+    if node.primitive_kind == ONELAKE_PUBLICATION:
+        consumers = ", ".join(
+            sorted({str(one.target) for one in node.publication_targets})
+        )
+        waiting = f"{target} to {consumers}" if consumers else str(target)
+        return f"Wait for OneLake publication: {waiting}"
 
     what = node.logical_id
     if what is None:
@@ -159,6 +165,7 @@ class Runner:
         self._graph: RunGraph | None = None
         self._events: list[dict] = []
         self._runtime_scope = None
+        self._publication = None
 
     @property
     def graph(self) -> RunGraph:
@@ -203,6 +210,23 @@ class Runner:
                 )
             )
         return self._runtime_scope
+
+    @property
+    def publication(self):
+        """What this run's publication barriers need from the loads they follow."""
+
+        if self._publication is None:
+            from .publication import PublicationLedger
+            from .resolution import ONELAKE_PUBLICATION
+
+            self._publication = PublicationLedger(
+                frozenset(
+                    node.produced_by
+                    for node in self.graph.nodes
+                    if node.primitive_kind == ONELAKE_PUBLICATION and node.produced_by
+                )
+            )
+        return self._publication
 
     def _close_runtime(self) -> None:
         """Close the run's deployed-module scope."""
@@ -375,6 +399,7 @@ class Runner:
                     fault_tolerant=self.request.fault_tolerant,
                     open_runtime=self.runtime_scope(session),
                     workspace=self.workspace,
+                    publication=self.publication,
                 )
             except Exception as exc:  # noqa: BLE001 - failures become node results
                 # Do not intercept process-control exceptions.

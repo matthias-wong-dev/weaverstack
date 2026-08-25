@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from .resolution import (
     ENDPOINT_REFRESH,
+    ONELAKE_PUBLICATION,
     PYTHON_FOLDER,
     PYTHON_TABLE,
     PYTHON_VALIDATION,
@@ -26,6 +27,7 @@ def dispatch_primitive(
     open_runtime=None,
     workspace=None,
     collect=False,
+    publication=None,
 ):
     """Run one installed primitive and return what it reported.
 
@@ -45,11 +47,15 @@ def dispatch_primitive(
         # Runner treats it as any other node; only the engine differs.
         return _validation(node, session, workspace, open_runtime, collect)
     if kind == WAREHOUSE_PROCEDURE:
-        return _warehouse_procedure(node, session, workspace, fault_tolerant)
+        return _warehouse_procedure(
+            node, session, workspace, fault_tolerant, publication
+        )
     if kind in (PYTHON_TABLE, PYTHON_FOLDER):
         return _python(node, session, workspace, resolved, fault_tolerant, open_runtime)
     if kind == ENDPOINT_REFRESH:
         return _endpoint_refresh(node, session, workspace)
+    if kind == ONELAKE_PUBLICATION:
+        return _onelake_publication(node, session, workspace, publication)
     raise RunError(f"{node.node_id} names unknown primitive kind {kind!r}")
 
 
@@ -89,7 +95,7 @@ def _scope(open_runtime, node):
     return open_runtime.get()
 
 
-def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
+def _warehouse_procedure(node, session, workspace, fault_tolerant: bool, publication):
     """The installed load procedure, called by name over the Session's TDS.
 
     The object's own procedure, not the generic ``_.Load`` wrapper: the run
@@ -108,11 +114,11 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     from ..etl import load_procedure_name
     from ..runtime.load_result import LoadResult
     from ..targets import ItemRef, WarehouseTarget
-    from .publication import await_publication, published_commits
 
     target = WarehouseTarget(ItemRef(node.physical_target.name))
-    readiness = tuple(getattr(node, "await_onelake", ()))
-    before = published_commits(node, session, workspace) if readiness else None
+    # Before the procedure, because a barrier behind it cannot see this.
+    if publication is not None:
+        publication.observe(node, session, workspace)
     sql = session.sql_executor(target, workspace=workspace)
     row = sql.call_procedure(
         load_procedure_name(node.logical_id.object_id),
@@ -120,11 +126,38 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
         outputs=PROCEDURE_RESULT_PARAMETERS,
     )
     result = LoadResult.from_row(logical_result_row(row))
-    if before is not None and (
-        result.rows_inserted or result.rows_updated or result.rows_deleted
-    ):
-        await_publication(node, session, workspace, before=before, readiness=readiness)
+    if publication is not None:
+        publication.settled(node.node_id, result)
     return result
+
+
+def _onelake_publication(node, session, workspace, publication):
+    """Wait for this Warehouse load's publication to reach its consumers.
+
+    The Warehouse-side counterpart of the SQL endpoint refresh, and a node for the
+    same reasons: its own progress line, its own timing, and a failure that blames
+    the boundary rather than the load that already committed.
+    """
+
+    from ..runtime.load_result import LoadResult
+    from .publication import await_publication
+
+    producer = node.produced_by
+    if publication is None or producer is None:
+        raise RunError(
+            f"{node.node_id} waits on a publication and this run recorded none"
+        )
+    if not publication.moved(producer):
+        # Nothing was written, so nothing is published and no Spark is needed.
+        return LoadResult(succeeded=True)
+    await_publication(
+        node,
+        session,
+        workspace,
+        before=publication.baseline(producer),
+        readiness=tuple(node.publication_targets),
+    )
+    return LoadResult(succeeded=True)
 
 
 def _python(node, session, workspace, resolved, fault_tolerant: bool, open_runtime):

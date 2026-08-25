@@ -775,13 +775,25 @@ def test_a_python_shortcut_import_orders_a_warehouse_before_its_lakehouse_consum
         ),
     )
 
-    assert (
-        "load:Warehouse/Serving_WH/SERVE.Reporting",
-        "load:Lakehouse/Published_LH/PUB.Reporting",
-    ) in dag.edges
-    from weaver.load_plan import OneLakeReadiness
+    from weaver.load_plan import ONELAKE_PUBLICATION, OneLakeReadiness
 
-    assert dag.by_id["load:Warehouse/Serving_WH/SERVE.Reporting"].await_onelake == (
+    producer = "load:Warehouse/Serving_WH/SERVE.Reporting"
+    consumer = "load:Lakehouse/Published_LH/PUB.Reporting"
+    barrier = "publish:Warehouse/Serving_WH/SERVE.Reporting"
+
+    # The barrier replaces the direct edge, as the endpoint refresh does in the
+    # other direction, so the consumer cannot start until it has settled.
+    assert (producer, consumer) not in dag.edges
+    assert (producer, barrier) in dag.edges
+    assert (barrier, consumer) in dag.edges
+
+    waiting = dag.by_id[barrier]
+    assert waiting.primitive_kind == ONELAKE_PUBLICATION
+    # No logical identity, so it leaves no catalogue state of its own.
+    assert waiting.logical_id is None
+    assert waiting.produced_by == producer
+    assert str(waiting.publication_of) == "Warehouse/Serving/SERVE.Reporting"
+    assert waiting.publication_targets == (
         OneLakeReadiness(
             target=PhysicalTargetRef("lakehouse", "Published_LH"),
             schema="WH",

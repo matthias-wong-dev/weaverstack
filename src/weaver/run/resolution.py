@@ -20,6 +20,7 @@ WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
 ENDPOINT_REFRESH = "endpoint_refresh"
+ONELAKE_PUBLICATION = "onelake_publication"
 #: How a validation is reached, from where it is installed.
 PYTHON_VALIDATION = "python_validation"
 
@@ -69,7 +70,11 @@ def resolve(node, *, can_refresh: bool = True) -> Resolved:
                     source=SOURCE,
                 )
             )
-    elif node.primitive_kind not in (WAREHOUSE_PROCEDURE, PYTHON_VALIDATION):
+    elif node.primitive_kind not in (
+        WAREHOUSE_PROCEDURE,
+        PYTHON_VALIDATION,
+        ONELAKE_PUBLICATION,
+    ):
         messages.append(
             error(
                 DISPATCH_LOCATION_MISSING,
@@ -150,6 +155,7 @@ def _module_class(node) -> str | None:
 
 __all__ = [
     "ENDPOINT_REFRESH",
+    "ONELAKE_PUBLICATION",
     "PYTHON_FOLDER",
     "PYTHON_KINDS",
     "PYTHON_TABLE",
