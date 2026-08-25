@@ -16,8 +16,14 @@ from weaver.fabric.client import FabricClient, FabricError
 
 
 def _response(status: int, *, headers=None):
+    """A response with the fields a real one has, so a fake cannot flatter."""
+
     return SimpleNamespace(
-        status_code=status, headers=headers or {}, text="", json=lambda: {}
+        status_code=status,
+        headers=headers or {},
+        text="",
+        content=b"",
+        json=lambda: {},
     )
 
 
@@ -91,3 +97,58 @@ def test_a_refusal_that_never_clears_is_reported_with_its_status(monkeypatch):
 
     assert raised.value.status_code == 503
     assert len(sent) == 4
+
+
+# --- the other two transports ------------------------------------------------
+
+
+@weaver_test()
+def test_a_refused_livy_call_is_repeated(monkeypatch):
+    """Livy uses the same front door, and polling a statement meets a busy one."""
+
+    from weaver.fabric import livy
+
+    slept: list = []
+    remaining = [_response(503), _response(503), _response(200)]
+    monkeypatch.setattr(livy, "send", lambda *a, **k: remaining.pop(0))
+    monkeypatch.setattr(livy.time, "sleep", slept.append)
+
+    livy._call("GET", "https://example/statements/17", "token", expected=(200,))
+
+    assert remaining == []
+    assert slept == [2.0, 4.0]
+
+
+@weaver_test()
+def test_a_refused_sql_connection_is_opened_again(monkeypatch):
+    """A Fabric endpoint scaling up refuses before anything is sent."""
+
+    from weaver.sql import connection as connection_module
+    from weaver.sql.authentication import SqlAuthentication
+    from weaver.sql.connection import SqlEndpoint, connect
+    from weaver.sql.errors import SqlConnectionError
+
+    slept: list = []
+    monkeypatch.setattr(connection_module.time, "sleep", slept.append)
+    attempts: list = []
+
+    class Authentication(SqlAuthentication):
+        def connection_arguments(self):
+            return {}
+
+    def connector(*_args, **_kwargs):
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise TimeoutError("Timeout error [258]")
+        return "connection"
+
+    endpoint = SqlEndpoint(server="server", database="Weaver")
+    assert connect(endpoint, Authentication(), connector=connector) == "connection"
+    assert len(attempts) == 3
+    assert slept == [3.0, 6.0]
+
+    def refusing(*_args, **_kwargs):
+        raise TimeoutError("Timeout error [258]")
+
+    with pytest.raises(SqlConnectionError, match="failed to connect"):
+        connect(endpoint, Authentication(), connector=refusing)

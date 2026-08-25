@@ -12,7 +12,13 @@ from typing import Any
 
 from ..errors import WeaverError
 from .auth import FABRIC_SCOPE, token_source
-from .client import FABRIC_API, send
+from .client import (
+    CONNECTION_ATTEMPTS,
+    FABRIC_API,
+    TRANSIENT_STATUSES,
+    retry_delay,
+    send,
+)
 
 DEFAULT_LIVY_API_VERSION = "2023-12-01"
 DEFAULT_POLL_INTERVAL = 3.0
@@ -241,25 +247,32 @@ def _call(
 ) -> dict:
     import requests
 
-    try:
-        response = send(
-            method,
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps(payload) if payload is not None else None,
-            timeout=120,
-        )
-    except requests.exceptions.RequestException as exc:
-        raise LivyError(f"{method} {url} could not be reached: {exc}") from exc
-    if response.status_code not in expected:
+    # Livy runs over the same REST front door, and it refuses a call the same way
+    # while a capacity is busy. Polling a statement for minutes meets that often.
+    for attempt in range(1, CONNECTION_ATTEMPTS + 1):
+        try:
+            response = send(
+                method,
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps(payload) if payload is not None else None,
+                timeout=120,
+            )
+        except requests.exceptions.RequestException as exc:
+            raise LivyError(f"{method} {url} could not be reached: {exc}") from exc
+        if response.status_code in expected:
+            return response.json() if response.content else {}
+        if response.status_code in TRANSIENT_STATUSES and attempt < CONNECTION_ATTEMPTS:
+            time.sleep(retry_delay(response, attempt))
+            continue
         raise LivyError(
             f"{method} {url} returned {response.status_code}: "
             f"{response.text.strip()[:400] or 'no body'}"
         )
-    return response.json() if response.content else {}
+    raise LivyError(f"{method} {url} did not settle")
 
 
 class LivySession:

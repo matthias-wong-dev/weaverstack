@@ -75,7 +75,7 @@ def never_sent(exc: BaseException) -> bool:
     return False
 
 
-def _retry_delay(response, attempt: int) -> float:
+def retry_delay(response, attempt: int) -> float:
     """How long to wait: what ``Retry-After`` asked for, or a widening gap."""
 
     asked = response.headers.get("Retry-After")
@@ -179,7 +179,7 @@ class FabricClient:
                     response.status_code in TRANSIENT_STATUSES
                     and attempt < CONNECTION_ATTEMPTS
                 ):
-                    time.sleep(_retry_delay(response, attempt))
+                    time.sleep(retry_delay(response, attempt))
                     continue
                 raise FabricError(
                     f"{method} {url} returned {response.status_code}: "
