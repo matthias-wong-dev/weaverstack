@@ -130,18 +130,27 @@ def generate(
     )
 
 
-def action_of(plan, kind: str):
+def action_of(plan, kind: str, *, naming: str | None = None):
     """One action out of a real plan, with the batch that binds it to a target.
 
     Taken from the generated bundle rather than hand-made, so what runs against
-    Fabric is provably what the build produces — the point of generating a bundle
-    at all when only one action is wanted from it.
+    Fabric is provably what the build produces. That is the point of generating a
+    bundle at all when only one action is wanted from it.
+
+    ``naming`` picks the action by its id, and a caller that means a particular
+    item has to give it. Weaver's runtime references are ordinary shortcuts, so a
+    plan over two items carries several ``create_shortcut`` actions and the first
+    is whichever item sorted first.
     """
 
     for _sequence, batch, action in plan.actions():
-        if action.kind == kind:
-            return batch, action
-    raise AssertionError(f"the plan carried no {kind} action")
+        if action.kind != kind:
+            continue
+        if naming is not None and naming not in action.id:
+            continue
+        return batch, action
+    named = "" if naming is None else f" naming {naming!r}"
+    raise AssertionError(f"the plan carried no {kind} action{named}")
 
 
 def run_from_here(
@@ -246,8 +255,15 @@ def shortcut_estate(
         staging=fabric_staging_lakehouse.name,
         catalogue_sql=session_catalogue_sql,
     )
-    batch, shortcut_action = action_of(bundle.plan, "create_shortcut")
-    _refresh_batch, refresh_action = action_of(bundle.plan, "refresh_sql_endpoint")
+    # The consumer's, by name: the producer has runtime-reference shortcuts of
+    # its own and they are `create_shortcut` actions too.
+    consumer_item = CONSUMER.split("/", 1)[1]
+    batch, shortcut_action = action_of(
+        bundle.plan, "create_shortcut", naming=consumer_item
+    )
+    _refresh_batch, refresh_action = action_of(
+        bundle.plan, "refresh_sql_endpoint", naming=consumer_item
+    )
 
     at = {
         role: resolver.spark_destination(ItemRef(item.name))
@@ -507,7 +523,11 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
         catalogue_sql=session_catalogue_sql,
         sql=warehouse.executor,
     )
-    batch, shortcut_action = action_of(bundle.plan, "create_shortcut")
+    batch, shortcut_action = action_of(
+        bundle.plan,
+        "create_shortcut",
+        naming=WAREHOUSE_CONSUMER.split("/", 1)[1],
+    )
     at = resolver.spark_destination(ItemRef(producer.name))
     source = at.qualify("DWG", "Customer")
 

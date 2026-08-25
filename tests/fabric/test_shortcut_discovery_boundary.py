@@ -76,7 +76,10 @@ def discovery_estate(
         staging=producer.name,
         catalogue_sql=session_catalogue_sql,
     )
-    batch, shortcut_action = action_of(bundle.plan, "create_shortcut")
+    # Named, because the producer's runtime references are shortcut actions too.
+    batch, shortcut_action = action_of(
+        bundle.plan, "create_shortcut", naming=CONSUMER.split("/", 1)[1]
+    )
 
     at = {
         role: resolver.spark_destination(ItemRef(item.name))
