@@ -127,9 +127,7 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     if before is not None and (
         result.rows_inserted or result.rows_updated or result.rows_deleted
     ):
-        _await_warehouse_delta_publication(
-            node, session, workspace, before, readiness
-        )
+        _await_warehouse_delta_publication(node, session, workspace, before, readiness)
     return result
 
 
@@ -190,9 +188,10 @@ def _await_warehouse_delta_publication(
                     _shortcut_delta_path(destination, session, workspace)
                     for destination in readiness
                 )
+                source_format = "delta"
                 session.execute_spark_sql_batch(
                     [
-                        f"select count(*) as rows\nfrom " f"delta.`{path}`"
+                        f"select count(*) as rows\nfrom {source_format}.`{path}`"
                         for path in paths
                     ],
                     workspace=workspace,

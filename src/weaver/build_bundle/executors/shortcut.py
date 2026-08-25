@@ -125,9 +125,7 @@ class ShortcutExecutor:
         window.
         """
 
-        tables = [
-            each for each in frozen if each.get("type", "table") == "table"
-        ]
+        tables = [each for each in frozen if each.get("type", "table") == "table"]
         if not tables:
             return None
 

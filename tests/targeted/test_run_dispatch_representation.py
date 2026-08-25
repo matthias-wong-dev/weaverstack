@@ -206,9 +206,7 @@ def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
         ),
     )
 
-    monkeypatch.setattr(
-        "weaver.run.dispatch.ONELAKE_PUBLICATION_POLL_INTERVAL", 0.0
-    )
+    monkeypatch.setattr("weaver.run.dispatch.ONELAKE_PUBLICATION_POLL_INTERVAL", 0.0)
     result = dispatch_primitive(node, session=Session())
 
     assert result.rows_inserted == 1

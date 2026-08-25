@@ -185,9 +185,7 @@ class FabricResolver:
             if getattr(source, "id", None) and getattr(source, "workspace_id", None)
             else self.resolve(
                 source,
-                item_type=(
-                    WAREHOUSE if source_kind == WAREHOUSE_TARGET else LAKEHOUSE
-                ),
+                item_type=(WAREHOUSE if source_kind == WAREHOUSE_TARGET else LAKEHOUSE),
             )
         )
         return create_shortcut(
@@ -199,9 +197,7 @@ class FabricResolver:
             client=self._rest_client(),
         )
 
-    def external_item(
-        self, name: str, *, item_type: str, workspace: str | None = None
-    ):
+    def external_item(self, name: str, *, item_type: str, workspace: str | None = None):
         """One item, in this workspace or a named one, resolved by its type.
 
         For a shortcut's *source*, which may sit outside the workspace the build

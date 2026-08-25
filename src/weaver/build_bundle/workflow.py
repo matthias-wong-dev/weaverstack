@@ -92,6 +92,7 @@ class BuildState:
     #: Where each direct shortcut points, resolved while the estate was
     #: readable. Keyed by ``<owner>/<name>``.
     shortcut_sources: Mapping[str, ResolvedShortcutSource] = field(default_factory=dict)
+
     def to_mapping(self) -> dict[str, object]:
         return {
             "format_version": 1,

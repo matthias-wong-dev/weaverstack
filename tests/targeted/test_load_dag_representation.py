@@ -781,9 +781,7 @@ def test_a_python_shortcut_import_orders_a_warehouse_before_its_lakehouse_consum
     ) in dag.edges
     from weaver.load_plan import OneLakeReadiness
 
-    assert dag.by_id[
-        "load:Warehouse/Serving_WH/SERVE.Reporting"
-    ].await_onelake == (
+    assert dag.by_id["load:Warehouse/Serving_WH/SERVE.Reporting"].await_onelake == (
         OneLakeReadiness(
             target=PhysicalTargetRef("lakehouse", "Published_LH"),
             schema="WH",

@@ -391,9 +391,7 @@ def test_an_unchanged_build_is_a_true_fixed_point(acceptance):
     step.observation = _observe(
         acceptance,
         {
-            "named_product": (
-                f"select ProductId from {landing}.`Source`.`Product`"
-            ),
+            "named_product": (f"select ProductId from {landing}.`Source`.`Product`"),
             "delta_product": (
                 "select ProductId from delta.`"
                 f"{landing_location.table_path('Source', 'Product')}`"

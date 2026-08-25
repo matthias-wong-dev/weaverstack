@@ -831,9 +831,7 @@ class _Planner:
                 self.edges.add((upstream_id, node.node_id))
             elif isinstance(crossed, OneLakeReadiness):
                 readiness = tuple(
-                    dict.fromkeys(
-                        (*self.nodes[upstream_id].await_onelake, crossed)
-                    )
+                    dict.fromkeys((*self.nodes[upstream_id].await_onelake, crossed))
                 )
                 self.nodes[upstream_id] = replace(
                     self.nodes[upstream_id], await_onelake=readiness
@@ -916,15 +914,13 @@ class _Planner:
         requested-target boundary even so.
         """
 
-        found: dict[
-            WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None
-        ] = {}
-        seen: set[tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None]] = set()
+        found: dict[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None] = {}
+        seen: set[
+            tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None]
+        ] = set()
         frontier: list[
             tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None]
-        ] = [
-            (identity, None)
-        ]
+        ] = [(identity, None)]
         while frontier:
             current, crossing = frontier.pop()
             for producer, hop in self._direct_producers(current):

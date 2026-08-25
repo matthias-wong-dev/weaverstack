@@ -216,9 +216,7 @@ def test_the_fabric_transport_resolves_a_bound_warehouse_by_its_declared_kind(
 
     import weaver.fabric.shortcuts as shortcuts
 
-    resolver = given_resolver(
-        lakehouses=("Curated_LH",), warehouses=("Serving_WH",)
-    )
+    resolver = given_resolver(lakehouses=("Curated_LH",), warehouses=("Serving_WH",))
     captured = {}
 
     def create(item, *, path, name, source, source_path, client):
