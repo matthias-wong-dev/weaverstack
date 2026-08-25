@@ -287,7 +287,12 @@ separate load/test engines         a per-position build
 old/new action terminology         build_uploaded_item_repository
 operation-local resource ownership update_catalogue / @update_catalogue
 Bookmark-specific build plumbing   a bespoke write per runtime table
+the `provision` test scope          disposable-Lakehouse fixtures
 ```
+
+The `provision` scope went when the suite moved to fixed items. Standing the
+estate up is `tests/fabric/provision_estate.py`, run by hand, and no test creates
+or deletes an item.
 
 **Who records is the interface.** A lower execution primitive never writes
 operational catalogue state. A run records centrally, and a standalone wrapper
@@ -326,10 +331,9 @@ for, and the artifact churn that makes Fabric's namespace resolver intermittentl
 report `Artifact not found` for an item that exists. The suite's cost is bundle
 generate and install round trips through Livy.
 
-Item lifecycle cover, creating and deleting Lakehouses, is marked `provision` and
-opted into separately from ordinary Fabric work. It exercises Fabric's resource
-management, changes rarely, and its create and delete churn would slow every run
-of the code under development.
+Nothing in the suite creates or deletes a Fabric item.
+`tests/fabric/provision_estate.py` does that, run by hand to stand the estate up
+on a new tenant. It reuses what is already there and deletes nothing.
 
 ### One state transition, one evidence payload
 
@@ -384,12 +388,11 @@ pytest                        # pure Python, no JVM and no tenant
 pytest -m "fabric and remote" # no published wheel needed
 pytest -m "fabric and hosted" # needs the wheel published to the Environment
 pytest -m full_integration    # composed lifecycle journeys
-pytest -m provision           # Fabric item lifecycle
 ```
 
-The scope is one of core, remote, hosted, integration, or provision. Integration
-and provision need no additional position flag. Resources are a separate closed
-vocabulary: `tds`, `livy`, `onelake`, `rest`.
+The scope is one of core, remote, hosted or integration. Integration needs no
+additional position flag. Resources are a separate closed vocabulary: `tds`,
+`livy`, `onelake`, `rest`.
 
 Pytest compares declared resources exactly with claim-body events from the test's
 registered Sessions. Fixture acquisition is reported separately, so the first TDS

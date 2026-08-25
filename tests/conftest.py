@@ -58,7 +58,6 @@ def pytest_collection_modifyitems(items):
             "remote",
             "hosted",
             "full_integration",
-            "provision",
             *RESOURCES,
         }
         actual = {mark.name for mark in item.iter_markers() if mark.name in managed}
@@ -70,7 +69,6 @@ def pytest_collection_modifyitems(items):
                 "remote": {"remote"},
                 "hosted": {"hosted"},
                 "integration": {"full_integration"},
-                "provision": {"provision"},
             }.get(declaration.scope, set())
         )
         if actual != expected:

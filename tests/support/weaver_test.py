@@ -37,7 +37,6 @@ def weaver_test(
     remote: bool = False,
     hosted: bool = False,
     integration: bool = False,
-    provision: bool = False,
     resources=frozenset(),
 ) -> Callable:
     """Declare a test's Weaver position and necessary external resources."""
@@ -48,7 +47,6 @@ def weaver_test(
             ("remote", remote),
             ("hosted", hosted),
             ("integration", integration),
-            ("provision", provision),
         )
         if enabled
     ]
@@ -73,8 +71,6 @@ def weaver_test(
             marked = getattr(pytest.mark, scope)(marked)
         if scope == "integration":
             marked = pytest.mark.full_integration(marked)
-        if scope == "provision":
-            marked = pytest.mark.provision(marked)
         for resource in sorted(declared):
             marked = getattr(pytest.mark, resource)(marked)
         return marked

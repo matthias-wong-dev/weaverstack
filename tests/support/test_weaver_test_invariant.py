@@ -38,7 +38,6 @@ def test_invalid_declarations_are_rejected():
         ("remote", "remote", {"fabric", "remote"}),
         ("hosted", "hosted", {"fabric", "hosted"}),
         ("integration", "integration", {"fabric", "full_integration"}),
-        ("provision", "provision", {"fabric", "provision"}),
     ],
 )
 def test_each_scope_is_one_declaration_with_matching_selection_markers(
@@ -54,9 +53,8 @@ def test_each_scope_is_one_declaration_with_matching_selection_markers(
 
 
 @weaver_test()
-def test_integration_and_provision_need_no_position_dimension():
+def test_integration_needs_no_position_dimension():
     assert weaver_test(integration=True)
-    assert weaver_test(provision=True)
 
 
 @weaver_test()
