@@ -4,7 +4,7 @@ A planning component says what has to happen and in what order relative to its
 siblings, never which sequence number that is: a number is a property of the
 finished plan, and reserved regions constrain the plan rather than describe it.
 
-Each component returns :class:`PlannedStage` values — a phase, a description,
+Each component returns :class:`PlannedStage` values: a phase, a description,
 target-bound batches, and the payloads those batches need. The planner
 concatenates them in execution order and :func:`enumerate_stages` numbers them,
 rewriting each payload into ``payload/<number>-<slug>/<filename>`` so the bundle
@@ -33,7 +33,7 @@ from .payloads import payload_path
 #: against a namespace holding what the item imports. The refresh closes the
 #: item: until a mutated Lakehouse's SQL endpoint has caught up, a dependent
 #: item's view or shortcut would be built over stale metadata. Load follows it,
-#: unordered within its own layer — nothing here runs those artefacts.
+#: unordered within its own layer, because nothing here runs those artefacts.
 PRUNE = "prune"
 DROP = "drop"
 SCHEMA = "schema"
@@ -62,16 +62,16 @@ class PlannedStage:
 
     ``phase`` and ``index`` place the stage among its siblings: ``index``
     separates the dependency layers within a phase, so two items in the same
-    topological item layer can have their layer *n* merged into one barrier.
+    topological item layer can have their layer n merged into one barrier.
 
     ``slug`` names the stage's payload directory. ``payloads`` is keyed by bare
     filename within it, because the directory's name is not known until the
     stage has a number.
 
-    ``changes`` is what this stage's actions will *mean* for each target, keyed
-    by target id. Rendered beside the actions rather than inferred from them —
-    see :mod:`weaver.build_bundle.changes` — so the statement of effect and the
-    thing that has the effect are written in one place.
+    ``changes`` is what this stage's actions mean for each target, keyed by target
+    id. Rendered beside the actions rather than inferred from them, so the
+    statement of effect and the thing that has the effect are written in one
+    place. See :mod:`weaver.build_bundle.changes`.
     """
 
     phase: str
@@ -107,8 +107,8 @@ def merge_layer_stages(stages: Iterable[PlannedStage]) -> tuple[PlannedStage, ..
     Items in the same topological layer have no ordering between them, so their
     work belongs in the same barriers: one batch per item, exactly as a
     single-layer build already produces. Merging here is what keeps the
-    invariant that matters — nothing in a later item layer starts before this
-    layer has completed — without serialising items that never needed it.
+    invariant that matters, that nothing in a later item layer starts before this
+    layer has completed, without serialising items that never needed it.
     """
 
     grouped: dict[tuple[int, int], list[PlannedStage]] = {}
@@ -159,8 +159,8 @@ def enumerate_stages(
     sequences: list[BuildSequence] = []
     payloads: dict[str, bytes] = {}
     changes: list[Mapping[str, tuple[TargetChange, ...]]] = []
-    # An empty stage is not a barrier — it is a phase this build had no work for
-    # — so it takes no number and leaves no gap.
+    # An empty stage is not a barrier. It is a phase this build had no work for,
+    # so it takes no number and leaves no gap.
     populated = [stage for stage in stages if stage.batches]
     for number, stage in enumerate(populated, start=1):
         resolved = {}

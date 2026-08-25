@@ -1,13 +1,13 @@
 """What one node's dispatch actually asks the engine for.
 
-The Runner decides *when* a node runs; this is the translation between a node and
+The Runner decides when a node runs; this is the translation between a node and
 the engine that runs it, and it is the only place a run crosses outward. What
-matters here is the shape of the request — which procedure, with which inputs,
-read back how — not what the engine does with it, which is a Primitive's claim
+matters here is the shape of the request, which procedure, with which inputs,
+read back how, not what the engine does with it, which is a Primitive's claim
 and is proven against a real Warehouse.
 
-The orchestration claims that used to live alongside these — ordering, fault
-tolerance, blocking, result normalisation, the observer — are in
+The orchestration claims that used to live alongside these, ordering, fault
+tolerance, blocking, result normalisation, the observer, are in
 ``tests/test_run_cycle.py`` now, where they need no engine at all and run in
 milliseconds.
 """

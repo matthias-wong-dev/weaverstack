@@ -61,7 +61,7 @@ def test_the_comparison_ignores_case():
     """The physical name's case is the workspace's to choose.
 
     Fabric folds identifiers, so comparing exactly
-    would ask for a schema that is already there — and `CREATE SCHEMA` without
+    would ask for a schema that is already there, and `CREATE SCHEMA` without
     `IF NOT EXISTS` fails on it.
     """
 
@@ -98,8 +98,8 @@ def test_an_shortcut_namespace_is_created_though_no_document_lives_in_it():
     """The case that cannot be seen from the documents alone.
 
     A shortcut destination lands in one of the item's own schemas, but no
-    *document* of the item need be declared there. A build that created only the
-    schemas its documents needed would leave the shortcut homeless — and the shortcut
+    document of the item need be declared there. A build that created only the
+    schemas its documents needed would leave the shortcut homeless, and the shortcut
     action would fail against a namespace that was never made.
     """
 
@@ -163,7 +163,7 @@ def test_a_warehouse_schema_name_has_its_brackets_escaped():
     """A `]` in an identifier ends the quoting unless it is doubled.
 
     Weaver's own names could not contain one, but the schema comes from a
-    declaration and the statement is generated — so the escaping is Weaver's to
+    declaration and the statement is generated, so the escaping is Weaver's to
     get right, not the author's to avoid.
     """
 

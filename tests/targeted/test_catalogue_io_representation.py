@@ -3,11 +3,11 @@
 The ``_`` schema is the catalogue and every table in it is a catalogue table, so
 one object reads it and one object writes it. Four claims about that object:
 
-* it is *selectively materialised* — it holds what it was asked for, and
+* it is selectively materialised. It holds what it was asked for, and
   ``_.Log`` is not asked for, being history nothing consults;
 * it answers which installed object a physical name is, or refuses to guess;
 * runtime rows go through it, appended or merged, and a merged row is visible to
-  a reader of the same catalogue at once;
+  a later read of the same catalogue at once;
 * a write that did not land is raised by ``flush`` and nowhere else.
 
 Pure Python. Every input is constructible, and the rows are in the shape the
@@ -115,7 +115,7 @@ def test_materialised_says_what_was_loaded_and_not_what_exists():
 
     A table that exists and holds no rows was still loaded, so it is materialised.
     Whether a table is physically there is a target's, and a target's inventory
-    answers it — see `tests/targeted/test_bookmark_build_install.py`.
+    answers it. See `tests/targeted/test_bookmark_build_install.py`.
     """
 
     from weaver.catalogue.state import read_installed_catalogue
@@ -372,8 +372,8 @@ def test_an_updated_row_is_merged():
 def test_an_updated_bookmark_is_visible_to_a_reader_at_once():
     """A run that just advanced a bookmark and then asks is asking about its own load.
 
-    Before the Warehouse has it, deliberately: the write is queued and the flush
-    is later, and a reader in between must not see what the row replaced.
+    Before the Warehouse has it: the write is queued and the flush
+    is later, and a read in between must not see what the row replaced.
     """
 
     catalogue = never("DWG.Customer")

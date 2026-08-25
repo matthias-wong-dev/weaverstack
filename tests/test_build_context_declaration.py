@@ -7,7 +7,7 @@ order serves both:
 
     explicit argument → typed Workspace → configuration → notebook context
 
-The part worth testing is the *precedence*, because every step of it is a value
+The part worth testing is the precedence, because every step of it is a value
 that would otherwise be plausible. A configured catalogue and an attached
 default Lakehouse are both real Lakehouses; picking the wrong one writes a
 catalogue into somewhere that works, and is wrong in a way nothing complains
@@ -71,8 +71,8 @@ def captured(monkeypatch):
     # One seam, because there is one build: what the Session answers is what
     # differs between a notebook and a desktop, not which algorithm runs.
     monkeypatch.setattr(weaver.operations.build, "_run_build", capture("build"))
-    # Preflight is a different claim — that a build proves its items exist before
-    # opening anything — and has its own tests below.
+    # Preflight is a different claim. That a build proves its items exist before
+    # opening anything, and has its own tests below.
     monkeypatch.setattr(weaver.operations.build, "_preflight", lambda *a, **k: None)
     return seen
 
@@ -328,7 +328,7 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused_by_the_session
 
 # --- where a Spark session would attach ---------------------------------------
 #
-# Fabric creates a Livy session *against* a Lakehouse, so a host that crosses
+# Fabric creates a Livy session against a Lakehouse, so a host that crosses
 # needs the id of one. It comes from the bindings the build was given, which is
 # why a workspace configuring no Lakehouses can still build into one.
 
@@ -351,7 +351,7 @@ def test_a_build_offers_the_lakehouse_it_was_bound_to(repository, captured):
 
 @weaver_test()
 def test_a_warehouse_only_build_offers_none(captured, tmp_path):
-    """Nothing to attach, and nothing that wants attaching."""
+    """Nothing to attach, and nothing that needs attaching."""
 
     from test_item_repository_declaration import _schema, _write
 

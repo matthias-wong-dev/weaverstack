@@ -1,8 +1,8 @@
 """The generated Warehouse validation procedure, against a real Fabric Warehouse.
 
-A *primitive* test: two tables are made, the procedures are installed from
+A primitive test: two tables are made, the procedures are installed from
 ``generate_validation()``, and each is then executed directly. No bundle, no
-installer, no orchestrator — the claim is that ``exec [_].[Test S.N]`` works on
+installer, no orchestrator, the claim is that ``exec [_].[Test S.N]`` works on
 its own.
 
 Fabric is the only place several of these can be answered, and they are the ones
@@ -11,9 +11,9 @@ procedure, whether ``tempdb.sys.columns`` answers for a session temp table,
 whether ``throw`` surfaces as an error a caller can read, and whether one
 execution can return both a diagnostic result set and its output counts. The
 pure renderer tests in ``tests/targeted/test_tsql_validation_representation.py`` cover
-the SQL's *shape*; this covers the engine's *answer*.
+the SQL's shape; this covers the engine's answer.
 
-The outcomes match what a Lakehouse validation produces, deliberately: two
+The outcomes match what a Lakehouse validation produces: two
 engines, one set of validation semantics. If they disagree, the semantics have
 diverged.
 """
@@ -487,7 +487,7 @@ def test_a_validation_that_could_not_be_evaluated_is_recorded_and_raised(estate)
     """It found nothing, and zero discrepancies is the answer it must not give.
 
     A duplicate key is a broken Test rather than a failing one: the procedure
-    throws, the entry point records Error with no count, and then raises — a
+    throws, the entry point records Error with no count, and then raises, a
     validation that could not run must not read as a call that succeeded.
     """
 

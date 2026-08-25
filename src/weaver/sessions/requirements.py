@@ -11,7 +11,7 @@ from __future__ import annotations
 AUTH = "auth"
 #: Turning a logical name into a physical item, over REST.
 RESOLVER = "resolver"
-#: The file transport — reading and writing a Lakehouse's Files area.
+#: The file transport, reading and writing a Lakehouse's Files area.
 ONELAKE = "onelake"
 #: A connection to a Warehouse, per Warehouse.
 TDS = "tds"

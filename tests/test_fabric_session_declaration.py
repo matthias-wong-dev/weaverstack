@@ -65,7 +65,7 @@ class _NamedLakehouses:
 
 @weaver_test()
 def test_a_lakehouse_resolves_to_what_authored_code_addresses():
-    """What ``lakehouse_for`` composes inside a session — attached or not.
+    """What ``lakehouse_for`` composes inside a session: attached or not.
 
     The OneLake root is the durable identity, and a table is addressed by it
     directly. A folder is reached through a mount of that same root, resolved on

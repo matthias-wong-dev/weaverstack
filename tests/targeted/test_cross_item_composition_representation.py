@@ -5,14 +5,14 @@ it: a Delta table published into the Warehouse through a shortcut, materialised
 there, viewed, and reconciled against its source by a Test. It is the one shape
 no single-target estate can express.
 
-So the *order* a build gives it is asserted here, in pure Python, where a plan is
+So the order a build gives it is asserted here, in pure Python, where a plan is
 a value and no engine is needed. What that leaves for Fabric is whether the
 statements this order produces are accepted, which is a different claim in a
 different place.
 
 The order is the subject. A Warehouse reads a Lakehouse table across a SQL
 analytics endpoint, and an endpoint that has not caught up reports the table as
-missing or stale — so the Lakehouse's objects, the refresh, and the Warehouse's
+missing or stale, so the Lakehouse's objects, the refresh, and the Warehouse's
 objects have to fall in that sequence. Being present is not enough.
 """
 
@@ -118,7 +118,7 @@ def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
     A Warehouse object reading an shortcut Delta table reaches it over the SQL
     analytics endpoint, and the endpoint is eventually consistent with the
     Lakehouse. Building the Warehouse side first would read a table the endpoint
-    has not seen yet — and the estate would be self-consistent on each side
+    has not seen yet, and the estate would be self-consistent on each side
     while the crossing between them was stale.
     """
 

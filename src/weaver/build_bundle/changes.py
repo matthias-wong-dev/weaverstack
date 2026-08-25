@@ -1,8 +1,8 @@
 """What a build intends each target to look like afterwards.
 
-A plan says what will *run*. This says what it will *mean*: for each bound
+A plan says what will run. This says what it will mean: for each bound
 target, the objects a build adds and the objects it removes. The two are written
-side by side, deliberately, and a test holds them to each other.
+side by side, and a test holds them to each other.
 
 Declared where the action is rendered rather than inferred from the action
 kind: an inference would be a model of what executors do, living where no
@@ -10,7 +10,7 @@ executor can correct it.
 
 What makes it load-bearing is :data:`action_id`. Every physical action must be
 named by exactly one change and every change must name a real action, so adding
-an artefact type means emitting both — forget either and the bijection breaks.
+an artefact type means emitting both. Forget either and the bijection breaks.
 
 That is also why the identity lives here. A prune action carries no
 ``resource_node_id``, because a pruned object has no node in the repository, so
@@ -70,8 +70,8 @@ _COLLECTION = {
 class TargetChange:
     """One object a build will add to, or remove from, one target.
 
-    ``name`` is spelled exactly as the inventory spells it — ``DWG.Customer``,
-    ``_/Load/lib/dates.py`` — because it is compared against a real read. A
+    ``name`` is spelled exactly as the inventory spells it, ``DWG.Customer``,
+    ``_/Load/lib/dates.py``, because it is compared against a real read. A
     change whose name did not match what a target reports would apply cleanly and
     describe nothing.
     """
@@ -136,7 +136,7 @@ def merge(
 def apply_to(inventory, changes: Iterable[TargetChange]):
     """The inventory a target would hold once these changes have been made.
 
-    Pure, and returns a new inventory: the point is to compare a *predicted*
+    Pure, and returns a new inventory: the point is to compare a predicted
     state against a declared one, and mutating the input would make the two
     comparable only once.
 

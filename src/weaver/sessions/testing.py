@@ -8,7 +8,7 @@ crossing is captured instead of made.
 What it must never become is an engine. It does not parse SQL, evaluate a
 statement, model a catalogue or stand in for Spark: it records the call and
 answers with whatever the test configured. A question about what a statement
-*means* is a question for a Fabric test, and one about what Weaver *renders* is
+means is a question for a Fabric test, and one about what Weaver renders is
 answered by reading the recorded statement.
 
 .. code-block:: python
@@ -143,7 +143,7 @@ class TestSession(Session):
         if not self._python_answers:
             raise CommandError(
                 "this TestSession was asked to run a Python program and no "
-                "result was configured for it — call answer_python() first"
+                "result was configured for it, call answer_python() first"
             )
         return self._python_answers.pop(0)
 

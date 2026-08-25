@@ -1,8 +1,8 @@
 """``weaver test`` at the command line: what it parses, and what it prints.
 
-The CLI owns no semantics — it adapts arguments to :func:`weaver.test` and
-renders what comes back — so these assert exactly that boundary. The public
-operation is faked, because what the operation *does* is proved where it is
+The CLI owns no semantics. It adapts arguments to :func:`weaver.test` and
+renders what comes back, so these assert exactly that boundary. The public
+operation is faked, because what the operation does is proved where it is
 implemented and re-proving it here would put two copies of the claim in the
 suite.
 
@@ -262,7 +262,7 @@ def test_a_targeted_run_prints_its_evidence(captured, capsys):
 
 @weaver_test()
 def test_a_whole_target_run_prints_no_rows(captured, capsys):
-    """There are none to print — the run never asked for them."""
+    """There are none to print, the run never asked for them."""
 
     _run("Lakehouse/Sales")
 
@@ -313,7 +313,7 @@ def test_json_carries_no_diagnostic_rows(captured, capsys):
 def test_the_workflow_is_pointed_at(captured, capsys):
     """A run's evidence is `_.Log` rows correlated by Workflow ID.
 
-    So what a finished command gives a reader is the identity to select on,
+    So a finished command gives the identity to select on,
     not a place to browse to.
     """
 

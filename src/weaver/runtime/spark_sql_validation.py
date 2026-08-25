@@ -30,7 +30,7 @@ def read_spark_sql_assumption(spark: Any, *, sql: str, what: str) -> Any:
 def _run(spark: Any, *, sql: str, what: str, kind: str) -> list[Any]:
     if not isinstance(sql, str) or not sql.strip():
         raise ValidationError(
-            f"{what}: this Spark SQL validation carries no program — a generated "
+            f"{what}: this Spark SQL validation carries no program, a generated "
             "module sets `sql` to the authored SQL it was built from"
         )
 

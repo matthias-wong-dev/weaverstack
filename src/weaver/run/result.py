@@ -94,8 +94,8 @@ CATALOGUE_BINDING_INVALID = "catalogue_binding_invalid"
 DAG_CYCLE = "dag_cycle"
 #: A dependency named in the catalogue could not be resolved to anything.
 DEPENDENCY_UNRESOLVED = "dependency_unresolved"
-#: A reference Weaver deliberately does not follow — a fully qualified physical
-#: read that names something outside the estate's own logical graph.
+#: A reference Weaver does not follow: a fully qualified physical read that names
+#: something outside the estate's own logical graph.
 DEPENDENCY_EXTERNAL = "dependency_external"
 
 
@@ -153,7 +153,7 @@ BLOCKED = "blocked"
 SKIPPED = "skipped"
 PENDING = "pending"
 #: The node could not be resolved, so nothing ran. Not the same as a primitive
-#: that ran and reported failure, and a reader asking which is asking this.
+#: that ran and reported failure, and this is what tells them apart.
 INVALID = "invalid"
 #: A dry run's outcome: resolved and ready, having executed nothing.
 VALIDATED = "validated"
@@ -165,7 +165,7 @@ RUN_SUCCEEDED_WITH_REJECTS = "succeeded_with_rejects"
 RUN_PARTIALLY_SUCCEEDED = "partially_succeeded"
 RUN_FAILED = "failed"
 #: A dry run in which something could not be resolved. A dry run has no
-#: successes to be partial about — it either proved the run could happen or it
+#: successes to be partial about. It either proved the run could happen or it
 #: found a reason it could not.
 RUN_INVALID = "invalid"
 
@@ -186,11 +186,11 @@ class RunNodeResult:
     status: str
     logical_id: str | None = None
     dispatch_location: str | None = None
-    #: What this node was for, where one graph carries more than one kind — a
-    #: Test and an Assumption are both validations and are reported apart.
+    #: What this node was for, where one graph carries more than one kind. A Test
+    #: and an Assumption are both validations and are reported apart.
     role: str | None = None
     #: Whether the dispatch threw rather than producing a result. A node that
-    #: raised was never evaluated, which a reader asking "did this check run?"
+    #: raised was never evaluated, which "did this check run?"
     #: needs to know.
     raised: bool = False
     #: Whether this outcome is Weaver's own decision about the work rather than
@@ -224,7 +224,7 @@ class RunNodeResult:
             "status": self.status,
             "role": self.role,
             "executed": self.executed,
-            # Whether anything was evaluated at all. Without it a reader cannot
+            # Whether anything was evaluated at all. Without it nothing can
             # tell a check that could not run from one that ran and failed.
             "raised": self.raised,
             "started_at": self.started_at,
@@ -247,9 +247,9 @@ class RunResult:
     inspected exactly as a real run is.
 
     **Where the evidence was written is not here.** A run is correct without a
-    log — that is what lets a whole Runner execute in a test with no storage at
-    all — so the location of a physical record belongs to the sink that wrote
-    it and to the public report that points at it, not to the canonical
+    log, which is what lets a whole Runner execute in a test with no storage at
+    all. So the location of a physical record belongs to the sink that wrote it
+    and to the public report that points at it, not to the canonical
     in-memory result. Production still writes one.
     """
 

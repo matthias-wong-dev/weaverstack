@@ -139,7 +139,7 @@ class FilesystemStore:
         if path.is_dir():
             if not recursive:
                 raise StoreError(
-                    f"{location.value} is a directory — pass recursive=True to delete it"
+                    f"{location.value} is a directory. Pass recursive=True to delete it"
                 )
             shutil.rmtree(path)
         else:

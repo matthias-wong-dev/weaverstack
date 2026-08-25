@@ -12,8 +12,8 @@ A bundle is a directory:
             ...
 
 The manifest is written **last**, so a half-written directory never looks
-installable. Loading validates the whole bundle — structure, target bindings,
-payload presence, and payload hashes — before any action can run, because the
+installable. Loading validates the whole bundle before any action can run:
+structure, target bindings, payload presence, and payload hashes. The
 installer must be able to trust what it is handed without re-reading the source.
 
 ``bundle_id`` is derived from stable inputs only: the format version, the
@@ -52,8 +52,8 @@ SHORTCUT_EXECUTOR = "shortcut"
 SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 LOAD_FILE_EXECUTOR = "load_file"
 RUNTIME_STATE_EXECUTOR = "runtime_state"
-#: Executors a bundle may carry. ``spark_sql`` runs one finished statement — a
-#: create, a ``CREATE SCHEMA`` or a frozen prune ``DROP``; ``spark_sql_batch``
+#: Executors a bundle may carry. ``spark_sql`` runs one finished statement, being
+#: a create, a ``CREATE SCHEMA`` or a frozen prune ``DROP``. ``spark_sql_batch``
 #: runs ordered catalogue DML as one action; ``spark_table`` completes a Spark
 #: SQL table's deferred build by running its query and creating the table;
 #: ``tsql`` runs a self-contained Warehouse script and ``tsql_batch`` an
@@ -85,17 +85,17 @@ _EXECUTOR_EXTENSION = {
     TSQL_EXECUTOR: ".sql",
     TSQL_BATCH_EXECUTOR: ".tsql-batch.json",
     SHORTCUT_EXECUTOR: ".shortcut.json",
-    # A deployed file's payload is its exact bytes, whatever they are — a Python
-    # module, a generated statement — so the extension names the *role* rather
-    # than the content, which is the one thing every load file has in common.
+    # A deployed file's payload is its exact bytes, whether a Python module or a
+    # generated statement, so the extension names the role rather than the
+    # content, which is the one thing every load file has in common.
     LOAD_FILE_EXECUTOR: ".payload",
     RUNTIME_STATE_EXECUTOR: ".runtime-state.json",
 }
 _PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR})
 #: Kinds that carry no payload even though their executor usually does. Only
 #: ``delete_file``: removing a deployed file needs the identity and nothing else,
-#: while writing one needs the exact bytes. Expressing it per *kind* keeps the
-#: strict requirement where it matters — a ``write_file`` with no payload is
+#: while writing one needs the exact bytes. Expressing it per kind keeps the
+#: strict requirement where it matters, so a ``write_file`` with no payload is
 #: still rejected here rather than at install time.
 _PAYLOADLESS_KINDS = frozenset({DELETE_FILE})
 
@@ -104,7 +104,7 @@ _PAYLOADLESS_KINDS = frozenset({DELETE_FILE})
 class BuildBundle:
     """A validated bundle and the store holding its files.
 
-    The bundle store is deliberately independent of the target store. Inside
+    The bundle store is independent of the target store. Inside
     Fabric, payloads live on the session driver's temporary filesystem while
     target Files mutations still use ``FabricStore``.
     ``None`` remains accepted for compatibility with callers that reconstruct a
@@ -135,8 +135,8 @@ def compute_bundle_id(plan: BuildPlan) -> str:
     """The identity of a plan, independent of its stored ``bundle_id`` field.
 
     The field is blanked before hashing so a plan's id never depends on itself,
-    and everything else — signature, targets, sequences, payload hashes — feeds
-    in through the canonical mapping.
+    and everything else feeds in through the canonical mapping: signature,
+    targets, sequences, payload hashes.
     """
 
     mapping = plan.to_mapping()

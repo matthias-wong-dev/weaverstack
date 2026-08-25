@@ -1,12 +1,12 @@
-"""``SparkSqlTable.read()`` — running an authored program and returning a pair.
+"""``SparkSqlTable.read()``: running an authored program and returning a pair.
 
 The extraction half of a SQL-authored table, proved without Spark. What is
-asserted here is what the primitive *does with* a session — which statements it
-submits, in what order, and what it hands back — and a recording double answers
+asserted here is what the primitive does with a session, which statements it
+submits, in what order, and what it hands back, and a recording double answers
 that exactly. Whether Spark then executes the SQL correctly is Spark's claim,
 made in ``tests/fabric/test_spark_table_lakehouse_boundary.py``.
 
-The load itself is deliberately absent. A SQL-authored table reaches
+The load itself is absent. A SQL-authored table reaches
 ``load_table`` through the ordinary ``Table.load()``, so rejection, thresholds
 and counts are proved once, against Python-authored tables, and inherited.
 """

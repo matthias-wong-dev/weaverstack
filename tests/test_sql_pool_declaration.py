@@ -127,7 +127,7 @@ class Droppable(Connection):
     """A connection that can be killed the way a server kills an idle one.
 
     Silently: nothing announces the drop, and the connection only reveals it
-    when something is asked of it. That silence is the whole problem — a caller
+    when something is asked of it. That silence is the whole problem, a caller
     handed one of these fails on its own statement and reads the failure as
     being about the statement.
     """
@@ -182,7 +182,7 @@ def test_a_connection_dropped_while_idle_is_replaced_rather_than_handed_out(
 
     A Fabric SQL endpoint drops connections it considers abandoned and says
     nothing. Handed one, the next caller fails with a communication link
-    failure — in a suite, that was one wipe failing and thirteen tests erroring
+    failure, in a suite, that was one wipe failing and thirteen tests erroring
     behind it, none of which had anything wrong with them.
     """
 

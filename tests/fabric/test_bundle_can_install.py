@@ -3,7 +3,7 @@
 Everything else about ordering is proven on paper. `test_item_plan.py` says the
 stages come out in the right order; `test_build_installer_boundary.py` says the installer
 walks them in that order; `test_fixed_point.py` says a correct estate plans
-nothing. None of them can say the order is **viable** — that a view really can be
+nothing. None of them can say the order is **viable**. That a view really can be
 created after its table, that a schema really exists by the time an object lands
 in it, that the whole sequence survives an engine.
 
@@ -12,15 +12,15 @@ pay for a session here. So this file is one test with everything in it rather
 than several with a little each.
 
 **No catalogue.** The bundle carries physical stages only, which is what makes
-this about *physicality* and nothing else — no DML against the catalogue,
+this about physicality and nothing else, no DML against the catalogue,
 no claims to reconcile, no publication to interpret. The catalogue's own round
 trip is a separate claim with its own tests
 (`test_item_catalogue_fabric_boundary.py`, `spark/boundary/test_catalogue_fidelity.py`).
-A production bundle interleaves those stages; this deliberately does not, so read
+A production bundle interleaves those stages; this does not, so read
 the pass as "the physical half installs in order", not "a whole build works".
 
 Distinct from `test_published_weaver_primitive.py::test_a_locally_generated_bundle_installs_inside_fabric`,
-which installs a *Warehouse* bundle *with* its catalogue. The interesting order
+which installs a Warehouse bundle with its catalogue. The interesting order
 is here: a Warehouse install is a series of T-SQL scripts over one connection,
 while a Lakehouse install spans a schema, two ways of making a table, a view over
 one of them, directories, and the deployed runtime tree.
@@ -80,9 +80,9 @@ select cast(null as string) as CustomerId
 def estate_repository(root: Path):
     """One item holding every physical form a Lakehouse build produces.
 
-    Two kinds of table because they are built two different ways — a Python
+    Two kinds of table because they are built two different ways, a Python
     document's declared columns become a plain `CREATE TABLE`, while a Spark SQL
-    document's shape is resolved by running its query — and a view over one of
+    document's shape is resolved by running its query, and a view over one of
     them, because a view is the thing that fails if the order is wrong.
     """
 
@@ -115,7 +115,7 @@ def physical_bundle(
 
     Built from `plan_item_build`, which returns exactly the stages that touch a
     target. A whole-planner bundle would append the catalogue tail, and this test
-    is not about that — so rather than generating one and ignoring half of it,
+    is not about that, so rather than generating one and ignoring half of it,
     the half that is the subject is what gets written.
     """
 
@@ -276,7 +276,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
 
     # 4. And the build's own account of what it would do was true of Fabric.
     #    `target_changes` is checked against the actions in pure Python and
-    #    applied to inventories there too — but only here is it compared with a
+    #    applied to inventories there too, and only here is it compared with a
     #    target that really had the actions run against it. A summary that
     #    predicted the right shape and the wrong estate would pass everything
     #    else and fail this.

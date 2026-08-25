@@ -7,17 +7,17 @@ analytics endpoint to cross:
 .. code-block:: text
 
     load Producer DWG.Customer      a Delta table, loaded by a deployed module
-      → refresh Producer endpoint   the metadata Fabric syncs *behind* the write
+      → refresh Producer endpoint   the metadata Fabric syncs behind the write
       → load Consumer Rpt.CustomerReport   a generated Warehouse procedure
 
 That is the whole subject. A Warehouse reads a Lakehouse table through its SQL
-analytics endpoint, and the endpoint lags the Delta mutation — so a consumer that
+analytics endpoint, and the endpoint lags the Delta mutation, so a consumer that
 ran before the refresh would read the previous shape, and often does. The barrier
 is a node in the graph precisely so it can be ordered, inspected and asserted
 rather than hidden inside dispatch.
 
 **`weaver.load(...)` is called, not a seam beneath it.** Load runs where the data
-is, so this runs inside the session on the installed wheel — which is also the
+is, so this runs inside the session on the installed wheel, which is also the
 one thing the local twin has to substitute for, since its shared Spark session
 cannot survive the public entry acquiring its own.
 
@@ -83,7 +83,7 @@ emit({{
 
 @pytest.fixture(scope="module")
 def orchestrated(fabric_mixed_estate):
-    """One installed mixed estate, loaded once — dry, then for real."""
+    """One installed mixed estate, loaded once: dry, then for real."""
 
     env = fabric_mixed_estate.env
     seen = env.run_python(
@@ -108,7 +108,7 @@ def by_node(report) -> dict:
 
 @weaver_test(hosted=True)
 def test_the_requested_targets_resolve_to_the_installed_physical_graph(orchestrated):
-    """Catalogue in, physical graph out — with the repository playing no part."""
+    """Catalogue in, physical graph out: with the repository playing no part."""
 
     env, seen = orchestrated
     dry = seen["dry"]
@@ -199,7 +199,7 @@ def test_every_step_ran_in_topological_order_through_its_own_primitive(orchestra
     assert not any(
         node["status"] in ("blocked", "skipped", "failed") for node in real["nodes"]
     )
-    # Executed in the planned order, not merely reported in it.
+    # Executed in the planned order, not reported in it.
     started = [
         node["started_at"]
         for node in sorted(
@@ -246,7 +246,7 @@ def test_the_upstream_delta_rows_exist_and_the_folder_materialised(orchestrated)
 def test_the_real_run_wrote_one_coherent_workflow_into_the_log(orchestrated):
     """One row per settled node, correlated by the run's own Workflow ID.
 
-    No plan row and no completion row: a workflow *is* its rows.
+    No plan row and no completion row: a workflow is its rows.
     """
 
     _env, seen = orchestrated

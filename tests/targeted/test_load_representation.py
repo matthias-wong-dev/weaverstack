@@ -1,6 +1,6 @@
-"""``SourceDocument.create_load(item=WeaverItemId("Warehouse", "Reporting"))`` — the generated load, as text.
+"""``SourceDocument.create_load(item=WeaverItemId("Warehouse", "Reporting"))``, the generated load, as text.
 
-Rendering claims only. That the generated procedure *works* is proved by
+Rendering claims only. That the generated procedure works is proved by
 executing it (``tests/fabric/test_warehouse_load_primitive.py``); what is
 established here is that the right thing was generated at all, and cheaply
 enough to run on every commit.
@@ -10,9 +10,9 @@ one replaces, that an incremental load does not delete, that identity never
 reaches an insert list. Pinning whole scripts would make every legitimate edit
 look like a regression.
 
-**The Warehouse procedure is the only generated load *program*.** A Spark SQL
+**The Warehouse procedure is the only generated load program.** A Spark SQL
 table is compiled into a deployed module instead, so what it generates is
-asserted in ``test_spark_sql_module_representation.py`` and what it *does* is the
+asserted in ``test_spark_sql_module_representation.py`` and what it does is the
 ordinary ``Table.load()``, proved once for both authoring languages.
 """
 
@@ -134,7 +134,7 @@ def test_warehouse_row_lifecycle_datetimes_use_the_utc_clock():
 def test_a_spark_sql_table_generates_a_deployed_module():
     """Compiled into a primitive, not into a load program.
 
-    What the artefact *is* is asserted here; what it contains is
+    What the artefact is is asserted here; what it contains is
     ``test_spark_sql_module_representation.py``'s.
     """
 
@@ -172,12 +172,12 @@ def test_a_change_to_generation_must_move_its_template_version():
     """A signature is the source's plus the template version.
 
     So a generator edit that leaves the version alone produces different bytes
-    with an unchanged signature, and incremental selection — correctly — rebuilds
+    with an unchanged signature, and incremental selection, correctly, rebuilds
     nothing: the estate keeps running the previous generation's artefacts. That
     happened, and it took a Fabric round trip to notice, which is what this test
     exists to make cheap.
 
-    When it fails, raise the matching version *and* update the hash here in the
+    When it fails, raise the matching version and update the hash here in the
     same edit, so the two cannot drift apart again.
     """
 
@@ -407,7 +407,7 @@ def test_an_incremental_load_deletes_nothing():
 # --- the keyed state machine ---------------------------------------------------
 #
 # One reconciliation model, and these assert the decisions that make it that
-# model rather than its layout. What the procedure *does* is proved by running it
+# model rather than its layout. What the procedure does is proved by running it
 # (``tests/fabric/test_warehouse_load_primitive.py``).
 #
 # Two texts, and which one a claim belongs to matters. The installer reads the
@@ -728,7 +728,7 @@ def test_a_table_declaring_no_load_procedure_generates_none():
     """Something other than Weaver populates it, so there is nothing to install.
 
     Weaver's own catalogue tables are the reason: written by the catalogue's DML,
-    so a load and the row signature that serves one are both dead weight — and
+    so a load and the row signature that serves one are both dead weight, and
     ``Prohibit rebuild: true`` meant an installed table could never acquire the
     column anyway.
     """
@@ -775,7 +775,7 @@ def test_merge_uniqueness_is_not_checked_for_a_non_incremental_load():
 def test_a_merge_conflict_stops_the_load_rather_than_refusing_rows():
     """The incoming rows are individually fine; the state they would leave is not.
 
-    So there is nothing to put in the reject table and nothing to purge — and
+    So there is nothing to put in the reject table and nothing to purge, and
     nothing to iterate towards, either.
     """
 
@@ -835,7 +835,7 @@ def _incremental(source: str) -> str:
 
 
 #: Setup, the staging query, and a second query naming the keys to retire. The
-#: setup sits *between* the two queries deliberately: where an author puts it is
+#: setup sits between the two queries: where an author puts it is
 #: where it has to run, or the second query reads a table that does not exist yet.
 TWO_QUERY_WAREHOUSE = _incremental(WAREHOUSE_TABLE).replace(
     "select [Customer id], [Customer name] from [Src].[Raw]",
@@ -865,7 +865,7 @@ def test_a_second_query_becomes_a_delete_working_table():
 
 @weaver_test()
 def test_the_delete_claim_is_narrowed_before_anything_is_counted():
-    """Distinct, not blank, and present in the target — all three, up front.
+    """Distinct, not blank, and present in the target: all three, up front.
 
     The stability threshold has to be checked against what will really be
     removed. A count of the raw claim would be a count of what was asked for,
@@ -933,7 +933,7 @@ def test_a_cte_query_is_run_as_a_statement_not_as_a_subquery():
     """``with … select …`` is a legal statement and an illegal derived table.
 
     So a body opening with a CTE cannot be wrapped, and the ``INTO`` has to land
-    on the body ``SELECT`` — which is where the offset-exact transform puts it,
+    on the body ``SELECT``, which is where the offset-exact transform puts it,
     whatever shape the query has.
     """
 

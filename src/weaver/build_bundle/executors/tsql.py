@@ -1,11 +1,11 @@
-"""T-SQL execution — run a generated Warehouse script through the SQL stack.
+"""T-SQL execution: run a generated Warehouse script through the SQL stack.
 
 The payload is a finished, self-contained T-SQL script (built by
 :mod:`weaver.declaration.tsql_ddl`): a table build materialises and inspects its own
 query shape server-side and creates only its main table; a view is a
 strict ``CREATE VIEW``. The executor runs it as one multi-statement script
-through the pooled SQL executor the environment supplies — it adds no logic of
-its own, exactly the mechanical executor the build philosophy calls for.
+through the pooled SQL executor the environment supplies. It adds no logic of its
+own, which is the mechanical executor the build philosophy calls for.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ class TSqlExecutor:
         if context.sql is None:
             raise InstallError(
                 f"tsql action {action.id!r} needs a SQL executor but none was "
-                "provided — a Warehouse install must supply one"
+                "provided. A Warehouse install must supply one"
             )
         script = payload.decode("utf-8")
         context.sql.execute_script(script)
@@ -49,7 +49,7 @@ class TSqlBatchExecutor:
     side does not have: several statements cannot share a batch when any of them
     is a ``CREATE VIEW``, because T-SQL requires that to be the first statement in
     its batch. ``execute_script`` sends what it is given as one batch, so a script
-    holding two ``CREATE OR ALTER VIEW`` statements is rejected outright —
+    holding two ``CREATE OR ALTER VIEW`` statements is rejected outright with
     *Incorrect syntax near the keyword 'create'*.
 
     So the payload is an ordered array rather than one script, and each element is
@@ -70,7 +70,7 @@ class TSqlBatchExecutor:
         if context.sql is None:
             raise InstallError(
                 f"tsql_batch action {action.id!r} needs a SQL executor but none was "
-                "provided — a Warehouse install must supply one"
+                "provided. A Warehouse install must supply one"
             )
         statements = json.loads(payload.decode("utf-8"))
         if not isinstance(statements, list):

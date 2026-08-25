@@ -1,6 +1,6 @@
 """Spark SQL dependency extraction over realistic complete statements.
 
-Weaver does not restrict what an author writes — intermediate statements,
+Weaver does not restrict what an author writes, intermediate statements,
 custom deletion, unusual patterns are all permitted. The requirement is that
 extraction stays accurate and invents nothing.
 """

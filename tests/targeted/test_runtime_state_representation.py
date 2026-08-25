@@ -1,9 +1,9 @@
 """The catalogue's runtime-state intent, and the DML it renders to.
 
-The intent is the decision — which current-state table, and which keyed rows a
+The intent is the decision, which current-state table, and which keyed rows a
 build has ended the incarnation of. This is the narrow claim that the decision
 becomes valid backend DML, and it is the only place a statement's text is read:
-everything about *which* rows go is asserted against the intent itself.
+everything about which rows go is asserted against the intent itself.
 """
 
 from __future__ import annotations

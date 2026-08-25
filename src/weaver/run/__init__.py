@@ -1,4 +1,4 @@
-"""Run — what runs against an installed estate, and what happened.
+"""Run: what runs against an installed estate, and what happened.
 
 The runtime half of Weaver's architecture:
 
@@ -16,7 +16,7 @@ Eight modules, and each is a step of that line rather than a fragment of one:
 
     state       the installed catalogue snapshot
     graph       what the catalogue says runs, and in what order
-    runner      what runs next — and what a run was asked for
+    runner      what runs next, and what a run was asked for
     resolution  the dispatch address a catalogue node names
     dispatch    the one place a run crosses into a real engine
     outcome     what a primitive's answer means, raised or returned

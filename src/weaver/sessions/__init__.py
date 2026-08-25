@@ -1,4 +1,4 @@
-"""Session — where Weaver is running, and what it already has.
+"""Session: where Weaver is running, and what it already has.
 
 One of Weaver's four doers:
 

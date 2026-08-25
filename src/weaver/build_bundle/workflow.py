@@ -235,7 +235,7 @@ def _read_catalogue(*, session, workspace, required):
 
     The catalogue is Warehouse tables under ``_``, so reading it is T-SQL over
     TDS. The statements go through the Session and the rows are assembled here,
-    in whichever position that is — neither needs Spark.
+    in whichever position that is. Neither needs Spark.
     """
 
     from ..catalogue.connection import catalogue_connection
@@ -246,7 +246,7 @@ def _read_catalogue(*, session, workspace, required):
 def session_catalogue(session, workspace, item: ItemRef):
     """Spark catalogue operations against one Lakehouse, through the Session.
 
-    A destination Lakehouse's *views* live only in the Spark catalogue, so
+    A destination Lakehouse's views live only in the Spark catalogue, so
     reading its inventory needs Spark. The Weaver catalogue does not come
     through here: it is a Warehouse, read over TDS.
 
@@ -437,7 +437,7 @@ def build_item_repository(
     output: Location | None = None,
     executors=None,
 ) -> ItemBuildResult:
-    """Decide, then install — a convenience over the two doers, not a third one.
+    """Decide, then install: a convenience over the two doers, not a third one.
 
     .. code-block:: text
 
@@ -447,7 +447,7 @@ def build_item_repository(
     case reads as one call, and adds no decisions of its own.
 
     ``output`` places the generated bundle tree somewhere durable instead of the
-    temporary directory. Only a caller that wants the bundle afterwards passes
+    temporary directory. Only a caller that needs the bundle afterwards passes
     it.
     """
 
@@ -484,7 +484,7 @@ def build_repository_bundle(
 ) -> BuildBundle:
     """Build one durable bundle from a parsed repository and observed state.
 
-    This is the boundary between planning and installation. It deliberately has
+    This is the boundary between planning and installation. It has
     no Session: target state is already represented by ``state`` and mutation
     belongs to :class:`Installer`.
     """
@@ -517,7 +517,7 @@ def build_item_repository_source(
         validate_build_request(
             repository, bindings, catalogue_binding=catalogue_binding
         )
-        # The *unreconciled* catalogue, deliberately. Reconciliation is a
+        # The unreconciled catalogue. Reconciliation is a
         # decision and belongs to the Builder; handing it an already-reconciled
         # catalogue would hand it one whose stale claims had already been
         # removed, so the bundle would never be told to prune them.
@@ -553,9 +553,9 @@ def read_reconciled_catalogue(
     """Read the Weaver catalogue and prove selected claims physically.
 
     The read covers the bound items and, when a ``repository`` is given, the
-    items that *produce* what those items shortcut. Those producers are not being
-    built and nothing about them will be written — but their Registry rows carry
-    the build that published them, and comparing that against the shortcut's own row
+    items that produce what those items shortcut. Those producers are not being
+    built and nothing about them will be written. Their Registry rows carry the
+    build that published them, and comparing that against the shortcut's own row
     is the only way to learn that a producer moved on while this consumer was not
     looking (see
     :func:`~weaver.build_bundle.incremental.stale_shortcut_destinations`).
@@ -637,8 +637,8 @@ def read_target_inventories(
 def _lakehouse_inventories(targets, *, session, workspace) -> dict:
     """Every named Lakehouse's inventory.
 
-    Mostly storage — a Delta table is a directory — and Spark SQL for the views,
-    which exist only in the catalogue.
+    Mostly storage, since a Delta table is a directory, and Spark SQL for the
+    views, which exist only in the catalogue.
     """
 
     resolver = session.resolver(workspace)
@@ -663,9 +663,9 @@ def _temp_copy(
 ) -> Iterator[Path]:
     """Always copy ``source`` to a temporary tree, whatever store holds it.
 
-    There is deliberately no shortcut for a source that is already on this
+    There is no shortcut for a source that is already on this
     filesystem. A build that parsed the caller's own directory would be reading a
-    tree the caller can still edit — so a repository could change between parsing
+    tree the caller can still edit, so a repository could change between parsing
     and bundle generation, and the bundle would describe a source that never
     existed as a whole. Copying every source makes the snapshot the only thing
     the build ever reads, and makes that true identically in a notebook, on a

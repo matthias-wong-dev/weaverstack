@@ -118,7 +118,7 @@ def test_the_two_role_vocabularies_are_one():
 
     It has to: the catalogue package imports `etl`, so importing back would be a
     real cycle. Repetition is the price, and this is what keeps the two copies
-    from drifting — a role added to one and not the other would put a value in
+    from drifting, a role added to one and not the other would put a value in
     the Registry that reconciliation refuses.
     """
 

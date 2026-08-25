@@ -9,11 +9,11 @@ The hierarchy is fixed at three levels and an error is not a fourth:
         Sub-step
           diagnostic/error
 
-An error is *content* attached to whichever of the three failed. Adding a level
-for it would mean a reader had to know whether a failure was a place in the
+An error is content attached to whichever of the three failed. Adding a level
+for it would mean knowing whether a failure was a place in the
 tree or a thing that happened at one.
 
-Two ledgers, deliberately, and neither derivable from the other. This one says
+Two ledgers, and neither derivable from the other. This one says
 a Step took eight seconds. :class:`~weaver.sessions.telemetry.SessionTelemetry`
 says the eight seconds were four Livy submissions and a token acquisition. A
 suite that spent nine minutes in Livy startup and one in execution has a
@@ -139,7 +139,7 @@ def test_an_interrupt_closes_its_frames_and_travels_on(session):
 
 @weaver_test()
 def test_a_frame_can_be_failed_from_inside_without_an_exception(session):
-    """A run node's failure is data, not an exception — and it still reads as
+    """A run node's failure is data, not an exception, and it still reads as
     a failure in the timings."""
 
     with session.task("Load"):
@@ -150,7 +150,7 @@ def test_a_frame_can_be_failed_from_inside_without_an_exception(session):
     assert failed == {"DWG.Customer": True, "Load": False}
 
 
-# --- what a reader gets -------------------------------------------------------
+# --- what the output carries -------------------------------------------------
 
 
 @weaver_test()
@@ -177,7 +177,7 @@ def test_the_console_writes_a_tree_a_person_can_read():
 
     printed = out.getvalue()
     lines = [line for line in printed.splitlines() if line.strip()]
-    # Children above their parent, with the parent's own total underneath — a
+    # Children above their parent, with the parent's own total underneath, a
     # roll-up, the way `du` reads.
     assert lines[0] == "Build"
     assert lines[1].strip().startswith("Sales.Customer")
@@ -223,7 +223,7 @@ def test_progress_never_reaches_stdout(capsys):
 
 # --- what is happening now ----------------------------------------------------
 #
-# A completed frame says what a wait cost. It cannot say a wait is *underway* —
+# A completed frame says what a wait cost. It cannot say a wait is underway,
 # and the frames that most need saying so are the slow ones, where recording
 # completions alone means a Task heading followed by two minutes of silence.
 
@@ -298,7 +298,7 @@ def test_durations_line_up_however_long_the_names_are(monkeypatch):
 
     ``Warehouse/Reporting/Reporting.CustomerRevenuePresent`` at Sub-step depth
     runs past a fixed fifty-two-character column, and the duration that follows
-    lands wherever the name happened to end — which loses the alignment that
+    lands wherever the name happened to end, which loses the alignment that
     makes a column of durations scannable at all.
     """
 
@@ -337,7 +337,7 @@ def test_the_column_never_narrows_below_its_floor(monkeypatch):
 @weaver_test()
 def test_the_elapsed_figure_moves_while_nothing_else_happens():
     """Without a ticker the line is painted only when some other frame opens or
-    closes — which, for the long waits that most need it, is never."""
+    closes, which, for the long waits that most need it, is never."""
 
     import time
 

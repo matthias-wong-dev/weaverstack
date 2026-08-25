@@ -34,7 +34,7 @@ def resolver(tmp_path):
 def _spark_root(resolver, name: str) -> str:
     """What Spark writes through for one Lakehouse: OneLake, keyed by ids.
 
-    Display names address the *catalogue*; storage is addressed by id, so the
+    Display names address the catalogue; storage is addressed by id, so the
     two roots are composed from what resolution answered rather than from the
     name the caller typed.
     """
@@ -96,7 +96,7 @@ def test_two_destinations_resolve_separately(resolver):
 def test_the_catalogue_resolves_like_any_other_item(resolver):
     """It is the attached one, not a special case of resolution.
 
-    Initialisation builds the catalogue *into* its Warehouse, so it is a destination
+    Initialisation builds the catalogue into its Warehouse, so it is a destination
     on that one occasion. Nothing about resolving it differs.
     """
 
@@ -111,7 +111,7 @@ def test_a_segment_that_could_escape_the_lakehouse_is_refused(resolver, bad):
     """These strings become paths Spark writes through.
 
     A segment that traversed upward would write outside the Lakehouse it names, so
-    it is checked rather than trusted — even though schema and object names are
+    it is checked rather than trusted, even though schema and object names are
     already validated upstream.
     """
 
@@ -155,7 +155,7 @@ def test_a_trailing_separator_on_a_root_does_not_double(resolver):
 
 @weaver_test()
 def test_the_installer_resolves_the_destination_for_its_executors(tmp_path):
-    """An executor must not derive its own path — that is a planning decision.
+    """An executor must not derive its own path: that is a planning decision.
 
     So the installation context carries the destination already resolved, once per
     target.
@@ -227,7 +227,7 @@ def test_a_resolver_without_the_method_is_not_a_failure(tmp_path):
 
 @weaver_test()
 def test_a_bound_target_carries_no_resolved_root():
-    """Roots are derived at install time, deliberately.
+    """Roots are derived at install time.
 
     On Fabric a root embeds workspace and item ids; locally it embeds a temporary
     directory. A bundle whose identity moved with a temporary path would not be

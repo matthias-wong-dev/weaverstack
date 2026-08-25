@@ -1,8 +1,8 @@
 """What a load reports when it finishes, in one shape for every primitive.
 
 A Warehouse procedure, a Python table, a compiled Spark SQL table and a Python
-folder run on different engines and return through different transports — a
-T-SQL result set, a Spark ``DataFrame``, a Python object. What they *mean* is
+folder run on different engines and return through different transports, a
+T-SQL result set, a Spark ``DataFrame``, a Python object. What they mean is
 the same, and this module is where that meaning is written down once.
 
 The field names are the contract. :data:`RESULT_COLUMNS` names them in order
@@ -43,7 +43,7 @@ RESULT_COLUMNS = (
 class LoadResult:
     """One object's load outcome: what happened, and whether it was acceptable.
 
-    The counts describe the *target*, not the source. ``rows_read`` is what the
+    The counts describe the target, not the source. ``rows_read`` is what the
     source produced, and the rest are what the load did with it, so
     ``rows_read`` need not equal the sum of the others: an unchanged row is read
     and neither inserted nor updated, which is the ordinary state of most rows in
@@ -65,7 +65,7 @@ class LoadResult:
     #: Whether a ``Static`` object was skipped because a clean load had already
     #: run for this incarnation. Reported rather than inferred from the counts: a
     #: skip and a load that read an empty window are both a success with nothing
-    #: moved, and only the engine that ran it knows which happened.
+    #: moved, and only the engine that ran it can say which happened.
     is_static_skip: bool = False
 
     @classmethod
@@ -75,7 +75,7 @@ class LoadResult:
         The counts are kept rather than zeroed because a partial load is exactly
         the case where they matter: "failed having written nothing" and "failed
         having written four hundred rows" are different situations to recover
-        from, and a result that reported neither would send the reader to the
+        from, and a result that reported neither would point at the
         target to find out.
         """
 
@@ -102,8 +102,8 @@ class LoadResult:
     def from_row(cls, row) -> "LoadResult":
         """Read a transport's final result row back into a result.
 
-        Takes anything indexable by column name — a ``dict``, a pyodbc row
-        mapping, a Spark ``Row`` — because the three transports each hand back
+        Takes anything indexable by column name, a ``dict``, a pyodbc row
+        mapping, a Spark ``Row``, because the three transports each hand back
         their own type and none of them is worth converting twice.
         """
 

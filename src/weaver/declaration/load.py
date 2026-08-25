@@ -32,19 +32,19 @@ SPARK_LOAD_EXTENSION = ".py"
 
 @dataclass(frozen=True)
 class GeneratedLoad:
-    """One source's generated load payload — installable, not yet executable.
+    """One source's generated load payload: installable, not yet executable.
 
     ``payload`` is what the bundle carries and what the installer is handed. It
-    is deliberately *not* a finished program: a Warehouse load is a script that
+    is not a finished program: a Warehouse load is a script that
     assembles the procedure server-side, and a Spark SQL load is an instruction
     the executor renders once it can see the built table. Calling it a completed
-    executable definition would misdescribe both, and invite a reader to write
+    executable definition would misdescribe both, and invite code that wrote
     the file down unchanged.
 
     ``template_version`` is the generator's version, carried out so the artefact
     layer can salt a signature with it without knowing which generator ran. That
     is what makes a change to load generation rebuild exactly the loads it
-    changed, and leave deployed Python — signed by its own bytes — alone.
+    changed, and leave deployed Python, signed by its own bytes, alone.
     """
 
     object_type: str
@@ -59,7 +59,7 @@ def generate_load(
     """The installable load payload for one validated source.
 
     Only a table has one. A Folder's load is its authored module and a View has
-    no load at all, so neither reaches here — :func:`has_generated_load` is the
+    no load at all, so neither reaches here. :func:`has_generated_load` is the
     question to ask first.
     """
 
@@ -80,10 +80,10 @@ def generate_load(
 def load_identity(document: "SourceDocument") -> tuple[str, int]:
     """One generated load's object type and template version, without rendering.
 
-    What an artefact *is* does not depend on where it is bound, so a caller
+    What an artefact is does not depend on where it is bound, so a caller
     listing identities and signatures asks this instead of generating a payload
-    it would throw away — and, for a Spark load, could not render at all
-    without a destination.
+    it would throw away and, for a Spark load, could not render at all without a
+    destination.
     """
 
     if document.language == SQL:

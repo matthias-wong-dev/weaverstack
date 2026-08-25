@@ -1,9 +1,9 @@
 """What an authored Warehouse T-SQL body means, and what it may not mean.
 
 The Warehouse counterpart of ``test_spark_sql_program_declaration.py``. A
-Warehouse table's body is read once and that reading serves both ends — the
+Warehouse table's body is read once and that reading serves both ends. The
 build materialises the staging query in shape-only form, the load stages it and
-deletes by whatever comes next — so these are the rules that decide which
+deletes by whatever comes next, so these are the rules that decide which
 ``SELECT`` is which.
 
 The hard part is not the contract but the recognition. T-SQL does not require
@@ -14,7 +14,7 @@ that is the tail of an ``INSERT``, a branch of a ``UNION``, the body of a
 ``SELECT … INTO``. Most of what follows is that distinction.
 
 Pure Python throughout. Nothing here needs Fabric, because nothing here parses
-T-SQL: whether each statement is *valid* is the Warehouse's answer, given when
+T-SQL: whether each statement is valid is the Warehouse's answer, given when
 it runs. That the generated artefacts then execute is proved in
 ``tests/fabric/test_warehouse_load_primitive.py``.
 """
@@ -177,7 +177,7 @@ select [Customer id] from #Working"""
 
 @weaver_test()
 def test_setup_keeps_the_order_it_was_written_in():
-    """Setup written between two queries was written there deliberately."""
+    """Setup written between two queries was written there."""
 
     body = """declare @cutoff date;
 

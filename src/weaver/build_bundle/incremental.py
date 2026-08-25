@@ -167,7 +167,7 @@ def declared_signatures(
     """What each selected node's Registry signature should be, from the source.
 
     Three kinds of node are selectable, signed differently. A document is signed
-    by its source file. A shortcut destination by the pair it declares — this
+    by its source file. A shortcut destination by the pair it declares. This
     destination, that source (see
     :attr:`~weaver.declaration.model.RepositoryShortcut.signature`). A load artefact
     by what it is rendered from: a deployed module by its own bytes, a generated
@@ -205,7 +205,7 @@ def declared_signatures(
 def runtime_artefact_identities(
     repository: WeaverRepository,
 ) -> frozenset[WeaverDocumentId]:
-    """Everything this repository installs to be *run* rather than to hold rows.
+    """Everything this repository installs to be run rather than to hold rows.
 
     Derived from the repository, because during a build the artefacts have been
     claimed from the declaration and nothing is installed yet. The same question
@@ -226,7 +226,7 @@ def _artefacts_standing_for_their_origin(
     One general relationship: a declaration compiles to a separately installed
     artefact, nothing is materialised under the declaration's own identity, and so
     the artefact's row is the only record of it. What kinds of declaration those
-    are is the artefact producer's to know — see
+    are is the artefact producer's to know, see
     :attr:`~weaver.etl.RuntimeArtefact.stands_for_origin`.
 
     A load artefact is absent: a table and the module that loads it are both
@@ -256,7 +256,7 @@ def determine_impact(
 
     Propagation is not confined to one item: the graph carries shortcut
     destinations as nodes, so ``source → shortcut destination → consumer`` is an
-    ordinary walk. Items not in the build are deferred by construction — they
+    ordinary walk. Items not in the build are deferred by construction. They
     are not in ``selected``, so nothing reaches them.
 
     ``stale_shortcuts`` are destinations the catalogue already proved out of date,
@@ -275,7 +275,7 @@ def determine_impact(
     declared = declared_signatures(repository, selected_set)
     # A declaration whose artefact is its whole physical form is classified by
     # that artefact's row, because that row is the only record of it. Nothing here
-    # knows which declarations those are; the artefact says so.
+    # names which declarations those are; the artefact says so.
     standing_for = _artefacts_standing_for_their_origin(repository, selected_set)
 
     new: set[WeaverDocumentId] = set()

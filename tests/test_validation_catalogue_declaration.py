@@ -1,7 +1,7 @@
-"""What the catalogue records about validation, and what it deliberately does not.
+"""What the catalogue records about validation, and what it does not.
 
 Two rows describe two different things, and keeping them apart is the whole
-point. ``TestDictionary`` describes the **logical** authored declaration —
+point. ``TestDictionary`` describes the **logical** authored declaration,
 what a Test is, what it compares, what key correlates it. ``Registry``
 certifies the **physical** procedure or module that validation compiles to.
 There is no Registry row under the logical Test ID, because nothing is
@@ -215,7 +215,7 @@ def test_a_validation_puts_its_schema_to_use(repository):
 
 @weaver_test()
 def test_a_validation_dependency_names_the_logical_validation(repository):
-    """Not the procedure or module it compiles to — see §14 of the design."""
+    """Not the procedure or module it compiles to. See §14 of the design."""
 
     edges = {
         (row["referencing_object_name"], row["dependency_reference"])
@@ -243,7 +243,7 @@ def test_a_validation_dependency_is_within_the_item(repository):
 # --- the role survives the round trip ---------------------------------------
 
 
-#: A Warehouse item, because a stored-procedure identity only belongs to one —
+#: A Warehouse item, because a stored-procedure identity only belongs to one,
 #: and a procedure is the shape a load artefact and a Test artefact share, which
 #: is the confusion these tests exist to rule out.
 WAREHOUSE_ITEM = WeaverItemId.parse("Warehouse/Reporting")

@@ -9,20 +9,20 @@ The family, and the four starting states it covers:
 ```text
 a correct estate    plans nothing, and selects nothing
 nothing at all      reaches the declared estate
-a damaged estate    repairs it — a deleted object, a stray, a leftover schema
+a damaged estate    repairs it, a deleted object, a stray, a leftover schema
 after a deletion    loses that object and nothing else
 ```
 
 Plus a second pass over the first, because reaching the fixed point and staying
 there are different claims.
 
-Two tests here are *not* convergence claims and keep descriptive names, because
+Two tests here are not convergence claims and keep descriptive names, because
 they guard the family against passing vacuously: a bundle with no actions at all
 would satisfy every assertion above, so one asserts the catalogue tail is still
 published, and one asserts the plan is deterministic.
 
 The general statement is that a build is a convergence operator onto
-`from_repository`. The special case — an estate that is already correct — is
+`from_repository`. The special case, an estate that is already correct, is
 where it started, and reads first below.
 
 ## A correct estate plans nothing. The whole build, as one property.
@@ -38,18 +38,18 @@ FixtureInventory.from_repository()  what the source says should be there
 generate_item_build_bundle(...)     must produce no physical action at all
 ```
 
-The three states agree by construction, so any physical action is a *false*
-one — something claimed as absent that is present, or as changed that is not.
+The three states agree by construction, so any physical action is a false
+one, something claimed as absent that is present, or as changed that is not.
 That is a different class of defect from the ones a narrow test finds, and it is
 the class that costs a real estate something: an object dropped and rebuilt for
 no reason, or a schema removed the same build created.
 
-Both item types, deliberately. The two physical sides are not symmetric —
-a Lakehouse's generated `_` is a folder *document* while a Warehouse's is a
-schema nothing declares — and a Lakehouse-only fixture stops being
+Both item types. The two physical sides are not symmetric,
+a Lakehouse's generated `_` is a folder document while a Warehouse's is a
+schema nothing declares, and a Lakehouse-only fixture stops being
 representative exactly where that asymmetry begins.
 
-Catalogue publication is *not* physical work and is expected: its statements are
+Catalogue publication is not physical work and is expected: its statements are
 idempotent and are emitted whether or not anything changed, which is what makes
 them correct against a prior state the planner never saw.
 """
@@ -83,7 +83,7 @@ from weaver.targets import ItemRef
 LAKEHOUSE_TARGET_NAME = "Sales_LH"
 WAREHOUSE_TARGET_NAME = "Reporting_WH"
 
-#: Everything a build does *to a target*. Deliberately exhaustive rather than a
+#: Everything a build does to a target. Deliberately exhaustive rather than a
 #: sample: this test's value is that a new physical kind cannot be added without
 #: someone deciding whether a no-op build may emit it, and a list of four kinds
 #: is how a spurious `prune_schema` went unnoticed.
@@ -132,7 +132,7 @@ def build(repository, tmp_path):
     )
     # Target ids come from the binding rather than being spelled here: the
     # planner refuses an inventory that describes a different target, which is
-    # the check that stops a fixture quietly answering for the wrong one.
+    # the check that stops a fixture answering for the wrong one.
     bound = {binding.item: binding.to_bound_target() for binding in bindings.entries}
     # Repository projection carries the logical runtime-reference rows. Binding
     # adds the Registry certification that makes this a physically correct
@@ -178,7 +178,7 @@ def build(repository, tmp_path):
 
 
 def physical(bundle, estate_targets) -> list[str]:
-    """Physical actions against the *estate*, which is what "no work" is about.
+    """Physical actions against the estate, which is what "no work" is about.
 
     The catalogue's own target is excluded, and only it: a build always writes
     its catalogue, so counting that would make a correct no-op build look like
@@ -197,7 +197,7 @@ def test_converges_from_a_correct_estate_by_planning_nothing(estate, tmp_path):
     """The property, stated once.
 
     Reported by action id rather than as a count, because the useful failure
-    names *which* object a build wanted to touch and the count does not.
+    names which object a build wanted to touch and the count does not.
     """
 
     assert physical(*build(estate, tmp_path)) == []
@@ -207,7 +207,7 @@ def test_converges_from_a_correct_estate_by_planning_nothing(estate, tmp_path):
 def test_converges_from_a_correct_estate_by_selecting_nothing(estate, tmp_path):
     """The decision behind the actions, asserted separately.
 
-    An empty selection and an empty action list fail for different reasons —
+    An empty selection and an empty action list fail for different reasons,
     selection could be right while a stage rendered work anyway, which is exactly
     what a keep-set defect looks like.
     """
@@ -224,8 +224,8 @@ def test_converges_from_a_correct_estate_by_selecting_nothing(estate, tmp_path):
 def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_path):
     """ "No work" must not be able to pass by planning nothing at all.
 
-    The estate here is already correct, so no physical action is expected — but
-    a bundle with no actions *whatever* would satisfy the two tests above for
+    The estate here is already correct, so no physical action is expected, but
+    a bundle with no actions whatever would satisfy the two tests above for
     entirely the wrong reason. This pins what is left: everything the build still
     does is catalogue work, and nothing else has crept
     in under the cover of a quiet plan.
@@ -233,8 +233,8 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
     Publication is a difference now, so what appears here depends on what the
         persisted catalogue already holds. This fixture's state is the repository's
         logical projection plus binding-specific shortcut certification, but carries
-        no Installation row. So the Installation row is genuinely new and the tail
-        genuinely publishes it. A build against a catalogue that has *everything*,
+        no Installation row. So the Installation row is new and the tail
+        publishes it. A build against a catalogue that has everything,
         Installation included, publishes nothing at all; that is the fixed point,
         and it is proven in `test_build_fixed_point_cycle`.
     """
@@ -256,7 +256,7 @@ def test_whatever_the_tail_publishes_is_only_ever_catalogue_work(estate, tmp_pat
 
 @weaver_test()
 def test_the_bundle_is_identical_the_second_time(estate, tmp_path):
-    """Same inputs, same identity — the determinism claim, on the no-op path.
+    """Same inputs, same identity, the determinism claim, on the no-op path.
 
     Cheap here and worth having: a plan that varied between two runs of an
     unchanged estate would mean something non-deterministic reached it, and the
@@ -271,22 +271,22 @@ def test_the_bundle_is_identical_the_second_time(estate, tmp_path):
 
 # --- convergence from anywhere ------------------------------------------------
 #
-# The fixed point above is one point. These say a build *reaches* it, from a
+# The fixed point above is one point. These say a build reaches it, from a
 # fresh target, from a damaged one, and from a correct one after a source is
 # deleted. Each applies the build's own declared effect to the state it was
-# planned against, and compares the result with what the source declares — so
+# planned against, and compares the result with what the source declares, so
 # what is being asserted is that the plan closes the gap it was given.
 
 
 def converged(repository, tmp_path, *, inventories, catalogue):
     """Where each target ends up, and where the source says it should be.
 
-    Reconciliation first, because convergence is a property of the *workflow*
+    Reconciliation first, because convergence is a property of the workflow
     rather than of the planner alone. A catalogue claiming an object the target
     no longer holds is exactly the damage a build is supposed to repair, and the
     step that turns "claimed but absent" into "rebuild this" is the reconciler.
     Planning against an unreconciled catalogue would leave the object missing and
-    the claim intact — correct for the inputs given, and not what a build does.
+    the claim intact, correct for the inputs given, and not what a build does.
     """
 
     from factories import estate_inventories
@@ -317,7 +317,7 @@ def converged(repository, tmp_path, *, inventories, catalogue):
 
 
 def holdings(inventory) -> dict[str, tuple[str, ...]]:
-    """What a target holds, folded — the shape two inventories compare on."""
+    """What a target holds, folded, the shape two inventories compare on."""
 
     return {
         field: tuple(sorted((v.casefold() for v in getattr(inventory, field))))
@@ -340,7 +340,7 @@ def assert_reaches_the_declared_estate(reached, declared):
 
 @weaver_test()
 def test_converges_from_nothing_to_the_declared_estate(estate, tmp_path):
-    """Empty target, empty catalogue — everything is new and nothing is stale."""
+    """Empty target, empty catalogue: everything is new and nothing is stale."""
 
     from factories import estate_inventories
 
@@ -393,7 +393,7 @@ def test_converges_after_a_deletion_by_losing_only_that_object(estate, tmp_path)
     """The one that matters most, because over-broad pruning destroys estates.
 
     A correct estate, one source removed, and the build must take exactly that
-    object and its deployed copy — the copy because a Python document owns two
+    object and its deployed copy, the copy because a Python document owns two
     targets, and losing the module would be as wrong as keeping the table.
     """
 

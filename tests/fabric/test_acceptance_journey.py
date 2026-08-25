@@ -5,7 +5,7 @@ a real workspace. One estate, moved through an ordered series of transitions, wi
 the evidence for each kept on the step it belongs to.
 
 The estate reads the foreign workspace through every shortcut shape Weaver
-supports, and it reads them by *consuming* them: a broken shortcut fails because
+supports, and it reads them by consuming them: a broken shortcut fails because
 a load could not materialise what it points at.
 
 Scenarios run in file order and do not cascade. A failed transition is recorded
@@ -475,8 +475,8 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
 @weaver_test(integration=True, resources=RUNNING)
 def test_an_unchanged_load_moves_only_the_appending_branch(acceptance):
     """
-    Intent: Incremental state prevents unnecessary movement while a deliberately
-    appending branch and the non-incremental branches still behave as declared.
+    Intent: Incremental state prevents unnecessary movement while an appending
+    branch and the non-incremental branches still behave as declared.
 
     Proof: a second load with no source change leaves the customer rows alone,
     adds exactly one generated event file, and leaves the stable branches equal.
@@ -938,7 +938,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     assert failed.status != "succeeded", failed.to_mapping()
     assert failed.errors, failed.to_mapping()
 
-    # The estate is genuinely partial: Landing's legitimate work happened.
+    # The estate is partial: Landing's legitimate work happened.
     landing = _item(acceptance, "Lakehouse/Landing")
     partial = _observe(
         acceptance, {"product": f"describe table {landing}.`LAND`.`Product`"}

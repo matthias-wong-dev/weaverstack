@@ -6,7 +6,7 @@ leading ``weaver``, and the few commands the context cannot run. A line copied
 from a terminal, a composition file or the documentation means the same thing in
 all three places.
 
-What a line *means* is argparse's answer, not this module's. Nothing here
+What a line means is argparse's answer, not this module's. Nothing here
 decides whether a command exists or whether its options are valid; the words go
 to the CLI's own parser, so ``weaver --help`` and ``weaver --version`` behave at
 a prompt as they do in a terminal.
@@ -24,8 +24,8 @@ from weaver.errors import CommandError
 PROGRAM = "weaver"
 
 #: Shell operators a Weaver command line does not carry. Weaver commands are
-#: run by the CLI's own handlers, so there is no shell to interpret these —
-#: but only outside quoting, where they would be operators. Quoted, they are
+#: run by the CLI's own handlers, so there is no shell to interpret these, and
+#: only outside quoting, where they would be operators. Quoted, they are
 #: ordinary characters in an argument such as "Research & Development".
 SHELL_OPERATORS = ("|", ">", "<", "&", ";", "$", "`")
 
@@ -80,7 +80,7 @@ def _split(text: str) -> list[str]:
     """Split a command line into arguments, keeping every backslash.
 
     :func:`shlex.split` reads a backslash as an escape, which eats the
-    separators of an ordinary Windows path — ``C:\\Users\\repo`` arrives as
+    separators of an ordinary Windows path, ``C:\\Users\\repo`` arrives as
     ``C:Usersrepo``, so a line copied from PowerShell does not reach argparse
     intact. Quoting is what a command line uses to hold a value together and is
     kept exactly as it was; escaping is not, so a backslash is an ordinary

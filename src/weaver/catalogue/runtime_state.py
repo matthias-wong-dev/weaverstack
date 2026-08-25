@@ -1,12 +1,12 @@
 """What a build ends the life of in the catalogue's current-state tables.
 
-A current-state row describes the *current incarnation* of one object: how far
+A current-state row describes the current incarnation of one object: how far
 it has been loaded, how its last load ended, what its last validation found.
 A build that drops and rebuilds that object, or stops installing it altogether,
 ends that incarnation, and the row goes with it.
 
-That decision is held here as structured intent — which table, and which keyed
-rows — rather than as the SQL it eventually becomes. Two things read it, and
+That decision is held here as structured intent naming the table and the keyed
+rows, rather than as the SQL it eventually becomes. Two things read it, and
 neither should have to parse a statement to find out what a build meant:
 
 .. code-block:: text

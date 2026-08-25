@@ -141,14 +141,14 @@ def object_id_for_filename(filename: str, language: str) -> ObjectId:
             raise DiscoveryError(
                 f"{filename}: a Python object file separates schema and object with "
                 f"{PYTHON_ID_SEPARATOR!r}, not '.', because a module name cannot "
-                "contain a dot — expected Schema__Object.py"
+                "contain a dot. Expected Schema__Object.py"
             )
         parts = _python_id_parts(stem)
     else:
         if PYTHON_ID_SEPARATOR in stem:
             raise DiscoveryError(
                 f"{filename}: a SQL object file separates schema and object with '.', "
-                f"not {PYTHON_ID_SEPARATOR!r} — expected Schema.Object{SQL_SUFFIX}"
+                f"not {PYTHON_ID_SEPARATOR!r}. Expected Schema.Object{SQL_SUFFIX}"
             )
         parts = stem.split(".")
     parts = [part.strip() for part in parts]
@@ -169,7 +169,7 @@ class SqlAnalysis:
     undetermined_because: str | None = None
     statements: tuple[str, ...] = ()
     #: Statements that look like they create a permanent object. Recorded for a
-    #: later lint, not refused — see _permanent_ddl.
+    #: later lint, not refused. See _permanent_ddl.
     permanent_ddl: tuple[str, ...] = ()
 
     @property
@@ -196,7 +196,7 @@ class SourceDocument:
     sql_body: str | None = None
     sql_analysis: SqlAnalysis | None = None
     #: Names this file refers to, as written. Whether each resolves is a build
-    #: concern — it needs the external-dependency configuration.
+    #: concern, because it needs the external-dependency configuration.
     discovered_references: tuple[RelationReference, ...] = ()
     python_ast: ast.Module | None = field(default=None, compare=False, repr=False)
     #: Item-qualified logical identity, assigned by the reader once the owning
@@ -241,7 +241,7 @@ class SourceDocument:
 
     @property
     def physical_signature(self) -> str:
-        """What the *installed structure* represents: the source, and its shape.
+        """What the installed structure represents: the source, and its shape.
 
         Almost always the authored implementation alone. A keyed table is the
         exception: Weaver gives it a row-signature column of its own, so a change
@@ -262,8 +262,8 @@ class SourceDocument:
     def node_id(self) -> str:
         """Identity within the repository: target and ID together.
 
-        The ID alone is not unique — the same Schema.Object may exist as a
-        folder, a Delta table and a Warehouse table simultaneously.
+        The ID alone is not unique. The same Schema.Object may exist as a folder,
+        a Delta table and a Warehouse table at once.
         """
 
         if self.logical_id is not None:
@@ -290,7 +290,7 @@ class SourceDocument:
 
     @property
     def referenced_object_ids(self) -> tuple[ObjectId, ...]:
-        """Two-part references — candidates for objects in this repository.
+        """Two-part references, being candidates for objects in this repository.
 
         Function calls are excluded: ``Sales.SplitLines(…)`` is two parts but
         names a function, not a managed object, so it yields no object identity.
@@ -304,7 +304,7 @@ class SourceDocument:
 
     @property
     def qualified_references(self) -> tuple[RelationReference, ...]:
-        """Three- and four-part references — physical targets the author named."""
+        """Three- and four-part references, the physical targets an author named."""
 
         return tuple(
             reference
@@ -314,7 +314,7 @@ class SourceDocument:
 
     @property
     def call_references(self) -> tuple[RelationReference, ...]:
-        """Two-part function calls — named like relations, resolved as functions."""
+        """Two-part function calls, named like relations and resolved as functions."""
 
         return tuple(
             reference
@@ -417,7 +417,7 @@ def _check_declared_id(
         raise DiscoveryError(
             f"{relative_path}: declares {document.kind} ID "
             f"{document.qualified!r} but the filename names "
-            f"{filename_id.qualified!r} — they must agree"
+            f"{filename_id.qualified!r}. They must agree"
         )
 
 
@@ -429,15 +429,15 @@ def _read_python(
 
     if document.kind == VIEW:
         raise DiscoveryError(
-            f"{relative_path}: a View is declared in SQL, not Python — its query is "
-            "its definition"
+            f"{relative_path}: a View is declared in SQL, not Python. Its query "
+            "is its definition"
         )
 
     module = ast.parse(text)
     expected_class = _stem(relative_path)
 
     # Ordinary helper classes may live alongside the object. What must be
-    # unique is the *Weaver* class — the one inheriting Folder, Table or View.
+    # unique is the Weaver class, the one inheriting Folder, Table or View.
     candidates = [
         node
         for node in module.body
@@ -452,15 +452,15 @@ def _read_python(
     if len(candidates) > 1:
         found = ", ".join(node.name for node in candidates)
         raise DiscoveryError(
-            f"{relative_path}: defines more than one Weaver object class ({found}) — "
-            "one file declares one object"
+            f"{relative_path}: defines more than one Weaver object class ({found}). "
+            "One file declares one object"
         )
 
     declared = candidates[0]
     if declared.name != expected_class:
         raise DiscoveryError(
             f"{relative_path}: defines class {declared.name!r} but the file names "
-            f"{expected_class!r} — the class, the file and the ID all carry the same name"
+            f"{expected_class!r}. The class, the file and the ID carry one name"
         )
 
     _check_base_class(relative_path, declared, document.kind)
@@ -554,7 +554,7 @@ def _require_method(relative_path: str, declared: ast.ClassDef, name: str) -> No
     if len(found) > 1:
         raise DiscoveryError(
             f"{relative_path}: class {declared.name!r} defines {name}() "
-            f"{len(found)} times — the later one silently replaces the earlier"
+            f"{len(found)} times. The later one replaces the earlier"
         )
     if isinstance(found[0], ast.AsyncFunctionDef):
         raise DiscoveryError(f"{relative_path}: {name}() must not be async")
@@ -619,8 +619,8 @@ def _read_sql(
 
     if document.kind == FOLDER:
         raise DiscoveryError(
-            f"{relative_path}: a Folder is declared in Python — it stages files rather "
-            "than returning rows"
+            f"{relative_path}: a Folder is declared in Python. It stages files "
+            "rather than returning rows"
         )
 
     analysis = analyse_sql(body)
@@ -640,21 +640,21 @@ def _read_sql(
 
     if document.kind == VIEW and analysis.statement_count > 1:
         raise DiscoveryError(
-            f"{relative_path}: a View is one query — Weaver wraps it in the CREATE "
+            f"{relative_path}: a View is one query. Weaver wraps it in the CREATE "
             f"VIEW, and a view definition cannot carry preceding statements. Found "
             f"{analysis.statement_count}."
         )
 
     if document.kind == TABLE and language in (SPARK_SQL, SQL):
         # A SQL table produces its rows and, at most, the keys to delete, so it
-        # may return two results rather than one — and which is which is the
+        # may return two results rather than one, and which is which is the
         # program parser's answer, not this counter's. Each dialect has its own
         # parser because each has its own idea of where a statement ends.
         _check_sql_table_program(relative_path, document, body, language)
     elif analysis.determined and analysis.result_set_count != 1:
         raise DiscoveryError(
             f"{relative_path}: a SQL object must produce exactly one result set, "
-            f"found {analysis.result_set_count}. Intermediate work is fine — only "
+            f"found {analysis.result_set_count}. Intermediate work is fine, only "
             "one statement may return rows."
         )
 
@@ -677,7 +677,7 @@ def _check_sql_validation_program(
 
     Through the dialect's own parser, as a SQL table's contract is, because each
     dialect has its own idea of where a statement ends. What it produces then
-    meets one counting rule — see :mod:`weaver.declaration.validation_program`.
+    meets one counting rule. See :mod:`weaver.declaration.validation_program`.
     """
 
     from .validation_program import validate_validation_contract
@@ -701,7 +701,8 @@ def _check_sql_table_program(
     The same checks the generated artefact depends on, made here so a body that
     could never load is refused by a build rather than discovered by one.
 
-    A body whose result-set count is beyond static reach — dynamic SQL — is not
+    A body whose result-set count is beyond static reach, such as dynamic SQL,
+    is not
     refused. The contract is about the queries Weaver can see; ``EXEC`` is setup
     like any other statement.
     """
@@ -735,7 +736,7 @@ def _check_sql_table_program(
 #: the check stands down rather than blocking a file it cannot read.
 _DYNAMIC_SQL = ("exec ", "execute ", "sp_executesql")
 
-#: Intermediate scratch — allowed, because it is working, not the object.
+#: Intermediate scratch, allowed because it is working and not the object.
 #: ``create temp view``, ``create temporary view``, ``create table #tmp``.
 _SCRATCH_DDL = re.compile(
     r"^\s*create\s+(or\s+replace\s+)?(temp|temporary|local\s+temporary)\b"

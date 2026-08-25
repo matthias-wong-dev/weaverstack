@@ -1,6 +1,6 @@
 """T-SQL dependency extraction over realistic complete statements.
 
-Weaver does not restrict what an author writes — intermediate statements,
+Weaver does not restrict what an author writes, intermediate statements,
 temporary tables, custom deletion against the current table are all permitted.
 The requirement is that extraction stays accurate and invents nothing.
 """

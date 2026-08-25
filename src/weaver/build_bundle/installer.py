@@ -1,22 +1,22 @@
-"""Installing a bundle — validated execution only, never planning.
+"""Installing a bundle: validated execution only, never planning.
 
 The installer loads and fully validates a bundle, resolves its targets through
 the supplied environment, and runs the sequences as barriers: each completes
 before the next starts, one action's failure fails its sequence, and no later
 sequence begins. It records exactly one result per action and persists the
 report. It never reads the source repository, resolves a dependency or selects a
-target — every such decision is already in the bundle.
+target, because every such decision is already in the bundle.
 
 Build is not load: it runs generated create DDL, creates folder directories,
 deploys an item's runtime code and reconciles the target. It never executes an
 object's code, and has no route back to the source repository.
 
 Everything runs one at a time. Sequences are serial because a sequence is a
-barrier; the actions within a batch are serial too — see :data:`_WHY_SERIAL`.
+barrier, and the actions within a batch are serial too. See :data:`_WHY_SERIAL`.
 
 Every action runs here, whichever position this is. An executor reaches for the
-capability its work needs — storage, REST, TDS, or the Session's Spark SQL — and
-the Session decides what performing it means.
+capability its work needs, being storage, REST, TDS or the Session's Spark SQL,
+and the Session decides what performing it means.
 """
 
 from __future__ import annotations
@@ -53,8 +53,8 @@ REPORT_FILENAME = "install-report.yml"
 class _Deferred:
     """A Warehouse connection opened by the first executor that uses it.
 
-    Separates "this batch has one" — which it needs when it is assembled — from
-    "one is open", which can wait. Everything is forwarded, so an executor
+    Separates "this batch has one", needed when it is assembled, from "one is
+    open", which can wait. Everything is forwarded, so an executor
     cannot tell.
     """
 
@@ -84,8 +84,8 @@ class Installer:
 
     It validates the bundle, resolves its targets, walks the sequences as
     barriers and records one result per action. It never reopens the repository,
-    resolves a dependency, chooses a target or replans anything — every such
-    decision is already in the bundle.
+    resolves a dependency, chooses a target or replans anything, because every
+    such decision is already in the bundle.
 
     Its runtime services come from the Session, and it closes none of them
     because it opened none of them.
@@ -167,8 +167,8 @@ class Installer:
         # The resolver, store and Spark already define the environment the
         # installer is running in, so a target is its item plus that item's
         # physical roots. Resolving here, once, is what stops an executor deriving
-        # a path for itself — and what would let one installation address several
-        # destination Lakehouses without ever changing the session's own.
+        # a path for itself, and what lets one installation address several
+        # destination Lakehouses without changing the session's own.
         item = ItemRef(bound.item_id)
         return ResolvedTarget(
             bound=bound,
@@ -180,7 +180,7 @@ class Installer:
     def _resolved(self, bound: BoundTarget, item: ItemRef, method: str):
         """One of the destination's two addresses, where the workspace can give it.
 
-        A Warehouse has neither — it is reached over TDS — and a resolver may not
+        A Warehouse has neither, being reached over TDS, and a resolver may not
         implement the method at all. Neither is a failure here, because the
         actions that need an address are Lakehouse actions and each fails
         explicitly, naming the target, when it is missing.
@@ -212,10 +212,10 @@ class Installer:
 
         started = _now()
         # One instant for the whole installation, taken once and handed to every
-        # batch. Registry rows are published across several statements — one pair
-        # per item — and rows written by one build have to be indistinguishable in
+        # batch. Registry rows are published across several statements, one pair
+        # per item, and rows written by one build have to be indistinguishable in
         # age, or a shortcut and the source it points at could order against each
-        # other merely for having been written a few milliseconds apart.
+        # other for having been written a few milliseconds apart.
         build_datetime = _epoch(started)
         sequence_results: list[SequenceResult] = []
         stop = False
@@ -283,8 +283,8 @@ def _sequence_label(sequence: BuildSequence, resolved: dict) -> str:
 
     The planner's own description, capitalised, with the targets it touches
     after it. Both halves earn their place: several sequences share a
-    description — a dependency layer is built once per layer — and the target is
-    what tells them apart.
+    description, since a dependency layer is built once per layer, and the target
+    is what tells them apart.
     """
 
     text = (sequence.description or "").strip()
@@ -331,11 +331,11 @@ def _run_sequence(
     # The sequence is the unit worth naming, and it already carries the words:
     # the planner wrote "publish catalogue dictionaries and installations" when
     # it built these, and nothing was showing it. A batch apiece described its
-    # executors instead — "Warehouse/Weaver: views" for what is plainly the
-    # catalogue being updated — which is the mechanism dressed up as an answer.
+    # executors instead, so "Warehouse/Weaver: views" named the mechanism where
+    # the catalogue being updated was the answer.
     # The target belongs on the line, not in the detail. "Build dependency
     # layer" appears once per layer, so four identical lines with four different
-    # durations told a reader that four things happened and nothing about which.
+    # durations said that four things happened and nothing about which.
     with installer.session.substep(_sequence_label(sequence, resolved)):
         for batch in sequence.batches:
             target = resolved[batch.target_id]
@@ -379,12 +379,12 @@ def execute_install_action(
     """Run one action against one target, with the installer's result semantics.
 
     The same execution the installer performs, minus everything that is about a
-    *bundle*: no loading, no validation, no sequence barriers, no target
+    bundle: no loading, no validation, no sequence barriers, no target
     resolution, no report. One action, one payload, one context, one result.
 
     It exists so the platform boundary can be tested where it actually is. A test
     asking whether Fabric accepts Weaver's generated T-SQL, or whether a created
-    Warehouse table shows up in inventory, needs the statement *executed* — not a
+    Warehouse table shows up in inventory, needs the statement executed, not a
     repository parsed, a catalogue read, a bundle planned and an installation
     reported. Those are separately proven, and running them again to reach the
     one question costs a full build.

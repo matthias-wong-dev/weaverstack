@@ -1,13 +1,13 @@
 """What a repository's load layer owns, and how it is physically bound.
 
-`weaver.etl` answers one question — given this source, which load artefacts
-exist, where do they go, and what is each one signed by — and everything
+`weaver.etl` answers one question, given this source, which load artefacts
+exist, where do they go, and what is each one signed by, and everything
 downstream reads that answer rather than deriving its own. So the claims here are
 about the answer itself: which sources produce artefacts and which produce none,
 that a path-shaped identity survives being written down and read back, and that a
 signature moves for exactly the reasons it should.
 
-The proxy bodies are deliberately not asserted. They are placeholders this branch
+The proxy bodies are not asserted. They are placeholders this branch
 replaces later, and pinning their text here would make the replacement look like a
 regression.
 """
@@ -117,7 +117,7 @@ def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
     """The whole derivation, as one visible set.
 
     Worth asserting whole rather than piecemeal: the interesting property is not
-    that a Python file is deployed but that *this* is the complete set — that a
+    that a Python file is deployed but that this is the complete set. That a
     view contributes nothing, that a helper module nobody declares still gets a
     claim, that a data file beside that module travels with it, and that the
     generated folder document does not deploy itself.
@@ -139,7 +139,7 @@ def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
 
 @weaver_test()
 def test_a_view_owns_no_load_artefact_on_either_side(estate):
-    """A view's definition *is* its query, so there is nothing for a load to do.
+    """A view's definition is its query, so there is nothing for a load to do.
 
     Asserted on both engines because the two are separate branches of the
     derivation and would fail independently.
@@ -206,7 +206,7 @@ def test_each_artefact_is_typed_as_what_it_physically_is(estate):
 def test_an_identity_survives_being_written_down_and_read_back(text):
     """The plan records selection as text, so the spelling has to be lossless.
 
-    A path, a filename with an extension, a name with a dot *and* a space —
+    A path, a filename with an extension, a name with a dot and a space,
     every one of these would be ambiguous under the two-part `Schema.Object`
     grammar, which is why the shape is part of what is written.
     """
@@ -271,7 +271,7 @@ def test_a_deployed_module_is_signed_by_its_own_bytes(tmp_path):
 def test_a_template_version_moves_only_the_bodies_it_renders(estate, monkeypatch):
     """The salts are separate because the two generators evolve separately.
 
-    Bumping the Spark one invalidates generated Spark SQL and nothing else — not
+    Bumping the Spark one invalidates generated Spark SQL and nothing else, not
     the Warehouse procedures, and not deployed Python, which is signed by bytes
     that no generator produced.
     """
@@ -312,9 +312,9 @@ def test_the_template_versions_do_not_reach_the_repository_signature(
 def test_the_deployed_tree_carries_every_lib_file_not_only_python(estate):
     """`lib/` is reproduced verbatim, whatever is in it.
 
-    A `.py` filter here was reading across from the *top level*, where a Weaver
+    A `.py` filter here was reading across from the top level, where a Weaver
     document is python, sql or yml. But a helper module that reads a data file
-    beside it needs that file to have travelled with it — and it did not, so on
+    beside it needs that file to have travelled with it, and it did not, so on
     Fabric the module found nothing.
     """
 

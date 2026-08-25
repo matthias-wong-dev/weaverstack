@@ -1,6 +1,6 @@
 """Pure logical repository, item and document identities.
 
-These values describe authored Weaver structure. They deliberately know
+These values describe authored Weaver structure. They know
 nothing about Fabric item names, workspaces, stores or build execution: those are
 physical bindings applied later.
 """
@@ -24,9 +24,9 @@ WAREHOUSE = "Warehouse"
 ITEM_TYPES = frozenset({LAKEHOUSE, WAREHOUSE})
 FILES = "Files"
 
-#: What an identity's two parts *mean*, which is what decides how they are
-#: validated and spelled. Weaver has one identity — a schema and an object
-#: within an item — and three kinds of target wear it differently:
+#: What an identity's two parts mean, which is what decides how they are
+#: validated and spelled. Weaver has one identity, a schema and an object within
+#: an item, and three kinds of target wear it differently:
 #:
 #: ``OBJECT``     ``Sales`` + ``Customer``: a table, view or folder.
 #: ``FILE``       ``_/Load/lib`` + ``dates.py``: the containing path is the
@@ -62,7 +62,7 @@ def _logical_name(value: object, *, what: str) -> str:
 
 
 def _relative_path(value: object, *, what: str) -> str:
-    """One relative, canonical path — a file identity's schema half.
+    """One relative, canonical path, being a file identity's schema half.
 
     A file's schema is where it sits, so it may contain ``/``. What would make
     it ambiguous or let it escape its root may not: an absolute path, a
@@ -86,7 +86,7 @@ def _relative_path(value: object, *, what: str) -> str:
 
 
 def _file_name(value: object, *, what: str) -> str:
-    """One complete leaf filename, extension included — a file identity's object."""
+    """One complete leaf filename with its extension, a file identity's object."""
 
     if not isinstance(value, str):
         raise IdentityError(f"{what} must be a string, got {type(value).__name__}")
@@ -203,8 +203,8 @@ class WeaverDocumentId:
     """An item-qualified target identity: one schema and one object, in one item.
 
     One identity model for everything Weaver builds. A table, a deployed Python
-    module and a generated stored procedure are all *a schema and an object
-    inside an item* — what differs is only the shape of those two parts, which
+    module and a generated stored procedure are all a schema and an object inside
+    an item. What differs is the shape of those two parts, which
     :data:`SHAPES` names and which decides both how they are validated and how
     they are spelled on one line. The Registry stores the two real parts, so
     nothing is encoded to fit a validator and nothing has to be decoded to be
@@ -252,7 +252,7 @@ class WeaverDocumentId:
         if len(parts) >= 4:
             marker = _SHAPE_MARKERS[FILE_SHAPE]
             if parts[2].startswith(marker):
-                # ``file:<path>/<name>`` — the last component is the filename and
+                # ``file:<path>/<name>``, where the last component is the filename and
                 # everything before it, marker stripped, is the containing path.
                 head = (parts[2][len(marker) :],) + parts[3:-1]
                 return cls(
@@ -285,7 +285,7 @@ class WeaverDocumentId:
 
     @classmethod
     def parse_local(cls, item: "WeaverItemId", text: str) -> "WeaverDocumentId":
-        """Parse the item-relative spelling — the inverse of :attr:`relative`.
+        """Parse the item-relative spelling, the inverse of :attr:`relative`.
 
         Used where the item is already known from context, so a declaration
         does not repeat it.
@@ -693,7 +693,7 @@ class WeaverItem:
     #: The item's Tests and Assumptions. Held apart from :attr:`documents`
     #: because they are logical declarations that materialise nothing: a
     #: projection that walks an item's documents is asking what this item puts
-    #: in the estate, and the answer must not include a Test merely because a
+    #: in the estate, and the answer must not include a Test because a
     #: Test has a Schema.Object identity too.
     validations: tuple[WeaverDocumentId, ...] = ()
     signature: str = ""
@@ -713,11 +713,11 @@ class WeaverItem:
 
     @property
     def declarations(self) -> tuple[WeaverDocumentId, ...]:
-        """Everything this item declares — objects and validation alike.
+        """Everything this item declares, objects and validation alike.
 
-        The common view, for the readers that genuinely span both: dependency
+        The common view, for the readers that span both: dependency
         resolution, reference checking and the item signature. Anything asking
-        what the item *materialises* wants :attr:`documents`.
+        what the item materialises needs :attr:`documents`.
         """
 
         return self.documents + self.validations
@@ -741,9 +741,9 @@ class WeaverRepository:
     )
     schema_documents: Mapping[WeaverSchemaId, "SchemaSes"] = field(default_factory=dict)
     support_files: tuple[str, ...] = ()
-    #: The bytes of the support files a build has to *carry*, by the same
+    #: The bytes of the support files a build has to carry, by the same
     #: repository-relative path. A ``lib/`` module is authored source that no
-    #: Weaver document declares, and the load layer deploys it — so its content
+    #: Weaver document declares, and the load layer deploys it, so its content
     #: has to reach signature derivation and the bundle without either of them
     #: reopening the repository. Files nothing deploys, such as
     #: ``shortcuts.yml``, are listed in :attr:`support_files` and not held here.
@@ -763,7 +763,7 @@ class WeaverRepository:
     dependency_edges: tuple[ItemDependency, ...] = ()
     dependency_graph: object | None = None
     #: The item-level graph over :attr:`items`, and its topological layers.
-    #: The document graph orders work *inside* an item; this orders the items
+    #: The document graph orders work inside an item; this orders the items
     #: themselves, and is the outer structure a build is planned against. It is
     #: derived once, here, so no later stage reconstructs an ordering of its own.
     item_graph: object | None = None

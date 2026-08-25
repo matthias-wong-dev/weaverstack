@@ -1,13 +1,13 @@
 """Shortcuts: every decision, in pure Python.
 
 A shortcut is the one construct that reaches outside its item, and almost
-everything about it is a *decision*: is it planned, is it left alone, does its
+everything about it is a decision: is it planned, is it left alone, does its
 schema still get created, does its consumer wait for its producer, is it stale
 because the producer moved on, and what pair of addresses is frozen for the
 installer. None of that needs a workspace. It is computed from the repository and
 the catalogue, both of which can be built directly.
 
-What genuinely needs Fabric is narrower, and it is the *installation*: a OneLake
+What needs Fabric is narrower, and it is the installation: a OneLake
 shortcut is an API call, Fabric discovers one asynchronously, and a Warehouse
 shortcut materialises as a view over a SQL endpoint. Those live in `tests/fabric`.
 
@@ -96,8 +96,8 @@ def test_a_selected_shortcut_is_planned_as_one_action(estate):
 def test_an_unselected_shortcut_is_left_alone(estate):
     """Incremental selection applies to shortcuts exactly as to documents.
 
-    A shortcut absent from the selection is current — its declaration is unchanged,
-    its destination is there, and its source has not moved — so replacing it
+    A shortcut absent from the selection is current, its declaration is unchanged,
+    its destination is there, and its source has not moved, so replacing it
     would destroy a working pointer for nothing.
     """
 
@@ -110,7 +110,7 @@ def test_an_unselected_shortcut_is_left_alone(estate):
 def test_a_retained_shortcut_still_reports_its_schema(estate):
     """The subtle one, and the reason schemas are reported separately.
 
-    A shortcut that is *not* being replaced still lives in a namespace the item
+    A shortcut that is not being replaced still lives in a namespace the item
     must have. A build that created only the schemas its rebuilt shortcuts needed
     would leave the retained ones homeless.
     """
@@ -124,7 +124,7 @@ def test_a_retained_shortcut_still_reports_its_schema(estate):
 def test_a_shortcut_whose_target_item_is_unbound_is_omitted(estate):
     """It has no physical form under these bindings, so it cannot be planned.
 
-    And — the part that matters — it must not be certified either. A Registry row
+    And, the part that matters, it must not be certified either. A Registry row
     would claim an installation that never happened.
     """
 
@@ -230,9 +230,9 @@ def test_the_consumer_gets_its_own_endpoint_refresh(estate):
 def certified(repository, *names, build_datetime=None):
     """The Registry as a successful build of these nodes would have left it.
 
-    `declared_signatures` is used for shortcuts too, and deliberately: a shortcut
-    destination is signed by *the pair it declares* — this destination, that
-    source — not by any file, because that pair is the whole of what a shortcut is.
+    `declared_signatures` is used for shortcuts too, and: a shortcut
+    destination is signed by the pair it declares. This destination, that
+    source, not by any file, because that pair is the whole of what a shortcut is.
     A hand-written signature here would make the shortcut look changed and drag its
     consumers into the build, which is how the first version of this file was
     wrong.
@@ -251,8 +251,8 @@ def certified(repository, *names, build_datetime=None):
 def test_a_shortcut_is_stale_when_its_target_was_published_later(estate):
     """The half of cross-item freshness the dependency graph cannot answer.
 
-    A producer rebuilt by some *earlier* build is, to this one, entirely
-    unchanged — nothing in the repository records that it moved. The only
+    A producer rebuilt by some earlier build is, to this one, entirely
+    unchanged. Nothing in the repository records that it moved. The only
     surviving evidence is that its Registry row carries a later build_datetime than the
     shortcut over it.
     """
@@ -285,7 +285,7 @@ def test_a_shortcut_published_after_its_target_is_current(estate):
 
 @weaver_test()
 def test_a_missing_registry_row_is_not_staleness(estate):
-    """Absent is *new*, which signature classification already handles.
+    """Absent is new, which signature classification already handles.
 
     Treating it as stale here would double-count, and worse would report an
     object as having moved when it was simply never installed.
@@ -325,7 +325,7 @@ def test_a_second_build_over_an_unchanged_estate_plans_no_shortcut_action(estate
 
     This is the decision `test_cross_item_shortcut_primitive.py` spent a full
     generate-and-install to observe. It is made from signatures and build datetimes before
-    any pointer is touched, so it belongs here — what Fabric can still say is
+    any pointer is touched, so it belongs here. What Fabric can still say is
     that the shortcut object itself was not disturbed.
     """
 
@@ -485,7 +485,7 @@ def test_a_schema_shortcut_is_created_directly_under_tables(tmp_path):
 
 @weaver_test()
 def test_a_schema_shortcut_asks_for_no_schema_of_its_own(tmp_path):
-    """It *is* the namespace, and the item it points at owns what is inside."""
+    """It is the namespace, and the item it points at owns what is inside."""
 
     from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 

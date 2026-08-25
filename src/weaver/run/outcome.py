@@ -1,9 +1,9 @@
-"""What one dispatch produced, and *how* it produced it.
+"""What one dispatch produced, and how it produced it.
 
 The second part is why this exists. A primitive that refuses rows raises when
 it was told not to tolerate them, and the exception carries counts that include
-the rejections — so the result alone cannot tell a refusal from a tolerated
-load. Both have ``succeeded=False`` and ``rows_rejected > 0``:
+the rejections, so the result alone cannot tell a refusal from a tolerated load.
+Both have ``succeeded=False`` and ``rows_rejected > 0``:
 
 .. code-block:: text
 
@@ -43,20 +43,20 @@ class Outcome:
     """One dispatch, normalised: a status, a result and what to say about it."""
 
     status: str
-    #: Whatever the primitive reported. Anything that says whether it succeeded
-    #: — a load's counts, a validation's judgement, a future operation's own.
+    #: Whatever the primitive reported: a load's counts, a validation's judgement,
+    #: a future operation's own.
     result: object
     messages: tuple = ()
     #: Whether the dispatch threw rather than returning. A failed node that
-    #: *raised* produced no judgement at all — which is a different thing from
-    #: one that ran and reported failure, and the difference is what tells "the
+    #: raised produced no judgement at all, which differs from one that ran and
+    #: reported failure, and the difference is what tells "the
     #: check could not be evaluated" from "the check found something wrong".
     raised: bool = False
     #: Whether this outcome is Weaver's own decision about the work. A refused
     #: breach and a validation's finding are; an exception nothing named is not.
     #: A load that refused ran under Weaver's control and produced an
     #: unacceptable result, so the catalogue records it as Failed rather than as
-    #: Error — see :func:`weaver.run.record.result_for`.
+    #: Error. See :func:`weaver.run.record.result_for`.
     refused: bool = False
 
 
@@ -67,8 +67,8 @@ def settle(node, *, returned=None, raised: BaseException | None = None) -> Outco
         return _raised(node, raised)
     # The contract is "it says whether it succeeded", not "it is a LoadResult".
     # A validation returns a judgement about data rather than a count of work,
-    # and both are results a run can settle — what is refused is a primitive
-    # that returned something which answers neither.
+    # and both are results a run can settle. What is refused is a primitive that
+    # returned something answering neither.
     if not reports_outcome(returned):
         return _malformed(node, returned)
     return Outcome(
@@ -151,13 +151,13 @@ def status_of(result) -> str:
     """What one primitive's own answer says became of it.
 
     Public because a standalone call settles the same way an orchestrated node
-    does — see :func:`weaver.run.record.settled_load` — and the rule must not be
-    written twice.
+    does, so the rule is not written twice. See
+    :func:`weaver.run.record.settled_load`.
 
     A primitive that refused rows and was asked to tolerate them wrote the valid
-    ones and *returned* the refusal. That is not a failed step; a step that
+    ones and returned the refusal. That is not a failed step; a step that
     failed without refusing anything is. A result with no notion of rejected
-    rows — a validation's judgement — failed.
+    rows, a validation's judgement, failed.
     """
 
     if result.succeeded:

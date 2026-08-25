@@ -121,7 +121,7 @@ def _inventories(bindings=None):
 
 @pytest.fixture
 def prepared_state(monkeypatch):
-    """The one boundary read, stubbed — these tests are about stores, not state.
+    """The one boundary read, stubbed: these tests are about stores, not state.
 
     One patch rather than two, because the build now takes a single Python
     handover: catalogue and inventories arrive together as a BuildState, and the

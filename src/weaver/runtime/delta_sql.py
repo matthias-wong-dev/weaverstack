@@ -1,11 +1,11 @@
 """The SQL fragments a Delta load is written in.
 
-Small, shared and deliberately opinion-free: a join on a key, the predicate that
+Small, shared and opinion-free: a join on a key, the predicate that
 decides a key is blank, the canonical text one value enters a row signature as,
 the audit column names, the table property every managed table carries. They are
 here rather than inline in :mod:`weaver.runtime.table_load` because getting any
-one of them subtly wrong is a silent data defect — a row that is never updated, a
-blank key admitted, a null indistinguishable from an empty string — so each is
+one of them subtly wrong is a silent data defect: a row that is never updated, a
+blank key admitted, a null indistinguishable from an empty string. So each is
 written once, explained once, and tested once.
 
 """
@@ -30,14 +30,14 @@ COLUMN_MAPPING = "TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
 
 #: The text a null enters a signature as. It cannot be confused with a present
 #: value, because a present value is written as its length, a colon and then
-#: itself — so it always begins with a digit.
+#: itself, so it always begins with a digit.
 NULL_MARKER = "~"
 
 #: How each Spark type is spelled before it enters a row signature. Named where
 #: the default rendering would move with something other than the value: a
 #: timestamp's with the session time zone, a boolean's and a binary's with the
-#: cast Spark happens to choose. Everything else — the numerics, decimal, date —
-#: casts to text exactly and stably.
+#: cast Spark happens to choose. The numerics, decimal and date cast to text
+#: exactly and stably.
 _CANONICAL_TEXT = {
     "boolean": "CAST(CAST({column} AS INT) AS STRING)",
     "binary": "hex({column})",
@@ -61,7 +61,7 @@ def delta_signature_name() -> str:
 
 
 def live_delete_literal() -> str:
-    """The delete timestamp a *live* row carries — far enough future to sort last."""
+    """The delete timestamp a live row carries, far enough future to sort last."""
 
     return f"CAST('{AUDIT_LIVE_DELETE_DATETIME}' AS TIMESTAMP)"
 
@@ -88,7 +88,7 @@ def row_signature(alias: str, columns, types) -> str:
 
     Each value is written as its length, a colon and its canonical text, so text
     containing the separator cannot be read as two values. The leading ``''``
-    keeps the expression complete for a table with nothing to compare — every row
+    keeps the expression complete for a table with nothing to compare. Every row
     then signs identically, which is what "nothing to compare" means.
     """
 
@@ -109,7 +109,7 @@ def row_signature(alias: str, columns, types) -> str:
 def blank_key_predicate(columns, alias: str = "s") -> str:
     """A key column that is null, empty or only spaces is not a key.
 
-    Blank is rejected alongside null deliberately: a key of whitespace matches
+    Blank is rejected alongside null: a key of whitespace matches
     nothing a human would call a match, and letting it through would create a
     row nobody can find again.
 
@@ -144,7 +144,7 @@ def participates(columns, alias: str = "s") -> str:
     """A row takes part in a unique key only when its whole tuple is present.
 
     A null is not a value, so two rows carrying one are not two rows claiming the
-    same thing — and ``GROUP BY`` would put them in one group.
+    same thing, and ``GROUP BY`` would put them in one group.
     """
 
     prefix = f"{alias}." if alias else ""

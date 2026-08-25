@@ -13,7 +13,7 @@ Two properties matter beyond "it is used":
 
 The first because a Session acquires lazily, so a wrong object handed to
 ``weaver.session()`` would otherwise surface during whichever operation first
-reached Fabric — a long way from the line that caused it. The second because a
+reached Fabric, a long way from the line that caused it. The second because a
 Session that acquired a token on open would make holding one expensive.
 """
 

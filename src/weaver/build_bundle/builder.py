@@ -1,4 +1,4 @@
-"""Builder — what should be installed, decided before anything is mutated.
+"""Builder: what should be installed, decided before anything is mutated.
 
 One of Weaver's four doers, and the one that makes every decision:
 
@@ -13,12 +13,12 @@ One of Weaver's four doers, and the one that makes every decision:
               Installer
 
 Builder is pure once its inputs are supplied: it reaches no REST, Spark,
-OneLake or Warehouse. Everything it knows about the estate arrived as
+OneLake or Warehouse. Everything it has about the estate arrived as
 :class:`~weaver.build_bundle.workflow.BuildState`, read once at a boundary
 above, so a decision is reproducible and a test needs no estate at all.
 
-Reconciliation happens here too — what the catalogue claims plus what the target
-holds gives what is stale — and needs no physical access.
+Reconciliation happens here too, what the catalogue claims plus what the target
+holds gives what is stale, and needs no physical access.
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ class Builder:
     def build_in_temporary(self, prefix: str = "weaver-build-"):
         """The bundle, in a temporary tree that lives as long as the context.
 
-        A convenience for the common shape — plan, install, discard — and the
+        A convenience for the common shape, plan, install, discard, and the
         reason it is a context manager rather than a return value: the payloads
         are files, and something has to own them until the Installer has read
         them.

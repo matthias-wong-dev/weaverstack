@@ -142,7 +142,7 @@ def _run_warehouse(session, document, target: PhysicalTargetRef):
     """Execute the generated batch directly, creating no procedure.
 
     A temporary stored procedure would leave something behind for a run whose
-    whole promise is that it does not — and the batch is what the procedure's
+    whole promise is that it does not, and the batch is what the procedure's
     body is anyway, so nothing is lost by running it as itself.
     """
 
@@ -158,9 +158,9 @@ def _run_warehouse(session, document, target: PhysicalTargetRef):
         )
     batch = generate_tsql_validation_batch(document.document, document.sql_body or "")
 
-    # Every result set, and the *last* is the counts. The batch returns the
+    # Every result set, and the last is the counts. The batch returns the
     # diagnostic rows first and then projects its locals, exactly as the
-    # installed procedure does through `call_procedure_with_results` — so
+    # installed procedure does through `call_procedure_with_results`, so
     # reading only the first set would read a diagnostic row, find no count
     # column on it, and report a failing Test as passing.
     produced = executor.query_result_sets(batch)

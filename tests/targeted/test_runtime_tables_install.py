@@ -52,7 +52,7 @@ def estate(tmp_path):
 
 
 #: A catalogue holding no rows at all, which is every state these tests start
-#: from: what a build says about bookmarks turns on whether the *table* is there,
+#: from: what a build says about bookmarks turns on whether the table is there,
 #: and a target's inventory answers that.
 EMPTY = Catalogue({})
 
@@ -197,7 +197,7 @@ def test_a_view_is_not_bookmarkable(estate):
 
 @weaver_test()
 def test_a_runtime_artefact_is_not_bookmarkable(estate):
-    """The module and the procedure are what *does* the loading."""
+    """The module and the procedure are what does the loading."""
 
     found = {str(one) for one in item_bookmarkable_objects(estate, item=item_id(ITEM))}
 
@@ -534,7 +534,7 @@ def test_a_catalogue_table_cannot_be_dropped_by_a_managed_drop():
 
     Every catalogue table declares ``Prohibit rebuild``, so selection never
     offers one. This is the guard behind that declaration, and it is at the
-    renderer because there the resource is known by its identity — an installer
+    renderer because there the resource is known by its identity, an installer
     would have to read it back out of SQL.
     """
 
@@ -592,7 +592,7 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
     """One build, and the graph orders it: the table, then the reference to it.
 
     The reference reads a document the built-in item owns, so the item graph puts
-    that item first — the same edge a declared shortcut's source item gets. A
+    that item first, the same edge a declared shortcut's source item gets. A
     build that installed the table and deferred the reference would not converge
     in one pass, and the build after it would not be a no-op.
     """

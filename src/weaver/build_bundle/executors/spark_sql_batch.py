@@ -45,8 +45,8 @@ class SparkSqlBatchExecutor:
             )
         # The build_datetime first: it is scoped to this installation rather than to a
         # destination, and ``expand`` rejects every token it does not itself
-        # resolve — so one left behind here would be reported as an unresolvable
-        # name instead of quietly reaching the engine.
+        # resolve, so one left behind here would be reported as an unresolvable
+        # name instead of reaching the engine.
         resolved = [
             substitute_build_datetime(statement.strip(), context.build_datetime)
             for statement in statements

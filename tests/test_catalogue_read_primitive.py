@@ -8,12 +8,12 @@ same question once per scope, so its cost was
 
     catalogue tables × bound items
 
-round trips — and the multiplier was the number of items, which is the thing a
+round trips, and the multiplier was the number of items, which is the thing a
 growing estate increases. One predicate per table answers all of it at once.
 
-What must not change with it is the *shape* of the answer: planning consumes an
+What must not change with it is the shape of the answer: planning consumes an
 item-oriented catalogue, so the rows are grouped back by installation in Python.
-Nor may the scope widen — a build that could see an unrelated installation's
+Nor may the scope widen, a build that could see an unrelated installation's
 rows could publish over them.
 
 The fake catalogue here counts reads and records predicates, so both halves are
@@ -55,7 +55,7 @@ class CountingCatalogue:
         return [dict(row) for row in self.rows_by_table.get(_table_of(statement), ())]
 
     def read_count(self, table_name: str) -> int:
-        """How many times this table's *rows* were scanned.
+        """How many times this table's rows were scanned.
 
         Not how often a table handle was taken: resolving a table to check its
         columns is a metadata lookup that happens once per table either way, and
@@ -166,7 +166,7 @@ def test_rows_are_grouped_back_by_logical_item():
 
 @weaver_test()
 def test_an_item_with_no_rows_is_still_present_in_the_catalogue():
-    """An unbuilt item is empty, not absent — everything downstream iterates these."""
+    """An unbuilt item is empty, not absent: everything downstream iterates these."""
 
     sales, inventory = _items("Lakehouse/Sales", "Lakehouse/Inventory")
     catalogue = CountingCatalogue({REGISTRY.name: (_registry_row(sales, "Customer"),)})
@@ -207,7 +207,7 @@ def test_the_predicate_names_every_requested_scope_and_no_others():
 
 @weaver_test()
 def test_a_row_outside_the_requested_scopes_is_a_failure_not_a_silent_drop():
-    """A read that ignored its predicate must not quietly become build state."""
+    """A read that ignored its predicate must not become build state."""
 
     sales = WeaverItemId.parse("Lakehouse/Sales")
     stranger = WeaverItemId.parse("Lakehouse/SomeoneElse")
@@ -264,8 +264,8 @@ def test_a_multi_scope_predicate_is_parenthesised_so_it_survives_composition():
     """`AND` binds tighter than `OR`, and every use of this composes with `AND`.
 
     Unparenthesised, ``WHERE <scopes> AND NOT (<keep>)`` reassociates to
-    ``(a AND b) OR ((c AND d) AND NOT (<keep>))`` — the first scope's rows are
-    deleted regardless of the keep-list — and a ``MERGE`` ``ON`` clause matches
+    ``(a AND b) OR ((c AND d) AND NOT (<keep>))``, the first scope's rows are
+    deleted regardless of the keep-list, and a ``MERGE`` ``ON`` clause matches
     every source row to every target row in the later scopes. This cost a real
     Delta failure to find, and it is invisible until a second installation
     exists, so it is pinned here where it costs nothing to check.
@@ -281,7 +281,7 @@ def test_a_multi_scope_predicate_is_parenthesised_so_it_survives_composition():
     rendered = scopes.predicate
 
     assert rendered.startswith("(") and rendered.endswith(")")
-    # The whole disjunction is inside one group, not merely each conjunct.
+    # The whole disjunction is inside one group, not each conjunct.
     depth = 0
     for character in rendered[:-1]:
         if character == "(":

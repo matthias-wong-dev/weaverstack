@@ -4,8 +4,9 @@ The sibling of :mod:`weaver.load_plan`, sharing its premise: the installed
 catalogue is authoritative and the repository is not reopened.
 
 What makes this a module rather than more branches in that one is that a
-validation has no Registry row — nothing is materialised under a logical Test
-ID. The estate comes from ``_.TestDictionary`` instead, and each declaration is
+validation has no Registry row, because nothing is materialised under a logical
+Test ID. The estate comes from ``_.TestDictionary`` instead, and each declaration
+is
 connected to its installed primitive by computing the artefact identity with
 :func:`weaver.etl.validation_artefact_id`, the function the build claimed it
 with. A row whose computed artefact is absent from Registry is a missing
@@ -40,17 +41,16 @@ class InstalledValidation:
     """One logical validation, and the primitive that runs it.
 
     ``logical`` is what the estate calls it and what a caller names; ``artefact``
-    is where the runnable thing actually is. Keeping both is the point of the
-    whole arrangement — a reader asking "what does this estate validate?" wants
-    the first, and a dispatcher wants the second.
+    is where the runnable thing is. Both are kept because the two questions have
+    different answers: what this estate validates, and what to dispatch.
     """
 
     logical: WeaverDocumentId
     kind: str
     target: PhysicalTargetRef
     artefact: WeaverDocumentId
-    #: What Registry says the primitive is, or ``None`` when it has no row —
-    #: which is a missing installation, not an absence of interest.
+    #: What Registry says the primitive is, or ``None`` when it has no row, which
+    #: is a missing installation rather than an absence of interest.
     object_type: str | None = None
     primary_key: tuple[str, ...] = ()
     description: str | None = None
@@ -73,14 +73,14 @@ class InstalledValidation:
 
         Reported rather than skipped, and reported as an execution failure
         rather than as a pass. A Test that could not be run is not a Test that
-        found nothing — see :mod:`weaver.runtime.validation_result`.
+        found nothing. See :mod:`weaver.runtime.validation_result`.
         """
 
         if self.is_installed:
             return
         raise ValidationError(
             f"{self.logical} is declared in {TEST_DICTIONARY.name} but its "
-            f"installed primitive {self.artefact} is not registered — build the "
+            f"installed primitive {self.artefact} is not registered. Build the "
             "item before running its validation"
         )
 
@@ -88,7 +88,7 @@ class InstalledValidation:
         """Everything a dispatcher needs, as plain data.
 
         A validation crosses the host boundary as the description the estate
-        gave of it — which is what it *is* here: a Registry row saying where the
+        gave of it, which is what it is here: a Registry row saying where the
         primitive lives and what it compares. Nothing is derived on the far side
         that was not derived here.
         """
@@ -213,7 +213,7 @@ class ValidationEstate:
         if len(candidates) > 1:
             found = ", ".join(str(validation.logical) for validation in candidates)
             raise ValidationError(
-                f"{name!r} names more than one installed validation ({found}) — "
+                f"{name!r} names more than one installed validation ({found}). "
                 "qualify the request with a single target"
             )
         return candidates[0]
@@ -246,7 +246,7 @@ def _kind(row: Mapping[str, object], logical: WeaverDocumentId) -> str:
 def _validation_dependencies(
     catalogue: Catalogue,
 ) -> dict[WeaverDocumentId, list[str]]:
-    """Dependency rows keyed by the *logical* validation that owns them.
+    """Dependency rows keyed by the logical validation that owns them.
 
     Matched against ``TestDictionary`` keys rather than recovered through
     Registry, because a validation has no Registry row to recover it through.

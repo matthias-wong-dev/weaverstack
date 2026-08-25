@@ -6,7 +6,7 @@ owned by its destination item, so it is planned as part of that item's work and
 ahead of every document the item declares, because those documents are written
 against the namespace it establishes.
 
-What a declaration *becomes* depends on the target it is bound to, and that is a
+What a declaration becomes depends on the target it is bound to, and that is a
 planning decision because it is a decision about the target kind:
 
 ===============================  ==============================================
@@ -159,10 +159,10 @@ def plan_item_shortcuts(
     not rebuilt since. So it is left alone rather than replaced, exactly as an
     unchanged document is.
 
-    Its *schema* is still reported. A retained shortcut lives in a namespace the
+    Its schema is still reported. A retained shortcut lives in a namespace the
     item must have, and a build that created only the schemas its rebuilt
     shortcuts needed would leave the others homeless. A schema shortcut reports
-    none, because it *is* the namespace and the item does not own it.
+    none, because it is the namespace and the item does not own it.
     """
 
     sources = dict(sources or {})
@@ -239,7 +239,7 @@ def plan_item_shortcuts(
         )
         # One action stands for every declaration the item consumes, so it
         # produces several changes. Each names what the destination physically
-        # *is* at this binding, which is the same question the Registry row
+        # is at this binding, which is the same question the Registry row
         # answers.
         stage = PlannedStage(
             phase=SHORTCUT,
@@ -350,7 +350,7 @@ def _shortcut_action(
     """One action for all of this item's declarations.
 
     One rather than one-per-declaration, because materialising a shortcut is not
-    instantaneous and the cost is per *wait*, not per create. A Lakehouse
+    instantaneous and the cost is per wait, not per create. A Lakehouse
     shortcut becomes usable some seconds after it exists (measured at 6-31s), so
     N actions run serially pay N waits while one action that creates everything
     and then waits pays roughly one. A Warehouse view is a script, and the

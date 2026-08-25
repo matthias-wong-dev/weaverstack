@@ -1,6 +1,6 @@
 """Clearing a Lakehouse: both OneLake areas, driven from this checkout.
 
-`wipe_lakehouse` takes its store as an argument and removes directories — a Delta
+`wipe_lakehouse` takes its store as an argument and removes directories, a Delta
 table is a directory, there is no catalogue to enumerate, and shortcuts go over
 REST. It never needed the installed package, only a real OneLake.
 
@@ -17,15 +17,15 @@ from support.weaver_test import weaver_test
 def test_a_wipe_clears_both_onelake_areas(
     livy_session, fabric_workspace, fabric_client, fabric_target_lakehouse
 ):
-    """What only OneLake can answer about a wipe: it clears Tables *and* Files.
+    """What only OneLake can answer about a wipe: it clears Tables and Files.
 
     `wipe_lakehouse` takes its store as an argument and removes directories, so
-    it runs from here against the real workspace. Only the seed needs a session —
-    a Delta table has to be made by Spark — and that body imports nothing, so
+    it runs from here against the real workspace. Only the seed needs a session,
+    a Delta table has to be made by Spark, and that body imports nothing, so
     this no longer waits on a wheel.
 
     "Clears" is not "empties": a schema-enabled Lakehouse is created holding
-    `dbo`, Fabric owns it, and a wipe empties it rather than removing it — see
+    `dbo`, Fabric owns it, and a wipe empties it rather than removing it, see
     :data:`weaver.physical_wipe._KEPT_SCHEMAS`. So the claim below is that what
     the seed put there is gone and the default schema is still standing.
     """
@@ -65,7 +65,7 @@ def test_a_wipe_clears_both_onelake_areas(
         "folder",
     ]
     assert [e.name for e in store.list(resolver.files_root(target))] == []
-    # `Sales` is gone; `dbo` is kept, deliberately and by the same judgement
+    # `Sales` is gone; `dbo` is kept and by the same judgement
     # prune makes. A wipe that took it away would leave the Lakehouse unable to
     # resolve a schema it is supposed to have, which is damage rather than a wipe.
     assert [e.name for e in store.list(resolver.tables_root(target))] == ["dbo"]

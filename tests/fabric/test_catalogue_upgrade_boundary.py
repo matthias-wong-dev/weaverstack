@@ -5,7 +5,7 @@ Two claims that need a real Warehouse and nothing else.
 Adding a table to ``_`` makes every existing installation older than the Weaver
 building against it. The build that introduces the table has to plan against a
 catalogue that does not have it yet, create it, and reconcile against it from
-then on — and it has to do all three in one bundle, because every build binds
+then on, and it has to do all three in one bundle, because every build binds
 ``_weaver`` and so gets the new table from the same bundle it would have needed
 it for.
 
@@ -167,7 +167,7 @@ def catalogue_of_its_own(fabric_workspace, clean_disposable_warehouse):
     """The disposable Warehouse, emptied of the catalogue it held, afterwards.
 
     Every other Warehouse test uses this item as an ordinary target, recorded in
-    the shared catalogue: there ``_.Bookmark`` is a *view* over the catalogue's
+    the shared catalogue: there ``_.Bookmark`` is a view over the catalogue's
     table, and a real table of that name is one the next ``create or alter view``
     cannot replace. What this test installs is recorded in the item's own ``_``
     instead, so nothing else would ever remove it.
@@ -205,10 +205,10 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("upgrade"))
     bind = f"Warehouse/{name}=Reporting"
 
-    # Setup, not the claim. This Warehouse is the catalogue *and* the estate's
+    # Setup, not the claim. This Warehouse is the catalogue and the estate's
     # target, so both items of the build want `_`: the built-in item for the
     # catalogue tables, and the estate's for its load procedures. Each plans to
-    # create it and the second fails, which is a defect of its own — an installed
+    # create it and the second fails, which is a defect of its own, an installed
     # catalogue is where this test starts, so it puts the schema there.
     warehouse.executor.execute_script(
         "if schema_id(N'_') is null exec('create schema [_]');"
@@ -372,7 +372,7 @@ def test_a_built_warehouse_is_given_views_over_the_catalogues_runtime_tables(
 ):
     """What a generated procedure says ``[_].[Bookmark]`` to reach, and the rest.
 
-    Installed by the ordinary build into a Warehouse that is *not* the catalogue,
+    Installed by the ordinary build into a Warehouse that is not the catalogue,
     which is the case that needs a reference: the catalogue Warehouse holds the
     tables themselves and is given nothing.
 
@@ -395,7 +395,7 @@ def test_a_built_warehouse_is_given_views_over_the_catalogues_runtime_tables(
         CatalogObject(schema="_", name=table.name, kind="V")
         for table in PRESENTED_RUNTIME_TABLES
     } <= present
-    # And each resolves — a three-part name in another database, selected here.
+    # And each resolves, a three-part name in another database, selected here.
     for table in PRESENTED_RUNTIME_TABLES:
         counted = warehouse.executor.query(
             f"select count(*) as n from [_].[{table.name}]"

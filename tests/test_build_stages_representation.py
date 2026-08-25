@@ -1,4 +1,4 @@
-"""Numbering the assembled plan — the one place a sequence number is chosen."""
+"""Numbering the assembled plan, the one place a sequence number is chosen."""
 
 from __future__ import annotations
 

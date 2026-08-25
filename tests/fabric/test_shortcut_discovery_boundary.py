@@ -8,8 +8,8 @@ The wait runs where the Installer runs. Creating the shortcut is a REST call and
 the wait asks Spark a question through ``context.spark_sql``, so a desktop
 install performs both without a session of its own, and that is the arrangement
 under test here. Both crossings run through the registered Session, so they
-show up in its telemetry; the estate the action needs — the repository, the
-generated bundle and the producer's table — is arranged in a fixture and never
+show up in its telemetry; the estate the action needs, the repository, the
+generated bundle and the producer's table, is arranged in a fixture and never
 claimed to be either.
 
 Everything else about a shortcut, including its creation, its target, the
@@ -97,7 +97,7 @@ def discovery_estate(
         # Exact case, as Weaver's own table build creates. Fabric folds a table
         # identifier to lower case otherwise, and the shortcut this test creates
         # points at a path spelled the declared way. The producer is shared, so
-        # this only has to get a *new* table's spelling right; a properly-cased
+        # this only has to get a new table's spelling right; a properly-cased
         # one already there makes the create the no-op it should be.
         "previous = spark.conf.get('spark.sql.caseSensitive')\n"
         "spark.conf.set('spark.sql.caseSensitive', 'true')\n"

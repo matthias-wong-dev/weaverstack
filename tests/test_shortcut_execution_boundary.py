@@ -63,7 +63,7 @@ def _action() -> InstallAction:
 def _local_context(tmp_path, *, resolver=None, store=None):
 
     # With a Spark destination, as a real Lakehouse target resolves to. Without
-    # one a shortcut in it cannot even be *named*, which used to go unnoticed
+    # one a shortcut in it cannot even be named, which used to go unnoticed
     # because the discovery wait was skipped whenever there was no Spark session.
     destination = replace(
         _target(DESTINATION_TARGET_ID, "Curated_Dev"),
@@ -93,7 +93,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
     return InstallationContext(
         # A host that can ask Spark and finds the shortcut readable at once. The
         # Installer supplies this on every host, so a context without it is one
-        # nobody would build in production — and the executor says so rather
+        # nobody would build in production, and the executor says so rather
         # than skipping the wait.
         spark_sql=lambda statement, exact_case=False: [],
         spark_sql_batch=lambda statements, exact_case=False: [],
@@ -256,7 +256,7 @@ class _LateSpark:
     asynchronously, and in between the Lakehouse reports the name as neither a view
     nor a table.
 
-    Doubled as the *capability* the executor asks through rather than as a Spark
+    Doubled as the capability the executor asks through rather than as a Spark
     session, because that is now the seam: the shortcut executor stays on whichever
     host is installing and only the question crosses. A double shaped like a
     session would be testing an arrangement the product no longer has.
@@ -416,7 +416,7 @@ class _NoTransportStore(FilesystemStore):
 @weaver_test()
 def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
     """A shortcut is a OneLake shortcut, so a host that cannot make one cannot
-    materialise it — and says which action it could not perform."""
+    materialise it, and says which action it could not perform."""
 
     class _WithoutShortcuts:
         """A resolver that resolves, and offers no shortcut creation."""

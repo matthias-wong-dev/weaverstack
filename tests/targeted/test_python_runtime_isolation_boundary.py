@@ -4,18 +4,18 @@ The defect this prevents is silent, which is why it is worth this much test.
 Authored code says ``from lib.dates import parse_date``; two Lakehouses may each
 deploy a ``lib/dates.py``; and Python consults ``sys.modules`` before it searches
 any path. So the second estate's load asks for ``lib.dates``, receives the
-*first* estate's module, and runs to completion with the wrong helper. No
+first estate's module, and runs to completion with the wrong helper. No
 exception, no warning, and results that are wrong in a way nobody would think to
 look for.
 
 What settles it is that the context is part of the key rather than part of the
-search — see :mod:`weaver.runtime.python_context`. These prove that, and prove
+search. See :mod:`weaver.runtime.python_context`. These prove that, and prove
 the ordinary things still work: a module reaches the rest of its own tree, an
 import of something outside the tree is untouched, and a failure says which
 module and which class.
 
 Pure Python and real files. A deployed tree is a directory, so the whole of this
-needs a ``tmp_path`` and nothing else — no session, no Lakehouse, no catalogue.
+needs a ``tmp_path`` and nothing else, no session, no Lakehouse, no catalogue.
 """
 
 from __future__ import annotations
@@ -37,8 +37,8 @@ from weaver.runtime.python_context import (
 def tree(root, stamp: str, **extra: str):
     """A deployed runtime tree that says which estate it came from.
 
-    Both halves of the estate carry the stamp — the helper module and the
-    ``Files/`` object — because a mix-up in either is the same defect.
+    Both halves of the estate carry the stamp, the helper module and the
+    ``Files/`` object, because a mix-up in either is the same defect.
     """
 
     runtime = root / stamp / "Files" / "_" / "Load"
@@ -117,7 +117,7 @@ def test_a_deployed_module_reaches_the_rest_of_its_own_tree(raw):
 @weaver_test()
 def test_a_deployed_folder_module_is_named_for_its_place_in_the_tree(raw):
     """``Files/Sales__Seed.py`` is ``Files.Sales__Seed``, which is how it is
-    imported — naming it otherwise would leave two module objects for one file,
+    imported, naming it otherwise would leave two module objects for one file,
     one of them the object nobody imports."""
 
     module = import_deployed_module(
@@ -131,7 +131,7 @@ def test_a_deployed_folder_module_is_named_for_its_place_in_the_tree(raw):
 def test_an_import_of_something_outside_the_tree_is_untouched(scope, tmp_path):
     """Only names the tree defines are redirected.
 
-    Everything else — ``weaver``, ``pyspark``, the standard library — goes to
+    Everything else, ``weaver``, ``pyspark``, the standard library, goes to
     the ordinary import, so the redirection cannot make an unrelated import mean
     something new.
     """
@@ -197,7 +197,7 @@ def test_the_context_is_part_of_the_key_and_not_only_of_the_search(raw, curated)
     """The claim a ``ContextVar`` could not make.
 
     ``sys.modules`` stays global however the search is scoped, so anything short
-    of a distinct *key* leaves the two estates sharing one entry.
+    of a distinct key leaves the two estates sharing one entry.
     """
 
     _customer(raw)
@@ -213,7 +213,7 @@ def test_the_context_is_part_of_the_key_and_not_only_of_the_search(raw, curated)
 def test_the_authored_names_never_reach_the_global_module_table(raw, curated):
     """A process that loaded two estates has no bare ``lib.dates`` at all.
 
-    Which is what makes the two importable at once — the alternative, deleting
+    Which is what makes the two importable at once, the alternative, deleting
     ``lib.*`` between loads, needs a global lock and forbids parallel dispatch.
     """
 
@@ -332,7 +332,7 @@ def test_a_rebuilt_module_is_executed_by_the_next_run(tmp_path):
     """The regression this lifetime exists for.
 
     A Fabric session outlives a build, and a build rewrites deployed Python *in
-    place* — same target, same path, new implementation. A context that survived
+    place*, same target, same path, new implementation. A context that survived
     between orchestrations would find the old module in ``sys.modules`` and
     never look at the file again, so the load after a rebuild would run the code
     the load before it ran.
@@ -376,7 +376,7 @@ def test_a_rebuilt_module_is_executed_by_the_next_run(tmp_path):
 @weaver_test()
 def test_closing_a_scope_leaves_nothing_of_it_behind(tmp_path):
     """The namespace goes whole, because deciding what may be kept would mean
-    knowing whether a build has rewritten it — which nothing here can see."""
+    knowing whether a build has rewritten it, which nothing here can see."""
 
     with RuntimeScope.new() as scope:
         context = scope.context_for(
@@ -416,7 +416,7 @@ def test_two_runs_never_share_a_context_identity(tmp_path):
 def test_a_context_identity_is_opaque_rather_than_derived_from_weaver_names(raw):
     """Deriving it from Weaver names means normalising them, and normalisation
     is not injective: two distinct valid identities could reduce to one Python
-    package and then quietly share modules. A UUID cannot."""
+    package and then share modules. A UUID cannot."""
 
     assert raw.context_id.startswith("c")
     assert "raw" not in raw.context_id.lower()

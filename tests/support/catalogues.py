@@ -5,7 +5,7 @@ the ``_`` schema holds them. Not a fake: an object anchored to one of these
 resolves its identity and reads its bookmark exactly as it does in a run, so what
 is under test is the object rather than a stand-in.
 
-The round trip — a clean load writing a row, and a later load reading it back —
+The round trip, a clean load writing a row, and a later load reading it back,
 needs a Warehouse, so it is proved where there is one.
 """
 
@@ -31,7 +31,7 @@ class Recording:
     """A catalogue writer that keeps what it was given.
 
     Stands where a Warehouse would, so a test can assert what a load recorded
-    without one — and can be made to fail, which is the other thing worth
+    without one, and can be made to fail, which is the other thing worth
     proving about a write.
     """
 
@@ -74,7 +74,7 @@ def installed(
     object no clean load has run for has.
 
     ``files`` says the objects are Folders, whose catalogue identity carries the
-    ``Files/`` prefix — a Folder and a Table of the same name are two objects.
+    ``Files/`` prefix, a Folder and a Table of the same name are two objects.
     """
 
     owner = WeaverItemId.parse(item)

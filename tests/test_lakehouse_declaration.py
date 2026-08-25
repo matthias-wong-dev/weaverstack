@@ -1,4 +1,4 @@
-"""One resolved Lakehouse — the destination half of an authored object's binding."""
+"""One resolved Lakehouse, the destination half of an authored object's binding."""
 
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ def test_a_folder_in_onelake_is_addressed_through_a_mount(monkeypatch):
     """A Folder's authored code is ordinary Python, and `open()` cannot read a URL.
 
     So the same bytes are presented as a filesystem path: Weaver mounts the root
-    it resolved — not the attachment — and a write through the mount lands in
+    it resolved, not the attachment, and a write through the mount lands in
     OneLake with nothing copied.
     """
 
@@ -129,7 +129,7 @@ def test_the_mount_caches_nothing(monkeypatch):
     """The repair for a mount that disagrees with the storage behind it.
 
     Weaver reaches one Files area two ways, and changes made through the other
-    one — a DFS wipe, a shortcut created by REST — have to be visible here
+    one, a DFS wipe, a shortcut created by REST, have to be visible here
     immediately. With caching on they are not, and the symptom is a listing that
     still holds entries the storage no longer has.
     """
@@ -218,7 +218,7 @@ def test_a_root_that_is_not_onelake_is_refused():
 
 @weaver_test()
 def test_a_path_segment_that_escaped_its_parent_is_refused():
-    """The same guard the resolved locations apply — these strings become paths."""
+    """The same guard the resolved locations apply: these strings become paths."""
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
@@ -231,7 +231,7 @@ def test_a_path_segment_that_escaped_its_parent_is_refused():
 
 @weaver_test()
 def test_a_lakehouse_with_no_destination_will_not_name_an_object():
-    """A bare Schema.Object resolves through whatever is attached — the anti-pattern."""
+    """A bare Schema.Object resolves through whatever is attached, the anti-pattern."""
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
@@ -289,7 +289,7 @@ def test_the_resolved_roots_agree_with_the_resolvers_own_arithmetic(tmp_path: Pa
 
     Spark writes through ``abfss://`` and the store lists through the DFS
     ``https://`` endpoint. Both address the same object, and they are not the
-    same string — conflating them would have a write going through a transport
+    same string, conflating them would have a write going through a transport
     that cannot perform it.
     """
 
@@ -316,7 +316,7 @@ def test_a_folder_path_agrees_with_the_resolvers_staging_sibling(tmp_path: Path)
     target = FolderTarget(lakehouse=ItemRef("Sales_LH"))
 
     # A Folder's files are reached as a filesystem, which outside a Fabric
-    # session there is no way to do — so what agrees here is the *address*.
+    # session there is no way to do, so what agrees here is the address.
     assert lakehouse.location.folder_path("Sales", "Export").endswith(
         "/Files/Sales/Export"
     )

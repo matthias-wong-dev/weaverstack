@@ -67,7 +67,7 @@ class LoadContract:
 
         Only an incremental keyed load with unique keys. A non-incremental load
         reconciles the whole target against clean staging, so the target it
-        leaves *is* staging and staging has already been made unique; an
+        leaves is staging and staging has already been made unique; an
         incremental load changes part of a target it cannot see the rest of.
         """
 
@@ -86,7 +86,7 @@ class LoadContract:
 
         The comparison is the one :meth:`breaches` makes, moved across the
         division and held at the smallest target it can act on. It decides only
-        whether to ask; what a breach *is* stays there.
+        whether to ask; what a breach is stays there.
         """
 
         if self.replaces_wholesale:
@@ -217,9 +217,9 @@ def normalise_read_result(returned):
 #: is read by people, so a Warehouse reject and a Delta reject for the same
 #: problem say the same thing.
 #:
-#: All four describe a *recoverable* problem with one incoming row. A load that
+#: All four describe a recoverable problem with one incoming row. A load that
 #: would leave the target itself invalid is a different matter and fails outright
-#: — see :attr:`LoadContract.checks_merge_uniqueness`.
+#:. See :attr:`LoadContract.checks_merge_uniqueness`.
 REASON_BLANK_PK = "blank_primary_key"
 REASON_DUPLICATE_PK = "duplicate_primary_key"
 REASON_NULL_COLUMN = "null_column"

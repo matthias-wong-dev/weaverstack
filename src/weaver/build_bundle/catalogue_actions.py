@@ -40,7 +40,7 @@ def collect_claims(
     Two sources, and they are symmetric: claims reconciliation already disproved
     against the inventory, and claims held by the objects this build is about to
     drop or remove. Both are passed in rather than one being read off the
-    catalogue, because a catalogue describes what is claimed — not which of those
+    catalogue, because a catalogue describes what is claimed, not which of those
     claims some earlier step decided were wrong.
     """
 
@@ -170,7 +170,7 @@ def _with_installation_rows(desired: Catalogue, installation) -> Catalogue:
 
     A repository-derived catalogue cannot know them and must not invent them:
     which physical target an item is bound to, and which Weaver published it, are
-    facts about *this build*, not about the source. They are folded in here so
+    facts about this build, not about the source. They are folded in here so
     the diff compares complete rows against complete rows.
     """
 
@@ -193,15 +193,15 @@ def desired_catalogue(
 ) -> Catalogue:
     """The catalogue state a successful build of ``selected_ids`` would leave.
 
-    Logical, then narrowed, then bound — in that order and visibly so. The
+    Logical, then narrowed, then bound, in that order and visibly so. The
     narrowing is what keeps a Registry row meaning "this succeeded"; the binding
     is what lets a shortcut be certified as the thing it physically is, and what
     supplies the Installation facts a repository cannot know.
 
-    Named and separate because it is *both* halves of the fixed point. It is what
+    Named and separate because it is both halves of the fixed point. It is what
     publication compares the persisted catalogue against, and it is therefore
-    exactly what the catalogue should already contain when nothing has changed —
-    so a test can feed it back as the current state and hold the build to
+    exactly what the catalogue should already contain when nothing has changed, so
+    a test can feed it back as the current state and hold the build to
     producing nothing, without restating any of this arithmetic itself.
     """
 
@@ -254,7 +254,7 @@ def render_catalogue_after_build(
     # appends nothing here.
     publication = publish(current or Catalogue(rows={}), desired)
 
-    # Registry last, in its own barrier — taken from the structure rather than
+    # Registry last, in its own barrier. Taken from the structure rather than
     # recovered from the SQL, so the ordering invariant is carried by the type
     # instead of by a string match.
     catalogue_statements: list[str] = [

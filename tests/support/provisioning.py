@@ -1,7 +1,7 @@
 """What the harness spends standing an estate up, measured rather than inferred.
 
-Provisioning an estate — staging the repository, generating a bundle, installing
-it — is the largest single cost in the Fabric suite, and it happens in fixtures.
+Provisioning an estate, staging the repository, generating a bundle, installing
+it, is the largest single cost in the Fabric suite, and it happens in fixtures.
 Before this it was visible only as wall-clock time nobody attributed, so an
 argument about reducing it had nothing but arithmetic behind it.
 

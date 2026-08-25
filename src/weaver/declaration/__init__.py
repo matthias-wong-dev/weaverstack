@@ -1,4 +1,4 @@
-"""Weaver document policy — the contract an authored object must satisfy."""
+"""Weaver document policy, the contract an authored object must satisfy."""
 
 from __future__ import annotations
 

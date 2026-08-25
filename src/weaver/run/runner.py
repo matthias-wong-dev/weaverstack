@@ -90,7 +90,7 @@ class RunRequest:
             raise CommandError(f"{self.kind} needs at least one target")
         if self.name is not None and self.file is not None:
             raise CommandError(
-                "a run selects name= or file=, not both — one names something "
+                "a run selects name= or file=, not both. One names something "
                 "the estate has and the other something it may not"
             )
         if self.kind == LOAD and (self.name is not None or self.file is not None):

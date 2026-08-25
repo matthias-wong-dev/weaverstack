@@ -1,6 +1,6 @@
 """An anchored object, inside Fabric, and the record it keeps of itself.
 
-The core suite proves what anchoring *decides* against a constructed catalogue.
+The core suite proves what anchoring decides against a constructed catalogue.
 What it cannot prove is the part that only exists in a workspace: that a name
 resolves through the real ``_.Installation`` and ``_.Registry``, that a load's
 bookmark reaches the catalogue Warehouse, and that the Lakehouse's own reference
@@ -10,7 +10,7 @@ to each of the catalogue's runtime tables resolves in Spark.
 object is constructed and loaded by authored code running in Fabric, the way a
 developer in a notebook constructs and loads one.
 
-One submission, one evidence payload — one for the anchored objects' own lives,
+One submission, one evidence payload. One for the anchored objects' own lives,
 a loadable and a validation together, and one for the references, which need a
 build of their own to exist.
 """
@@ -73,8 +73,8 @@ results["persisted"] = second.bookmark().isoformat()
 #
 # Loaded by path: a compiled validation lands under `tests/` in the deployed
 # tree, so the import root alone does not name it, and `tests` is not a package
-# name worth claiming inside a Spark driver. What it imports in turn — the object
-# modules it was authored against — resolves through the root, which is on the
+# name worth claiming inside a Spark driver. What it imports in turn, the object
+# modules it was authored against, resolves through the root, which is on the
 # path already.
 import importlib.util
 
@@ -146,7 +146,7 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
     assert "cannot read its bookmark or record one" in seen["freestanding_bookmark"]
     assert "cannot read its bookmark or record one" in seen["freestanding_load"]
 
-    # Anchored, and the identity is the Registry's — the *item* that declared the
+    # Anchored, and the identity is the Registry's, the item that declared the
     # folder, under its files identity, rather than the Lakehouse it was built into.
     assert seen["identity"].endswith("/Files/Raw.CustomerCsv")
 
@@ -165,7 +165,7 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
     # Internal values, because this read the rows back through a `Catalogue`:
     # the public sentence-case spellings exist at the persistence boundary and
     # nothing above it sees them. A reader selecting from the view gets
-    # `Succeeded` — see ``tests/fabric/test_warehouse_load_primitive.py``.
+    # `Succeeded`. See ``tests/fabric/test_warehouse_load_primitive.py``.
     assert seen["status"] == ["succeeded"]
     assert seen["statistics"] and seen["statistics"][0][1] is False
 
@@ -208,7 +208,7 @@ def test_one_build_installs_the_lakehouse_references_and_the_next_plans_none(
 ):
     """One pass, and the shortcuts it ends with.
 
-    This estate's own build created the catalogue tables and pointed at them —
+    This estate's own build created the catalogue tables and pointed at them,
     the item graph orders the two, and the source wait carries the moment between
     Fabric creating a Warehouse table and publishing it to OneLake. So the build
     here has nothing left to do, and Spark reads each runtime table in the

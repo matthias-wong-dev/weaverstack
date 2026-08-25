@@ -73,7 +73,7 @@ def test_unbind_executes_only_catalogue_dml_without_a_physical_target_client():
 # --- what an unbind costs -----------------------------------------------------
 #
 # A DELETE is a Delta transaction that rewrites files, and it costs seconds
-# whether it removes one row or a thousand. So the statement *count* is the
+# whether it removes one row or a thousand. So the statement count is the
 # cost, and against a real Fabric workspace it was the largest single thing in
 # the development loop: a wipe of the Weaver Example estate spent about 105
 # seconds in one Livy call, almost all of it transaction overhead on thirty-odd
@@ -105,8 +105,8 @@ def test_every_installation_is_removed_in_one_pass_over_the_tables():
 
 @weaver_test()
 def test_the_combined_delete_names_every_installation_and_no_others():
-    """The predicate is a *bounded* address. `WHERE` with no predicate — or one
-    that reassociates — is every row in the catalogue."""
+    """The predicate is a bounded address. `WHERE` with no predicate, or one
+    that reassociates, is every row in the catalogue."""
 
     from weaver.catalogue.reconcile import prune_installation
     from weaver.catalogue.render import InstallationScope, InstallationScopes

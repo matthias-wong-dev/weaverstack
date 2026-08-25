@@ -1,17 +1,17 @@
 """What a build writes to the catalogue, before and after its physical work.
 
-Two renderings, both pure. The *before* stage removes claims: the ones
+Two renderings, both pure. The before stage removes claims: the ones
 reconciliation disproved, and the ones held by objects this build is about to
-drop. The *after* stage publishes what the build now certifies.
+drop. The after stage publishes what the build now certifies.
 
 Neither needs a session. The old Fabric tests reached these by installing an
 estate and reading the catalogue back, which meant a claim about statement
-*ordering* was paid for with a full build and could fail for any reason a build
+ordering was paid for with a full build and could fail for any reason a build
 can fail.
 
 The ordering is the strict invariant here and most of what is asserted: the
-dictionaries describe, Installation records the binding, and Registry certifies
-— so Registry is written last, and a row in it can never outrun the work it
+dictionaries describe, Installation records the binding, and Registry certifies,
+so Registry is written last and a row in it can never outrun the work it
 attests to.
 """
 
@@ -62,7 +62,7 @@ def after(repository, *names, current=None):
 
     ``current`` is what the catalogue already holds. It is the difference
     against that state which decides what gets written, so a test asserting a
-    delete has to say what there was to delete — a build against a catalogue
+    delete has to say what there was to delete, a build against a catalogue
     holding nothing has nothing to remove, however little it certifies.
     """
 
@@ -235,7 +235,7 @@ def test_publication_ends_with_the_registry_and_nothing_after_it(repository):
 def test_a_build_certifying_nothing_removes_what_the_catalogue_still_claims(
     repository,
 ):
-    """Not "nothing to publish, nothing to do" — the opposite.
+    """Not "nothing to publish, nothing to do", the opposite.
 
     Projecting no rows for a scope means everything persisted under it is
     obsolete, so the build must say so. Skipping it would leave the catalogue
@@ -274,10 +274,10 @@ def test_a_build_certifying_nothing_removes_what_the_catalogue_still_claims(
 def test_a_build_certifying_nothing_against_an_empty_catalogue_removes_nothing(
     repository,
 ):
-    """The other side of it, and the whole point of the diff.
+    """The other side of it, and what the diff is for.
 
     A delete is emitted because rows exist that the desired state no longer
-    claims — never merely because a table was considered. With nothing
+    claims, never because a table was considered. With nothing
     persisted there is nothing to remove, and the build says nothing.
     """
 
@@ -293,7 +293,7 @@ def test_every_published_statement_is_scoped_to_its_item(repository):
     """The reach of a build's catalogue work is bounded by construction.
 
     Every statement carries the item scope, so a build cannot touch another
-    item's rows even by mistake — which matters because the catalogue is keyed
+    item's rows even by mistake, which matters because the catalogue is keyed
     by logical item and two estates can share one.
     """
 
@@ -305,7 +305,7 @@ def test_every_published_statement_is_scoped_to_its_item(repository):
 
 @weaver_test()
 def test_the_publication_epoch_stays_a_token(repository):
-    """Rendered at install, not at plan time — and the bundle's identity is its
+    """Rendered at install, not at plan time, and the bundle's identity is its
     bytes, so a clock in a payload would make every build differ.
 
     It also has to be one value across the whole installation, which a token

@@ -1,13 +1,13 @@
 """What a OneLake mount does, asked of Fabric rather than of Weaver.
 
 This is a ``remote`` Fabric test, not a ``hosted`` one, and the distinction is
-the point. Nothing here imports the installed package — it asks the *platform*
+the point. Nothing here imports the installed package. It asks the platform
 what a mount is, which needs a session and nothing else. So it runs in the fast
 loop, with no Environment publication in front of it.
 
 That matters because the mount is what broke. A Folder's authored code writes
 ordinary files, and ``folder_path()`` was handing it an ``abfss://`` URL that
-``pathlib`` cannot parse — so on Fabric the files went into a local directory
+``pathlib`` cannot parse, so on Fabric the files went into a local directory
 literally named ``abfss:/…``, the load reported success, and the table that read
 them failed. The behaviour that settles it is entirely Fabric's:
 
@@ -42,7 +42,7 @@ target.mkdir(parents=True, exist_ok=True)
 (target / "hello.txt").write_text("written with pathlib", encoding="utf-8")
 out["read_back"] = (target / "hello.txt").read_text(encoding="utf-8")
 
-# And it is the same bytes at the abfss address — a view, not a copy.
+# And it is the same bytes at the abfss address, a view, not a copy.
 out["seen_via_abfss"] = [
     f.name for f in notebookutils.fs.ls(ROOT + "/Files/weaver_mount_probe/nested")
 ]
@@ -58,7 +58,7 @@ def test_a_mount_makes_onelake_addressable_by_ordinary_python(
 ):
     """The contract a Folder load depends on, asked of the platform directly.
 
-    Weaver mounts a root it *resolved by name*, so this works detached — it is
+    Weaver mounts a root it resolved by name, so this works detached. It is
     not ``/lakehouse/default``, which only ever names whatever a notebook
     attached and could never serve an orchestrator loading somewhere else.
     """
@@ -69,7 +69,7 @@ def test_a_mount_makes_onelake_addressable_by_ordinary_python(
 
     seen = livy_session.run(f"ROOT = {root!r}\n{MOUNT_CONTRACT}").payload
 
-    # A POSIX path, so pathlib and open() work — which is what a Folder needs.
+    # A POSIX path, so pathlib and open() work, which is what a Folder needs.
     assert seen["local_path"].startswith("/synfs/")
     assert seen["read_back"] == "written with pathlib"
     # The same bytes at the abfss address: a view of OneLake, not a copy of it.
@@ -79,10 +79,10 @@ def test_a_mount_makes_onelake_addressable_by_ordinary_python(
     assert seen["scopes"] == ["job"]
 
 
-#: The second contract, and the one that cost a defect. A mount is a *view* of
+#: The second contract, and the one that cost a defect. A mount is a view of
 #: remote storage, and a view can be stale: Weaver reaches one Files area two
-#: ways — ``abfss://`` over DFS for storage work, the mount for authored Python
-#: — so anything that changes OneLake outside the mount has to be visible
+#: ways, ``abfss://`` over DFS for storage work, the mount for authored Python
+#:, so anything that changes OneLake outside the mount has to be visible
 #: through it. With caching on it is not, and the symptom is a listing that
 #: still holds entries the storage no longer has: ``shutil.rmtree`` deletes what
 #: it was told about and then fails to remove the directory, as ``ENOTEMPTY``.
@@ -109,7 +109,7 @@ import notebookutils, shutil, time
 from pathlib import Path
 
 out = {}
-# The same mount, in the same session — not remounted. Fabric refuses a second
+# The same mount, in the same session, not remounted. Fabric refuses a second
 # mount of one point, so this is the state a real load meets.
 local = Path(notebookutils.fs.getMountPath(POINT))
 staging = local / "Files" / PROBE / "CustomerCsv_Staging"
@@ -121,7 +121,7 @@ staging = local / "Files" / PROBE / "CustomerCsv_Staging"
 out["exists_after_wipe"] = staging.exists()
 out["listed_after_wipe"] = sorted(p.name for p in staging.iterdir()) if staging.exists() else None
 
-# The reset a folder load performs, verbatim from `reset_staging` — inlined
+# The reset a folder load performs, verbatim from `reset_staging`, inlined
 # because the Environment carries the published wheel, which may predate the
 # change under test. This is the operation that failed with ENOTEMPTY.
 def with_retry(action, attempts=RESET_ATTEMPTS, pause=RESET_PAUSE):
@@ -151,11 +151,11 @@ def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
 ):
     """The mount-coherence repair, proved where it is the only place it fails.
 
-    One Livy session spans the whole thing deliberately: the defect needs a
+    One Livy session spans the whole thing: the defect needs a
     mount that outlives a change made outside it, and a test that remounted
     between the two halves would prove nothing. The wipe goes over DFS from
     here, which is exactly how ``weaver wipe`` reaches a Lakehouse from a
-    desktop — and then the session, holding the same mount, must both see the
+    desktop, and then the session, holding the same mount, must both see the
     removal and be able to reset the directory over it.
     """
 
@@ -177,15 +177,15 @@ def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
     assert before["before"] == ["customers.csv"]
 
     # Outside the mount, and outside the session: the desktop's own transport.
-    # The location is resolved rather than composed — a DFS client addresses
-    # OneLake by URL, and an item by *id*, not by the name a person types.
+    # The location is resolved rather than composed, a DFS client addresses
+    # OneLake by URL, and an item by id, not by the name a person types.
     dfs = OneLakeDfsClient()
     staged = resolver.files_root(ItemRef(item.name)) / probe / "CustomerCsv_Staging"
     dfs.delete(staged, recursive=True)
 
     after = livy_session.run(preamble + MOUNT_AFTER_WIPE).payload
 
-    # The claim, and it is about the *outcome* rather than about any listing on
+    # The claim, and it is about the outcome rather than about any listing on
     # the way to it. Before the repair this was
     # `OSError: [Errno 39] Directory not empty`.
     assert after["reset"] == "ok", after["reset"]
@@ -197,7 +197,7 @@ def test_a_zero_cache_mount_sees_a_dfs_wipe_made_behind_it(
     # Fabric's behaviour and not Weaver's, and because getting them wrong is
     # what the retry exists for.
     #
-    # A directory whose storage is gone still answers `exists()` — so a reset
+    # A directory whose storage is gone still answers `exists()`, so a reset
     # cannot decide there is nothing to remove and skip straight to `mkdir`.
     assert after["exists_after_wipe"] is True
     # And the listing is eventually consistent, not immediately: it may still

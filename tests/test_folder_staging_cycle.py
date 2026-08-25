@@ -7,14 +7,14 @@ The lifecycle is short and every step of it is load-bearing:
     reset the fixed staging directory
     issue exactly one StagingFolder
     run read()
-    require *that* object back
+    require that object back
     publish from it
     remove it on success, keep it on failure
     clear the issued reference
 
 What each step prevents is asserted here rather than described. The two that
-carry the most weight are the reset — without it the previous run's files are
-published again and a replacement concludes nothing was retired — and the
+carry the most weight are the reset, without it the previous run's files are
+published again and a replacement concludes nothing was retired, and the
 identity check, because a returned copy would have Weaver publish a directory it
 never emptied.
 
@@ -50,7 +50,7 @@ Incremental: false
 
 
 class Sales__Export(Folder):
-    """The object under test. Its module docstring is *this* file's, so the
+    """The object under test. Its module docstring is this file's, so the
     contract is attached explicitly below rather than parsed from it."""
 
     files: dict = {}
@@ -279,7 +279,7 @@ def test_returning_a_string_is_refused(export):
 def test_returning_another_staging_folder_of_the_same_path_is_refused(export):
     """Equality is not the contract; identity is.
 
-    A copy addresses the same directory, so publishing from it would *work* —
+    A copy addresses the same directory, so publishing from it would work,
     which is exactly why the check has to be stricter than it looks. What the
     identity proves is that the object came from the call that reset the
     directory, and a reconstructed one proves nothing at all.
@@ -449,7 +449,7 @@ def test_a_second_load_is_never_handed_the_first_ones_directory(export):
 # Zero-cache mounting is the real repair for a mount that disagrees with the
 # storage behind it. This is the defensive half: even with nothing cached, the
 # mount fronts object storage rather than a local disk, so a removal can meet an
-# entry that is already gone — and the same call a moment later succeeds.
+# entry that is already gone, and the same call a moment later succeeds.
 
 
 @pytest.fixture
@@ -505,7 +505,7 @@ def test_a_transient_cleanup_failure_does_not_fail_a_published_load(export, flak
     """The load already succeeded; what remains is tidying.
 
     A retry gives the storage a moment to agree, and the same bounded policy
-    applies — an unbounded one would turn a published load into a hang.
+    applies, an unbounded one would turn a published load into a hang.
     """
 
     export.files = {"a.csv": "x"}

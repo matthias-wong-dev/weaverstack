@@ -1,17 +1,17 @@
 """Azure tokens for Fabric, OneLake and SQL.
 
 Core does **not** decide which credential to use. It accepts an injected
-credential and, absent one, falls back to ``DefaultAzureCredential`` — the
-library default — without pinning the chain. Choosing a specific identity is a
-caller's policy, not the core's.
+credential and, absent one, falls back to the library default,
+``DefaultAzureCredential``, without pinning the chain. Choosing a specific
+identity is a caller's policy, not the core's.
 
 That policy matters in practice: ``DefaultAzureCredential`` walks a chain and
 does not always settle on the identity you are signed in as, so on a machine
 where ``az`` works a OneLake write can still fail
 ``401 Access token validation failed``. ``azure-identity`` 1.23 honours
 ``AZURE_TOKEN_CREDENTIALS`` to pin the chain, and :func:`prefer_cli_credential`
-sets it to ``AzureCliCredential`` — but a **caller** invokes that (the desktop
-CLI does; the Fabric test infrastructure does). Core never sets it as a side
+sets it to ``AzureCliCredential``. A caller invokes that: the desktop CLI does,
+and so does the Fabric test infrastructure. Core never sets it as a side
 effect of asking for a token.
 """
 
@@ -34,8 +34,8 @@ DEFAULT_CREDENTIAL = "AzureCliCredential"
 def prefer_cli_credential() -> str:
     """Pin the credential chain to the Azure CLI, unless already chosen.
 
-    Policy, so a **caller** invokes it — the desktop CLI before a Fabric
-    command, the test infrastructure before the Fabric suite. Core never calls
+    Policy, so a caller invokes it: the desktop CLI before a Fabric command, the
+    test infrastructure before the Fabric suite. Core never calls
     it, so importing or using the core imposes no credential choice.
     """
 
@@ -54,8 +54,8 @@ def checked_credential(supplied):
     credential from a library Weaver does not import. What every one of them
     must have is a callable ``get_token``.
 
-    Checked where it is *supplied* rather than where it is first used, because
-    a Session acquires its token lazily — so a wrong object handed to
+    Checked where it is supplied rather than where it is first used, because
+    a Session acquires its token lazily, so a wrong object handed to
     ``weaver.session()`` would otherwise surface much later, during whichever
     operation happened to reach Fabric first.
     """
@@ -83,7 +83,7 @@ def get_token(scope: str, cred=None) -> str:
     """An access token for one scope, from an injected credential or the default.
 
     Answers the string and drops the expiry, which suits a one-shot command and
-    nothing that outlives one. Anything long-lived wants :class:`TokenProvider`.
+    nothing that outlives one. Anything long-lived needs :class:`TokenProvider`.
     """
 
     return (cred or credential()).get_token(scope).token
@@ -97,7 +97,7 @@ TOKEN_REFRESH_MARGIN_SECONDS = 300.0
 class TokenProvider:
     """A token for one scope, renewed shortly before it expires.
 
-    Holding the token *string* is a bug that only appears in long runs.
+    Holding the token string is a bug that only appears in long runs.
     ``AzureCliCredential`` serves from the Azure CLI's own cache, so an arriving
     token may already be most of the way through its life: the usable budget is
     not the nominal lifetime, and a snapshotted token starts answering ``401``
@@ -145,7 +145,7 @@ def token_source(token=None, *, scope: str, cred=None):
     """Normalise what a caller supplied into a zero-argument token source.
 
     ``None`` builds a renewing :class:`TokenProvider`. A **string** is honoured
-    exactly as given — the caller owns it and its lifetime, which is how a Fabric
+    exactly as given, so the caller owns it and its lifetime, which is how a Fabric
     session passes on the identity it was handed. A **callable** is used as-is,
     so a caller with its own refresh keeps it.
     """

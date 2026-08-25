@@ -1,8 +1,8 @@
-"""What the *installed package* has to prove, and nothing more.
+"""What the installed package has to prove, and nothing more.
 
 Weaver's executors are one implementation. What differs between a desktop run and
 a notebook is how they get their capabilities. Prove that once per capability and
-every feature stops having to re-prove it — which is what lets the rest of
+every feature stops having to re-prove it, which is what lets the rest of
 `tests/fabric` drive real Fabric from the checkout, and lets the ordinary
 development loop run without publishing anything.
 
@@ -12,14 +12,14 @@ implementation, different acquisition" is true of only half of it:
 ``SQL``       same executor; a desktop injects one, `sql_for` opens one on the
               session identity
 ``Spark``     same executors; the session supplies its own catalogue
-``store``     *different classes*. `OneLakeDfsClient` is how a desktop crosses
+``store``     different classes. `OneLakeDfsClient` is how a desktop crosses
               into OneLake; `store_for` in a session returns `FabricStore` over
               `notebookutils.fs`
-``resolution`` *different classes*. A desktop resolves over REST with
+``resolution`` different classes. A desktop resolves over REST with
               `DefaultAzureCredential`; a session has no CLI, no IMDS and no
               environment variables, so that construction simply fails there.
               `resolver_for` returns a `FabricSessionResolver` backed by
-              `notebookutils`, reaching REST — for a SQL endpoint, a shortcut —
+              `notebookutils`, reaching REST, for a SQL endpoint, a shortcut,
               through a `notebookutils.credentials` token
 
 The second pair matters more, because for them a desktop test proves a *different
@@ -60,7 +60,7 @@ def _checkout_version() -> str:
 
 
 def warehouse_target(warehouse) -> ResolvedTarget:
-    """A Warehouse resolves to no Spark address at all — it is reached over TDS."""
+    """A Warehouse resolves to no Spark address at all: it is reached over TDS."""
 
     from factories import bound_target
 
@@ -120,15 +120,15 @@ def test_the_installed_package_imports_and_reports_a_version(
 
     assert wanted in published, (
         f"this checkout is weaverstack {wanted}, but the Environment has "
-        f"published {sorted(published)} — run `weaver fabric environment publish`"
+        f"published {sorted(published)}. Run `weaver fabric environment publish`"
     )
 
     assert payload["dist"] in published, (
         f"this Fabric session is running weaverstack {payload['dist']}, but the "
         f"Environment has published {sorted(published)}. A publish reports "
-        "Success before new sessions are served the new image — wait for it "
+        "Success before new sessions are served the new image, wait for it "
         "rather than publishing again, and only rerun `weaver fabric environment publish` if the "
-        "published set is genuinely not this checkout's."
+        "published set is not this checkout's."
     )
 
 
@@ -146,14 +146,14 @@ def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
     fabric_staging_lakehouse,
     clean_disposable_warehouse,
 ):
-    """Resolution in a session is a *different class*, not a different credential.
+    """Resolution in a session is a different class, not a different credential.
 
     Writing this probe corrected the model it was meant to confirm. A desktop
     resolves over REST with `FabricClient` and `DefaultAzureCredential`; a session
     has no CLI, no IMDS and no environment variables, so that construction simply
     fails there. `resolver_for` returns a `FabricSessionResolver` backed by
-    `notebookutils` instead, and reaches REST — where it must, as for a SQL
-    endpoint — through a token from `notebookutils.credentials`.
+    `notebookutils` instead, and reaches REST, where it must, as for a SQL
+    endpoint, through a token from `notebookutils.credentials`.
 
     So this belongs with the store rather than with SQL and Spark: two of the
     four capabilities are the same implementation acquired differently, and two
@@ -180,7 +180,7 @@ def test_the_session_resolver_reaches_rest_on_the_sessions_own_identity(
     ).payload
 
     # Named, so a regression to the desktop resolver would be loud rather than
-    # quietly passing on a credential this process happens to have.
+    # passing on a credential this process happens to have.
     assert payload["kind"] == "FabricSessionResolver"
     assert payload["root"]
     assert payload["endpoint"], "the session could not reach REST on its own identity"
@@ -194,7 +194,7 @@ def test_a_sql_executor_is_acquired_from_the_session_and_runs(
 
     Only a desktop caller injects `desktop_sql_executor`; in a session the
     installed package must reach the Warehouse itself. Everything the T-SQL
-    executors *do* is proven from the checkout in the Warehouse primitive modules.
+    executors do is proven from the checkout in the Warehouse primitive modules.
     """
 
     warehouse = clean_disposable_warehouse
@@ -225,7 +225,7 @@ def test_a_spark_executor_runs_one_action_in_the_session(
 ):
     """One real action, through the real executor, on the session's own Spark.
 
-    Not what the statement says — that is checked from the checkout and on local
+    Not what the statement says. That is checked from the checkout and on local
     Spark. What only the wheel can answer is that an installed executor, given a
     context the installed package assembled, reaches the session's catalogue at
     all.
@@ -260,7 +260,7 @@ def test_a_spark_executor_runs_one_action_in_the_session(
         "resource_node_id=None, executor='spark_sql', payload='p.spark.sql', "
         "payload_sha256=None)\n"
         # The statement is created without IF NOT EXISTS, so the probe starts
-        # from nothing and clears up after itself — it must run twice.
+        # from nothing and clears up after itself. It must run twice.
         "spark.sql('DROP SCHEMA IF EXISTS ' + "
         "target.destination.qualified_schema('Parity') + ' CASCADE')\n"
         "statement = target.destination.create_schema_statement("
@@ -284,14 +284,14 @@ def test_a_spark_executor_runs_one_action_in_the_session(
 def test_the_session_native_store_reads_back_what_it_wrote(
     livy_session, fabric_workspace, fabric_target_lakehouse, fabric_staging_lakehouse
 ):
-    """`FabricStore` over `notebookutils.fs` — a different class, not a different
+    """`FabricStore` over `notebookutils.fs`, a different class, not a different
     credential.
 
     This is the capability the parity argument is weakest about, and the reason
-    it gets its own probe. `OneLakeDfsClient` is how a *desktop* crosses into
+    it gets its own probe. `OneLakeDfsClient` is how a desktop crosses into
     OneLake; `store_for(Workspace)` inside a session returns something
     else entirely. Exercising the DFS client from the checkout says nothing about
-    whether the session-native one writes, lists and deletes the same way — and
+    whether the session-native one writes, lists and deletes the same way, and
     the folder executor and the Files-area shortcut both go through it.
     """
 
@@ -354,7 +354,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     connection this process opened.
 
     The same body reads the inventory back Fabric-natively, so one call answers
-    both — did the install work, and does an in-session read agree with the
+    both, did the install work, and does an in-session read agree with the
     desktop read the tests above rely on.
     """
 
@@ -370,8 +370,8 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     warehouse = clean_disposable_warehouse
 
     # This test installs from nothing, so it starts from nothing. The Warehouse
-    # is emptied per *module*, and the estate fixture above has already built
-    # into it — without this the install would be asked to create a table that
+    # is emptied per module, and the estate fixture above has already built
+    # into it, without this the install would be asked to create a table that
     # exists, and the test would fail for a reason that is not its subject.
     # Found by exactly that: it passed alone and failed in the suite.
     wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
@@ -406,7 +406,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
     )
     read_warehouse_inventory(warehouse_target(warehouse).bound, sql=warehouse.executor)
     item = item_id(ITEM)
-    # Each item's inventory must carry *its own* bound target id — the planner
+    # Each item's inventory must carry its own bound target id, the planner
     # checks that pairing, and the control item's id is nothing like the
     # Warehouse's. Deriving it from the binding rather than defaulting is the
     # difference between a prepared inventory and a plausible-looking one.
@@ -419,7 +419,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
             )
         else:
             # The catalogue, read for real over TDS from here. An empty
-            # inventory would be a lie rather than a simplification — its
+            # inventory would be a lie rather than a simplification, its
             # tables are already there, and claiming otherwise makes the planner
             # emit creates the session then rejects.
             inventories[binding.item] = read_warehouse_inventory(
@@ -432,7 +432,7 @@ def test_a_locally_generated_bundle_installs_inside_fabric(
         store=store,
         target_inventories=inventories,
         # The control item's own catalogue documents are already installed, so
-        # the catalogue must say so — otherwise they look new, the build tries to
+        # the catalogue must say so, otherwise they look new, the build tries to
         # create them again, and the session rejects tables that exist. Nothing
         # is certified for the Warehouse item, which is what makes it build.
         catalogue=FixtureCatalogue.from_repository(

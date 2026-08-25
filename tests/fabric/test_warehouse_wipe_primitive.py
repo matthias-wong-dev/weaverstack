@@ -1,4 +1,4 @@
-"""Wiping a real Warehouse: populate, wipe, verify — all over TDS.
+"""Wiping a real Warehouse: populate, wipe, verify: all over TDS.
 
 A Warehouse is reached over TDS, and `wipe_sql_target` takes its SQL executor as
 an argument. So none of this needs a Livy session: the production implementation
@@ -60,7 +60,7 @@ def test_weaver_wipes_a_populated_warehouse(
     from weaver.physical_wipe import wipe_sql_target
 
     started = time.monotonic()
-    # The production implementation, given the SQL executor explicitly — which is
+    # The production implementation, given the SQL executor explicitly, which is
     # the only thing a session would have supplied differently.
     wipe_sql_target(warehouse.target, warehouse.workspace, sql=warehouse.executor)
     warehouse.timings["wipe execution"] = time.monotonic() - started

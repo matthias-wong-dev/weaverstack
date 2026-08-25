@@ -62,8 +62,8 @@ def dispatch_primitive(
 def _validation(node, session, workspace, open_runtime, collect: bool):
     """One installed Test or Assumption, run where it is installed.
 
-    Delegated rather than reimplemented: what a validation *means* — comparing
-    two sides, counting violations, deciding what a discrepancy is — belongs to
+    Delegated rather than reimplemented: what a validation means, comparing
+    two sides, counting violations, deciding what a discrepancy is, belongs to
     the validation runtime and is proven against real engines. What belongs here
     is the same thing that belongs here for a load: reaching the engine through
     the Session that owns it.
@@ -165,12 +165,12 @@ def _python(node, session, workspace, resolved, fault_tolerant: bool, open_runti
 
     A deployed module is imported inside the session that owns the Spark it will
     use, so on a desktop this crosses. What crosses is the handful of strings
-    the import and the construction need — not a serialisation of the Runner's
+    the import and the construction need, not a serialisation of the Runner's
     node, which carries typed identities the far side has no use for and would
     then have to be kept in step with.
 
     Which of the two happens is the scope's to answer, not this function's: a
-    remote scope knows how to dispatch into the interpreter holding it.
+    remote scope dispatches into the interpreter holding it.
     """
 
     expected = getattr(resolved, "expected_class", None)

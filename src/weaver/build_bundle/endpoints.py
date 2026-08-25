@@ -2,9 +2,9 @@
 
 A Fabric Lakehouse presents its Delta tables twice: natively to Spark, and
 through a SQL analytics endpoint whose metadata is synchronised behind the
-mutation rather than with it. Everything that reads a Lakehouse *as SQL* reads
-that endpoint — a Warehouse view over another item, a report, a downstream
-shortcut — so a build that created a table and immediately built a dependent view
+mutation rather than with it. Everything that reads a Lakehouse as SQL reads
+that endpoint, a Warehouse view over another item, a report, a downstream
+shortcut, so a build that created a table and immediately built a dependent view
 over it could and did see the previous shape.
 
 The refresh therefore sits at the item boundary rather than in a tail after all
@@ -28,7 +28,7 @@ from .stages import REFRESH, PlannedStage
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Everything that leaves a Lakehouse's endpoint metadata stale. Shortcut creation
-#: is here because a OneLake shortcut *is* a new table in the destination.
+#: is here because a OneLake shortcut is a new table in the destination.
 _MUTATING = DELTA_MUTATING_KINDS | {CREATE_SHORTCUT}
 
 
@@ -40,8 +40,8 @@ def item_refresh_stage(
 ) -> PlannedStage | None:
     """One refresh for this item, when its planned work mutated Delta.
 
-    A Warehouse item has no endpoint of its own to refresh — it *is* reached over
-    SQL — and an item whose only work was a folder or a schema has changed
+    A Warehouse item has no endpoint of its own to refresh. It is reached over
+    SQL, and an item whose only work was a folder or a schema has changed
     nothing the endpoint describes.
     """
 

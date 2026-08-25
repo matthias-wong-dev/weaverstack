@@ -1,4 +1,4 @@
-"""Installer orchestration — barriers, skipping, and faithful reporting.
+"""Installer orchestration: barriers, skipping, and faithful reporting.
 
 These use a recording fake executor rather than Spark, so the sequencing and
 reporting logic is pinned fast: sequences are barriers, a failure stops later
@@ -191,7 +191,7 @@ def test_an_endpoint_refresh_a_host_cannot_perform_is_skipped_not_failed(tmp_pat
     """Inside a Fabric session there is no REST client to refresh with.
 
     The refresh is a workspace operation, and a notebook resolver reaches the
-    workspace through NotebookUtils rather than REST — so it offers no refresh
+    workspace through NotebookUtils rather than REST, so it offers no refresh
     and the action is recorded as skipped. A desktop resolver performs it. The
     plan is the same either way, which is what keeps the decision in the
     Builder and out of the host.
@@ -258,7 +258,7 @@ def test_an_install_that_needs_no_spark_never_starts_one(tmp_path):
 
     A batch is handed its capabilities up front, and building Spark eagerly
     meant a bundle of file writes, T-SQL and an endpoint refresh still started
-    one — paying for a capability none of its actions would touch and, in a
+    one, paying for a capability none of its actions would touch and, in a
     process that already had a session, failing outright with *Only one
     SparkContext should be running in this JVM*.
     """

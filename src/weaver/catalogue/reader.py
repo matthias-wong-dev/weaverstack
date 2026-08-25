@@ -6,8 +6,8 @@ column is upgrade, where a newer Weaver compares against a table an older one
 created.
 
 Neither is recognised from a failure. The connection asks the ``_`` schema what
-it holds, once, and a table or column absent from that answer is absent —
-so a permission error or a broken connection stays a failure rather than
+it holds, once, and a table or column absent from that answer is absent, so a
+permission error or a broken connection stays a failure rather than
 reading as "no rows", which would tell the next build that nothing is
 catalogued. That is a licence to remove an estate.
 """
@@ -32,12 +32,12 @@ def read_table(
     ``catalogue`` is a :class:`CatalogueConnection` bound to the Warehouse the
     catalogue lives in.
 
-    ``scope`` narrows the read to one installation, which is what a build wants:
+    ``scope`` narrows the read to one installation, which is what a build needs:
     it compares and writes within one item and has no business seeing another's
     rows.
 
     Returns plain dictionaries under the internal snake-case keys, with stored
-    vocabularies mapped back — the same shape the projection produces, so the
+    vocabularies mapped back, in the same shape the projection produces, so the
     two can be compared directly.
     """
 
@@ -108,7 +108,7 @@ def read_installation(
     """Every catalogue table, read for one installation.
 
     Keyed by table name, so a caller compares table by table against the
-    projection without repeating the scope — which it could otherwise forget.
+    projection without repeating the scope.
     """
 
     from .tables import PROJECTED_TABLES
@@ -127,7 +127,7 @@ def read_installations(
     Bound items share the same physical tables, so reading per item would cost
     ``catalogue tables × bound items`` round trips to answer what one predicate
     per table already answers. Rows come back for every scope together and the
-    grouping is done in Python — see
+    grouping is done in Python. See
     :func:`weaver.catalogue.state.read_catalogue_state`.
 
     Still scoped: nothing outside ``scopes`` is returned.

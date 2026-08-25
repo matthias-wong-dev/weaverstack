@@ -15,7 +15,7 @@ from .delta_sql import blank_key_predicate
 SIDE_COLUMN = "_weaver_side"
 
 #: The correlation key. Runtime information, not a serialized copy of the
-#: declared primary key: a reader needs to know which rows pair, not which
+#: declared primary key, because what matters is which rows pair, not which
 #: columns paired them.
 SK_COLUMN = "_weaver_sk"
 
@@ -41,7 +41,7 @@ def compare(
     :data:`SK_COLUMN` ahead of the Test's own columns.
 
     Raises :class:`~weaver.errors.ValidationError` for anything that makes the
-    comparison meaningless rather than failing — mismatched shapes, a declared
+    comparison meaningless rather than failing: mismatched shapes, or a declared
     key that does not identify rows. Those are execution failures, and reporting
     them as zero discrepancies would say the Test passed.
     """
@@ -68,7 +68,7 @@ def compare(
         rank = f"dense_rank() OVER (ORDER BY {ordering})"
     else:
         # Nothing to pair by, so nothing is paired. Each row gets a key of its
-        # own rather than a shared placeholder, so a reader cannot mistake two
+        # own rather than a shared placeholder, so nothing can mistake two
         # rows for the two sides of one entity.
         rank = "row_number() OVER (ORDER BY monotonically_increasing_id())"
 
@@ -94,15 +94,16 @@ def _check_shape(
     reserved = [column for column in left + right if column in RESERVED_COLUMNS]
     if reserved:
         raise ValidationError(
-            f"{what}: {', '.join(sorted(set(reserved)))} is reserved — Weaver adds "
+            f"{what}: {', '.join(sorted(set(reserved)))} is reserved. Weaver adds "
             f"{SIDE_COLUMN} and {SK_COLUMN} to the diagnostic rows, so a Test's own "
             "columns may not carry those names"
         )
 
     if len(left) != len(right):
         raise ValidationError(
-            f"{what}: expected has {len(left)} column(s) and actual has {len(right)} — "
-            "the two sides of a Test must be the same shape to be compared. "
+            f"{what}: expected has {len(left)} column(s) and actual has "
+            f"{len(right)}. The two sides of a Test must be the same shape to be "
+            "compared. "
             f"expected: {', '.join(left) or 'none'}; actual: {', '.join(right) or 'none'}"
         )
 
@@ -135,7 +136,7 @@ def _check_key(frame: Any, *, side: str, key: tuple[str, ...], what: str) -> Non
     """A declared key that does not identify rows cannot correlate them.
 
     Blank and null are refused together, and duplicates are refused, on the same
-    terms a load refuses them — see
+    terms a load refuses them. See
     :func:`weaver.runtime.delta_sql.blank_key_predicate`. A Test whose key
     repeats would pair rows arbitrarily and call the result evidence.
     """

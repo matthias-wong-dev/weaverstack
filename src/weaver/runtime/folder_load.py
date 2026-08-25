@@ -180,7 +180,7 @@ def _validate_paths(destination: str | Path, staging: str | Path) -> tuple[Path,
     if staging_path.name != expected:
         raise LoadError(
             f"a folder's staging directory must be named {expected!r}, not "
-            f"{staging_path.name!r} — return self.staging_folder()"
+            f"{staging_path.name!r}. Return self.staging_folder()"
         )
     return destination_path, staging_path
 
@@ -189,13 +189,13 @@ def _classify(staging_path: Path, contract) -> tuple[list[str], list[str]]:
     """Split the staged tree into what may be published and what may not.
 
     A file the key does not claim is a rejection rather than a quiet skip: the
-    author staged it deliberately.
+    author staged it.
     """
 
     if not staging_path.is_dir():
         raise LoadError(
-            f"a folder's staging directory does not exist: {staging_path} — "
-            "write files into self.staging_folder() and return it"
+            f"a folder's staging directory does not exist: {staging_path}. "
+            "Write files into self.staging_folder() and return it"
         )
     staged, rejected = [], []
     for relative in _relative_files(staging_path):
@@ -225,7 +225,7 @@ def _validate_deletes(
     if entries and contract.replaces_wholesale:
         raise LoadError(
             f"{contract.qualified}: a non-incremental folder cannot name explicit "
-            "deletes — it is replaced whole, so absence from staging is what "
+            "deletes. It is replaced whole, so absence from staging is what "
             "retires a file"
         )
 
@@ -314,9 +314,9 @@ def _publish(
 def _reconcile_deletes(
     destination: Path, deletes, staged, *, contract
 ) -> tuple[str, ...]:
-    """Explicit deletes, plus — when the folder is replaced — what it stopped staging.
+    """Explicit deletes, plus what a replaced folder stopped staging.
 
-    Automatic removal inventories only *managed* files, so anything the file key
+    Automatic removal inventories only managed files, so anything the file key
     does not claim survives a replacement it was never part of.
     """
 

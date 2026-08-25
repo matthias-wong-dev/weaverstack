@@ -1,7 +1,7 @@
 """The load layer as a stage: where it sits, what it installs, what it removes.
 
 `test_load_artefacts_representation.py` asks what a repository owns. This asks what a build
-*does* with it — the ordering claim that an item's runtime code goes down after
+does with it, the ordering claim that an item's runtime code goes down after
 its structure is built, the frozen actions and payloads that carry it, and the
 removals that come from the catalogue rather than from a scan.
 
@@ -123,7 +123,7 @@ def test_load_is_the_last_thing_an_item_does(lakehouse):
     """The ordering claim, and the only one the layer makes.
 
     Its artefacts depend on the item's structural work being finished, which is
-    expressed by the layer being last rather than by any edge — and nothing
+    expressed by the layer being last rather than by any edge, and nothing
     within it is ordered against anything else, because nothing here runs.
     """
 
@@ -212,7 +212,7 @@ def test_the_procedure_schema_is_created_in_the_ordinary_schema_phase(warehouse)
     """`_` is a managed schema, not a reserved word.
 
     No document declares an object in it, so it would never be created if only
-    documents were consulted — and it is derived from the artefacts, so an item
+    documents were consulted, and it is derived from the artefacts, so an item
     with no procedures asks for no schema and the ordinary schema prune can take
     one that is left behind.
     """
@@ -300,7 +300,7 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
 
 @weaver_test()
 def test_a_removed_table_is_not_mistaken_for_a_load_artefact(lakehouse):
-    """Scoped by what the Registry says each object *is*.
+    """Scoped by what the Registry says each object is.
 
     A removed table is removed by the inventory prune, which can see it. Reading
     the removals by identity shape rather than by installed type would have this

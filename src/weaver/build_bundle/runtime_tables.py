@@ -101,7 +101,7 @@ def runtime_state_invalidation(
     invalidation = []
     for table in CURRENT_STATE_TABLES:
         population = _POPULATIONS[table.invalidated_by]
-        # What keeps its row: an object this build still runs and is *not*
+        # What keeps its row: an object this build still runs and is not
         # replacing. Everything else loses its row.
         keep = {
             _key(table, _identity_row(identity))

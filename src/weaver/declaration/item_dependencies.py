@@ -80,8 +80,8 @@ def _reject_validation_producer(
     """Nothing depends on a validation.
 
     A Test and an Assumption read the estate and produce nothing, so there is
-    nothing for anything else to read — and this is worth refusing rather than
-    letting resolve, because two things downstream rest on it. Installation puts
+    nothing for anything else to read. Worth refusing rather than letting resolve,
+    because two things downstream rest on it. Installation puts
     validation artefacts at the end, with the load artefacts, on the strength of
     validation never being something another declaration waits for. And the
     reason a validation need not declare its dependencies exhaustively is that
@@ -94,7 +94,7 @@ def _reject_validation_producer(
         return
     raise DiscoveryError(
         f"{consumer}: {written!r} names {upstream.document.kind} {producer}, and "
-        "nothing depends on a validation — it reads the estate and produces "
+        "nothing depends on a validation. It reads the estate and produces "
         "nothing to read. Depend on the object it inspects instead."
     )
 
@@ -116,11 +116,11 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     folded_logical = {str(identity).casefold(): identity for identity in logical_pairs}
     edges: list[ItemDependency] = []
     #: Graph edges, kept separately from ``edges`` because the two answer
-    #: different questions — see :func:`_document_graph`.
+    #: different questions. See :func:`_document_graph`.
     graph_edges: set[tuple[str, str]] = set()
 
     for consumer, source in native.items():
-        # One rule for every kind — see
+        # One rule for every kind. See
         # :func:`weaver.declaration.repository.effective_dependencies`.
         if source.document.declares_dependencies:
             references = _declared_references(source, consumer)
@@ -192,7 +192,7 @@ def _document_graph(
 
     Not a projection of :attr:`dependency_edges`. An edge records where a
     reference resolved to, so a shortcut edge names the source document as the
-    producer. This graph answers what must be *built*, where the shortcut
+    producer. This graph answers what must be built, where the shortcut
     destination is a shortcut or view in its own right:
 
     .. code-block:: text
@@ -221,17 +221,17 @@ def _item_graph(
 
     One item depends on another when it reaches into it: either a document
     resolves to a document that other item owns, or this item declares a shortcut
-    whose source lives there. The shortcut edge matters on its own — a shortcut with
-    no consumer yet still has to be materialised after its source exists — so it
-    is not left to be implied by the dependency edges.
+    whose source lives there. The shortcut edge matters on its own, because a
+    shortcut with no consumer yet is still materialised after its source exists,
+    so it is not left to be implied by the dependency edges.
 
     Within-item edges are absent by construction: the document graph already
     orders those, and an item cannot wait for itself.
 
     A circular item graph is a **repository** fault. It is rejected here, while
     the whole declaration is in view, rather than at the point some incremental
-    selection happens to exercise it — a repository whose items cannot be
-    ordered has no correct build, not merely no correct build today.
+    selection happens to exercise it. A repository whose items cannot be ordered
+    has no correct build.
     """
 
     edges: set[tuple[str, str]] = set()

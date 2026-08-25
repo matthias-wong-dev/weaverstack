@@ -1,7 +1,7 @@
 """A Session for Weaver running on a desktop, reaching into Fabric.
 
 Every capability crosses: Spark SQL and Python over Livy, storage over OneLake,
-T-SQL over TDS, everything else over REST. There is no Spark session here — see
+T-SQL over TDS, everything else over REST. There is no Spark session here. See
 :mod:`weaver.sessions.notebook` for the position that has one.
 
 Resources are cached per workspace for reuse across commands.
@@ -52,7 +52,7 @@ class WarmUp:
 class ConsoleSession(Session):
     """A reusable console-process execution scope.
 
-    ``workspace`` is a *default context* and nothing more: ``weaver session``
+    ``workspace`` is a default context and nothing more: ``weaver session``
     starts without one, and every command may name its own.
     """
 
@@ -77,7 +77,7 @@ class ConsoleSession(Session):
         self._given_store = store
         self._given_resolver = resolver
         #: Where the timing tree is written. stderr by default, because stdout
-        #: is a command's answer and several commands emit JSON on it — progress
+        #: is a command's answer and several commands emit JSON on it, so progress
         #: interleaved into that would make the answer unparseable. ``False``
         #: silences it.
         self._progress = progress
@@ -92,16 +92,17 @@ class ConsoleSession(Session):
 
     #: The narrowest the name column may be; the real width comes from the
     #: terminal (:meth:`_width`). A fixed column is only ever right for one
-    #: estate — a name like ``Warehouse/Reporting/Reporting.CustomerRevenuePresent``
-    #: runs past it and pushes its own duration out of alignment.
+    #: estate. A name like
+    #: ``Warehouse/Reporting/Reporting.CustomerRevenuePresent`` runs past it and
+    #: pushes its own duration out of alignment.
     PROGRESS_WIDTH = 52
 
     #: Kept back from the terminal's own width so the duration never wraps.
     DURATION_WIDTH = 8
 
     #: How often the live line redraws while work is in flight. Slow enough to
-    #: cost nothing, fast enough that the elapsed figure is visibly moving —
-    #: which is the half of it that says the wait is alive rather than hung.
+    #: cost nothing, fast enough that the elapsed figure is visibly moving, which
+    #: is what says the wait is alive rather than hung.
     PROGRESS_TICK = 1.0
 
     def present(self, frame, event: str, error: BaseException | None = None) -> None:
@@ -204,7 +205,7 @@ class ConsoleSession(Session):
         self._painted = 0
 
     def _innermost(self):
-        """The deepest frame still open — what the wait is actually for.
+        """The deepest frame still open, which is what the wait is for.
 
         A Task names the command, which the heading already said; the useful
         answer to "what is it doing" is the smallest thing currently in flight.
@@ -345,7 +346,7 @@ class ConsoleSession(Session):
     ) -> Any:
         # No frame is opened here: a crossing is how the caller's work happens
         # rather than a second thing that happened, and framing it printed the
-        # program's name above the frame that asked for it — two lines, one
+        # program's name above the frame that asked for it: two lines, one
         # duration. The cost is still recorded in telemetry.
         scope = self.scope(workspace)
         # A program is Python that imports Weaver where Spark is, so this is the
@@ -564,7 +565,7 @@ class ConsoleScope(WorkspaceScope):
         holding it open.
 
         Otherwise it is the DFS transport. A console has no within-workspace
-        store at all — ``FabricStore`` goes through NotebookUtils, which exists
+        store at all, ``FabricStore`` goes through NotebookUtils, which exists
         only inside a session.
         """
 
@@ -671,7 +672,7 @@ class ConsoleScope(WorkspaceScope):
         if published and published != local:
             warn(
                 f"this console runs weaverstack {local}; {self.name} has "
-                f"{published} published — run `weaver fabric environment publish {self.workspace.environment} --workspace {self.workspace.workspace}` if the difference "
+                f"{published} published. Run `weaver fabric environment publish {self.workspace.environment} --workspace {self.workspace.workspace}` if the difference "
                 "matters"
             )
 
@@ -707,11 +708,11 @@ class ConsoleScope(WorkspaceScope):
         return result.payload
 
     def _statement_failure(self, exc, name: str):
-        """The remote failure, said in terms the reader can act on.
+        """The remote failure, said in terms that can be acted on.
 
         A program that could not import Weaver is almost always a wheel older
         than the console that submitted it, and the raw ``ModuleNotFoundError``
-        sends the reader after a missing package rather than to publish.
+        points at a missing package rather than at publishing.
         Everything else is passed through as it came.
         """
 

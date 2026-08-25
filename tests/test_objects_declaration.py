@@ -1,8 +1,8 @@
 """The authoring surface: what a developer writes, and what it reaches.
 
 Fakes rather than a session: every call an authored object makes is an ordinary
-one on the Spark object it was handed, so the assertions here are about *which*
-call is made with *which* address. That a real session and a real Delta table
+one on the Spark object it was handed, so the assertions here are about which
+call is made with which address. That a real session and a real Delta table
 answer those calls is proved in ``tests/fabric``.
 """
 
@@ -166,7 +166,7 @@ def test_a_dependency_inherits_the_session_and_the_lakehouse(spark):
 
 @weaver_test()
 def test_a_dependency_resolves_against_the_callers_environment(spark):
-    """Same class, two destinations — whichever the dependent was given."""
+    """Same class, two destinations: whichever the dependent was given."""
 
     other = Lakehouse(
         name="Sales_Prod",
@@ -240,7 +240,7 @@ def test_an_empty_dataframe_is_the_existing_table_with_no_rows(spark):
 
 
 def _customer(returned, *, incremental: bool):
-    """One table whose ``read()`` returns whatever a case wants it to."""
+    """One table whose ``read()`` returns whatever a case needs it to."""
 
     from weaver.declaration.metadata import PYTHON, parse_document
 
@@ -461,7 +461,7 @@ def test_a_non_incremental_table_returning_none_is_refused(monkeypatch):
 
 
 def _export(returned, *, incremental: bool):
-    """One folder whose ``read()`` returns whatever a case wants it to."""
+    """One folder whose ``read()`` returns whatever a case needs it to."""
 
     from weaver.declaration.metadata import PYTHON, parse_document
 
@@ -620,7 +620,7 @@ def test_a_detached_lakehouse_is_reached_exactly_like_an_attached_one(
     """Weaver mounts the root it resolved, never the notebook's attachment.
 
     That is what keeps a detached orchestrator able to load a Lakehouse nobody
-    attached — the property `/lakehouse/default` could never have provided.
+    attached, the property `/lakehouse/default` could never have provided.
     """
 
     import weaver.lakehouse as module
@@ -674,7 +674,7 @@ def test_read_must_be_implemented(spark):
 )
 @weaver_test()
 def test_the_context_era_surface_is_gone(removed):
-    """Removed outright rather than deprecated — pre-alpha, and one API is enough."""
+    """Removed outright rather than deprecated: pre-alpha, and one API is enough."""
 
     assert not any(hasattr(base, removed) for base in (WeaverObject, Table, View))
 

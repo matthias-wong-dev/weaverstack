@@ -1,10 +1,10 @@
-"""Weaver build — planning a declaration into a bundle, and installing it.
+"""Weaver build: planning a declaration into a bundle, and installing it.
 
 The boundary is deliberate::
 
     WeaverRepository -> planner -> BuildBundle -> installer -> workspaces
 
-The planner owns every decision — item selection, ordering, executable
+The planner owns every decision, item selection, ordering, executable
 generation, certification. The installer owns execution only: it validates a
 bundle and runs it, and never reads the source declaration, resolves a
 dependency or selects a target.

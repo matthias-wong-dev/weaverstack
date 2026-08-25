@@ -117,7 +117,7 @@ class MultiSetCursor(Cursor):
 
     Which is what a Warehouse load procedure now looks like from outside: the
     authored setup may run ``EXEC`` and return rows of its own, and Weaver's
-    answer is the projection its *own* batch ends with.
+    answer is the projection its own batch ends with.
     """
 
     def __init__(self, sets):

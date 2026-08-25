@@ -26,7 +26,7 @@ class RemoteProgram:
     """A named unit of work executable here or in a Fabric session.
 
     ``name`` is what timing and reporting call it, so it should read as the work
-    rather than the mechanism — ``read_build_state``, not ``run_livy_body``.
+    rather than the mechanism, ``read_build_state``, not ``run_livy_body``.
     """
 
     name: str
@@ -36,7 +36,7 @@ class RemoteProgram:
     source: str
     #: How long the remote spelling may take, where it differs from the default.
     timeout: float | None = None
-    #: Anything the caller wants recorded alongside the timing.
+    #: Anything the caller needs recorded alongside the timing.
     detail: str | None = None
 
 

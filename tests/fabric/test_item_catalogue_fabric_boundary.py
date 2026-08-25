@@ -72,7 +72,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
         "    session=session,\n"
         "    catalogue_binding=control)\n"
         "report = result.report\n"
-        # The catalogue is a Warehouse, so it is read back over TDS — in this
+        # The catalogue is a Warehouse, so it is read back over TDS, in this
         # session, on its own identity, exactly as the build wrote it.
         "catalogue = catalogue_connection(session, workspace)\n"
         "catalogue.forget_shape()\n"
@@ -102,7 +102,7 @@ def test_installed_weaver_builds_and_catalogues_its_builtin_item(
     assert payload["status"] == "succeeded", payload["errors"]
     # Every catalogue table, physically present in the Warehouse.
     assert payload["tables"] == payload["expected"]
-    # The Installation row records the *item*: which Warehouse holds `_`.
+    # The Installation row records the item: which Warehouse holds `_`.
     assert payload["target_names"] == [str(fabric_workspace.catalogue_item)]
     # One Registry row per catalogue table it built.
     assert payload["registry_count"] == payload["table_count"]

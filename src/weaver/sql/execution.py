@@ -85,9 +85,9 @@ class PooledSqlExecutor:
         """Every result set a batch produced, in order.
 
         :meth:`query` reads the first and stops, which is right for a statement
-        that answers one question. A batch that returns *evidence and then a
-        projection* — which is what a validation run directly from source is —
-        needs both, and reading only the first silently answers with the wrong
+        that answers one question. A batch that returns evidence and then a
+        projection, which is what a validation run directly from source is, needs
+        both, and reading only the first silently answers with the wrong
         one: a diagnostic row has no count column, so the counts read as zero
         and a failing Test reports as passed.
         """
@@ -110,15 +110,15 @@ class PooledSqlExecutor:
     ) -> SqlRow:
         """Call a procedure and read back the values it set on its outputs.
 
-        ``mssql-python`` does not bind output parameters — ``callproc`` is
-        declared and raises ``NotSupportedError`` — so they are marshalled in
+        ``mssql-python`` does not bind output parameters, since ``callproc`` is
+        declared and raises ``NotSupportedError``, so they are marshalled in
         T-SQL instead: locals are declared, passed as ``output``, and projected
         by a ``select`` this method writes.
 
         That last detail is the point. The projection is the final statement of
-        a batch *Weaver* composed, so the row read back is Weaver's own however
-        many result sets the procedure emitted on the way — which is the whole
-        reason the load result stopped being one of them. Anything the
+        a batch Weaver composed, so the row read back is Weaver's own however many
+        result sets the procedure emitted on the way, which is why the load result
+        stopped being one of them. Anything the
         procedure's authored setup returned is passed over, not parsed.
         """
 
@@ -135,7 +135,7 @@ class PooledSqlExecutor:
         )
         if not row:
             raise SqlExecutionError(
-                f"{procedure} returned no output row — it may have been altered "
+                f"{procedure} returned no output row. It may have been altered "
                 "outside Weaver, or replaced by a version without these outputs"
             )
         return row[0]
@@ -147,11 +147,11 @@ class PooledSqlExecutor:
         inputs: Sequence[tuple[str, object]] = (),
         outputs: Sequence[tuple[str, str]] = (),
     ) -> "ProcedureResult":
-        """Call a procedure and keep *both* its result sets and its outputs.
+        """Call a procedure and keep both its result sets and its outputs.
 
-        :meth:`call_procedure` reads the last result set — Weaver's own output
-        projection — and passes over everything the procedure emitted on the
-        way. That is right for a load, whose evidence is entirely in its counts.
+        :meth:`call_procedure` reads the last result set, Weaver's own output
+        projection, and passes over everything the procedure emitted on the way.
+        That is right for a load, whose evidence is entirely in its counts.
         It is wrong for a Test: the counts say how much disagreed and the rows
         say what, and a caller wanting both must not run the Test twice, because
         the data could change in between and the cost could be large.
@@ -173,7 +173,7 @@ class PooledSqlExecutor:
         )
         if not sets or not sets[-1]:
             raise SqlExecutionError(
-                f"{procedure} returned no output row — it may have been altered "
+                f"{procedure} returned no output row. It may have been altered "
                 "outside Weaver, or replaced by a version without these outputs"
             )
         return ProcedureResult(
@@ -255,8 +255,8 @@ def _output_parameter_batch(
     The locals are prefixed so they cannot collide with a parameter name, since
     ``@rows_read = @rows_read output`` would be legal and unreadable.
 
-    Input *values* are placeholders rather than literals — the values come from
-    a caller and are the one part of this text that is not Weaver's own.
+    Input values are placeholders rather than literals. They come from a caller
+    and are the one part of this text that is not Weaver's own.
     """
 
     declares = "\n".join(
@@ -280,7 +280,7 @@ def _rows(cursor) -> list[SqlRow]:
 def _final_rows(cursor) -> list[SqlRow]:
     """The last result set the batch produced, and only it.
 
-    For a batch whose *own* trailing ``select`` is the answer: everything before
+    For a batch whose own trailing ``select`` is the answer: everything before
     it belongs to whatever the batch called, and has to be consumed to be got
     past rather than interpreted.
     """
@@ -297,7 +297,7 @@ def _every_result_set(cursor) -> list[list[SqlRow]]:
     """Every result set the batch produced, in order.
 
     A set with no description is one a statement produced without returning
-    columns, and is skipped rather than recorded as empty — otherwise a
+    columns, and is skipped rather than recorded as empty. Otherwise a
     procedure's internal work would appear as result sets a caller has to know
     to ignore.
     """

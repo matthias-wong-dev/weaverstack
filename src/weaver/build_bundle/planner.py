@@ -134,7 +134,7 @@ def generate_item_build_bundle(
             )
 
     # Freshness is read before ``registered`` is narrowed, because the whole
-    # point is to compare against an item this build does *not* include.
+    # point is to compare against an item this build does not include.
     stale_shortcuts = stale_shortcut_destinations(
         repository, catalogue.registered, bound_items=by_item
     )
@@ -166,8 +166,8 @@ def generate_item_build_bundle(
     omitted: list[OmittedNode] = []
 
     # Collected once and used twice. These rows are deleted before any physical
-    # work, so publication compares against the catalogue without them — an
-    # object dropped and rebuilt whose projection did not change would otherwise
+    # work, so publication compares against the catalogue without them. An object
+    # dropped and rebuilt whose projection did not change would otherwise
     # compare equal, produce no merge, and stay deleted.
     deleted_claims = collect_claims(
         catalogue, removed | selected_for_drop, stale_claims=stale_claims
@@ -184,7 +184,7 @@ def generate_item_build_bundle(
         stages.append(catalogue_before)
 
     # Current state is invalidated here, between decertification and the first
-    # physical action, and never after it — see
+    # physical action, and never after it. See
     # :mod:`weaver.build_bundle.runtime_tables`. Against the catalogue this build
     # read: which rows are obsolete is arithmetic over rows it holds, and a build
     # creating the tables read none.
@@ -236,7 +236,7 @@ def generate_item_build_bundle(
             target_by_item,
             catalogue_target=catalogue_target,
             # The catalogue as the claim deletions above will leave it, not as
-            # it was read — see `without_claims`.
+            # it was read. See `without_claims`.
             current=catalogue_after_deletions,
         )
     )
@@ -290,7 +290,7 @@ def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:
 def _selectable(
     repository: WeaverRepository, by_item: Mapping
 ) -> tuple[set, set, set, set]:
-    """The four selectable kinds, separately — see the comment at the call site."""
+    """The four selectable kinds, separately. See the comment at the call site."""
 
     return (
         {
@@ -425,9 +425,9 @@ def plan_item_build(
     )
     stages: list[PlannedStage] = []
 
-    # Prune is given every *declared* shortcut destination, never only the selected
+    # Prune is given every declared shortcut destination, never only the selected
     # ones: a shortcut this build decided not to touch is still desired state, and
-    # a prune that could not see it would delete the very thing incremental
+    # a prune that could not see it would delete the thing incremental
     # selection just chose to keep. Load artefacts are treated the same way, and
     # the stage derives them itself.
     prune = item_prune_stage(
@@ -454,7 +454,7 @@ def plan_item_build(
         target=target,
         inventory=inventory,
         # `_` is where a Warehouse's generated load procedures live, and no
-        # document declares an object in it — so like a shortcut's namespace it
+        # document declares an object in it, so like a shortcut's namespace it
         # would never be created if only documents were consulted. It is derived
         # from the artefacts, so an item with no procedures asks for no schema.
         extra_schemas=tuple(shortcuts.schemas) + load_schemas(artefacts),

@@ -14,7 +14,7 @@ def metadata_column_references(document: SesDocument) -> tuple[tuple[str, str], 
     """The ``(label, column)`` pairs this document's metadata references.
 
     Every pair must resolve to a produced business column. The set is the same
-    whether the table is declared or inferred; only *when* it is checked differs.
+    whether the table is declared or inferred; only when it is checked differs.
     """
 
     references: list[tuple[str, str]] = []
@@ -53,11 +53,11 @@ def metadata_column_references(document: SesDocument) -> tuple[tuple[str, str], 
 def resolve_build_columns(
     document: SesDocument, query_columns: tuple[str, ...]
 ) -> tuple[str, ...]:
-    """Validate a built table's columns from a live document — the tests' entry.
+    """Validate a built table's columns from a live document, the tests' entry.
 
     A convenience wrapper over :func:`validate_build_columns` that reads the
     declared columns and metadata references off ``document``. The installer never
-    uses this — it holds no document — and calls the data-level function with the
+    uses this, holding no document, and calls the data-level function with the
     values the bundle froze (how-does-build-work §2).
     """
 
@@ -91,9 +91,8 @@ def validate_build_columns(
     :func:`metadata_column_references`. ``identity`` names the Weaver-managed
     surrogate column, when one is declared: it is not a business column, so it may
     not clash with the query's output, but the primary key may name it. Returns
-    the physical business columns in order — declared names when declared
-    (authoritative), else the query's own — and raises :class:`BuildError` on any
-    violation.
+    the physical business columns in order, being declared names when declared and
+    the query's own otherwise, and raises :class:`BuildError` on any violation.
     """
 
     _reject_duplicate_query_columns(qualified, query_columns)
@@ -119,7 +118,7 @@ def _reject_identity_collision(
         return
     if any(identity.lower() == name.lower() for name in business_columns):
         raise BuildError(
-            f"{qualified}: Identity {identity!r} collides with a business column — "
+            f"{qualified}: Identity {identity!r} collides with a business column. "
             "the identity column is Weaver-managed and must not be one the query "
             "produces or the schema declares."
         )
@@ -139,7 +138,7 @@ def _reject_duplicate_query_columns(
             f"{qualified}: the query produces columns that collide by name "
             "(case-insensitively): "
             + "; ".join(colliding)
-            + " — no unambiguous table can be built. Give them distinct names."
+            + ". No unambiguous table can be built. Give them distinct names."
         )
 
 

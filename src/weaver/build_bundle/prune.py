@@ -78,7 +78,7 @@ class _Managed:
     folders: frozenset[str]
     tables: frozenset[str]
     views: frozenset[str]
-    #: Object names a *document* declares, whatever kind it declares them as. A
+    #: Object names a document declares, whatever kind it declares them as. A
     #: document installed under the other kind is a kind change, removed by the
     #: item's managed drop, which reads the installed type from inventory, so
     #: prune spares the name. Shortcut destinations are held out: nothing drops one,
@@ -158,7 +158,7 @@ class TargetInventory:
         """This target as the plan intends to leave it.
 
         The build's declared effect on this target, applied. What it gives is a
-        *prediction*, and the value of a prediction is that it can be wrong: an
+        prediction, and the value of a prediction is that it can be wrong: an
         estate built from a repository and read back should equal the same
         repository's declared inventory, and if applying a build's own summary to
         the state it was planned against does not reach that, the build does not
@@ -178,14 +178,14 @@ class TargetInventory:
         """Whether the target holds this object, asked of the right collection.
 
         Branching on the type is not a convenience: falling through to ``tables``
-        for a type this did not know about would answer *no* for something that
-        is plainly there, and reconciliation reads a *no* as proof the claim is
+        for a type this did not know about would answer no for something that
+        is plainly there, and reconciliation reads a no as proof the claim is
         stale.
         """
 
         if object_type == "file":
-            # A file is addressed by path, and its schema already *is* the path
-            # beneath Files — so the two halves join with a separator rather than
+            # A file is addressed by path, and its schema already is the path
+            # beneath Files, so the two halves join with a separator rather than
             # the dot a two-part object name uses.
             return _holds(self.files, f"{schema}/{name}")
         if object_type == "stored_procedure":
@@ -256,8 +256,8 @@ def read_lakehouse_inventory(
     """Read every Weaver-manageable object in one Lakehouse.
 
     Storage answers everything but the views, which exist only in the
-    catalogue — so ``catalogue`` is optional and its absence means the views
-    cannot be listed, not that there are none.
+    catalogue, so ``catalogue`` is optional and its absence means the views cannot
+    be listed rather than that there are none.
     """
 
     lakehouse = ItemRef(target.item_id)
@@ -305,9 +305,9 @@ def read_lakehouse_inventory(
         for entry in _child_dirs(store, tables_root / schema)
     )
     # The same narrowing the Delta side uses, and for the same reason. The
-    # control item's Files area holds Weaver's own working directories — the
-    # declaration, retained bundles, CLI handover — none of which is a Folder
-    # object; what it *does* declare is the task log, under the reserved schema.
+    # control item's Files area holds Weaver's own working directories, being the
+    # declaration, retained bundles and CLI handover, none of which is a Folder
+    # object. What it declares is the task log, under the reserved schema.
     # Excluding the whole area instead left that folder unobservable, so every
     # build concluded it was absent and tried to create it again.
     folder_schema_entries = tuple(
@@ -483,14 +483,14 @@ def render_inventory_prune(
     actions: list[InstallAction] = []
     changes: list[TargetChange] = []
 
-    # A name is spared when the keep-set wants it as this kind, and also when a
+    # A name is spared when the keep-set needs it as this kind, and also when a
     # document declares it as the other one. See :class:`_Managed`.
     def spared(qualified: str, same_kind) -> bool:
         folded = qualified.casefold()
         return folded in same_kind or folded in managed.declared_objects
 
     def protected(qualified: str) -> bool:
-        """Whether this *table* is a catalogue table, which prune never removes.
+        """Whether this table is a catalogue table, which prune never removes.
 
         Asked of a table and not of a view, because the two answer differently
         for one name: ``_.Bookmark`` is the catalogue's own table in the
@@ -633,8 +633,8 @@ def managed_sets(
     ``shortcut_destinations`` belong in the keep-set: they are desired state in
     this item as a declared document is, produced elsewhere, and a build
     that pruned the shortcut it was about to create would be destructive and
-    pointless. Which set one joins follows its physical form — a folder under
-    Files, a view in a Warehouse, a table directory in a Lakehouse.
+    pointless. Which set one joins follows its physical form: a folder under Files,
+    a view in a Warehouse, a table directory in a Lakehouse.
 
     ``load_identities`` contribute the ``_`` schema a Warehouse's generated load
     procedures live in, which nothing declares: without it every build would

@@ -131,7 +131,7 @@ class ShortcutExecutor:
 
         if context.spark_sql is None:
             # Loud rather than silent: every context the Installer builds has
-            # this, so its absence means one was assembled by hand — and not
+            # this, so its absence means one was assembled by hand, and not
             # waiting is the race this exists to prevent.
             raise InstallError(
                 "a table shortcut was created but this context offers no way to "
@@ -178,7 +178,7 @@ class ShortcutExecutor:
                         # The probes cross; the waiting does not.
                         context.spark_sql(statement, exact_case=True)
                         del surfaces[surface]
-                    except Exception as exc:  # not discovered yet — or never will be
+                    except Exception as exc:  # not discovered yet, or never will be
                         failure = exc
                 if not surfaces:
                     del pending[shortcut]

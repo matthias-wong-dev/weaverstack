@@ -12,8 +12,8 @@ Three claims, and none of them can be made anywhere else:
     the scope is closed at the end       close_scope once, whatever happened
 
 The middle one is the guarantee the decomposition most had to preserve. A run
-that opened a scope per node would still pass every local test — the nodes would
-import their modules and load their tables — and would quietly lose the sharing
+that opened a scope per node would still pass every local test, the nodes would
+import their modules and load their tables, and would lose the sharing
 that lets two objects of one item see each other's ``lib/`` helpers.
 
 It is read off the desktop's own telemetry rather than by asking Fabric what it
@@ -99,7 +99,7 @@ def test_every_python_node_shared_one_runtime_scope(loaded):
 
 @weaver_test(hosted=True)
 def test_the_scope_is_closed_when_the_run_ends(loaded):
-    """A scope left open is one the next run would inherit — and with it, the
+    """A scope left open is one the next run would inherit, and with it, the
     modules a rebuild has since replaced."""
 
     _, spent = loaded

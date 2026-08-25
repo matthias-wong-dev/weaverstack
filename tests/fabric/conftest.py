@@ -3,8 +3,8 @@
 These touch a real workspace and a running capacity, so they are deselected by
 default: `-m fabric` is what asks for them.
 
-The estate is permanent and named by default — `PYTEST_WORKSPACE`, holding
-`PYTEST_WEAVER` and the `PYTEST_LH_*` Lakehouses — so a run needs no environment
+The estate is permanent and named by default, `PYTEST_WORKSPACE`, holding
+`PYTEST_WEAVER` and the `PYTEST_LH_*` Lakehouses, so a run needs no environment
 at all. Every name is still overridable (`WEAVER_FABRIC_WORKSPACE`,
 `WEAVER_PYTEST_<ROLE>`) for a tenant that arranges its items differently.
 
@@ -42,8 +42,9 @@ WORKSPACE_ENV = "WEAVER_FABRIC_WORKSPACE"
 #: The permanent suite workspace. A default rather than a required export: the
 #: estate it holds is permanent too, so naming it per run was ceremony.
 DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
-#: The Environment the session attaches to — published once with `weaver fabric environment publish`
-#: and consumed by the suite, never uploaded by it.
+#: The Environment the session attaches to, published once with
+#: `weaver fabric environment publish` and consumed by the suite, never uploaded
+#: by it.
 ENVIRONMENT_ENV = "WEAVER_FABRIC_ENVIRONMENT"
 DEFAULT_ENVIRONMENT = "weaver"
 
@@ -73,7 +74,7 @@ def _timed_session_run(session, label: str, body: str, *, phase: str | None = No
 
 @pytest.fixture(scope="session")
 def fabric_workspace_item():
-    """The suite's workspace — ``PYTEST_WORKSPACE`` unless one is named."""
+    """The suite's workspace: ``PYTEST_WORKSPACE`` unless one is named."""
 
     pytest.importorskip("azure.identity", reason="pip install weaverstack")
     pytest.importorskip("requests", reason="pip install weaverstack")
@@ -92,7 +93,7 @@ def fabric_workspace_item():
     except Exception as exc:
         # Any reason at all: no credential, no network, no such workspace. Every
         # one of them means "this machine cannot run the Fabric suite", which is a
-        # skip — only a WeaverError was caught before, so an unauthenticated
+        # skip, only a WeaverError was caught before, so an unauthenticated
         # machine raised azure's ClientAuthenticationError and errored instead.
         pytest.skip(f"cannot reach workspace {name!r}: {type(exc).__name__}: {exc}")
 
@@ -106,7 +107,7 @@ def fabric_client(fabric_workspace_item):
 
 #: The estate the suite expects to already exist, by role. Fixed rather than
 #: generated because creating an item is quick but waiting for its SQL endpoint
-#: to provision is not bounded — and a reused item's endpoint is already there.
+#: to provision is not bounded, and a reused item's endpoint is already there.
 #: Reuse also stops the suite churning workspace artifacts underneath a
 #: long-lived Spark session, which Fabric's namespace resolver reacts badly to.
 #:
@@ -114,7 +115,7 @@ def fabric_client(fabric_workspace_item):
 FIXED_ITEMS = {
     "weaver": "PYTEST_WEAVER",
     # Repositories and bundles need OneLake and the catalogue has none. This
-    # Lakehouse holds them and is never built into: staged files in a *target*
+    # Lakehouse holds them and is never built into: staged files in a target
     # would show up in its own inventory, which is how the bundle the suite had
     # just written started failing a claim about declared folders.
     "staging": "PYTEST_STAGING",
@@ -128,8 +129,8 @@ FIXED_ITEMS = {
 
 #: Where the suite stages what it needs OneLake for, beneath a Lakehouse's
 #: Files. The catalogue Warehouse has no Files area. Neither is product
-#: behaviour — a repository is a caller's own
-#: path and a bundle is kept only when a caller asks — so any Lakehouse will do,
+#: behaviour, a repository is a caller's own
+#: path and a bundle is kept only when a caller asks, so any Lakehouse will do,
 #: and the tests name one they already have.
 WEAVER_ITEMS_AREA = "weaver_items"
 BUILD_BUNDLES_AREA = "build_bundles"
@@ -181,7 +182,7 @@ def _ensure_lakehouse(client, workspace, role: str):
     """The fixed Lakehouse for a role, created if this tenant has not got it yet.
 
     Self-healing rather than a precondition, so a first run against a new
-    workspace works without a provisioning ritual — and so a run is never left
+    workspace works without a provisioning ritual, and so a run is never left
     guessing whether an absent item is a setup mistake or a test failure.
     """
 
@@ -202,7 +203,7 @@ def _ensure_catalogue_warehouse(client, workspace, role: str):
     Self-healing like the Lakehouses. A Lakehouse of the same name is left from
     when the catalogue was Delta, and is removed rather than worked around: it
     would go on answering name lookups for an item type nothing asks for any
-    more, and a reader finding it would reasonably think it was still in use.
+    more, and finding it later would suggest it was still in use.
     """
 
     from weaver.fabric.resources import (
@@ -237,7 +238,7 @@ def _ensure_catalogue_warehouse(client, workspace, role: str):
 # and cheap to reuse. This is the third execution position: not Weaver reaching
 # into a workspace, but Weaver running there.
 #
-# Weaver is *installed* into a Fabric Environment beforehand with `weaver
+# Weaver is installed into a Fabric Environment beforehand with `weaver
 # install`; the suite attaches that Environment and imports it. It never uploads
 # Weaver source, copies it into /tmp, or edits sys.path.
 
@@ -260,7 +261,7 @@ def fabric_staging_lakehouse(fabric_workspace_item, fabric_client):
     """The Lakehouse that holds repositories and bundles, and is never built into.
 
     Both need OneLake and the catalogue is a Warehouse, so they live somewhere.
-    Somewhere that is not a *target*: a staged file under a target's ``Files``
+    Somewhere that is not a target: a staged file under a target's ``Files``
     is an ordinary folder to that target's own inventory, so a bundle written
     there would appear in the estate the build is being held to.
     """
@@ -275,7 +276,7 @@ def fabric_target_lakehouse(fabric_workspace_item, fabric_client):
     Isolation comes from **emptying** it on the way into each build context
     (``_empty_the_target``) rather than from replacing it. That is the same
     reconciliation a build performs, so the cleaning path is exercised rather than
-    bypassed — and it is what a real installation looks like, since you do not get
+    bypassed, and it is what a real installation looks like, since you do not get
     a new Lakehouse per build.
     """
 
@@ -285,8 +286,8 @@ def fabric_target_lakehouse(fabric_workspace_item, fabric_client):
 #: The roles a cross-item shortcut run needs its own Lakehouses for.
 #:
 #: A producer and a consumer, because a cross-item shortcut is the one thing a single
-#: destination cannot express — there has to be something to point across to. And a
-#: *second* producer for the Warehouse case, because sharing one would leave that
+#: destination cannot express. There has to be something to point across to. And a
+#: second producer for the Warehouse case, because sharing one would leave that
 #: estate building into a Lakehouse the Lakehouse estate had already built: the
 #: producer's table would be unchanged, incremental selection would correctly emit
 #: no work and no endpoint refresh for it, and the ordering that test is about would
@@ -299,8 +300,8 @@ def fabric_shortcut_lakehouses(fabric_workspace_item, fabric_client):
     """The fixed Lakehouses a cross-item shortcut run needs, by role.
 
     A producer and a consumer, because a cross-item shortcut is the one thing a
-    single destination cannot express — there has to be something to point across
-    to. And a *second* producer for the Warehouse case, because sharing one would
+    single destination cannot express. There has to be something to point across
+    to. And a second producer for the Warehouse case, because sharing one would
     leave that estate building into a Lakehouse the Lakehouse estate had already
     built: the producer's table would be unchanged, incremental selection would
     correctly emit no work and no endpoint refresh for it, and the ordering that
@@ -467,7 +468,7 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
 def livy_session(fabric_workspace, fabric_client, request):
     """One Spark session in Fabric with the Weaver Environment attached.
 
-    Skips — rather than fails — when the Environment is missing or carries no
+    Skips, rather than fails, when the Environment is missing or carries no
     usable Weaver, because that means Environment publication has not been run, which
     is a setup step, not a defect in what is under test.
     """
@@ -528,14 +529,14 @@ def livy_session(fabric_workspace, fabric_client, request):
     except LivyError as exc:
         # Name the capacity before the Environment. A capacity commonly permits
         # one Spark session, so the usual cause is that something else already
-        # holds the slot — an interrupted run that never got to close its
+        # holds the slot, an interrupted run that never got to close its
         # session, or a notebook someone left open. The preflight already knows
         # which, and saying "Environment installed?" instead sent at least one
         # reader off to check a wheel that was perfectly fine.
         held = (
             "the capacity's session slot is held by "
             + ", ".join(occupied)
-            + " — wait for it to release, or end it if it is yours; otherwise "
+            + ", wait for it to release, or end it if it is yours; otherwise "
             if occupied
             else ""
         )
@@ -561,9 +562,9 @@ def weaver_session(fabric_workspace, livy_session):
     with one item cache, one Livy session and one TDS connection per Warehouse
     for the whole run.
 
-    The Livy session is **given**, not acquired. The suite already starts one —
+    The Livy session is **given**, not acquired. The suite already starts one,
     with the preflight and the skip semantics that belong to a harness rather
-    than to the product — and a capacity commonly permits exactly one, so a
+    than to the product, and a capacity commonly permits exactly one, so a
     Session that started its own would queue behind the fixture's forever. A
     given resource is not closed by the Session that borrowed it.
     """
@@ -594,7 +595,7 @@ def ready_warehouse_session(weaver_session, fabric_workspace, disposable_warehou
 
 @pytest.fixture
 def fresh_weaver_session(fabric_workspace):
-    """A Session of its own, for a test whose claim *is* runtime isolation.
+    """A Session of its own, for a test whose claim is runtime isolation.
 
     Explicit because it is expensive and rarely what a test means. Estate
     isolation is a different question and is answered by a different fixture: a
@@ -644,11 +645,11 @@ def disposable_warehouse(fabric_workspace_item, fabric_client, fabric_workspace)
 
     Named ``disposable`` for history: its contents are, its existence is not.
     Creating a Warehouse is quick, but waiting for its SQL endpoint to become
-    connectable is not bounded — the loop below tolerates ten minutes — and that
+    connectable is not bounded, the loop below tolerates ten minutes, and that
     wait is pure variance in every measurement the suite takes. A Warehouse that
     already exists has already paid it.
 
-    The readiness loops stay, because a *first* run on a new tenant creates the
+    The readiness loops stay, because a first run on a new tenant creates the
     Warehouse and must still wait. They simply cost nothing on the runs after.
     """
 
@@ -763,8 +764,8 @@ def fabric_empty_lakehouse(
 
     Reusing items makes residue possible in a way disposable ones never allowed,
     and residue is not inert. A producer whose table already matches leaves
-    incremental selection with nothing to do — correctly — so a test asserting
-    *build order* then finds no build action in the plan at all. That is not a
+    incremental selection with nothing to do, correctly, so a test asserting
+    build order then finds no build action in the plan at all. That is not a
     hypothetical: it is exactly how the Warehouse shortcut tests failed when two
     estates shared a producer.
 
@@ -1122,7 +1123,7 @@ def populated_fabric_lakehouse(
 
 @pytest.fixture(scope="module")
 def weaver_repo_fixture(request):
-    """Which Weaver document repository a build env installs — the default, or a test's choice.
+    """Which Weaver document repository a build env installs, the default, or a test's choice.
 
     Module-scoped so an estate is provisioned once per test module. Parametrise
     indirectly (with a fixture from ``build_envs``) to point an environment at
@@ -1162,7 +1163,7 @@ def _fabric_build_context(
     ``Tables/<schema>/<table>``.
 
     **The catalogue and the Livy session are the run's, not this context's.**
-    A destination is disposable and a catalogue is not — that is the
+    A destination is disposable and a catalogue is not. That is the
     architecture, and modelling it costs less as well. A Livy session takes one to
     two minutes to reach ``idle``, which was about seventy per cent of this
     module's wall clock when every test started its own; a capacity that permits
@@ -1170,9 +1171,9 @@ def _fabric_build_context(
     start, and at the tail of a long run it did not, so two estates were refused
     with ``did not reach 'idle' within 600s``.
 
-    The **target** Lakehouse is the run's too, and is *emptied* on the way in
-    rather than re-created. Tests that want a target nobody has touched — prune,
-    the failure paths — get one that way, and the workspace's artifacts stop
+    The **target** Lakehouse is the run's too, and is emptied on the way in
+    rather than re-created. Tests that want a target nobody has touched, prune,
+    the failure paths, get one that way, and the workspace's artifacts stop
     churning underneath a long-lived session. It is also what the local context
     has always done.
     """
@@ -1189,8 +1190,8 @@ def _fabric_build_context(
     staging = ItemRef(staging_lh.name)
     warehouse_name = warehouse.item.name if warehouse is not None else None
     repository_relative = ("test_repositories", weaver_repo_fixture.name)
-    # Staged in the *target* Lakehouse's Files. It used to be the catalogue's,
-    # and a Warehouse has no Files area — nor any reason to hold a repository,
+    # Staged in the target Lakehouse's Files. It used to be the catalogue's,
+    # and a Warehouse has no Files area, nor any reason to hold a repository,
     # which was only ever staging for a build that reads it.
     repository_root = resolver.files_root(staging).join(*repository_relative)
 
@@ -1228,7 +1229,7 @@ def _fabric_build_context(
     def generate(bundle_name: str = "buildtest"):
         # Generation runs IN the session, against the native Spark catalogue.
         # The item type chooses its binding, so one context serves a Lakehouse
-        # estate or a mixed one without a test naming a target kind — the same
+        # estate or a mixed one without a test naming a target kind, the same
         # rule `_bindings_for` applies locally.
         binds = ", ".join(
             (
@@ -1359,7 +1360,7 @@ def _fabric_build_context(
         return session.run(body).payload
 
     def run_python(body: str, *, label: str = "shared body"):
-        """Run a shared body *in Fabric*, with the session's own resolver bound.
+        """Run a shared body in Fabric, with the session's own resolver bound.
 
         The preamble is the whole transport difference: ``resolver_for`` returns
         the session-native resolver here and the local one on a laptop, so the
@@ -1385,7 +1386,7 @@ def _fabric_build_context(
         return _timed_session_run(session, label, preamble + body).payload
 
     def seed_orphans() -> None:
-        # Seeded in the *destination*, by its four-part name, exactly as a
+        # Seeded in the destination, by its four-part name, exactly as a
         # build names what it creates. A two-part name would depend on the
         # session's attachment, which is precisely what nothing may rely on.
         statements = [
@@ -1429,7 +1430,7 @@ def _fabric_build_context(
 
 #: Every schema a Lakehouse build fixture registers in the target, and every Files
 #: area it writes. Emptied between contexts, which is what a fresh target used to
-#: be for. The local context drops the same set — see `_LOCAL_SCHEMAS`.
+#: be for. The local context drops the same set. See `_LOCAL_SCHEMAS`.
 _FABRIC_TARGET_SCHEMAS = ("DWG", "Raw", "Legacy", "Sales", "Reporting")
 
 
@@ -1441,32 +1442,32 @@ def _empty_the_target(
     workspace,
     warehouse=None,
 ) -> None:
-    """Leave the target Lakehouse *and the Weaver catalogue* as though nothing ran.
+    """Leave the target Lakehouse and the Weaver catalogue as though nothing ran.
 
     **Through Weaver's own wipe.** This used to sweep the Lakehouse's two areas
     with ``store.delete`` and it is exactly the mistake ``AGENTS.md`` records
-    against the first Fabric suite — test code reproducing what the function
+    against the first Fabric suite, test code reproducing what the function
     would have done, and looking like it was testing ``wipe``. A hand-rolled
-    sweep is a *list* of what to remove, so it can omit something; and it
+    sweep is a list of what to remove, so it can omit something; and it
     recursively deleted directories without removing shortcuts first, which
     ``wipe_folder_target`` is careful never to do, since a recursive delete
     through a shortcut reaches the *producer's* data.
 
     **The catalogue is cleared too, and that is the point.** Weaver's own record
     is state like any other, and it accumulates faster than anything else here:
-    the catalogue is shared and permanent while the *logical item names* bound to
+    the catalogue is shared and permanent while the logical item names bound to
     one physical target change from module to module, so its Registry ends up
     holding several items' claims on one physical object. No build repairs that,
-    and correctly so — reconciliation is scoped to the items a build binds,
+    and correctly so, reconciliation is scoped to the items a build binds,
     because an item you are not building has claims you have no business
     deleting. Right in production; in a suite reusing one target under many names
     it makes the residue permanent.
 
     Clearing it is now a Warehouse question rather than a Spark one, so it drops
-    the ``_`` schema over TDS. A build creates its tables *and* its schema, so
+    the ``_`` schema over TDS. A build creates its tables and its schema, so
     unlike the Delta arrangement there is nothing to put back.
 
-    What storage cannot reach in the destination is the Spark metastore: a *view*
+    What storage cannot reach in the destination is the Spark metastore: a view
     exists only there. So the session drops the destination's schemas as well.
     """
 
@@ -1488,7 +1489,7 @@ def _empty_the_catalogue(workspace) -> None:
     """Drop `_` in the catalogue Warehouse, leaving the Warehouse itself alone.
 
     Weaver owns `_` there and nothing else, so this is the whole of what a reset
-    may touch — a neighbour's schema in the same Warehouse is not the suite's to
+    may touch, a neighbour's schema in the same Warehouse is not the suite's to
     remove any more than it is Weaver's.
     """
 
@@ -1545,8 +1546,8 @@ def _warehouse_build_env(
     """A Warehouse BuildEnv that runs **inside Fabric**, like the Lakehouse one.
 
     Weaver is a Fabric tool: it is installed into the Environment and does the
-    work there. So both phases run in the Livy session — generation reads the
-    target Warehouse's system schema through Weaver's *own* Fabric-native mssql
+    work there. So both phases run in the Livy session, generation reads the
+    target Warehouse's system schema through Weaver's own Fabric-native mssql
     connector (``fabric_sql_executor``, the session identity) to compile the prune
     into the bundle, and installation runs the frozen T-SQL through that same
     connector. The desktop uploads only the explicit Weaver repository source and
@@ -1560,7 +1561,7 @@ def _warehouse_build_env(
     resolver = FabricResolver(fabric_workspace, client=None)
     store = OneLakeDfsClient()
     # Staged in a Lakehouse's Files, because that is the only OneLake area
-    # there is. The catalogue is a Warehouse and has none — and no reason to
+    # there is. The catalogue is a Warehouse and has none, and no reason to
     # hold a repository, which is staging for a build that reads it.
     weaver = _ItemRef(staging.name)
     warehouse_ref = _ItemRef(warehouse.item.name)
@@ -1589,7 +1590,7 @@ def _warehouse_build_env(
 
     def generate(bundle_name: str = "whtest"):
         # Generation runs IN Fabric and reads the Warehouse catalogue there
-        # through its own Fabric-native SQL — no sql= injection.
+        # through its own Fabric-native SQL, no sql= injection.
         binds = ", ".join(
             f"ItemBinding(WeaverItemId.parse({item!r}), "
             f"WarehouseBinding(warehouse=ItemRef({warehouse_ref.name!r}), "
@@ -1716,7 +1717,7 @@ def _warehouse_build_env(
         """Objects the bundle does not manage, for prune to reconcile away.
 
         An orphan table and view inside a managed schema, plus a whole orphan
-        schema holding both — so the frozen drops must cover object-level and
+        schema holding both, so the frozen drops must cover object-level and
         schema-level reconciliation, in a dependency-safe order.
         """
 
@@ -1780,7 +1781,7 @@ def warehouse_estate(
 
 # --- the estates a Fabric test drives ----------------------------------------
 #
-# Fabric-only, deliberately, and built from the same `tests/support` machinery a
+# Fabric-only, and built from the same `tests/support` machinery a
 # test without a tenant uses. A module placed here collects this conftest, and
 # with it a workspace, a credential and a session.
 
@@ -1789,9 +1790,9 @@ def warehouse_estate(
 def fabric_lakehouse_journey(request, weaver_repo_fixture):
     """One Fabric estate for a journey to drive.
 
-    **The transitions are deliberately not run here.** A fixture that took every
+    **The transitions are not run here.** A fixture that took every
     move up front and handed the result to a set of tests would leave each one
-    inspecting the *final* estate, whatever transition it claimed to be about —
+    inspecting the final estate, whatever transition it claimed to be about,
     and a later move could repair what an earlier one broke, so the earlier
     assertion would pass on evidence that no longer existed.
     """
@@ -1813,9 +1814,9 @@ def fabric_lakehouse_journey(request, weaver_repo_fixture):
 def fabric_cross_item_journey(request, weaver_repo_fixture):
     """One Fabric estate spanning a Lakehouse and a Warehouse, for a journey.
 
-    The same arrangement as :func:`fabric_mixed_estate` — one bundle installing
+    The same arrangement as :func:`fabric_mixed_estate`. One bundle installing
     both halves, so the ordering the build gives them is the ordering a real
-    estate has — but handed over untouched, because a journey's transitions are
+    estate has, and handed over untouched, because a journey's transitions are
     its subject and a fixture that had already taken them would leave every
     assertion reading the final estate.
     """
@@ -1855,7 +1856,7 @@ def fabric_lakehouse_estate(request, weaver_repo_fixture):
 
 @pytest.fixture(scope="module")
 def fabric_mixed_estate(request, weaver_repo_fixture):
-    """One estate spanning a Lakehouse *and* a Warehouse, installed together.
+    """One estate spanning a Lakehouse and a Warehouse, installed together.
 
     The one arrangement neither single-target context can express, and the one
     the physical load graph most needs: a Delta table published into a Warehouse

@@ -146,8 +146,8 @@ def render_source(table, *, lineage: str = LINEAGE) -> str:
         # to install and no row signature to keep for one.
         "Has load procedure: false",
         # The key is declared as the primary key, so the catalogue's own tables
-        # describe themselves: Weaver document makes key columns not null, and the projection
-        # records the key in the catalogue like any other object's.
+        # describe themselves: a Weaver document makes key columns not null, and
+        # the projection records the key like any other object's.
         "Primary key: " + ", ".join(table.public_name_of(name) for name in table.key),
     ]
     if not_null:

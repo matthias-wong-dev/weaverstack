@@ -2,12 +2,12 @@
 
 A plan says what will run; `target_changes` says what it will mean. Written side
 by side because inferring the second from the first would put a model of executor
-semantics somewhere no executor could correct it — but a summary the planner
+semantics somewhere no executor could correct it, and a summary the planner
 writes about its own plan proves nothing on its own.
 
 This is what makes it prove something. Every physical action must be named by a
 change and every change must name a real action, so the two cannot drift apart
-without failing here. Adding an artefact type means emitting an action *and* a
+without failing here. Adding an artefact type means emitting an action and a
 change; forget either and the correspondence breaks.
 
 Per item type, because the two physical sides emit different actions and a
@@ -70,7 +70,7 @@ def repository(tmp_path):
 
 
 def build(repository, tmp_path, *, inventories=None, catalogue=None):
-    """A build against whatever prior state a test wants to describe."""
+    """A build against whatever prior state a test needs to describe."""
 
     return generate_item_build_bundle(
         repository,
@@ -129,7 +129,7 @@ def test_every_declared_change_names_an_action_that_runs(repository, tmp_path, i
     """The other direction, and the one that catches a summary of good intentions.
 
     A change naming no action is a claim about state that nothing will bring
-    about — which is precisely how a self-certifying summary would look.
+    about, which is precisely how a self-certifying summary would look.
     """
 
     plan = build(repository, tmp_path).plan
@@ -209,7 +209,7 @@ def test_the_summary_travels_in_the_manifest(repository, tmp_path):
     """Inside the hashed plan, not beside it.
 
     A sibling file outside the bundle identity could be edited after
-    certification, which is the thing frozen payloads exist to prevent — so the
+    certification, which is the thing frozen payloads exist to prevent, so the
     summary a reviewer reads is the summary the installation was certified with,
     and it survives the round trip that proves it.
     """
@@ -225,7 +225,7 @@ def test_the_summary_travels_in_the_manifest(repository, tmp_path):
 
 @weaver_test()
 def test_the_summary_is_part_of_bundle_identity(repository, tmp_path):
-    """Changing what a build claims it will do changes what the build *is*."""
+    """Changing what a build claims it will do changes what the build is."""
 
     from dataclasses import replace
 

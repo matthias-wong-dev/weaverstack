@@ -1,14 +1,14 @@
 """What an authored Spark SQL table's body means, and what it may not mean.
 
 A Spark SQL table is installed as an importable primitive whose ``read()``
-returns ``(staging, deletes)``, so the body's shape *is* that pair: one query is
+returns ``(staging, deletes)``, so the body's shape is that pair: one query is
 staging, two are staging and the keys to delete. These are the rules that make
-one body legible as the other, and they are asserted at both ends — the parse
+one body legible as the other, and they are asserted at both ends, the parse
 that refuses a build, and the contract check the deployed primitive repeats.
 
 Pure Python throughout. Nothing here needs Spark, because nothing here parses
 Spark SQL: statement boundaries are lexical and classification is by what a
-statement leads with. Whether each statement is *valid* is Spark's answer, given
+statement leads with. Whether each statement is valid is Spark's answer, given
 when it runs.
 """
 

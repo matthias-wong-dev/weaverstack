@@ -286,7 +286,7 @@ def test_the_build_succeeds_against_an_empty_lakehouse_with_no_prior_preparation
 def test_no_build_module_reaches_the_initialisation_wrapper():
     """`initialise` is a compatibility shell; build must not route through it.
 
-    Source-level because the failure it guards is a *reintroduced call*, and the
+    Source-level because the failure it guards is a reintroduced call, and the
     cheapest honest statement of "build does not do this" is that the build
     modules do not name it. A behavioural version would have to stand up each of
     the three platform paths to prove a negative about all of them.

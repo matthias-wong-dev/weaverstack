@@ -63,7 +63,7 @@ TASK_INVALID = "invalid"
 # Owned by the run package, because they are runtime vocabulary rather than load
 # vocabulary: a load, a validation and whatever runtime work comes next all
 # report through them. Re-exported here under the name this module's public
-# report has always used, so a reader of a LoadRunReport sees one message type.
+# report has always used, so a LoadRunReport carries one message type.
 
 from .run.result import (  # noqa: E402 - the vocabulary this report projects
     CATALOGUE_BINDING_INVALID,
@@ -222,7 +222,7 @@ def final_status(nodes: tuple[LoadNodeReport, ...], *, dry_run: bool) -> str:
     """The task status these node reports add up to.
 
     Derived rather than accumulated, so the summary cannot disagree with the
-    nodes it summarises — the failure mode of a status advanced by hand as the
+    nodes it summarises, the failure mode of a status advanced by hand as the
     run proceeds.
     """
 

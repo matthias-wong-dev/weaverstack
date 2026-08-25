@@ -1,7 +1,7 @@
 """One item's physical plan, from prepared inputs.
 
-The seam between deciding *what* to build and assembling a whole bundle. Ordering
-claims live here — prune before drop before schema before build before refresh —
+The seam between deciding what to build and assembling a whole bundle. Ordering
+claims live here, prune before drop before schema before build before refresh,
 and they are the claims that used to require generating a bundle, or installing
 one against Fabric, to see.
 
@@ -159,7 +159,7 @@ def test_an_unmanaged_object_is_pruned_before_anything_is_built(customer):
 
 @weaver_test()
 def test_a_declared_object_present_in_the_inventory_is_never_pruned(customer):
-    """What prune spares is the assertion worth making — it is destructive."""
+    """What prune spares is the assertion worth making: it is destructive."""
 
     identity = document_id("DWG.Customer")
 
@@ -177,10 +177,10 @@ def test_a_declared_object_present_in_the_inventory_is_never_pruned(customer):
 def test_an_object_being_rebuilt_is_dropped_before_it_is_built(customer):
     """A drop clears the way for a rebuild; it is not how a removal is handled.
 
-    The two are different and the difference is easy to lose. A *drop* is Weaver
+    The two are different and the difference is easy to lose. A drop is Weaver
     removing something it certified, whose type it knows from the Registry, and
-    which is still declared — so it is ordered through the repository's own
-    dependency graph, dependants first. A *prune* removes something Weaver never
+    which is still declared, so it is ordered through the repository's own
+    dependency graph, dependants first. A prune removes something Weaver never
     claimed, found by diffing the inventory. An object that has left the
     declaration entirely is in neither set here: it has no node in the graph, and
     its Registry claim is retired by catalogue reconciliation.
@@ -277,7 +277,7 @@ def test_a_warehouse_item_orders_its_objects_by_dependency(tmp_path):
 
     A Warehouse build used to prove this by installing into Fabric and reading
     sequence numbers off the bundle. The ordering is a property of the item's
-    document graph, so it is decided here — what Fabric can say is only whether
+    document graph, so it is decided here. What Fabric can say is only whether
     the statements are valid, which is a different test.
     """
 

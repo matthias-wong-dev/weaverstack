@@ -3,9 +3,9 @@
 ``weaver session`` makes one promise, and it is the whole reason the command
 exists: a console pays for authentication, item resolution and a Livy session
 once, and every command typed at the prompt reuses them. The promise was
-already true of ``build`` and ``wipe``. It was quietly false of ``load``,
+already true of ``build`` and ``wipe``. It was false of ``load``,
 ``test`` and unbinding, which each opened a :class:`LivySession` of their own,
-waited a minute for it, and closed it on the way out — so a developer running
+waited a minute for it, and closed it on the way out, so a developer running
 
 .. code-block:: text
 
@@ -15,13 +15,13 @@ waited a minute for it, and closed it on the way out — so a developer running
     weaver> test  Lakehouse/Sales
 
 started three Spark sessions in a shell whose banner said it had started one.
-On a capacity that permits a single concurrent session that is not merely slow;
+On a capacity that permits a single concurrent session that is not slow;
 the second one cannot start at all while the first is up.
 
 Two claims, because they fail differently. The behavioural one below is what a
 developer experiences. The source-level one is what stops it coming back: the
 bug was not that a crossing was written wrongly, it was that a crossing was
-written *somewhere else*, and no test could see the difference.
+written somewhere else, and no test could see the difference.
 """
 
 from __future__ import annotations
@@ -119,7 +119,7 @@ def transport(monkeypatch):
         property(lambda self: _PresentResolver(self.workspace)),
     )
     # The catalogue is a Warehouse, reached over TDS rather than Livy. Answered
-    # with nothing, which is an empty catalogue — see `_answer_for`. Counted, so
+    # with nothing, which is an empty catalogue. See `_answer_for`. Counted, so
     # a command that stopped reading the estate cannot pass for the wrong reason.
     from weaver.sessions.console import ConsoleSession
 
@@ -138,7 +138,7 @@ def transport(monkeypatch):
 def _answer_for(code: str):
     """What the far side would emit for each program a run submits.
 
-    The catalogue itself is answered over TDS and is empty, deliberately: these
+    The catalogue itself is answered over TDS and is empty: these
     tests are about which resources a run of commands acquires, not about what
     it finds. A load against an estate that claims nothing stops early, which is
     what is being counted.
@@ -170,7 +170,7 @@ def _run(session, parser, words: list[str]) -> None:
 
     Failures are swallowed exactly as the prompt swallows them: an empty estate
     is a perfectly ordinary answer here, and what these tests count is which
-    resources were acquired on the way to it — a session that a failed command
+    resources were acquired on the way to it, a session that a failed command
     tore down would be the bug, not the failure.
     """
 
@@ -187,7 +187,7 @@ def test_reading_the_catalogue_starts_no_livy_at_all(transport, capsys):
     """The catalogue is a Warehouse, so asking it what is installed is TDS.
 
     A Spark session costs a minute to start and a capacity's only slot. Neither
-    of these commands finds anything to run, so neither has any Spark work — and
+    of these commands finds anything to run, so neither has any Spark work, and
     a run with no Spark work must not pay for a Spark session.
     """
 
@@ -272,7 +272,7 @@ def test_a_command_given_no_session_still_works_on_its_own(transport):
 
 # --- which commands are worth a Spark session, and where it attaches ---------
 #
-# Fabric creates a Livy session *against* a Lakehouse: its id is in the Livy URL.
+# Fabric creates a Livy session against a Lakehouse: its id is in the Livy URL.
 # The Lakehouse comes from the command, which named the physical targets it is
 # for, so a workspace configuring none can still build into one. Warehouse-only
 # work names no Lakehouse and needs no session at all.
@@ -306,7 +306,7 @@ def test_a_warehouse_only_command_needs_no_lakehouse_and_starts_no_spark(transpo
     """A Warehouse estate needs no Lakehouse, configured or bound.
 
     A build bound only to Warehouses writes T-SQL, and its catalogue is a
-    Warehouse too, so nothing here wants Spark. The workspace configures no
+    Warehouse too, so nothing here needs Spark. The workspace configures no
     Lakehouses and the commands still run.
     """
 
@@ -579,10 +579,10 @@ def test_a_command_naming_another_workspace_is_refused(transport, monkeypatch):
 def test_only_the_session_opens_a_livy_session():
     """Who may reach for the transport, read off the source.
 
-    The bug this replaces was not a crossing written wrongly — each of the three
-    worked. It was a crossing written *outside* the Session, where nothing could
+    The bug this replaces was not a crossing written wrongly, each of the three
+    worked. It was a crossing written outside the Session, where nothing could
     see that it duplicated one. So the rule is positional: acquiring Livy is the
-    Session's, and a command that wants Spark asks for a capability.
+    Session's, and a command that needs Spark asks for a capability.
     """
 
     from pathlib import Path

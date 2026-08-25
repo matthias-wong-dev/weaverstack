@@ -121,8 +121,8 @@ MERGE_CONFLICT_MESSAGE = (
 )
 
 #: Banners marking where the author's own code sits in the generated procedure.
-#: A generated artefact is read by people — usually when something has gone
-#: wrong — and the first question is always "which of this did I write?".
+#: A generated artefact is read when something has gone wrong, and the first
+#: question is which of it the author wrote.
 PREPROCESSING_BANNER = "/*-- Pre-processing --*/"
 TRANSFORMATION_BANNER = "/*---- Data transformation ----*/"
 END_TRANSFORMATION_BANNER = "/*---- End data transformation ----*/"
@@ -153,7 +153,7 @@ _CANONICAL_FALLBACK = "cast({column} as varchar(max))"
 
 #: The text of a null comparison value. It cannot be confused with a present
 #: value, because a present value is written as its byte length, a colon, and
-#: then itself — so it always begins with a digit.
+#: then itself, so it always begins with a digit.
 _NULL_MARKER = "~"
 
 
@@ -162,7 +162,7 @@ def generate_tsql_load_script(
 ) -> str:
     """The installer script for one Warehouse table's load procedure.
 
-    ``body`` is the table's own query — the same text its build materialises to
+    ``body`` is the table's own query, the same text its build materialises to
     settle its shape. A load runs it for real.
 
     ``item`` is the logical Weaver item the table belongs to. A document knows
@@ -259,8 +259,8 @@ def _result_assignment(**values: str) -> str:
         "rows_rejected": "@weaver_rows_rejected",
         "error_message": "@weaver_error",
         # Null unless a clean load actually ran. A caller advances a bookmark
-        # only to an instant a load established, so an exit that read nothing —
-        # a Static skip, a refused breach, a load that rejected rows — reports
+        # only to an instant a load established. An exit that read nothing, being
+        # a Static skip, a refused breach or a load that rejected rows, reports
         # none and the bookmark it already had stands.
         "bookmark_datetime": "null",
         # Reported rather than inferred from the counts: a Static skip and a load
@@ -287,8 +287,8 @@ def _static_gate(contract: LoadContract) -> str:
 
     The bookmark answers it, not the target's contents. What ``Static`` means is
     "load this once", and the record of whether that has happened is the
-    bookmark — so a table somebody populated by hand is still loaded, and a
-    table a clean load emptied is still skipped. Before the staging query, so a
+    bookmark, so a table populated by hand is still loaded and a table a clean
+    load emptied is still skipped. Before the staging query, so a
     loaded object costs no source read.
 
     A non-static object gets a comment rather than a disabled branch.
@@ -398,7 +398,7 @@ def _staging_table_sql(names: dict, query: str, contract: LoadContract) -> str:
 
     A keyed load places ``INTO`` in the query by the same offset-exact transform
     the shape-only build uses, because ``with … select …`` is a legal statement
-    and an illegal derived table — so a body opening with a CTE cannot be wrapped
+    and an illegal derived table, so a body opening with a CTE cannot be wrapped
     and has to be run as the statement it is.
     """
 
@@ -498,7 +498,7 @@ def _signature_expression() -> str:
     """The digest of one staged row's comparison state.
 
     ``N''`` opens the payload so the expression is complete even for a table
-    whose comparison columns are empty — every row then signs identically, which
+    whose comparison columns are empty. Every row then signs identically, which
     is what "nothing to compare" means.
     """
 
@@ -630,8 +630,8 @@ def _unique_key_ctes(
 
     Which row survives a group is arbitrary and settled cheaply. A single-column
     primary key gives an aggregate to settle it with; a composite one has none,
-    so those groups are ranked — over the duplicate groups alone, never over the
-    whole population.
+    so those groups are ranked, over the duplicate groups alone and never over
+    the whole population.
     """
 
     reason = duplicate_unique_reason(unique_key)
@@ -915,7 +915,7 @@ def _delete_derivation(
 
     Which rows those are is what ``Incremental`` decides. A non-incremental
     source is the whole truth, so a key clean staging no longer carries is
-    retired — including one whose only staged row was refused, which is why this
+    retired, including one whose only staged row was refused, which is why this
     reads staging after the purge rather than before it. An incremental source is
     a window, so only an explicit second query can retire anything, and that
     query's claim was already narrowed when it ran.
@@ -962,7 +962,7 @@ def _prospective_deletes(
 
 
 def _reconciliation(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
-    """Remove the target rows this load retires — a physical delete."""
+    """Remove the target rows this load retires, as a physical delete."""
 
     if not _has_delete_relation(contract, claims_deletes):
         return "-- Incremental, and no delete query: absence retires nothing."
@@ -986,8 +986,8 @@ def _merge_uniqueness(names: dict, contract: LoadContract, has_delete: bool) -> 
     it leaves the target equal to clean staging, and staging has already been
     made unique.
 
-    A holder gives its value up in exactly two ways — the load deletes it, or the
-    load moves it off that value. Being in the upsert set is not one of them: a
+    A holder gives its value up in two ways: the load deletes it, or the load
+    moves it off that value. Being in the upsert set is not one of them, and a
     row may be changing something else entirely and keeping the value it has. So
     a swap, and a cycle whose proposed state is unique, both pass, and a claim
     against an untouched holder does not.
@@ -1066,7 +1066,7 @@ def _cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
     """Drop whatever a previous run left behind, newest dependency first.
 
     Only the tables this procedure makes. An unkeyed load has no reject, upsert
-    or delete table; dropping them anyway would send a reader hunting for the
+    or delete table; dropping them anyway would hide the
     statement that creates them.
     """
 
@@ -1135,7 +1135,7 @@ def _signature_payload_select(
 
     Each value is written as its byte length, a colon, and its canonical text, so
     a value containing whatever separator was chosen cannot be read as two
-    values — and a null, written ``~``, cannot be read as an empty string.
+    values, and a null, written ``~``, cannot be read as an empty string.
     """
 
     if not contract.primary_key:
@@ -1290,8 +1290,8 @@ def _blank_key_predicate(columns: tuple[str, ...], *, alias: str = "s") -> str:
     """A key column that is null, empty or only spaces is not a key.
 
     Blank is rejected alongside null: a whitespace key matches nothing a person
-    would call a match, and would create a row nobody can find again — or, on
-    the delete side, claim one.
+    would call a match, and would create a row nobody can find again, or claim
+    one on the delete side.
 
     ``alias`` is empty where the predicate is applied to one table with no
     relation to qualify, as the staging purge does.
@@ -1316,7 +1316,7 @@ def _sql_literal(text: str) -> str:
 
 
 def _escape_literal(text: str) -> str:
-    """Text going *inside* an already-quoted literal in the procedure template.
+    """Text going inside an already-quoted literal in the procedure template.
 
     The procedure is itself embedded in a string literal by the installer, so a
     quote here is doubled twice over: once at each layer.

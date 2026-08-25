@@ -179,9 +179,9 @@ def test_shortcut_rows_reproduce_what_was_declared(tmp_path):
 
 @weaver_test()
 def test_a_shortcut_destination_is_registered_as_the_object_it_actually_is(tmp_path):
-    """No ``shortcut`` *type*. To every reader of the catalogue an external
+    """No ``shortcut`` type. To every reader of the catalogue an external
     reference in a Warehouse is a view, and that is what it is recorded as. What
-    it is *for* is the role, and where it points is ``_.Shortcut``."""
+    it is for is the role, and where it points is ``_.Shortcut``."""
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     projection = _project(
@@ -195,7 +195,7 @@ def test_a_shortcut_destination_is_registered_as_the_object_it_actually_is(tmp_p
 
 @weaver_test()
 def test_a_lakehouse_shortcut_is_registered_as_a_table(tmp_path):
-    """The same shortcut against a Lakehouse is a table — a OneLake shortcut is how
+    """The same shortcut against a Lakehouse is a table, a OneLake shortcut is how
     it is made, not what it is."""
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
@@ -320,7 +320,7 @@ class _Shaped(_FakeCatalogue):
 
 @weaver_test()
 def test_a_registry_without_the_epoch_column_is_refused_by_name():
-    """It can be read but not written — the merge sets the build_datetime on every insert.
+    """It can be read but not written, the merge sets the build_datetime on every insert.
 
     Failing here says which column of which table is wrong. Letting it through
     would move the failure into the install, where it arrives as an engine
@@ -346,7 +346,7 @@ def _shaped(*names: str):
 
 
 def _whole():
-    """Every catalogue table present — the only complete state a build accepts."""
+    """Every catalogue table present, the only complete state a build accepts."""
 
     from weaver.catalogue.tables import PROJECTED_TABLES
 
@@ -366,8 +366,8 @@ def test_a_registry_with_the_epoch_column_is_accepted():
 # --- which absences are the first run, and which are damage -------------------
 #
 # One rule, and the thing that decides it is whether anything else is there.
-# The tempting exception — a *dictionary* table, because the built-in item will
-# recreate it — is the case these tests exist to refuse. Recreating the table is
+# The tempting exception, a dictionary table, because the built-in item will
+# recreate it, is the case these tests exist to refuse. Recreating the table is
 # not restoring its contents, and an ordinary build is scoped to the items it
 # was pointed at, so it can only ever write those items' rows back.
 
@@ -389,7 +389,7 @@ def test_a_missing_dictionary_table_beside_a_populated_catalogue_is_refused():
     """The physical table would come back; another item's rows would not.
 
     On an estate holding `Sales` and `Finance`, a build scoped to `Sales` would
-    recreate the table and write Sales' rows — leaving Finance with none, while
+    recreate the table and write Sales' rows, leaving Finance with none, while
     Finance's Registry and Installation rows survived to claim objects the
     dictionaries no longer describe. Nothing later notices: the next build finds
     a table that exists and rows that match whatever it was scoped to.
@@ -469,7 +469,7 @@ def test_a_catalogue_predating_an_introduced_table_still_builds():
     no rows in it yet.
 
     Without this, adding a dictionary table would stop every existing estate
-    from building until somebody repaired a catalogue that was never broken —
+    from building until somebody repaired a catalogue that was never broken,
     which is exactly what `_.TestDictionary` did on a real Fabric workspace.
     """
 
@@ -605,7 +605,7 @@ def test_a_schema_shortcut_is_not_a_schema_the_item_owns(tmp_path):
 def test_a_shortcut_row_names_the_shortcut_the_way_registry_does(tmp_path):
     """``Shortcut ID`` keys it; ``Schema``/``Object`` are the reader's identity.
 
-    So a reader joins Registry and Shortcut without splitting an id.
+    So Registry and Shortcut join without splitting an id.
     """
 
     _repository, rows = _shortcut_rows(tmp_path)

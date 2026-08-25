@@ -14,7 +14,7 @@ from .errors import SqlPoolClosedError
 
 #: How many physical connections one pool opens. Sized for the work rather than
 #: chosen: a load holds one to run the object's procedure while the catalogue's
-#: runtime tables are written on a worker each — one for the evidence, one for
+#: runtime tables are written on a worker each. One for the evidence, one for
 #: the status, one for the statistics, one for the bookmark. Fewer than that and
 #: a writer waits for the reader to finish, which costs latency nothing needs to
 #: pay.
@@ -22,7 +22,7 @@ DEFAULT_MAX_CONNECTIONS = 6
 
 #: How long a connection may sit idle before it is checked rather than trusted.
 #: A Fabric SQL endpoint drops connections it considers abandoned, and it does
-#: so silently — the next statement fails with "Communication link failure",
+#: so silently, the next statement fails with "Communication link failure",
 #: which reads as though the statement was at fault. Under this threshold the
 #: check is skipped, so a burst of work pays nothing.
 IDLE_VALIDATION_SECONDS = 60.0
@@ -207,7 +207,7 @@ class SqlPoolRegistry:
 
 
 def _alive(connection: Any) -> bool:
-    """Whether this connection still answers — asked as cheaply as possible."""
+    """Whether this connection still answers: asked as cheaply as possible."""
 
     try:
         cursor = connection.cursor()

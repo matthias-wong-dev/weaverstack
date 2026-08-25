@@ -1,9 +1,9 @@
 """Weaver carries no house jargon, examples included.
 
 Folder, Delta and SQL are materialisation forms, so `T0`/`T1`/`T2` naming must
-not appear: it is our own tiering convention and means nothing to a reader
+not appear: it is our own tiering convention and means nothing
 outside these repositories. Widely-understood naming such as bronze/silver/gold
-is fine — it illustrates without assuming.
+is fine. It illustrates without assuming.
 """
 
 from __future__ import annotations

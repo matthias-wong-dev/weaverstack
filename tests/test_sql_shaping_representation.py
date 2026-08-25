@@ -1,4 +1,4 @@
-"""Offset-exact T-SQL shape transforms — ported from the reference
+"""Offset-exact T-SQL shape transforms: ported from the reference
 implementation's wrangle tests, trimmed to the two transforms weaverstack
 keeps (insert_where_one_eq_zero, insert_select_into) plus template rendering.
 The serious-SQL fixtures exercise real, gnarly queries the way a Warehouse

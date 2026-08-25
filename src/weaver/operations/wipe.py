@@ -160,7 +160,7 @@ def wipe(
             # Compared as item names, because the two arrive spelled
             # differently: `unbind_from` names an item and the workspace's
             # catalogue is typed. Wiping the catalogue itself skips the unbind
-            # entirely — deleting rows from tables that are about to be removed
+            # entirely, deleting rows from tables that are about to be removed
             # is work nobody needs.
             control_name = str(control).rpartition("/")[2] if control else None
             # Either type: the catalogue is a Warehouse, and a wipe of the
@@ -216,7 +216,7 @@ def _wipe_one(target: WipeTarget, workspace, *, store, dry_run, session):
     warehouse = WarehouseTarget(target.item)
     # The Session's connection, reused and closed with the Session. A wipe that
     # opened its own would pay for a Warehouse the build before it had already
-    # connected to — and would close it before the load after it connects again.
+    # connected to, and would close it before the load after it connects again.
     wipe_sql_target(
         warehouse, workspace, sql=session.sql_executor(warehouse, workspace=workspace)
     )

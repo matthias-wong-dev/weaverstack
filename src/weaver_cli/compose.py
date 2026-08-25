@@ -33,7 +33,7 @@ def load_composition(name: str, *, file: str | None = None) -> tuple[list[str], 
     if not path.is_file():
         raise CommandError(
             f"no composition file at {path}"
-            + ("" if file else " — write one, or name one with --file")
+            + ("" if file else ". Write one, or name one with --file")
         )
     try:
         document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -49,7 +49,7 @@ def load_composition(name: str, *, file: str | None = None) -> tuple[list[str], 
         raise CommandError(f"{path}: {COMPOSE_KEY!r} must be a mapping of names")
     if name not in compositions:
         known = ", ".join(sorted(compositions)) or "none"
-        raise CommandError(f"{path}: no composition named {name!r} — found: {known}")
+        raise CommandError(f"{path}: no composition named {name!r}. Found: {known}")
 
     entries = compositions[name]
     if not isinstance(entries, list) or not entries:

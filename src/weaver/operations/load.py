@@ -52,8 +52,8 @@ def load(
 ) -> LoadRunReport:
     """Load installed objects within the requested physical targets.
 
-    ``targets`` are typed physical items — ``Lakehouse/Curated``,
-    ``Warehouse/Reporting`` — and they are a hard execution boundary. With no
+    ``targets`` are typed physical items such as ``Lakehouse/Curated`` and
+    ``Warehouse/Reporting``, and they are a hard execution boundary. With no
     name filter, every loadable object hosted there runs in dependency order;
     dependencies never add an unrequested target.
 
@@ -197,7 +197,7 @@ def run_load(
 def _as_load_report(result, *, started, record) -> LoadRunReport:
     """One RunResult, rendered as the shape a load's readers expect.
 
-    One internal model, several public shapes. A load reader wants rows moved
+    One internal model, several public shapes. A load reader needs rows moved
     and a workflow to correlate its evidence by.
     """
 
@@ -281,7 +281,7 @@ def _refuse_uninstalled_targets(estate: InstalledEstate, requested) -> None:
     raise CommandError(
         "no installed estate in "
         + ", ".join(str(target) for target in unknown)
-        + f" — the catalogue binds no logical item to it. Installed: {known}"
+        + f". The catalogue binds no logical item to it. Installed: {known}"
     )
 
 
@@ -327,7 +327,7 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
         if node.result is not None:
             # What the result actually measured. A node that failed without
             # reaching its primitive reports no counts at all, and it
-            # contributes none — which is true, because nothing was written.
+            # contributes none, which is true because nothing was written.
             for name in rows:
                 rows[name] += getattr(node.result, name, 0)
     return {

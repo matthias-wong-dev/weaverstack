@@ -185,7 +185,7 @@ def test_a_literal_dollar_can_be_escaped():
 
 @weaver_test()
 def test_notes_are_free_range():
-    """Unpoliced by design — no reference parsing, no placeholder rules."""
+    """Unpoliced by design: no reference parsing, no placeholder rules."""
     document = parse(
         TABLE_YAML + "\nNotes: |\n  Amounts are $AUD.\n  TBD whether tax is included."
     )
@@ -421,7 +421,7 @@ def test_a_delta_table_may_not_declare_identity(language):
     """Identity is a Warehouse declaration.
 
     Native generation is the whole value of the column, and no Delta version
-    Weaver runs on provides it — so a Delta table declares none rather than
+    Weaver runs on provides it, so a Delta table declares none rather than
     carrying a column Weaver would have to populate itself and could not
     promise to keep unique.
     """
@@ -879,7 +879,7 @@ def test_dependencies_must_be_a_list():
 # --- validation declarations -----------------------------------------------
 #
 # A Test and an Assumption are Weaver declarations that produce no data. The
-# contract is therefore mostly about what they may *not* say: everything
+# contract is therefore mostly about what they may not say: everything
 # describing how data is materialised, keyed or rebuilt reads as plausible on a
 # Test until you ask what it would do, so each is refused by name.
 

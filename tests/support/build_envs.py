@@ -24,9 +24,9 @@ _NOT_COPIED = shutil.ignore_patterns("__pycache__", "*.pyc")
 class SesFixture:
     """One declaration a build env installs, and the items it binds.
 
-    The items are part of the fixture because binding *is* the build input: an
+    The items are part of the fixture because binding is the build input: an
     environment cannot derive them, and which items a fixture leaves unbound is
-    sometimes the whole subject — the mixed estate binds only its Lakehouse item
+    sometimes the whole subject, the mixed estate binds only its Lakehouse item
     so that the Warehouse leaves must be omitted.
 
     ``lakehouse_names`` gives a named item its own Lakehouse instead of the
@@ -53,9 +53,8 @@ class SesFixture:
         """The same fixture, over a copy of its tree under ``root``.
 
         A checked-in fixture is repository source, and a test that edits one is
-        editing the repository — so the next test reads an estate the last one
-        left behind, and every later run is working from a checkout it quietly
-        modified. A test that needs to edit an estate takes a copy and edits
+        editing the repository, so the next test reads an estate the last one
+        left behind, and every later run is working from a checkout it modified. A test that needs to edit an estate takes a copy and edits
         that.
 
         Copied rather than restored afterwards: a restore is only as good as the
@@ -109,7 +108,7 @@ class SesFixture:
         other's rows look rebuilt. An estate that needs an identity of its own
         takes it here rather than by checking the same documents in twice.
 
-        ``names`` maps whole item ids — ``{"Lakehouse/Sales": "Lakehouse/Stock"}``.
+        ``names`` maps whole item ids, ``{"Lakehouse/Sales": "Lakehouse/Stock"}``.
         Directories are renamed and every text file is rewritten, because a
         document may name another item: a shortcut says which item it crosses to.
         """
@@ -145,7 +144,7 @@ class SesFixture:
 #: hard-codes a path and both transports draw the same source.
 BUILD_FIXTURE = SesFixture(_FIXTURES / "build-lakehouse-item", ("Lakehouse/Raw",))
 SQL_TABLE_FIXTURE = SesFixture(_FIXTURES / "sql-table-build-item", ("Lakehouse/Sales",))
-#: Three documents and nothing else — two Python tables and a Python folder — so
+#: Three documents and nothing else, two Python tables and a Python folder, so
 #: an authored-object test builds the smallest thing that has one of each.
 AUTHORED_OBJECTS_FIXTURE = SesFixture(
     _FIXTURES / "authored-objects-item", ("Lakehouse/Sales",)
@@ -156,7 +155,7 @@ WAREHOUSE_ESTATE_FIXTURE = SesFixture(
 )
 #: The smallest estate a load run can be orchestrated over: a Folder that
 #: produces files, the Python table that reads them, and the Spark SQL table that
-#: reads *that*. Three objects, three dispatch kinds, one dependency chain — so a
+#: reads that. Three objects, three dispatch kinds, one dependency chain, so a
 #: failure names the orchestration layer rather than an unrelated transition.
 #:
 #: Every object really loads, which is what separates it from the other Lakehouse
@@ -165,7 +164,7 @@ WAREHOUSE_ESTATE_FIXTURE = SesFixture(
 LOAD_ORCHESTRATION_FIXTURE = SesFixture(
     _FIXTURES / "load-orchestration", ("Lakehouse/Sales",)
 )
-#: The canonical *physical* load scenario, and the one no single-target estate
+#: The canonical physical load scenario, and the one no single-target estate
 #: can hold: a Delta table published into a Warehouse through a shortcut, read
 #: there across a SQL analytics endpoint, and consumed by a Warehouse table with
 #: a generated load procedure of its own. That crossing is where the
@@ -178,12 +177,12 @@ LOAD_ORCHESTRATION_WAREHOUSE_FIXTURE = SesFixture(
     _FIXTURES / "load-orchestration-warehouse",
     ("Lakehouse/Producer", "Warehouse/Consumer"),
 )
-#: The one Lakehouse estate a journey drives, and deliberately the only Fabric
+#: The one Lakehouse estate a journey drives, and the only Fabric
 #: fixture that declares ``Lakehouse/Sales``.
 #:
 #: Its logical name matters as much as its content. The catalogue is keyed by
-#: logical item — the physical target is never identity — so two fixtures naming
-#: the same item describe the *same registered objects*, and building one makes
+#: logical item, the physical target is never identity, so two fixtures naming
+#: the same item describe the same registered objects, and building one makes
 #: the other's rows look rebuilt. ``BUILD_FIXTURE`` declared ``Lakehouse/Raw``,
 #: which is exactly what the shortcut fixtures declare; this one does not collide
 #: with anything.
@@ -203,7 +202,7 @@ LAKEHOUSE_JOURNEY_FIXTURE = SesFixture(
 #:
 #: The composition is what neither half can state alone. Each side is
 #: self-consistent while the shortcut between them is stale, so only a claim
-#: spanning both catches it — and the endpoint-refresh barrier that keeps them
+#: spanning both catches it, and the endpoint-refresh barrier that keeps them
 #: in step exists nowhere else.
 #:
 #: A Warehouse, so a real workspace is the only place this can run.
@@ -218,7 +217,7 @@ DESKTOP_JOURNEY_NAMES = {
     "Lakehouse/Sales": "Lakehouse/Stock",
     "Warehouse/Reporting": "Warehouse/Analysis",
 }
-#: A producer and the consumer that shortcuts it, in two Lakehouses — the one
+#: A producer and the consumer that shortcuts it, in two Lakehouses, the one
 #: thing a single destination cannot express, since a shortcut needs something to
 #: point across to.
 CROSS_ITEM_SHORTCUT_FIXTURE = SesFixture(

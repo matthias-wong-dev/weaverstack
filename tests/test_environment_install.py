@@ -2,7 +2,7 @@
 
 The Fabric round-trip is exercised by the opt-in integration path; here we pin
 the pure logic: which files count as Weaver wheels, how a version is read back
-from a wheel name, and — the safety-critical one — that stale-wheel cleanup only
+from a wheel name, and, the safety-critical one, that stale-wheel cleanup only
 ever removes ``weaverstack`` wheels.
 """
 
@@ -178,7 +178,7 @@ def test_a_freshly_created_environment_has_nothing_staged():
 
     Fabric answers 404 with ``This environment does not have any staged
     libraries``, which is the same "nothing yet" a never-published Environment
-    reports — and had to be read the same way. Treating it as fatal meant the
+    reports, and had to be read the same way. Treating it as fatal meant the
     only path that had never been exercised was the only one that could not work.
     """
 
@@ -357,7 +357,7 @@ def test_a_long_publish_reports_the_state_it_last_saw(monkeypatch):
     """The timeout message must contain the state, not describe it.
 
     It read "(last state polled)" literally, so half an hour of waiting ended
-    in a sentence with the interesting value missing — and 'Running' means
+    in a sentence with the interesting value missing, and 'Running' means
     something very different from '', which is Fabric answering with no publish
     details at all.
     """

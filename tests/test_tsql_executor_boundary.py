@@ -1,4 +1,4 @@
-"""The ``tsql`` executor — mechanical, running a script through the SQL stack.
+"""The ``tsql`` executor: mechanical, running a script through the SQL stack.
 
 Behavioural verification of the generated scripts runs against the Play Warehouse
 under Fabric. Here we prove the executor's own contract without a database: it

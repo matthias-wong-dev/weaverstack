@@ -278,7 +278,7 @@ def test_the_bookmark_publishes_its_frozen_columns():
 def test_a_bookmark_is_keyed_by_the_identity_the_registry_uses():
     """One object seen twice, so the two rows have to agree about what it is.
 
-    Not "the same four names" — the same four *columns*: a Registry row and a
+    Not "the same four names", the same four columns: a Registry row and a
     Bookmark row are the same installed object, and a key that drifted would
     leave a bookmark standing for something else.
     """
@@ -361,7 +361,7 @@ def test_which_runtime_tables_are_current_state_and_which_are_history():
 
     A current-state row belongs to one physical incarnation and goes when a
     build ends it. History records what happened, and a rebuild does not unhappen
-    it — so moving a table from one group to the other changes whether an
+    it, so moving a table from one group to the other changes whether an
     estate's record of itself survives a rebuild.
     """
 
@@ -577,7 +577,7 @@ def test_public_names_follow_the_sentence_case_rules(internal, public):
 def test_every_node_status_maps_to_a_frozen_result():
     """A status with no mapping fails the run at its last step, in Fabric.
 
-    Weaver has two node vocabularies — a load's and a validation's — and
+    Weaver has two node vocabularies, a load's and a validation's, and
     `_.Log` records both. When they were mapped by hand one of them was
     forgotten, and the first thing that noticed was a real workspace.
     """

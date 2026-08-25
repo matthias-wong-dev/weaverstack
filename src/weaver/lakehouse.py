@@ -18,7 +18,7 @@ from .targets import FILES_AREA, ItemRef
 
 #: The Spark-facing root of a Fabric item. The same template as
 #: :func:`weaver.fabric.onelake.abfss_root`, repeated so that inferring an
-#: attached Lakehouse needs no import from ``weaver.fabric`` — this module is
+#: attached Lakehouse needs no import from ``weaver.fabric``. This module is
 #: reached by authored object code, which should pull in no transport.
 #: ``test_lakehouse`` asserts the two stay identical.
 _ABFSS_ROOT = "abfss://{workspace}@onelake.dfs.fabric.microsoft.com/{item}"
@@ -41,7 +41,7 @@ class Lakehouse:
     """One destination Lakehouse, resolved once, as authored code reaches it.
 
     ``destination`` is how a statement names this Lakehouse, needed only by
-    objects with no path of their own — a view exists as a catalogue name and
+    objects with no path of their own, since a view exists as a catalogue name and
     nothing else. It has no default, because a bare ``Schema.Object`` resolves
     through whatever the session is attached to. The one Lakehouse that may be
     named that way is the session's own attachment, via
@@ -75,11 +75,11 @@ class Lakehouse:
         return self.location.table_path(schema, name)
 
     def files_root(self) -> str:
-        """The ``Files`` area as *Python* can address it, resolved on use.
+        """The ``Files`` area as Python can address it, resolved on use.
 
         Two roots, because Spark takes ``abfss://`` while ``open()`` and
-        ``pathlib`` cannot parse a URL — and a Folder's authored code is
-        ordinary Python that writes files. Weaver mounts its own root and
+        ``pathlib`` cannot parse a URL, and a Folder's authored code is ordinary
+        Python that writes files. Weaver mounts its own root and
         returns the mount path; a write through it is a write to OneLake,
         visible at once at the ``abfss://`` address.
 
@@ -91,7 +91,7 @@ class Lakehouse:
         return _join(_mounted(self.name, self.spark_root), FILES_AREA)
 
     def folder_path(self, schema: str, name: str) -> Path:
-        """Where one folder object's files live, as *Python* addresses them.
+        """Where one folder object's files live, as Python addresses them.
 
         A real :class:`pathlib.Path`, because a Folder's authored code globs,
         opens and writes files: Weaver's mount of the resolved OneLake root, so
@@ -103,10 +103,10 @@ class Lakehouse:
         return Path(_join(self.files_root(), schema, name))
 
     def folder_spark_path(self, schema: str, name: str) -> str:
-        """The same folder, as *Spark* addresses it.
+        """The same folder, as Spark addresses it.
 
-        What one object hands another when the reader is an engine. A table
-        reads a folder's files with ``spark.read``, which wants the ``abfss://``
+        What one object hands another when an engine does the reading. A table
+        reads a folder's files with ``spark.read``, which needs the ``abfss://``
         form: given a mount path it resolves against its own default filesystem
         and asks for a path that does not exist.
         """
@@ -119,7 +119,7 @@ class Lakehouse:
         if self.destination is None:
             raise LoadError(
                 f"Lakehouse {self.name!r} was resolved without a Spark destination, so "
-                "a statement cannot name its objects — resolve it with "
+                "a statement cannot name its objects. Resolve it with "
                 "weaver.lakehouse_for(resolver, item), which supplies one"
             )
         return self.destination.qualify(schema, name)
@@ -133,7 +133,7 @@ class AttachedLakehouse:
     """Two-part naming for the Lakehouse this session already has attached.
 
     The one exception to naming every destination in full, and it is bounded by
-    the same rule: here the session's catalogue *is* the destination, so
+    the same rule: here the session's catalogue is the destination, so
     ``Schema.Object`` resolves to this Lakehouse and nowhere else. Every other
     destination carries a :class:`~weaver.spark.FabricSparkTarget`.
     """
@@ -178,8 +178,8 @@ def default_lakehouse(spark: Any) -> Lakehouse:
     workspace, item, name = _attached_from_settings(spark)
     if not (workspace and item):
         # Field by field, so a host that answers half through the session and half
-        # through its runtime context still resolves — and so a blank second source
-        # never erases what the first one knew.
+        # through its runtime context still resolves, and so a blank second source
+        # never erases what the first one supplied.
         settings = (workspace, item, name)
         context = _attached_from_runtime_context()
         workspace, item, name = tuple(a or b for a, b in zip(settings, context))
@@ -187,23 +187,23 @@ def default_lakehouse(spark: Any) -> Lakehouse:
     if not item:
         raise LoadError(
             "no Lakehouse is attached to this Spark session, so there is no "
-            "destination to infer — attach a default Lakehouse to the notebook, or "
+            "destination to infer. Attach a default Lakehouse to the notebook, or "
             "construct the object with lakehouse=<resolved Lakehouse>"
         )
     if not workspace:
         raise LoadError(
             "this session reports an attached Lakehouse but no workspace, so its "
-            "storage root cannot be composed — construct the object with "
+            "storage root cannot be composed. Construct the object with "
             "lakehouse=<resolved Lakehouse>"
         )
     return Lakehouse(
         name=name or item,
         # The attachment's storage is reached the same way every other Lakehouse
-        # is — by its OneLake root. The ``/lakehouse/default`` mount addresses the
+        # is, by its OneLake root. The ``/lakehouse/default`` mount addresses the
         # same bytes, but only from a session that attached it, so nothing here
         # depends on one.
         spark_root=_ABFSS_ROOT.format(workspace=workspace, item=item),
-        # The one place plain two-part naming is correct: this Lakehouse *is* what
+        # The one place plain two-part naming is correct: this Lakehouse is what
         # the session is attached to, so its catalogue is the session's own.
         destination=AttachedLakehouse(lakehouse=name or item),
     )
@@ -219,12 +219,12 @@ _MOUNTS: dict[str, str] = {}
 
 #: Where Weaver mounts a Lakehouse. Keyed by item id rather than fixed, because
 #: an estate spans several Lakehouses and one session may load from more than
-#: one — a single fixed point would let the second quietly address the first.
+#: one, and a single fixed point would let the second address the first.
 _MOUNT_POINT = "/weaver/{item}"
 
 #: Mount configuration. ``fileCacheTimeout=0`` because Weaver reaches the same
-#: Files area two ways — ``abfss://`` for storage work and this mount for
-#: authored Python — so a change made outside the mount must be visible through
+#: Files area two ways, ``abfss://`` for storage work and this mount for authored
+#: Python, so a change made outside the mount must be visible through
 #: it at once. With caching on, a directory listing still holds entries the
 #: storage no longer has, and ``shutil.rmtree`` fails with ``ENOTEMPTY``.
 #:
@@ -241,7 +241,7 @@ def _mounted(name: str, spark_root: str) -> str:
     which is why it is resolved on use rather than carried on the
     :class:`Lakehouse`.
 
-    The root is one Weaver resolved by name, so this works detached — unlike the
+    The root is one Weaver resolved by name, so this works detached, unlike the
     ``/lakehouse/default`` attachment.
     """
 
@@ -288,7 +288,7 @@ def _notebook_utils() -> Any:
 
 
 def _item_of(spark_root: str) -> str:
-    """The item id in an ``abfss://ws@host/item`` root — the mount's name."""
+    """The item id in an ``abfss://ws@host/item`` root, which the mount uses."""
 
     return spark_root.rstrip("/").rsplit("/", 1)[-1]
 

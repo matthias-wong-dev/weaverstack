@@ -5,8 +5,7 @@ physical table what shape it is: every value comes from the validated
 declaration or its resolved graph.
 
 Only bound items are projected. Objects owned by unbound items are out of scope
-rather than deleted — projecting them would invite a comparison that removed
-them.
+rather than deleted. Projecting them would invite a comparison that removed them.
 
 Every row is stamped with the same item scope, passed in once, so no projector
 can derive a different one and write into the wrong installation.
@@ -84,7 +83,7 @@ TEST_TYPE_FOR_KIND = {TEST: "test", ASSUMPTION: "assumption"}
 
 @dataclass(frozen=True)
 class CatalogueProjection:
-    """Every catalogue row one build invocation wants, for one installation."""
+    """Every catalogue row one build invocation needs, for one installation."""
 
     scope: InstallationScope
     rows: Mapping[str, tuple[Row, ...]]
@@ -115,7 +114,7 @@ def project_item_catalogue(
     No Registry row is written for a shortcut destination here. The logical
     relation belongs in this projection whether it is authored or package-owned;
     the Registry row certifies that a physical object exists at that name and
-    what it is, which needs a binding — see :func:`project_shortcut_registry`.
+    what it is, which needs a binding. See :func:`project_shortcut_registry`.
     """
 
     scope = InstallationScope(item.item_type, item.item_name)
@@ -125,7 +124,7 @@ def project_item_catalogue(
 
     # ``retained`` carries every kind of registered object. Splitting them here
     # rather than at the call site keeps the caller from having to know which is
-    # which — the repository already does.
+    # which, because the repository already does.
     # Every declaration, not only the logical ones: a shortcut destination is
     # not a source document whichever kind of target it names, and what follows
     # projects tables, columns and keys that it has none of.
@@ -257,7 +256,7 @@ def project_item_catalogue(
     # A validation claims TestDictionary and its dependencies, and nothing else.
     # In particular it claims no Registry row: Registry certifies a physical
     # object that exists, and nothing is materialised under the logical Test ID.
-    # What *is* certified is the procedure or module the validation compiles to,
+    # What is certified is the procedure or module the validation compiles to,
     # and that artefact has an identity of its own.
     for identity in retained_validations:
         source = repository.source_documents[identity]
@@ -275,8 +274,8 @@ def project_item_catalogue(
         )
 
     # A runtime artefact claims the Registry and nothing else. It has no columns
-    # to describe, no keys to record and no dependencies to keep — it is a
-    # deployed module or a generated statement, and what the catalogue knows
+    # to describe, no keys to record and no dependencies to keep. It is a deployed
+    # module or a generated statement, and what the catalogue records
     # about it is that Weaver installed it, what it is for, and at what
     # signature.
     #
@@ -306,8 +305,8 @@ def project_item_catalogue(
             {
                 **_identity_as(scope, edge.consumer, role="referencing"),
                 "dependency_reference": edge.reference,
-                # Null where the edge did not resolve — an authored physical
-                # name, or a reference that leaves the item through a shortcut.
+                # Null where the edge did not resolve, being an authored physical
+                # name or a reference that leaves the item through a shortcut.
                 "referenced_item_type": (
                     producer.item.item_type if producer is not None else None
                 ),
@@ -449,8 +448,8 @@ def project_shortcut_registry(
     an item's catalogue that source cannot derive: a shortcut is registered as
     what it physically is, which depends on its binding.
 
-    The kind is required rather than defaulted, because a default would quietly
-    record a Warehouse view as a table.
+    The kind is required rather than defaulted, because a default would record a
+    Warehouse view as a table.
 
     A schema shortcut is registered as the schema it presents, and what is inside
     one is not: those objects belong to the item the shortcut points at and can
@@ -506,13 +505,13 @@ def project_shortcut_registry(
 
 
 def _shortcut_object_type(declaration, target_kind: str) -> str:
-    """What a shortcut destination physically *is*, in the catalogue's vocabulary.
+    """What a shortcut destination physically is, in the catalogue's vocabulary.
 
     Not a type of its own: a shortcut is registered as what it is, so existence,
     addressing and dropping are the ordinary operations for that type. That a
     Lakehouse table shortcut is a OneLake shortcut is execution detail.
 
-    What it is *for* is the object role, which is ``shortcut``, and where it
+    What it is for is the object role, which is ``shortcut``, and where it
     points is :data:`~weaver.catalogue.tables.SHORTCUT`.
     """
 

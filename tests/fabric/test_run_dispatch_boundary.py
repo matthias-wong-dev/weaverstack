@@ -6,8 +6,8 @@ Every link in the chain is production code:
 
     Runner → dispatch → Session → Livy → import → a trivial installed artefact
 
-The only thing not real is what the primitive *does*, and that is the point. A
-thin run proves the wiring — that the Runner reaches dispatch, that dispatch
+The only thing not real is what the primitive does, and that is the point. A
+thin run proves the wiring. That the Runner reaches dispatch, that dispatch
 resolves the deployed artefact and reaches it through the Session, and that
 whatever comes back is settled into the run's own vocabulary. What a primitive
 would have done to data is a Primitive's claim, made elsewhere.
@@ -18,7 +18,7 @@ settled by a different rule:
 .. code-block:: text
 
     Success      a result reporting success
-    Rejects      rows written and rows refused — tolerated, or not
+    Rejects      rows written and rows refused, tolerated, or not
     Failure      a reported failure, nothing raised
     Raises       an exception the primitive never normalised
     Malformed    something that is not a result at all
@@ -183,7 +183,7 @@ def test_tolerated_rejections_are_reported_without_failing_the_node(tolerated):
 def test_an_intolerant_run_raises_and_names_the_node_that_stopped_it(thin):
     """The other half: intolerance raises rather than returning a report.
 
-    Its own crossing, deliberately: what is being asserted is the boundary
+    Its own crossing: what is being asserted is the boundary
     between a run that continues and one that does not, so it cannot share a
     report with the tolerant case. The failure names the node and carries what
     the primitive said, because a run that stopped without saying where is a
@@ -228,7 +228,7 @@ def test_every_settled_node_reaches_the_log_from_the_desktop(thin, tolerated):
     """The run's evidence, read back out of `_.Log`.
 
     A desktop Session appends asynchronously through a flusher it owns, so the
-    rows exist only once something waits for the worker — `Session.flush`, or
+    rows exist only once something waits for the worker, `Session.flush`, or
     the Session closing. The suite's Session outlives this module, so the wait
     is explicit here.
 
@@ -254,7 +254,7 @@ def test_every_settled_node_reaches_the_log_from_the_desktop(thin, tolerated):
         node.logical_id.rsplit(".", 1)[1] for node in tolerated.nodes
     }
 
-    # The physical identity, not a logical one: a reader of `_.Log` is looking
+    # The physical identity, not a logical one: `_.Log` is read looking
     # at an estate, and the target is where the work happened.
     for row in logged.values():
         assert row["Task type"] == "load"

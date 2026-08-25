@@ -1,16 +1,16 @@
-"""Workspace resolution — names to locations.
+"""Workspace resolution: names to locations.
 
 Fabric is the only workspace, and resolution is arithmetic: nothing here touches
 storage, so every location can be inspected before any mutation. Mutation is a
 :class:`~weaver.store.Store` concern.
 
-This is the only place that knows how a name becomes a location. Everything
+This is the only place that turns a name into a location. Everything
 downstream receives resolved locations and never derives them.
 """
 
 from __future__ import annotations
 
-#: The Lakehouse area holding Delta tables. Never written by a user — a Delta
+#: The Lakehouse area holding Delta tables. Never written by a user, a Delta
 #: target names a Lakehouse and the area follows from the object kind.
 TABLES_AREA = "Tables"
 

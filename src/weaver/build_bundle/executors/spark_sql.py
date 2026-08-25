@@ -1,4 +1,4 @@
-"""Spark SQL execution — run the generated statement against the batch's target.
+"""Spark SQL execution: run the generated statement against the batch's target.
 
 The payload is the single executable unit ``create_ddl`` produced: a ``CREATE OR
 REPLACE VIEW``/``TABLE``, a ``CREATE SCHEMA``, or a frozen prune ``DROP``. It

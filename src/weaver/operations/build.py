@@ -14,8 +14,8 @@ from typing import Sequence
 from ..errors import BuildError, CommandError
 from ..locations import Location
 
-# Position — whether this process is inside the Fabric session it addresses, and
-# what Spark it would use if it were — is the first half of "where am I
+# Position is whether this process is inside the Fabric session it addresses, and
+# what Spark it would use if it were. It is the first half of "where am I
 # running", so a Session owns it. Kept under the names this module already uses.
 from ..sessions.host import inside_fabric_session as _inside_fabric_session
 from ..store import FilesystemStore, Store
@@ -103,9 +103,9 @@ def build(
 ) -> BuildResult:
     """Build an authored repository.
 
-    Every value is a *name*: ``workspace``, ``catalogue`` and ``environment``
-    are strings, resolved the same way each operation resolves them — an
-    explicit argument, then workspace configuration, then the Session's own
+    Every value is a name: ``workspace``, ``catalogue`` and ``environment``
+    are strings, resolved the same way each operation resolves them: an explicit
+    argument, then workspace configuration, then the Session's own
     context, then, inside a Fabric notebook, what the notebook is attached to.
     Anything still unresolved is an error stated in one sentence.
 
@@ -144,7 +144,7 @@ def build(
     )
     source_location, source_store = _repository_source(source, resolved_workspace)
 
-    # This complete parse and pure request validation is deliberately above all
+    # This complete parse and pure request validation is above all
     # control-plane creation, Spark start, REST item resolution, and Livy work.
     from ..build_bundle.workflow import prepare_repository, validate_build_request
     from ..sessions.host import use_or_create_session
@@ -299,8 +299,8 @@ def _run_build(
 
     # No wrapping Step: `read_build_state` opens one per part it reads, and a
     # Step inside a Step would make a fourth level of a hierarchy that has
-    # three. What a reader wants is the parts — the catalogue and the
-    # inventories are separately slow, and separately fixable.
+    # three. The parts are what matter: the catalogue and the inventories are
+    # separately slow, and separately fixable.
     state = read_build_state(
         bindings,
         required_catalogue_items=catalogue_items_for_build(repository, bindings),

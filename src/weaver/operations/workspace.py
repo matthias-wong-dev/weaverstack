@@ -29,7 +29,7 @@ def _operation_workspace(
                 → a configuration error naming what is missing
 
     The Session's default context lets a command inside ``weaver session`` omit
-    what the session already knows:
+    what the session already holds:
 
     .. code-block:: text
 
@@ -48,7 +48,7 @@ def _operation_workspace(
             "        weaver.build('.', session=session)"
         )
     # The base context first, then what this call named on top of it. Split in
-    # two because the same overrides apply however the base was found — a
+    # two because the same overrides apply however the base was found, a
     # Session's workspace, a configuration file, or a notebook's own context.
     if workspace is not None or workspace_config is not None:
         from ..config import resolve_workspace
@@ -112,7 +112,7 @@ def operation_workspace(
 def current_workspace() -> Workspace:
     """The workspace this code is running in, discovered rather than named.
 
-    Inside a Fabric notebook the session already knows the answer. This is the
+    Inside a Fabric notebook the session already holds the answer. This is the
     discovery every operation does for ``workspace=None``, reachable on its own
     for a caller that needs a resolver rather than an operation.
 

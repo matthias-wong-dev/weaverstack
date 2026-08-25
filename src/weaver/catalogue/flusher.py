@@ -4,7 +4,7 @@ Rows are queued to one worker. Session close is the durability barrier.
 
 Two ways to write, and a row carries which it is. ``submit`` appends, for
 evidence a run accumulates. ``update`` upserts by the table's key, for state a
-run maintains — ``_.Bookmark``, where the row for an object is the same row
+run maintains, ``_.Bookmark``, where the row for an object is the same row
 every time. The two never share a statement, because one is an INSERT and the
 other a MERGE.
 """
@@ -86,7 +86,7 @@ class WarehouseFlusher:
         Accepting and queueing happen under one lock, so ``close`` cannot put
         the stop sentinel between them: the worker would stop before reaching
         the row, and close would return reporting nothing wrong. Queueing costs
-        nothing to hold the lock for — the queue is unbounded and the worker
+        nothing to hold the lock for, the queue is unbounded and the worker
         never blocks a put.
         """
 
@@ -112,7 +112,7 @@ class WarehouseFlusher:
         if not getattr(self.table, "is_current_state", bool(self.table.key)):
             raise FlushError(
                 f"{self.table.qualified} is history, so a row cannot be merged "
-                "into it — append it with submit()"
+                "into it, append it with submit()"
             )
         self.submit(row, keyed=True)
 

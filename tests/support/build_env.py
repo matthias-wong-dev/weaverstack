@@ -1,6 +1,6 @@
 """The build environment a test drives, independent of transport.
 
-`BuildEnv` hides *how* a build reaches its estate behind callables, so a test
+`BuildEnv` hides how a build reaches its estate behind callables, so a test
 body names what it is asserting rather than Livy, Spark or ODBC. It lives here
 rather than in `tests/fabric/conftest.py` so that a test importing it does not
 thereby acquire a workspace, a credential and a session.
@@ -41,7 +41,7 @@ class PopulatedLakehouse:
 class InstalledEstate:
     """One estate provisioned and installed once, for read-only assertions.
 
-    A test that rebuilds — to exercise prune, say — calls ``env.generate()``
+    A test that rebuilds, to exercise prune, say, calls ``env.generate()``
     again; the bindings come from the environment's fixture, so nothing has to
     be named twice.
     """
@@ -61,7 +61,7 @@ class Step:
     name: str
     bundle: Any = None
     outcome: "InstallOutcome | None" = None
-    #: Set when the transition raised. Later steps then report *this* name, so a
+    #: Set when the transition raised. Later steps then report this name, so a
     #: journey fails once and says where.
     error: BaseException | None = None
     #: The one evidence payload taken at this transition, set by the test that
@@ -94,21 +94,21 @@ class Step:
 class Journey:
     """One estate driven through an ordered series of transitions.
 
-    The suite's cost is *estates*, not assertions: a module-scoped Fabric estate
+    The suite's cost is estates, not assertions: a module-scoped Fabric estate
     is one full generate-and-install, and six checks over it cost exactly what
     one does. The old shape therefore paid an install per module and could only
-    ever ask "what did a first build do?" — which is the question the fast suite
+    ever ask "what did a first build do?", which is the question the fast suite
     already answers, and not the one incremental logic lives in.
 
-    A journey inverts that. It installs once, then *moves* the estate — change a
-    document, seed an orphan, break a payload, wipe — and each move costs one
+    A journey inverts that. It installs once, then moves the estate, change a
+    document, seed an orphan, break a payload, wipe, and each move costs one
     round trip while every assertion about it costs nothing. So it is both
-    cheaper and able to ask the questions that matter: what did the *second*
+    cheaper and able to ask the questions that matter: what did the second
     build do, and did it correctly do nothing?
 
     **A journey owns its state.** Its own repository root, its own logical item
     names, its own physical targets. Estates in one run otherwise collide through
-    shared things — repository source locations, the Registry (which is keyed by
+    shared things, repository source locations, the Registry (which is keyed by
     logical item), and the fixed Lakehouses. Each of those has already produced
     a confusing failure, so every environment carries its source explicitly.
 
@@ -127,20 +127,20 @@ class Journey:
     def run(self, name: str, *, before=None, between=None) -> Step:
         """Take one transition: optionally change something, then build.
 
-        ``before`` mutates the repository or the target — it is the *move*, and
+        ``before`` mutates the repository or the target. It is the move, and
         the build that follows is what the assertions are about.
 
         ``between(env, bundle)`` runs after generation and before installation,
         for the two claims that need the world to change mid-transition. It may
-        return a bundle to install *instead* of the generated one:
+        return a bundle to install instead of the generated one:
 
         - removing the source repository, to prove a bundle installs from itself
         - substituting a corrupted bundle, to prove a failing action stops its
           barrier
 
-        A transition whose installation reports failure is recorded in full — the
+        A transition whose installation reports failure is recorded in full. The
         step keeps its bundle and outcome, so the test that expects a failure can
-        inspect it — but the journey is marked failed, so anything after it is
+        inspect it, and the journey is marked failed, so anything after it is
         skipped rather than asserting against a part-built estate.
         """
 
@@ -189,7 +189,7 @@ class InstallOutcome:
 class BuildEnv:
     """Everything a build test needs, with transport hidden behind callables.
 
-    Assertions are written in logical names — ``{{object:DWG.Customer}}`` — and
+    Assertions are written in logical names, ``{{object:DWG.Customer}}``, and
     resolved against a named destination before they run. That is not sugar. A
     test that asked for ``DWG.Customer`` would resolve it through the session's
     own catalogue, which is exactly the mistake the build no longer makes: it
@@ -197,8 +197,8 @@ class BuildEnv:
     pass. Naming the destination in the assertion is what makes the assertion
     able to see the thing it claims about.
 
-    The substitution is this harness's own. A *payload* carries no tokens any
-    more — a build renders final names — so what is resolved here is only the
+    The substitution is this harness's own. A payload carries no tokens any
+    more, a build renders final names, so what is resolved here is only the
     shorthand a test is written in.
     """
 
@@ -218,17 +218,17 @@ class BuildEnv:
     install: Callable[[Any], InstallOutcome]
     #: Raw SQL, run wherever this environment runs. Prefer ``query``.
     run_query: Callable[[str], list]
-    #: ``[{"name", "type", "nullable"}]`` for a table — schema with nullability,
+    #: ``[{"name", "type", "nullable"}]`` for a table, schema with nullability,
     #: which ``query``/DESCRIBE cannot give. Warehouse reads it from the catalogue.
     run_columns: Callable[[str], list]
     seed_orphans: Callable[[], None]
     #: Whether a fully-qualified schema exists. Asked rather than listed, because
-    #: an absent schema is the answer a prune assertion wants and both workspaces raise
+    #: an absent schema is the answer a prune assertion needs and both workspaces raise
     #: for `SHOW TABLES` in one.
     run_schema_exists: Callable[[str], bool] = None
     #: Python source, run wherever this environment runs, returning whatever it
     #: ``emit``s. The namespace carries ``spark``, ``resolver`` and ``target``, so
-    #: one body serves both transports — the only way to exercise code that must
+    #: one body serves both transports, the only way to exercise code that must
     #: behave identically in a notebook and on a laptop.
     run_python: Callable[[str], Any] = None
     #: The destination Lakehouse being built. The catalogue is a Warehouse and
@@ -239,7 +239,7 @@ class BuildEnv:
     #: leaving a caller to guess.
     bundle_location: Callable[[str], Any] = None
     #: Every Lakehouse this fixture bound, by the item that owns it. Empty unless
-    #: the fixture asked for more than one — a cross-item shortcut is the only thing
+    #: the fixture asked for more than one, a cross-item shortcut is the only thing
     #: that does, and it needs both ends addressable to prove the shortcut points
     #: across rather than at itself.
     destinations: Mapping[str, Any] = field(default_factory=dict)
@@ -250,8 +250,8 @@ class BuildEnv:
     def _addressed(self, text: str, destination) -> str:
         """Resolve this harness's shorthand against a named Spark destination.
 
-        A Warehouse environment has none — it is reached over TDS and its names
-        are ordinary T-SQL — so its statements pass through untouched.
+        A Warehouse environment has none. It is reached over TDS and its names
+        are ordinary T-SQL, so its statements pass through untouched.
         """
 
         place = self.at(destination)
@@ -289,14 +289,14 @@ class BuildEnv:
     ) -> Observation:
         """Ask the estate everything at once and bring back one evidence payload.
 
-        A Fabric round trip costs seconds, so the number of them — not the work
-        inside them — sets what this suite costs. Six ``query`` calls describing
+        A Fabric round trip costs seconds, so the number of them, not the work
+        inside them, sets what this suite costs. Six ``query`` calls describing
         one moment are six waits for the same answer; this submits their bodies
         together and returns one payload, which the test then asserts against
         in this process.
 
         That is not only cheaper, it is more accurate. Separate calls interrogate
-        a *mutable remote estate* at six different instants, so a claim about
+        a mutable remote estate at six different instants, so a claim about
         "the estate after prune" is really six claims about six moments. One
         payload is one observation of one moment, which is what the assertion
         says it is.
@@ -304,11 +304,11 @@ class BuildEnv:
         ``queries``, ``schemas`` and ``tables`` are mappings of evidence name to,
         respectively, a statement, a schema name and a ``Schema.Object`` pair. A
         value may instead be a ``(text, destination)`` pair, so one observation
-        can span two destinations — the pairing that proves a build wrote where
+        can span two destinations, the pairing that proves a build wrote where
         it claimed and nowhere else, and which two calls could never make about
         the same instant.
 
-        Ask ``tables`` rather than ``queries`` where *absent* is a legitimate
+        Ask ``tables`` rather than ``queries`` where absent is a legitimate
         answer: a SELECT against a missing table raises instead of reporting.
 
         Failures stay local: :class:`Observation` names the piece of evidence
@@ -334,7 +334,7 @@ class BuildEnv:
         # A Warehouse environment has no Spark session to batch into: it is
         # reached over TDS, where a statement is a cheap local round trip and not
         # a Livy submission. Batching there would buy nothing and hide the shape
-        # of what ran, so it stays a loop — and the test-facing API is the same
+        # of what ran, so it stays a loop, and the test-facing API is the same
         # either way, which is what lets one journey run against both.
         if self.run_python is None:
             return Observation(
@@ -373,7 +373,7 @@ class BuildEnv:
         """Change the installed declaration between two builds.
 
         Incremental behaviour can only be asserted across builds, and what
-        changes between them is the repository — so a test needs to edit it in
+        changes between them is the repository, so a test needs to edit it in
         place rather than install a second fixture. Both transports write through
         the same store abstraction, so this needs no per-environment form.
         """
@@ -400,11 +400,11 @@ def _outcome_from_report(report) -> InstallOutcome:
 
 
 def _upload_tree(store, source: Path, destination) -> None:
-    """Install a repository, *replacing* whatever was there under that name.
+    """Install a repository, replacing whatever was there under that name.
 
     Replacing, not merging. Two modules install different fixtures under the same
     repository name into one shared staging Lakehouse, and a plain file-by-file
-    write left the previous fixture's objects behind — so a Warehouse estate
+    write left the previous fixture's objects behind, so a Warehouse estate
     inherited a Lakehouse-reading table from a repository it had never heard of,
     and failed on a three-part name naming a Lakehouse that does not exist here.
     Installing a repository has never meant "add to whatever is already called
@@ -434,7 +434,7 @@ def _bindings_for(
 
     ``lakehouses`` maps a specific item to its own Lakehouse, for the one thing a
     single destination cannot express: a cross-item shortcut needs the producer and
-    the consumer in *different* Lakehouses, or the shortcut would point a name at
+    the consumer in different Lakehouses, or the shortcut would point a name at
     something already in the same place. ``lakehouse`` remains the default for
     every item not named there, so single-target fixtures are untouched.
     """
@@ -477,7 +477,7 @@ def _bindings_for(
 
 #: Every schema any build fixture registers, in either Lakehouse. Dropped on
 #: local-env teardown, so a shared Spark catalogue never leaks one test's objects
-#: into the next — the one place catalogue cleanup lives; tests never do it
+#: into the next, the one place catalogue cleanup lives; tests never do it
 #: themselves. They are dropped through the destination, because a local schema's
 #: real database name carries the Lakehouse it belongs to.
 

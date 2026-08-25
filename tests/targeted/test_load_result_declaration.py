@@ -1,13 +1,13 @@
-"""The load result primitive — one meaning, three transports.
+"""The load result primitive: one meaning, three transports.
 
 A Warehouse procedure returns a T-SQL result set, a Spark SQL program a
 ``DataFrame``, a Python object an instance. The claim worth testing is that the
-*meaning* survives all three: the column names are one list, so a generator
+meaning survives all three: the column names are one list, so a generator
 cannot spell a column its reader will not find, and a result read back off a row
 says what the load did.
 
 The counts are the subtle part. They describe the target, not the source, so
-they do not have to add up to ``rows_read`` — and a failed load keeps them,
+they do not have to add up to ``rows_read``, and a failed load keeps them,
 because "failed having written nothing" and "failed having written four hundred
 rows" are different things to recover from.
 """

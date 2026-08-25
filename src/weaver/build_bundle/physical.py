@@ -64,7 +64,7 @@ _DECLARATION_KIND = {"folder": FOLDER, "table": TABLE, "view": VIEW}
 
 #: A Weaver document kind, and an inventory object type, as the change vocabulary
 #: spells them. Two mappings rather than one because the two inputs are
-#: different: a build knows what it declares, a drop knows what is installed.
+#: different: a build has what it declares, a drop has what is installed.
 _CHANGE_KIND_FOR_KIND = {FOLDER: FOLDER_KIND, TABLE: TABLE_KIND, VIEW: VIEW_KIND}
 _CHANGE_KIND_FOR_TYPE = {
     "folder": FOLDER_KIND,
@@ -526,11 +526,11 @@ def item_load_removals(
     row says what to remove, while the new identity is new.
 
     The removals ride in the item's load layer alongside its writes. They cannot
-    collide — an identity is either still claimed or not — so everything the
+    collide, an identity is either still claimed or not, so everything the
     load layer does is in one barrier.
     """
 
-    # Scoped by what the Registry says each removed object *is*, not by what its
+    # Scoped by what the Registry says each removed object is, not by what its
     # identity looks like. A removed table is removed by the inventory prune,
     # which can see it; only the two the prune cannot see are handled here.
     selected = sorted(

@@ -148,7 +148,7 @@ def claim_completed(outcome) -> bool:
     """Whether a test body ran to the end rather than raising.
 
     Only a completed claim has a resource set worth comparing. A body that
-    skipped crossed nothing, and one that failed stopped part way — comparing
+    skipped crossed nothing, and one that failed stopped part way, comparing
     either reports declared resources as unused, and the mismatch is then
     reported instead of the failure the developer needs to read.
     """

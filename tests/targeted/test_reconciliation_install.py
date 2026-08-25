@@ -3,12 +3,12 @@
 Reconciliation is the honesty check between the two prepared states: a catalogue
 says an object is installed, an inventory says what is physically there, and a
 claim the inventory disproves must stop being believed. Both inputs are built
-directly here, so "the object is gone" needs no Lakehouse to arrange — which is
+directly here, so "the object is gone" needs no Lakehouse to arrange, which is
 what it used to need, because the only way to produce a disproved claim was to
 build something and then delete it.
 
 The pairing is the point, and it is why one `Catalogue` and one `TargetInventory`
-class are worth having: every question below is "these two disagree — who wins".
+class are worth having: every question below is "these two disagree, who wins".
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ def test_a_missing_schema_shortcut_retires_only_its_registry_claim():
 
 @weaver_test()
 def test_a_claim_the_inventory_disproves_becomes_stale():
-    """The certification the Registry offered is withdrawn, not merely noted."""
+    """The certification the Registry offered is withdrawn, not noted."""
 
     result = reconcile(
         FixtureCatalogue.from_registry_rows(registry_row("DWG.Customer")),
@@ -183,7 +183,7 @@ def test_an_item_with_no_inventory_has_nothing_disproved():
 
 @weaver_test()
 def test_a_registry_row_with_an_unsupported_object_type_is_rejected():
-    """Weaver drops what it certified by the type it certified — never a guess."""
+    """Weaver drops what it certified by the type it certified: never a guess."""
 
     with pytest.raises(BuildError, match="unsupported object_type"):
         reconcile(
@@ -196,7 +196,7 @@ def test_a_registry_row_with_an_unsupported_object_type_is_rejected():
 
 @weaver_test()
 def test_a_registry_row_without_a_signature_is_rejected():
-    """No signature means no basis for deciding changed — and so no build."""
+    """No signature means no basis for deciding changed, and so no build."""
 
     with pytest.raises(BuildError, match="no signature"):
         reconcile(
@@ -211,8 +211,8 @@ def test_a_registry_row_without_a_signature_is_rejected():
 def test_a_files_schema_is_understood_as_a_folder_claim():
     """`Files/Raw` in the Registry is the folder side, not a schema called that.
 
-    The two namespaces collide by name — a table and a folder may both be
-    `Raw.CustomerCsv` — so a claim that read the prefix wrongly would disprove
+    The two namespaces collide by name, a table and a folder may both be
+    `Raw.CustomerCsv`, so a claim that read the prefix wrongly would disprove
     one using the other's inventory.
     """
 
@@ -332,7 +332,7 @@ def test_a_keyed_table_is_signed_by_its_shape_as_well_as_its_source(tmp_path):
 
     The row-signature column is not in the authored source, so signing a keyed
     table by the source alone would leave every installed one standing at the old
-    shape — and the load reading a column that is not there.
+    shape, and the load reading a column that is not there.
     """
 
     keyed, _unkeyed = _keyed_and_unkeyed(tmp_path)

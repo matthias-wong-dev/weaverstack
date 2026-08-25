@@ -1,4 +1,4 @@
-"""Schema Weaver document files — one declared schema per file under ``_schemas``.
+"""Schema Weaver document files, one declared schema per file under ``_schemas``.
 
 A repository declares its schemas explicitly rather than letting a two-part
 object ID conjure one on the fly. Every ``Schema.Object`` an object or a shortcut
@@ -14,8 +14,8 @@ is invalid.
       Sales__Order.py
       Reporting.OrderReport.sql
 
-Each file names exactly one schema, and its filename — without ``.yml`` — must
-match the declared ``Schema ID`` exactly, case included. A schema is a
+Each file names exactly one schema, and its filename without ``.yml`` must match
+the declared ``Schema ID`` exactly, case included. A schema is a
 repository resource: it is not owned by a Lakehouse, a Warehouse, a tier or an
 object folder, and declaring one does not create anything physical.
 """
@@ -46,7 +46,7 @@ class SchemaSes:
     schema_id: str
     description: str | None
     relative_path: str
-    #: The declaration's content hash, on the same terms as an object's — it is
+    #: The declaration's content hash, on the same terms as an object's. It is
     #: what the catalogue records as the signature of a schema row. Empty for a
     #: schema parsed from text rather than read from a file.
     source_hash: str = ""
@@ -88,7 +88,7 @@ def read_schema_document(relative_path: str, data: bytes) -> SchemaSes:
     if schema.schema_id != filename_id:
         raise DiscoveryError(
             f"{relative_path}: declares Schema ID {schema.schema_id!r} but the filename "
-            f"names {filename_id!r} — they must match exactly, case included"
+            f"names {filename_id!r}. They must match exactly, case included"
         )
     return schema
 

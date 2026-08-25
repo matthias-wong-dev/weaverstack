@@ -26,7 +26,7 @@ def test_every_runtime_dependency_is_installed_by_the_environment():
 @weaver_test()
 def test_the_environment_installs_the_warehouse_sql_driver():
     # mssql-python is the one runtime dependency easy to forget, because nothing
-    # local needs it — Warehouse SQL only runs in Fabric.
+    # local needs it, Warehouse SQL only runs in Fabric.
     staged = {name.lower() for name in environment_dependencies()}
     assert "mssql-python" in staged
 

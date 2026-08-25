@@ -34,9 +34,9 @@ TYPE_MAPPING_PATH = Path(__file__).resolve().parent / "warehouse_type_mapping.ym
 def generate_tsql_table_script(document: SesDocument, body: str) -> str:
     """A self-contained T-SQL script that builds ``document``'s main table.
 
-    The table's shape comes from the *staging* query and only from it. A body
-    that also names the keys to delete describes two things — what the object
-    holds, and which rows are leaving — and only the first is the table. The
+    The table's shape comes from the staging query and only from it. A body that
+    also names the keys to delete describes two things, what the object holds and
+    which rows are leaving, and only the first is the table. The
     second is still materialised, but into a temp table of its own, so the build
     can say now that it names the primary key and nothing else rather than
     leaving the load to discover it.
@@ -103,9 +103,9 @@ def _materialise_shapes(
 
     **The guard reaches only what it can see.** A body whose setup builds its
     working table through ``EXEC`` or ``sp_executesql`` runs that setup for
-    real, because the alternative is reading the SQL inside a string literal —
+    real, because the alternative is reading the SQL inside a string literal,
     which Weaver does not do. Shape-only is a promise about the queries Weaver
-    interprets, not about statements it merely passes on.
+    interprets, not about statements it passes on.
     """
 
     guarded = insert_where_one_eq_zero(body)
@@ -137,8 +137,8 @@ def _render_delete_shape_validation(document: SesDocument, temp_table: str) -> s
     """Refuse a delete query that does not name exactly the primary key.
 
     The load deletes target rows by key, so a delete query producing anything
-    else is either missing part of the key — in which case it would retire rows
-    it never named — or carrying columns that mean nothing to a deletion. Both
+    else is either missing part of the key, in which case it retires rows it never
+    named, or carrying columns that mean nothing to a deletion. Both
     are authoring mistakes, and both are cheaper to state here than to discover
     in a load that has already begun.
 
@@ -209,8 +209,8 @@ def _render_identity_union(column) -> str:
         return ""
     definition = _column_definition(column)
     # This is the leading SELECT of the all_columns CTE, so it must name both
-    # columns — a CTE takes its column names from its first SELECT, and an
-    # unnamed literal there is a T-SQL error ("No column name was specified").
+    # columns. A CTE takes its column names from its first SELECT, and an unnamed
+    # literal there is a T-SQL error ("No column name was specified").
     return (
         f"    select 0 as column_ordinal, {_sql_literal(definition)} as column_definition\n"
         "    union all\n\n"
@@ -353,10 +353,10 @@ def _render_metadata_validation(document: SesDocument, temp_literal: str) -> str
 
 
 def _render_identity_available(identity: str | None) -> str:
-    """Make the identity column an *available* column for the metadata check.
+    """Make the identity column an available column for the metadata check.
 
     The identity is Weaver's own column, not one the query produces, so the
-    primary key may name it — but the query-shape temp table does not contain it.
+    primary key may name it, and the query-shape temp table does not contain it.
     Union it into the ``described`` set so a primary key on the surrogate resolves
     (mirrors the Python validator's available-set in ``weaver.ses.columns``).
     """

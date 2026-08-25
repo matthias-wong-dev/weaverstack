@@ -5,7 +5,7 @@ runs where Spark is. A desktop can submit a script that calls it; it cannot run
 it. So these bodies import the installed package and call ``load_table`` itself,
 never a local approximation of what it would have done.
 
-What is asserted is the *semantics*, matched to
+What is asserted is the semantics, matched to
 ``tests/fabric/test_warehouse_load_primitive.py`` claim for claim. Two engines,
 one reconciliation model: a bad incoming row is refused and recoverable, and a
 set of proposed changes that would leave a declared unique key held by two rows
@@ -13,8 +13,8 @@ is refused outright. If the two files disagree the model has diverged.
 
 The target is arranged in the session rather than built by a bundle, because what
 needs proving here is the load and the build has a suite of its own. Its shape is
-taken from the declaration the load reads — business columns, the audit columns
-and the row signature — so the table the load meets is the table a build makes.
+taken from the declaration the load reads, business columns, the audit columns
+and the row signature, so the table the load meets is the table a build makes.
 
 One submission per state transition, per the suite's rule. Refusing and
 tolerating are one transition each; the merge cases share a submission with the
@@ -29,7 +29,7 @@ from support.weaver_test import weaver_test
 SCHEMA = "DWG"
 
 #: The declaration both estates load from, as its own docstring. A key, a
-#: required column, a nullable unique column and a composite unique key — the
+#: required column, a nullable unique column and a composite unique key. The
 #: same declaration the Warehouse file uses, so the two matrices are comparable.
 HEADER = """Table ID: {schema}.{object}
 
@@ -344,7 +344,7 @@ seen["reseed"] = run(contract, SEED, deletes=[])
 before = contents(OBJECT)
 
 # A value nobody is giving up: c3 holds c@x.test and is not in this load at all.
-# c2's rename is valid on its own and must not be applied anyway — the load either
+# c2's rename is valid on its own and must not be applied anyway, the load either
 # describes a valid target or does not run.
 UNTOUCHED_HOLDER = [
     ["c1", "One", "c@x.test", 10, "A"],
@@ -476,7 +476,7 @@ def test_the_delta_keyed_load_refuses_a_target_its_changes_would_invalidate(
     """The half that is not recoverable, matched to the Warehouse claim for claim.
 
     A holder gives up a unique value by being deleted, by moving off it, or by
-    taking a null. By nothing else — so a claim against an untouched holder stops
+    taking a null. By nothing else, so a claim against an untouched holder stops
     the load, whatever ``fault_tolerant`` says, and leaves the target as it was.
     """
 

@@ -29,16 +29,14 @@ from .targets import LAKEHOUSE_KIND, WAREHOUSE_KIND
 
 # --- the primitive kinds ------------------------------------------------------
 #
-# What an installed load *is*, in the vocabulary dispatch branches on. Four
+# What an installed load is, in the vocabulary dispatch branches on. Four
 # values, three of them a real installed artefact and one a barrier the planner
 # inserts. They are strings rather than a class hierarchy because they cross into
-# a plan file and a task log, where a reader needs to see the word.
+# a plan file and a task log, where the word itself is what appears.
 #
-# There is no kind for a Spark-SQL-authored table, deliberately. It installs as
-# a deployed ``SparkSqlTable`` module and dispatches as ``python_table``, so the
-# language it was authored in is a fact about its *declaration* — recorded in the
-# catalogue, where a reader can ask — and not about how it runs. A kind that said
-# otherwise would be orchestration knowing something it must not act on.
+# There is no kind for a Spark-SQL-authored table. It installs as
+# a deployed ``SparkSqlTable`` module and dispatches as ``python_table``. The
+# authoring language is recorded in the catalogue, not in the kind.
 
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_TABLE = "python_table"
@@ -75,9 +73,9 @@ class PhysicalTargetRef:
     def of(cls, target) -> "PhysicalTargetRef":
         """The reference one typed physical target makes.
 
-        The single conversion from the typed vocabulary — ``DeltaTarget`` and
-        ``WarehouseTarget`` — into the two words a plan and a catalogue row
-        carry. Every operation that names a target goes through it.
+        The single conversion from the typed vocabulary, ``DeltaTarget`` and
+        ``WarehouseTarget``, into the two words a plan and a catalogue row carry.
+        Every operation that names a target goes through it.
         """
 
         from .targets import DeltaTarget, physical_item
@@ -201,7 +199,7 @@ class InstalledEstate:
     dependencies: tuple[InstalledDependency, ...]
     shortcuts: tuple[InstalledShortcut, ...]
     #: Physical addresses two logical objects both claim, by the target they are
-    #: in. Recorded rather than raised — see :meth:`from_catalogue`.
+    #: in. Recorded rather than raised. See :meth:`from_catalogue`.
     ambiguous: Mapping[PhysicalTargetRef, tuple[str, ...]] = field(default_factory=dict)
 
     @classmethod
@@ -250,9 +248,9 @@ class InstalledEstate:
                 )
             else:
                 physical_owner[key] = identity
-            # What an installed artefact is *for*, from the Registry row that
-            # said so — never from its physical shape. A Test compiles to a file
-            # or a procedure exactly as a load does, so shape inference would
+            # What an installed artefact is for, from the Registry row that said
+            # so, and never from its physical shape. A Test compiles to a file or
+            # a procedure exactly as a load does, so shape inference would
             # walk validation straight into the load DAG.
             if document.is_runtime_artefact:
                 primitives[identity] = installed
@@ -405,7 +403,8 @@ def _is_python_module_reference(reference: str) -> bool:
     """Whether a stored dependency names a Python module rather than an object.
 
     The catalogue records a dependency as its author wrote it, and for a Python
-    object that is an import — ``.Files.Sales__Seed``, or ``Files.Sales__Seed``.
+    object that is an import, such as ``.Files.Sales__Seed`` or
+    ``Files.Sales__Seed``.
 
     A leading dot is a relative import. Otherwise the tell is the separator: a
     module name cannot carry a dot, so a Python object module spells
@@ -483,8 +482,8 @@ def primitive_candidates(
 
     Derived from identity and object type alone, which is all a build has when
     it decides where to put one: the naming is the contract. Candidates rather
-    than an answer, because one case has two — a Warehouse table's load is a
-    procedure, a Lakehouse object's a deployed module.
+    than an answer, because one case has two: a Warehouse table's load is a
+    procedure and a Lakehouse object's is a deployed module.
 
     A Lakehouse table has one candidate whatever it was authored in: a Spark SQL
     table compiles to a ``SparkSqlTable`` module under the module's own name, so
@@ -535,7 +534,7 @@ class LoadNode:
     physical_target: PhysicalTargetRef
     primitive_kind: str
     physical_object: PhysicalObjectRef | None = None
-    #: The installed primitive itself — the procedure or the deployed file.
+    #: The installed primitive itself, being the procedure or the deployed file.
     #: ``None`` for a refresh, which is a capability rather than an artefact.
     primitive_id: WeaverDocumentId | None = None
     primitive_object: PhysicalObjectRef | None = None
@@ -571,8 +570,8 @@ class LoadDag:
     """The selected physical load graph: nodes, edges and what was requested.
 
     An edge means the upstream node must complete successfully before the
-    downstream node may execute, and nothing else — not a data-flow statement,
-    and not a claim about what the downstream node reads.
+    downstream node may execute, and nothing else. It is not a data-flow
+    statement, and not a claim about what the downstream node reads.
     """
 
     nodes: tuple[LoadNode, ...]
@@ -664,7 +663,7 @@ def load_dag(
     targets are crossed only when the caller named both.
 
     With ``names``, exactly those ``Schema.Object`` loadables within the
-    requested targets — an operator override, so dependencies add neither nodes
+    requested targets. An operator override, so dependencies add neither nodes
     nor ordering edges.
     """
 
@@ -725,7 +724,7 @@ class _Planner:
         self._refuse_ambiguity(requested)
         seeds = self._seeds(requested, names=names)
         if names:
-            # An exact-name request is deliberately not a partial DAG request.
+            # An exact-name request is not a partial DAG request.
             # The caller chose the nodes and asked Weaver not to infer more work
             # or readiness constraints from their dependencies.
             for identity in seeds:
@@ -743,8 +742,7 @@ class _Planner:
             messages=tuple(self.messages),
         )
         # Ordering is what proves acyclicity, so it is done here rather than left
-        # to whoever consumes the graph — a planner that returned a cyclic graph
-        # would have made a decision it could not defend.
+        # to whoever consumes the graph.
         dag.order()
         return dag
 
@@ -796,7 +794,7 @@ class _Planner:
                 found = ", ".join(str(identity) for identity in candidates)
                 raise LoadError(
                     f"{name!r} names more than one installed loadable object "
-                    f"({found}) — qualify the request with a single target"
+                    f"({found}). Qualify the request with a single target"
                 )
             selected.append(candidates[0])
         return tuple(selected)
@@ -989,7 +987,7 @@ class _Planner:
             ):
                 # Lakehouse to Warehouse is the one crossing read through a SQL
                 # analytics endpoint. A Lakehouse-to-Lakehouse shortcut is a OneLake
-                # shortcut — Delta on both sides, and nothing to synchronise.
+                # shortcut, Delta on both sides, with nothing to synchronise.
                 crossing = producer_target
             elif (
                 shortcut is not None
@@ -1026,7 +1024,7 @@ class _Planner:
             if producer not in self.estate.objects:
                 # A shortcut import says nothing about which area its
                 # destination is in, so a folder shortcut resolves to the table
-                # spelling first. The estate is what knows.
+                # spelling first. The estate is what answers.
                 beneath_files = replace(producer, is_files=True)
                 if beneath_files in self.estate.objects:
                     producer = beneath_files
@@ -1035,7 +1033,7 @@ class _Planner:
                 if shortcut.source not in self.estate.objects:
                     raise LoadError(
                         f"{consumer} reads shortcut {reference}, which points at "
-                        f"{shortcut.source} — not an installed object"
+                        f"{shortcut.source}, which is not an installed object"
                     )
                 return shortcut.source, shortcut
             if producer not in self.estate.objects:
@@ -1048,7 +1046,7 @@ class _Planner:
             if producer not in self.estate.objects:
                 raise LoadError(
                     f"{consumer} imports {reference!r}, which resolves to "
-                    f"{producer} — not an installed object"
+                    f"{producer}, which is not an installed object"
                 )
             return producer, None
         parts = reference.split(".")
@@ -1075,7 +1073,7 @@ class _Planner:
             if shortcut.source not in self.estate.objects:
                 raise LoadError(
                     f"{consumer} reads shortcut {reference}, which points at "
-                    f"{shortcut.source} — not an installed object"
+                    f"{shortcut.source}, which is not an installed object"
                 )
             return shortcut.source, shortcut
         if candidate in self.estate.objects:

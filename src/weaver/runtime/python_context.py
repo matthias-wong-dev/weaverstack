@@ -32,7 +32,7 @@ class PythonRuntimeContext:
     context_id: str
     runtime_root: Path
     #: The top-level names this tree defines, and therefore the only names an
-    #: authored import may have meant *this* tree by. Frozen at construction:
+    #: authored import may have meant this tree by. Frozen at construction:
     #: the tree is deployed by a build and does not change during a load.
     top_level: frozenset = field(default_factory=frozenset)
 
@@ -88,9 +88,9 @@ class RuntimeScope:
     def close(self) -> None:
         """Drop every module this run imported.
 
-        The whole namespace goes, because the alternative is deciding *which*
-        modules a later run may keep — and the answer depends on whether a build
-        has rewritten them since, which nothing here can see.
+        The whole namespace goes. Keeping some would mean deciding which modules
+        a later run may keep, and that depends on whether a build has rewritten
+        them since, which nothing here can see.
         """
 
         with self._lock:
@@ -112,8 +112,8 @@ def import_deployed_module(
 ):
     """One deployed module, imported inside its context, with its class present.
 
-    ``relative`` is the module's path within the tree —
-    ``Files/Sales__Seed.py`` — which also names it: a module is imported as its
+    ``relative`` is the module's path within the tree, as
+    ``Files/Sales__Seed.py``, and it also names it: a module is imported as its
     position, so one file never becomes two module objects.
     """
 
@@ -132,8 +132,8 @@ def import_deployed_module(
     except ModuleNotFoundError as exc:
         # Which module was missing decides which failure this is. The one asked
         # for means nothing was deployed there; anything else means the module
-        # was found and its *own* import failed — a different fault, with a
-        # different fix, and reporting them alike sends the reader to the wrong
+        # was found and its own import failed, which is a different fault with a
+        # different fix, and reporting them alike points at the wrong
         # place.
         missing = exc.name or ""
         if missing and (name == missing or name.startswith(f"{missing}.")):
@@ -156,7 +156,7 @@ def import_deployed_module(
     if not hasattr(module, expected):
         raise LoadError(
             f"{node_id}: {context.runtime_root}/{relative} defines no class "
-            f"{expected!r} — a deployed object module names its class for its file"
+            f"{expected!r}. A deployed object module names its class for its file"
         )
     return module
 
@@ -185,11 +185,12 @@ def _forget_modules(package: str) -> None:
 
 
 def _context_builtins(context: PythonRuntimeContext) -> dict:
-    """A builtins mapping whose ``__import__`` knows one tree.
+    """A builtins mapping whose ``__import__`` reaches one tree.
 
     Every deployed module executes with this in place of the real builtins, so
     the redirection reaches only what Weaver deployed. A name the tree does not
-    define — ``weaver``, ``pyspark``, ``json`` — goes to the ordinary import.
+    define, such as ``weaver``, ``pyspark`` or ``json``, goes to the ordinary
+    import.
     """
 
     real = builtins.__import__
@@ -198,7 +199,7 @@ def _context_builtins(context: PythonRuntimeContext) -> dict:
         if level == 0 and name:
             head = name.split(".", 1)[0]
             if head in context.top_level:
-                # Qualify the name and then hand it to the *real* import.
+                # Qualify the name and then hand it to the real import.
                 # Anything less reimplements Python's import semantics, and the
                 # part most easily missed is `fromlist`: ``from lib import
                 # dates`` calls this with name="lib" and fromlist=("dates",),
@@ -210,7 +211,7 @@ def _context_builtins(context: PythonRuntimeContext) -> dict:
                 imported = real(qualified, globals, locals, fromlist or (), level)
                 if fromlist:
                     return imported
-                # Without a fromlist, ``__import__`` returns the *root* package —
+                # Without a fromlist, ``__import__`` returns the root package, so
                 # ``import lib.dates`` binds ``lib``. The real call returned
                 # ``_weaver_runtime``, which is Weaver's root and not the
                 # author's, so the redirected head is what belongs here.
@@ -226,8 +227,8 @@ class _ContextLoader:
     From source, because Python decides whether its bytecode cache is current
     from the source's size and its mtime to the second. A build rewrites a
     deployed module in place, so a rebuild that changes it without changing its
-    length can land inside the same second and be taken for no change at all —
-    and the next load runs the previous build's code.
+    length can land inside the same second and be taken for no change at all, and
+    the next load runs the previous build's code.
 
     It also keeps ``__pycache__`` out of the deployed tree, which in Fabric is a
     folder Weaver manages and prunes.
@@ -275,8 +276,8 @@ class _WeaverRuntimeFinder:
         """Bind a context so its package resolves against its own tree.
 
         No rebinding case to handle: an id is minted once, by one scope, and is
-        never seen again — so a package name cannot come to mean a second tree,
-        and there are no modules under it left over from anything earlier.
+        never seen again, so a package name cannot come to mean a second tree, and
+        there are no modules under it left over from anything earlier.
         """
 
         with self._lock:
@@ -307,7 +308,7 @@ class _WeaverRuntimeFinder:
         if spec is None:
             return None
         if spec.loader is None:
-            # A directory with no ``__init__.py`` — ``lib/``, ``Files/``. There
+            # A directory with no ``__init__.py``, such as ``lib/`` or ``Files/``. There
             # is nothing to execute, so there is nothing to give builtins to.
             return spec
         spec.loader = _ContextLoader(spec.loader, bound.builtins)
@@ -332,7 +333,7 @@ class _Bound:
     """One registered context and the builtins its modules execute with.
 
     Held together so registering is one insertion under one lock, rather than
-    two mappings that a reader could catch disagreeing.
+    two mappings that could disagree.
     """
 
     context: PythonRuntimeContext
@@ -354,7 +355,7 @@ def _install_finder() -> None:
 
 
 def _top_level_names(root: Path) -> frozenset:
-    """What this tree defines at its root — the redirectable names."""
+    """What this tree defines at its root, being the redirectable names."""
 
     if not root.is_dir():
         return frozenset()

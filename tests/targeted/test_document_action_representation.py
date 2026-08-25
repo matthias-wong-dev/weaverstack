@@ -1,8 +1,8 @@
 """One authored document rendered into one build action.
 
 The smallest step the build takes, and the one that used to be provable only by
-generating a whole bundle. `source.create_ddl()` says *what statement*; this says
-what action carries it — which executor runs it, under what id, against which
+generating a whole bundle. `source.create_ddl()` says what statement; this says
+what action carries it, which executor runs it, under what id, against which
 frozen bytes, and with what hash. Those are separate claims and they fail for
 separate reasons, so they are asserted separately.
 
@@ -72,7 +72,7 @@ def test_the_action_id_is_derived_from_the_document_identity(lakehouse_customer)
 
 @weaver_test()
 def test_the_payload_is_the_documents_own_ddl(lakehouse_customer):
-    """The action carries what `create_ddl()` produced — not a re-rendering of it."""
+    """The action carries what `create_ddl()` produced, not a re-rendering of it."""
 
     document = lakehouse_customer.source_documents[document_id("DWG.Customer")]
     rendered = _render(lakehouse_customer, "DWG.Customer")
@@ -186,7 +186,7 @@ def test_a_warehouse_view_renders_a_tsql_build_view_action(tmp_path):
 
 @weaver_test()
 def test_a_folder_renders_an_action_with_no_payload_at_all(tmp_path):
-    """A folder is created, not executed — there is nothing to freeze or hash.
+    """A folder is created, not executed: there is nothing to freeze or hash.
 
     Worth its own assertion because a payload-less action is the one shape the
     installer's payload loading and hash verification must both skip, and an

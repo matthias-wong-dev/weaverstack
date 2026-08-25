@@ -5,7 +5,7 @@ travels verbatim, and a generated one is complete when it is generated, because
 a module reads its target's columns when it runs rather than when it is written.
 
 Nothing happens on the way down. A generated module already names the Lakehouse
-it reads, because the build knew the target when it rendered the module, so what
+it reads, because the build had the target when it rendered the module, so what
 is written is what was frozen.
 
 .. code-block:: text
@@ -20,13 +20,13 @@ A ``delete_file`` action removes a file whose source has stopped claiming it.
 Both derive their location the same way every other executor does: from the
 action's resource id and the target the batch names. The identity says where the
 file goes (``_/Load/lib/dates.py`` beneath ``Files``) and the bound target says
-which Lakehouse, so nothing here decides placement — that was settled when the
+which Lakehouse, so nothing here decides placement, that was settled when the
 artefact was claimed.
 
 Directories are the store's business on the way down, and nobody's on the way
 back up. The tree is owned by a declared folder, so when the last artefact goes
 the folder stops being projected and ordinary folder prune removes the whole
-subtree — an executor walking upward deleting empty parents would be a second,
+subtree, an executor walking upward deleting empty parents would be a second,
 quieter answer to a question already answered.
 """
 
@@ -60,7 +60,7 @@ class LoadFileExecutor:
         if action.kind == DELETE_FILE:
             # Tolerant of absence, and only here. A delete is reconciliation
             # toward "this must not exist", and something else having already
-            # removed it is that state reached — unlike a create, where a
+            # removed it is that state reached. Unlike a create, where a
             # collision means two things believe they own one name.
             if context.store.exists(location):
                 context.store.delete(location)

@@ -43,7 +43,7 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 def _cli():
     """The command module, not the ``main`` function of the same dotted name.
 
-    ``weaver_cli.main`` is both, and attribute access finds the function — so
+    ``weaver_cli.main`` is both, and attribute access finds the function, so
     the module is asked for by name, exactly as the load tests do.
     """
 
@@ -222,7 +222,7 @@ def test_without_a_terminal_nothing_is_ever_asked(args, monkeypatch):
 
 @weaver_test()
 def test_a_non_interactive_run_opens_no_session_of_its_own(monkeypatch):
-    """Nothing is retried, so nothing needs holding open — and resolving a
+    """Nothing is retried, so nothing needs holding open, and resolving a
     workspace to hold it would make a failure happen in a new place."""
 
     monkeypatch.setattr(_cli(), "_can_ask", lambda: False)
@@ -290,7 +290,7 @@ def test_a_task_failure_is_not_a_resource_failure(args, monkeypatch):
     """A SQL syntax error, a Python import error, a bad declaration: none of
     them is a reason to throw away a Livy session that is still up.
 
-    Asserted through the loop because that is where it would be lost — an
+    Asserted through the loop because that is where it would be lost, an
     implementation that reopened the Session per attempt would pass every other
     test here and still cost a cold start per fix.
     """
@@ -346,7 +346,7 @@ def test_a_retry_re_runs_the_task_rather_than_resuming_inside_it(args, monkeypat
 def test_a_raised_weaver_error_is_not_swallowed_by_the_loop(args, monkeypatch):
     """A command that raises rather than returning a status keeps raising.
 
-    The loop retries *reported* failures. Turning an exception into a prompt
+    The loop retries reported failures. Turning an exception into a prompt
     would put a retry in front of errors that no edit can fix.
     """
 
@@ -430,10 +430,10 @@ def test_one_keypress_is_read_as_itself(sent, expected):
     )
 
     pid, descriptor = pty.fork()
-    if pid == 0:  # the child *is* the terminal session
+    if pid == 0:  # the child is the terminal session
         # Between fork and exec the child is a copy of this pytest process, so
         # an exec that failed would leave a second pytest running the rest of
-        # the suite concurrently — against the same temporary directories, and
+        # the suite concurrently, against the same temporary directories, and
         # failing tests with nothing to do with this one. `os._exit` skips every
         # handler and cannot be caught.
         try:

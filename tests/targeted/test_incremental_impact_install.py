@@ -4,8 +4,8 @@ Incremental selection compares a declared signature against a certified one and
 walks the dependency graph from what changed. That is all it does, and all it
 needs: a repository and a mapping of `RegisteredDocument`.
 
-Constructing a whole catalogue projection to make these claims — which is what
-the old tests did — meant a signature-comparison defect and a catalogue-
+Constructing a whole catalogue projection to make these claims, which is what
+the old tests did, meant a signature-comparison defect and a catalogue-
 projection defect failed the same test the same way. Here a failure can only mean
 selection is wrong.
 """
@@ -32,7 +32,7 @@ VIEW = "DWG.ActiveCustomer"
 
 @pytest.fixture
 def chain(tmp_path):
-    """A table and the view that reads it — the smallest graph with a descendant."""
+    """A table and the view that reads it, the smallest graph with a descendant."""
 
     return single_document_repository(
         tmp_path,
@@ -179,7 +179,7 @@ def test_an_unchanged_table_impacts_nothing(chain):
 def test_a_descendant_left_out_of_the_selection_is_not_reached(chain):
     """Selection bounds the walk: an item not in this build stays deferred.
 
-    Not a rule applied afterwards — the unselected node is simply not in the set
+    Not a rule applied afterwards, the unselected node is simply not in the set
     being classified, so nothing propagates to it by construction.
     """
 
@@ -244,8 +244,8 @@ def test_an_object_that_prohibits_rebuild_is_never_dropped(tmp_path):
     """The one thing that outranks a changed signature.
 
     A table holding data a rebuild would destroy says so in its declaration, and
-    the selection must honour that even though the signature moved — it is
-    reported as prohibited rather than quietly built.
+    the selection must honour that even though the signature moved. It is
+    reported as prohibited rather than built.
     """
 
     declaration = lakehouse_table(TABLE).replace(

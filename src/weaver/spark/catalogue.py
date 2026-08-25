@@ -34,8 +34,9 @@ class SparkCatalogue:
     def over_sql(cls, run_sql, destination: FabricSparkTarget) -> "SparkCatalogue":
         """A catalogue reached by running statements, with no session here.
 
-        ``run_sql(statement)`` returns the statement's rows as dictionaries —
-        :meth:`weaver.sessions.base.Session.execute_spark_sql`. Wherever that runs
+        ``run_sql(statement)`` returns the statement's rows as dictionaries, as
+        :meth:`weaver.sessions.base.Session.execute_spark_sql` does. Wherever that
+        runs
         is where the catalogue is.
         """
 
@@ -104,7 +105,7 @@ class SparkCatalogue:
     def views(self, schema: str) -> tuple[str, ...]:
         """Persistent view names in one schema of this destination.
 
-        Views are catalogue-only — there is no directory to find them in — so
+        Views are catalogue-only, there is no directory to find them in, so
         this is the one part of an inventory that has to be asked of Spark.
         """
 
@@ -136,7 +137,7 @@ class SparkCatalogue:
         """Run a listing, reading an absent schema as an empty one.
 
         A schema that is not there holds nothing, which is the answer an
-        inventory wants, and both workspaces raise for it rather than returning
+        inventory needs, and both workspaces raise for it rather than returning
         no rows. Everything else propagates: a real failure read as "nothing
         here" tells the next build that nothing is managed.
         """
@@ -183,7 +184,7 @@ def is_absent(exception: Exception) -> bool:
     """Whether this means "not created yet" rather than "went wrong".
 
     Keyed on Spark's error class where there is one, so a reworded message
-    cannot quietly turn an infrastructure failure into an empty inventory. A
+    cannot turn an infrastructure failure into an empty inventory. A
     statement that crossed a boundary arrives as a message rather than a Spark
     exception, so the class name is matched in the text as well.
     """

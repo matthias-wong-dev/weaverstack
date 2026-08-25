@@ -4,21 +4,21 @@ Weaver's own catalogue lives in schema ``_`` of a Warehouse, declared as
 ordinary Weaver document and built through the ordinary build path. Two rules had to give way
 for that, and both were over-broad rather than load-bearing:
 
-- the underscore convention is about *directories* — ``schemas/``, ``lib/`` — so
+- the underscore convention is about directories, ``schemas/``, ``lib/``, so
   a document filename may begin with one when it still names a schema and an
   object;
 - a Spark SQL object must be explicit about its dependencies, which an empty list
   satisfies as well as a populated one. A query built from literals has none.
 
 ``_`` itself is the one name an ordinary item may not use, and that is a
-statement about *ownership* rather than a return of the naming rule: it holds the
+statement about ownership rather than a return of the naming rule: it holds the
 runtime tree a load is deployed into and the schema generated load procedures
 live in, both of which Weaver generates and prunes. The package-owned
 ``Warehouse/_weaver`` still declares its catalogue there, because it is the item
 that owns it. Any other underscore schema is authored freely, which is what these
 tests check.
 
-A misnamed object file is still an error rather than quietly demoted to
+A misnamed object file is still an error rather than demoted to
 support.
 """
 
@@ -141,8 +141,8 @@ def test_an_underscore_schema_must_still_be_declared(tmp_path):
 def test_schema_underscore_itself_belongs_to_weaver(tmp_path):
     """The one name an ordinary item may not author into.
 
-    It holds generated infrastructure — the deployed runtime tree and the load
-    procedures — so an authored object there would collide with something Weaver
+    It holds generated infrastructure, the deployed runtime tree and the load
+    procedures, so an authored object there would collide with something Weaver
     generates, claims and prunes. Refused at interpretation, where the author can
     still see which file caused it.
     """
@@ -191,7 +191,7 @@ def test_a_spark_sql_object_must_still_say_something():
 def test_an_explicit_none_suppresses_discovery(tmp_path):
     """`Dependencies: []` replaces discovery rather than falling back to it.
 
-    A declaration has always replaced discovery so an author can *remove* an
+    A declaration has always replaced discovery so an author can remove an
     edge; an empty declaration is the same statement about the empty set. Without
     this, `Dependencies: []` would silently mean "discover them for me".
     """

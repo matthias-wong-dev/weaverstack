@@ -1,11 +1,11 @@
-"""A thin run: every real link in the chain, and deliberately nothing at the end.
+"""A thin run: every real link in the chain, and nothing at the end.
 
 .. code-block:: text
 
     Runner → dispatch → Session → real import → a trivial installed artefact
 
 Everything in that chain is production code. The only thing not real is what the
-primitive *does*, and that is the point: a thin run proves the wiring — that the
+primitive does, and that is the point: a thin run proves the wiring. That the
 Runner reaches dispatch, that dispatch resolves the deployed artefact and reaches
 it through the Session, and that whatever comes back is settled into the run's
 own vocabulary. What a primitive would have done to data is a Primitive's claim,
@@ -15,10 +15,10 @@ and is proven against real engines elsewhere.
 primitive: a catalogue saying it is installed, and the artefact being where the
 catalogue says. Both are arranged directly here. The Registry points at these
 artefacts exactly as it points at production ones, which is what makes the
-Runner unable to tell the difference — and it is why paying for a build to make
+Runner unable to tell the difference, and it is why paying for a build to make
 a primitive callable is unnecessary when the claim is about dispatch.
 
-Each meets the contract a deployed load primitive meets — ``cls(spark,
+Each meets the contract a deployed load primitive meets, ``cls(spark,
 lakehouse=...)`` and ``_load(fault_tolerant=...)``. The lower interface, because
 that is the one a run calls: ``load()`` is the standalone wrapper that records,
 and a run recording through a primitive would be a second writer of the same row.
@@ -29,7 +29,7 @@ each is settled by a different rule:
 .. code-block:: text
 
     Success      a result reporting success
-    Rejects      rows written and rows refused — tolerated, or not
+    Rejects      rows written and rows refused, tolerated, or not
     Failure      a reported failure, nothing raised
     Raises       an exception the primitive never normalised
     Malformed    something that is not a result at all
@@ -38,7 +38,7 @@ each is settled by a different rule:
     Disagrees    a validation finding a discrepancy on both sides
     Unreadable   a validation that could not be evaluated at all
 
-Loads need no Spark session at all, because a trivial load never touches one —
+Loads need no Spark session at all, because a trivial load never touches one,
 so those run in the pure suite. A Test's artefact returns a frame, so the
 judgements need a real one; they still build nothing and read nothing, and cost
 milliseconds on a Spark session the suite has already paid for.
@@ -72,7 +72,7 @@ from weaver.targets import ItemRef
 SCHEMA = "Thin"
 
 #: One trivial artefact per outcome. The class name is the module name, which is
-#: the rule the deployed tree already follows — so these are found the way any
+#: the rule the deployed tree already follows, so these are found the way any
 #: deployed module is found, not by a special case.
 ARTEFACTS = {
     "Success": '''\
@@ -97,9 +97,9 @@ class {name}:
     """Refuses one row, and answers the way the real runtime answers.
 
     Both halves matter, and both are spelled as ``table_load`` spells them.
-    A tolerated rejection *returns* a result marked failed that counted its
-    rejects; an intolerant one *raises*, carrying the same counts. The two
-    results are indistinguishable — the raising is the only difference, which
+    A tolerated rejection returns a result marked failed that counted its
+    rejects; an intolerant one raises, carrying the same counts. The two
+    results are indistinguishable, the raising is the only difference, which
     is precisely why a fixture that invented a tidier spelling would prove
     the Runner settles something no primitive ever sends it.
     """
@@ -157,8 +157,8 @@ class {name}:
 OUTCOMES = tuple(ARTEFACTS)
 
 #: A Test's deployed artefact is read rather than called, and what it returns is
-#: a real Spark frame of sides — so these need a session where a load's do not.
-#: Two literal rows are enough to settle each outcome: what a Test *means* is the
+#: a real Spark frame of sides, so these need a session where a load's do not.
+#: Two literal rows are enough to settle each outcome: what a Test means is the
 #: comparison's own claim, and what these settle is how the run reports it.
 VALIDATIONS = {
     "Agrees": '''from pyspark.sql.types import StringType, StructField, StructType
@@ -192,7 +192,7 @@ class {name}:
         )
 ''',
     "Unreadable": '''class {name}:
-    """Cannot be evaluated at all — which is not the same as finding nothing."""
+    """Cannot be evaluated at all, which is not the same as finding nothing."""
 
     def __init__(self, spark, lakehouse=None):
         self.spark = spark
@@ -233,7 +233,7 @@ class ThinEstate:
         """The one validation node for a judgement.
 
         Found by the object it validates rather than by a node id, because a
-        validation report is keyed by what a reader names — the logical id —
+        validation report is keyed by the logical id,
         and that is the vocabulary difference the projection exists to make.
         """
 
@@ -264,7 +264,7 @@ def thin_estate(
     publishes. Only the artefacts it points at are trivial.
 
     A thin run reaches a primitive and settles what comes back; it never touches
-    data. What varies is *where* the artefacts are deployed and who dispatches
+    data. What varies is where the artefacts are deployed and who dispatches
     to them, which is why the store, resolver and Session are injectable: given
     a real workspace's resolver and a OneLake store, the same builder deploys
     into Fabric and the same claims are made against the session that imports
@@ -295,7 +295,7 @@ def thin_estate(
         )
     deployed = store if store is not None else FilesystemStore()
 
-    # Written where the *build* would have written them, asked of the build's own
+    # Written where the build would have written them, asked of the build's own
     # enumerator rather than assembled from a path this module believes in. A
     # load module and a Test module do not share a directory, and a fixture that
     # guessed would only be pinning the guess.

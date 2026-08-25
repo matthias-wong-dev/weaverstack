@@ -1,17 +1,17 @@
 """The generated Warehouse load procedure, executed against a real Fabric Warehouse.
 
-A *primitive* test: the table is built from ``create_ddl()``, the procedure is
+A primitive test: the table is built from ``create_ddl()``, the procedure is
 installed from ``create_load()``, and the procedure is then executed directly.
-No bundle is planned, no installer runs and no orchestrator exists — the claim
+No bundle is planned, no installer runs and no orchestrator exists, the claim
 is that ``exec [_].[Load S.N]`` loads correctly on its own.
 
 Fabric is the only place several of these can be answered. Whether the engine
 accepts an identity column, whether it accepts the generated procedure at all,
 and what it does with a two-phase installer reading ``sys.columns`` are its
-answers, not ours — which is why the semantics are established here rather than
+answers, not ours, which is why the semantics are established here rather than
 inferred from a local approximation.
 
-The outcomes match what a Lakehouse load produces, deliberately: two engines,
+The outcomes match what a Lakehouse load produces: two engines,
 one set of load semantics. If they disagree, the semantics have diverged.
 
 **One estate, and one execution per sequence.** Every round trip to a Warehouse
@@ -20,11 +20,11 @@ makes but how many times it makes the engine do something. Two things follow,
 and both are visible in the shape below.
 
 The table and its procedure are installed once for the module rather than per
-test. Installing them is not a claim any test here makes — it is the premise all
-of them share — and a two-phase procedure install is one of the more expensive
+test. Installing them is not a claim any test here makes. It is the premise all
+of them share, and a two-phase procedure install is one of the more expensive
 things in the suite.
 
-And a *sequence* runs once, whatever number of claims are about it. "A second
+And a sequence runs once, whatever number of claims are about it. "A second
 run updates only what changed" and "an unchanged row keeps its original update
 time" are two questions about one load-then-load-again; asking the Warehouse to
 do it twice does not make either answer better. So each sequence below runs its
@@ -33,8 +33,8 @@ hands back a snapshot. Capturing rather than leaving the tests to query later is
 what makes the sharing safe: the sequences share one table, so a snapshot taken
 afterwards would describe whichever sequence ran last.
 
-The ordinary path goes further and runs as a chain — seed, update, shrink —
-because each of those steps *is* the next one's starting state. Rejection keeps
+The ordinary path goes further and runs as a chain, seed, update, shrink,
+because each of those steps is the next one's starting state. Rejection keeps
 its own sequences, because refusing and tolerating are a different subject and
 neither follows from the other.
 """
@@ -120,7 +120,7 @@ class Estate:
 
 
 #: The logical item the installed procedures belong to. A load procedure is keyed
-#: by it — its bookmark row carries the Registry's four-part identity — so it is
+#: by it, its bookmark row carries the Registry's four-part identity, so it is
 #: named here rather than left to a default.
 ITEM = WeaverItemId(*PROCEDURE_ITEM)
 
@@ -209,7 +209,7 @@ def _reset(estate: Estate) -> None:
     """Empty the target and its evidence, without rebuilding either.
 
     A sequence has to start from a known state, and dropping and recreating the
-    table and procedure would be the obvious way to get one — and would put the
+    table and procedure would be the obvious way to get one, and would put the
     module's most expensive statement back into every sequence. Deleting rows is
     the same starting state for every claim here, none of which is about a table
     that has never existed.
@@ -358,9 +358,9 @@ class Ran:
 def _ordinary(estate):
     """The ordinary life of a loaded table: seed it, change it, shrink it.
 
-    One chain rather than three, because each step's *base* is the step before
+    One chain rather than three, because each step's base is the step before
     it. Run separately, the update case would first have to re-seed and the
-    shrink case would have to re-seed and update again — three loads bought to
+    shrink case would have to re-seed and update again, three loads bought to
     reach states two earlier loads had already produced.
 
     Every step captures what its own claims need before the next one runs, so
@@ -498,8 +498,8 @@ def test_a_tolerant_run_preserves_valid_rows_and_rejection_evidence(estate):
 # --- static -------------------------------------------------------------------
 #
 # The fourth authored form, and the only one whose static behaviour is written in
-# SQL rather than in Python. The gate is *inside* the procedure — see
-# `weaver.declaration.tsql_load._static_gate` — so it has to be executed to be
+# SQL rather than in Python. The gate is inside the procedure, see
+# `weaver.declaration.tsql_load._static_gate`, so it has to be executed to be
 # proved, and only a Warehouse can execute it. What the generator emits is
 # asserted cheaply in `tests/test_static_load_declaration.py`; this is the half
 # that needs an engine.
@@ -510,7 +510,7 @@ def _static_run(static_estate):
 
     Both through the entry point. The Static gate reads a bookmark and the
     object's own procedure does not write one, so what closes the gate is the
-    *record* — and the record belongs to whoever ran the load. Run through the
+    record, and the record belongs to whoever ran the load. Run through the
     primitive alone, a Static object would seed itself on every call.
     """
 
@@ -702,7 +702,7 @@ def test_the_static_warehouse_load_seeds_once_and_then_is_a_no_op(static_estate)
 #
 # Nullability and uniqueness are declarations, and what they mean is what the
 # engine does with the generated procedure. Two more estates, because the two
-# subjects are genuinely different: one is about refusing incoming rows and
+# subjects are different: one is about refusing incoming rows and
 # recovering, the other about refusing to write at all.
 #
 # One test per sequence, as above, with every claim about that sequence in it.
@@ -1108,7 +1108,7 @@ def test_a_key_the_source_still_produces_is_not_retired(merge_estate):
     """The claim gives it up, and the row is loaded as an ordinary update.
 
     c2 is claimed and staged changed; c3 is claimed and staged unchanged. Neither
-    is deleted, c2 is updated, and c3 is left alone — so its insert and update
+    is deleted, c2 is updated, and c3 is left alone, so its insert and update
     times both survive, which deleting and re-inserting would not have preserved.
     """
 
@@ -1175,7 +1175,7 @@ def test_a_holder_moving_to_a_null_frees_its_value(merge_estate):
 
 
 #: Proposals that do not describe a valid target. Each is run over the same
-#: seeded state, which an abort leaves untouched — so nothing has to be re-seeded
+#: seeded state, which an abort leaves untouched, so nothing has to be re-seeded
 #: between them, and that fact is itself one of the claims.
 CONFLICTS = {
     # A value nobody is giving up. c2's rename is valid on its own and must not be
@@ -1190,11 +1190,11 @@ CONFLICTS = {
     ],
 }
 
-# A holder that is in the upsert set while keeping the value a claimant wants is
+# A holder that is in the upsert set while keeping the value a claimant needs is
 # not among these, and cannot be: both rows would then carry that value in
 # staging, which incoming uniqueness refuses before the merge check is reached.
 # The generated predicate still has to distinguish the two, because that is what
-# lets a genuine swap or move through — asserted in
+# lets a genuine swap or move through, asserted in
 # ``tests/targeted/test_load_representation.py``.
 
 

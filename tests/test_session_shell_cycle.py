@@ -1,11 +1,11 @@
-"""``weaver session`` — one console session, many commands, one set of resources.
+"""``weaver session``: one console session, many commands, one set of resources.
 
 The claim is about what survives between commands, so these tests drive the
 shell with a scripted stdin and watch what the handlers receive. No workspace is
-resolved and nothing physical is acquired: the Session's job here is to *be* the
+resolved and nothing physical is acquired: the Session's job here is to be the
 same object each time, and to still be usable after a command has failed.
 
-Commands are written as they are everywhere else — ``weaver build .`` — because
+Commands are written as they are everywhere else, ``weaver build .``, because
 the session runs the ordinary CLI, not a dialect of it. The terminal behaviour
 of the prompt itself is proved in ``test_session_terminal_boundary``.
 """
@@ -200,7 +200,7 @@ def test_quoted_arguments_survive_the_prompt(every_command):
 )
 @weaver_test()
 def test_a_windows_path_reaches_the_handler_intact(line, repository, every_command):
-    """The line a reader copies out of PowerShell is the line that runs."""
+    """The line copied out of PowerShell is the line that runs."""
 
     calls, factory = every_command
 
@@ -527,8 +527,8 @@ def test_a_warehouse_only_command_offers_no_lakehouse_and_wants_no_spark(recorde
 def test_a_command_wanting_spark_is_told_why_livy_is_not_starting(recorded, capsys):
     """The rule is right; announcing work it then declines is not.
 
-    Livy genuinely cannot start against a workspace that names no Environment.
-    The reason is owed to the reader at the point something wants Spark, which is
+    Livy cannot start against a workspace that names no Environment.
+    The reason is owed to the reader at the point something needs Spark, which is
     the first command that names a Lakehouse rather than the banner.
     """
 

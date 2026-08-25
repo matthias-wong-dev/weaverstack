@@ -6,14 +6,14 @@ An object is freestanding or catalogue-anchored::
     My__Table(spark, catalogue="Warehouse/Weaver")  # anchored
 
 Anchoring resolves two things once, at construction: the catalogue itself, and
-which installed object this is. Both are needed before a load begins — a
-``Static`` gate reads a bookmark and an authored ``read()`` may too — and neither
+which installed object this is. Both are needed before a load begins, a
+``Static`` gate reads a bookmark and an authored ``read()`` may too, and neither
 is worth resolving twice.
 
 The catalogue opens the Session it reads and writes through and owns it, so
 nothing here holds a connection or caches one.
 
-An orchestrated run has already read the catalogue and knows the identity, so it
+An orchestrated run has already read the catalogue and holds the identity, so it
 anchors the object itself through ``with_catalogue`` and this module is not
 involved.
 """

@@ -86,7 +86,7 @@ def test_a_source_published_a_moment_later_is_waited_for(monkeypatch):
     """One build can create a thing and point at it.
 
     Fabric validates a shortcut's target, and a Warehouse publishes a table to
-    OneLake shortly after creating it in its own catalogue — so the create can
+    OneLake shortly after creating it in its own catalogue, so the create can
     arrive before there is anything to point at.
     """
 
@@ -117,7 +117,7 @@ def test_a_source_published_a_moment_later_is_waited_for(monkeypatch):
 
 @weaver_test()
 def test_a_source_that_never_appears_still_fails(monkeypatch):
-    """Bounded, so a target that is genuinely absent is a failure and not a hang."""
+    """Bounded, so a target that is absent is a failure and not a hang."""
 
     import weaver.fabric.shortcuts as shortcuts
 

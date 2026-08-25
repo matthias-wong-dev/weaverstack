@@ -31,7 +31,7 @@ class FabricSparkTarget:
 
     Both names are display names: that is what Fabric's Spark namespace is
     spelled with, and what a reviewer reading a frozen statement can recognise.
-    The workspace and item *ids* stay in resolution and in the bundle's target
+    The workspace and item ids stay in resolution and in the bundle's target
     block.
     """
 
@@ -59,7 +59,7 @@ class FabricSparkTarget:
         return (self.workspace, self.lakehouse)
 
     def qualified_schema(self, schema: str) -> str:
-        """The schema, fully qualified — what ``CREATE SCHEMA`` is given."""
+        """The schema, fully qualified: what ``CREATE SCHEMA`` is given."""
 
         return ".".join(
             identifier(part)
@@ -67,7 +67,7 @@ class FabricSparkTarget:
         )
 
     def qualify(self, schema: str, name: str) -> str:
-        """One object, fully qualified — what every statement names it by."""
+        """One object, fully qualified: what every statement names it by."""
 
         return (
             f"{self.qualified_schema(schema)}"
@@ -95,11 +95,11 @@ def _checked(value: object, *, what: str) -> str:
 
     Only that it is a non-empty string. Every part is back-tick quoted by
     :func:`identifier`, which doubles any back-tick, so a dot or a space inside
-    a name is unambiguous — and a Fabric workspace name may contain both.
+    a name is unambiguous, and a Fabric workspace name may contain both.
     Path-unsafe characters are refused where they matter, by
     :func:`weaver.targets.validate_name`, before a name reaches this.
 
-    Fabric's own rule for a *new* Lakehouse is stricter still: begin with a
+    Fabric's own rule for a new Lakehouse is stricter still: begin with a
     letter, then alphanumerics and underscores, up to 123 characters
     (Microsoft 2026). It is not repeated here, because this names Lakehouses
     that already exist and refusing to address one Fabric is serving would be

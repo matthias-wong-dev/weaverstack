@@ -51,7 +51,7 @@ class FabricResolver:
         self._items: dict[str, Item] = {}
         #: Answers this resolver gave without asking the workspace. A Session
         #: owns one resolver for its lifetime, so this is what a reused item
-        #: cache is *worth* — and a hit is the absence of a call, which nothing
+        #: cache is worth, and a hit is the absence of a call, which nothing
         #: above the cache can observe for itself.
         self.cache_hits = 0
 
@@ -77,8 +77,8 @@ class FabricResolver:
         """The workspace item of this name and type. Cached.
 
         A type is required: identity is ``workspace + type + name``, and asking the
-        workspace what a bare name *is* would make a caller depend on ambiguous
-        name inference. The caller knows the type from the slot — a
+        workspace what a bare name is would make a caller depend on ambiguous
+        name inference. The caller takes the type from the slot, a
         ``DeltaTarget`` is a Lakehouse, a ``WarehouseTarget`` is a Warehouse.
         """
 
@@ -156,7 +156,7 @@ class FabricResolver:
     # Two operations an installed bundle needs that are neither path arithmetic
     # nor a SQL statement: pointing one Lakehouse at another's data, and asking a
     # Lakehouse's SQL analytics endpoint to catch up. Both are REST, so they
-    # belong to the adapter that already knows how to reach this workspace. A
+    # belong to the adapter that already reaches this workspace. A
     # resolver inside a Fabric session offers neither, and an action that needs
     # one is recorded as skipped rather than failed.
 
@@ -200,7 +200,7 @@ class FabricResolver:
     def external_item(self, name: str, *, item_type: str, workspace: str | None = None):
         """One item, in this workspace or a named one, resolved by its type.
 
-        For a shortcut's *source*, which may sit outside the workspace the build
+        For a shortcut's source, which may sit outside the workspace the build
         is bound to. Nothing binds it and nothing builds into it.
 
         A Warehouse resolves here as well as a Lakehouse, because a Fabric
@@ -312,7 +312,7 @@ class FabricResolver:
         Fabric's namespace is the fundamental representation:
         ``workspace.lakehouse.schema.object``. One session addresses every
         Lakehouse in the workspace through it, so nothing has to be attached and
-        nothing has to be switched — and a schema-enabled Lakehouse pins its own
+        nothing has to be switched, and a schema-enabled Lakehouse pins its own
         managed tables, which is why no path appears in the destination.
 
         Display names, because that is what the namespace is spelled with. The

@@ -1,10 +1,10 @@
-"""The ``spark_table`` executor, driven with a fake capability — no JVM.
+"""The ``spark_table`` executor, driven with a fake capability: no JVM.
 
 The install-time behaviour (describe the query, validate, create the table) is
 proven end to end against a real Lakehouse in
 ``tests/fabric/test_spark_table_lakehouse_boundary.py``. These tests pin the
 executor's own logic cheaply: what it asks Spark, what SQL it
-generates, and that it surfaces every column violation the plan lists — without
+generates, and that it surfaces every column violation the plan lists, without
 paying for a Spark session.
 
 The executor reaches Spark twice and only twice: once to describe the query's
@@ -33,8 +33,8 @@ DESCRIBE = "DESCRIBE QUERY "
 class _Capability:
     """The Session's Spark SQL capability, answering DESCRIBE QUERY from a shape.
 
-    It records every call — the statements it carried and the identifier-case
-    scope they travelled under — because both are claims the executor makes.
+    It records every call, the statements it carried and the identifier-case
+    scope they travelled under, because both are claims the executor makes.
     """
 
     def __init__(
@@ -91,7 +91,7 @@ AUDIT = [
 
 
 #: The destination every case here builds into. The payload arrives already
-#: addressed to it, and this executor discovers the query's *shape* — never
+#: addressed to it, and this executor discovers the query's shape, never
 #: where the table goes.
 DESTINATION = FabricSparkTarget(workspace="Demo", lakehouse="Sales_LH")
 FABRIC_DESTINATION = FabricSparkTarget(workspace="Analytics", lakehouse="Sales_LH")
@@ -156,7 +156,7 @@ def _run(capability, payload: bytes, *, destination=DESTINATION):
 def test_the_shape_is_asked_for_rather_than_the_query_being_run():
     """``DESCRIBE QUERY`` answers the two things the executor takes from a query.
 
-    The names in order and each type as ``simpleString`` spells it — without
+    The names in order and each type as ``simpleString`` spells it, without
     running the query, and without a ``DataFrame`` to hold.
     """
 

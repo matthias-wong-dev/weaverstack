@@ -9,9 +9,9 @@ What proves it is what is submitted. Every statement the read sends is captured
 and inspected: an ``import weaver`` anywhere in them would mean the published
 package was still load-bearing, whatever the session happened to have installed.
 
-Load's Python primitives are a different matter and still need the wheel — a
+Load's Python primitives are a different matter and still need the wheel, a
 deployed module is imported where Spark is. What is asserted here is the state a
-*build* reads before it plans.
+build reads before it plans.
 
 The same fact stated as a requirement: a build names no Fabric Environment. An
 Environment is what carries the published Weaver, and a build imports it
@@ -97,7 +97,7 @@ def test_the_statements_it_submitted_import_nothing(recorded_session):
     """Whatever crossed to Spark is a statement, never a program.
 
     Nothing is counted here. The catalogue is a Warehouse now, so the read's
-    Spark traffic is a Lakehouse's views alone — and a target with no schemas
+    Spark traffic is a Lakehouse's views alone, and a target with no schemas
     has none to list, which is a fact about the estate rather than about the
     read. That the read happened at all is
     `test_build_state_is_read_without_importing_weaver_in_fabric`; that views
@@ -141,7 +141,7 @@ def test_a_lakehouse_inventory_lists_views_over_spark_sql(
     """The one part of an inventory that is not storage.
 
     A view exists only in the catalogue, so it is the piece that has to be asked
-    of Spark — and asking it is a statement rather than a program.
+    of Spark, and asking it is a statement rather than a program.
     """
 
     from weaver.build_bundle.workflow import session_catalogue
@@ -151,7 +151,7 @@ def test_a_lakehouse_inventory_lists_views_over_spark_sql(
     )
 
     # A schema that is not there holds no views, which is an answer rather than
-    # a failure — and it is the answer a first build depends on.
+    # a failure, and it is the answer a first build depends on.
     assert catalogue.views("NoSuchSchemaHere") == ()
     assert catalogue.schema_exists("NoSuchSchemaHere") is False
 
@@ -162,7 +162,7 @@ def test_a_build_runs_against_a_workspace_naming_no_environment(
 ):
     """The requirement, made real: a whole build with `environment` unset.
 
-    A Warehouse-only estate, so nothing here even starts Spark — the objects are
+    A Warehouse-only estate, so nothing here even starts Spark, the objects are
     T-SQL and the catalogue they are registered in is a Warehouse. What would
     have failed before is the refusal itself, which came before any Fabric call
     and did not depend on what the build turned out to need.
