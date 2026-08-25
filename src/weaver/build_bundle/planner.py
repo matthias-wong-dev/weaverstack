@@ -413,6 +413,7 @@ def plan_item_build(
         target_by_item=target_by_item,
         selected=selected_for_build & selected_shortcuts,
         sources=shortcut_sources,
+        catalogue_target=catalogue_target,
     )
     artefacts = item_runtime_artefacts(
         repository,

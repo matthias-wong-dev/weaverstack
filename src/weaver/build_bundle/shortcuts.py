@@ -115,6 +115,33 @@ class ItemShortcutPlan:
     omitted_destinations: tuple[object, ...] = ()
 
 
+def _is_the_catalogue_itself(
+    target: BoundTarget, catalogue: BoundTarget | None
+) -> bool:
+    """Whether this target is the Warehouse the catalogue lives in.
+
+    Compared on kind and ``item_id``, which is the physical item. ``id`` carries
+    the logical item name as well, so two bindings onto one Warehouse have
+    different ``id`` values and the same ``item_id``. This is the pairing
+    :func:`weaver.build_bundle.planner._catalogue_target` matches on.
+    """
+
+    return (
+        catalogue is not None
+        and target.kind == catalogue.kind
+        and target.item_id == catalogue.item_id
+    )
+
+
+def _references_the_catalogue(declaration, logical_sources) -> bool:
+    """Whether this declaration is one of Weaver's own runtime references."""
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+
+    source = logical_sources.get(declaration.destination)
+    return source is not None and source.item == BUILTIN_ITEM
+
+
 def plan_item_shortcuts(
     repository,
     *,
@@ -123,6 +150,7 @@ def plan_item_shortcuts(
     target_by_item: Mapping[WeaverItemId, BoundTarget],
     selected: Iterable[WeaverDocumentId],
     sources: Mapping[str, ResolvedShortcutSource] | None = None,
+    catalogue_target: BoundTarget | None = None,
 ) -> ItemShortcutPlan:
     """Plan the shortcuts this build selected.
 
@@ -146,6 +174,19 @@ def plan_item_shortcuts(
         ),
         key=lambda declaration: str(declaration.destination),
     )
+    logical_sources = {
+        pair.destination: pair.source for pair in repository.logical_shortcuts
+    }
+    if _is_the_catalogue_itself(target, catalogue_target):
+        # This item is bound to the Warehouse holding the catalogue, so `_` and
+        # its tables are already there. A two-part `[_].[Bookmark]` in a
+        # generated procedure reaches the real table, and a view of that name
+        # over itself is what T-SQL refuses to alter.
+        declarations = [
+            declaration
+            for declaration in declarations
+            if not _references_the_catalogue(declaration, logical_sources)
+        ]
     if not declarations:
         return ItemShortcutPlan()
 
@@ -154,10 +195,6 @@ def plan_item_shortcuts(
     omitted_destinations: list[object] = []
     supported: list[tuple] = []
     schemas: list[str] = []
-
-    logical_sources = {
-        pair.destination: pair.source for pair in repository.logical_shortcuts
-    }
 
     for declaration in declarations:
         if not declaration.is_schema and declaration.destination_identity is None:
