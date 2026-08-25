@@ -405,11 +405,16 @@ def test_a_built_warehouse_is_given_views_over_the_catalogues_runtime_tables(
 
 @weaver_test(remote=True, resources={"rest", "tds"})
 def test_a_generated_load_reads_the_catalogue_through_a_consumer_warehouse_view(
-    fabric_workspace, clean_disposable_warehouse, tmp_path_factory
+    fabric_workspace, emptied_disposable_warehouse, tmp_path_factory
 ):
-    """Exercise ``Warehouse/consumer/_.Bookmark -> Warehouse/catalogue``."""
+    """Exercise ``Warehouse/consumer/_.Bookmark -> Warehouse/catalogue``.
 
-    warehouse = clean_disposable_warehouse
+    Emptied for this test alone: it counts the rows its own load moved, and the
+    Reporting estate above declares a ``Wh.Customer`` of its own in the same
+    Warehouse.
+    """
+
+    warehouse = emptied_disposable_warehouse
     name = warehouse.item.name
     root = tmp_path_factory.mktemp("runtime-reference") / "estate"
     estate = _write_runtime_reference_estate(root)

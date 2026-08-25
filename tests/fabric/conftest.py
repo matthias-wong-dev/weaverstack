@@ -827,6 +827,27 @@ def clean_disposable_warehouse(session_disposable_warehouse):
     yield session_disposable_warehouse
 
 
+@pytest.fixture
+def emptied_disposable_warehouse(session_disposable_warehouse):
+    """The fixed Warehouse, emptied for one test rather than one module.
+
+    ``clean_disposable_warehouse`` empties once per module, which is enough while
+    a module's tests bind one logical item to it. A test binding a different item
+    needs the physical names the previous one left to be gone: two items can
+    declare the same ``Schema.Object``, and the rows behind it are not this
+    test's.
+    """
+
+    from weaver.physical_wipe import wipe_sql_target
+
+    wipe_sql_target(
+        session_disposable_warehouse.target,
+        session_disposable_warehouse.workspace,
+        sql=session_disposable_warehouse.executor,
+    )
+    yield session_disposable_warehouse
+
+
 @pytest.fixture(scope="session")
 def warehouse_session(fabric_workspace):
     """One desktop Session for Warehouse-only primitives, without Livy."""
@@ -905,6 +926,7 @@ def warehouse_primitive_estate(
         InstallationContext,
         ResolvedTarget,
     )
+    from weaver.catalogue.builtin import BUILTIN_ITEM
     from weaver.physical_wipe import wipe_sql_target
     from weaver.targets import ItemRef
 
@@ -953,7 +975,10 @@ def warehouse_primitive_estate(
                     target_name=warehouse.item.name,
                 )
             ),
-            target_by_item={identity: target.bound},
+            # The catalogue item too, as the planner supplies it: a runtime
+            # reference names the built-in item as its source, and one with no
+            # target is omitted as unsupported.
+            target_by_item={identity: target.bound, BUILTIN_ITEM: catalogue},
             selected_documents=selected,
             selected_shortcuts=selected_shortcuts,
             selected_for_drop=set(selected) if rebuild else set(),
