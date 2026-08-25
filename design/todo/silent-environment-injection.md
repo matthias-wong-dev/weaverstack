@@ -91,10 +91,80 @@ distribution names; idempotent rerun stages nothing; a foreign wheel and a
 foreign yml survive a publish. Promote the 25 August probe to a marked
 `fabric remote` acceptance test asserting preservation in one observation.
 
+## Session injection for the Fabric suite
+
+The publish-free path also changes how the Fabric suite itself runs. Today the
+hosted half waits on `weaver fabric environment publish`, so iteration pays
+minutes before any hosted test, and the published revision lags the checkout.
+
+The arrangement:
+
+1. `PYTEST_WORKSPACE` carries one Environment, `pytest_environment`, holding
+   Weaver's dependencies only (pyyaml, sqlparse, mssql-python) and **no**
+   weaver wheel. It is created and published once; it is republished only when
+   the dependency set changes, which is rare.
+2. The suite's shared Livy session carries the dev wheel across at start:
+   build (~1 s), stage one file to Lakehouse Files over OneLake DFS (~1.5 s),
+   create the session with both `spark.fabric.environmentDetails` (the
+   dependency Environment) and `files: [abfss wheel]`, then one statement that
+   extracts the wheel to `/tmp/weaver-dev` and prepends it to `sys.path`
+   (~3 s). Livy statements share one interpreter, so the path prepend holds for
+   every test in the session.
+3. Nothing imports Weaver before that statement: the injection replaces
+   `ensure_weaver`'s role for the suite.
+
+Measured on the 35 South tenancy against `PYTEST_WORKSPACE`, 25 August 2026:
+
+| variant | session start | inject cost | correctness |
+| --- | --- | --- | --- |
+| `files` + extract-to-`/tmp` | 125.6 s | 2.9 s | version flip verified; template readable; deps intact |
+| `pyFiles` (zipimport) | 125.7 s | no statement | import works, but `SQL_TEMPLATE_DIR.is_dir()` is false under zipimport |
+| `pip install --force-reinstall --no-deps` | 142.5 s | 7.6 s | works |
+
+The extract variant is chosen. `pyFiles` is rejected on evidence: Weaver reads
+its SQL templates through ``Path(__file__).parent``, which zipimport cannot
+satisfy (`template_exists: false` above). One file crosses OneLake per run;
+extraction lands on driver-local disk.
+
+### Consequences
+
+**The published-version-match test dies.** Whatever asserts that the session's
+Weaver equals the Environment's published wheel goes; the session now
+deliberately runs ahead of the Environment.
+
+**The `hosted` marker loses its meaning.** It existed to say "needs a published
+wheel". After this change nothing in the suite needs one: every Fabric test
+runs against an injected dev wheel by default, and remote and hosted differ
+only in where the body executes, not what must be installed first. The marker
+is removed rather than redefined; `-m "fabric"` selects everything. Updates
+follow in [AGENTS.md](../../AGENTS.md), [test-architecture.md](../test-architecture.md)
+and [fabric-testing.md](../fabric-testing.md).
+
+**Publish stops gating tests but keeps its product job.** `weaver fabric
+environment publish` remains how a workspace's own notebooks get Weaver; the
+suite simply no longer rides on it.
+
+**W6. Harness work.** Deps-only Environment fixture (create if missing, publish
+only when its yml differs); session-start injection replacing
+`ensure_weaver`/publish preconditions in `tests/fabric`; delete the
+version-match assertion; marker cleanup. Land W6 independently of W1-W5 —
+it needs none of them.
+
+### Open questions
+
+**Notebook-driven tests.** A notebook attached to `pytest_environment` executes
+with the Environment's libraries only, so a notebook body importing Weaver sees
+no wheel at all. Any test that drives a notebook expecting Weaver code still
+needs a publish, or the notebook body installs/stages its own copy. None exist
+today; noted so the gap is a decision rather than a surprise.
+
+
 ## Sequence
 
 ```text
 W1 probe (mssql-python fetch) --> W1 land --> W2 --> W3 + W5 fast tests --> W5 fabric acceptance
+
+W6 (session injection for the suite) -- independent of W1-W5
 ```
 
 W2 without W1 can land behind the existing three-package yml entries already
@@ -325,6 +395,39 @@ The `environmentYml` string in the second observation is byte-identical to the
 first, including the comment line the user definition carried; the wheel list
 grew by exactly the staged file. That is the whole claim of this plan,
 observed once against the real service.
+
+### Second probe: session injection costs (35 South, PYTEST_WORKSPACE)
+
+Ran 25 August 2026. The dev wheel (587 KB) staged as one OneLake file and
+carried into Livy sessions two ways, both alongside
+`spark.fabric.environmentDetails` naming the dependency Environment:
+
+```text
+Variant A: files=[wheel], one extract statement
+  session start            125.6 s   (the cost any hosted run pays today)
+  extract + path prepend     2.9 s   one statement
+  import resolves to         /tmp/weaver-dev/weaver/__init__.py
+  metadata version           dev fingerprint, not the published one
+  template_readable          true
+
+Variant B: pyFiles=[wheel] (zipimport, no statement)
+  session start            125.7 s
+  import resolves to       ...container.../weaverstack-*.whl/weaver/__init__.py
+  SQL_TEMPLATE_DIR.is_dir()  false  -- data files unreadable through a zip
+
+Earlier variant, same tenancy: pip install --no-deps --force-reinstall from the
+staged file: session start 142.5 s, install statement 7.6 s, version flip and
+dependency health verified.
+
+Baseline distribution check in the attached session: weaverstack (published),
+sqlparse, pyyaml and mssql-python all resolve from Environment site-packages;
+mssql-python is present only through the Environment.
+```
+
+The incremental cost of publish-free iteration is therefore roughly five
+seconds per suite run: wheel build and upload before the session, one extract
+statement after it. Session start dominates and is paid either way.
+
 
 
 
