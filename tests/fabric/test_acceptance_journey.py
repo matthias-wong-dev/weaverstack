@@ -649,7 +649,8 @@ REPOSITORY_EDITS = (
     # A description only. Nothing physical follows from it.
     (
         "Lakehouse/Landing/LAND__Product.py",
-        "Description: The foreign product table, copied whole.",
+        "Description: The foreign product table, copied whole through the schema "
+        "shortcut.",
         "Description: Products, as the foreign estate delivers them.",
     ),
     # A new column on an unprotected table, so the physical table is replaced.
@@ -861,8 +862,8 @@ BREAKING_EDITS = (
     ),
     (
         "Lakehouse/Landing/LAND__Product.py",
-        '        return Reference(self).table("Product").dataframe()',
-        '        return Reference(self).table("Product").dataframe().selectExpr(\n'
+        "        return Source__Product(self).dataframe()",
+        "        return Source__Product(self).dataframe().selectExpr(\n"
         '            "ProductId", "ProductName", "upper(ProductName) as ProductLabel"\n'
         "        )",
     ),
