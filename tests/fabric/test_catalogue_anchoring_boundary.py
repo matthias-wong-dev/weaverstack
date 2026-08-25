@@ -223,7 +223,7 @@ def test_one_build_installs_the_lakehouse_references_and_the_next_plans_none(
     planned = [
         action.id
         for _sequence, _batch, action in bundle.plan.actions()
-        if "runtime-reference" in action.id
+        if action.kind == "create_shortcut"
     ]
     outcome = env.install(bundle)
     assert outcome.status == "succeeded", outcome.action_error

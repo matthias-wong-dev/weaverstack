@@ -151,7 +151,8 @@ def build(repository, tmp_path, *, catalogue, runtime_references: bool = True):
     bound = {binding.item: binding.to_bound_target() for binding in bindings.entries}
     inventories = {
         item: replace(
-            inventory, runtime_references=PRESENTED if runtime_references else ()
+            inventory,
+            runtime_references=PRESENTED if runtime_references else (),
         )
         if inventory.kind == "lakehouse"
         else inventory
@@ -167,7 +168,6 @@ def build(repository, tmp_path, *, catalogue, runtime_references: bool = True):
         catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
-        runtime_sources=RUNTIME_SOURCES,
     )
 
 
@@ -226,9 +226,11 @@ def test_the_first_build_installs_the_runtime_references_and_the_second_does_not
         )
         second = build(estate, root / "second", catalogue=installed_catalogue(estate))
 
-    assert [action.id for action in actions(first) if "runtime-reference" in action.id]
+    assert [
+        action.id for action in actions(first) if action.id.startswith("shortcuts-")
+    ]
     assert not [
-        action.id for action in actions(second) if "runtime-reference" in action.id
+        action.id for action in actions(second) if action.id.startswith("shortcuts-")
     ]
 
 

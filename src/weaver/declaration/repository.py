@@ -535,6 +535,7 @@ def parse_item_repository(
         ),
         logical_shortcuts=logical_shortcuts,
         shortcuts=shortcuts,
+        planned_shortcuts=shortcuts,
         generated_files=generated_files,
     )
     return resolve_item_dependencies(repository)

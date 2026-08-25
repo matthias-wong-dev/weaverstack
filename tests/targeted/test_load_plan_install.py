@@ -77,8 +77,15 @@ def plan(repository, *, item=None, target=None, **overrides):
         "catalogue_target": catalogue_target(),
     }
     arguments.update(overrides)
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+
+    control = arguments["catalogue_target"]
     return plan_item_build(
-        repository, item=item, target=target, target_by_item={item: target}, **arguments
+        repository,
+        item=item,
+        target=target,
+        target_by_item={item: target, BUILTIN_ITEM: control},
+        **arguments,
     )
 
 
@@ -190,7 +197,7 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
         "build_procedure",
     ]
     assert [action.kind for action in actions_of(planned, "shortcut")] == [
-        "create_runtime_reference"
+        "create_shortcut"
     ]
     assert {action.executor for action in actions} == {"tsql"}
     installed = {action.resource_node_id for action in actions}
@@ -286,7 +293,7 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
     # wanted, but precedes documents in the shortcut phase now.
     assert [action.kind for action in actions] == ["drop_procedure"]
     assert [action.kind for action in actions_of(planned, "shortcut")] == [
-        "create_runtime_reference"
+        "create_shortcut"
     ]
     assert statement == "drop procedure if exists [_].[Load Sales.Retired];\n"
 

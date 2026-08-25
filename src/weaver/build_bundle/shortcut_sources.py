@@ -17,11 +17,9 @@ a Files shortcut is Lakehouse-specific, because a Warehouse has no Files area.
 
 from __future__ import annotations
 
-from ..catalogue.tables import CATALOGUE_SCHEMA, PRESENTED_RUNTIME_TABLES
 from ..declaration.model import LAKEHOUSE, SCHEMA_SHORTCUT, TABLE_SHORTCUT
 from ..errors import BuildError
 from ..locations import Location
-from ..targets import WarehouseTarget
 from .shortcuts import ResolvedShortcutSource
 
 TABLES_AREA = "Tables"
@@ -46,32 +44,6 @@ def physical_shortcuts(shortcuts, *, bindings):
         and not declaration.is_view
         and declaration.owner in bindings.by_item
     )
-
-
-def read_runtime_sources(*, resolver, catalogue) -> dict[str, ResolvedShortcutSource]:
-    """Where each of the catalogue's runtime tables sits in OneLake, by name.
-
-    A Fabric Warehouse publishes each of its tables as a Delta directory under
-    ``Tables/<schema>/<table>``, so a Lakehouse can hold a read-only shortcut to
-    one. That is how a built Lakehouse presents the runtime tables to Spark.
-
-    Resolved here for the reason a physical shortcut's source is: the catalogue
-    Warehouse is not a Lakehouse target of this build, and the installer has no
-    reason to be able to find it. One resolution serves every table, because they
-    are all in the same Warehouse. Each name is spelled exactly, because Weaver
-    created the table and Fabric publishes it under the name it was created with.
-    """
-
-    item = resolver.warehouse(WarehouseTarget(catalogue))
-    return {
-        table.name: ResolvedShortcutSource(
-            workspace_id=item.workspace_id,
-            item_id=item.id,
-            item_name=item.name,
-            path=f"{TABLES_AREA}/{CATALOGUE_SCHEMA}/{table.name}",
-        )
-        for table in PRESENTED_RUNTIME_TABLES
-    }
 
 
 def read_shortcut_sources(

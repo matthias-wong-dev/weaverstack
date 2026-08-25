@@ -239,20 +239,17 @@ CROSS_ITEM_SHORTCUT_FIXTURE = SesFixture(
 #: and a caller resolves them with :meth:`SesFixture.substituted`.
 ACCEPTANCE_FIXTURE = SesFixture(
     _FIXTURES / "acceptance",
-    ("Lakehouse/Landing", "Lakehouse/Curated", "Warehouse/Serving"),
+    (
+        "Lakehouse/Landing",
+        "Lakehouse/Curated",
+        "Warehouse/Serving",
+        "Lakehouse/Published",
+    ),
 )
-
-#: ``Lakehouse/Published`` is declared and deliberately left unbound. It closes
-#: the chain by reading the Serving Warehouse, and Weaver has no shortcut form
-#: that can name an object the same build creates: a logical Lakehouse shortcut
-#: refuses a Warehouse source, and a physical one resolves against the estate as
-#: it already stands. An unbound item is omitted from the build, so the intended
-#: architecture stays visible in the tree. Bind it when the product allows it.
 
 #: What ``substituted`` resolves in the acceptance estate.
 ACCEPTANCE_TOKENS = (
     "EXTERNAL_WORKSPACE",
     "EXTERNAL_LAKEHOUSE",
     "EXTERNAL_WAREHOUSE",
-    "SERVING_WAREHOUSE",
 )

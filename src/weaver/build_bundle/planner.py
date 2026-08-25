@@ -61,7 +61,6 @@ from .physical import (
 )
 from .prune import TargetInventory
 from .runtime_tables import (
-    render_runtime_references,
     render_runtime_state_reconciliation,
     runtime_state_invalidation,
 )
@@ -81,7 +80,6 @@ def generate_item_build_bundle(
     stale_claims: tuple = (),
     catalogue_binding: WarehouseBinding,
     shortcut_sources: Mapping[str, object] | None = None,
-    runtime_sources: object | None = None,
 ) -> BuildBundle:
     """Freeze the one incremental build model into an installable bundle."""
 
@@ -159,6 +157,10 @@ def generate_item_build_bundle(
     catalogue_target = _catalogue_target(catalogue_binding, targets)
     if all(target.id != catalogue_target.id for target in targets):
         targets = targets + (catalogue_target,)
+    from ..catalogue.builtin import BUILTIN_ITEM
+
+    shortcut_target_by_item = dict(target_by_item)
+    shortcut_target_by_item.setdefault(BUILTIN_ITEM, catalogue_target)
 
     stages: list[PlannedStage] = []
     omitted: list[OmittedNode] = []
@@ -206,7 +208,7 @@ def generate_item_build_bundle(
                 item=item,
                 target=target_by_item[item],
                 inventory=inventories[item],
-                target_by_item=target_by_item,
+                target_by_item=shortcut_target_by_item,
                 selected_documents=selected_documents,
                 selected_shortcuts=selected_shortcuts,
                 shortcut_sources=shortcut_sources,
@@ -220,7 +222,6 @@ def generate_item_build_bundle(
                 removed=removed,
                 registered=registered,
                 catalogue_target=catalogue_target,
-                runtime_sources=runtime_sources,
             )
             layer_stages.extend(planned.stages)
             omitted.extend(planned.omitted)
@@ -393,7 +394,6 @@ def plan_item_build(
     selected_loads=(),
     removed=(),
     shortcut_sources=None,
-    runtime_sources=None,
 ) -> PlannedItem:
     """One item's physical plan, from prepared inputs.
 
@@ -462,18 +462,6 @@ def plan_item_build(
         stages.append(schemas)
     if shortcuts.stage is not None:
         stages.append(shortcuts.stage)
-    # Authored SQL may read a runtime table while a Warehouse table build
-    # executes it to discover and materialise its shape.
-    references = render_runtime_references(
-        repository,
-        item=item,
-        target=target,
-        catalogue_target=catalogue_target,
-        runtime_sources=runtime_sources,
-        selected=selected_for_build & selected_shortcuts,
-    )
-    if references is not None:
-        stages.append(references)
     stages.extend(
         item_build_stages(
             repository,

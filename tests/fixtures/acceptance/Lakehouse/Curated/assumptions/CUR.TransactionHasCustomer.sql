@@ -1,7 +1,7 @@
 /*
 Assumption ID: CUR.TransactionHasCustomer
 
-Description: Every transaction names a customer that exists.
+Description: Every transaction names an active or retired customer.
 
 Revision notes:
   - 2026-08-24 Created.
@@ -14,4 +14,7 @@ select
 from CUR.Transaction as t
 left join CUR.Customer as c
     on c.CustomerId = t.CustomerId
-where c.CustomerId is null;
+left join CUR.RetiredCustomer as r
+    on r.CustomerId = t.CustomerId
+where c.CustomerId is null
+  and r.CustomerId is null;

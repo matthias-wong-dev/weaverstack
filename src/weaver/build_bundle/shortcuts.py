@@ -44,6 +44,7 @@ from ..declaration.model import (
 from .changes import (
     FOLDER as FOLDER_KIND,
 )
+from .changes import RUNTIME_REFERENCE as RUNTIME_REFERENCE_KIND
 from .changes import (
     SCHEMA as SCHEMA_KIND,
 )
@@ -140,7 +141,7 @@ def plan_item_shortcuts(
     declarations = sorted(
         (
             declaration
-            for declaration in repository.shortcuts
+            for declaration in repository.planned_shortcuts
             if declaration.owner == item
         ),
         key=lambda declaration: str(declaration.destination),
@@ -159,7 +160,7 @@ def plan_item_shortcuts(
     }
 
     for declaration in declarations:
-        if not declaration.is_schema:
+        if not declaration.is_schema and declaration.destination_identity is None:
             schemas.append(declaration.schema)
         if declaration.destination not in chosen:
             continue
@@ -240,45 +241,6 @@ def declaration_key(declaration) -> str:
     return f"{declaration.owner}/{declaration.name}"
 
 
-@dataclass(frozen=True)
-class Reference:
-    """What a shortcut *is*, without being authored.
-
-    A declaration is an author's intent and carries a name written in the
-    ``Schema__Object`` convention. Weaver's own infrastructure references have no
-    author and live in the reserved ``_`` schema, which that convention cannot
-    spell — so they carry the destination directly and satisfy the same renderers.
-
-    :class:`~weaver.declaration.model.ShortcutDeclaration` already answers all of
-    this, so both go through :func:`view_statement` and :func:`shortcut_payload`
-    and there is one implementation of what each becomes.
-    """
-
-    owner: WeaverItemId
-    name: str
-    destination: WeaverDocumentId
-    shortcut_type: str
-    target: str
-    target_item_name: str
-    target_object: object
-    is_logical: bool = False
-
-    @property
-    def is_schema(self) -> bool:
-        return False
-
-    @property
-    def is_files(self) -> bool:
-        return self.destination.is_files
-
-    @property
-    def target_item(self):
-        from ..declaration.model import WAREHOUSE
-        from ..declaration.model import WeaverItemId as Item
-
-        return Item(WAREHOUSE, self.target_item_name)
-
-
 def _unsupported(
     declaration,
     *,
@@ -308,10 +270,10 @@ def _unsupported(
             "a shortcut must stay in one namespace: a Files destination needs a "
             "Files source, and a table destination a table source"
         )
-    if not declaration.is_view and source_target.kind == WAREHOUSE_TARGET:
+    if declaration.is_files and source_target.kind == WAREHOUSE_TARGET:
         return (
-            "a Lakehouse shortcut is a OneLake shortcut, and there is no "
-            f"shortcut form for the Warehouse source {source}"
+            "a Files shortcut needs a Lakehouse source, and the bound source "
+            f"{source} is a Warehouse"
         )
     return None
 
@@ -326,6 +288,8 @@ def _change_kind(declaration, target) -> str:
 
     if declaration.is_view:
         return VIEW_KIND
+    if declaration.destination_identity is not None:
+        return RUNTIME_REFERENCE_KIND
     if declaration.is_schema:
         return SCHEMA_KIND
     return FOLDER_KIND if declaration.is_files else TABLE_KIND

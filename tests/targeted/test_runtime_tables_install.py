@@ -127,9 +127,7 @@ def _inventories(repository, *, holding_runtime_tables: bool = True):
     )
 
 
-def _bundle(
-    repository, tmp_path, *, catalogue=None, inventories=None, runtime_sources=None
-):
+def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
     return generate_item_build_bundle(
         repository,
         bindings=estate_bindings(),
@@ -140,7 +138,6 @@ def _bundle(
         else _inventories(repository),
         catalogue=catalogue if catalogue is not None else EMPTY,
         catalogue_binding=CATALOGUE,
-        runtime_sources=runtime_sources,
     )
 
 
@@ -574,29 +571,20 @@ def test_prune_spares_the_catalogue_table_and_not_the_local_reference():
 
 
 @weaver_test()
-def test_each_source_is_the_catalogue_tables_own_delta_directory():
-    """A Warehouse publishes each table as a Delta directory a shortcut can read.
+def test_runtime_relations_are_ordinary_logical_shortcut_declarations(estate):
+    """Planning sees the same declaration representation for authored and runtime relations."""
 
-    One resolution serves every table, because they are all in one Warehouse.
-    """
+    from weaver.catalogue.builtin import BUILTIN_ITEM
 
-    from weaver.build_bundle.shortcut_sources import read_runtime_sources
-
-    class _Item:
-        workspace_id = "ws-1"
-        id = "item-1"
-        name = "Weaver"
-
-    class _Resolver:
-        def warehouse(self, target):
-            return _Item()
-
-    sources = read_runtime_sources(resolver=_Resolver(), catalogue="Weaver")
-
-    assert {name: source.path for name, source in sources.items()} == {
-        table.name: f"Tables/_/{table.name}" for table in PRESENTED_RUNTIME_TABLES
+    runtime = [
+        declaration
+        for declaration in estate.planned_shortcuts
+        if declaration.logical_source.item == BUILTIN_ITEM
+    ]
+    assert {declaration.destination.object_id.object for declaration in runtime} == {
+        table.name for table in PRESENTED_RUNTIME_TABLES
     }
-    assert all(source.item_id == "item-1" for source in sources.values())
+    assert all(declaration.is_logical for declaration in runtime)
 
 
 @weaver_test()
@@ -608,18 +596,6 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
     build that installed the table and deferred the reference would not converge
     in one pass, and the build after it would not be a no-op.
     """
-
-    from weaver.build_bundle.shortcuts import ResolvedShortcutSource
-
-    source = {
-        table.name: ResolvedShortcutSource(
-            workspace_id="ws-1",
-            item_id="item-1",
-            item_name="Weaver",
-            path=f"Tables/_/{table.name}",
-        )
-        for table in PRESENTED_RUNTIME_TABLES
-    }
 
     from weaver.build_bundle import effective_item_bindings
 
@@ -646,7 +622,6 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
         target_inventories=inventories,
         catalogue=EMPTY,
         catalogue_binding=CATALOGUE,
-        runtime_sources=source,
     )
 
     assert _references(creating, "Lakehouse")
@@ -659,9 +634,9 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
 
 
 def _references(bundle, item_type: str) -> list[str]:
-    """The runtime-reference actions one bundle installs, per kind of item."""
+    """The ordinary shortcut actions that include runtime relations, per item kind."""
 
-    wanted = f"runtime-reference-{item_type}"
+    wanted = f"shortcuts-{item_type}"
     return [
         action.id
         for _sequence, _batch, action in bundle.plan.actions()

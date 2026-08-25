@@ -95,6 +95,15 @@ class PhysicalTargetRef:
         return self.kind == LAKEHOUSE_TARGET
 
 
+@dataclass(frozen=True)
+class OneLakeReadiness:
+    """A Lakehouse shortcut path that must see a Warehouse publication."""
+
+    target: PhysicalTargetRef
+    schema: str
+    object: str
+
+
 def lakehouse_names(targets) -> tuple[str, ...]:
     """The Lakehouse names among some :class:`PhysicalTargetRef`, in order given.
 
@@ -528,6 +537,9 @@ class LoadNode:
     #: ``None`` for a refresh, which is a capability rather than an artefact.
     primitive_id: WeaverDocumentId | None = None
     primitive_object: PhysicalObjectRef | None = None
+    #: Lakehouse shortcut paths that must be able to read this Warehouse load's
+    #: published Delta files before their downstream nodes can begin.
+    await_onelake: tuple[OneLakeReadiness, ...] = ()
 
     @property
     def sort_key(self) -> tuple[str, str, str, str]:
@@ -817,6 +829,16 @@ class _Planner:
             )
             if crossed is None:
                 self.edges.add((upstream_id, node.node_id))
+            elif isinstance(crossed, OneLakeReadiness):
+                readiness = tuple(
+                    dict.fromkeys(
+                        (*self.nodes[upstream_id].await_onelake, crossed)
+                    )
+                )
+                self.nodes[upstream_id] = replace(
+                    self.nodes[upstream_id], await_onelake=readiness
+                )
+                self.edges.add((upstream_id, node.node_id))
             else:
                 # A shortcut read as SQL: the producer's endpoint has to catch up
                 # before the consumer can see it, so the barrier replaces the
@@ -883,7 +905,9 @@ class _Planner:
         identity: WeaverDocumentId,
         *,
         allowed_targets: frozenset[PhysicalTargetRef],
-    ) -> tuple[tuple[WeaverDocumentId, PhysicalTargetRef | None], ...]:
+    ) -> tuple[
+        tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None], ...
+    ]:
         """The in-scope loadable ancestors, and where each hop crossed.
 
         Passing through non-loadable producers is what makes a view a conduit:
@@ -892,9 +916,13 @@ class _Planner:
         requested-target boundary even so.
         """
 
-        found: dict[WeaverDocumentId, PhysicalTargetRef | None] = {}
-        seen: set[WeaverDocumentId] = set()
-        frontier: list[tuple[WeaverDocumentId, PhysicalTargetRef | None]] = [
+        found: dict[
+            WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None
+        ] = {}
+        seen: set[tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None]] = set()
+        frontier: list[
+            tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None]
+        ] = [
             (identity, None)
         ]
         while frontier:
@@ -917,20 +945,24 @@ class _Planner:
 
     def _direct_producers(
         self, consumer: WeaverDocumentId
-    ) -> tuple[tuple[WeaverDocumentId, PhysicalTargetRef | None], ...]:
+    ) -> tuple[
+        tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None], ...
+    ]:
         """What one object reads directly, and the barrier each read crosses."""
 
-        producers: list[tuple[WeaverDocumentId, PhysicalTargetRef | None]] = []
+        producers: list[
+            tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None]
+        ] = []
         consumer_target = self.estate.objects[consumer].target
         for edge in self._dependencies.get(consumer, ()):
             resolved = self._resolve_reference(consumer, edge)
             if resolved is None:
                 continue
-            producer, through_shortcut = resolved
+            producer, shortcut = resolved
             producer_target = self.estate.objects[producer].target
             crossing = None
             if (
-                through_shortcut
+                shortcut is not None
                 and producer_target.is_lakehouse
                 and not consumer_target.is_lakehouse
             ):
@@ -938,12 +970,23 @@ class _Planner:
                 # analytics endpoint. A Lakehouse-to-Lakehouse shortcut is a OneLake
                 # shortcut — Delta on both sides, and nothing to synchronise.
                 crossing = producer_target
+            elif (
+                shortcut is not None
+                and not producer_target.is_lakehouse
+                and consumer_target.is_lakehouse
+            ):
+                destination = shortcut.destination.object_id
+                crossing = OneLakeReadiness(
+                    target=consumer_target,
+                    schema=destination.schema,
+                    object=destination.object,
+                )
             producers.append((producer, crossing))
         return tuple(producers)
 
     def _resolve_reference(
         self, consumer: WeaverDocumentId, edge: InstalledDependency
-    ) -> tuple[WeaverDocumentId, bool] | None:
+    ) -> tuple[WeaverDocumentId, InstalledShortcut | None] | None:
         """What one written reference names, in the consumer's own namespace.
 
         Shortcuts are consulted before native objects, and the order matters: an
@@ -966,19 +1009,27 @@ class _Planner:
                 beneath_files = replace(producer, is_files=True)
                 if beneath_files in self.estate.objects:
                     producer = beneath_files
+            shortcut = self._shortcut_by_destination.get(producer)
+            if shortcut is not None:
+                if shortcut.source not in self.estate.objects:
+                    raise LoadError(
+                        f"{consumer} reads shortcut {reference}, which points at "
+                        f"{shortcut.source} — not an installed object"
+                    )
+                return shortcut.source, shortcut
             if producer not in self.estate.objects:
                 # A schema shortcut is keyed by the namespace it presents, so a
                 # two-part spelling of it finds nothing. It orders nothing
                 # either: what appears inside belongs to the item it points at.
                 namespace = WeaverSchemaId(producer.item, producer.object_id.schema)
                 if namespace in self.estate.objects:
-                    return namespace, False
+                    return namespace, None
             if producer not in self.estate.objects:
                 raise LoadError(
                     f"{consumer} imports {reference!r}, which resolves to "
                     f"{producer} — not an installed object"
                 )
-            return producer, False
+            return producer, None
         parts = reference.split(".")
         if len(parts) > 2:
             # A fully qualified physical read. It names something outside the
@@ -1005,12 +1056,12 @@ class _Planner:
                     f"{consumer} reads shortcut {reference}, which points at "
                     f"{shortcut.source} — not an installed object"
                 )
-            return shortcut.source, True
+            return shortcut.source, shortcut
         if candidate in self.estate.objects:
-            return candidate, False
+            return candidate, None
         folder = replace(candidate, is_files=True)
         if folder in self.estate.objects:
-            return folder, False
+            return folder, None
         raise LoadError(
             f"{consumer} declares dependency {reference!r}, which resolves to "
             "neither an installed object nor a shortcut in its own item"

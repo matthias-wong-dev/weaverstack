@@ -419,6 +419,9 @@ class ShortcutDeclaration:
     #: Where this was written, carried from the reader so nothing downstream
     #: reconstructs an authored path.
     relative_path: str = ""
+    #: Package-owned declarations may already have an identity. Authored names
+    #: leave this empty and are decoded from ``Schema__Object`` below.
+    destination_identity: "WeaverDocumentId | WeaverSchemaId | None" = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -503,6 +506,13 @@ class ShortcutDeclaration:
         :class:`WeaverDocumentId` in the owning item.
         """
 
+        if self.destination_identity is not None:
+            if self.destination_identity.item != self.owner:
+                raise IdentityError(
+                    f"shortcut destination {self.destination_identity} belongs to "
+                    f"{self.destination_identity.item}, not {self.owner}"
+                )
+            return self.destination_identity
         if self.is_schema:
             return WeaverSchemaId(self.owner, self.name)
         parts = self.name.split(NAME_SEPARATOR)
@@ -746,6 +756,10 @@ class WeaverRepository:
     #: including the physical declarations that name a Fabric item and so have
     #: no logical source.
     shortcuts: tuple[ShortcutDeclaration, ...] = ()
+    #: Authored and package-owned shortcut declarations presented to physical
+    #: planning. Repository preparation fills this after injecting runtime
+    #: relations, while :attr:`shortcuts` remains the authored surface.
+    planned_shortcuts: tuple[ShortcutDeclaration, ...] = ()
     dependency_edges: tuple[ItemDependency, ...] = ()
     dependency_graph: object | None = None
     #: The item-level graph over :attr:`items`, and its topological layers.

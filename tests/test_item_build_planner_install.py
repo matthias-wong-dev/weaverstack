@@ -226,7 +226,7 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_target(tmp_path):
     shortcut = next(
         action
         for _s, _b, action in bundle.plan.actions()
-        if action.kind == "create_shortcut"
+        if action.kind == "create_shortcut" and action.executor == "tsql_batch"
     )
     # One action for the item's shortcuts, and each statement its own batch:
     # T-SQL will not accept a CREATE VIEW that is not first in its batch.
@@ -235,10 +235,11 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_target(tmp_path):
     statements = json.loads(
         store.read(bundle.location.join(*shortcut.payload.split("/"))).decode()
     )
-    assert statements == [
+    assert (
         "create or alter view [Sales].[PortableCustomer] as select * from "
         "[Curated_Dev].[Sales].[Customer];"
-    ]
+    ) in statements
+    assert any("[_].[Bookmark]" in statement for statement in statements)
     assert not bundle.plan.omitted_nodes or all(
         node.reason != "shortcut_unsupported" for node in bundle.plan.omitted_nodes
     )
@@ -269,14 +270,18 @@ def test_a_bound_shortcut_freezes_both_addresses_by_target_id(tmp_path):
     shortcut = next(
         action
         for _s, _b, action in bundle.plan.actions()
-        if action.kind == "create_shortcut"
+        if action.id == "shortcuts-Lakehouse--Curated"
     )
     assert shortcut.executor == "shortcut"
     frozen = json.loads(
         store.read(bundle.location.join(*shortcut.payload.split("/"))).decode()
     )
-    assert len(frozen["shortcuts"]) == 1
-    assert frozen["shortcuts"][0] == {
+    authored = next(
+        entry
+        for entry in frozen["shortcuts"]
+        if entry["shortcut"] == "Lakehouse/Curated/Sales.Landed"
+    )
+    assert authored == {
         "shortcut": "Lakehouse/Curated/Sales.Landed",
         "type": "table",
         "path": "Tables/Sales",
@@ -717,7 +722,7 @@ def test_a_warehouse_item_has_no_endpoint_of_its_own_to_refresh(tmp_path):
 
 @weaver_test()
 def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
-    """A Folder is a directory in Files. The SQL endpoint describes tables."""
+    """A first loadable Folder also installs runtime table shortcuts."""
 
     root = tmp_path / "Estate"
     _write(root, "Lakehouse/Raw/schemas/Sales.yml", _schema("Sales"))
@@ -730,7 +735,7 @@ def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
         store=FilesystemStore(),
     )
 
-    assert _refreshed(bundle) == set()
+    assert _refreshed(bundle) == {"Lakehouse-Raw--lakehouse-Raw_Dev"}
     assert any(
         action.kind == "build_folder" for _s, _b, action in bundle.plan.actions()
     )

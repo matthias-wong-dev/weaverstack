@@ -7,6 +7,7 @@ name without asking the workspace again.
 
 from __future__ import annotations
 
+from ..build_bundle.targets import WAREHOUSE_TARGET
 from ..errors import CommandError
 from ..locations import LakehouseSparkLocation, Location
 from ..resolution import TABLES_AREA
@@ -165,7 +166,8 @@ class FabricResolver:
         *,
         path: str,
         name: str,
-        source: ItemRef,
+        source: ItemRef | Item,
+        source_kind: str | None = None,
         source_path: str,
     ) -> dict:
         """Point ``item``'s ``path/name`` at ``source``'s ``source_path``.
@@ -181,7 +183,12 @@ class FabricResolver:
         resolved_source = (
             source
             if getattr(source, "id", None) and getattr(source, "workspace_id", None)
-            else self.resolve(source, item_type=LAKEHOUSE)
+            else self.resolve(
+                source,
+                item_type=(
+                    WAREHOUSE if source_kind == WAREHOUSE_TARGET else LAKEHOUSE
+                ),
+            )
         )
         return create_shortcut(
             self.resolve(item, item_type=LAKEHOUSE),

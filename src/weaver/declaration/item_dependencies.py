@@ -254,18 +254,27 @@ def _with_runtime_references(repository: WeaverRepository) -> WeaverRepository:
 
     ``_.Bookmark`` and the other presented runtime tables are ordinary logical
     references from a consuming item's namespace to the built-in catalogue item.
-    Holding them as :class:`RepositoryShortcut` pairs gives dependency resolution,
-    both graphs, pruning, physical rendering and installed-catalogue projection
-    one object set to work from. They remain absent from authored shortcut
-    declarations, but publish through the same Shortcut and Registry contract so
-    a later load can reconstruct the pair without the source repository.
+    Each relation has both halves every shortcut has: the declaration that is
+    planned and installed, and the resolved pair that dependency resolution and
+    catalogue projection consume. Injecting both here keeps runtime references on
+    the ordinary shortcut lifecycle from this point onward.
     """
 
     from ..catalogue.builtin import BUILTIN_ITEM
     from ..catalogue.tables import CATALOGUE_SCHEMA, PRESENTED_RUNTIME_TABLES
     from ..etl import item_presents_runtime_tables
+    from .model import (
+        LOGICAL_TARGET,
+        TABLE_SHORTCUT,
+        VIEW_SHORTCUT,
+        WAREHOUSE,
+        ShortcutDeclaration,
+    )
 
     pairs = {pair.destination: pair for pair in repository.logical_shortcuts}
+    declarations = {
+        declaration.destination: declaration for declaration in repository.shortcuts
+    }
     for item in repository.items:
         owner = item.identity
         if owner == BUILTIN_ITEM or not item_presents_runtime_tables(
@@ -285,10 +294,26 @@ def _with_runtime_references(repository: WeaverRepository) -> WeaverRepository:
             pairs[destination] = RepositoryShortcut(
                 destination=destination, source=source
             )
+            declarations[destination] = ShortcutDeclaration(
+                owner=owner,
+                name=object_id.qualified,
+                shortcut_type=(
+                    VIEW_SHORTCUT if owner.item_type == WAREHOUSE else TABLE_SHORTCUT
+                ),
+                target_type=LOGICAL_TARGET,
+                target=str(source),
+                destination_identity=destination,
+            )
     return replace(
         repository,
         logical_shortcuts=tuple(
             sorted(pairs.values(), key=lambda pair: str(pair.destination))
+        ),
+        planned_shortcuts=tuple(
+            sorted(
+                declarations.values(),
+                key=lambda declaration: str(declaration.destination),
+            )
         ),
     )
 

@@ -293,6 +293,48 @@ def test_the_cli_area_is_reserved_from_inventory_and_nothing_else_is(tmp_path):
 
 
 @weaver_test()
+def test_inventory_does_not_claim_objects_presented_by_a_schema_shortcut(tmp_path):
+    """A schema shortcut's children belong to its source and are never prunable."""
+
+    from weaver.fabric.shortcuts import Shortcut
+
+    workspace = given_workspace(catalogue="Warehouse/Control")
+    inner = given_resolver(
+        workspace=workspace,
+        lakehouses=("Weaver", "Raw_Dev"),
+        root=tmp_path,
+    )
+
+    class Resolver:
+        def __getattr__(self, name):
+            return getattr(inner, name)
+
+        def onelake_shortcuts(self, _item):
+            return (
+                Shortcut(path="Tables", name="Reference"),
+                Shortcut(path="Tables/Source", name="Customer"),
+            )
+
+    store = FilesystemStore()
+    tables = inner.tables_root(ItemRef("Raw_Dev"))
+    for relative in (
+        "Reference/Customer",
+        "Reference/Product",
+        "Source/Customer",
+    ):
+        store.make_directory(tables.join(*relative.split("/")))
+
+    inventory = read_lakehouse_inventory(
+        _bindings().entries[0].to_bound_target(),
+        resolver=Resolver(),
+        store=store,
+    )
+
+    assert set(inventory.schemas) == {"Reference", "Source"}
+    assert inventory.tables == ("Source.Customer",)
+
+
+@weaver_test()
 def test_bundle_archive_round_trip_preserves_identity_and_payloads(tmp_path):
     root = Location(str(_estate(tmp_path)))
     store = FilesystemStore()

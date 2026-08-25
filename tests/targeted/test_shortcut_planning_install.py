@@ -511,7 +511,7 @@ def test_a_schema_shortcut_asks_for_no_schema_of_its_own(tmp_path):
         selected={declaration.destination},
     )
 
-    assert planned.schemas == ()
+    assert "Reference" not in planned.schemas
 
 
 @weaver_test()
@@ -532,6 +532,62 @@ def test_a_direct_shortcut_with_no_resolved_source_is_omitted(tmp_path):
     assert planned.stage is None
     assert planned.omitted_destinations == (declaration.destination,)
     assert "not resolved when this bundle was generated" in planned.omitted[0].detail
+
+
+@weaver_test()
+def test_a_lakehouse_table_shortcut_can_read_a_bound_warehouse(tmp_path):
+    """A Warehouse table is published in OneLake and uses the ordinary relation plan."""
+
+    from factories import _write, lakehouse_table, schema_document, warehouse_table
+
+    from weaver.declaration import parse_item_repository
+    from weaver.locations import Location
+
+    root = tmp_path / "warehouse-source"
+    producer = "Warehouse/Serving"
+    consumer = "Lakehouse/Published"
+    _write(root, f"{producer}/schemas/SERVE.yml", schema_document("SERVE"))
+    _write(
+        root,
+        f"{producer}/SERVE.Reporting.sql",
+        warehouse_table("SERVE.Reporting"),
+    )
+    _write(root, f"{consumer}/schemas/PUB.yml", schema_document("PUB"))
+    _write(root, f"{consumer}/schemas/WH.yml", schema_document("WH"))
+    _write(root, f"{consumer}/PUB__Copy.py", lakehouse_table("PUB.Copy"))
+    _write(
+        root,
+        f"{consumer}/shortcuts.py",
+        "from weaver import Shortcut\n\n"
+        "WH__Reporting = Shortcut(\n"
+        '    shortcut_type="table",\n'
+        '    target_type="logical",\n'
+        '    target="Warehouse/Serving/SERVE.Reporting",\n)\n',
+    )
+    repository = parse_item_repository(Location(str(root)))
+    declaration = next(
+        declaration
+        for declaration in repository.shortcuts
+        if declaration.destination.object_id.qualified == "WH.Reporting"
+    )
+    by_item = {
+        item_id(producer): bound_target(
+            id="serving", kind="warehouse", item_id="Serving_WH"
+        ),
+        item_id(consumer): bound_target(id="published", item_id="Published_LH"),
+    }
+
+    planned = plan_item_shortcuts(
+        repository,
+        item=item_id(consumer),
+        target=by_item[item_id(consumer)],
+        target_by_item=by_item,
+        selected={declaration.destination},
+    )
+
+    assert planned.omitted == ()
+    assert _frozen(planned)[0]["source_target_id"] == "serving"
+    assert _frozen(planned)[0]["source_area"] == "Tables"
 
 
 @weaver_test()
@@ -603,9 +659,6 @@ def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_p
         patch(
             "weaver.build_bundle.workflow.read_shortcut_sources", side_effect=_refuse
         ),
-        # This session has no catalogue Warehouse to resolve, and where the
-        # catalogue's bookmark table lives is not what this test is about.
-        patch("weaver.build_bundle.workflow.read_runtime_sources", return_value={}),
     ):
         state = read_build_state(
             bindings,

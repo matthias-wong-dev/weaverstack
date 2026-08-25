@@ -728,3 +728,65 @@ def test_a_program_importing_shortcuts_still_loads(tmp_path):
     _estate, consumer, dag = _resolved_producers(tmp_path)
 
     assert any(node.logical_id == consumer for node in dag.nodes)
+
+
+@weaver_test()
+def test_a_python_shortcut_import_orders_a_warehouse_before_its_lakehouse_consumer(
+    tmp_path,
+):
+    """The installed import must retain the logical shortcut's producer hop."""
+
+    from factories import _write, logical_shortcuts
+
+    from weaver.declaration import parse_item_repository
+    from weaver.locations import Location
+
+    producer = "Warehouse/Serving"
+    consumer = "Lakehouse/Published"
+    shortcut_path, shortcut_text = logical_shortcuts(
+        consumer, **{"WH.Reporting": f"{producer}/SERVE.Reporting"}
+    )
+    for relative, text in {
+        f"{producer}/schemas/SERVE.yml": schema_document("SERVE"),
+        f"{producer}/SERVE.Reporting.sql": warehouse_table("SERVE.Reporting"),
+        f"{consumer}/schemas/PUB.yml": schema_document("PUB"),
+        f"{consumer}/schemas/WH.yml": schema_document("WH"),
+        shortcut_path: shortcut_text,
+        f"{consumer}/PUB__Reporting.py": lakehouse_table("PUB.Reporting").replace(
+            "from weaver import Table",
+            "from shortcuts import WH__Reporting\n\nfrom weaver import Table",
+        ),
+    }.items():
+        _write(tmp_path, relative, text)
+
+    repository = parse_item_repository(Location(str(tmp_path)))
+    catalogue = installed_catalogue(
+        repository,
+        item_bindings(
+            (producer, "Serving_WH"),
+            (consumer, "Published_LH"),
+        ),
+    )
+    dag = load_dag(
+        InstalledEstate.from_catalogue(catalogue),
+        targets=(
+            PhysicalTargetRef("warehouse", "Serving_WH"),
+            PhysicalTargetRef("lakehouse", "Published_LH"),
+        ),
+    )
+
+    assert (
+        "load:Warehouse/Serving_WH/SERVE.Reporting",
+        "load:Lakehouse/Published_LH/PUB.Reporting",
+    ) in dag.edges
+    from weaver.load_plan import OneLakeReadiness
+
+    assert dag.by_id[
+        "load:Warehouse/Serving_WH/SERVE.Reporting"
+    ].await_onelake == (
+        OneLakeReadiness(
+            target=PhysicalTargetRef("lakehouse", "Published_LH"),
+            schema="WH",
+            object="Reporting",
+        ),
+    )

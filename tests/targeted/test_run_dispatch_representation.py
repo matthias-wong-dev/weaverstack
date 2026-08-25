@@ -111,6 +111,127 @@ def test_a_warehouse_load_asks_for_its_result_by_name():
 
 
 @weaver_test()
+def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
+    tmp_path, monkeypatch
+):
+    """TDS completion precedes readable shortcut files, so both are one load unit."""
+
+    from weaver.declaration.metadata import ObjectId
+    from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+    from weaver.declaration.tsql_load import (
+        PROCEDURE_RESULT_PARAMETERS,
+        RESULT_PARAMETERS,
+    )
+    from weaver.load_plan import OneLakeReadiness, PhysicalObjectRef
+    from weaver.locations import Location
+    from weaver.run.graph import RunNode
+    from weaver.store import FilesystemStore
+
+    root = Location(str(tmp_path / "warehouse"))
+    log = root.join("Tables", "Sales", "Customer", "_delta_log")
+    store = FilesystemStore()
+    store.make_directory(log)
+    store.write(log / "00000000000000000000.json", b"{}")
+    events = []
+    physical_row = {
+        physical_name: ROW[logical_name]
+        for (logical_name, _logical_type), (physical_name, _physical_type) in zip(
+            RESULT_PARAMETERS, PROCEDURE_RESULT_PARAMETERS, strict=True
+        )
+    }
+
+    class Sql:
+        def call_procedure(self, _name, *, inputs, outputs):
+            events.append("procedure")
+            store.write(log / "00000000000000000001.json", b"{}")
+            return physical_row
+
+    class Resolver:
+        def resolve(self, item, *, item_type):
+            return SimpleNamespace(
+                id="warehouse-id", name=item.name, workspace_id="workspace-id"
+            )
+
+        def external_root(self, _item):
+            return root
+
+        def lakehouse_spark_location(self, item):
+            return SimpleNamespace(
+                table_path=lambda schema, object: (
+                    f"abfss://workspace/{item.name}/Tables/{schema}/{object}"
+                )
+            )
+
+    class Session:
+        attempts = 0
+
+        def resolver(self, _workspace=None):
+            events.append("resolve")
+            return Resolver()
+
+        def transport_store(self, _workspace=None):
+            return store
+
+        def sql_executor(self, _target, workspace=None):
+            return Sql()
+
+        def execute_spark_sql_batch(self, statements, *, workspace=None):
+            events.append(("spark", tuple(statements)))
+            self.attempts += 1
+            if self.attempts == 1:
+                raise PermissionError("the published Parquet file is not ready")
+            return [{"rows": 1}]
+
+    identity = WeaverDocumentId(
+        WeaverItemId("Warehouse", "Reporting"), ObjectId("Sales", "Customer")
+    )
+    node = RunNode(
+        node_id="load:Warehouse/Reporting_WH/Sales.Customer",
+        physical_target=REPORTING,
+        primitive_kind=WAREHOUSE_PROCEDURE,
+        logical_id=identity,
+        physical_object=PhysicalObjectRef(
+            target_id="Reporting_WH",
+            target_kind="warehouse",
+            schema="Sales",
+            object="Customer",
+            object_type="table",
+        ),
+        await_onelake=(
+            OneLakeReadiness(
+                target=PhysicalTargetRef("lakehouse", "Published_LH"),
+                schema="WH",
+                object="Reporting",
+            ),
+        ),
+    )
+
+    monkeypatch.setattr(
+        "weaver.run.dispatch.ONELAKE_PUBLICATION_POLL_INTERVAL", 0.0
+    )
+    result = dispatch_primitive(node, session=Session())
+
+    assert result.rows_inserted == 1
+    assert events[:3] == ["resolve", "procedure", "resolve"]
+    assert [event for event in events if isinstance(event, tuple)] == [
+        (
+            "spark",
+            (
+                "select count(*) as rows\nfrom delta."
+                "`abfss://workspace/Published_LH/Tables/WH/Reporting`",
+            ),
+        ),
+        (
+            "spark",
+            (
+                "select count(*) as rows\nfrom delta."
+                "`abfss://workspace/Published_LH/Tables/WH/Reporting`",
+            ),
+        ),
+    ]
+
+
+@weaver_test()
 def test_a_run_calls_the_objects_own_procedure_and_not_the_entry_point():
     """``_.Load`` records; the object's procedure does not.
 

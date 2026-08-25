@@ -41,7 +41,17 @@ FOLDER = "folder"
 FOLDER_SCHEMA = "folder_schema"
 FILE = "file"
 STORED_PROCEDURE = "stored_procedure"
-OBJECT_KINDS = (SCHEMA, TABLE, VIEW, FOLDER, FOLDER_SCHEMA, FILE, STORED_PROCEDURE)
+RUNTIME_REFERENCE = "runtime_reference"
+OBJECT_KINDS = (
+    SCHEMA,
+    TABLE,
+    VIEW,
+    FOLDER,
+    FOLDER_SCHEMA,
+    FILE,
+    STORED_PROCEDURE,
+    RUNTIME_REFERENCE,
+)
 
 #: Which inventory collection each kind lives in.
 _COLLECTION = {
@@ -52,6 +62,7 @@ _COLLECTION = {
     FOLDER_SCHEMA: "folder_schemas",
     FILE: "files",
     STORED_PROCEDURE: "procedures",
+    RUNTIME_REFERENCE: "runtime_references",
 }
 
 

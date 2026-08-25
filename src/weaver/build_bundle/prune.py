@@ -24,6 +24,7 @@ from ..declaration.model import (
 from ..declaration.source import SourceDocument
 from ..errors import BuildError
 from ..etl import LOAD_ROOT
+from ..resolution import TABLES_AREA
 from ..store import Store
 from ..targets import ItemRef
 from ..workspaces import CLI_AREA
@@ -262,6 +263,17 @@ def read_lakehouse_inventory(
     lakehouse = ItemRef(target.item_id)
     tables_root = resolver.tables_root(lakehouse)
     files_root = resolver.files_root(lakehouse)
+    enumerate_shortcuts = getattr(resolver, "onelake_shortcuts", None)
+    shortcuts = tuple(enumerate_shortcuts(lakehouse)) if enumerate_shortcuts else ()
+    # A schema shortcut is a namespace owned by its source item. OneLake storage
+    # exposes the source's children beneath the local shortcut root, but they are
+    # not local objects and must never enter prune's object inventory: dropping
+    # one through the shortcut would delete the producer's data.
+    shortcut_schemas = {
+        shortcut.name.casefold()
+        for shortcut in shortcuts
+        if shortcut.path.strip("/").casefold() == TABLES_AREA.casefold()
+    }
     control_item = target.logical_item_name == "_weaver"
     reserved_schemas = set(_RESERVED_SCHEMAS)
     if control_item:
@@ -289,6 +301,7 @@ def read_lakehouse_inventory(
     tables = tuple(
         f"{schema}.{entry.name}"
         for schema in schemas
+        if schema.casefold() not in shortcut_schemas
         for entry in _child_dirs(store, tables_root / schema)
     )
     # The same narrowing the Delta side uses, and for the same reason. The
@@ -314,7 +327,10 @@ def read_lakehouse_inventory(
     views: tuple[str, ...] = ()
     if catalogue is not None:
         views = tuple(
-            f"{schema}.{view}" for schema in schemas for view in catalogue.views(schema)
+            f"{schema}.{view}"
+            for schema in schemas
+            if schema.casefold() not in shortcut_schemas
+            for view in catalogue.views(schema)
         )
     # Storage, not the Spark catalogue: a reference is a shortcut, and a shortcut
     # is a directory under `Tables/_` whether or not anything has registered it

@@ -16,12 +16,11 @@ point somewhere is the transport's business. A shortcut holds no data, so an
 existing one is replaced rather than treated as a collision: a build has to run
 twice.
 
-**The action is not finished until a table shortcut can be read.** Fabric creates
-a shortcut synchronously and discovers it asynchronously, so for a few seconds
-the Lakehouse reports the name as neither a view nor a table. An action reporting
-success there would push the failure into the next item's DDL. A schema shortcut
-is not waited on: what it presents is the source item's, and its contents can
-change without a build.
+**The action is not finished until a table shortcut can be read both ways.**
+Fabric creates a shortcut synchronously and discovers its named relation and
+physical Delta path asynchronously. Those surfaces may settle at different
+times, and consumers use both. A schema shortcut is not waited on: what it
+presents is the source item's, and its contents can change without a build.
 """
 
 from __future__ import annotations
@@ -35,6 +34,7 @@ from ...errors import InstallError
 from ...locations import Location
 from ...targets import DeltaTarget, FolderTarget
 from ..models import InstallAction
+from ..targets import WAREHOUSE_TARGET
 from .base import InstallationContext, ResolvedTarget
 
 FILES_AREA = "Files"
@@ -85,6 +85,7 @@ class ShortcutExecutor:
         if "source_target_id" in frozen:
             source = context.resolved(frozen["source_target_id"])
             source_item = source.lakehouse
+            source_kind = source.bound.kind
             source_name = _physical_source_name(frozen, context, source)
             source_path = (
                 f"{frozen['source_area']}/{frozen['source_schema']}/{source_name}"
@@ -98,11 +99,13 @@ class ShortcutExecutor:
                 workspace_id=frozen["source_workspace_id"],
             )
             source_path = frozen["source_path"]
+            source_kind = None
         made = shortcut(
             context.target.lakehouse,
             path=frozen["path"],
             name=frozen["name"],
             source=source_item,
+            source_kind=source_kind,
             source_path=source_path,
         )
         return {
@@ -114,13 +117,19 @@ class ShortcutExecutor:
     def _await_addressable(
         self, context: InstallationContext, frozen: list
     ) -> float | None:
-        """Wait until every table shortcut just created can actually be read.
+        """Wait until every table shortcut's relation and Delta path can be read.
 
-        A read rather than a catalogue lookup, because the catalogue is the part
-        that is briefly wrong: Fabric reports the shortcut's metadata while still
-        refusing it as a relation. All of them are waited on together, so several
-        shortcuts cost one discovery window.
+        Reads rather than catalogue or storage lookups, because Fabric can report
+        the shortcut's metadata before either consumer surface is ready. All of
+        them are waited on together, so several shortcuts cost one discovery
+        window.
         """
+
+        tables = [
+            each for each in frozen if each.get("type", "table") == "table"
+        ]
+        if not tables:
+            return None
 
         if context.spark_sql is None:
             # Loud rather than silent: every context the Installer builds has
@@ -138,29 +147,43 @@ class ShortcutExecutor:
                 f"target {context.target.bound.id!r} resolved to no Spark "
                 "destination, so a shortcut in it cannot be named"
             )
-        pending = {
-            each["shortcut"]: destination.qualify(
-                each["path"].split("/", 1)[1], each["name"]
+        location = context.target.location
+        if location is None:
+            raise InstallError(
+                f"target {context.target.bound.id!r} resolved to no Spark "
+                "location, so a shortcut's Delta path cannot be checked"
             )
-            for each in frozen
-            if each.get("type", "table") == "table"
+        pending = {
+            each["shortcut"]: {
+                "relation": str(
+                    destination.qualify(each["path"].split("/", 1)[1], each["name"])
+                ),
+                "delta path": location.table_path(
+                    each["path"].split("/", 1)[1], each["name"]
+                ),
+            }
+            for each in tables
         }
-        if not pending:
-            return None
 
         started = time.monotonic()
         deadline = started + ADDRESSABLE_TIMEOUT
         failure: Exception | None = None
         while pending:
-            for shortcut, qualified in list(pending.items()):
-                try:
-                    # The probe crosses; the waiting does not.
-                    context.spark_sql(
-                        f"SELECT * FROM {qualified} LIMIT 0", exact_case=True
+            for shortcut, surfaces in list(pending.items()):
+                for surface, address in list(surfaces.items()):
+                    statement = (
+                        f"SELECT * FROM {address} LIMIT 0"
+                        if surface == "relation"
+                        else f"SELECT * FROM delta.`{address}` LIMIT 0"
                     )
+                    try:
+                        # The probes cross; the waiting does not.
+                        context.spark_sql(statement, exact_case=True)
+                        del surfaces[surface]
+                    except Exception as exc:  # not discovered yet — or never will be
+                        failure = exc
+                if not surfaces:
                     del pending[shortcut]
-                except Exception as exc:  # not discovered yet — or never will be
-                    failure = exc
             if not pending:
                 break
             if time.monotonic() >= deadline:
@@ -214,6 +237,11 @@ def _physical_source_name(frozen: dict, context: InstallationContext, source) ->
     ``Customer`` table directory as ``customer``. Prefer the authored spelling
     when it exists; otherwise resolve one case-insensitive storage match.
     """
+
+    if source.bound.kind == WAREHOUSE_TARGET:
+        # A Warehouse publishes its table at the declared OneLake spelling, but
+        # it has no Lakehouse Spark location for the store resolver to inspect.
+        return frozen["source_object"]
 
     producer = _location(source, frozen, context, source=True)
     if context.store.exists(producer):

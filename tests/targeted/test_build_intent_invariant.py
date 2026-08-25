@@ -46,7 +46,6 @@ PHYSICAL_KINDS = frozenset(
     {
         "create_schema",
         "create_shortcut",
-        "create_runtime_reference",
         "build_folder",
         "build_table",
         "build_view",
@@ -271,4 +270,5 @@ _COLLECTION_FOR = {
     "folder_schema": "folder_schemas",
     "file": "files",
     "stored_procedure": "procedures",
+    "runtime_reference": "runtime_references",
 }

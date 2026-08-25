@@ -1,11 +1,8 @@
 """The acceptance estate, driven through Weaver's public operations.
 
-External → Landing → Curated → Serving, built and loaded from the desktop against
+External → Landing → Curated → Serving → Published, built and loaded from the desktop against
 a real workspace. One estate, moved through an ordered series of transitions, with
 the evidence for each kept on the step it belongs to.
-
-The repository also declares ``Lakehouse/Published``, which closes the chain by
-reading the Warehouse. It is left unbound, and ``support.build_envs`` says why.
 
 The estate reads the foreign workspace through every shortcut shape Weaver
 supports, and it reads them by *consuming* them: a broken shortcut fails because
@@ -14,11 +11,8 @@ a load could not materialise what it points at.
 Scenarios run in file order and do not cascade. A failed transition is recorded
 and every later scenario skips naming the step that broke.
 
-**Scenarios A and B pass. C onward is blocked** on the shortcut discovery wait,
-which probes the relation a downstream statement names and not the path an
-authored load reads, so a load in the same run can reach a shortcut Fabric has
-not finished discovering. The scenarios are written and correct; they fail
-intermittently until that is settled.
+Table shortcut installation waits for both the named relation and the Delta path
+that authored Python loads read before the next item starts.
 """
 
 from __future__ import annotations
@@ -38,7 +32,7 @@ from weaver.sessions.program import RemoteProgram
 #: A build stages its repository and reads target inventories over OneLake. A
 #: load and a test do neither: they submit programs and record centrally.
 BUILDING = {"livy", "onelake", "rest", "tds"}
-RUNNING = {"livy", "rest", "tds"}
+RUNNING = {"livy", "onelake", "rest", "tds"}
 
 
 @pytest.fixture(scope="module")
@@ -59,6 +53,7 @@ def acceptance(
         "Lakehouse/Landing": f"Lakehouse/{fabric_target_lakehouse.name}",
         "Lakehouse/Curated": f"Lakehouse/{fabric_shortcut_lakehouses['producer'].name}",
         "Warehouse/Serving": f"Warehouse/{disposable_warehouse.item.name}",
+        "Lakehouse/Published": f"Lakehouse/{fabric_shortcut_lakehouses['consumer'].name}",
     }
     estate = ACCEPTANCE_FIXTURE.substituted(
         tmp_path_factory.mktemp("acceptance"),
@@ -66,7 +61,6 @@ def acceptance(
             "EXTERNAL_WORKSPACE": fabric_external_workspace_item.name,
             "EXTERNAL_LAKEHOUSE": fabric_external_lakehouse.name,
             "EXTERNAL_WAREHOUSE": fabric_external_warehouse.name,
-            "SERVING_WAREHOUSE": disposable_warehouse.item.name,
         },
     )
 
@@ -121,6 +115,7 @@ def _estate_evidence(journey) -> dict:
 
     landing = _item(journey, "Lakehouse/Landing")
     curated = _item(journey, "Lakehouse/Curated")
+    published = _item(journey, "Lakehouse/Published")
     return {
         "land_customer": (
             f"select CustomerId, CustomerName from {landing}.`LAND`.`Customer` "
@@ -140,6 +135,10 @@ def _estate_evidence(journey) -> dict:
         "cur_summary": (
             "select CustomerId, TransactionCount, TotalAmount "
             f"from {curated}.`CUR`.`CustomerSummary` order by CustomerId"
+        ),
+        "pub_reporting": (
+            "select CustomerId, CustomerName, TransactionCount, TotalAmount "
+            f"from {published}.`PUB`.`Reporting` order by CustomerId"
         ),
     }
 
@@ -168,6 +167,51 @@ def _catalogue_rows(journey, statement: str) -> list:
         WarehouseTarget(ItemRef(catalogue)), workspace=journey.workspace
     )
     return [dict(row) for row in executor.query(statement)]
+
+
+def _assert_load_status(journey, report) -> None:
+    """Current operational state agrees with this successful physical load."""
+
+    from weaver.catalogue.claims import bookmark_row
+    from weaver.declaration.model import WeaverDocumentId, parse_installed_identity
+
+    expected = set()
+    for node in report.nodes:
+        if not node.logical_id:
+            continue
+        identity = parse_installed_identity(str(node.logical_id))
+        if not isinstance(identity, WeaverDocumentId):
+            continue
+        row = bookmark_row(identity)
+        expected.add(
+            (
+                row["item_type"],
+                row["item_name"],
+                row["schema_name"],
+                row["object_name"],
+            )
+        )
+
+    rows = _catalogue_rows(
+        journey,
+        "select [Item type] as item_type, [Item name] as item_name, "
+        "[Schema name] as schema_name, [Object name] as object_name, "
+        "[Result] as result, [Workflow ID] as workflow_id "
+        "from [_].[LoadStatus] where [Item name] in "
+        "('Landing', 'Curated', 'Serving', 'Published')",
+    )
+    actual = {
+        (
+            row["item_type"],
+            row["item_name"],
+            row["schema_name"],
+            row["object_name"],
+        )
+        for row in rows
+    }
+    assert actual == expected
+    assert {row["result"] for row in rows} == {"Succeeded"}
+    assert {row["workflow_id"] for row in rows} == {report.workflow_id}
 
 
 def _ids(observation, name: str, column: str) -> list:
@@ -215,6 +259,7 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
 
     landing = _item(acceptance, "Lakehouse/Landing")
     curated = _item(acceptance, "Lakehouse/Curated")
+    published = _item(acceptance, "Lakehouse/Published")
     step.observation = _observe(
         acceptance,
         {
@@ -223,6 +268,8 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
             "landing_reference": f"show tables in {landing}.`Reference`",
             "cur": f"show tables in {curated}.`CUR`",
             "curated_shortcuts": f"show tables in {curated}.`SRC`",
+            "published": f"show tables in {published}.`PUB`",
+            "published_shortcuts": f"show tables in {published}.`WH`",
         },
     )
     seen = step.observation
@@ -254,6 +301,8 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
         "region",
         "transaction",
     }
+    assert seen.values("published", "tableName") == {"reporting"}
+    assert seen.values("published_shortcuts", "tableName") == {"reporting"}
 
     # Folder shortcuts land in Files, so SHOW TABLES cannot see them. The
     # catalogue records every shortcut the build made, whichever area it is in.
@@ -263,13 +312,14 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
             acceptance,
             "select [Item name] as item, [Shortcut ID] as id, "
             "[Shortcut type] as kind from [_].[Shortcut] "
-            "where [Item name] in ('Landing', 'Curated')",
+            "where [Item name] in ('Landing', 'Curated', 'Published')",
         )
     }
     assert ("Landing", "Reference", "Schema") in shortcuts
     assert ("Landing", "Source.Events", "Folder") in shortcuts
     assert ("Curated", "SRC.SourceEvents", "Folder") in shortcuts
     assert ("Curated", "SRC.GeneratedEvents", "Folder") in shortcuts
+    assert ("Published", "WH.Reporting", "Table") in shortcuts
 
     serving = {
         row["name"]
@@ -329,6 +379,30 @@ def test_an_unchanged_build_is_a_true_fixed_point(acceptance):
     }
     assert churned == set(), sorted(churned)
 
+    # The build's item-closing endpoint refresh is itself a state transition.
+    # Observe both shortcut surfaces after that final transition, not only while
+    # the shortcut action that created them was still running.
+    from weaver.targets import ItemRef
+
+    landing_name = acceptance.physical["Lakehouse/Landing"].split("/", 1)[1]
+    resolver = acceptance.session.resolver(acceptance.workspace)
+    landing_location = resolver.lakehouse_spark_location(ItemRef(landing_name))
+    landing = _item(acceptance, "Lakehouse/Landing")
+    step.observation = _observe(
+        acceptance,
+        {
+            "named_product": (
+                f"select ProductId from {landing}.`Source`.`Product`"
+            ),
+            "delta_product": (
+                "select ProductId from delta.`"
+                f"{landing_location.table_path('Source', 'Product')}`"
+            ),
+        },
+    )
+    assert _ids(step.observation, "named_product", "ProductId") == [10, 20]
+    assert _ids(step.observation, "delta_product", "ProductId") == [10, 20]
+
 
 # --- Scenario C: the first end-to-end load ----------------------------------
 
@@ -351,6 +425,7 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
     acceptance.require("load")
     loaded = acceptance["load"].result
     assert loaded.succeeded, loaded.to_mapping()
+    _assert_load_status(acceptance, loaded)
 
     step = acceptance.steps["load"]
     step.observation = _observe(acceptance, _estate_evidence(acceptance))
@@ -374,7 +449,7 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
     summary = {row["CustomerId"]: row for row in seen["cur_summary"]}
     assert sorted(summary) == [1, 2, 3]
     assert summary[1]["TransactionCount"] == 1
-    assert summary[1]["TotalAmount"] == Decimal("100.00")
+    assert Decimal(str(summary[1]["TotalAmount"])) == Decimal("100.00")
 
     # Serving materialised from Curated.
     reporting = _warehouse_rows(
@@ -383,6 +458,7 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
         "order by CustomerId",
     )
     assert [row["CustomerId"] for row in reporting] == [1, 2, 3]
+    assert _ids(seen, "pub_reporting", "CustomerId") == [1, 2, 3]
 
     tested = acceptance.step(
         "test",
@@ -419,6 +495,7 @@ def test_an_unchanged_load_moves_only_the_appending_branch(acceptance):
     assert acceptance["reload"].result.succeeded, acceptance[
         "reload"
     ].result.to_mapping()
+    _assert_load_status(acceptance, acceptance["reload"].result)
 
     step = acceptance.steps["reload"]
     step.observation = _observe(acceptance, _estate_evidence(acceptance))
@@ -499,6 +576,7 @@ def test_foreign_source_movement_propagates_through_the_whole_chain(acceptance):
         acceptance, "select CustomerId from [SERVE].[Customer] order by CustomerId"
     )
     assert [row["CustomerId"] for row in serving] == [1, 2, 4]
+    assert _ids(after, "pub_reporting", "CustomerId") == [1, 2, 4]
 
     tested = acceptance.step(
         "test-mutated",
@@ -745,6 +823,7 @@ def test_the_rebuilt_estate_still_loads_and_validates(acceptance):
     assert acceptance["load-changed"].result.succeeded, acceptance[
         "load-changed"
     ].result.to_mapping()
+    _assert_load_status(acceptance, acceptance["load-changed"].result)
 
     landing = _item(acceptance, "Lakehouse/Landing")
     step = acceptance.steps["load-changed"]
@@ -878,6 +957,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     assert acceptance["load-repaired"].result.succeeded, acceptance[
         "load-repaired"
     ].result.to_mapping()
+    _assert_load_status(acceptance, acceptance["load-repaired"].result)
 
     tested = acceptance.step(
         "test-repaired",

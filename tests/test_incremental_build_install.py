@@ -538,6 +538,9 @@ def _shortcut_inventories(repository, *, shortcut_installed=True):
         ]
         views = list(objects) if target.kind == "warehouse" else []
         tables = [] if target.kind == "warehouse" else list(objects)
+        runtime = tuple(table.name for table in PRESENTED_RUNTIME_TABLES)
+        if target.kind == "warehouse":
+            views.extend(f"_.{name}" for name in runtime)
         if shortcut_installed and item == WeaverItemId.parse("Warehouse/Reporting"):
             views.append("Sales.PortableCustomer")
         inventories[item] = TargetInventory(
@@ -547,6 +550,7 @@ def _shortcut_inventories(repository, *, shortcut_installed=True):
             schemas=("Sales",),
             tables=tuple(tables),
             views=tuple(views),
+            runtime_references=runtime if target.kind == "lakehouse" else (),
         )
     return inventories
 

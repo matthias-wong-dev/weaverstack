@@ -187,7 +187,7 @@ def find_or_create_environment(
     response = client.request(
         "POST",
         f"workspaces/{workspace.id}/environments",
-        payload={"displayName": name, "description": "Weaver runtime"},
+        payload={"displayName": name},
         expected=(200, 201, 202),
     )
     if response.status_code == 202:

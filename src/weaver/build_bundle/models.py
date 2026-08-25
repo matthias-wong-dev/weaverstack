@@ -53,12 +53,6 @@ PRUNE_VIEW = "prune_view"
 PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
 
-#: Present the catalogue's runtime tables in a built target under their own
-#: names, so a generated procedure can read a bookmark and record what it did.
-#: Weaver runtime infrastructure rather than declared shortcuts — see
-#: :mod:`weaver.build_bundle.runtime_tables`.
-CREATE_RUNTIME_REFERENCE = "create_runtime_reference"
-
 #: Refresh the SQL analytics endpoint for one Lakehouse after its Delta tables
 #: have changed. The action is target-bound and payloadless: the planner decides
 #: which Lakehouses need it, while the executor performs or explicitly skips it
