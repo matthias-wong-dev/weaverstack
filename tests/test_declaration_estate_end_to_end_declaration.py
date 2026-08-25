@@ -4,9 +4,9 @@ Filename classification -> metadata extraction -> structural checks -> SQL
 analysis -> discovered references -> signature -> graph, asserted together
 rather than in pieces, so a regression anywhere in the chain surfaces here.
 
-The estate is deliberately awkward in the ways real ones are. ``Sales.Customer``
-exists twice — as a Delta table in ``Lakehouse/Sales`` and as a Warehouse table
-in ``Warehouse/Reporting`` — which the item model resolves by ownership rather
+The estate is awkward in the ways real ones are. ``Sales.Customer``
+exists twice, as a Delta table in ``Lakehouse/Sales`` and as a Warehouse table
+in ``Warehouse/Reporting``, which the item model resolves by ownership rather
 than by disambiguating a shared name. Both SQL documents stage through a
 temporary object, both mention a retired object in a comment, and the Warehouse
 reads the Lakehouse by its three-part physical name, which stays a reference and
@@ -40,10 +40,10 @@ def authored(repository):
     """Every authored document, keyed by its full logical identity.
 
     Generated declarations are excluded, and the word is meant literally: a
-    parsed repository also carries what Weaver composes into it — the builtin
+    parsed repository also carries what Weaver composes into it, the builtin
     catalogue item, and the runtime folder an item with load code is deployed
     into. Those are real documents and are built like any other; they are simply
-    not what a test about *authoring* is describing.
+    not what a test about authoring is describing.
     """
 
     return {
@@ -347,7 +347,7 @@ def test_a_physical_three_part_read_is_a_reference_not_an_edge(repository):
 def test_a_two_part_name_resolves_inside_the_writers_own_item(repository):
     """``Sales.Customer`` in the Warehouse binds to the Warehouse's own table.
 
-    The Lakehouse has a ``Sales.Customer`` too. A short name never reaches it —
+    The Lakehouse has a ``Sales.Customer`` too. A short name never reaches it,
     that is what makes the three-part physical read above necessary.
     """
 

@@ -84,10 +84,10 @@ def _remove_shortcuts(
     """Take away this Lakehouse's shortcuts beneath ``prefix``, before storage is swept.
 
     Scoped by path prefix, so a wipe of one area leaves the other's pointers
-    alone — a Files wipe must not take away a shortcut under ``Tables/``.
+    alone, so a Files wipe does not take away a shortcut under ``Tables/``.
 
     Reported as ``shortcut:<path>/<name>`` so a dry run distinguishes a pointer
-    being taken away from a directory being deleted — they are not the same act,
+    being taken away from a directory being deleted. They are not the same act,
     and only one of them destroys data.
 
     """
@@ -164,8 +164,8 @@ def wipe_delta_target(
     """Remove every Delta table in a Lakehouse, keeping the Tables area.
 
     A table is a directory. There is no catalogue to enumerate from and none to
-    leave behind, because Weaver never registered one — with one exception, and it
-    is the reason shortcuts go first: a table shortcut is a directory whose bytes
+    leave behind, because Weaver never registered one. There is one exception, and
+    it is why shortcuts go first: a table shortcut is a directory whose bytes
     belong to another item.
     """
 
@@ -192,7 +192,7 @@ def wipe_sql_target(
 ) -> None:
     """Clear a Warehouse through the common SQL capability.
 
-    The default is deliberately Fabric-native.  A desktop caller crossing into
+    The default is Fabric-native.  A desktop caller crossing into
     Fabric constructs and injects ``desktop_sql_executor`` explicitly.
     """
 
@@ -277,9 +277,9 @@ def wipe_lakehouse(
     dry_run: bool = False,
     session=None,
 ) -> tuple[WipeReport, ...]:
-    """Clear both areas of a Lakehouse — its Files and its Tables.
+    """Clear both areas of a Lakehouse, its Files and its Tables.
 
-    The item is resolved *as a Lakehouse*, so there is no untyped "what is this
+    The item is resolved as a Lakehouse, so there is no untyped "what is this
     name?" discovery: a Warehouse of the same name resolves elsewhere and is not
     reached here. A destructive operation must not depend on name inference.
 
@@ -292,7 +292,8 @@ def wipe_lakehouse(
     resolver = _resolver_for(workspace, session)
     if not _lakehouse_exists(resolver, lakehouse):
         raise CommandError(
-            f"no Lakehouse named {lakehouse.name!r} on this workspace — nothing to wipe"
+            f"no Lakehouse named {lakehouse.name!r} on this workspace, so there is "
+            "nothing to wipe"
         )
     return (
         wipe_folder_target(
@@ -339,7 +340,7 @@ def wipe_selection(
 
     ``Sales_LH`` is a **Lakehouse** and clears both its areas.
     ``Sales_LH/Files`` is that Lakehouse's Files area and clears only that. A bare
-    name is always a Lakehouse — a Warehouse must be wiped through a
+    name is always a Lakehouse. A Warehouse is wiped through a
     :class:`~weaver.targets.WarehouseTarget`, never inferred from a name.
     """
 

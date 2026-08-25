@@ -3,7 +3,7 @@
 The core tier runs pure Python: it renders, plans and reconciles against a
 :class:`~weaver.sessions.testing.TestSession`, which records what a host would
 have been asked to do. Nothing here starts a JVM, holds a Spark session or
-reaches a workspace — the tests that need a real one carry the ``fabric``
+reaches a workspace, the tests that need a real one carry the ``fabric``
 marker and build their own in ``tests/fabric``.
 """
 
@@ -18,6 +18,7 @@ from pathlib import Path as _Path
 import pytest
 from support.weaver_test import (
     begin_test,
+    claim_completed,
     end_test,
     event_snapshot,
     observed_resources,
@@ -26,8 +27,8 @@ from support.weaver_test import (
     setup_events,
 )
 
-# The narrow fixture constructors are shared by every layer — the core suite
-# and the Fabric one build their inputs the same way — so they are importable
+# The narrow fixture constructors are shared by every layer, the core suite
+# and the Fabric one build their inputs the same way, so they are importable
 # from anywhere in the suite rather than copied per directory.
 _sys.path.insert(0, str(_Path(__file__).parent / "targeted"))
 
@@ -57,7 +58,6 @@ def pytest_collection_modifyitems(items):
             "remote",
             "hosted",
             "full_integration",
-            "provision",
             *RESOURCES,
         }
         actual = {mark.name for mark in item.iter_markers() if mark.name in managed}
@@ -69,7 +69,6 @@ def pytest_collection_modifyitems(items):
                 "remote": {"remote"},
                 "hosted": {"hosted"},
                 "integration": {"full_integration"},
-                "provision": {"provision"},
             }.get(declaration.scope, set())
         )
         if actual != expected:
@@ -102,7 +101,7 @@ def pytest_runtest_call(item):
     declaration = getattr(item.obj, "__weaver_test_declaration__", None)
     before = event_snapshot()
     item._weaver_setup_telemetry_events = setup_events(before)
-    yield
+    outcome = yield
     events = [
         event
         for session in registered_sessions()
@@ -110,6 +109,11 @@ def pytest_runtest_call(item):
     ]
     item._weaver_telemetry_events = tuple(events)
     if declaration is None:
+        return
+    # Only a completed claim has a resource set worth comparing. A skip crossed
+    # nothing and a failure stopped part way, and reporting the mismatch would
+    # replace the error the developer needs to read.
+    if not claim_completed(outcome):
         return
     observed = observed_resources(before)
     item._weaver_resource_match = observed == declaration.resources
@@ -277,10 +281,10 @@ def no_credentials_outside_fabric(request, monkeypatch):
     """Nothing but a Fabric test may ask for a real credential.
 
     ``DefaultAzureCredential`` is a network call that, on a build agent with no
-    identity, hangs and then fails — and the test it fails is whichever one
+    identity, hangs and then fails, and the test it fails is whichever one
     happened to construct a Fabric-shaped Session, which says nothing about the
     cause. It is not enough to mock it in the tests that reach it today: a
-    ``Resource`` binds its acquisition when the scope is *constructed*, so a
+    ``Resource`` binds its acquisition when the scope is constructed, so a
     patch applied to a scope afterwards leaves the original in place and the
     call happens anyway. That is exactly how this escaped once.
 
@@ -294,8 +298,8 @@ def no_credentials_outside_fabric(request, monkeypatch):
     def refuse():
         raise AssertionError(
             "a test outside `-m fabric` asked for an Azure credential. Replace "
-            "`weaver.fabric.auth.credential` before the Session is constructed "
-            "— a Resource binds its acquisition at construction, so patching "
+            "`weaver.fabric.auth.credential` before the Session is constructed. "
+            "A Resource binds its acquisition at construction, so patching "
             "the scope afterwards is too late."
         )
 
@@ -434,7 +438,7 @@ def desktop_credential(monkeypatch):
     """A credential a desktop command can acquire without a tenant.
 
     The sanctioned way past :func:`no_credentials_outside_fabric`: the CLI does
-    prefer a real credential, and a test about what it *parses* should not need
+    prefer a real credential, and a test about what it parses should not need
     one. Replaced before any Session is constructed, because a Resource binds
     its acquisition then.
     """

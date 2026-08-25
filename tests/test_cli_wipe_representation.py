@@ -104,7 +104,7 @@ def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
 def test_an_authorised_wipe_does_not_pay_for_a_preview_nobody_reads(monkeypatch):
     """``--yes`` means no question, so the listing that asks it is pure cost.
 
-    A dry run is a full read of the estate — every target, every path — and on
+    A dry run is a full read of the estate, every target, every path, and on
     the Weaver Example it was four seconds of a twelve-second wipe, spent
     rendering a list that was never going to be answered.
     """

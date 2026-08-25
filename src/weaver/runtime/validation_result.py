@@ -14,7 +14,7 @@ class TestResult:
     """One Test's outcome: how much disagreed, and whether it ran at all."""
 
     #: Not a pytest test class. Weaver's Test is a data validation, and pytest's
-    #: collector recognises only the name — so it would warn about every module
+    #: collector recognises only the name, so it would warn about every module
     #: that imports this one into a test. The same opt-out
     #: :class:`weaver.objects.Test` carries.
     __test__ = False

@@ -1,7 +1,7 @@
 """Sessions built around resources a test already holds.
 
 A Session closes only what it opened, so handing it a store or a resolver is the
-ordinary way for a caller that already has them to reach the build path — a
+ordinary way for a caller that already has them to reach the build path, a
 notebook does exactly this.
 
 That is why the suite needs no test-only installer: there is one Installer, it
@@ -10,7 +10,7 @@ takes a Session, and a test gives that Session whatever it already has.
 Outside ``tests/fabric`` that Session is a
 :class:`~weaver.sessions.testing.TestSession`, which records every statement it
 is asked to run and answers from what the test configured. What a statement
-*does* is proven against a real workspace; what Weaver *renders* is proven by
+does is proven against a real workspace; what Weaver renders is proven by
 reading it back here.
 """
 
@@ -40,7 +40,7 @@ def given_session(
 ) -> TestSession:
     """A Session around resources the caller owns and will close itself.
 
-    Without a resolver, one is built over an inventory this test declares —
+    Without a resolver, one is built over an inventory this test declares,
     never the real one, which would reach a tenant. ``lakehouses`` and
     ``warehouses`` name what the workspace holds; a name outside them resolves
     to nothing, exactly as it would in a workspace that does not hold it.

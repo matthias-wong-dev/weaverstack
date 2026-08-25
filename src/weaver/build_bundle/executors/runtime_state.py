@@ -1,8 +1,8 @@
 """Invalidate the catalogue's current-state rows one build has ended.
 
-The payload is structured intent — which table, and which keyed rows — rather
-than a statement, so the lifecycle decision survives as something a reader can
-inspect. This renders one scoped DELETE per table and runs it.
+The payload is structured intent naming the table and the keyed rows, rather than
+a statement, so the lifecycle decision survives as something that can be
+inspected. This renders one scoped DELETE per table and runs it.
 
 See :mod:`weaver.catalogue.runtime_state` for what the intent holds and
 :mod:`weaver.build_bundle.bookmarks` for why it runs ahead of physical work.
@@ -32,7 +32,7 @@ class RuntimeStateExecutor:
         if context.sql is None:
             raise InstallError(
                 f"runtime_state action {action.id!r} needs a SQL executor but none "
-                "was provided — the catalogue is a Warehouse"
+                "was provided, the catalogue is a Warehouse"
             )
         invalidation = read_invalidation(payload)
         statements = render_invalidation(invalidation)

@@ -15,6 +15,7 @@ from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarg
 from weaver.build_bundle.models import CREATE_SHORTCUT, InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
+from weaver.locations import LakehouseSparkLocation
 from weaver.spark import FabricSparkTarget
 from weaver.store import Entry, FilesystemStore
 from weaver.targets import ItemRef
@@ -62,11 +63,16 @@ def _action() -> InstallAction:
 def _local_context(tmp_path, *, resolver=None, store=None):
 
     # With a Spark destination, as a real Lakehouse target resolves to. Without
-    # one a shortcut in it cannot even be *named*, which used to go unnoticed
+    # one a shortcut in it cannot even be named, which used to go unnoticed
     # because the discovery wait was skipped whenever there was no Spark session.
     destination = replace(
         _target(DESTINATION_TARGET_ID, "Curated_Dev"),
         destination=FabricSparkTarget(workspace="Demo", lakehouse="Curated_Dev"),
+        location=LakehouseSparkLocation(
+            item="Curated_Dev",
+            tables_root="abfss://workspace/item/Tables",
+            files_root="abfss://workspace/item/Files",
+        ),
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
     local_resolver = given_resolver(
@@ -87,7 +93,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
     return InstallationContext(
         # A host that can ask Spark and finds the shortcut readable at once. The
         # Installer supplies this on every host, so a context without it is one
-        # nobody would build in production — and the executor says so rather
+        # nobody would build in production, and the executor says so rather
         # than skipping the wait.
         spark_sql=lambda statement, exact_case=False: [],
         spark_sql_batch=lambda statements, exact_case=False: [],
@@ -123,6 +129,7 @@ class _ShortcutResolver:
 
     def __init__(self, events=None):
         self.calls = []
+        self.source_kinds = []
         self.events = events if events is not None else []
         self.inner = None
 
@@ -131,8 +138,11 @@ class _ShortcutResolver:
             raise AttributeError(name)
         return getattr(self.inner, name)
 
-    def create_onelake_shortcut(self, item, *, path, name, source, source_path):
+    def create_onelake_shortcut(
+        self, item, *, path, name, source, source_kind=None, source_path
+    ):
         self.calls.append((item.name, path, name, source.name, source_path))
+        self.source_kinds.append(source_kind)
         self.events.append("create")
         return {"path": f"{path}/{name}"}
 
@@ -171,6 +181,63 @@ def test_a_shortcut_uses_the_source_tables_physical_case(tmp_path):
     assert resolver.calls[0][-1] == "Tables/Sales/customer"
 
 
+@weaver_test()
+def test_a_warehouse_source_uses_its_onelake_table_spelling(tmp_path):
+    """A Warehouse source has no Lakehouse path to resolve through the store."""
+
+    resolver = _ShortcutResolver()
+    context = _local_context(tmp_path, resolver=resolver)
+    warehouse = ResolvedTarget(
+        bound=BoundTarget(
+            id=SOURCE_TARGET_ID,
+            kind="warehouse",
+            item_id="Serving_WH",
+            item_name="Serving_WH",
+        ),
+        lakehouse=ItemRef("Serving_WH"),
+    )
+    context = replace(context, targets={**context.targets, SOURCE_TARGET_ID: warehouse})
+
+    ShortcutExecutor().execute(
+        _action(),
+        _payload(source="Warehouse/Serving/Sales.Customer"),
+        context,
+    )
+
+    assert resolver.calls[0][-2:] == ("Serving_WH", "Tables/Sales/Customer")
+    assert resolver.source_kinds == ["warehouse"]
+
+
+@weaver_test()
+def test_the_fabric_transport_resolves_a_bound_warehouse_by_its_declared_kind(
+    monkeypatch,
+):
+    """A Lakehouse and Warehouse may share a name, so the source slot is typed."""
+
+    import weaver.fabric.shortcuts as shortcuts
+
+    resolver = given_resolver(lakehouses=("Curated_LH",), warehouses=("Serving_WH",))
+    captured = {}
+
+    def create(item, *, path, name, source, source_path, client):
+        captured.update(destination=item, source=source)
+        return {"path": f"{path}/{name}"}
+
+    monkeypatch.setattr(shortcuts, "create_shortcut", create)
+
+    resolver.create_onelake_shortcut(
+        ItemRef("Curated_LH"),
+        path="Tables/Sales",
+        name="Customer",
+        source=ItemRef("Serving_WH"),
+        source_kind="warehouse",
+        source_path="Tables/Sales/Customer",
+    )
+
+    assert captured["destination"].type == "Lakehouse"
+    assert captured["source"].type == "Warehouse"
+
+
 class _Conf:
     def __init__(self):
         self.values = {"spark.sql.caseSensitive": "false"}
@@ -189,7 +256,7 @@ class _LateSpark:
     asynchronously, and in between the Lakehouse reports the name as neither a view
     nor a table.
 
-    Doubled as the *capability* the executor asks through rather than as a Spark
+    Doubled as the capability the executor asks through rather than as a Spark
     session, because that is now the seam: the shortcut executor stays on whichever
     host is installing and only the question crosses. A double shaped like a
     session would be testing an arrangement the product no longer has.
@@ -223,6 +290,11 @@ def _addressable_context(tmp_path, spark, resolver):
         ),
         lakehouse=ItemRef("Curated_Dev"),
         destination=FabricSparkTarget(workspace="Demo", lakehouse="Curated_Dev"),
+        location=LakehouseSparkLocation(
+            item="Curated_Dev",
+            tables_root="abfss://workspace/item/Tables",
+            files_root="abfss://workspace/item/Files",
+        ),
     )
     source = _target(SOURCE_TARGET_ID, "Raw_Dev")
     local_resolver = given_resolver(
@@ -259,9 +331,48 @@ def test_a_shortcut_is_not_finished_until_it_can_be_read(tmp_path, monkeypatch):
     details = ShortcutExecutor().execute(_action(), _payload(), context)
 
     reads = [s for s in spark.statements if s.startswith("SELECT")]
-    assert len(reads) == 3
+    assert len(reads) == 4
     assert "`Demo`.`Curated_Dev`.`Sales`.`Landed`" in reads[0]
+    assert "delta.`abfss://workspace/item/Tables/Sales/Landed`" in reads[1]
     assert "addressable_after_seconds" in details
+
+
+class _LateDeltaPath(_LateSpark):
+    """The named relation is ready before the Delta path Python loaders read."""
+
+    def __call__(self, statement, *, exact_case: bool = False):
+        self.statements.append(statement)
+        self.exact_case.append(exact_case)
+        self.events.append("read")
+        if "FROM delta." in statement and self.remaining > 0:
+            self.remaining -= 1
+            raise RuntimeError("PATH_NOT_FOUND")
+        return []
+
+
+@weaver_test()
+def test_a_table_shortcut_waits_for_its_delta_path_after_the_relation_is_ready(
+    tmp_path, monkeypatch
+):
+    """Python Delta loads must not start during Fabric's split discovery window."""
+
+    monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
+    spark = _LateDeltaPath(failures=2)
+    context = _addressable_context(tmp_path, spark, _ShortcutResolver())
+
+    ShortcutExecutor().execute(_action(), _payload(), context)
+
+    relation = [
+        statement for statement in spark.statements if "FROM delta." not in statement
+    ]
+    physical = [
+        statement for statement in spark.statements if "FROM delta." in statement
+    ]
+    assert len(relation) == 1
+    assert len(physical) == 3
+    assert physical[0] == (
+        "SELECT * FROM delta.`abfss://workspace/item/Tables/Sales/Landed` LIMIT 0"
+    )
 
 
 @weaver_test()
@@ -305,7 +416,7 @@ class _NoTransportStore(FilesystemStore):
 @weaver_test()
 def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
     """A shortcut is a OneLake shortcut, so a host that cannot make one cannot
-    materialise it — and says which action it could not perform."""
+    materialise it, and says which action it could not perform."""
 
     class _WithoutShortcuts:
         """A resolver that resolves, and offers no shortcut creation."""

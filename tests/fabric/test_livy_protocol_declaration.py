@@ -1,4 +1,4 @@
-"""How a Livy submission reports itself — a claim about the transport.
+"""How a Livy submission reports itself, a claim about the transport.
 
 Neither body imports Weaver, and both would hold against an Environment that had
 never heard of it. They sat with the wheel tests only because of a filename.

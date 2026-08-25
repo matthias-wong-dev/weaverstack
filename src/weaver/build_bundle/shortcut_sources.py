@@ -9,15 +9,17 @@ So it is resolved here, where the estate can be read, and frozen into the bundle
 workspace id, item id, and the source path spelled as storage spells it. Fabric
 validates a shortcut's target when it is created and its paths are
 case-sensitive, so an address guessed later is a 400 rather than a wrong answer.
+
+A physical target may be a Warehouse as well as a Lakehouse: a Fabric Warehouse
+publishes each table as a Delta directory under ``Tables/<schema>/<table>``. Only
+a Files shortcut is Lakehouse-specific, because a Warehouse has no Files area.
 """
 
 from __future__ import annotations
 
-from ..catalogue.tables import CATALOGUE_SCHEMA, PRESENTED_RUNTIME_TABLES
 from ..declaration.model import LAKEHOUSE, SCHEMA_SHORTCUT, TABLE_SHORTCUT
 from ..errors import BuildError
 from ..locations import Location
-from ..targets import WarehouseTarget
 from .shortcuts import ResolvedShortcutSource
 
 TABLES_AREA = "Tables"
@@ -44,32 +46,6 @@ def physical_shortcuts(shortcuts, *, bindings):
     )
 
 
-def read_runtime_sources(*, resolver, catalogue) -> dict[str, ResolvedShortcutSource]:
-    """Where each of the catalogue's runtime tables sits in OneLake, by name.
-
-    A Fabric Warehouse publishes each of its tables as a Delta directory under
-    ``Tables/<schema>/<table>``, so a Lakehouse can hold a read-only shortcut to
-    one. That is how a built Lakehouse presents the runtime tables to Spark.
-
-    Resolved here for the reason a physical shortcut's source is: the catalogue
-    Warehouse is not a Lakehouse target of this build, and the installer has no
-    reason to be able to find it. One resolution serves every table, because they
-    are all in the same Warehouse. Each name is spelled exactly, because Weaver
-    created the table and Fabric publishes it under the name it was created with.
-    """
-
-    item = resolver.warehouse(WarehouseTarget(catalogue))
-    return {
-        table.name: ResolvedShortcutSource(
-            workspace_id=item.workspace_id,
-            item_id=item.id,
-            item_name=item.name,
-            path=f"{TABLES_AREA}/{CATALOGUE_SCHEMA}/{table.name}",
-        )
-        for table in PRESENTED_RUNTIME_TABLES
-    }
-
-
 def read_shortcut_sources(
     shortcuts,
     *,
@@ -90,15 +66,17 @@ def read_shortcut_sources(
 
 def _resolve(declaration, *, resolver, store) -> ResolvedShortcutSource:
     target = declaration.target_item
-    if target.item_type != LAKEHOUSE:
+    if declaration.is_files and target.item_type != LAKEHOUSE:
         raise BuildError(
             f"shortcut {declaration.name} in {declaration.owner} points at "
-            f"{declaration.target}. A OneLake shortcut reads a Lakehouse, and "
-            f"{target.item_type} items are reached over TDS."
+            f"{declaration.target}. A Files shortcut reads a Lakehouse's Files "
+            f"area, and a {target.item_type} has none."
         )
     try:
-        item = resolver.external_lakehouse(
-            target.item_name, workspace=declaration.workspace
+        item = resolver.external_item(
+            target.item_name,
+            item_type=target.item_type,
+            workspace=declaration.workspace,
         )
     except Exception as exc:
         where = declaration.workspace or "this workspace"

@@ -48,7 +48,7 @@ class TableCase:
     #: The object name within :data:`SCHEMA`.
     name: str
     #: What the table's rows come from. ``{reads}`` is filled with the managed
-    #: object named by :attr:`reads`, addressed to the destination — because a
+    #: object named by :attr:`reads`, addressed to the destination, because a
     #: build renders that name rather than deferring it.
     source_query: str
     #: Business column name to the type the built table must carry, in order.

@@ -72,7 +72,7 @@ class CatalogueConnection:
         return self.shape().get(table.name.casefold())
 
     def forget_shape(self) -> None:
-        """Read the schema again — after a build created or altered a table."""
+        """Read the schema again, after a build created or altered a table."""
 
         self._shape = None
 

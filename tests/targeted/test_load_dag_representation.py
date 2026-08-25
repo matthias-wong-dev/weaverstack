@@ -1,13 +1,13 @@
 """What the installed catalogue says the physical load graph is.
 
 Pure Python throughout: no Spark session, no SQL connection, no real target. The
-subject is the arithmetic that turns *installed state* into *what runs and in
+subject is the arithmetic that turns installed state into *what runs and in
 what order*, and that arithmetic reads nothing else.
 
-Two kinds of fixture appear here, deliberately. Claims about a well-formed estate
-use `installed_catalogue`, which is composed from the production projection — so
+Two kinds of fixture appear here. Claims about a well-formed estate
+use `installed_catalogue`, which is composed from the production projection, so
 what is planned against is what a build actually publishes. Claims about a
-*malformed* estate hand-write rows, because a repository that parses cannot
+malformed estate hand-write rows, because a repository that parses cannot
 produce a cycle or an ambiguous binding, and a fixture that could not express
 them would leave the refusals untested.
 """
@@ -185,7 +185,7 @@ def test_load_dag_orders_direct_dependencies(estate):
 def test_load_dag_resolves_a_python_import_as_a_dependency(tmp_path):
     """A Python object declares its dependencies by importing them.
 
-    And the catalogue records a dependency *exactly as its author wrote it* — so
+    And the catalogue records a dependency *exactly as its author wrote it*, so
     for a Python object the stored reference is an import path, ``Files.X__Y``,
     not a ``Schema.Object`` name. Reversing the graph means reapplying the rule
     that turned one into an identity.
@@ -455,7 +455,7 @@ def test_two_items_may_share_a_target_when_their_objects_do_not_collide():
     """A request names a target and means everything installed there.
 
     An estate accumulates an Installation row for every item ever bound to a
-    target, so refusing the *item* overlap would stop a load of a target whose
+    target, so refusing the item overlap would stop a load of a target whose
     objects are perfectly unambiguous.
     """
 
@@ -494,7 +494,7 @@ def test_two_items_may_share_a_target_when_their_objects_do_not_collide():
         targets=(PhysicalTargetRef("lakehouse", "Shared_LH"),),
     )
 
-    # Ordered by *logical* identity, so the two items' objects interleave by
+    # Ordered by logical identity, so the two items' objects interleave by
     # item name rather than by the physical name they share.
     assert node_ids(dag) == (
         "load:Lakehouse/Shared_LH/Sales.Order",
@@ -728,3 +728,75 @@ def test_a_program_importing_shortcuts_still_loads(tmp_path):
     _estate, consumer, dag = _resolved_producers(tmp_path)
 
     assert any(node.logical_id == consumer for node in dag.nodes)
+
+
+@weaver_test()
+def test_a_python_shortcut_import_orders_a_warehouse_before_its_lakehouse_consumer(
+    tmp_path,
+):
+    """The installed import must retain the logical shortcut's producer hop."""
+
+    from factories import _write, logical_shortcuts
+
+    from weaver.declaration import parse_item_repository
+    from weaver.locations import Location
+
+    producer = "Warehouse/Serving"
+    consumer = "Lakehouse/Published"
+    shortcut_path, shortcut_text = logical_shortcuts(
+        consumer, **{"WH.Reporting": f"{producer}/SERVE.Reporting"}
+    )
+    for relative, text in {
+        f"{producer}/schemas/SERVE.yml": schema_document("SERVE"),
+        f"{producer}/SERVE.Reporting.sql": warehouse_table("SERVE.Reporting"),
+        f"{consumer}/schemas/PUB.yml": schema_document("PUB"),
+        f"{consumer}/schemas/WH.yml": schema_document("WH"),
+        shortcut_path: shortcut_text,
+        f"{consumer}/PUB__Reporting.py": lakehouse_table("PUB.Reporting").replace(
+            "from weaver import Table",
+            "from shortcuts import WH__Reporting\n\nfrom weaver import Table",
+        ),
+    }.items():
+        _write(tmp_path, relative, text)
+
+    repository = parse_item_repository(Location(str(tmp_path)))
+    catalogue = installed_catalogue(
+        repository,
+        item_bindings(
+            (producer, "Serving_WH"),
+            (consumer, "Published_LH"),
+        ),
+    )
+    dag = load_dag(
+        InstalledEstate.from_catalogue(catalogue),
+        targets=(
+            PhysicalTargetRef("warehouse", "Serving_WH"),
+            PhysicalTargetRef("lakehouse", "Published_LH"),
+        ),
+    )
+
+    from weaver.load_plan import ONELAKE_PUBLICATION, OneLakeReadiness
+
+    producer = "load:Warehouse/Serving_WH/SERVE.Reporting"
+    consumer = "load:Lakehouse/Published_LH/PUB.Reporting"
+    barrier = "publish:Warehouse/Serving_WH/SERVE.Reporting"
+
+    # The barrier replaces the direct edge, as the endpoint refresh does in the
+    # other direction, so the consumer cannot start until it has settled.
+    assert (producer, consumer) not in dag.edges
+    assert (producer, barrier) in dag.edges
+    assert (barrier, consumer) in dag.edges
+
+    waiting = dag.by_id[barrier]
+    assert waiting.primitive_kind == ONELAKE_PUBLICATION
+    # No logical identity, so it leaves no catalogue state of its own.
+    assert waiting.logical_id is None
+    assert waiting.produced_by == producer
+    assert str(waiting.publication_of) == "Warehouse/Serving/SERVE.Reporting"
+    assert waiting.publication_targets == (
+        OneLakeReadiness(
+            target=PhysicalTargetRef("lakehouse", "Published_LH"),
+            schema="WH",
+            object="Reporting",
+        ),
+    )

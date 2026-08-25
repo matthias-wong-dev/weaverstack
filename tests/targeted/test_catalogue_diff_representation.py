@@ -3,18 +3,18 @@
 Two things come out of the same comparison, and it is worth being clear which is
 which:
 
-- ``current.diff(desired).per_table()`` is the **report** — new, changed,
-  unchanged, removed — so a reviewer can see what a bundle will do before it
+- ``current.diff(desired).per_table()`` is the **report**, new, changed,
+  unchanged, removed, so a reviewer can see what a bundle will do before it
   runs.
 - :func:`weaver.catalogue.reconcile.publish` produces the **statements**.
 
 Both now read both sides. Statements used to be rendered from ``desired`` alone,
-which made them correct against any prior state — including one the reader had
-got wrong — at the cost of rewriting every catalogue table on every build. The
+which made them correct against any prior state, including one the reader had
+got wrong, at the cost of rewriting every catalogue table on every build. The
 read is authoritative now: it validates each table's shape, tells a bootstrap
 absence from a damaged catalogue, and refuses rows outside the scopes it asked
-for, so an unreadable catalogue stops the build instead of quietly becoming a
-diff. What that buys is the property tested hardest here — a table with nothing
+for, so an unreadable catalogue stops the build instead of becoming a
+diff. What that buys is the property tested hardest here, a table with nothing
 to change produces no statement at all.
 """
 
@@ -53,7 +53,7 @@ def repository(tmp_path):
 
 
 def desired_from(repository, *names):
-    """Logical, then narrowed — the order publication uses."""
+    """Logical, then narrowed, the order publication uses."""
 
     return retaining(
         Catalogue.from_repository(repository),
@@ -128,7 +128,7 @@ def test_a_changed_signature_is_reported_changed_not_replaced(repository):
 def test_a_catalogue_that_already_matches_produces_no_statements(repository):
     """The property the whole change exists for.
 
-    Not "produces statements that write nothing" — produces none. An idempotent
+    Not "produces statements that write nothing", produces none. An idempotent
     delete-and-merge pair would also leave the rows alone, and would still make
     every build write every catalogue table and refresh the endpoint after.
     """
@@ -141,7 +141,7 @@ def test_a_catalogue_that_already_matches_produces_no_statements(repository):
 
 @weaver_test()
 def test_a_new_object_merges_without_a_delete(repository):
-    """Nothing is obsolete, so nothing is deleted — the table is only added to."""
+    """Nothing is obsolete, so nothing is deleted, the table is only added to."""
 
     lines = statements(Catalogue(rows={}), desired_from(repository, CUSTOMER))
 
@@ -220,8 +220,8 @@ def test_every_statement_stays_scoped_to_the_item(repository):
 def test_an_installation_the_build_did_not_name_is_never_touched(repository):
     """A scoped build must not reach an item it was not pointed at.
 
-    The catalogue read covers more items than a build publishes — shortcut
-    producers come back with it — so "everything I read" and "everything I may
+    The catalogue read covers more items than a build publishes, shortcut
+    producers come back with it, so "everything I read" and "everything I may
     write" are different sets, and only the second may drive a statement.
     """
 
@@ -266,7 +266,7 @@ def test_no_build_module_reaches_the_unconditional_renderer():
         )
     )
 
-    # The *function*, imported or called — not any name that starts with it.
+    # The function, imported or called, not any name that starts with it.
     # `reconcile_catalogue_state` decides what is stale, which is exactly what a
     # build is for, and `from ..catalogue.reconcile import publish` imports the
     # diff-based renderer this test is defending. Matching the substring caught

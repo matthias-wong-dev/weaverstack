@@ -4,11 +4,11 @@ This is the layer that decides how much Fabric the suite has to buy. An executor
 is where Weaver meets the engine, and almost all of what it does is checkable
 without one: that the exact statement reaches the session, that a logical name is
 resolved against the batch's destination before it does, that a missing
-capability fails saying which, and that a failure becomes a *result* rather than
+capability fails saying which, and that a failure becomes a result rather than
 an exception.
 
-What is left for a real workspace afterwards is genuinely narrow — does Fabric
-accept this T-SQL, does the object appear in inventory — and answering it no
+What is left for a real workspace afterwards is narrow, does Fabric
+accept this T-SQL, does the object appear in inventory, and answering it no
 longer requires parsing a repository, reading a catalogue and installing a bundle
 to reach the one statement in question.
 
@@ -62,7 +62,7 @@ def test_a_failing_action_is_recorded_rather_than_raised():
     """A failure is data, here exactly as in an installation.
 
     If this raised, an installer built on the same path could not record one
-    action's failure and carry on to report it — and every caller would need its
+    action's failure and carry on to report it, and every caller would need its
     own try/except to find out what went wrong.
     """
 
@@ -108,7 +108,7 @@ def test_an_action_is_timed_even_when_it_fails():
 
 @weaver_test()
 def test_a_skipped_execution_reports_skipped_with_its_details():
-    """Not every action does work — an endpoint refresh on a host without one."""
+    """Not every action does work, an endpoint refresh on a host without one."""
 
     from weaver.build_bundle.executors.base import SkippedExecution
 
@@ -164,8 +164,8 @@ def test_the_default_registry_is_used_when_none_is_named():
 def test_a_spark_statement_is_resolved_against_the_batchs_destination():
     """The difference between a build that works and one that looks like it does.
 
-    A two-part name resolves through whatever the session is attached to — the
-    attached Lakehouse — so an unresolved statement would create the object in the
+    A two-part name resolves through whatever the session is attached to. The
+    attached Lakehouse, so an unresolved statement would create the object in the
     attached Lakehouse and then read it back from there, and pass. The token must be
     gone, and gone in favour of *this batch's* destination.
     """
@@ -355,7 +355,7 @@ def _load_action(*, kind: str, relative: str, payload: str | None):
 @weaver_test()
 def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
     """Placement comes from the identity and the bound target, and from nothing
-    the executor decides — that was settled when the artefact was claimed."""
+    the executor decides. That was settled when the artefact was claimed."""
 
     from weaver.etl import LOAD_ROOT
 
@@ -376,9 +376,9 @@ def test_a_deployed_file_lands_under_the_runtime_tree(tmp_path):
 def test_a_generated_load_module_is_addressed_as_it_lands(tmp_path):
     """The bundle stays destination-free; the installed file must be runnable.
 
-    Keyed on what the payload *is*, not what it is called. A generated module and
+    Keyed on what the payload is, not what it is called. A generated module and
     an authored one are both `.py` in one tree, so only the first line tells them
-    apart — and a rule that read the name instead once shipped every installed
+    apart, and a rule that read the name instead once shipped every installed
     program with its tokens intact.
     """
 
@@ -488,7 +488,7 @@ def test_removing_a_file_that_is_already_gone_is_the_state_it_wanted(tmp_path):
     """Tolerant of absence, and only here.
 
     A delete reconciles toward "this must not exist", and something else having
-    removed it first is that state reached — unlike a create, where a collision
+    removed it first is that state reached. Unlike a create, where a collision
     means two things believe they own one name.
     """
 

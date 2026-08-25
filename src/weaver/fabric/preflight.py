@@ -10,8 +10,8 @@ Preflight reads and never creates: a missing catalogue Warehouse is a failure he
 because creating a workspace item is provisioning rather than building.
 
 The workspace's items are listed once and every target resolved from that one
-result, and every missing item is reported together — a build stopped twice has
-paid two round trips to learn one thing.
+result, and every missing item is reported together, because a build stopped twice
+has paid two round trips to learn one thing.
 """
 
 from __future__ import annotations
@@ -48,9 +48,9 @@ class PreflightError(BuildError):
 class RequiredItem:
     """One item a build needs, and what it needs it to be.
 
-    ``role`` is what the item is *to this build* — the Weaver catalogue, a bound
+    ``role`` is what the item is to this build: the Weaver catalogue, a bound
     target, the Environment. It exists so the report says why the item was
-    wanted, which is the part a reader needs in order to act on it.
+    wanted, which is the part needed to act on it.
     """
 
     name: str
@@ -82,8 +82,8 @@ def required_items(
 
     Derived from the bindings rather than from configuration, so a target a
     binding names is checked even when nothing in the workspace file mentions
-    it. The catalogue's Warehouse is included as a Warehouse like any other —
-    it is only special in what it holds.
+    it. The catalogue's Warehouse is included as a Warehouse like any other, being
+    special only in what it holds.
     """
 
     wanted: list[RequiredItem] = [
@@ -135,7 +135,7 @@ def preflight_fabric_targets(
             continue
         if len(matches) > 1:
             problems.append(
-                f"- {required} matches {len(matches)} items of that type — "
+                f"- {required} matches {len(matches)} items of that type, so "
                 "the name is ambiguous"
             )
             continue
@@ -152,9 +152,9 @@ def preflight_fabric_targets(
 def _missing(required: RequiredItem, inventory) -> str:
     """One missing item, and the type confusion behind it when there is one.
 
-    A name that exists as the wrong type is the common mistake — a Lakehouse
-    bound where a Warehouse was meant — and reporting it as a plain absence
-    sends a reader looking for something that is in front of them.
+    A name that exists as the wrong type is the common mistake, such as a Lakehouse
+    bound where a Warehouse was meant. Reporting it as a plain absence sends the
+    search after something that is already there.
     """
 
     others = sorted(

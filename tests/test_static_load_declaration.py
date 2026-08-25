@@ -1,9 +1,9 @@
-"""``Static: true`` — the contract, and what it renders into.
+"""``Static: true``, the contract, and what it renders into.
 
 A static object is seeded once into an empty target and never loaded again: a
 reference list, a fixed dimension, a deployed tree. The behaviour is one rule
-stated four times, once per authored form, but implemented in only three places
-— because a Spark-SQL-authored table *is* a Python table by the time it loads:
+stated four times, once per authored form, and implemented in three places,
+because a Spark-SQL-authored table is a Python table by the time it loads:
 
 .. code-block:: text
 
@@ -154,10 +154,10 @@ def test_a_warehouse_tables_declaration_reaches_its_load_contract(static):
 
 # --- the population check is only asked when it can matter --------------------
 #
-# `static` is checked *before* the target is inspected, and the order is not
+# `static` is checked before the target is inspected, and the order is not
 # style. Python evaluates arguments eagerly, so a predicate taking `populated=`
 # would run the query on every ordinary load to answer a question only a static
-# object can act on — a Spark action per table, a tree walk per folder, on every
+# object can act on, a Spark action per table, a tree walk per folder, on every
 # load in the estate.
 
 
@@ -177,7 +177,7 @@ class _TableUnderTest(Table):
     """A table whose contract is attached rather than parsed from a docstring.
 
     This file's own module docstring is not a Weaver document, so the contract
-    is supplied directly — the parsing route is covered above.
+    is supplied directly, the parsing route is covered above.
     """
 
     static = False
@@ -274,7 +274,7 @@ def _procedure(*, static: bool) -> str:
 def test_a_static_warehouse_load_returns_early_when_it_has_a_bookmark_row():
     """Baked into the artefact, not performed by whoever calls it.
 
-    The procedure is independently runnable — someone can execute it by hand —
+    The procedure is independently runnable, someone can execute it by hand,
     so a caller-side check would be a rule that only applied when Weaver was
     driving.
 
@@ -295,7 +295,7 @@ def test_a_static_warehouse_load_returns_early_when_it_has_a_bookmark_row():
 
 @weaver_test()
 def test_the_static_gate_reports_the_same_result_contract_as_a_real_load():
-    """A no-op is a *result*, and a caller must not have to tell them apart.
+    """A no-op is a result, and a caller must not have to tell them apart.
 
     Every output is set, not just the interesting ones: a field left at its
     ``null`` default would be indistinguishable from a real null, and the
@@ -351,7 +351,7 @@ def test_a_static_skip_advances_no_bookmark():
 def test_an_object_procedure_writes_no_catalogue_state():
     """It is an execution primitive: it loads, and it records nothing.
 
-    Whoever called it owns the record — an orchestrated run centrally, or
+    Whoever called it owns the record, an orchestrated run centrally, or
     ``_.Load`` synchronously. So there is no flag deciding which, and no MERGE
     here at all.
     """
@@ -373,7 +373,7 @@ def test_only_a_clean_load_reports_the_instant_it_began():
 
 @weaver_test()
 def test_a_non_static_warehouse_load_carries_no_gate_at_all():
-    """Emitting a disabled branch would leave a reader guessing which way it went."""
+    """Emitting a disabled branch would leave which way it went unstated."""
 
     payload = _procedure(static=False)
 

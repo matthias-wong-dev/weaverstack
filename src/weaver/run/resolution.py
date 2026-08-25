@@ -11,21 +11,22 @@ from .result import (
     warning,
 )
 
-#: Who noticed, for a reader following a node's messages across layers.
+#: Who noticed, for following a node's messages across layers.
 SOURCE = "run.resolution"
 
-#: Primitive kinds this module knows how to reason about. A kind not named here
+#: Primitive kinds this module reasons about. A kind not named here
 #: resolves as unaddressable rather than being assumed to work.
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
 ENDPOINT_REFRESH = "endpoint_refresh"
+ONELAKE_PUBLICATION = "onelake_publication"
 #: How a validation is reached, from where it is installed.
 PYTHON_VALIDATION = "python_validation"
 
 PYTHON_KINDS = (PYTHON_TABLE, PYTHON_FOLDER)
 
-#: What a refresh resolves to. Not a physical object — a Lakehouse's SQL
+#: What a refresh resolves to. Not a physical object, a Lakehouse's SQL
 #: analytics endpoint is a capability of the item, so the address names the item
 #: and the capability rather than a path.
 ENDPOINT_SUFFIX = "sql_endpoint"
@@ -43,7 +44,7 @@ class Resolved:
 
     @property
     def valid(self) -> bool:
-        """No *error* stops this node. A warning is a finding, not a refusal."""
+        """No error stops this node. A warning is a finding, not a refusal."""
 
         from .result import SEVERITY_ERROR
 
@@ -69,7 +70,11 @@ def resolve(node, *, can_refresh: bool = True) -> Resolved:
                     source=SOURCE,
                 )
             )
-    elif node.primitive_kind not in (WAREHOUSE_PROCEDURE, PYTHON_VALIDATION):
+    elif node.primitive_kind not in (
+        WAREHOUSE_PROCEDURE,
+        PYTHON_VALIDATION,
+        ONELAKE_PUBLICATION,
+    ):
         messages.append(
             error(
                 DISPATCH_LOCATION_MISSING,
@@ -112,7 +117,7 @@ def _where(node) -> str | None:
     """The installed thing this node would reach for, named logically.
 
     A Warehouse node means a procedure; a Python node means a deployed module.
-    Both are addressable from the node alone — the absolute path is the
+    Both are addressable from the node alone, the absolute path is the
     resolver's business, and a dry run that had to resolve one would have to
     reach a workspace to say what it intends.
     """
@@ -150,6 +155,7 @@ def _module_class(node) -> str | None:
 
 __all__ = [
     "ENDPOINT_REFRESH",
+    "ONELAKE_PUBLICATION",
     "PYTHON_FOLDER",
     "PYTHON_KINDS",
     "PYTHON_TABLE",

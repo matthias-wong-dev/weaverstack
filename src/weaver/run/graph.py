@@ -17,28 +17,33 @@ class RunNode:
     primitive_kind: str
     logical_id: object | None = None
     physical_object: object | None = None
-    #: The installed primitive itself — the procedure or the deployed file.
+    #: The installed primitive itself, the procedure or the deployed file.
     #: ``None`` for a refresh, which is a capability rather than an artefact.
     primitive_id: object | None = None
     primitive_object: object | None = None
     #: What this node is for, where one graph carries more than one kind.
     role: str | None = None
     #: The installed thing this node runs, as the estate describes it. Opaque
-    #: to the Runner: the Runner decides *when* a node
+    #: to the Runner: the Runner decides when a node
     #: runs, and only dispatch needs to know what it is.
     installed: object | None = None
+    #: A publication barrier only: the Warehouse table it waits on, the consuming
+    #: shortcut paths, and the load node that publishes what it waits for.
+    publication_of: object | None = None
+    publication_targets: tuple[object, ...] = ()
+    produced_by: str | None = None
 
     @property
     def sort_key(self) -> tuple[str, str, str, str, str]:
         """What orders two nodes that became ready at the same moment.
 
-        Target kind, then target, then logical identity, then primitive kind —
-        so the order a graph prints is a property of the estate rather than of
-        the dictionary iteration that happened to build it.
+        Target kind, then target, then logical identity, then primitive kind, so
+        the order a graph prints is a property of the estate rather than of the
+        dictionary iteration that built it.
 
         ``node_id`` breaks the last tie. Without it, two nodes alike in all four
         fall back to the order the graph happened to be built in, which is the
-        very thing the sort exists to remove — and a run whose order depends on
+        very thing the sort exists to remove, and a run whose order depends on
         construction is one a log cannot reproduce.
         """
 
@@ -121,7 +126,7 @@ class RunGraph:
 def graph_for(request, state) -> RunGraph:
     """The graph one request implies against one observed estate.
 
-    Selection is where the kinds of run differ, and it is the *only* place they
+    Selection is where the kinds of run differ, and it is the only place they
     do: what runs is a different question per kind, how a run behaves is not.
     """
 
@@ -152,6 +157,9 @@ def _load_graph(request, state) -> RunGraph:
                 physical_object=node.physical_object,
                 primitive_id=node.primitive_id,
                 primitive_object=node.primitive_object,
+                publication_of=node.publication_of,
+                publication_targets=node.publication_targets,
+                produced_by=node.produced_by,
                 role="load",
             )
             for node in dag.nodes

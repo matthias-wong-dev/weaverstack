@@ -5,7 +5,7 @@ Fabric answers is that the wipe holds where OneLake has a `dbo` schema Weaver
 never created and must not remove.
 
 Driven from this checkout. `wipe_delta_target` takes its store as an argument and
-removes directories — it never needed the installed package, only a real
+removes directories. It never needed the installed package, only a real
 OneLake. The session that seeds the fixture runs raw Spark and imports nothing.
 """
 

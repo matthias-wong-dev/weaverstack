@@ -3,13 +3,13 @@
 Four properties are load-bearing and each is tested directly rather than
 incidentally:
 
-- **determinism** — the same rows render the same bytes, whatever order they
+- **determinism**, the same rows render the same bytes, whatever order they
   arrive in, because a bundle's identity is a hash of its payloads;
-- **scope** — every statement names one logical item, so a build of one item
+- **scope**. Every statement names one logical item, so a build of one item
   cannot express a change to another's row;
-- **explicit values** — nulls are typed, quotes survive, and booleans reach a
+- **explicit values**, nulls are typed, quotes survive, and booleans reach a
   ``bit`` as ``1`` and ``0`` rather than as the strings that look like them;
-- **the public spelling** — statements carry the ``_`` schema's own column names
+- **the public spelling**, statements carry the ``_`` schema's own column names
   and stored vocabularies, never the internal snake-case keys.
 
 The clock is the deliberate exception: ``SYSDATETIME()`` is rendered as a call,
@@ -200,7 +200,7 @@ def test_sorting_is_by_the_key_and_tolerates_a_null():
 
 @weaver_test()
 def test_the_clock_is_a_call_not_a_rendered_instant():
-    """A rendered timestamp would change the payload — and the bundle id — each run.
+    """A rendered timestamp would change the payload, and the bundle id, each run.
 
     The engine supplies the instant instead, which keeps the payload frozen while
     still stamping the row.
@@ -240,8 +240,8 @@ def test_the_build_datetime_is_a_token_so_the_payload_stays_frozen():
 def test_the_build_datetime_is_written_on_insert_and_nowhere_else():
     """The decision the whole freshness comparison rests on.
 
-    Every object a build actually rebuilds arrives here as an insert — it is new,
-    or its claim was deleted before the physical work. So an *update* is a row
+    Every object a build actually rebuilds arrives here as an insert. It is new,
+    or its claim was deleted before the physical work. So an update is a row
     whose projection moved while the object stood still, and dating it to this
     build would claim a rebuild that never happened.
     """
@@ -249,9 +249,9 @@ def test_the_build_datetime_is_written_on_insert_and_nowhere_else():
     statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
     source, guard, update = _clauses(statement)
 
-    assert "Build datetime" not in source, "not projected — no row carries one"
-    assert "Build datetime" not in guard, "not compared — it differs every build"
-    assert "Build datetime" not in update, "not updated — only an insert dates a row"
+    assert "Build datetime" not in source, "not projected, no row carries one"
+    assert "Build datetime" not in guard, "not compared. It differs every build"
+    assert "Build datetime" not in update, "not updated, only an insert dates a row"
     assert "[Build datetime]" in statement[statement.index("WHEN NOT MATCHED") :]
 
 
@@ -358,7 +358,7 @@ def test_a_matched_unchanged_row_is_a_no_op():
     """The matched branch is guarded by a comparison of every non-key column.
 
     So rebuilding an unchanged Weaver document writes nothing and does not
-    advance ``Row update datetime`` — which is what makes a rebuild idempotent
+    advance ``Row update datetime``, which is what makes a rebuild idempotent
     from the catalogue's point of view.
     """
 
@@ -374,8 +374,8 @@ def test_a_matched_unchanged_row_is_a_no_op():
 def test_the_comparison_is_null_safe_in_both_directions():
     """T-SQL has no null-safe operator, and half a comparison is silently wrong.
 
-    ``a <> b`` is UNKNOWN when either side is null, so a column that became null
-    — or stopped being null — would never be seen as changed.
+     ``a <> b`` is UNKNOWN when either side is null, so a column that became null
+    , or stopped being null, would never be seen as changed.
     """
 
     statement = render_merge(REGISTRY, [registry_row("Alpha")], scope=LAKEHOUSE_SCOPE)
@@ -488,10 +488,10 @@ def test_the_scope_predicate_leads_so_a_reviewer_sees_it_first():
 
 @weaver_test()
 def test_the_installation_table_has_no_obsolete_row_to_delete():
-    """Its key *is* the scope, so at most one row exists and the merge maintains it.
+    """Its key is the scope, so at most one row exists and the merge maintains it.
 
     A predicate over the key columns "beyond the scope" would be a predicate over
-    no columns, and would delete the very row about to be merged.
+    no columns, and would delete the row about to be merged.
     """
 
     row = {
@@ -675,8 +675,8 @@ def test_a_thousand_rows_still_render_one_statement():
 def test_more_rows_than_the_constructor_takes_are_split():
     """A T-SQL table value constructor accepts at most a thousand rows.
 
-    A catalogue table passes that without the estate being large — a thousand
-    described columns is an ordinary repository — so the rows are chunked rather
+    A catalogue table passes that without the estate being large, a thousand
+    described columns is an ordinary repository, so the rows are chunked rather
     than left to fail at install against a real Warehouse.
     """
 

@@ -6,7 +6,7 @@ owned by its destination item, so it is planned as part of that item's work and
 ahead of every document the item declares, because those documents are written
 against the namespace it establishes.
 
-What a declaration *becomes* depends on the target it is bound to, and that is a
+What a declaration becomes depends on the target it is bound to, and that is a
 planning decision because it is a decision about the target kind:
 
 ===============================  ==============================================
@@ -44,6 +44,7 @@ from ..declaration.model import (
 from .changes import (
     FOLDER as FOLDER_KIND,
 )
+from .changes import RUNTIME_REFERENCE as RUNTIME_REFERENCE_KIND
 from .changes import (
     SCHEMA as SCHEMA_KIND,
 )
@@ -114,6 +115,33 @@ class ItemShortcutPlan:
     omitted_destinations: tuple[object, ...] = ()
 
 
+def _is_the_catalogue_itself(
+    target: BoundTarget, catalogue: BoundTarget | None
+) -> bool:
+    """Whether this target is the Warehouse the catalogue lives in.
+
+    Compared on kind and ``item_id``, which is the physical item. ``id`` carries
+    the logical item name as well, so two bindings onto one Warehouse have
+    different ``id`` values and the same ``item_id``. This is the pairing
+    :func:`weaver.build_bundle.planner._catalogue_target` matches on.
+    """
+
+    return (
+        catalogue is not None
+        and target.kind == catalogue.kind
+        and target.item_id == catalogue.item_id
+    )
+
+
+def _references_the_catalogue(declaration, logical_sources) -> bool:
+    """Whether this declaration is one of Weaver's own runtime references."""
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+
+    source = logical_sources.get(declaration.destination)
+    return source is not None and source.item == BUILTIN_ITEM
+
+
 def plan_item_shortcuts(
     repository,
     *,
@@ -122,6 +150,7 @@ def plan_item_shortcuts(
     target_by_item: Mapping[WeaverItemId, BoundTarget],
     selected: Iterable[WeaverDocumentId],
     sources: Mapping[str, ResolvedShortcutSource] | None = None,
+    catalogue_target: BoundTarget | None = None,
 ) -> ItemShortcutPlan:
     """Plan the shortcuts this build selected.
 
@@ -130,21 +159,34 @@ def plan_item_shortcuts(
     not rebuilt since. So it is left alone rather than replaced, exactly as an
     unchanged document is.
 
-    Its *schema* is still reported. A retained shortcut lives in a namespace the
+    Its schema is still reported. A retained shortcut lives in a namespace the
     item must have, and a build that created only the schemas its rebuilt
     shortcuts needed would leave the others homeless. A schema shortcut reports
-    none, because it *is* the namespace and the item does not own it.
+    none, because it is the namespace and the item does not own it.
     """
 
     sources = dict(sources or {})
     declarations = sorted(
         (
             declaration
-            for declaration in repository.shortcuts
+            for declaration in repository.planned_shortcuts
             if declaration.owner == item
         ),
         key=lambda declaration: str(declaration.destination),
     )
+    logical_sources = {
+        pair.destination: pair.source for pair in repository.logical_shortcuts
+    }
+    if _is_the_catalogue_itself(target, catalogue_target):
+        # This item is bound to the Warehouse holding the catalogue, so `_` and
+        # its tables are already there. A two-part `[_].[Bookmark]` in a
+        # generated procedure reaches the real table, and a view of that name
+        # over itself is what T-SQL refuses to alter.
+        declarations = [
+            declaration
+            for declaration in declarations
+            if not _references_the_catalogue(declaration, logical_sources)
+        ]
     if not declarations:
         return ItemShortcutPlan()
 
@@ -154,12 +196,8 @@ def plan_item_shortcuts(
     supported: list[tuple] = []
     schemas: list[str] = []
 
-    logical_sources = {
-        pair.destination: pair.source for pair in repository.logical_shortcuts
-    }
-
     for declaration in declarations:
-        if not declaration.is_schema:
+        if not declaration.is_schema and declaration.destination_identity is None:
             schemas.append(declaration.schema)
         if declaration.destination not in chosen:
             continue
@@ -201,7 +239,7 @@ def plan_item_shortcuts(
         )
         # One action stands for every declaration the item consumes, so it
         # produces several changes. Each names what the destination physically
-        # *is* at this binding, which is the same question the Registry row
+        # is at this binding, which is the same question the Registry row
         # answers.
         stage = PlannedStage(
             phase=SHORTCUT,
@@ -240,45 +278,6 @@ def declaration_key(declaration) -> str:
     return f"{declaration.owner}/{declaration.name}"
 
 
-@dataclass(frozen=True)
-class Reference:
-    """What a shortcut *is*, without being authored.
-
-    A declaration is an author's intent and carries a name written in the
-    ``Schema__Object`` convention. Weaver's own infrastructure references have no
-    author and live in the reserved ``_`` schema, which that convention cannot
-    spell — so they carry the destination directly and satisfy the same renderers.
-
-    :class:`~weaver.declaration.model.ShortcutDeclaration` already answers all of
-    this, so both go through :func:`view_statement` and :func:`shortcut_payload`
-    and there is one implementation of what each becomes.
-    """
-
-    owner: WeaverItemId
-    name: str
-    destination: WeaverDocumentId
-    shortcut_type: str
-    target: str
-    target_item_name: str
-    target_object: object
-    is_logical: bool = False
-
-    @property
-    def is_schema(self) -> bool:
-        return False
-
-    @property
-    def is_files(self) -> bool:
-        return self.destination.is_files
-
-    @property
-    def target_item(self):
-        from ..declaration.model import WAREHOUSE
-        from ..declaration.model import WeaverItemId as Item
-
-        return Item(WAREHOUSE, self.target_item_name)
-
-
 def _unsupported(
     declaration,
     *,
@@ -308,10 +307,10 @@ def _unsupported(
             "a shortcut must stay in one namespace: a Files destination needs a "
             "Files source, and a table destination a table source"
         )
-    if not declaration.is_view and source_target.kind == WAREHOUSE_TARGET:
+    if declaration.is_files and source_target.kind == WAREHOUSE_TARGET:
         return (
-            "a Lakehouse shortcut is a OneLake shortcut, and there is no "
-            f"shortcut form for the Warehouse source {source}"
+            "a Files shortcut needs a Lakehouse source, and the bound source "
+            f"{source} is a Warehouse"
         )
     return None
 
@@ -326,6 +325,8 @@ def _change_kind(declaration, target) -> str:
 
     if declaration.is_view:
         return VIEW_KIND
+    if declaration.destination_identity is not None:
+        return RUNTIME_REFERENCE_KIND
     if declaration.is_schema:
         return SCHEMA_KIND
     return FOLDER_KIND if declaration.is_files else TABLE_KIND
@@ -349,7 +350,7 @@ def _shortcut_action(
     """One action for all of this item's declarations.
 
     One rather than one-per-declaration, because materialising a shortcut is not
-    instantaneous and the cost is per *wait*, not per create. A Lakehouse
+    instantaneous and the cost is per wait, not per create. A Lakehouse
     shortcut becomes usable some seconds after it exists (measured at 6-31s), so
     N actions run serially pay N waits while one action that creates everything
     and then waits pays roughly one. A Warehouse view is a script, and the

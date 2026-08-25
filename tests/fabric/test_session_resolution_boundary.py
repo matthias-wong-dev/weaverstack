@@ -1,4 +1,4 @@
-"""One Session, one resolver, one answer per name — against a real workspace.
+"""One Session, one resolver, one answer per name: against a real workspace.
 
 The cache must survive the operation that filled it. A Session owns one resolver
 for its lifetime, so the second question for the same typed name is free.
@@ -83,7 +83,7 @@ def test_one_credential_serves_the_whole_session(console, fabric_workspace):
     scope = console.scope(fabric_workspace)
     scope.token_provider()
 
-    # The Azure CLI is shelled out to by *constructing* a credential, so sharing
+    # The Azure CLI is shelled out to by constructing a credential, so sharing
     # one is the saving; a provider per call would still be one credential.
     assert scope._credential is console.scope(fabric_workspace)._credential
 

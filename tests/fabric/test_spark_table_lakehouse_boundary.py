@@ -1,7 +1,7 @@
 """The ``spark_table`` executor, run from a desktop against a real Lakehouse.
 
-The whole action runs here. Two statements cross — the setup with its
-``DESCRIBE QUERY``, then the rendered ``CREATE TABLE`` — and everything between
+The whole action runs here. Two statements cross, the setup with its
+``DESCRIBE QUERY``, then the rendered ``CREATE TABLE``, and everything between
 them is decided in this process: column validation, the physical columns, the
 DDL. Nothing imports Weaver on the far side, which is why this is ``remote``.
 
@@ -131,7 +131,7 @@ def test_the_exact_case_table_is_readable_by_the_next_action(spark_table_estate)
     """Fabric folds a table identifier to lower case unless analysis is exact.
 
     The view was built by the next action in the same installation, so a folded
-    table would have failed that action rather than this assertion — which is
+    table would have failed that action rather than this assertion, which is
     where the failure belongs.
     """
 

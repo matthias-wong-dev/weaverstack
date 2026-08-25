@@ -1,7 +1,7 @@
 """OneLake listing must fail loudly rather than silently truncate.
 
 Mocked, so it needs no tenant: a paged response would otherwise return only its
-first page and quietly break a wipe, a sync or a reconciliation.
+first page and break a wipe, a sync or a reconciliation.
 """
 
 from __future__ import annotations

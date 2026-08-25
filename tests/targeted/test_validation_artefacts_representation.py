@@ -5,7 +5,7 @@ claims because the lifecycle is the same lifecycle: one artefact per validation,
 a deterministic identity, a signature that changes when it should and only then,
 and a role carried rather than inferred from a shape.
 
-Nothing here builds or installs. An artefact is a claim about what *should* be
+Nothing here builds or installs. An artefact is a claim about what should be
 installed, derived from source alone, which is what lets a deleted validation
 produce an ordinary prune instead of needing a scan to notice its module is
 orphaned.
@@ -224,7 +224,7 @@ def test_loads_and_validations_are_claimed_together(estate):
 
 @weaver_test()
 def test_a_deployed_module_is_claimed_once(estate):
-    """A Python validation is runtime source *and* a validation, not two files."""
+    """A Python validation is runtime source and a validation, not two files."""
 
     identities = [
         str(artefact.identity)
@@ -339,7 +339,7 @@ def test_a_validation_only_warehouse_still_gets_its_generated_schema(tmp_path):
     _write(
         tmp_path,
         "Warehouse/Reporting/tests/Sales.Reconciles.sql",
-        # Reading nothing this item declares, which is the whole point: an item
+        # Reading nothing this item declares, which is the case being covered: an item
         # that only validates still needs somewhere to put the procedure.
         WAREHOUSE_TEST.replace("Sales.Report", "Sales.Elsewhere").replace(
             "Primary key: Id", "Primary key: Id\n\nDependencies: []"

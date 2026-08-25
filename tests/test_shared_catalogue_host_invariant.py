@@ -14,7 +14,7 @@ Every statement Weaver renders against its own catalogue names an object in
 ``_``; nothing it emits can reach `Sales.Customer` in the same Warehouse, and
 nothing about resetting the catalogue touches the Warehouse containing it.
 
-These are structural claims about what Weaver *renders*, so they hold without a
+These are structural claims about what Weaver renders, so they hold without a
 tenant. What a real shared Warehouse does with them is proved in
 ``tests/fabric``.
 """
@@ -184,7 +184,7 @@ def test_the_catalogue_items_inventory_sees_only_the_reserved_schema():
 
     Prune offers an item everything its inventory can see. So an inventory for
     the catalogue item that could see `Finance` would offer a user's tables to
-    an item that never declared them — and prune would remove them, correctly,
+    an item that never declared them, and prune would remove them, correctly,
     having been told they were the item's to manage.
 
     Caught against a real Warehouse, which had a neighbour's schema in it and

@@ -74,8 +74,7 @@ markers = [
     # Generated selection mechanics. @weaver_test is the declaration source.
     "remote: Weaver runs on this machine and reaches into Fabric — the desktop CLI's position. Needs no publish, so this is the fast loop (pytest -m 'fabric and remote')",
     "hosted: Weaver runs inside a Fabric session, as the installed wheel — the product's own position. Needs `weaver install` first (pytest -m 'fabric and hosted')",
-    # Integration and provision are complete scopes, not extra position flags.
-    "provision: creates and deletes Fabric items. Opted into separately because it exercises Fabric's resource management rather than Weaver's, changes rarely, and its churn slows every other run",
+    # Integration is a complete scope, not an extra position flag.
     "full_integration: a comprehensive Fabric lifecycle journey, which proves the whole pipeline composes rather than answering any single question. Opted into by name, so the expensive composition proof runs by exception",
     # Resource selectors generated from @weaver_test(resources=...).
     "tds: test claim requires a TDS boundary crossing",
@@ -86,7 +85,7 @@ markers = [
 # Default runs stay fast and need no JVM.
 addopts = [
     "-m",
-    "not fabric and not provision and not full_integration",
+    "not fabric and not full_integration",
 ]
 
 

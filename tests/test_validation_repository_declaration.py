@@ -2,7 +2,7 @@
 
 A Test and an Assumption are authored beneath the item that owns them, in
 ``tests/`` and ``assumptions/``, and are read by the same machinery that reads
-objects. What this proves is that they are *not* objects: they carry the item's
+objects. What this proves is that they are not objects: they carry the item's
 ordinary ``Schema.Object`` identity, they resolve dependencies the ordinary way,
 and they are held apart from the documents an item materialises.
 """
@@ -284,7 +284,7 @@ def test_the_filename_and_the_declared_id_must_agree(lakehouse):
         _python_test("Sales.OrdersReconcile"),
     )
 
-    with pytest.raises(DiscoveryError, match="they must agree"):
+    with pytest.raises(DiscoveryError, match="They must agree"):
         parse(lakehouse)
 
 
@@ -413,7 +413,7 @@ def test_a_declaration_replaces_inference(lakehouse):
 
 @weaver_test()
 def test_declaring_none_suppresses_inference(lakehouse):
-    """`Dependencies: []` is a declaration, so it means none — here too."""
+    """`Dependencies: []` is a declaration, so it means none: here too."""
 
     source = _python_test("Sales.OrdersReconcile").replace(
         "Primary key: Id", "Primary key: Id\n\nDependencies: []"
@@ -629,8 +629,8 @@ def test_data_metadata_on_a_validation_is_refused_by_the_repository(lakehouse):
 
 # --- the contract queries end the body ----------------------------------------
 #
-# Counting them is not enough. A Spark SQL `SELECT` is lazy — the frame is built
-# where it is written and materialised later — so a setup statement *after* the
+# Counting them is not enough. A Spark SQL `SELECT` is lazy, the frame is built
+# where it is written and materialised later, so a setup statement after the
 # first contract query changes what that query will read by the time anyone
 # reads it. T-SQL does the opposite: the compiler captures each contract query
 # into a temp table at its authored position. The same body would mean two
@@ -705,7 +705,7 @@ create or replace temporary view sneaky as select 1 as Id;
 
 @weaver_test()
 def test_setup_before_the_contract_queries_is_ordinary(warehouse):
-    """Which is the whole point — setup is unrestricted, it just comes first."""
+    """Setup is unrestricted. It comes first."""
 
     _write(
         warehouse,

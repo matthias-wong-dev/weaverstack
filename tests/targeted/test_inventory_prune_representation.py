@@ -10,7 +10,7 @@ derived. Both sides are plain data, so what is being asserted is arithmetic on
 two sets and the statements that fall out of it.
 
 Prune is the destructive direction, so most of what is asserted is what it
-*spares*.
+spares.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ def keep(
     """The keep-set, with the document-declared names defaulting to all of them.
 
     ``declared_objects`` is stated only where the difference is the subject: an
-    shortcut destination is in ``tables`` or ``views`` and *not* here, because no
+    shortcut destination is in ``tables`` or ``views`` and not here, because no
     managed drop can remove one.
     """
 
@@ -79,7 +79,7 @@ def test_an_inventory_matching_the_keep_set_is_left_alone():
 
 @weaver_test()
 def test_an_empty_inventory_prunes_nothing_rather_than_everything():
-    """Nothing there is nothing to remove — not everything to remove.
+    """Nothing there is nothing to remove, not everything to remove.
 
     The direction matters: computed the wrong way round, a fresh target would
     produce a removal for every declared object, against objects that do not
@@ -123,7 +123,7 @@ def test_a_table_the_item_now_declares_as_a_view_is_spared_the_same_way():
 @weaver_test()
 def test_the_comparison_folds_case():
     """The physical name's case is the workspace's to choose, so a keep-set that
-    compared exactly would delete the very object it meant to spare."""
+    compared exactly would delete the object it meant to spare."""
 
     actions, _ = prune(
         target_inventory(schemas=("DWG",), tables=("DWG.Customer",)),
@@ -180,7 +180,7 @@ def test_a_schema_that_is_going_takes_its_contents_with_it():
     """One drop, not three.
 
     Dropping the schema removes what is in it, so emitting a drop per object as
-    well would issue statements against objects the first one already took —
+    well would issue statements against objects the first one already took,
     which succeeds only because the drops are `IF EXISTS`, and reads as a build
     doing three times the work it needs to.
     """
@@ -232,7 +232,7 @@ def test_a_warehouse_prune_is_t_sql():
 
 @weaver_test()
 def test_an_shortcut_destination_installed_as_the_other_kind_is_still_dropped():
-    """The limit of the kind-change rule, and why it names *documents*.
+    """The limit of the kind-change rule, and why it names documents.
 
     A Warehouse shortcut is materialised by `create or alter view`, which cannot
     replace a table, and no managed drop covers a shortcut. So a table standing
@@ -250,10 +250,10 @@ def test_an_shortcut_destination_installed_as_the_other_kind_is_still_dropped():
 
 @weaver_test()
 def test_a_warehouse_drops_every_orphan_by_name_including_in_a_doomed_schema():
-    """The Warehouse side does *not* fold objects into their schema's drop.
+    """The Warehouse side does not fold objects into their schema's drop.
 
     T-SQL will not drop a schema that still holds objects, so each has to go by
-    name first — the opposite of the Lakehouse rule, and worth pinning because
+    name first, the opposite of the Lakehouse rule, and worth pinning because
     the two look interchangeable from a distance.
     """
 

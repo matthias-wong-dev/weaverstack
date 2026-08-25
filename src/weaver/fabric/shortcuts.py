@@ -24,7 +24,7 @@ REPLACE_POLL_INTERVAL = 2.0
 #: OneLake. A Warehouse creates a table in its own catalogue first and publishes
 #: the Delta directory behind it a moment later, so a shortcut created in the same
 #: build as its source can arrive before there is anything to point at. Bounded,
-#: because a source that is genuinely absent has to fail.
+#: because a source that is absent has to fail.
 SOURCE_TIMEOUT = 120.0
 SOURCE_POLL_INTERVAL = 5.0
 
@@ -55,8 +55,8 @@ class Shortcut:
 def list_shortcuts(item: Item, *, client: FabricClient) -> tuple[Shortcut, ...]:
     """Every shortcut this item holds.
 
-    Fabric echoes a path back rooted — ``/Tables/DWG`` for the ``Tables/DWG`` it
-    was given — so the leading separator is normalised here rather than by every
+    Fabric echoes a path back rooted, ``/Tables/DWG`` for the ``Tables/DWG`` it
+    was given, so the leading separator is normalised here rather than by every
     caller.
     """
 
@@ -148,7 +148,7 @@ def create_shortcut(
         "in": destination.name,
         "target": f"{source.name}/{source_path}",
         # Reported because it says which contract Fabric honoured. Creating one
-        # shortcut is documented as synchronous — a 201 — while bulk creation is
+        # shortcut is documented as synchronous, a 201, while bulk creation is
         # not; so a 202 here would mean the shortcut itself is still being made,
         # which is a different thing from the destination Lakehouse not yet having
         # registered it as a table. Only the second is what the readability wait

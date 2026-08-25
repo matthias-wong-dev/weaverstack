@@ -2,13 +2,13 @@
 
 The ``_`` schema's runtime tables are written as work happens: ``_.Log`` appended
 as each unit settles, ``_.Bookmark`` merged as each clean load finishes. Both go
-through one boundary, so a caller says *what* it recorded and never *how*.
+through one boundary, so a caller says what it recorded and never how.
 
 Underneath is :class:`~weaver.catalogue.flusher.WarehouseFlusher`, one per table:
 rows are queued, batched and written on a worker, and a failure is surfaced by
 :meth:`CatalogueWriter.flush`. Whether a lost row matters is the caller's
-judgement — a lost ``_.Log`` row loses evidence, a lost bookmark makes the next
-load read a window it has already read — so this raises and lets them decide.
+judgement, a lost ``_.Log`` row loses evidence, a lost bookmark makes the next
+load read a window it has already read, so this raises and lets them decide.
 """
 
 from __future__ import annotations

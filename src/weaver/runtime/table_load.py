@@ -1,4 +1,4 @@
-"""Loading a Delta table — the mechanics behind ``Table.load()``.
+"""Loading a Delta table: the mechanics behind ``Table.load()``.
 
 The authored class proposes rows; this owns everything that happens to them.
 ``read()`` returns staging, and an incremental one may return
@@ -6,7 +6,7 @@ The authored class proposes rows; this owns everything that happens to them.
 ``SparkSqlTable`` enters here too, so both authoring languages reconcile through
 one implementation.
 
-The first value is *staging*: unvalidated, with nothing yet rejected or
+The first value is staging: unvalidated, with nothing yet rejected or
 classified. It goes through the phases the Warehouse procedure runs: raw
 staging, every refusal discovered, the rejection gate, the purge that makes
 staging the clean incoming state, the change set the load has settled on, merge
@@ -393,7 +393,7 @@ def _validation_chain(
 ) -> tuple[str, list[str]]:
     """The common table expressions both discovery and the purge read.
 
-    One definition, so what is refused and what survives cannot disagree — which
+    One definition, so what is refused and what survives cannot disagree. That
     matters most where the choice is arbitrary, as it is inside a duplicate
     primary key group.
     """
@@ -460,8 +460,8 @@ def _unique_key_ctes(
 
     Which row survives a group is arbitrary and settled cheaply. A single-column
     primary key gives an aggregate to settle it with; a composite one has none, so
-    those groups are ranked — over the duplicate groups alone, never over the whole
-    population.
+    those groups are ranked, over the duplicate groups alone and never over the
+    whole population.
     """
 
     named = qualified("s", columns)
@@ -672,7 +672,7 @@ def _change_counts(spark, change_view: str) -> tuple[int, int, int]:
 
 
 def _delete_keys(spark, held, names, change_view: str, contract: LoadContract) -> str:
-    """The keys the settled changes retire, under the name a reader knows.
+    """The keys the settled changes retire, under their published name.
 
     A projection of a relation that is already settled, so nothing is computed
     here. The delete mutation reads it and ``_Delete`` evidence is written from
@@ -699,8 +699,8 @@ def _merge_conflicts(
     leaves the target equal to clean staging, and staging has already been made
     unique.
 
-    A holder gives its value up in exactly two ways — the load deletes it, or the
-    load moves it off that value. So a swap, and a cycle whose proposed state is
+    A holder gives its value up in two ways: the load deletes it, or the load
+    moves it off that value. So a swap, and a cycle whose proposed state is
     unique, both pass, and a claim against an untouched holder does not.
 
     Any collision that remains stops the load. There is no partial application and
@@ -923,7 +923,7 @@ def _name(spark, held, sql: str, target: str, role: str) -> str:
     """Name a statement's result without materialising it.
 
     For a projection of a relation that is already settled and persisted, where
-    what the name buys is a shape a reader and a mutation both know. Nothing is
+    what the name buys is a shape a query and a mutation share. Nothing is
     computed here: whatever reads it computes it, from the phase underneath.
     """
 
@@ -991,7 +991,7 @@ def _drop_evidence(spark, names) -> None:
 
 
 def _keep_evidence(spark, names, kept: set, **relations) -> None:
-    """Write the relations a reader will want as Delta tables beside the object.
+    """Write the relations a later query needs as Delta tables beside the object.
 
     Only for an outcome with something to troubleshoot, which is what separates
     evidence from execution state:
@@ -1057,7 +1057,7 @@ def _comparison_columns(contract: LoadContract, columns) -> tuple[str, ...]:
     """Which columns decide whether a matched row changed.
 
     What the declaration named, and otherwise every business column except the
-    key — read from the target, because a Spark SQL table may infer its schema and
+    key, read from the target because a Spark SQL table may infer its schema and
     then the contract has no column list to default from. Left empty, every row
     would sign identically and no change would ever be detected.
 
@@ -1102,7 +1102,7 @@ def _require_columns(frame, contract: LoadContract, columns) -> None:
     if missing:
         raise LoadError(
             f"{contract.qualified}: read() did not produce "
-            f"{', '.join(repr(name) for name in missing)} — the staged frame "
+            f"{', '.join(repr(name) for name in missing)}. The staged frame "
             "must carry every column the table declares, by exact name"
         )
     key_missing = [name for name in contract.primary_key if name not in produced]

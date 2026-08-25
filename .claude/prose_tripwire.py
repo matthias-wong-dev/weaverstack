@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prompt a review of high-signal prose patterns in changed source text."""
+"""Prompt a review of the register checks in CLAUDE.md, over changed lines."""
 
 from __future__ import annotations
 
@@ -7,18 +7,30 @@ import re
 import subprocess
 import sys
 
+# The register checks from CLAUDE.md. Phrase bans alone do not hold: "this is not
+# X; it is Y" was banned and the same move reappeared 870 times as "X rather than
+# Y". These check the constructions instead.
 PATTERNS = {
-    "the whole point": re.compile(r"\bthe whole point\b", re.IGNORECASE),
-    "the key point": re.compile(r"\bthe key point\b", re.IGNORECASE),
-    "worth noting": re.compile(r"\bworth noting\b", re.IGNORECASE),
-    "obviously": re.compile(r"\bobviously\b", re.IGNORECASE),
-    "simply": re.compile(r"\bsimply\b", re.IGNORECASE),
-    "merely": re.compile(r"\bmerely\b", re.IGNORECASE),
-    "this is not X; it is Y": re.compile(
-        r"\bthis is not\b.+\b(it is|it's)\b", re.IGNORECASE
+    "em dash": re.compile(r"\u2014"),
+    "contrastive definition": re.compile(r"\b(rather than|instead of)\b", re.I),
+    "counterfactual": re.compile(
+        r"\bwould (have|be|then|leave|need|make|put|report|send|know)\b", re.I
+    ),
+    "code with mental states": re.compile(
+        r"\b(knows|knew|wants|refuses|cares|needs to know|is meant to)\b", re.I
+    ),
+    "emphasis": re.compile(
+        r"(?<![*\w])\*[A-Za-z][A-Za-z ]{1,25}\*(?![*\w])"
+        r"|\b(genuinely|the whole point|the key point|the very|deliberately"
+        r"|intentionally|quietly|worth noting|obviously|simply|merely)\b",
+        re.I,
+    ),
+    "the reader in the text": re.compile(
+        r"\b(a reader|the reader|someone reading)\b", re.I
     ),
 }
-SKIP = {"AGENTS.md", "CLAUDE.md", ".claude/prose_tripwire.py"}
+# CLAUDE.md quotes these constructions to ban them.
+SKIP = {"CLAUDE.md", ".claude/prose_tripwire.py"}
 
 
 def changed_lines() -> list[tuple[str, int, str]]:

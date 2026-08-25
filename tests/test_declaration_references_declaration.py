@@ -1,9 +1,9 @@
 """Following a ``$Schema.Object`` metadata reference to the text it points at.
 
 A reference means "the text over there is the text here", so resolving one is a
-copy. What matters architecturally is that a *documentation* reference is not a
+copy. What matters architecturally is that a documentation reference is not a
 dependency: it names the object of that name, and the case it exists for is the
-cross-target one — a Warehouse table saying it comes from the Delta table that
+cross-target one, a Warehouse table saying it comes from the Delta table that
 shares its ID.
 """
 

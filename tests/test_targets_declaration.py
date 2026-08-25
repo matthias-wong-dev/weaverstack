@@ -43,7 +43,7 @@ def test_folder_target_refuses_anything_beneath_the_files_area():
     """A folder object lands at Files/<Schema>/<Object>, derived from its identity.
 
     A configurable root would make that derivation false, so the binding cannot
-    offer one — authored code composes this path from identity alone.
+    offer one, authored code composes this path from identity alone.
     """
 
     with pytest.raises(IdentityError, match="nothing to configure"):
@@ -146,7 +146,7 @@ def test_the_same_bare_name_under_two_types_is_two_items():
 
 @weaver_test()
 def test_a_typed_logical_item_is_refused_and_says_what_to_write():
-    """Not a type mismatch to check — a sentence that cannot be written.
+    """Not a type mismatch to check, a sentence that cannot be written.
 
     The old grammar said the word twice and let the two disagree, so the error
     it needed was about disagreement. This one has nothing to disagree with.

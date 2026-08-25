@@ -2,7 +2,7 @@
 
 The architectural claim, against a real workspace: a console that runs several
 commands acquires one credential, one resolver with one item cache, one Livy
-session and one TDS connection per Warehouse — and closes only what it opened.
+session and one TDS connection per Warehouse, and closes only what it opened.
 
 Deliberately cheap. Proving reuse does not require doing expensive work twice;
 it requires showing that the second command finds what the first left behind.

@@ -1,15 +1,15 @@
 """The catalogue a repository describes, derived from source alone.
 
 `catalogue_from_repository` is the logical twin of reading the persisted
-catalogue: one says what *should* be, the other what *is*, and both produce the
+catalogue: one says what should be, the other what is, and both produce the
 same class so the two can be compared.
 
 It lives in production rather than in a fixture on purpose. A projection the
 build itself uses cannot drift; a fixture listing the rows a repository ought to
 produce has to be updated by hand every time an artefact is added, and will be
-wrong the first time someone forgets. So the tests below assert the *properties*
-that make it trustworthy — it is a function of source, it carries no binding, it
-is stable — rather than enumerating rows, which would reintroduce exactly the
+wrong the first time someone forgets. So the tests below assert the properties
+that make it trustworthy. It is a function of source, it carries no binding, it
+is stable, rather than enumerating rows, which would reintroduce exactly the
 hand-maintained list the constructor exists to remove.
 """
 
@@ -50,8 +50,8 @@ def repository(tmp_path):
 def derived(repository, *names):
     """The logical catalogue, narrowed to the objects a test is talking about.
 
-    `from_repository` takes no selection — it is everything the source declares —
-    so narrowing is a separate step, which is the whole point of the contract.
+    `from_repository` takes no selection. It is everything the source declares,
+    so narrowing is a separate step, which is what the contract says.
     """
 
     catalogue = Catalogue.from_repository(repository)
@@ -67,7 +67,7 @@ def derived(repository, *names):
 def test_everything_declared_is_certified(repository):
     """The premise of the whole idea: adding a declaration adds a row.
 
-    No fixture to update, no list to keep in step, and no selection to pass —
+    No fixture to update, no list to keep in step, and no selection to pass,
     the constructor reads the repository, so a new artefact appears in the
     desired catalogue by existing.
     """
@@ -75,8 +75,8 @@ def test_everything_declared_is_certified(repository):
     catalogue = Catalogue.from_repository(repository)
 
     # Scoped to this item: a repository always carries Weaver's own builtin
-    # catalogue item too, and projecting *everything declared* means projecting
-    # that as well — which is right, and worth seeing rather than filtering away
+    # catalogue item too, and projecting everything declared means projecting
+    # that as well, which is right, and worth seeing rather than filtering away
     # inside the constructor.
     #
     # The last three are here for the same reason. An item with load code
@@ -113,7 +113,7 @@ def test_each_object_is_registered_as_what_it_is(repository):
         "CustomerCsv": "folder",
         "Load": "folder",
         # The deployed copies of the two Python documents above. A Python file
-        # authors a structural object *and* is runtime source, and those are two
+        # authors a structural object and is runtime source, and those are two
         # targets rather than one thing described twice.
         "DWG__Customer.py": "file",
         "Raw__CustomerCsv.py": "file",
@@ -145,8 +145,8 @@ def test_signatures_are_the_declarations_own(repository):
 def test_narrowing_is_a_later_step_not_an_input(repository):
     """Selection transforms the desired catalogue; it does not construct it.
 
-    The full logical catalogue claims everything declared. What a *build* may
-    certify is a narrowing of it — and it has to be, because a Registry row means
+    The full logical catalogue claims everything declared. What a build may
+    certify is a narrowing of it, and it has to be, because a Registry row means
     the work succeeded, so publishing the whole declaration would claim objects a
     build omitted or failed to materialise.
     """
@@ -185,7 +185,7 @@ def test_no_installation_row_is_claimed(repository):
 
 @weaver_test()
 def test_no_publication_epoch_is_stamped(repository):
-    """The build_datetime is one value per *installation*, resolved when it runs. A
+    """The build_datetime is one value per installation, resolved when it runs. A
     repository-derived row carrying one would be inventing a build."""
 
     catalogue = derived(repository, CUSTOMER)
@@ -198,9 +198,9 @@ def test_no_publication_epoch_is_stamped(repository):
 def test_an_shortcut_is_not_certified_until_it_is_bound(tmp_path):
     """The logical catalogue declares the shortcut and certifies nothing about it.
 
-    A shortcut is a view in a Warehouse and a table in a Lakehouse. The Shortcut row —
-    this name points at that object — is a declaration and belongs to the source.
-    The Registry row says a physical object exists *and what it is*, which cannot
+    A shortcut is a view in a Warehouse and a table in a Lakehouse. The Shortcut row.
+    This name points at that object, is a declaration and belongs to the source.
+    The Registry row says a physical object exists and what it is, which cannot
     be answered without knowing what it was bound to. So it is not answered.
     """
 
@@ -249,8 +249,8 @@ def test_binding_certifies_the_shortcut_as_what_it_physically_is(tmp_path):
 def test_an_item_that_is_not_bound_is_not_published(tmp_path):
     """Binding and scoping are one decision, which is what removes the hazard.
 
-    A shortcut certified against a *guessed* kind would record a Warehouse shortcut as
-    a table — wrong, quiet, and in the authoritative record. There is no path to
+    A shortcut certified against a guessed kind would record a Warehouse shortcut as
+    a table, wrong, quiet, and in the authoritative record. There is no path to
     that here: naming the item is how it gets published, and naming it means
     stating its kind. An item left out is simply out of scope.
     """
@@ -336,7 +336,7 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
 
     The tripwire for a new artefact, and the first thing that should fail when
     one is added. Adding a member to `OBJECT_TYPES` without teaching the
-    projection to emit it — or without adding a source that owns one — breaks
+    projection to emit it, or without adding a source that owns one, breaks
     this immediately, and names the type that is missing.
 
     Asserted as equality rather than containment on purpose. Containment would
@@ -362,8 +362,8 @@ def test_catalogue_from_repository_has_all_artefacts(tmp_path):
 def test_every_declared_object_and_artefact_is_registered(tmp_path):
     """Nothing the source declares is left out of what it claims to install.
 
-    The other half of the same idea: the first test says every *kind* appears,
-    this says every *instance* does. A projection that emitted one file and
+    The other half of the same idea: the first test says every kind appears,
+    this says every instance does. A projection that emitted one file and
     forgot the rest would satisfy the first and fail here.
     """
 

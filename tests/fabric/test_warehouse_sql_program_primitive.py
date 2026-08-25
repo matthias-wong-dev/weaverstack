@@ -1,17 +1,17 @@
 """Authored Warehouse T-SQL, as a program, executed against a real Warehouse.
 
-``test_tsql_program_declaration.py`` establishes what a body *means* — which
+``test_tsql_program_declaration.py`` establishes what a body means, which
 ``SELECT`` is staging, which names the keys to retire, what is setup. It proves
-none of it runs, because it deliberately parses no T-SQL: the Warehouse is the
+none of it runs, because it parses no T-SQL: the Warehouse is the
 only authority on that.
 
-So this is the other half, and it is deliberately small. Three seams, each one a
+So this is the other half, and it is small. Three seams, each one a
 place where an authoring shape and a generated artefact meet and could plausibly
 disagree with the engine:
 
 .. code-block:: text
 
-    a complex staging query    CTE, join, nested predicate — built and loaded
+    a complex staging query    CTE, join, nested predicate, built and loaded
     authored setup             SELECT INTO #Working, then a query over it
     two result queries         staging, and the keys an incremental load retires
 
@@ -95,8 +95,8 @@ select w.[Customer id], w.[Customer name]
 from #Working as w
 """
 
-#: Authored setup that returns rows of its own. Legal — dynamic SQL is setup,
-#: and Weaver does not read inside it — and it is exactly what makes "the result
+#: Authored setup that returns rows of its own. Legal, dynamic SQL is setup,
+#: and Weaver does not read inside it, and it is exactly what makes "the result
 #: set this procedure produced" a question with no answer.
 NOISY_SETUP = f"""/*
 Table ID: {SCHEMA}.ProgramNoisy
@@ -117,8 +117,8 @@ from [{SCHEMA}].[ProgramCustomer] as c
 where c.[Active] = 1
 """
 
-#: The two-query contract. The staging query is a window — an incremental
-#: source, so what it omits is not retired — and the second query is the only
+#: The two-query contract. The staging query is a window, an incremental
+#: source, so what it omits is not retired, and the second query is the only
 #: thing that can retire anything.
 TWO_QUERY = f"""/*
 Table ID: {SCHEMA}.ProgramRetire
@@ -295,7 +295,7 @@ def test_a_cte_join_and_nested_predicate_builds_with_its_inferred_shape(warehous
     """The gnarly shape, end to end: shape-only build, then a real load.
 
     The build has to guard the CTE's SELECT, the outer SELECT and the one inside
-    the WHERE, and divert only the last of those into its shape table — while
+    the WHERE, and divert only the last of those into its shape table, while
     still producing a table the load's generated procedure can fill.
     """
 
@@ -318,7 +318,7 @@ def test_a_cte_join_and_nested_predicate_builds_with_its_inferred_shape(warehous
 
 @weaver_test(remote=True, resources={"tds"})
 def test_setup_runs_and_the_query_over_it_becomes_staging(warehouse):
-    """``SELECT INTO #Working`` is working, not a result — in both executions."""
+    """``SELECT INTO #Working`` is working, not a result: in both executions."""
 
     _install(warehouse, "ProgramWorking", SETUP_THEN_QUERY)
     _rows(
@@ -399,7 +399,7 @@ def retire_program(warehouse):
 def _retired(warehouse, *, source, retirement):
     """Seed three customers, load, then load again with this claim and source.
 
-    Each claim below is about a *different* second load, so each pays for its
+    Each claim below is about a different second load, so each pays for its
     own pair. What they share is the install, which is neither cheap nor a
     claim, and the base is re-established rather than inherited so that a claim
     reads the same however the module was ordered.
@@ -446,8 +446,8 @@ def _retired_evidence(retire_program):
 def test_absence_does_not_delete_but_a_named_key_does(retire_program):
     """The whole contract, in one load.
 
-    The staging query returns only c1, so c2 is absent — and absence from an
-    incremental window is not a retirement, so c2 stays. c3 is absent *and*
+    The staging query returns only c1, so c2 is absent, and absence from an
+    incremental window is not a retirement, so c2 stays. c3 is absent and
     named by the delete query, and that is what removes it.
     """
 

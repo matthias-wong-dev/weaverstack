@@ -150,7 +150,7 @@ def test_a_run_anchors_without_widening_the_primitive_contract():
     """What a deployed primitive must accept is ``cls(spark, lakehouse=...)``.
 
     A run knows the catalogue and the identity, and an author should not have to
-    accept an argument for either — so the run *asks* the primitive to take them
+    accept an argument for either, so the run asks the primitive to take them
     after it is built. A class meeting only the minimal contract is left alone.
     """
 
@@ -162,7 +162,7 @@ def test_a_run_anchors_without_widening_the_primitive_contract():
 
 
 class _Minimal:
-    """The whole contract, and nothing else — as `tests/support/thin.py` has."""
+    """The whole contract, and nothing else: as `tests/support/thin.py` has."""
 
     def __init__(self, spark, lakehouse=None):
         self.spark = spark
@@ -188,7 +188,7 @@ def test_anchoring_by_name_outside_a_fabric_session_says_so(lakehouse):
 
 @weaver_test()
 def test_a_catalogue_named_by_name_owns_the_session_it_opened(monkeypatch):
-    """Nobody handed it one, so it opened one — and closing it closes that.
+    """Nobody handed it one, so it opened one, and closing it closes that.
 
     A load records how far it read, so the catalogue an object anchors to has to
     be able to write for as long as the object lives. Owning the Session is what
@@ -383,7 +383,7 @@ class DWG__Loading(DWG__Customer):
 
     ``staged`` stands for whatever the author's frame is: the runtime is
     replaced, so what it holds is never read. It is not ``None``, which for a
-    non-incremental table is refused — see ``tests/test_objects_declaration.py``.
+    non-incremental table is refused. See ``tests/test_objects_declaration.py``.
     """
 
     staged = object()
@@ -501,7 +501,7 @@ def test_a_rejecting_load_moves_no_bookmark(monkeypatch, lakehouse):
     result = table.load(fault_tolerant=True)
 
     assert result.bookmark_datetime is None
-    # The status and the statistics are recorded — a rejecting load happened —
+    # The status and the statistics are recorded, a rejecting load happened,
     # and the bookmark is not, because the window was not read.
     assert [name for name, _row in catalogue.writer.updated] == [LOAD_STATUS.name]
     assert catalogue.writer.rows(LOAD_STATUS.name)[0]["result"] == "rejected"

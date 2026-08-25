@@ -1,16 +1,16 @@
-"""Spark SQL table build — shape inference and creation in one action.
+"""Spark SQL table build: shape inference and creation in one action.
 
 A Spark SQL table's shape is settled by asking Spark about its query, so the
 payload is a JSON instruction rather than finished SQL
 (:func:`weaver.declaration.ddl._spark_table_ddl`). This executor completes it:
 
-1. ``DESCRIBE QUERY``, after whatever setup the body needs — one piece of work,
+1. ``DESCRIBE QUERY``, after whatever setup the body needs, as one piece of work,
    so a temporary view the query reads is registered in the session describing it;
 2. validate the columns with the guards a declared schema passes at parse
    (:func:`weaver.declaration.columns.validate_build_columns`);
-3. choose the physical business columns — declared types when declared, the
+3. choose the physical business columns, declared types when declared and the
    query's otherwise;
-4. append Weaver's own columns — the audit columns, and a keyed table's row
+4. append Weaver's own columns, the audit columns and a keyed table's row
    signature;
 5. create the table with strict ``CREATE TABLE``.
 
@@ -68,13 +68,13 @@ class SparkTableExecutor:
         # Both sides are resolved against the batch's destination: the table this
         # creates, and every managed object its query reads. Inferring the shape
         # from a query that resolved through the session's own catalogue would
-        # read some other Lakehouse's table of that name — and then create a table
+        # read some other Lakehouse's table of that name, and then create a table
         # of that shape, silently, in the right place.
         qualified = instruction["object"]
         query = instruction["source_query"]
 
         # Fabric defaults case-sensitive analysis off, and Weaver identities are
-        # exact, so the query and the DDL must share one scope — or a table
+        # exact, so the query and the DDL share one scope. Otherwise a table
         # created as ``CustomerEnriched`` cannot be read by the next action.
 
         # The setup and the describe are one piece of work: a view registered in
@@ -177,7 +177,7 @@ class SparkTableExecutor:
 
         Declared columns carry their declared type and not-null. Inferred columns
         take the query's type and are not null when the primary key or a
-        ``Not null`` names them — the same loading contract, applied to a shape
+        ``Not null`` names them, the same loading contract, applied to a shape
         the query supplied rather than a declaration.
         """
 

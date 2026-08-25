@@ -2,7 +2,7 @@
 
 These tests exist to make an accidental change obvious. The catalogue schema is a
 contract between the built-in Weaver document that materialises it, the reader that tolerates
-older shapes, the projection that fills it and the DML that writes it — four
+older shapes, the projection that fills it and the DML that writes it, four
 places that must agree, and would fail subtly rather than loudly if one drifted.
 
 The invariants that carry architectural weight are asserted structurally rather
@@ -115,8 +115,8 @@ def test_every_table_ends_with_a_signature(each: CatalogueTable):
 def test_the_audit_columns_are_physical_but_not_declared(each: CatalogueTable):
     """Weaver's audit columns are appended by build, so they are not business columns.
 
-    They still have to be known here, because the catalogue's own DML writes them
-    — including the live-row sentinel, since all three are physically not null.
+     They still have to be known here, because the catalogue's own DML writes them
+    , including the live-row sentinel, since all three are physically not null.
     """
 
     assert not set(each.column_names) & set(AUDIT_COLUMN_NAMES)
@@ -159,7 +159,7 @@ def test_every_column_declares_a_type_and_a_description(each: CatalogueTable):
 
 @weaver_test()
 def test_installation_is_keyed_on_the_scope_alone():
-    """One installation per repository per target type — so the key is the scope.
+    """One installation per repository per target type, so the key is the scope.
 
     The bound item's name is an attribute of the installation. Rebinding to a
     different Lakehouse is an update to this row, not a second installation, and
@@ -229,7 +229,7 @@ def test_the_column_dictionary_is_purely_descriptive():
 def test_a_logical_key_is_identified_by_its_columns_not_a_name():
     """No index name, because nothing physical is built and names would be invented.
 
-    The key's own columns identify it, so both belong to the row's identity — which
+    The key's own columns identify it, so both belong to the row's identity, which
     also means a table may declare several alternate keys without collision.
     """
 

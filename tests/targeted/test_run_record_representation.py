@@ -34,7 +34,7 @@ RECONCILE = "Lakehouse/Sales/DWG.CustomerReconcile"
 
 
 def _node(**overrides) -> RunNodeResult:
-    """One settled load node, in whatever state a case wants it."""
+    """One settled load node, in whatever state a case needs it."""
 
     values = {
         "node_id": "DWG.Customer",

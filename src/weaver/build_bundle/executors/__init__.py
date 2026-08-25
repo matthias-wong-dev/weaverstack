@@ -1,9 +1,9 @@
 """Executor dispatch for InstallActions.
 
-``spark_sql`` runs one finished statement — a create, a ``CREATE SCHEMA`` or a
+``spark_sql`` runs one finished statement, a create, a ``CREATE SCHEMA`` or a
 frozen ``DROP``; ``spark_sql_batch`` runs an ordered catalogue payload as one
 reported action. ``spark_table`` completes a table whose shape only the session
-knows, and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse
+carries, and ``folder`` makes or removes a directory. ``tsql`` is the Warehouse
 SQL path.
 ``shortcut`` points one Lakehouse name at another item's object, and ``sql_endpoint``
 syncs a Lakehouse's SQL analytics endpoint.
@@ -14,7 +14,7 @@ own: a create-or-alter is T-SQL, which ``tsql`` runs.
 ``runtime_state`` invalidates the catalogue's current-state rows for objects this
 build has ended the incarnation of.
 
-There is no prune executor — a build freezes its drops as payloads, so the
+There is no prune executor, a build freezes its drops as payloads, so the
 installer never enumerates the target.
 
 Every Spark executor addresses the destination its batch names, never what the
@@ -36,7 +36,7 @@ from .tsql import TSqlBatchExecutor, TSqlExecutor
 
 
 def default_executors() -> dict[str, ActionExecutor]:
-    """The executor registry, by name — the names actions carry."""
+    """The executor registry, by name, the names actions carry."""
 
     return {
         SparkSqlExecutor.name: SparkSqlExecutor(),

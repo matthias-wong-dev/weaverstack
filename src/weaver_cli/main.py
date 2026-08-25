@@ -10,7 +10,7 @@ import weaver
 from weaver.errors import CommandError, WeaverError
 
 #: The capacity verbs, kept here so building the parser imports nothing from
-#: `weaver.fabric` — `weaver --help` should not pay for a transport.
+#: `weaver.fabric`, because `weaver --help` should not pay for a transport.
 CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
 #: Named in help text. Spelled out here rather than imported at module scope so
@@ -20,12 +20,12 @@ COMPOSE_DEFAULT_FILE = "compose.yml"
 
 # --- what each command will want ----------------------------------------------
 #
-# Declared here, from parsed arguments alone, and deliberately coarse. A Session
-# cannot work these out — it has no idea what a build is, and a Session that did
+# Declared here, from parsed arguments alone, and coarse. A Session
+# cannot work these out. It holds no notion of what a build is, and one that did
 # would be a second place deciding what an operation does. So commands declare
 # and the Session prepares.
 #
-# These are a *superset*, because arguments cannot know what a repository or a
+# These are a superset, because arguments cannot know what a repository or a
 # catalogue turns out to contain. `load Lakehouse/Sales` says Livy may be needed
 # because a Lakehouse usually holds Python primitives, not because this estate
 # does. Exact routing comes later, from the BuildBundle or the RunGraph, and
@@ -73,8 +73,8 @@ def _requires_build(args) -> frozenset[str]:
 
     A build that names only Warehouses needs no Spark: its objects are T-SQL and
     the catalogue it writes is a Warehouse too. Declaring Livy anyway would have
-    the console start a Spark session — a minute, and a capacity's only slot —
-    for a build that never submits one.
+    the console start a Spark session, costing a minute and a capacity's only
+    slot, for a build that never submits one.
 
     A build that names nothing has not said, so it gets the superset: bindings
     can come from workspace configuration, and what a repository turns out to
@@ -493,8 +493,8 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
     Fabric pytest run attached to the Environment can ``import weaver`` with no
     source shipped into a Lakehouse.
 
-    The result is always printed, and it is the JSON — a command's result is
-    what it produced, not an option. Progress goes to stderr and the result to
+    The result is always printed, and it is the JSON: a command's result is what
+    it produced, not an option. Progress goes to stderr and the result to
     stdout, so ``weaver fabric environment publish Runtime | jq`` works while a person still watches the
     publish tick over.
     """
@@ -596,8 +596,8 @@ def _add_workspace_args(
 def _prefer_desktop_credential() -> None:
     """Pin the Azure CLI credential for desktop commands.
 
-    Credential choice is the CLI's policy, not the core's. Best-effort — if the
-    Fabric extra is not installed there is nothing to pin, and a local command
+    Credential choice is the CLI's policy, not the core's. Best-effort, because
+    if the Fabric extra is not installed there is nothing to pin, and a local
     never needs it.
     """
 
@@ -612,7 +612,7 @@ def _desktop_store(workspace):
     """The store a desktop command uses to reach a workspace.
 
     Reaching into Fabric is a crossing, so the CLI constructs the
-    OneLakeDfsClient here — core never turns a Workspace into a DFS client.
+    OneLakeDfsClient here. Core never turns a Workspace into a DFS client.
     """
 
     from weaver.fabric import OneLakeDfsClient
@@ -636,7 +636,7 @@ def _resolve_workspace(args: argparse.Namespace):
     Naming the workspace the session is already open on says what is already
     true. Naming another one is refused: one Session is one Fabric workspace.
 
-    Inheritance is only ever from the session's *starting* workspace. A default
+    Inheritance is only ever from the session's starting workspace. A default
     accumulated from whichever command ran last would mean the next command
     silently borrowing another workspace's Environment.
     """
@@ -664,7 +664,7 @@ def _refuse_another_workspace(args: argparse.Namespace, inherited) -> None:
 
     A Session holds one Fabric workspace for its whole life, so a command naming
     a different one has nowhere to run. Refused here rather than resolved and
-    then quietly ignored.
+    then ignored.
     """
 
     from weaver.config import resolve_workspace
@@ -730,8 +730,8 @@ def _session(args: argparse.Namespace):
 def _running_session(args: argparse.Namespace, workspace):
     """The Session this command runs in, borrowed or opened for it.
 
-    Operations take names and a Session, never a resolved Workspace — so the
-    CLI, which resolves one for its own inheritance and override rules, is what
+    Operations take names and a Session, never a resolved Workspace, so the CLI,
+    which resolves one for its own inheritance and override rules, is what
     turns it into a Session. Borrowed from ``weaver session`` where there is
     one, and closed here only when this opened it.
     """
@@ -891,12 +891,12 @@ def handle_load(args: argparse.Namespace) -> int:
 def _load_once(args: argparse.Namespace) -> int:
     """Adapt command-line values to :func:`weaver.load`, wherever it has to run.
 
-    The CLI owns exactly one thing the API does not: the *host boundary*. A load
+    The CLI owns exactly one thing the API does not: the host boundary. A load
     runs where the data is, so a desktop asking for a Fabric workspace has to
-    reach into a session to get one — and that crossing is the CLI's, the same
-    way it is for ``build`` and ``unbind``. Everything else — resolving the
-    workspace, validating targets, planning, orchestrating, reporting — happens
-    once, inside :func:`weaver.load`, whichever side of the boundary it runs on.
+    reach into a session to get one, and that crossing is the CLI's, as it is for
+    ``build`` and ``unbind``. Resolving the workspace, validating targets,
+    planning, orchestrating and reporting all happen once, inside
+    :func:`weaver.load`, whichever side of the boundary it runs on.
     """
 
     import json
@@ -991,9 +991,8 @@ def _test_once(args: argparse.Namespace) -> int:
     validation reads the data, so it runs where the data is.
 
     A failing validation exits non-zero. That is what makes ``weaver test``
-    usable in a pipeline — the report is the evidence and the exit code is the
-    verdict — and it is why the API returns a report where this returns a
-    status.
+    usable in a pipeline: the report is the evidence and the exit code is the
+    verdict. It is why the API returns a report where this returns a status.
     """
 
     import json

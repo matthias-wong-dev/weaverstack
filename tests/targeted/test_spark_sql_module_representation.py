@@ -6,7 +6,7 @@ the contract the primitive reads at run time; the authored SQL, because it is
 what the primitive executes; and the class name, because it is what the
 orchestrator imports by.
 
-The rest of these assert what the module *is* — that it is importable Python,
+The rest of these assert what the module is. That it is importable Python,
 that it announces itself as generated, and that it carries object tokens rather
 than resolved names. Nothing here needs Spark: the module is text until someone
 runs it.
@@ -204,7 +204,7 @@ def test_the_encoder_round_trips_text_designed_to_break_it(text):
 def test_the_encoder_round_trips_every_short_string_over_a_hostile_alphabet():
     """Exhaustive rather than representative.
 
-    The failure this guards against is a *specific* character sequence closing
+    The failure this guards against is a specific character sequence closing
     the literal early, and a handful of examples is exactly the wrong shape of
     evidence for that. Every string up to four characters over the three
     characters that can do it is cheap and settles the question.

@@ -1,4 +1,4 @@
-"""``SourceDocument.create_ddl`` — the generated *create* DDL per source.
+"""``SourceDocument.create_ddl``, the generated create DDL per source.
 
 Build creates structure, not data. A Delta table (Python or Spark SQL) becomes a
 ``CREATE TABLE`` over its declared columns; a view becomes strict ``CREATE
@@ -92,7 +92,7 @@ def test_view_preserves_the_body_apart_from_addressing_its_references():
     assert ADDRESSED_BODY in ddl.content
     # Only the reference moved. Line breaks, indentation and casing are the
     # author's, because a build freezes text it is going to execute and must not
-    # quietly reformat it.
+    # reformat it.
     assert ddl.content.count("\n    CustomerId,\n    CustomerName\n") == 1
     assert "where IsActive = true" in ddl.content
 
@@ -200,8 +200,8 @@ def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
 def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     """A Spark SQL table's shape is only settled by running its query, so its
     payload is a deterministic instruction the ``spark_table`` executor completes
-    at install — not finished SQL (how-does-build-work §2). The query therefore
-    *does* belong in the payload; it is executed at install, not at build."""
+    at install, not finished SQL (how-does-build-work §2). The query therefore
+    does belong in the payload; it is executed at install, not at build."""
 
     ddl = _doc("DWG.CustomerCount.sql", SPARK_TABLE_SOURCE).create_ddl(
         destination=SALES
@@ -233,7 +233,7 @@ def test_a_preamble_is_carried_apart_from_the_query_whose_shape_is_read():
 
     Handing the whole body to one ``spark.sql`` call fails on the first
     semicolon, so the setup travels separately and runs for its effect. Which
-    matters more now than it did: a body may also carry a *second* query naming
+    matters more now than it did: a body may also carry a second query naming
     the keys to delete, and that one says nothing about the table's shape
     either.
     """

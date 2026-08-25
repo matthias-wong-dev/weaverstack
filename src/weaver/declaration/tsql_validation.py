@@ -18,7 +18,7 @@ from .validation_program import validate_validation_contract
 
 #: The diagnostic columns, ahead of the validation's own. Snake case and
 #: reserved, matching what :mod:`weaver.runtime.test_compare` adds on the Spark
-#: side — one vocabulary, whichever engine produced the rows.
+#: side. One vocabulary, whichever engine produced the rows.
 SIDE_COLUMN = "_weaver_side"
 SK_COLUMN = "_weaver_sk"
 EXPECTED = "expected"
@@ -32,13 +32,13 @@ TEST_PARAMETERS = (("missing_count", "bigint"), ("unexpected_count", "bigint"))
 ASSUMPTION_PARAMETERS = (("violation_count", "bigint"),)
 RESULT_PARAMETERS = {TEST: TEST_PARAMETERS, ASSUMPTION: ASSUMPTION_PARAMETERS}
 
-#: The flag every validation procedure carries, defaulting to *returning* the
-#: diagnostics. A person running one by hand wants the evidence; orchestration
+#: The flag every validation procedure carries, defaulting to returning the
+#: diagnostics. A person running one by hand needs the evidence; orchestration
 #: is the caller that has to ask for silence, and it knows to.
 SUPPRESS_PARAMETER = "suppress_result_set"
 
 #: Banners marking where the author's own code sits in the generated procedure,
-#: so a reader can tell what they wrote from what Weaver added. The same two
+#: so authored text is distinguishable from what Weaver added. The same two
 #: words a generated load procedure uses.
 SETUP_BANNER = "/*-- Pre-processing --*/"
 POSTPROCESSING_BANNER = "/*-- Post-processing --*/"
@@ -50,7 +50,7 @@ def generate_tsql_validation_script(
     """The installable procedure for one Warehouse validation."""
 
     core = validation_body(document, body)
-    # The counts first and the flag last, because that is the order a reader
+    # The counts first and the flag last, because that is the order the
     # meets them in: what the validation found, then how much of it to return.
     declared = [
         f"@{name} {type_name} = null output"
@@ -198,9 +198,9 @@ def _difference(into: str, left: str, right: str) -> str:
 def _diagnostics(
     document: SesDocument, missing: str, unexpected: str, qualified: str
 ) -> str:
-    """The discrepancy rows, keyed so a reader can pair them.
+    """The discrepancy rows, keyed so the two sides pair.
 
-    Returned only when the caller wants them, because they may be large and may
+    Returned only when the caller needs them, because they may be large and may
     carry sensitive business data.
     """
 
@@ -296,7 +296,7 @@ def _shape_guard(expected: str, actual: str, qualified: str) -> str:
         "    declare @weaver_shape nvarchar(400) = concat(\n"
         f"        N'{_escape(qualified)}: expected has ', @weaver_expected_columns,\n"
         "        N' column(s) and actual has ', @weaver_actual_columns,\n"
-        "        N' — the two sides of a Test must be the same shape to be compared');\n"
+        "        N', the two sides of a Test must be the same shape to be compared');\n"
         "    throw 51020, @weaver_shape, 1;\n"
         "end;"
     )
@@ -339,7 +339,7 @@ def _capture_contract_queries(body: str, into: tuple[str, ...]) -> str:
     """The authored body, with each contract query diverted into a temp table.
 
     A single pass over the original text, so everything other than the contract
-    queries travels verbatim and in place — setup, comments, formatting,
+    queries travels verbatim and in place. Setup, comments, formatting,
     separators. That is why this splices offsets rather than reassembling
     statements.
 

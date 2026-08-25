@@ -46,7 +46,7 @@ def current_workspace_name() -> str | None:
     """The Fabric workspace this process is running in, or None outside one.
 
     Read from the notebook runtime rather than from configuration, because it is
-    the one thing a process inside Fabric knows about itself that no caller had
+    the one thing a process inside Fabric can tell about itself that no caller had
     to tell it.
     """
 

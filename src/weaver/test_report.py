@@ -11,9 +11,9 @@ from typing import Any, Sequence
 
 #: The validation ran and found nothing.
 PASSED = "passed"
-#: The validation ran and found evidence — discrepancies, or violations.
+#: The validation ran and found evidence, discrepancies, or violations.
 FAILED = "failed"
-#: The validation could not be evaluated. Not a failure *of* the data.
+#: The validation could not be evaluated. Not a failure of the data.
 INVALID = "invalid"
 #: Planned and not run, because the caller asked what would run.
 PLANNED = "planned"

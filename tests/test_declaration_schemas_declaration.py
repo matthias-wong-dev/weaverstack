@@ -195,7 +195,7 @@ def test_the_error_names_the_expected_schema_file(tmp_path):
 #
 # A case-insensitive file system cannot hold both Abc.yml and abc.yml, so the
 # rejection is driven through the reader directly with a stub store rather than
-# real files — it is a case-sensitive file system this guards against.
+# real files. It is a case-sensitive file system this guards against.
 
 
 class _StubStore:

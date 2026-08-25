@@ -29,6 +29,11 @@ DEFAULT_OPERATION_POLL_INTERVAL = 2.0
 CONNECTION_ATTEMPTS = 4
 CONNECTION_BACKOFF = 2.0
 
+#: Statuses where Fabric answered "not now". It refused the request rather than
+#: acting on it, so repeating it is safe whatever the method. A 500 is not here:
+#: it can mean the work was done and the reply was not.
+TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
+
 
 class FabricError(WeaverError):
     """Raised when a Fabric API call fails."""
@@ -68,6 +73,18 @@ def never_sent(exc: BaseException) -> bool:
         if isinstance(reason, BaseException):
             frontier.append(reason)
     return False
+
+
+def retry_delay(response, attempt: int) -> float:
+    """How long to wait: what ``Retry-After`` asked for, or a widening gap."""
+
+    asked = response.headers.get("Retry-After")
+    if asked:
+        try:
+            return max(0.0, float(asked))
+        except ValueError:
+            pass
+    return CONNECTION_BACKOFF * attempt
 
 
 def send(method: str, url: str, **kwargs):
@@ -125,6 +142,8 @@ class FabricClient:
         payload: Any = None,
         expected: tuple[int, ...] = (200, 201, 202),
     ):
+        """One Fabric call, repeated while Fabric answers "not now"."""
+
         import requests
 
         url = (
@@ -138,28 +157,35 @@ class FabricClient:
             else nullcontext()
         )
         with observation:
-            try:
-                response = send(
-                    method,
-                    url,
-                    headers={
-                        "Authorization": f"Bearer {self.token}",
-                        "Content-Type": "application/json",
-                    },
-                    data=json.dumps(payload) if payload is not None else None,
-                    timeout=self.timeout,
-                )
-            except requests.exceptions.RequestException as exc:
-                raise FabricError(
-                    f"{method} {url} could not be reached: {exc}"
-                ) from exc
-            if response.status_code not in expected:
+            for attempt in range(1, CONNECTION_ATTEMPTS + 1):
+                try:
+                    response = send(
+                        method,
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {self.token}",
+                            "Content-Type": "application/json",
+                        },
+                        data=json.dumps(payload) if payload is not None else None,
+                        timeout=self.timeout,
+                    )
+                except requests.exceptions.RequestException as exc:
+                    raise FabricError(
+                        f"{method} {url} could not be reached: {exc}"
+                    ) from exc
+                if response.status_code in expected:
+                    return response
+                if (
+                    response.status_code in TRANSIENT_STATUSES
+                    and attempt < CONNECTION_ATTEMPTS
+                ):
+                    time.sleep(retry_delay(response, attempt))
+                    continue
                 raise FabricError(
                     f"{method} {url} returned {response.status_code}: "
                     f"{response.text.strip()[:400] or 'no body'}",
                     status_code=response.status_code,
                 )
-            return response
 
     def get_json(self, path: str) -> dict:
         response = self.request("GET", path, expected=(200,))

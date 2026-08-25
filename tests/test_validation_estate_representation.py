@@ -2,7 +2,7 @@
 
 The claim §14 of the design turns on: a validation has **no Registry row**, so
 the estate is recovered from `_.TestDictionary` and each declaration is
-connected to its installed primitive by *computing* the artefact identity — the
+connected to its installed primitive by computing the artefact identity. The
 same function the build claimed it with. Dependency rows are associated against
 logical IDs for the same reason.
 
@@ -212,7 +212,7 @@ def test_the_installed_primitive_supplies_the_object_type(catalogue):
 
 @weaver_test()
 def test_dependencies_are_associated_with_the_logical_validation(catalogue):
-    """Not through Registry — there is no Registry row to go through."""
+    """Not through Registry: there is no Registry row to go through."""
 
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)

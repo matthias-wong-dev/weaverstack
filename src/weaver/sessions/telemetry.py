@@ -2,7 +2,7 @@
 
 The reporting frames on :class:`~weaver.sessions.base.Session` say why work is
 happening.  This module records the other half: the external resource crossed,
-the operation, elapsed time, and whether it failed.  It deliberately remains a
+the operation, elapsed time, and whether it failed.  It remains a
 small ledger rather than a tracing framework.
 """
 
@@ -217,7 +217,7 @@ class SessionTelemetry:
 
     @property
     def lifetime(self) -> float:
-        """Seconds since this Session's telemetry began — its own lifetime."""
+        """Seconds since this Session's telemetry began: its own lifetime."""
 
         return time.monotonic() - self._started
 

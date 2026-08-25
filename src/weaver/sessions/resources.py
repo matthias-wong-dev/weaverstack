@@ -36,8 +36,8 @@ class Resource(Generic[T]):
     """A lazily acquired, shared, closable thing owned by a Session.
 
     ``acquire`` is called at most once per attempt and never concurrently.
-    ``release`` is called only for a value this resource actually acquired —
-    a Session never closes what it was given.
+    ``release`` is called only for a value this resource actually acquired, so a
+    Session never closes what it was given.
     """
 
     def __init__(
@@ -79,7 +79,7 @@ class Resource(Generic[T]):
 
     @property
     def acquired(self) -> bool:
-        """Whether this Session actually holds the thing — so must close it."""
+        """Whether this Session actually holds the thing, so must close it."""
 
         return self.state in {ResourceState.READY, ResourceState.STARTING}
 
@@ -166,7 +166,7 @@ class Resource(Generic[T]):
         return value
 
     def fail(self, error: BaseException | None = None) -> None:
-        """Declare the resource dead — the caller has seen it is unusable.
+        """Declare the resource dead, the caller has seen it is unusable.
 
         For a resource fault, not a statement fault: a failed SQL statement
         leaves a healthy connection.
@@ -231,7 +231,7 @@ class Resource(Generic[T]):
         try:
             value = future.result(self._close_timeout)
         except TimeoutError:
-            # Still starting, and out of patience. Abandoned deliberately: an
+            # Still starting, and out of patience. Abandoned: an
             # exit that cannot complete is worse than a resource the platform
             # will reap on its own.
             if self._telemetry is not None:

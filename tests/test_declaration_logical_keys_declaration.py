@@ -1,8 +1,8 @@
-"""Unique keys and foreign keys — the semantic model, not physical constraints.
+"""Unique keys and foreign keys, the semantic model, not physical constraints.
 
 These declarations create nothing. No index is built and no constraint is
 enforced; they record that a column set identifies a row, or that it means
-another object's row. The catalogue projects them so a reader can see the model,
+another object's row. The catalogue projects them so the model is visible,
 and later quality checks can ask whether it is complete.
 
 Because they are semantic, they carry no names, several relationships may run
@@ -51,7 +51,7 @@ def parse(*blocks: str, language: str = PYTHON):
     """Parse one or more YAML fragments, each dedented on its own.
 
     Fragments are written at their call site's indentation, so each is dedented
-    separately before they are joined — a shared prefix across a constant and an
+    separately before they are joined, a shared prefix across a constant and an
     indented literal would otherwise be no prefix at all.
     """
 

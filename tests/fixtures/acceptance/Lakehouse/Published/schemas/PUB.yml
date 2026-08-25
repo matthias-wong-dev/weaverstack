@@ -1,0 +1,4 @@
+Schema ID: PUB
+
+Description: |
+  The final result, back in a Lakehouse where Spark can read it.

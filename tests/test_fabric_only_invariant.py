@@ -2,8 +2,8 @@
 
 A retirement stays retired when something fails if it returns. These are the
 names, imports and payload shapes a second, non-Fabric workspace brought with
-it: each was deleted deliberately, and each would be easy to reintroduce by
-habit — a stray
+it: each was deleted, and each would be easy to reintroduce by
+habit, a stray
 ``import pyspark`` in a module that runs on a desktop, a token in a payload that
 is meant to be finished SQL, a second workspace kind.
 
@@ -25,7 +25,7 @@ CORE = SOURCE / "weaver"
 CLI = SOURCE / "weaver_cli"
 
 #: The only modules that may import PySpark: they run inside a Fabric session,
-#: where Spark is the host's own and authored runtime code genuinely holds it.
+#: where Spark is the host's own and authored runtime code holds it.
 #: Everything else is desktop or shared code, and a desktop has no Spark.
 HOSTED_MODULES = frozenset(
     {
@@ -72,8 +72,8 @@ RETIRED = (
     "read_installed_bookmarks",
     "resolve_installed_object",
     # The switch that said who records. Which interface was called decides it
-    # now — `_load()` against `load()`, `read()` against `run()`, an object's own
-    # procedure against `_.Load` — so there is no flag a caller can get wrong.
+    # now, `_load()` against `load()`, `read()` against `run()`, an object's own
+    # procedure against `_.Load`, so there is no flag a caller can get wrong.
     "update_catalogue",
     "catalogue_write",
     # Bookmark-specific build plumbing, generalised into the runtime-table
@@ -217,7 +217,7 @@ def test_no_module_emits_an_object_or_schema_token(path: Path):
 
     ``{{object:Schema.Name}}`` was how a payload deferred a name to install
     time. The Builder decides it now, so a token in a payload would be a name
-    nothing resolves — and unresolved token syntax is not valid Spark SQL.
+    nothing resolves, and unresolved token syntax is not valid Spark SQL.
     """
 
     text = path.read_text(encoding="utf-8")
@@ -231,7 +231,7 @@ def test_no_module_emits_an_object_or_schema_token(path: Path):
 
 @weaver_test()
 def test_the_only_payload_token_left_is_the_publication_epoch():
-    """One value genuinely cannot be frozen, and it is named.
+    """One value cannot be frozen, and it is named.
 
     A rendered clock would make the same repository produce different payload
     bytes on every run, and a bundle's identity is its bytes.

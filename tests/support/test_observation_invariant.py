@@ -1,10 +1,10 @@
 """The evidence payload, tested where it belongs: in pure Python, with no Fabric.
 
 This is the machinery every Fabric assertion now reads through, so a defect in it
-would not fail — it would quietly assert something else. It has no Fabric in it
+would not fail. It would assert something else. It has no Fabric in it
 worth speaking of, so nothing here needs a workspace.
 
-The body is checked by *running* it against a fake Spark rather than by matching
+The body is checked by running it against a fake Spark rather than by matching
 its text. What matters is that it collects the right evidence under the right
 names, not how it spells the loop.
 """

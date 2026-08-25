@@ -1,4 +1,4 @@
-"""The intentionally small notebook-facing product namespace."""
+"""The small notebook-facing product namespace."""
 
 from __future__ import annotations
 

@@ -296,7 +296,7 @@ def test_empty_other_underscore_directory_is_still_discovered(tmp_path):
 
 @weaver_test()
 def test_the_owning_item_decides_which_sql_a_document_speaks(tmp_path):
-    """One filename, two dialects — the directory above it is the difference.
+    """One filename, two dialects, the directory above it is the difference.
 
     This is why a document needs no dialect suffix: a Lakehouse materialises
     Delta through Spark and a Warehouse materialises through T-SQL, so the

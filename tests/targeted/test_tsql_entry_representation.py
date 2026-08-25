@@ -1,7 +1,7 @@
 """What the generated ``_.Load`` and ``_.Test`` contain.
 
 Pure Python: they are generated from the item's declarations, so every input to
-the decision can be constructed. That a Fabric Warehouse *accepts* them is a
+the decision can be constructed. That a Fabric Warehouse accepts them is a
 claim about Fabric and is made where there is one.
 """
 
@@ -171,7 +171,7 @@ def test_a_validation_that_threw_is_an_error_whatever_threw_it(
     """Where the two kinds of work part, and both halves are asserted.
 
     A load can refuse and mean it. A validation that threw produced no judgement
-    at all — a shape mismatch, a key that repeats — so there is nothing for
+    at all, a shape mismatch, a key that repeats, so there is nothing for
     Failed to mean, and Weaver's own refusal range has no branch here.
     """
 
@@ -259,7 +259,7 @@ def test_a_standalone_call_is_its_own_workflow(load_script):
 
 @weaver_test()
 def test_the_statistic_says_a_reload_is_not_what_this_was(load_script):
-    """Written rather than left null, so a reader counting reloads gets zero."""
+    """Written rather than left null, so counting reloads gives zero."""
 
     assert "cast(0 as bit)" in load_script
     assert "cast(coalesce(@is_static_skip, 0) as bit)" in load_script

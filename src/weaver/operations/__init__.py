@@ -3,7 +3,7 @@
 Deliberately re-exporting nothing. The public names and the module names are
 the same words, so a package that exported ``build`` would shadow ``build.py``
 and ``weaver.operations.build`` would mean the callable in one line and the
-module in the next — which is the collision this package was made to remove.
+module in the next, which is the collision this package was made to remove.
 
 So each name has exactly one meaning in each namespace:
 

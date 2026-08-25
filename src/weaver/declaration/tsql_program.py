@@ -19,8 +19,8 @@ class TsqlStatement:
 
     ``sql`` is sliced out of the body rather than reassembled, so an author's
     formatting, comments and case survive into the generated artefact exactly as
-    written — which is what makes a generated procedure readable by the person
-    who wrote the query in it.
+    written, which is what makes a generated procedure readable by the person who
+    wrote the query in it.
     """
 
     sql: str
@@ -66,9 +66,9 @@ def parse_tsql_program(body: str, *, what: str, error: type[Exception]) -> TsqlP
     """Split and classify one authored T-SQL body.
 
     ``GO`` is refused rather than split on. It is a client-side batch separator
-    with no meaning to the server, and the load installs the body *inside* a
-    stored procedure, where it is a syntax error — so a body containing one
-    could never load, and saying so here costs an author a clear message instead
+    with no meaning to the server, and the load installs the body inside a
+    stored procedure, where it is a syntax error, so a body containing one could
+    never load, and saying so here costs an author a clear message instead
     of an obscure failure at install time.
     """
 
@@ -106,13 +106,13 @@ def validate_query_contract(
             f"{what}: a Warehouse table must produce its rows from a visible "
             "SELECT, and this body has none. Setup statements alone stage "
             "nothing, and a result set inside EXEC or sp_executesql is not one "
-            "Weaver can see — end the body with the SELECT that produces the "
+            "Weaver can see. End the body with the SELECT that produces the "
             "rows."
         )
     if len(queries) > 2:
         raise error(
             f"{what}: a Warehouse table produces its rows and, at most, the keys "
-            f"to delete — {len(queries)} statements produce results. Divert the "
+            f"to delete, and {len(queries)} statements produce results. Divert the "
             "intermediate ones with SELECT … INTO #temp."
         )
     if len(queries) == 1:
@@ -120,11 +120,11 @@ def validate_query_contract(
     if not primary_key:
         raise error(
             f"{what}: a second query names the rows to delete, which needs a "
-            "primary key to name them by — declare one, or return one query"
+            "primary key to name them by. Declare one, or return one query"
         )
     if not incremental:
         raise error(
-            f"{what}: a non-incremental table cannot name explicit deletes — the "
+            f"{what}: a non-incremental table cannot name explicit deletes. The "
             "source is the whole truth, so a row's absence from the staging "
             "query is what retires it. Return one query, or declare "
             "Incremental: true."
@@ -137,7 +137,7 @@ def _in_source_order(
     """The body cut at its result queries, everything between them setup.
 
     Order is the whole of what a load needs: setup written between two queries
-    was written there deliberately, and running it anywhere else would change
+    was written there, and running it anywhere else would change
     what the second query sees.
     """
 

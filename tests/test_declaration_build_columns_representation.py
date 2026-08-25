@@ -1,4 +1,4 @@
-"""The shared build-time column model — the deferred twin of parse-time guards.
+"""The shared build-time column model, the deferred twin of parse-time guards.
 
 An inferred SQL table cannot have its column-referencing metadata checked until
 the query's output shape is known, which is at build. These tests pin the rules

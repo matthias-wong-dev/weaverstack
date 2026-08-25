@@ -1,8 +1,8 @@
 """Compiling a ``.sql`` validation into the module a build deploys.
 
-A Spark SQL Test and a Spark SQL table compile to the same shape of file — the
+A Spark SQL Test and a Spark SQL table compile to the same shape of file. The
 authored header as the docstring, the authored SQL under ``SQL``, a Weaver base
-supplying everything else — and differ in the base class and one word on the
+supplying everything else, and differ in the base class and one word on the
 marker line. These assert that the difference is exactly that, because a
 validation acquiring a compilation path of its own is how the estate ends up
 with two ideas of what a Test is.
@@ -100,7 +100,7 @@ def test_an_assumption_subclasses_the_generated_assumption_base(assumption_modul
 
 @weaver_test()
 def test_the_marker_says_which_kind_was_generated(test_module, assumption_module):
-    """The installer needs "generated"; a reader opening the file wants more."""
+    """The installer needs "generated"; the file itself says more."""
 
     assert test_module.splitlines()[0].startswith(f"{GENERATED_MODULE_MARKER} test —")
     assert assumption_module.splitlines()[0].startswith(

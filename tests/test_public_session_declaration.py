@@ -1,13 +1,13 @@
-"""``weaver.session()`` — the reusable context, and what opening one costs.
+"""``weaver.session()``, the reusable context, and what opening one costs.
 
 Two claims. The first is that it exists as a callable at all: ``weaver.session``
-used to be the session *package*, so the name a caller would reach for was
+used to be the session package, so the name a caller would reach for was
 already taken by a module. That collision is why the package is now
 ``weaver.sessions``.
 
 The second is that opening one is cheap. Everything a Session holds is expensive
 and everything is lazy, so a caller who opens one and does nothing has paid for
-a credential object and nothing else — no resolved items, no Livy session, no
+a credential object and nothing else, no resolved items, no Livy session, no
 TDS connection, nothing published.
 """
 
@@ -27,7 +27,7 @@ def test_the_public_name_is_a_callable_rather_than_a_module():
     """The collision the rename removed.
 
     ``import weaver; weaver.session(...)`` is the documented form, and a module
-    is not callable — so this is the whole reason ``weaver.session`` could not
+    is not callable, so this is the whole reason ``weaver.session`` could not
     stay the package's name.
     """
 
@@ -103,7 +103,7 @@ def test_opening_a_session_acquires_nothing(desktop_credential):
     """The property that makes one Session per script the right default.
 
     A Session that resolved items or started Livy on open would make holding one
-    expensive, and callers would go back to opening one per operation — which is
+    expensive, and callers would go back to opening one per operation, which is
     the cost this exists to remove.
     """
 

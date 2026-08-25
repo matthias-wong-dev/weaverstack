@@ -1,9 +1,9 @@
 """What an authored SQL validation's body means, as a program.
 
 Both dialects already split a body into statements and say which of them produce
-rows — :mod:`weaver.declaration.spark_sql_program` and
+rows: :mod:`weaver.declaration.spark_sql_program` and
 :mod:`weaver.declaration.tsql_program`. A validation's contract is a statement
-about *how many* of those there are and what each one is for, and that is the
+about how many of those there are and what each one is for, and that is the
 same statement in either dialect:
 
 .. code-block:: text
@@ -18,8 +18,8 @@ Setup is unrestricted and comes first: anything returning no rows is setup,
 however much of it there is. What the contract constrains is the final one or
 two result-producing queries, because those are what the comparison reads.
 
-An undetermined count is not a refusal — dynamic SQL puts it beyond static
-reach, and a validation whose setup builds something dynamically is ordinary.
+An undetermined count is not a refusal. Dynamic SQL puts it beyond static reach,
+and a validation whose setup builds something dynamically is ordinary.
 Whether the final queries are capturable is answered where the rendering
 happens.
 """
@@ -60,8 +60,8 @@ def validate_validation_contract(
     """Refuse a program whose queries cannot be this kind of validation.
 
     Called from repository parsing, where it stops a build, and again from the
-    deployed primitive, where it stops a run — the same rule at both ends,
-    because a module edited by hand after deployment never met the first.
+    deployed primitive, where it stops a run. One rule at both ends, because a
+    module edited by hand after deployment never met the first.
     """
 
     required, contract = CONTRACT[kind]
@@ -76,11 +76,11 @@ def validate_validation_contract(
             f"{what}: {article} {kind} ends in the "
             f"{'queries' if required > 1 else 'query'} that "
             f"produce{'' if required > 1 else 's'} {contract}, and this body has "
-            "none — setup statements alone compare nothing"
+            "none. Setup statements alone compare nothing"
         )
     raise error(
         f"{what}: {article} {kind} must produce exactly {required} result "
-        f"{'sets' if required > 1 else 'set'} — {contract} — and this body produces "
+        f"{'sets' if required > 1 else 'set'}, being {contract}, and this body produces "
         f"{found}. Statements that return no rows are setup and may precede them "
         "freely; turn an intermediate query into a temporary view."
     )
@@ -92,9 +92,9 @@ def _refuse_setup_after_the_contract(
     """The contract queries end the body; nothing runs after them.
 
     Counting them is not enough, and the reason is Spark. A ``SELECT`` there is
-    lazy: the frame is built where it is written and *materialised* later, so a
-    setup statement sitting after the first contract query — replacing a
-    temporary view, say — changes what that query will read by the time anyone
+    lazy: the frame is built where it is written and materialised later, so a
+    setup statement sitting after the first contract query, replacing a temporary
+    view for instance, changes what that query will read by the time anyone
     reads it. T-SQL has the opposite behaviour, because the compiler captures
     each contract query into a temp table at its authored position.
 
@@ -129,7 +129,7 @@ def _refuse_setup_after_the_contract(
         f"{len(trailing)} statement(s) follow. Setup belongs before them: a "
         "Spark SQL query is lazy, so a statement that runs afterwards can change "
         "what it reads before anyone reads it, while T-SQL captures it where it "
-        "was written — so the same body would mean two different things on the "
+        "was written, so the same body would mean two different things on the "
         "two engines. Move the setup above the first query."
     )
 

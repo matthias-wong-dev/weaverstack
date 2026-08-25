@@ -53,7 +53,7 @@ class SqlStatement:
 def parse_statements(sql_text: str) -> tuple[SqlStatement, ...]:
     """Every top-level statement in ``sql_text``, in source order.
 
-    Comment-only and empty runs are not statements and are dropped — including a
+    Comment-only and empty runs are not statements and are dropped, including a
     trailing comment after the final semicolon, which must not read as an
     unterminated statement.
     """
@@ -92,7 +92,7 @@ def strip_terminator(sql_text: str) -> str:
     """The text with one trailing statement terminator removed, if it has one.
 
     For callers embedding an authored body into something that runs it as one
-    unit — a shape-only build instruction, a view definition — where the
+    unit, such as a shape-only build instruction or a view definition, where the
     separator would be a syntax error.
     """
 
@@ -123,7 +123,7 @@ def flatten_with_offsets(sql_text: str) -> list[SqlToken]:
     """Every token in ``sql_text``, flattened, with exact offsets and depth.
 
     Offsets are into the original string, so a caller slices the source back out
-    rather than reassembling it from tokens — which keeps an authored program
+    rather than reassembling it from tokens, which keeps an authored program
     byte-identical through parsing.
     """
 

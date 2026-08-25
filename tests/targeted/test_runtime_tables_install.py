@@ -52,7 +52,7 @@ def estate(tmp_path):
 
 
 #: A catalogue holding no rows at all, which is every state these tests start
-#: from: what a build says about bookmarks turns on whether the *table* is there,
+#: from: what a build says about bookmarks turns on whether the table is there,
 #: and a target's inventory answers that.
 EMPTY = Catalogue({})
 
@@ -127,9 +127,7 @@ def _inventories(repository, *, holding_runtime_tables: bool = True):
     )
 
 
-def _bundle(
-    repository, tmp_path, *, catalogue=None, inventories=None, runtime_sources=None
-):
+def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
     return generate_item_build_bundle(
         repository,
         bindings=estate_bindings(),
@@ -140,7 +138,6 @@ def _bundle(
         else _inventories(repository),
         catalogue=catalogue if catalogue is not None else EMPTY,
         catalogue_binding=CATALOGUE,
-        runtime_sources=runtime_sources,
     )
 
 
@@ -200,7 +197,7 @@ def test_a_view_is_not_bookmarkable(estate):
 
 @weaver_test()
 def test_a_runtime_artefact_is_not_bookmarkable(estate):
-    """The module and the procedure are what *does* the loading."""
+    """The module and the procedure are what does the loading."""
 
     found = {str(one) for one in item_bookmarkable_objects(estate, item=item_id(ITEM))}
 
@@ -537,7 +534,7 @@ def test_a_catalogue_table_cannot_be_dropped_by_a_managed_drop():
 
     Every catalogue table declares ``Prohibit rebuild``, so selection never
     offers one. This is the guard behind that declaration, and it is at the
-    renderer because there the resource is known by its identity — an installer
+    renderer because there the resource is known by its identity, an installer
     would have to read it back out of SQL.
     """
 
@@ -574,29 +571,20 @@ def test_prune_spares_the_catalogue_table_and_not_the_local_reference():
 
 
 @weaver_test()
-def test_each_source_is_the_catalogue_tables_own_delta_directory():
-    """A Warehouse publishes each table as a Delta directory a shortcut can read.
+def test_runtime_relations_are_ordinary_logical_shortcut_declarations(estate):
+    """Planning sees the same declaration representation for authored and runtime relations."""
 
-    One resolution serves every table, because they are all in one Warehouse.
-    """
+    from weaver.catalogue.builtin import BUILTIN_ITEM
 
-    from weaver.build_bundle.shortcut_sources import read_runtime_sources
-
-    class _Item:
-        workspace_id = "ws-1"
-        id = "item-1"
-        name = "Weaver"
-
-    class _Resolver:
-        def warehouse(self, target):
-            return _Item()
-
-    sources = read_runtime_sources(resolver=_Resolver(), catalogue="Weaver")
-
-    assert {name: source.path for name, source in sources.items()} == {
-        table.name: f"Tables/_/{table.name}" for table in PRESENTED_RUNTIME_TABLES
+    runtime = [
+        declaration
+        for declaration in estate.planned_shortcuts
+        if declaration.logical_source.item == BUILTIN_ITEM
+    ]
+    assert {declaration.destination.object_id.object for declaration in runtime} == {
+        table.name for table in PRESENTED_RUNTIME_TABLES
     }
-    assert all(source.item_id == "item-1" for source in sources.values())
+    assert all(declaration.is_logical for declaration in runtime)
 
 
 @weaver_test()
@@ -604,22 +592,10 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
     """One build, and the graph orders it: the table, then the reference to it.
 
     The reference reads a document the built-in item owns, so the item graph puts
-    that item first — the same edge a declared shortcut's source item gets. A
+    that item first, the same edge a declared shortcut's source item gets. A
     build that installed the table and deferred the reference would not converge
     in one pass, and the build after it would not be a no-op.
     """
-
-    from weaver.build_bundle.shortcuts import ResolvedShortcutSource
-
-    source = {
-        table.name: ResolvedShortcutSource(
-            workspace_id="ws-1",
-            item_id="item-1",
-            item_name="Weaver",
-            path=f"Tables/_/{table.name}",
-        )
-        for table in PRESENTED_RUNTIME_TABLES
-    }
 
     from weaver.build_bundle import effective_item_bindings
 
@@ -646,7 +622,6 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
         target_inventories=inventories,
         catalogue=EMPTY,
         catalogue_binding=CATALOGUE,
-        runtime_sources=source,
     )
 
     assert _references(creating, "Lakehouse")
@@ -659,9 +634,9 @@ def test_the_build_that_creates_the_table_also_points_at_it(estate, tmp_path):
 
 
 def _references(bundle, item_type: str) -> list[str]:
-    """The runtime-reference actions one bundle installs, per kind of item."""
+    """The ordinary shortcut actions that include runtime relations, per item kind."""
 
-    wanted = f"runtime-reference-{item_type}"
+    wanted = f"shortcuts-{item_type}"
     return [
         action.id
         for _sequence, _batch, action in bundle.plan.actions()
@@ -697,3 +672,119 @@ def _without_the_folder(tmp_path):
 
 
 __all__: tuple = ()
+
+
+# --- where the runtime reference is not materialised ---------------------------
+
+
+def _plan_runtime_references(repository, *, catalogue_target):
+    """This Warehouse item's shortcut plan, with every runtime reference selected."""
+
+    from factories import bound_target
+
+    from weaver.build_bundle.shortcuts import plan_item_shortcuts
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+
+    item = item_id(WAREHOUSE_ITEM)
+    warehouse = bound_target(
+        id="Warehouse-Reporting--warehouse-Reporting_WH",
+        kind="warehouse",
+        item_id="Reporting_WH",
+        logical_item_name="Reporting",
+        logical_item_type="Warehouse",
+    )
+    by_item = {item: warehouse, BUILTIN_ITEM: catalogue_target}
+    selected = {
+        WeaverDocumentId.parse(f"{WAREHOUSE_ITEM}/_.{table.name}")
+        for table in PRESENTED_RUNTIME_TABLES
+    }
+    return plan_item_shortcuts(
+        repository,
+        item=item,
+        target=warehouse,
+        target_by_item=by_item,
+        selected=selected,
+        catalogue_target=catalogue_target,
+    )
+
+
+#: The catalogue in its own Warehouse, which is the ordinary arrangement.
+_ELSEWHERE = dict(
+    id="Warehouse-_weaver--warehouse-Weaver_WH",
+    kind="warehouse",
+    item_id="Weaver_WH",
+    logical_item_name="_weaver",
+    logical_item_type="Warehouse",
+)
+
+
+@weaver_test()
+def test_a_warehouse_reading_a_separate_catalogue_gets_its_runtime_views(estate):
+    """The ordinary arrangement: the tables are elsewhere, so a view reaches them."""
+
+    from factories import bound_target
+
+    planned = _plan_runtime_references(
+        estate, catalogue_target=bound_target(**_ELSEWHERE)
+    )
+
+    assert planned.stage is not None
+    kinds = [action.kind for batch in planned.stage.batches for action in batch.actions]
+    assert kinds == ["create_shortcut"]
+
+
+@weaver_test()
+def test_a_warehouse_that_is_its_own_catalogue_plans_no_runtime_reference(estate):
+    """The tables are already there under ``_``, so nothing is materialised.
+
+    A generated procedure names ``[_].[Bookmark]`` in two parts and reaches the
+    real table. Rendering a view of that name over itself is what T-SQL refuses
+    with "cannot perform alter on an incompatible object type".
+    """
+
+    from factories import bound_target
+
+    # The same Warehouse, bound again as the catalogue: a different ``id``
+    # because the logical name differs, and the same ``item_id``.
+    catalogue_target = bound_target(
+        id="Warehouse-_weaver--warehouse-Reporting_WH",
+        kind="warehouse",
+        item_id="Reporting_WH",
+        logical_item_name="_weaver",
+        logical_item_type="Warehouse",
+    )
+    planned = _plan_runtime_references(estate, catalogue_target=catalogue_target)
+
+    assert planned.stage is None, [
+        action.id for batch in planned.stage.batches for action in batch.actions
+    ]
+
+
+@weaver_test()
+def test_a_bundle_for_a_warehouse_that_is_its_own_catalogue_plans_no_reference(
+    estate, tmp_path
+):
+    """The whole planning path, with the catalogue bound to the item's Warehouse.
+
+    Isolated planning is not enough here: the catalogue's target is derived from
+    the binding by ``_catalogue_target``, so the identity the guard compares is
+    only right if that derivation is included.
+    """
+
+    shared = WarehouseBinding(ItemRef("Reporting_WH"), workspace_name=WORKSPACE)
+    bundle = generate_item_build_bundle(
+        estate,
+        bindings=estate_bindings(),
+        output=Location(str(tmp_path / "bundle")),
+        store=FilesystemStore(),
+        target_inventories=_inventories(estate),
+        catalogue=EMPTY,
+        catalogue_binding=shared,
+    )
+    shortcut_actions = [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "create_shortcut" and "Warehouse" in action.id
+    ]
+
+    assert shortcut_actions == [], shortcut_actions

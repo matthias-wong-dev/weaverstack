@@ -2,10 +2,10 @@
 
 A load runs where the data is, so a desktop asking for a Fabric workspace gets
 its report as JSON from a session it reached into. What it renders has to be the
-same object an in-session caller holds — otherwise the CLI becomes a second
+same object an in-session caller holds, otherwise the CLI becomes a second
 place that knows what a load report means, and the two drift.
 
-So the claim is round-trip fidelity, and it is asserted over the *whole* value
+So the claim is round-trip fidelity, and it is asserted over the whole value
 rather than field by field: a mapping that loses a message, a count or a
 node's timing is a report that reads differently on the two sides of a boundary
 nobody can see.

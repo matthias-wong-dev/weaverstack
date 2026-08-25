@@ -1,7 +1,7 @@
 """Constructors for the smallest input each seam actually needs.
 
-The old suite's habit was to reach for a complete estate — a parsed repository, a
-projected catalogue, a generated bundle — whatever the subject was. That made
+The old suite's habit was to reach for a complete estate, a parsed repository, a
+projected catalogue, a generated bundle, whatever the subject was. That made
 every test slow to read and, worse, made failures ambiguous: a broken signature
 comparison and a broken catalogue projection failed the same test the same way.
 
@@ -90,7 +90,7 @@ def registered_document(
     """One validated Registry row, as incremental selection consumes it.
 
     This is all `determine_impact` and `select_build` ever look at, so a test
-    about signature comparison needs nothing else — no catalogue, no projection,
+    about signature comparison needs nothing else, no catalogue, no projection,
     no Spark. Constructing one directly is the difference between a test that
     fails because a signature comparison is wrong and one that fails because
     anything at all in a catalogue projection is wrong.
@@ -123,7 +123,7 @@ def registry_row(
         "item_type": identity.item.item_type,
         "item_name": identity.item.item_name,
         # Only a Folder carries the prefix. A load artefact's schema is already
-        # the real one — a path beneath Files, or a Warehouse schema.
+        # the real one, a path beneath Files, or a Warehouse schema.
         "schema_name": f"Files/{schema}" if identity.is_files else schema,
         "object_name": identity.object_id.object,
         "object_type": object_type,
@@ -134,16 +134,16 @@ def registry_row(
 
 
 class FixtureCatalogue(Catalogue):
-    """The production `Catalogue`, with the ways a test wants to populate one.
+    """The production `Catalogue`, with the ways a test needs to populate one.
 
-    A subclass rather than a separate type, deliberately. Every build decision
+    A subclass rather than a separate type. Every build decision
     runs against the real class; what changes is only *where the state came
     from*. Beginning from a hand-written Registry row is the same move as
-    installing a frozen bundle instead of building one from a repository — a
+    installing a frozen bundle instead of building one from a repository, a
     later starting point on the real thing, not a stand-in for it.
 
     These constructors are here and not on `Catalogue` because a Registry row
-    means work *succeeded*: it is written last in a build, and the planner has a
+    means work succeeded: it is written last in a build, and the planner has a
     whole `uncertified` mechanism to withhold rows for work that was not done. A
     production method that manufactured rows from declarations would be a way to
     forge that guarantee, and eventually something would call it on a build path.
@@ -153,9 +153,9 @@ class FixtureCatalogue(Catalogue):
     def from_registry_rows(cls, *rows, item: str | WeaverItemId = ITEM) -> "Catalogue":
         """A catalogue holding exactly the Registry rows given.
 
-        Physically incomplete on purpose — no other catalogue table is present.
+        Physically incomplete on purpose, no other catalogue table is present.
         Right for reconciliation and selection, which read the Registry alone;
-        wrong for testing the catalogue *read*, which is a Spark-boundary claim
+        wrong for testing the catalogue read, which is a Spark-boundary claim
         and has to see a complete catalogue.
         """
 
@@ -168,10 +168,10 @@ class FixtureCatalogue(Catalogue):
 
     @classmethod
     def holding(cls, item: str | WeaverItemId = ITEM, **tables) -> "Catalogue":
-        """A catalogue holding the named tables' rows — Registry and beyond.
+        """A catalogue holding the named tables' rows: Registry and beyond.
 
         `from_registry_rows` is the common case; this is for the claims that are
-        *about* more than the Registry, such as the order in which a build
+        about more than the Registry, such as the order in which a build
         removes a certification and the description behind it. A claim is only
         collected where a row actually exists, so a catalogue with no dictionary
         rows cannot demonstrate dictionary ordering.
@@ -188,8 +188,8 @@ class FixtureCatalogue(Catalogue):
     def certifying(cls, *registered: RegisteredDocument) -> "Catalogue":
         """A catalogue certifying exactly these documents, with no row data.
 
-        For tests whose subject is downstream of the Registry — selection,
-        shortcut staleness, planning — where the rows themselves are never read.
+        For tests whose subject is downstream of the Registry, selection,
+        shortcut staleness, planning, where the rows themselves are never read.
         """
 
         return cls(
@@ -266,7 +266,7 @@ def installed_catalogue(
 
     Where `FixtureCatalogue.from_repository` gives one item's Registry, this
     gives the estate: every item's dictionaries, its dependencies, its shortcuts,
-    the shortcut destinations the build certified, *and* the Installation rows that
+    the shortcut destinations the build certified, and the Installation rows that
     say which physical target each logical item is bound to.
 
     That last part is what load orchestration cannot do without. A build is
@@ -274,8 +274,8 @@ def installed_catalogue(
     to discover the bindings from the catalogue, so a fixture that omitted them
     would let a reverse-binding claim pass without a binding to reverse.
 
-    Composed from production constructors — `Catalogue.from_repository` and
-    `for_targets` — rather than hand-written rows, so the fixture cannot drift
+    Composed from production constructors, `Catalogue.from_repository` and
+    `for_targets`, rather than hand-written rows, so the fixture cannot drift
     from what a build actually publishes.
     """
 
@@ -328,7 +328,7 @@ def installed_catalogue(
         target_name = physical.get(item)
         if target_name is None:
             # An unbound item is not installed, so it contributes no rows at all
-            # — exactly as a build that never targeted it would leave things.
+            # , exactly as a build that never targeted it would leave things.
             continue
         rows[item] = {
             **{name: tuple(table_rows) for name, table_rows in tables.items()},
@@ -342,7 +342,7 @@ def installed_catalogue(
                 },
             ),
         }
-    # A catalogue a run writes to, because a run records what it did *into* it.
+    # A catalogue a run writes to, because a run records what it did into it.
     # Through the Session where there is one, so a claim about the statements a
     # run submits still sees them; a recorder otherwise.
     from support.catalogues import Recording
@@ -375,7 +375,7 @@ def target_inventory(
 
     Every default is empty, so a test states the estate it means rather than
     inheriting one. "Empty inventory" is then a claim a test makes explicitly,
-    which matters: an unexpectedly *populated* inventory is what makes a prune
+    which matters: an unexpectedly populated inventory is what makes a prune
     test pass for the wrong reason.
     """
 
@@ -394,11 +394,11 @@ def target_inventory(
 
 
 class FixtureInventory(TargetInventory):
-    """The production `TargetInventory`, with the ways a test wants to fill one.
+    """The production `TargetInventory`, with the ways a test needs to fill one.
 
     Safe to populate freely in a way a catalogue is not, and the asymmetry is
-    worth knowing: a wrong inventory *degrades a decision* — prune removes
-    nothing, a schema is not created — whereas a wrong catalogue *forges a
+    worth knowing: a wrong inventory degrades a decision, prune removes
+    nothing, a schema is not created, whereas a wrong catalogue *forges a
     guarantee* that an object was installed. Both belong in tests, but only one
     of them would be dangerous on the production class.
     """
@@ -420,11 +420,11 @@ class FixtureInventory(TargetInventory):
         meant standing up a Lakehouse and building into it, purely so a prune
         test could assert that a declared object is spared.
 
-        Built from the documents rather than from `managed_sets`, deliberately.
+        Built from the documents rather than from `managed_sets`.
         The two hold the same objects, but `managed_sets` folds case for
         comparison while a real inventory reports the names the target actually
         has. Since the point of this class is to stand in for a real read, it
-        keeps declared case — otherwise it would be easier to satisfy than the
+        keeps declared case, otherwise it would be easier to satisfy than the
         thing it imitates.
         """
 
@@ -563,7 +563,7 @@ def catalogue_inventory(
     """The catalogue Warehouse's own inventory, as the planner receives it.
 
     ``holding`` says whether it physically holds the runtime tables. That is what
-    decides the two things the build that *creates* the catalogue cannot do: a
+    decides the two things the build that creates the catalogue cannot do: a
     Lakehouse shortcut has nothing to point at, and runtime-state reconciliation
     has no table to reconcile.
     """
@@ -630,7 +630,7 @@ class {class_name}(Table):
 
 
 def lakehouse_test(object_id: str, *, primary_key: str = "CustomerId") -> str:
-    """A declared Python Test — two sides, both empty, so it declares and no more."""
+    """A declared Python Test: two sides, both empty, so it declares and no more."""
 
     class_name = object_id.replace(".", "__")
     return f'''\
@@ -658,16 +658,16 @@ def warehouse_table(
     identity: str | None = None,
     has_load_procedure: bool = True,
 ) -> str:
-    """A Warehouse table, whose *query* defines its schema.
+    """A Warehouse table, whose query defines its schema.
 
-    Unlike a Lakehouse table, the columns are not listed — the result set is the
+    Unlike a Lakehouse table, the columns are not listed, the result set is the
     declaration, and Weaver infers types from it. A caller wanting particular
     physical types casts them in the select, which is also how the real fixtures
     read.
 
     ``identity`` names an engine-generated surrogate key: a column the query does
-    *not* produce, which build declares ``identity`` and the Warehouse
-    assigns — which is why it needs an engine to confirm.
+    not produce, which build declares ``identity`` and the Warehouse
+    assigns, which is why it needs an engine to confirm.
     """
 
     identity_line = f"Identity: {identity}\n\n" if identity else ""
@@ -763,6 +763,26 @@ def logical_shortcuts(consumer: str, **references: str) -> tuple[str, str]:
     )
 
 
+def physical_schema_shortcut(owner: str, *, target: str, workspace: str) -> tuple:
+    """Where a Lakehouse declares a physical schema shortcut, and what it says.
+
+    A schema shortcut must be physical: what appears inside belongs to the item
+    it points at, so Weaver binds objects rather than namespaces.
+    """
+
+    schema = target.rsplit("/", 1)[-1]
+    return (
+        f"{owner}/shortcuts.py",
+        "from weaver import Shortcut\n\n"
+        f"{schema} = Shortcut(\n"
+        '    shortcut_type="schema",\n'
+        '    target_type="physical",\n'
+        f'    target="{target}",\n'
+        f'    workspace="{workspace}",\n'
+        ")\n",
+    )
+
+
 def shortcut_repository(
     root: Path,
     *,
@@ -776,7 +796,7 @@ def shortcut_repository(
     The smallest repository that can express a cross-item shortcut, which is the
     one shape a single-item fixture cannot reach: a shortcut that did not cross
     would not be one. The consumer also builds a view over the shortcut name, so
-    the ordering claim — the consumer's whole group waits for the producer's —
+    the ordering claim, the consumer's whole group waits for the producer's,
     has something to order.
     """
 
@@ -796,8 +816,8 @@ def shortcut_repository(
     )
     if consumer_view:
         # A Warehouse consumer reads its shortcut through T-SQL over the producer's
-        # SQL endpoint, so the view it builds is spelled differently — and for a
-        # probe that only wants the shortcut itself, no view is wanted at all.
+        # SQL endpoint, so the view it builds is spelled differently, and for a
+        # probe that only needs the shortcut itself, no view is wanted at all.
         if consumer.startswith("Warehouse/"):
             _write(
                 root,
@@ -841,11 +861,11 @@ def full_estate(root: Path):
     """One repository holding every artefact Weaver can install.
 
     A table, a view, a folder, a deployed module, a generated Spark SQL load
-    file, and a generated stored procedure — across both item types, because the
+    file, and a generated stored procedure, across both item types, because the
     two physical sides are not symmetric and a Lakehouse-only estate stops being
     representative exactly where that asymmetry starts.
 
-    Shared because three separate claims need *completeness* rather than a narrow
+    Shared because three separate claims need completeness rather than a narrow
     subject: that the catalogue registers every artefact kind, that a build's
     declared effect covers every action it emits, and that a build converges. A
     narrower fixture cannot answer any of them.
@@ -923,8 +943,8 @@ def load_estate(root: Path):
     Every element earns its place. ``Sales.Order`` is the upstream Delta load;
     ``Sales.Daily`` proves a second dispatch kind and an ordinary within-item
     edge; ``Sales.Export`` proves the folder kind. On the Warehouse side the
-    shortcut is what makes the dependency *cross*, ``Sales.Summary`` is what
-    consumes it, and ``Sales.Live`` is a view — no load work of its own, but a
+    shortcut is what makes the dependency cross, ``Sales.Summary`` is what
+    consumes it, and ``Sales.Live`` is a view, no load work of its own, but a
     conduit a downstream table still depends through.
 
     Deliberately mixed across both physical sides, because a Lakehouse-only
@@ -993,17 +1013,17 @@ def single_document_repository(
 ):
     """The smallest legal repository holding the documents given.
 
-    One item, its schema declarations, and the files named — nothing else. The
+    One item, its schema declarations, and the files named. Nothing else. The
     point is that a parse, a DDL or an action-rendering claim is made against a
     repository whose entire content is visible in the test that wrote it.
 
     ``documents`` maps a relative filename to its content, so a caller composes
     from the document builders above and stays explicit about what exists. Every
     schema a document uses must be declared, so ``schemas`` widens when a fixture
-    reaches beyond ``DWG`` — a Files folder under ``Raw``, say.
+    reaches beyond ``DWG``, a Files folder under ``Raw``, say.
 
     One thing to know before asserting over ``repository.source_documents``: a
-    parsed repository *always* carries the builtin ``Warehouse/_weaver``
+    parsed repository always carries the builtin ``Warehouse/_weaver``
     catalogue documents as well as the ones written here. Look documents up by
     identity rather than iterating, or the answer will be about the catalogue.
     """
@@ -1048,8 +1068,8 @@ def single_action_bundle(
 ):
     """The smallest valid bundle: one target, one sequence, one batch, one action.
 
-    Installer claims — sequencing, failure semantics, reporting, payload loading —
-    are about the *installer*, not about whatever repository happened to produce
+    Installer claims, sequencing, failure semantics, reporting, payload loading,
+    are about the installer, not about whatever repository happened to produce
     a bundle. Generating a real one to test them makes the planner a dependency
     of every installer failure.
     """
@@ -1092,8 +1112,8 @@ def _with_identity(plan: BuildPlan) -> BuildPlan:
 #
 # Fakes, not mocks: each records what it was asked to do and answers plainly, so
 # a test asserts on the *statement that reached the engine* rather than on a call
-# signature. That is the claim worth making about an executor — it adds no logic
-# of its own — and it is the one a mock's `assert_called_with` would obscure.
+# signature. That is the claim worth making about an executor. It adds no logic
+# of its own, and it is the one a mock's `assert_called_with` would obscure.
 
 
 class FakeSpark:
@@ -1165,7 +1185,7 @@ def spark_destination(item: str = "Sales_LH", *, workspace: str = WORKSPACE):
 
 
 #: Distinguishes "caller said nothing, give the usual one" from "caller means
-#: none". A Warehouse target genuinely resolves to no Spark destination, and that
+#: none". A Warehouse target resolves to no Spark destination, and that
 #: is a state executors must handle, so it has to be expressible.
 DEFAULT = object()
 
@@ -1227,7 +1247,7 @@ def installation_context(
     """The one target and the runtime services an executor is handed.
 
     Everything defaults to absent rather than to something plausible, because an
-    executor's behaviour when a capability is *missing* is a real claim — a
+    executor's behaviour when a capability is missing is a real claim, a
     ``tsql`` action with no SQL executor must fail saying so, not fail obscurely
     somewhere deeper.
 

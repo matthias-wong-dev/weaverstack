@@ -226,7 +226,7 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_target(tmp_path):
     shortcut = next(
         action
         for _s, _b, action in bundle.plan.actions()
-        if action.kind == "create_shortcut"
+        if action.kind == "create_shortcut" and action.executor == "tsql_batch"
     )
     # One action for the item's shortcuts, and each statement its own batch:
     # T-SQL will not accept a CREATE VIEW that is not first in its batch.
@@ -235,10 +235,11 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_target(tmp_path):
     statements = json.loads(
         store.read(bundle.location.join(*shortcut.payload.split("/"))).decode()
     )
-    assert statements == [
+    assert (
         "create or alter view [Sales].[PortableCustomer] as select * from "
         "[Curated_Dev].[Sales].[Customer];"
-    ]
+    ) in statements
+    assert any("[_].[Bookmark]" in statement for statement in statements)
     assert not bundle.plan.omitted_nodes or all(
         node.reason != "shortcut_unsupported" for node in bundle.plan.omitted_nodes
     )
@@ -269,14 +270,18 @@ def test_a_bound_shortcut_freezes_both_addresses_by_target_id(tmp_path):
     shortcut = next(
         action
         for _s, _b, action in bundle.plan.actions()
-        if action.kind == "create_shortcut"
+        if action.id == "shortcuts-Lakehouse--Curated"
     )
     assert shortcut.executor == "shortcut"
     frozen = json.loads(
         store.read(bundle.location.join(*shortcut.payload.split("/"))).decode()
     )
-    assert len(frozen["shortcuts"]) == 1
-    assert frozen["shortcuts"][0] == {
+    authored = next(
+        entry
+        for entry in frozen["shortcuts"]
+        if entry["shortcut"] == "Lakehouse/Curated/Sales.Landed"
+    )
+    assert authored == {
         "shortcut": "Lakehouse/Curated/Sales.Landed",
         "type": "table",
         "path": "Tables/Sales",
@@ -308,7 +313,7 @@ def test_a_shortcut_is_materialised_before_the_documents_that_use_it(tmp_path):
         action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
     }
     # The source item produces the table, its endpoint catches up, and only then
-    # does the consuming item's shortcut — and the document reading it — exist.
+    # does the consuming item's shortcut, and the document reading it, exist.
     assert (
         at["object-Lakehouse--Curated--Sales.Customer"]
         < at["refresh-sql-endpoint-Lakehouse--Curated"]
@@ -622,7 +627,7 @@ def test_a_consumer_items_whole_group_follows_its_producers(tmp_path):
     """The invariant multi-item build rests on, stated as barriers.
 
     ``Warehouse/Reporting`` reaches into ``Lakehouse/Curated`` through a shortcut,
-    so nothing of Reporting's may share a barrier with — let alone precede — any
+    so nothing of Reporting's may share a barrier with, let alone precede, any
     of Curated's.
     """
 
@@ -717,7 +722,7 @@ def test_a_warehouse_item_has_no_endpoint_of_its_own_to_refresh(tmp_path):
 
 @weaver_test()
 def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
-    """A Folder is a directory in Files. The SQL endpoint describes tables."""
+    """A first loadable Folder also installs runtime table shortcuts."""
 
     root = tmp_path / "Estate"
     _write(root, "Lakehouse/Raw/schemas/Sales.yml", _schema("Sales"))
@@ -730,7 +735,7 @@ def test_an_item_whose_only_work_is_folders_needs_no_refresh(tmp_path):
         store=FilesystemStore(),
     )
 
-    assert _refreshed(bundle) == set()
+    assert _refreshed(bundle) == {"Lakehouse-Raw--lakehouse-Raw_Dev"}
     assert any(
         action.kind == "build_folder" for _s, _b, action in bundle.plan.actions()
     )
@@ -806,7 +811,7 @@ def test_catalogue_tail_is_item_scoped_and_registry_is_last(tmp_path):
     assert "[Item name] = N'Raw'" in registry_payloads[0]
     assert "[Item name] = N'Audit'" in registry_payloads[0]
     # A Lakehouse item still refreshes its own endpoint, inside its own group.
-    # What no longer happens is a refresh *after* the catalogue: it is written
+    # What no longer happens is a refresh after the catalogue: it is written
     # over TDS into the Warehouse that holds it, and is readable when it commits.
     assert not any(
         action.kind == "refresh_sql_endpoint"
@@ -845,7 +850,7 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
         if action.kind == "refresh_sql_endpoint"
     }
     # Both Lakehouses, and nothing else. A Warehouse is reached over SQL and has
-    # no endpoint of its own to sync — and neither has the catalogue, which is a
+    # no endpoint of its own to sync, and neither has the catalogue, which is a
     # Warehouse too.
     assert refreshed == {
         "Lakehouse-Raw--lakehouse-Raw_Dev",

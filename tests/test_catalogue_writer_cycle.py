@@ -253,7 +253,7 @@ def test_one_tables_failure_is_reported_even_when_another_succeeded():
         writer.flush()
 
 
-# --- what a reader of the same catalogue sees --------------------------------
+# --- what a later read of the same catalogue sees ----------------------------
 
 
 @weaver_test()

@@ -1,7 +1,7 @@
 """Livy session plumbing that needs no tenant.
 
-The parts a Fabric session leans on — how a session URL is formed, and how a
-returned value is told from printed output — verified without a workspace.
+The parts a Fabric session leans on, how a session URL is formed, and how a
+returned value is told from printed output, verified without a workspace.
 """
 
 from __future__ import annotations
@@ -140,7 +140,7 @@ def test_workspace_session_listing_finds_other_lakehouses_and_can_filter_ended(
 # A capacity has a limit on concurrent Spark sessions, often one, and `DELETE`
 # returns when the request is accepted rather than when the slot is free. A close
 # that did not wait would let a caller ask for the next session while the previous
-# still held the only slot — which is how a long Fabric run ends with a session
+# still held the only slot, which is how a long Fabric run ends with a session
 # that never reaches `idle`.
 
 

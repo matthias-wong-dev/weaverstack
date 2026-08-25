@@ -2,7 +2,7 @@
 
 The Fabric round-trip is exercised by the opt-in integration path; here we pin
 the pure logic: which files count as Weaver wheels, how a version is read back
-from a wheel name, and — the safety-critical one — that stale-wheel cleanup only
+from a wheel name, and, the safety-critical one, that stale-wheel cleanup only
 ever removes ``weaverstack`` wheels.
 """
 
@@ -178,7 +178,7 @@ def test_a_freshly_created_environment_has_nothing_staged():
 
     Fabric answers 404 with ``This environment does not have any staged
     libraries``, which is the same "nothing yet" a never-published Environment
-    reports — and had to be read the same way. Treating it as fatal meant the
+    reports, and had to be read the same way. Treating it as fatal meant the
     only path that had never been exercised was the only one that could not work.
     """
 
@@ -194,13 +194,26 @@ def test_staging_failures_other_than_404_are_re_raised(status_code):
 
 @weaver_test()
 def test_fabric_client_preserves_failure_status(monkeypatch):
-    response = types.SimpleNamespace(status_code=429, text="slow down", content=b"")
-    monkeypatch.setattr("requests.request", lambda *args, **kwargs: response)
+    """A throttle that never clears is reported as the throttle it was.
+
+    Retried first, because 429 means Fabric declined to act rather than acted and
+    failed. See ``tests/test_fabric_rest_retry_boundary.py`` for that decision.
+    """
+
+    response = types.SimpleNamespace(
+        status_code=429, text="slow down", content=b"", headers={}
+    )
+    attempts: list = []
+    monkeypatch.setattr(
+        "requests.request", lambda *args, **kwargs: attempts.append(1) or response
+    )
+    monkeypatch.setattr("weaver.fabric.client.time.sleep", lambda _seconds: None)
 
     with pytest.raises(FabricError) as info:
         FabricClient(token="token").get_json("workspaces")
 
     assert info.value.status_code == 429
+    assert len(attempts) == 4
 
 
 # --- publication diff-and-skip decisions, without touching Fabric ------------
@@ -344,7 +357,7 @@ def test_a_long_publish_reports_the_state_it_last_saw(monkeypatch):
     """The timeout message must contain the state, not describe it.
 
     It read "(last state polled)" literally, so half an hour of waiting ended
-    in a sentence with the interesting value missing — and 'Running' means
+    in a sentence with the interesting value missing, and 'Running' means
     something very different from '', which is Fabric answering with no publish
     details at all.
     """

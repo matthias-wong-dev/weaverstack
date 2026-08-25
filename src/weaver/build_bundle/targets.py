@@ -1,13 +1,13 @@
 """Serialisable physical target descriptors.
 
 A build request supplies live workspace objects; a bundle must not. The planner
-converts each supplied binding into a :class:`BoundTarget` — a flat, stable
+converts each supplied binding into a :class:`BoundTarget`, a flat and stable
 descriptor carrying exactly what an installer needs to resolve the physical
 destination, and nothing that ties the bundle to the process that wrote it.
 
 There is no workspace kind here. Weaver has one workspace, Fabric. A target names
-an item — a Lakehouse or a Warehouse — by the identifiers the installer resolves
-it with, and by the display names Fabric Spark spells a four-part object name
+an item, a Lakehouse or a Warehouse, by the identifiers the installer resolves it
+with, and by the display names Fabric Spark spells a four-part object name
 with. Where the installer runs is supplied by its Session, not frozen into the
 bundle.
 """
@@ -50,8 +50,8 @@ class BoundTarget:
     item_id: str
     #: The item's resolved display name. Carried alongside ``item_id`` because on
     #: Fabric the id is a GUID: the catalogue records which item an installation is
-    #: bound to, and a GUID would make that record unreadable. It is a *record*,
-    #: never identity — resolution goes through ``item_id``.
+    #: bound to, and a GUID would make that record unreadable. It is a record,
+    #: never identity, because resolution goes through ``item_id``.
     item_name: str | None = None
     workspace_id: str | None = None
     workspace_name: str | None = None
@@ -90,8 +90,8 @@ class BoundTarget:
     def display(self) -> str:
         """What to call this target on screen: ``Lakehouse/Sales``.
 
-        The *physical* item, always. A logical name is the estate's own
-        vocabulary and some of it is internal — the catalogue Warehouse is the
+        The physical item, always. A logical name is the estate's own vocabulary
+        and some of it is internal: the catalogue Warehouse is the
         logical item ``_weaver``, which means nothing to somebody watching a
         build write to a Lakehouse they know as ``Weaver``. ``id`` is worse
         still: ``Lakehouse-_weaver--lakehouse-Weaver``.
@@ -287,7 +287,7 @@ def effective_item_bindings(
 ) -> ItemBindings:
     """Add the mandatory package-owned catalogue item binding.
 
-    ``control_item`` is the Warehouse the catalogue lives in — the item itself
+    ``control_item`` is the Warehouse the catalogue lives in, the item itself
     rather than the workspace's typed ``catalogue`` value, because what a
     binding needs is a name it can resolve.
 
@@ -337,7 +337,7 @@ def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
 
     That is why a typed right-hand side is refused rather than accepted and
     checked. ``Lakehouse/SalesDev=Warehouse/Sales`` is not a binding whose
-    types disagree — it is a sentence that cannot be written.
+    types disagree. It is a sentence that cannot be written.
     """
 
     if not isinstance(text, str) or text.count("=") > 1:

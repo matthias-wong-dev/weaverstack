@@ -1,24 +1,24 @@
-"""The row signature — what goes into it, and how a value is spelled.
+"""The row signature: what goes into it, and how a value is spelled.
 
 A keyed load decides whether a row changed by comparing one stored digest with
 one computed digest, so everything about correctness here is about the payload
 the digest is taken over. Two properties matter and neither is obvious from
 reading a hash call:
 
-*What* is hashed must be the comparison columns and only those, or a load reports
+What is hashed must be the comparison columns and only those, or a load reports
 a change the declaration excluded, or misses one it did not.
 
-*How* each value is written must be unambiguous. A concatenation cannot
+How each value is written must be unambiguous. A concatenation cannot
 distinguish a null from an empty string, or two values from one value containing
-whatever separator was chosen — and both mistakes are silent: the row never
+whatever separator was chosen, and both mistakes are silent: the row never
 updates.
 
 The two engines are asserted side by side because they are required to agree on
-those properties and required *not* to agree on the bytes. A Warehouse hashes to
+those properties and required not to agree on the bytes. A Warehouse hashes to
 ``varbinary(32)``; Spark's ``sha2`` returns hex text. A signature is only ever
 compared with another signature from the same table.
 
-That the digests behave — that a changed row really does produce a different one —
+That the digests behave. That a changed row really does produce a different one,
 is proved by running a load (``tests/fabric/test_warehouse_load_primitive.py``
 and ``tests/fabric/test_delta_table_load_primitive.py``).
 """
@@ -298,7 +298,7 @@ def test_the_two_engines_agree_on_the_payload_and_not_on_the_bytes():
 
     Within one table a signature is only ever compared with another from the same
     table, so what has to match across engines is which columns are covered and
-    how each value is written — not the digest.
+    how each value is written, not the digest.
     """
 
     delta = _delta()

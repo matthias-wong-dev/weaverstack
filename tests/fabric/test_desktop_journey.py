@@ -194,7 +194,7 @@ def _assert_load_state(session, workspace, report) -> None:
     The Runner's own path, end to end: this is the composition proof that a real
     load against a real estate leaves the operational record the pure-Python
     tests decide. Every object the load reported is here with the outcome it
-    reported, and nothing carries a physical target — where an object lives is
+    reported, and nothing carries a physical target, where an object lives is
     the Installation's to say.
     """
 
@@ -304,7 +304,7 @@ def _node_identity(node) -> tuple[str | None, str | None, str | None, str | None
     ``_.Log`` carries the object's ``Schema.Object`` as the run reports it, which
     for a Folder is the display spelling without its ``Files/`` prefix. The
     current-state tables key on the Registry's identity instead, which keeps the
-    prefix — see :func:`_recorded_identity`.
+    prefix. See :func:`_recorded_identity`.
     """
 
     target_type, _, target_name = str(node.physical_target).partition("/")

@@ -20,6 +20,7 @@ from .declaration.model import (
     WAREHOUSE,
     WeaverDocumentId,
     WeaverItemId,
+    WeaverSchemaId,
 )
 from .errors import LoadError
 from .etl import LOAD_ROOT, load_procedure_id
@@ -28,27 +29,27 @@ from .targets import LAKEHOUSE_KIND, WAREHOUSE_KIND
 
 # --- the primitive kinds ------------------------------------------------------
 #
-# What an installed load *is*, in the vocabulary dispatch branches on. Four
+# What an installed load is, in the vocabulary dispatch branches on. Four
 # values, three of them a real installed artefact and one a barrier the planner
 # inserts. They are strings rather than a class hierarchy because they cross into
-# a plan file and a task log, where a reader needs to see the word.
+# a plan file and a task log, where the word itself is what appears.
 #
-# There is no kind for a Spark-SQL-authored table, deliberately. It installs as
-# a deployed ``SparkSqlTable`` module and dispatches as ``python_table``, so the
-# language it was authored in is a fact about its *declaration* — recorded in the
-# catalogue, where a reader can ask — and not about how it runs. A kind that said
-# otherwise would be orchestration knowing something it must not act on.
+# There is no kind for a Spark-SQL-authored table. It installs as
+# a deployed ``SparkSqlTable`` module and dispatches as ``python_table``. The
+# authoring language is recorded in the catalogue, not in the kind.
 
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
 ENDPOINT_REFRESH = "endpoint_refresh"
+ONELAKE_PUBLICATION = "onelake_publication"
 
 PRIMITIVE_KINDS = (
     WAREHOUSE_PROCEDURE,
     PYTHON_TABLE,
     PYTHON_FOLDER,
     ENDPOINT_REFRESH,
+    ONELAKE_PUBLICATION,
 )
 
 #: What the catalogue calls each physical target kind. The same two words the
@@ -72,9 +73,9 @@ class PhysicalTargetRef:
     def of(cls, target) -> "PhysicalTargetRef":
         """The reference one typed physical target makes.
 
-        The single conversion from the typed vocabulary — ``DeltaTarget`` and
-        ``WarehouseTarget`` — into the two words a plan and a catalogue row
-        carry. Every operation that names a target goes through it.
+        The single conversion from the typed vocabulary, ``DeltaTarget`` and
+        ``WarehouseTarget``, into the two words a plan and a catalogue row carry.
+        Every operation that names a target goes through it.
         """
 
         from .targets import DeltaTarget, physical_item
@@ -92,6 +93,15 @@ class PhysicalTargetRef:
     @property
     def is_lakehouse(self) -> bool:
         return self.kind == LAKEHOUSE_TARGET
+
+
+@dataclass(frozen=True)
+class OneLakeReadiness:
+    """A Lakehouse shortcut path that must see a Warehouse publication."""
+
+    target: PhysicalTargetRef
+    schema: str
+    object: str
 
 
 def lakehouse_names(targets) -> tuple[str, ...]:
@@ -136,15 +146,19 @@ class InstalledObject:
 
     @property
     def physical(self) -> PhysicalObjectRef:
-        from .catalogue.claims import catalogue_schema
+        from .catalogue.claims import catalogue_columns
+        from .declaration.model import OBJECT_SHAPE
 
+        schema, name = catalogue_columns(self.identity)
         return PhysicalObjectRef(
             target_id=self.target.name,
             target_kind=self.target.kind,
-            schema=catalogue_schema(self.identity),
-            object=self.identity.object_id.object,
+            schema=schema,
+            object=name,
             object_type=self.object_type,
-            shape=self.identity.shape,
+            # A schema identity carries no shape: it names a namespace, and
+            # nothing is installed inside it that this estate owns.
+            shape=getattr(self.identity, "shape", OBJECT_SHAPE),
         )
 
 
@@ -185,7 +199,7 @@ class InstalledEstate:
     dependencies: tuple[InstalledDependency, ...]
     shortcuts: tuple[InstalledShortcut, ...]
     #: Physical addresses two logical objects both claim, by the target they are
-    #: in. Recorded rather than raised — see :meth:`from_catalogue`.
+    #: in. Recorded rather than raised. See :meth:`from_catalogue`.
     ambiguous: Mapping[PhysicalTargetRef, tuple[str, ...]] = field(default_factory=dict)
 
     @classmethod
@@ -234,9 +248,9 @@ class InstalledEstate:
                 )
             else:
                 physical_owner[key] = identity
-            # What an installed artefact is *for*, from the Registry row that
-            # said so — never from its physical shape. A Test compiles to a file
-            # or a procedure exactly as a load does, so shape inference would
+            # What an installed artefact is for, from the Registry row that said
+            # so, and never from its physical shape. A Test compiles to a file or
+            # a procedure exactly as a load does, so shape inference would
             # walk validation straight into the load DAG.
             if document.is_runtime_artefact:
                 primitives[identity] = installed
@@ -389,7 +403,8 @@ def _is_python_module_reference(reference: str) -> bool:
     """Whether a stored dependency names a Python module rather than an object.
 
     The catalogue records a dependency as its author wrote it, and for a Python
-    object that is an import — ``.Files.Sales__Seed``, or ``Files.Sales__Seed``.
+    object that is an import, such as ``.Files.Sales__Seed`` or
+    ``Files.Sales__Seed``.
 
     A leading dot is a relative import. Otherwise the tell is the separator: a
     module name cannot carry a dot, so a Python object module spells
@@ -467,14 +482,18 @@ def primitive_candidates(
 
     Derived from identity and object type alone, which is all a build has when
     it decides where to put one: the naming is the contract. Candidates rather
-    than an answer, because one case has two — a Warehouse table's load is a
-    procedure, a Lakehouse object's a deployed module.
+    than an answer, because one case has two: a Warehouse table's load is a
+    procedure and a Lakehouse object's is a deployed module.
 
     A Lakehouse table has one candidate whatever it was authored in: a Spark SQL
     table compiles to a ``SparkSqlTable`` module under the module's own name, so
     it and a hand-written ``Sales__OrderSummary.py`` install to one path.
     """
 
+    # A schema identity names a namespace, so there is no object to load and no
+    # primitive to install for it.
+    if not hasattr(identity, "object_id"):
+        return ()
     item = identity.item
     schema, name = identity.object_id.schema, identity.object_id.object
     if item.item_type == WAREHOUSE:
@@ -515,10 +534,19 @@ class LoadNode:
     physical_target: PhysicalTargetRef
     primitive_kind: str
     physical_object: PhysicalObjectRef | None = None
-    #: The installed primitive itself — the procedure or the deployed file.
+    #: The installed primitive itself, being the procedure or the deployed file.
     #: ``None`` for a refresh, which is a capability rather than an artefact.
     primitive_id: WeaverDocumentId | None = None
     primitive_object: PhysicalObjectRef | None = None
+    #: A publication barrier only. The Warehouse table whose OneLake publication
+    #: is waited for, carried apart from ``logical_id`` so the barrier leaves no
+    #: catalogue state of its own.
+    publication_of: WeaverDocumentId | None = None
+    #: A publication barrier only. The Lakehouse shortcut paths that must be able
+    #: to read the published Delta files before the consumers can begin.
+    publication_targets: tuple[OneLakeReadiness, ...] = ()
+    #: A publication barrier only. The load node that publishes what it waits for.
+    produced_by: str | None = None
 
     @property
     def sort_key(self) -> tuple[str, str, str, str]:
@@ -542,8 +570,8 @@ class LoadDag:
     """The selected physical load graph: nodes, edges and what was requested.
 
     An edge means the upstream node must complete successfully before the
-    downstream node may execute, and nothing else — not a data-flow statement,
-    and not a claim about what the downstream node reads.
+    downstream node may execute, and nothing else. It is not a data-flow
+    statement, and not a claim about what the downstream node reads.
     """
 
     nodes: tuple[LoadNode, ...]
@@ -635,7 +663,7 @@ def load_dag(
     targets are crossed only when the caller named both.
 
     With ``names``, exactly those ``Schema.Object`` loadables within the
-    requested targets — an operator override, so dependencies add neither nodes
+    requested targets. An operator override, so dependencies add neither nodes
     nor ordering edges.
     """
 
@@ -696,7 +724,7 @@ class _Planner:
         self._refuse_ambiguity(requested)
         seeds = self._seeds(requested, names=names)
         if names:
-            # An exact-name request is deliberately not a partial DAG request.
+            # An exact-name request is not a partial DAG request.
             # The caller chose the nodes and asked Weaver not to infer more work
             # or readiness constraints from their dependencies.
             for identity in seeds:
@@ -714,8 +742,7 @@ class _Planner:
             messages=tuple(self.messages),
         )
         # Ordering is what proves acyclicity, so it is done here rather than left
-        # to whoever consumes the graph — a planner that returned a cyclic graph
-        # would have made a decision it could not defend.
+        # to whoever consumes the graph.
         dag.order()
         return dag
 
@@ -767,7 +794,7 @@ class _Planner:
                 found = ", ".join(str(identity) for identity in candidates)
                 raise LoadError(
                     f"{name!r} names more than one installed loadable object "
-                    f"({found}) — qualify the request with a single target"
+                    f"({found}). Qualify the request with a single target"
                 )
             selected.append(candidates[0])
         return tuple(selected)
@@ -808,6 +835,12 @@ class _Planner:
             )
             if crossed is None:
                 self.edges.add((upstream_id, node.node_id))
+            elif isinstance(crossed, OneLakeReadiness):
+                # OneLake publishes a Warehouse commit after the transaction, so
+                # the barrier replaces the direct edge, as the refresh does.
+                barrier = self._publication_node(self.nodes[upstream_id], crossed)
+                self.edges.add((upstream_id, barrier.node_id))
+                self.edges.add((barrier.node_id, node.node_id))
             else:
                 # A shortcut read as SQL: the producer's endpoint has to catch up
                 # before the consumer can see it, so the barrier replaces the
@@ -832,6 +865,25 @@ class _Planner:
                 primitive_object=primitive.physical,
             )
             self.nodes[node_id] = node
+        return node
+
+    def _publication_node(self, producer: LoadNode, crossed) -> LoadNode:
+        """The one publication barrier behind this Warehouse load."""
+
+        identity = producer.logical_id
+        node_id = f"publish:{producer.physical_target}/{identity.object_id.qualified}"
+        node = self.nodes.get(node_id)
+        readiness = () if node is None else node.publication_targets
+        node = LoadNode(
+            node_id=node_id,
+            logical_id=None,
+            physical_target=producer.physical_target,
+            primitive_kind=ONELAKE_PUBLICATION,
+            publication_of=identity,
+            publication_targets=tuple(dict.fromkeys((*readiness, crossed))),
+            produced_by=producer.node_id,
+        )
+        self.nodes[node_id] = node
         return node
 
     def _refresh_node(self, target: PhysicalTargetRef) -> LoadNode:
@@ -862,7 +914,7 @@ class _Planner:
 
         for node_id, target in self.refresh_sources.items():
             for node in list(self.nodes.values()):
-                if node.primitive_kind == ENDPOINT_REFRESH:
+                if node.primitive_kind in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION):
                     continue
                 if node.physical_target == target:
                     self.edges.add((node.node_id, node_id))
@@ -874,7 +926,9 @@ class _Planner:
         identity: WeaverDocumentId,
         *,
         allowed_targets: frozenset[PhysicalTargetRef],
-    ) -> tuple[tuple[WeaverDocumentId, PhysicalTargetRef | None], ...]:
+    ) -> tuple[
+        tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None], ...
+    ]:
         """The in-scope loadable ancestors, and where each hop crossed.
 
         Passing through non-loadable producers is what makes a view a conduit:
@@ -883,11 +937,13 @@ class _Planner:
         requested-target boundary even so.
         """
 
-        found: dict[WeaverDocumentId, PhysicalTargetRef | None] = {}
-        seen: set[WeaverDocumentId] = set()
-        frontier: list[tuple[WeaverDocumentId, PhysicalTargetRef | None]] = [
-            (identity, None)
-        ]
+        found: dict[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None] = {}
+        seen: set[
+            tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None]
+        ] = set()
+        frontier: list[
+            tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None]
+        ] = [(identity, None)]
         while frontier:
             current, crossing = frontier.pop()
             for producer, hop in self._direct_producers(current):
@@ -908,33 +964,48 @@ class _Planner:
 
     def _direct_producers(
         self, consumer: WeaverDocumentId
-    ) -> tuple[tuple[WeaverDocumentId, PhysicalTargetRef | None], ...]:
+    ) -> tuple[
+        tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None], ...
+    ]:
         """What one object reads directly, and the barrier each read crosses."""
 
-        producers: list[tuple[WeaverDocumentId, PhysicalTargetRef | None]] = []
+        producers: list[
+            tuple[WeaverDocumentId, PhysicalTargetRef | OneLakeReadiness | None]
+        ] = []
         consumer_target = self.estate.objects[consumer].target
         for edge in self._dependencies.get(consumer, ()):
             resolved = self._resolve_reference(consumer, edge)
             if resolved is None:
                 continue
-            producer, through_shortcut = resolved
+            producer, shortcut = resolved
             producer_target = self.estate.objects[producer].target
             crossing = None
             if (
-                through_shortcut
+                shortcut is not None
                 and producer_target.is_lakehouse
                 and not consumer_target.is_lakehouse
             ):
                 # Lakehouse to Warehouse is the one crossing read through a SQL
                 # analytics endpoint. A Lakehouse-to-Lakehouse shortcut is a OneLake
-                # shortcut — Delta on both sides, and nothing to synchronise.
+                # shortcut, Delta on both sides, with nothing to synchronise.
                 crossing = producer_target
+            elif (
+                shortcut is not None
+                and not producer_target.is_lakehouse
+                and consumer_target.is_lakehouse
+            ):
+                destination = shortcut.destination.object_id
+                crossing = OneLakeReadiness(
+                    target=consumer_target,
+                    schema=destination.schema,
+                    object=destination.object,
+                )
             producers.append((producer, crossing))
         return tuple(producers)
 
     def _resolve_reference(
         self, consumer: WeaverDocumentId, edge: InstalledDependency
-    ) -> tuple[WeaverDocumentId, bool] | None:
+    ) -> tuple[WeaverDocumentId, InstalledShortcut | None] | None:
         """What one written reference names, in the consumer's own namespace.
 
         Shortcuts are consulted before native objects, and the order matters: an
@@ -953,16 +1024,31 @@ class _Planner:
             if producer not in self.estate.objects:
                 # A shortcut import says nothing about which area its
                 # destination is in, so a folder shortcut resolves to the table
-                # spelling first. The estate is what knows.
+                # spelling first. The estate is what answers.
                 beneath_files = replace(producer, is_files=True)
                 if beneath_files in self.estate.objects:
                     producer = beneath_files
+            shortcut = self._shortcut_by_destination.get(producer)
+            if shortcut is not None:
+                if shortcut.source not in self.estate.objects:
+                    raise LoadError(
+                        f"{consumer} reads shortcut {reference}, which points at "
+                        f"{shortcut.source}, which is not an installed object"
+                    )
+                return shortcut.source, shortcut
+            if producer not in self.estate.objects:
+                # A schema shortcut is keyed by the namespace it presents, so a
+                # two-part spelling of it finds nothing. It orders nothing
+                # either: what appears inside belongs to the item it points at.
+                namespace = WeaverSchemaId(producer.item, producer.object_id.schema)
+                if namespace in self.estate.objects:
+                    return namespace, None
             if producer not in self.estate.objects:
                 raise LoadError(
                     f"{consumer} imports {reference!r}, which resolves to "
-                    f"{producer} — not an installed object"
+                    f"{producer}, which is not an installed object"
                 )
-            return producer, False
+            return producer, None
         parts = reference.split(".")
         if len(parts) > 2:
             # A fully qualified physical read. It names something outside the
@@ -987,14 +1073,14 @@ class _Planner:
             if shortcut.source not in self.estate.objects:
                 raise LoadError(
                     f"{consumer} reads shortcut {reference}, which points at "
-                    f"{shortcut.source} — not an installed object"
+                    f"{shortcut.source}, which is not an installed object"
                 )
-            return shortcut.source, True
+            return shortcut.source, shortcut
         if candidate in self.estate.objects:
-            return candidate, False
+            return candidate, None
         folder = replace(candidate, is_files=True)
         if folder in self.estate.objects:
-            return folder, False
+            return folder, None
         raise LoadError(
             f"{consumer} declares dependency {reference!r}, which resolves to "
             "neither an installed object nor a shortcut in its own item"

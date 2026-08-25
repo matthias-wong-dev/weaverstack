@@ -59,8 +59,8 @@ def _repository(root):
 def _catalogue(repository, item_text: str, *, old=()) -> ReconciledCatalogue:
     """One item's catalogue as a completed build would have left it.
 
-    Every kind of registered object is included — documents, the item's shortcut
-    destinations and its load artefacts — because that is what a real
+    Every kind of registered object is included, documents, the item's shortcut
+    destinations and its load artefacts, because that is what a real
     installation holds, and selection reads them all the same way.
     """
 
@@ -221,7 +221,7 @@ def test_changed_root_expands_through_same_item_descendants(tmp_path):
 def _stale(rows, item_text: str, object_name: str) -> None:
     """Age one certified object's signature, found by name rather than position.
 
-    An item's Registry rows are whatever it declares, and that set grows — the
+    An item's Registry rows are whatever it declares, and that set grows. The
     generated runtime folder joined it when load artefacts arrived. Reaching for
     a row by index made a test about signature comparison depend on how the rows
     happened to sort.
@@ -290,7 +290,7 @@ def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
 @weaver_test()
 def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path):
     root = _estate(tmp_path)
-    # The catalogue as the *previous* build left it — projected before today's
+    # The catalogue as the previous build left it, projected before today's
     # edits, so it carries the old description and knows nothing of the folder
     # authored below. Deriving it from the edited repository instead would make
     # the persisted state already agree with the desired state, and a
@@ -522,8 +522,8 @@ def _shortcut_bindings():
 def _shortcut_inventories(repository, *, shortcut_installed=True):
     """Both targets as they stand, with the shortcut view present or absent.
 
-    The shortcut destination is an ordinary view in the Warehouse's inventory —
-    which is exactly the point of registering it as one — so leaving it out is
+    The shortcut destination is an ordinary view in the Warehouse's inventory,
+    which is exactly the point of registering it as one, so leaving it out is
     how "somebody deleted the shortcut" is expressed.
     """
 
@@ -538,6 +538,9 @@ def _shortcut_inventories(repository, *, shortcut_installed=True):
         ]
         views = list(objects) if target.kind == "warehouse" else []
         tables = [] if target.kind == "warehouse" else list(objects)
+        runtime = tuple(table.name for table in PRESENTED_RUNTIME_TABLES)
+        if target.kind == "warehouse":
+            views.extend(f"_.{name}" for name in runtime)
         if shortcut_installed and item == WeaverItemId.parse("Warehouse/Reporting"):
             views.append("Sales.PortableCustomer")
         inventories[item] = TargetInventory(
@@ -547,6 +550,7 @@ def _shortcut_inventories(repository, *, shortcut_installed=True):
             schemas=("Sales",),
             tables=tuple(tables),
             views=tuple(views),
+            runtime_references=runtime if target.kind == "lakehouse" else (),
         )
     return inventories
 
@@ -589,7 +593,7 @@ def test_an_unchanged_shortcut_is_not_replaced(tmp_path):
     """The behaviour this whole change exists for.
 
     A shortcut used to be remade on every build. Now its declaration is unchanged,
-    its destination is present and its source was not rebuilt — so there is
+    its destination is present and its source was not rebuilt, so there is
     nothing to do, and a shortcut that takes seconds to become readable is not
     torn down and remade for nothing.
     """
@@ -604,7 +608,7 @@ def test_an_unchanged_shortcut_is_not_replaced(tmp_path):
 
 @weaver_test()
 def test_a_repointed_shortcut_is_replaced(tmp_path):
-    """The declaration *is* the shortcut, so changing what it points at changes it."""
+    """The declaration is the shortcut, so changing what it points at changes it."""
 
     root = _dependency_estate(tmp_path)
     _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
@@ -624,7 +628,7 @@ def test_a_repointed_shortcut_is_replaced(tmp_path):
 def test_an_shortcut_whose_destination_is_gone_is_remade(tmp_path):
     """Registered but not there: reconciliation drops the row, so it reads as new.
 
-    Nothing shortcut-specific does this — the shortcut is registered as a view, and the
+    Nothing shortcut-specific does this, the shortcut is registered as a view, and the
     Warehouse inventory simply does not hold one.
     """
 
@@ -647,7 +651,7 @@ def test_an_shortcut_whose_destination_is_gone_is_remade(tmp_path):
 
 @weaver_test()
 def test_an_shortcut_destination_installed_as_a_table_is_pruned(tmp_path):
-    """The keep-set wants this name, and prune removes it anyway.
+    """The keep-set needs this name, and prune removes it anyway.
 
     A Warehouse shortcut is remade by `create or alter view`, which cannot replace
     a table, and no managed drop covers a shortcut destination. So a table
@@ -787,7 +791,7 @@ def test_an_shortcut_is_stale_when_its_unbound_source_was_published_later(tmp_pa
 
 @weaver_test()
 def test_a_stale_shortcut_carries_its_consumers_with_it(tmp_path):
-    """It joins the ordinary changed roots, so the ordinary walk does the rest —
+    """It joins the ordinary changed roots, so the ordinary walk does the rest,
     there is no separate cross-item descendant handling."""
 
     repository = _repository(_dependency_estate(tmp_path))
@@ -837,7 +841,7 @@ def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
 
 @weaver_test()
 def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
-    """A producer rebuilt by an *earlier* build is unchanged to this one.
+    """A producer rebuilt by an earlier build is unchanged to this one.
 
     Binding it changes nothing: its signature matches the repository, so the
     descendant walk never starts from it, and only the build datetimes record that it
@@ -898,7 +902,7 @@ def test_a_stale_shortcut_is_replaced_by_the_shortcut_executor(tmp_path):
 def test_the_epoch_leaves_bundle_identity_alone(tmp_path):
     """Generating twice must give the same bytes, or a bundle could not be
     compared against another built from the same source. The build_datetime is a token in
-    the payload for exactly this reason — the installer resolves it, not the
+    the payload for exactly this reason, the installer resolves it, not the
     planner."""
 
     repository = _repository(_dependency_estate(tmp_path))

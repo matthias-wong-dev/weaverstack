@@ -23,17 +23,17 @@ if TYPE_CHECKING:
 #: payload's identity column: a Delta table no longer has one to carry.
 BUILD_FORMAT_VERSION = 2
 
-#: The version of the physical shape Weaver gives a *keyed* table, salted into
+#: The version of the physical shape Weaver gives a keyed table, salted into
 #: :attr:`~weaver.declaration.source.SourceDocument.physical_signature`. It is
 #: what makes a change to that shape rebuild the tables it changed even though no
 #: authored source moved. Version 1 added the row-signature column.
 #:
-#: Keyed only, so an unkeyed table — which gains nothing — is not rebuilt for a
+#: Keyed only, so an unkeyed table, which gains nothing, is not rebuilt for a
 #: change it does not carry.
 KEYED_TABLE_VERSION = 1
 
 #: The executor a concrete Spark statement runs through. It names a runtime
-#: dispatch key, not an engine — a Fabric Spark session and a local one both use
+#: dispatch key, not an engine: a Fabric Spark session and a local one both use
 #: ``spark_sql``.
 SPARK_SQL_EXECUTOR = "spark_sql"
 SPARK_SQL_EXTENSION = ".spark.sql"
@@ -46,7 +46,7 @@ SPARK_TABLE_EXECUTOR = "spark_table"
 SPARK_TABLE_EXTENSION = ".spark-table.json"
 
 #: The executor that runs a T-SQL script against the Warehouse. Its payload is a
-#: finished, self-contained script — a table build materialises and inspects its
+#: finished, self-contained script. A table build materialises and inspects its
 #: own query shape server-side, so no round-trip is needed.
 TSQL_EXECUTOR = "tsql"
 TSQL_EXTENSION = ".sql"
@@ -72,8 +72,8 @@ def generate_ddl(document: "SourceDocument", *, destination=None) -> GeneratedDd
     managed name in the result is rendered against it. A Warehouse object needs
     none: its script is T-SQL, addressed by the connection it runs on.
 
-    Folders have no create DDL — a Folder is a directory, created by the
-    installer rather than by a statement — so this is never called for one.
+    Folders have no create DDL. A Folder is a directory, created by the installer
+    rather than by a statement, so this is never called for one.
     """
 
     if document.language == SQL:
@@ -128,7 +128,7 @@ def _python_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
 
     A Python-backed table has no query to infer from, so the reader requires a
     declared schema. The build is an empty table of that shape with Weaver's
-    audit columns appended — the concrete statement is known now, so it is frozen
+    audit columns appended. The concrete statement is known now, so it is frozen
     directly rather than deferred to an executor.
     """
 
@@ -165,8 +165,8 @@ def _spark_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
         "declared_columns": (
             [_column_entry(column) for column in ses.schema] if declared else None
         ),
-        # The statements that must run first — a temporary view the query reads —
-        # and the one query whose shape *is* the table's. A body may hold two
+        # The statements that must run first, such as a temporary view the query
+        # reads, and the one query whose shape is the table's. A body may hold two
         # queries (staging, then the keys to delete), and only the first says
         # what the table looks like.
         "setup": [
@@ -212,8 +212,8 @@ def _shape_program(document: "SourceDocument") -> tuple[tuple[str, ...], str]:
         if statement.produces_result:
             return tuple(setup), statement.sql
         setup.append(statement.sql)
-    # Unreachable for a validated document — parsing already refused a body with
-    # no query — but a build must not depend on that having happened.
+    # Unreachable for a validated document, since parsing already refused a body
+    # with no query, and a build must not depend on that having happened.
     raise DiscoveryError(
         f"{document.relative_path}: a Spark SQL table must end in a query that "
         "produces its rows, and this body has none"
@@ -224,7 +224,7 @@ def _view_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
     """A persistent view over the validated body, its managed names addressed.
 
     The body is otherwise untouched. What changes is that every reference to
-    another managed object now says which Lakehouse it means — without which a
+    another managed object now says which Lakehouse it means. Without that, a
     view built in one destination would read its inputs from whichever Lakehouse
     the session happened to be attached to.
     """
@@ -240,8 +240,8 @@ def _column_entry(column) -> list:
     """A payload column triple ``[name, type, not_null]``.
 
     Nullability travels with the column so the executor emits the same
-    constraint — the audit columns are always not null, and a declared primary
-    key or ``Not null`` column carries its constraint through too.
+    constraint. The audit columns are always not null, and a declared primary key
+    or ``Not null`` column carries its constraint through too.
     """
 
     return [column.name, column.type, column.not_null]

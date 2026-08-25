@@ -1,8 +1,8 @@
 """One remote state transition, one evidence payload.
 
 A statement submitted to a Fabric session costs seconds, so a test asking six
-questions of the estate pays six times over — and, worse, gets six answers about
-six different instants of a *mutable remote estate*. A claim like "after prune,
+questions of the estate pays six times over, and, worse, gets six answers about
+six different instants of a mutable remote estate. A claim like "after prune,
 the declared objects are still there and the orphans are gone" is then not one
 claim about one moment; it is several claims about several, and a later one can
 be true of state an earlier one never saw.
@@ -12,7 +12,7 @@ it once, bring back one payload, and assert against it here. Assertion messages
 stay readable, the estate is interrogated once, and the evidence can be kept on
 the step it belongs to rather than re-read later.
 
-The bodies are *text* rather than code called directly, because they have to run
+The bodies are text rather than code called directly, because they have to run
 where the estate is: inside a Fabric session, submitted over Livy.
 """
 
@@ -24,7 +24,7 @@ from typing import Mapping
 
 @dataclass(frozen=True)
 class Observation:
-    """What one round trip saw — the evidence a transition is asserted against.
+    """What one round trip saw, the evidence a transition is asserted against.
 
     Held rather than re-queried. A journey step keeps its own observation, so a
     later transition cannot repair what an earlier one broke and have the earlier
@@ -63,7 +63,7 @@ class Observation:
         directory exactly as a case-folding metastore does, so an exact-case
         comparison would assert something neither environment promises.
 
-        Empty and null entries are dropped — `DESCRIBE` pads its output with
+        Empty and null entries are dropped, `DESCRIBE` pads its output with
         blank rows to separate sections, and those are not object names.
         """
 
@@ -93,9 +93,9 @@ def observe_body(
 ) -> str:
     """The one body that collects every piece of evidence and emits it together.
 
-    Every name reaching this is already qualified by the caller, because only the
-    caller knows which of an estate's Lakehouses each piece of evidence is about
-    — and spanning several of them in one payload is exactly the point.
+     Every name reaching this is already qualified by the caller, because only the
+     caller knows which of an estate's Lakehouses each piece of evidence is about
+    , and spanning several of them in one payload is exactly the point.
     """
 
     return (
@@ -124,7 +124,7 @@ def observation_from(payload) -> Observation:
 def observe_in_session(
     session, *, queries=None, schemas=None, tables=None
 ) -> Observation:
-    """One Livy submission, one evidence payload — for a raw session.
+    """One Livy submission, one evidence payload: for a raw session.
 
     ``BuildEnv.observe`` is the same thing for a fixture that has a whole build
     environment and can resolve object tokens for itself. This serves the estates

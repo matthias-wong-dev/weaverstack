@@ -1,4 +1,4 @@
-"""``weaver load`` — the command-line surface, and what it delegates to.
+"""``weaver load``, the command-line surface, and what it delegates to.
 
 Two claims, and they pull in opposite directions on purpose.
 
@@ -7,11 +7,11 @@ an adapter, so what a user types and what the API is called with must be the
 same request. These are asserted against a recorded call rather than a real run,
 because what is under test is the mapping, not the load.
 
-The second is that the CLI owns *nothing else*. It resolves a workspace, crosses
+The second is that the CLI owns nothing else. It resolves a workspace, crosses
 the host boundary when it has to, renders what comes back and chooses an exit
-code. It does not plan, validate targets, order a graph or decide what failed —
+code. It does not plan, validate targets, order a graph or decide what failed,
 and the last test here says so by reading the source, because that is the kind of
-rule that decays quietly.
+rule that decays without saying so.
 
 Pure Python throughout: no Spark, no workspace, no Livy. The desktop-to-Fabric
 crossing is proved against a recording double, since what matters on this side
@@ -43,7 +43,7 @@ def _cli_module():
     """The command module itself.
 
     ``weaver_cli.main`` is a function on the package as well as a submodule, and
-    the function is what attribute access finds — so the module is asked for by
+    the function is what attribute access finds, so the module is asked for by
     name.
     """
 
@@ -272,8 +272,8 @@ def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
 ):
     """Tolerance returns a report; a report of failure is still a failure.
 
-    The distinction the exit code has to keep is between *how* a failure was
-    surfaced and *whether* there was one.
+    The distinction the exit code has to keep is between how a failure was
+    surfaced and whether there was one.
     """
 
     monkeypatch.setattr(
@@ -402,12 +402,12 @@ class _FakeLivy:
     """A Livy session that records the program and answers with a payload.
 
     Reached through a real :class:`~weaver.sessions.console.ConsoleSession`,
-    because that is how the command reaches it: the double is the *transport*,
+    because that is how the command reaches it: the double is the transport,
     not the Session, so what these tests exercise is the crossing the product
     performs rather than one arranged for them.
 
     ``submitted`` holds the programs the command sent. The Session's own version
-    probe is answered but not recorded — it is the Session's business, it
+    probe is answered but not recorded. It is the Session's business, it
     happens once per workspace context, and a test about a load should not have
     to know it exists.
     """
@@ -442,7 +442,7 @@ class _FakeLivy:
 
         class Result:
             # ``returned`` is whether the program called ``emit`` at all, which
-            # is a different question from what it emitted — and the one the
+            # is a different question from what it emitted, and the one the
             # Session uses to tell "ran and said nothing" from "ran and said no".
             returned = answer is not None
             payload = answer
@@ -486,7 +486,7 @@ class _FakeResolver:
 def livy(monkeypatch):
     """The transport a desktop crosses on, doubled beneath a real Session.
 
-    Everything is replaced *before* a Session is constructed: a ``Resource``
+    Everything is replaced before a Session is constructed: a ``Resource``
     binds its acquisition at construction, so patching the scope afterwards
     leaves the original in place and the credential is asked for anyway.
     """
@@ -562,10 +562,10 @@ def test_a_session_that_returns_nothing_is_an_error_rather_than_a_success(livy, 
 
 @weaver_test()
 def test_the_command_module_contains_no_orchestration_of_its_own():
-    """The rule that decays quietly, so it is read off the source.
+    """The rule that decays without saying so, so it is read off the source.
 
-    Everything a load decides — which nodes exist, in what order, what a failure
-    means, what the run added up to — belongs to one implementation that runs on
+    Everything a load decides, which nodes exist, in what order, what a failure
+    means, what the run added up to, belongs to one implementation that runs on
     both sides of the host boundary. A CLI that reached for any of it would be
     the second place that knows, and the two would drift.
     """

@@ -38,7 +38,6 @@ def test_invalid_declarations_are_rejected():
         ("remote", "remote", {"fabric", "remote"}),
         ("hosted", "hosted", {"fabric", "hosted"}),
         ("integration", "integration", {"fabric", "full_integration"}),
-        ("provision", "provision", {"fabric", "provision"}),
     ],
 )
 def test_each_scope_is_one_declaration_with_matching_selection_markers(
@@ -54,9 +53,8 @@ def test_each_scope_is_one_declaration_with_matching_selection_markers(
 
 
 @weaver_test()
-def test_integration_and_provision_need_no_position_dimension():
+def test_integration_needs_no_position_dimension():
     assert weaver_test(integration=True)
-    assert weaver_test(provision=True)
 
 
 @weaver_test()
@@ -72,3 +70,26 @@ def test_every_declared_resource_generates_its_selection_marker():
         "onelake",
         "rest",
     }
+
+
+@weaver_test()
+def test_only_a_completed_claim_is_held_to_its_resource_declaration():
+    """
+    Intent: A Fabric test reports why it skipped or failed, rather than
+    reporting a resource declaration mismatch instead.
+
+    Proof: a body that raised is recognised, so the comparison is not made
+    against one that crossed nothing or stopped part way.
+    """
+
+    from _pytest.outcomes import Skipped
+
+    from .weaver_test import claim_completed
+
+    class Outcome:
+        def __init__(self, excinfo):
+            self.excinfo = excinfo
+
+    assert claim_completed(Outcome(None))
+    assert not claim_completed(Outcome((Skipped, Skipped("no estate"), None)))
+    assert not claim_completed(Outcome((AssertionError, AssertionError("x"), None)))

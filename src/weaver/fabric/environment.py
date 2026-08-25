@@ -81,9 +81,9 @@ def environment_dependencies(root: Path | None = None) -> list[str]:
 
 
 #: Packages a desktop needs to reach Fabric, and Fabric itself never imports.
-#: They are ordinary runtime dependencies — `pip install weaverstack` gives you
-#: a working CLI — but installing them *into* a Fabric Environment would ship
-#: an HTTP stack, a build frontend and a terminal line editor to a Spark image
+#: They are ordinary runtime dependencies, and `pip install weaverstack` gives a
+#: working CLI. Installing them into a Fabric Environment would ship an HTTP
+#: stack, a build frontend and a terminal line editor to a Spark image
 #: that has no use for any of them.
 DESKTOP_ONLY = frozenset({"azure-identity", "requests", "build", "prompt_toolkit"})
 
@@ -187,7 +187,7 @@ def find_or_create_environment(
     response = client.request(
         "POST",
         f"workspaces/{workspace.id}/environments",
-        payload={"displayName": name, "description": "Weaver runtime"},
+        payload={"displayName": name},
         expected=(200, 201, 202),
     )
     if response.status_code == 202:
@@ -221,8 +221,8 @@ def _staging_base(env: Item) -> str:
 def read_staging(env: Item, *, client: FabricClient) -> dict:
     """What the Environment currently has staged: custom wheels and the env yml.
 
-    A freshly created Environment answers 404 here — ``This environment does not
-    have any staged libraries`` — which is the same "nothing yet"
+    A freshly created Environment answers 404 here, saying ``This environment does
+    not have any staged libraries``. That is the same "nothing yet"
     :func:`read_published` reads from a 404, and is read the same way. Treated
     as fatal, it made the first Environment publication into a new Environment fail.
     """
@@ -236,7 +236,7 @@ def read_staging(env: Item, *, client: FabricClient) -> dict:
 
 
 def read_published(env: Item, *, client: FabricClient) -> dict:
-    """What the Environment has *published* — the live image's libraries.
+    """What the Environment has published, being the live image's libraries.
 
     The diff that decides whether a republish is needed compares against this
     rather than staging, which can hold half-finished changes from an
@@ -259,7 +259,7 @@ def library_wheels(libraries: dict) -> list[str]:
     return list(custom)
 
 
-#: Backwards-compatible alias — reads wheels out of a staging or published body.
+#: Backwards-compatible alias, reading wheels out of a staging or published body.
 staged_wheels = library_wheels
 
 
@@ -353,8 +353,8 @@ def _null_step(name: str, detail: str | None = None):
 def _reporter(session):
     """``session.step`` when there is a Session, and a no-op otherwise.
 
-    Reporting is the caller's: a pytest fixture installing Weaver wants no
-    frames and the CLI wants them. One accessor rather than an ``if session`` at
+    Reporting is the caller's: a pytest fixture installing Weaver needs no
+    frames and the CLI needs them. One accessor rather than an ``if session`` at
     every phase.
     """
 
@@ -385,7 +385,7 @@ def publish_and_wait(
         time.sleep(poll_interval)
     # Name the state last seen rather than describing it: an empty string, from
     # Fabric answering with no publishDetails, reads very differently from a
-    # publish genuinely stuck in Running.
+    # publish stuck in Running.
     raise FabricError(
         f"Environment publish did not finish within {int(timeout)} seconds. Last state: {seen!r}."
     )
@@ -396,7 +396,7 @@ def publish_and_wait(
 
 @dataclass
 class EnvironmentPublishResult:
-    """What one Environment publication did — serialisable for ``--json``."""
+    """What one Environment publication did, serialisable for ``--json``."""
 
     workspace_name: str
     workspace_id: str
@@ -465,7 +465,7 @@ def publish_environment(
     definition_path = root / ENVIRONMENT_DEFINITION
     wanted_yml = definition_path.read_text("utf-8")
 
-    # Diff against what is *published* (what a session imports), not staging.
+    # Diff against what is published (what a session imports), not staging.
     with step("Read the published revision"):
         published_libs = read_published(env, client=client)
         deps_changed = (

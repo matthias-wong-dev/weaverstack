@@ -67,7 +67,7 @@ class NotebookSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        # Framed by the caller, not here — see ConsoleSession.execute_python for
+        # Framed by the caller, not here. See ConsoleSession.execute_python for
         # why. Both hosts have to agree about this or the same operation reads
         # differently depending on where it ran.
         self.scope(workspace)  # the attachment check, before any work happens
@@ -85,7 +85,7 @@ class NotebookSession(Session):
         """Ordered Spark SQL statements against the attached session.
 
         Nothing crosses here, so a batch is a batch only in that the statements
-        share one identifier-case scope — which is what makes a setup and the
+        share one identifier-case scope, which is what makes a setup and the
         query that reads it mean the same thing in both positions.
         """
 
@@ -126,7 +126,7 @@ class NotebookSession(Session):
 
 
 class NotebookScope(WorkspaceScope):
-    """The attached notebook's own resources — mostly things it already has."""
+    """The attached notebook's own resources: mostly things it already has."""
 
     def __init__(self, workspace: Workspace, *, spark: Any = None, **kwargs) -> None:
         super().__init__(workspace, **kwargs)

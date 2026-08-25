@@ -1,6 +1,6 @@
 """Desktop-only SQL setup and inspection for Warehouse integration tests.
 
-This module is test infrastructure.  It deliberately does not participate in
+This module is test infrastructure.  It does not participate in
 Fabric-native connection construction or Weaver's wipe implementation.
 """
 
@@ -20,7 +20,7 @@ class CatalogObject:
 
 
 #: The logical item a hand-installed load procedure belongs to. A procedure is
-#: keyed by it — its bookmark row carries the Registry's four-part identity — so
+#: keyed by it, its bookmark row carries the Registry's four-part identity, so
 #: a test names it rather than leaving it to a default.
 PROCEDURE_ITEM = ("Warehouse", "Reporting")
 

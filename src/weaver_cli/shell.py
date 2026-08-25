@@ -1,7 +1,7 @@
 """Interactive Weaver session: ordinary CLI commands, one ConsoleSession.
 
 Commands are written as they are in a terminal, in ``compose.yml`` and in the
-documentation — ``weaver build .`` — and are parsed by the top-level CLI parser
+documentation, ``weaver build .``, and are parsed by the top-level CLI parser
 and run by its handlers. The leading ``weaver`` is optional at the prompt, so
 ``build .`` and ``weaver build .`` are the same command. What the session adds
 is the Session underneath them, held open so a credential, item resolution and
@@ -182,7 +182,7 @@ def _prepare_for(session, parsed) -> None:
     try:
         workspace = _resolve_workspace(parsed)
         session.offer_spark_home(command_lakehouses(parsed), workspace=workspace)
-        # A resource the command wants and this workspace cannot start is
+        # A resource the command needs and this workspace cannot start is
         # reported here, where the reader can still act on it before the command
         # fails for the same reason further in.
         _report_skipped(session.prepare(required, workspace=workspace))

@@ -1,12 +1,12 @@
 """The planner/executor seam: generate and install from already-prepared state.
 
 `build_item_repository` is the one function whose whole job is composing prepared
-inputs correctly, and until now no test named it — it was reached only through
+inputs correctly, and until now no test named it. It was reached only through
 the Fabric bodies, where a defect in it would surface as "the build failed".
 
 What it must do is narrow: generate a bundle from source and state it was handed,
-install that bundle, and report both. What it must *not* do is anything that
-looks like re-deciding — parsing the repository again, reading the catalogue,
+install that bundle, and report both. What it must not do is anything that
+looks like re-deciding, parsing the repository again, reading the catalogue,
 discovering a target. Those are the caller's, already done, and doing them here
 would mean a build could disagree with the state it was planned against.
 
@@ -217,8 +217,8 @@ def test_the_result_carries_the_signatures_a_caller_records(estate):
 
 @weaver_test()
 def test_an_inventory_that_already_holds_the_schema_plans_no_create(estate):
-    """Prepared state is *used*, not re-read. If the caller says the schema is
-    there, the build must believe it — that is what makes the seam a seam."""
+    """Prepared state is used, not re-read. If the caller says the schema is
+    there, the build must believe it. That is what makes the seam a seam."""
 
     bindings = _bindings()
     inventories = {
@@ -253,8 +253,8 @@ def test_a_catalogue_that_certifies_the_document_plans_no_rebuild(estate):
     """The unchanged case, reached through the seam rather than the planner.
 
     A build handed a catalogue that already certifies what the repository
-    declares must decide there is nothing to do — which is the incremental claim
-    the whole design rests on, and here it is asserted of the *composition*.
+    declares must decide there is nothing to do, which is the incremental claim
+    the whole design rests on, and here it is asserted of the composition.
     """
 
     from factories import FixtureCatalogue
@@ -263,8 +263,8 @@ def test_a_catalogue_that_certifies_the_document_plans_no_rebuild(estate):
         estate["repository"], item="Lakehouse/Sales"
     )
     # And the table is physically there. A catalogue certifying an object the
-    # target does not hold is a *stale* claim, and reconciling it away so the
-    # object rebuilds is correct — which this test would otherwise trip over,
+    # target does not hold is a stale claim, and reconciling it away so the
+    # object rebuilds is correct, which this test would otherwise trip over,
     # because it used to hand the build a reconciliation already made for it.
     present = _inventories(tables=("DWG.Customer",))
     result = build(
@@ -307,7 +307,7 @@ def test_a_binding_naming_an_unknown_item_is_refused(estate):
 def test_a_failing_action_is_reported_not_raised(estate):
     """A build that failed is a result to read, not an exception to catch.
 
-    The caller needs the plan and the per-action detail to say *what* failed —
+    The caller needs the plan and the per-action detail to say what failed,
     an exception would leave it with a stack trace and no report.
     """
 
@@ -349,12 +349,12 @@ def test_an_action_set_with_no_spark_action_makes_no_spark_crossing(estate):
     Scoped to the Installer and this action set, not to builds in general: the
     catalogue lives in a Warehouse and is published over TDS, so
     an ordinary complete build does cross to Spark. What is guarded here is
-    narrower and still worth guarding — the Installer used to evaluate the
+    narrower and still worth guarding, the Installer used to evaluate the
     Session's Spark while assembling every batch's context, so an action set
     whose executors never run a statement reached for a session anyway.
 
     Asserted by watching what the Session was asked for, because a build that
-    quietly acquired one would still pass an assertion about its result.
+    acquired one would still pass an assertion about its result.
     """
 
     result = build(estate)

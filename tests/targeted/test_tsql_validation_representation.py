@@ -2,7 +2,7 @@
 
 Everything here is pure: rendering a procedure needs no Warehouse, no columns
 and no session, which is the property that makes exhaustive cover of the
-generated SQL cheap. What a *real* Warehouse does with it is proved separately
+generated SQL cheap. What a real Warehouse does with it is proved separately
 and narrowly in ``tests/fabric``.
 
 Two claims run through all of it. The counts live in the signature rather than a
@@ -113,7 +113,7 @@ def test_an_assumption_exposes_one_optional_count(assumption_script):
 
 @weaver_test()
 def test_both_expose_suppression_defaulting_to_returning_the_evidence():
-    """A person running one by hand wants the rows; orchestration asks for silence."""
+    """A person running one by hand needs the rows; orchestration asks for silence."""
 
     for script in (
         _script(TEST_SOURCE, "t/Sales.OrdersReconcile.sql", "[_].[T]"),
@@ -158,10 +158,10 @@ def test_the_two_contract_queries_are_captured_as_expected_and_actual(test_scrip
 
 @weaver_test()
 def test_the_authored_setup_travels_verbatim():
-    """Their formatting, their line breaks, their temp table — untouched.
+    """Their formatting, their line breaks, their temp table: untouched.
 
     Against the body rather than the script, because the procedure indents the
-    whole of it and the claim here is about what was *not* rewritten.
+    whole of it and the claim here is about what was not rewritten.
     """
 
     body = _body(TEST_SOURCE, "Warehouse/Reporting/tests/Sales.OrdersReconcile.sql")
@@ -404,7 +404,7 @@ def test_an_unkeyed_test_has_no_key_guards():
 
 @weaver_test()
 def test_an_assumption_has_no_guards_at_all(assumption_script):
-    """One side, no key, nothing to correlate — so nothing to guard."""
+    """One side, no key, nothing to correlate, so nothing to guard."""
 
     assert "throw" not in assumption_script
 

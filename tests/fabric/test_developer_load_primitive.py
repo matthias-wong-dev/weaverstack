@@ -1,11 +1,11 @@
 """A developer running a deployed load primitive in Fabric, by hand.
 
-This is a *primitive* test, and its claim is developer-facing: someone in a
+This is a primitive test, and its claim is developer-facing: someone in a
 Fabric session can import a deployed object and run its load, with no planner,
 no catalogue orchestration and no estate-level entry point in the way.
 
 That is also why it is ``hosted``. The subject is the API the *wheel installed
-in the session* offers — that `.load()` exists there and behaves — rather than
+in the session* offers, that `.load()` exists there and behaves, rather than
 the load semantics underneath it, which the core suite proves for a fraction of
 the cost.
 
@@ -27,7 +27,7 @@ it brings back.
 
 It therefore carries ``fabric`` and ``hosted``: the first says where the
 resources are, the second says where Weaver runs. The platform question
-underneath it — what a mount is — is a ``fabric and remote`` test of its own and
+underneath it, what a mount is, is a ``fabric and remote`` test of its own and
 runs without a publish.
 """
 
@@ -47,7 +47,7 @@ from pathlib import Path
 
 from weaver import lakehouse_for
 
-# The body's `target` is an ItemRef — a name, not a destination. Resolving it is
+# The body's `target` is an ItemRef, a name, not a destination. Resolving it is
 # the orchestrator's move, and the one an object never makes for itself.
 destination = lakehouse_for(resolver, target)
 results = {}
@@ -60,7 +60,7 @@ sys.path.insert(0, root)
 results["deployed"] = sorted(os.listdir(root))
 
 # The import a deployed tree is laid out for: `Files.*`, because the authored
-# path is reproduced verbatim beneath the root — `Files/Raw__CustomerCsv.py`
+# path is reproduced verbatim beneath the root, `Files/Raw__CustomerCsv.py`
 # stays where it was written, so the module name says the same thing it did.
 from Files.Raw__CustomerCsv import Raw__CustomerCsv
 
@@ -72,7 +72,7 @@ results["lib"] = sorted(os.listdir(os.path.join(root, "lib", "data")))
 
 # The folder load, writing ordinary files to OneLake through the mount. The
 # catalogue is named because a load records how far it got, and the workspace is
-# what says where it lives — nothing infers it.
+# what says where it lives. Nothing infers it.
 export = Raw__CustomerCsv(spark, lakehouse=destination, catalogue=workspace.catalogue)
 results["folder"] = export.load().as_row()
 # Two spellings of one location, and only one of them is a filesystem path.
@@ -103,7 +103,7 @@ emit(results)
 #: A catalogue for an ad-hoc probe, built in the session that runs it.
 #:
 #: A load needs a catalogue, because it reads its bookmark. A probe is not part
-#: of the built estate, so the estate's own catalogue does not record it — this is
+#: of the built estate, so the estate's own catalogue does not record it. This is
 #: the real :class:`~weaver.catalogue.state.Catalogue`, over the rows that make
 #: one object installed. It has nowhere to write and needs nowhere: the probes
 #: call ``_load()``, the interface that records nothing.
@@ -345,7 +345,7 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_e
     assert seen["lib"] == ["customers.csv"]
     # The authored path is reproduced verbatim, so the import reads the same.
     assert seen["imported"] == "Raw__CustomerCsv"
-    # Two spellings of one location, because two things read them — and the one
+    # Two spellings of one location, because two things read them, and the one
     # authored code gets is a real Path, not a string it has to convert.
     assert seen["folder_path_is_mounted"] is True
     assert seen["folder_path_is_a_path"] is True
@@ -364,7 +364,7 @@ def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(
     `DWG.NamedCustomer.sql` is authored in Spark SQL and installed as
     `DWG__NamedCustomer.py`. What this asserts is that the file the build wrote
     is importable in the session, carries its authored contract, and loads
-    through the ordinary `Table.load()` — so a SQL-authored table and a
+    through the ordinary `Table.load()`, so a SQL-authored table and a
     Python-authored one are the same primitive by the time anything runs.
     """
 

@@ -3,16 +3,16 @@
 A Warehouse table's inferred build runs its query in *shape-only* form: every
 ``SELECT`` is guarded to return its columns and no rows, and the final result is
 diverted into a temp table whose metadata the generated script then reads. Those
-two rewrites — :func:`insert_where_one_eq_zero` and :func:`insert_select_into` —
+two rewrites, :func:`insert_where_one_eq_zero` and :func:`insert_select_into`,
 work over a flattened, offset-carrying token stream rather than by string
 munging, so nested queries, CTEs, set operations and existing ``WHERE`` clauses
 are handled correctly.
 
 Everything here is T-SQL's: the keyword sets, the ``GO`` boundary, the
-``SELECT INTO`` placement and the shape-only guard. What is not dialect-specific
-— flattening text into offset-carrying tokens, and finding where a statement
-ends — lives in :mod:`weaver.sql_statements`, because Spark SQL needs the same
-answer.
+``SELECT INTO`` placement and the shape-only guard. Flattening text into
+offset-carrying tokens, and finding where a statement ends, are not
+dialect-specific and live in :mod:`weaver.sql_statements`, because Spark SQL
+needs the same answer.
 
 :func:`render_sql_template` fills the T-SQL DDL templates in ``ses/templates``.
 """
@@ -118,8 +118,8 @@ def insert_select_into(
     """Insert ``INTO <table_name>`` into one standalone SELECT query.
 
     The last query by default, which is where a single-query body's result is.
-    A body that produces its rows and *then* names the keys to delete has two,
-    and the caller says which — so ``span`` is how a build diverts the staging
+    A body that produces its rows and then names the keys to delete has two,
+    and the caller says which, so ``span`` is how a build diverts the staging
     query rather than whichever query happens to come last.
     """
 

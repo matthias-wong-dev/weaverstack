@@ -3,7 +3,7 @@
 A Lakehouse declares its shortcuts in ``shortcuts.py``, which is Python syntax
 used for static declarations. It is parsed, never executed: a build reads it to
 learn what an item points at, and the same names are importable from the item's
-own programs at load time. So the accepted syntax is deliberately narrow, and
+own programs at load time. So the accepted syntax is narrow, and
 anything that would only have a meaning when run is refused here.
 
 A Warehouse declares its shortcuts in ``shortcuts.yml``, in two sections named

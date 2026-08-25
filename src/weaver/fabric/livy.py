@@ -12,7 +12,13 @@ from typing import Any
 
 from ..errors import WeaverError
 from .auth import FABRIC_SCOPE, token_source
-from .client import FABRIC_API, send
+from .client import (
+    CONNECTION_ATTEMPTS,
+    FABRIC_API,
+    TRANSIENT_STATUSES,
+    retry_delay,
+    send,
+)
 
 DEFAULT_LIVY_API_VERSION = "2023-12-01"
 DEFAULT_POLL_INTERVAL = 3.0
@@ -32,7 +38,7 @@ class LivyError(WeaverError):
 
 
 class LivyStatementError(LivyError):
-    """Raised when a *statement* failed. The session that ran it is fine.
+    """Raised when a statement failed. The session that ran it is fine.
 
     A remote ``ModuleNotFoundError`` says the submitted program was wrong and
     nothing about the Spark session, which is still up and still costs a minute
@@ -241,25 +247,32 @@ def _call(
 ) -> dict:
     import requests
 
-    try:
-        response = send(
-            method,
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps(payload) if payload is not None else None,
-            timeout=120,
-        )
-    except requests.exceptions.RequestException as exc:
-        raise LivyError(f"{method} {url} could not be reached: {exc}") from exc
-    if response.status_code not in expected:
+    # Livy runs over the same REST front door, and it refuses a call the same way
+    # while a capacity is busy. Polling a statement for minutes meets that often.
+    for attempt in range(1, CONNECTION_ATTEMPTS + 1):
+        try:
+            response = send(
+                method,
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps(payload) if payload is not None else None,
+                timeout=120,
+            )
+        except requests.exceptions.RequestException as exc:
+            raise LivyError(f"{method} {url} could not be reached: {exc}") from exc
+        if response.status_code in expected:
+            return response.json() if response.content else {}
+        if response.status_code in TRANSIENT_STATUSES and attempt < CONNECTION_ATTEMPTS:
+            time.sleep(retry_delay(response, attempt))
+            continue
         raise LivyError(
             f"{method} {url} returned {response.status_code}: "
             f"{response.text.strip()[:400] or 'no body'}"
         )
-    return response.json() if response.content else {}
+    raise LivyError(f"{method} {url} did not settle")
 
 
 class LivySession:
@@ -300,8 +313,8 @@ class LivySession:
     ) -> "LivySession":
         """A session attached to one of the workspace's Lakehouses.
 
-        Fabric creates a Spark session *against a Lakehouse* — its id is in the
-        Livy URL — so a session needs one to live in. Which one does not affect
+        Fabric creates a Spark session against a Lakehouse, whose id is in the
+        Livy URL, so a session needs one to live in. Which one does not affect
         where work lands: every statement Weaver generates names the Lakehouse
         it is about, in full. The attachment is a home, not a destination.
 
@@ -314,7 +327,7 @@ class LivySession:
         body that imports Weaver finds what ``weaver fabric environment publish`` published.
         Nothing is copied into the workspace.
 
-        An Environment is *not* required to start a session. Submitting Spark
+        An Environment is not required to start a session. Submitting Spark
         to a workspace and running the installed package are two different
         needs, and only the second waits on a wheel publish: a build's
         statements are Spark SQL that imports nothing, so it runs on the
@@ -379,8 +392,8 @@ class LivySession:
         payload: dict[str, Any] = {"name": "weaver"}
         if self.environment_id:
             # Fabric attaches an Environment to a Livy session through a Spark
-            # conf, not a top-level field — the published libraries (Weaver and
-            # its dependencies) are loaded only when this is set.
+            # conf, not a top-level field. The published libraries, Weaver and its
+            # dependencies, are loaded only when this is set.
             payload["conf"] = {
                 "spark.fabric.environmentDetails": json.dumps(
                     {"id": self.environment_id}
@@ -412,9 +425,9 @@ class LivySession:
     ) -> StatementResult:
         """Run code in the session and return what it printed.
 
-        A statement that wants to return something calls :func:`emit`, which
-        prints a tagged JSON line — printed output and returned values are then
-        distinguishable, and a result survives whatever else was logged.
+        A statement that needs to return something calls :func:`emit`, which
+        prints a tagged JSON line, so printed output and returned values stay
+        distinguishable and a result survives whatever else was logged.
         """
 
         if self.session_url is None:
@@ -469,7 +482,7 @@ class LivySession:
                 state = _call("GET", url, self.token, expected=(200, 404))
             except LivyError:  # gone, or no longer ours to ask about
                 return
-            if not state:  # 404 — the session is no longer there
+            if not state:  # 404, so the session is no longer there
                 return
             if (state.get("state") or "").lower() in {
                 "dead",
@@ -524,7 +537,7 @@ def _resolve_environment_id(workspace, resolver) -> str:
     """The item id of the workspace's named Environment.
 
     Resolved by type, so a same-named Lakehouse or Warehouse cannot be picked up
-    by mistake — identity is ``workspace + type + name``.
+    by mistake. Identity is ``workspace + type + name``.
     """
 
     from .resources import ENVIRONMENT, find_item

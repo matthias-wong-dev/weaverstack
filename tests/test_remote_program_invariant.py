@@ -1,15 +1,15 @@
 """Every program Weaver ships into Fabric is valid Python before it is shipped.
 
 A remote program is a string here and code there. A typo in one costs a Livy
-session, a submission and a wait to discover — twenty minutes into a Fabric run,
+session, a submission and a wait to discover, twenty minutes into a Fabric run,
 reported as a Spark error about something else. Nothing else in the suite reads
 these bodies at all.
 
 So they are parsed here, cheaply, with no Fabric and no Spark. Interpolations are
-replaced with a placeholder: the *shape* is what this checks, because the values
+replaced with a placeholder: the shape is what this checks, because the values
 are known only at submission time.
 
-This does not check that the program is correct — only that it is syntax. What
+This does not check that the program is correct, only that it is syntax. What
 it is really defending is the moment an API those bodies name gets renamed, which
 is when a body silently stops matching the wheel it will run against.
 """
@@ -28,10 +28,10 @@ ROOT = Path(__file__).resolve().parents[1]
 MARKERS = ("emit(", "import ")
 
 #: Stands in for an interpolated value. A name, so it parses wherever a value
-#: does — as an argument, a subscript or the right-hand side of an assignment.
+#: does, as an argument, a subscript or the right-hand side of an assignment.
 PLACEHOLDER = "_interpolated"
 
-#: Source *builders*, not programs: these assemble a body around a placeholder
+#: Source builders, not programs: these assemble a body around a placeholder
 #: that is itself a block of code, so they are not valid Python until something
 #: fills them in. Named explicitly, because "skip what does not parse" would
 #: skip exactly the defects this exists to catch.
@@ -60,7 +60,7 @@ def _strings(tree: ast.AST):
     """Every string node, without descending into an f-string's own parts.
 
     An f-string's fragments are Constants too, and a fragment of a program is
-    not a program — checking one reports a syntax error in the middle of a
+    not a program, checking one reports a syntax error in the middle of a
     perfectly good body.
     """
 
@@ -117,7 +117,7 @@ def test_no_remote_program_names_an_abstraction_that_no_longer_exists():
 
     The console and the published wheel are two halves of one contract, and a
     rename that misses a program body leaves the two disagreeing until something
-    runs. The protocol version catches a *stale wheel*; this catches a stale
+    runs. The protocol version catches a stale wheel; this catches a stale
     program.
     """
 
@@ -126,7 +126,7 @@ def test_no_remote_program_names_an_abstraction_that_no_longer_exists():
     # Installer already is, so nothing crosses but the statements themselves,
     # and no program should name it again.
     # The names the whole refactor retired come from one register, because a
-    # body carrying one fails only when Fabric runs it — minutes into a suite,
+    # body carrying one fails only when Fabric runs it, minutes into a suite,
     # rather than in the check that renamed it.
     from test_fabric_only_invariant import RETIRED
 
@@ -155,15 +155,15 @@ def test_the_runner_needs_no_load_vocabulary_to_orchestrate():
     """Adding a runtime operation must not mean importing another one's types.
 
     The Runner decides what runs, in what order, and what became of it. None of
-    that is a load's business — so its planning, resolution, outcome and result
+    that is a load's business, so its planning, resolution, outcome and result
     modules must not reach for a load's result type, a load's error or a load's
     report to say so. `run/dispatch.py` is the exception and the reason: it is
-    where a *load* primitive is reached, and a load primitive returns a load
+    where a load primitive is reached, and a load primitive returns a load
     result.
     """
 
     # Enumerated rather than listed, so the rule covers a module somebody adds
-    # tomorrow — and so it cannot quietly stop covering one that is merged away.
+    # tomorrow, and so it cannot stop covering one that is merged away.
     run = ROOT / "src" / "weaver" / "run"
     generic = sorted(
         path.name
@@ -176,7 +176,7 @@ def test_the_runner_needs_no_load_vocabulary_to_orchestrate():
         for name in generic
         for word in forbidden
         if word in (ROOT / "src" / "weaver" / "run" / name).read_text(encoding="utf-8")
-        # A comment naming the thing it does *not* depend on is the point.
+        # A comment naming the thing it does not depend on is the point.
         and not _only_in_prose(
             (ROOT / "src" / "weaver" / "run" / name).read_text(encoding="utf-8"), word
         )

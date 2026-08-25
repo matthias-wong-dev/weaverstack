@@ -821,6 +821,54 @@ This preserves the same architectural separation used throughout Weaver.
 - Build generates deployment artefacts.
 - Load executes those artefacts.
 
+## Cross-engine boundaries in a load
+
+A load graph orders two kinds of edge. Most are ordinary dependencies: the
+producer finishes and the consumer runs. The rest cross from one Fabric engine to
+another, where the producer finishing is not yet the same thing as the consumer
+being able to see what it produced. Weaver waits at both of them.
+
+```text
+Lakehouse producer  →  Warehouse consumer   the Lakehouse's SQL analytics
+                                            endpoint has to catch up
+Warehouse producer  →  Lakehouse consumer   the Warehouse's OneLake Delta
+                                            publication has to catch up
+```
+
+Both are nodes in the load graph, and both replace the direct edge they stand on.
+The endpoint refresh barrier sits behind every selected load in the refreshed
+Lakehouse. The publication barrier sits behind the one Warehouse load it waits
+for.
+
+```text
+load:Warehouse/Serving/SERVE.Reporting
+        ↓
+publish:Warehouse/Serving/SERVE.Reporting
+        ↓
+load:Lakehouse/Published/PUB.Reporting
+```
+
+Fabric publishes a Warehouse table's Delta log in the background after the
+transaction commits, so a Lakehouse consumer reading that table through a shortcut
+can see the previous snapshot, or a new snapshot whose Parquet files it cannot open
+yet. The barrier proves both: a commit that was not published before the load ran,
+and an opened read of each Parquet file that commit added, through the consuming
+shortcut's own path. It counts no rows, because Delta answers `count(*)` from the
+commit's statistics and would report a snapshot readable before its files are.
+
+Being a node is what gives it a progress line, a timing frame and a step file of
+its own, and what makes a publication timeout fail the boundary rather than the
+load whose T-SQL already committed. It carries no logical identity, so it leaves
+no catalogue state: the Warehouse table it waits on is held in `publication_of`.
+
+A barrier runs after its load and cannot see what was published before it, so the
+load records that in a run-scoped ledger the Runner owns. Only the loads a barrier
+follows are recorded, and a barrier whose load moved no rows settles without
+reaching Spark, so a Warehouse-only load submits nothing to Spark and reads no
+Delta log.
+
+The mechanisms live in `weaver.run.publication`.
+
 ---
 
 # Typical Development Cycle

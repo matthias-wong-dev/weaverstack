@@ -412,7 +412,7 @@ def parse_item_repository(
         if authored:
             raise DiscoveryError(
                 f"{sorted(authored)[0]}: schema {ETL_SCHEMA!r} is generated Weaver "
-                "infrastructure — it holds the runtime tree a load is deployed "
+                "infrastructure. It holds the runtime tree a load is deployed "
                 "into and the schema generated load procedures live in, so an "
                 "item may not author into it"
             )
@@ -513,8 +513,8 @@ def parse_item_repository(
     # payload the bundle carries, and neither may reopen the repository.
     #
     # Every support file, not only the Python ones. A `.py` filter here was
-    # reading across from the *top level*, where a Weaver document is python,
-    # sql or yml — but `lib/` is an ordinary directory the runtime tree
+    # reading across from the top level, where a Weaver document is python,
+    # sql or yml. But `lib/` is an ordinary directory the runtime tree
     # reproduces verbatim, and a module that reads a data file beside it needs
     # that file to have travelled with it.
     support_file_contents = {
@@ -535,6 +535,7 @@ def parse_item_repository(
         ),
         logical_shortcuts=logical_shortcuts,
         shortcuts=shortcuts,
+        planned_shortcuts=shortcuts,
         generated_files=generated_files,
     )
     return resolve_item_dependencies(repository)
@@ -855,7 +856,7 @@ def _ignored(relative: str) -> bool:
 def importable_module_name(relative_path: str) -> str | None:
     """The full dotted module a repository-relative path is importable as.
 
-    ``_helpers/dates.py`` is ``_helpers.dates``, not ``dates`` — a nested module
+    ``_helpers/dates.py`` is ``_helpers.dates``, not ``dates``. A nested module
     lives in its package's namespace and cannot shadow a top-level one.
     ``_helpers/__init__.py`` is the package itself, ``_helpers``.
     """
@@ -889,17 +890,18 @@ def effective_dependencies(document: SourceDocument) -> tuple[ObjectId, ...]:
     """What this document depends on: declared if declared, else discovered.
 
     A declaration replaces discovery rather than adding to it, so an author can
-    remove an edge as well as add one — the phantom dependency an unused import
-    creates has no other cure. ``Dependencies: []`` is such a declaration, so an
+    remove an edge as well as add one, because the phantom dependency an unused
+    import creates has no other cure. ``Dependencies: []`` is such a declaration,
+    so an
     explicit none suppresses discovery rather than falling back to it.
 
     One rule for every kind, validation included. What differs is only whether a
-    kind is *required* to declare: a Spark SQL object is, because its query may
+    kind is required to declare: a Spark SQL object is, because its query may
     read by path and a load ordered by a half-known graph builds things in the
     wrong order. A validation is not, because it reads objects that its own
-    installation has already put in place — validation runs after the load
-    artefacts, and a validation never depends on another validation — so an
-    edge inference missed costs an ordering nicety rather than a wrong estate.
+    installation has already put in place. Validation runs after the load
+    artefacts, and a validation never depends on another validation, so an edge
+    inference missed costs an ordering nicety rather than a wrong estate.
     """
 
     if document.document.declares_dependencies:
@@ -916,7 +918,7 @@ def _resolve(
 
     A two-part name resolves in the namespace of whoever wrote it: T-SQL
     resolves inside the Warehouse, Spark SQL inside the Lakehouse. So the
-    referrer's own target wins when it has a candidate — `join Sales.Customer`
+    referrer's own target wins when it has a candidate, `join Sales.Customer`
     in a Warehouse query means the Warehouse's Sales.Customer, because that is
     what the SQL would actually bind to.
 
@@ -924,7 +926,7 @@ def _resolve(
     boundary: a Warehouse query reading a Delta table is the ordinary case, and
     the one the SQL endpoint and the shortcuts exist to bridge.
 
-    Two candidates in neither of those positions is genuinely ambiguous and is
+    Two candidates in neither of those positions is ambiguous and is
     left for the build, which has the targets and the shortcut bindings.
     """
 
@@ -958,7 +960,7 @@ def build_internal_graph(
     """The graph over references that resolve within this repository.
 
     Nodes are ``target:Schema.Object``, because an ID alone is not unique.
-    References resolving to nothing here — or to more than one thing — are left
+    References resolving to nothing here, or to more than one thing, are left
     out entirely. They may be shortcuts, objects of another repository, or
     mistakes, and telling those apart needs the external-dependency
     configuration supplied at build.
@@ -972,7 +974,7 @@ def build_internal_graph(
     for document in documents:
         for dependency in effective_dependencies(document):
             if _canonical(dependency.qualified) in known_external:
-                # Provided from outside — a boundary, not an edge within this graph.
+                # Provided from outside, a boundary, not an edge within this graph.
                 continue
             upstream = _resolve(dependency, by_id, document)
             if upstream is not None and upstream.node_id != document.node_id:

@@ -10,7 +10,7 @@
 
 A blocked node has a status and no statistics: it did nothing, and a row of
 zeroes for it would read as a load that moved nothing. A node about no object at
-all — an endpoint refresh — has evidence and no state.
+all, such as an endpoint refresh, has evidence and no state.
 
 Row construction, writing and flushing stay three things. See
 ``design/catalogue.md`` for the operational-state model these rows belong to.
@@ -49,7 +49,7 @@ TEST_TASK = "test"
 
 #: Every run and validation status, in the frozen public ``[Result]``
 #: vocabulary. A status missing from here fails the run at its last step, so a
-#: new one is added here deliberately.
+#: new one is added here.
 RESULT_FOR_STATUS = {
     "succeeded": SUCCEEDED,
     "succeeded_with_rejects": REJECTED,
@@ -84,7 +84,7 @@ def result_for(node, *, task_type: str = LOAD_TASK) -> str:
     except KeyError:
         raise RunError(
             f"{status!r} has no place in the public Result vocabulary; add one "
-            "deliberately rather than letting a run write an unknown value"
+            "rather than letting a run write an unknown value"
         ) from None
     if result != FAILED or not getattr(node, "raised", False):
         return result
@@ -158,7 +158,7 @@ def load_statistic_row(node, identity, *, workflow_id: str) -> dict:
         "rows_updated": _count(result, "rows_updated"),
         "rows_deleted": _count(result, "rows_deleted"),
         "rows_rejected": _count(result, "rows_rejected"),
-        # Written rather than left null, so a reader counting reloads gets zero.
+        # Written rather than left null, so counting reloads gives zero.
         "is_reload": False,
         "is_static_skip": bool(getattr(result, "is_static_skip", False)),
     }
@@ -222,7 +222,7 @@ class RunRecord:
     """One workflow's operational record, written through its catalogue.
 
     Downstream of the Runner by construction: a run is correct without one, and
-    the operation that wants a durable record opens it. One object, because it is
+    the operation that needs a durable record opens it. One object, because it is
     one catalogue, one connection and one flush.
     """
 
@@ -310,7 +310,7 @@ def settled_load(
     A direct call settles one object as a run settles a graph node, so both build
     their rows through one implementation and a column added to a table reaches
     both. ``raised`` and ``refused`` carry what a dispatched node's outcome
-    carries — see :func:`result_for`.
+    carries. See :func:`result_for`.
     """
 
     from .outcome import status_of
@@ -482,7 +482,7 @@ def new_workflow_id() -> str:
 def open_run_record(
     catalogue, *, workspace=None, task_type: str, workflow_id=None, session=None
 ) -> RunRecord:
-    """Where this run's operational record goes — the catalogue that owns ``_``."""
+    """Where this run's operational record goes, the catalogue that owns ``_``."""
 
     if workspace is not None and not workspace.catalogue:
         raise RunError("recording what a run did needs a Workspace with a catalogue")

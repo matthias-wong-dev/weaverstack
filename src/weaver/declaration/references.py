@@ -27,8 +27,8 @@ IDENTITY_COLUMN_NOTE = (
 class ResolvedText:
     """One piece of metadata, split into its text and where the text came from.
 
-    ``literal`` is the prose — written here, or copied from the end of a
-    reference chain, or ``None`` when a reference could not be followed.
+    ``literal`` is the prose, written here or copied from the end of a reference
+    chain, or ``None`` when a reference could not be followed.
     ``reference`` is the ``$Schema.Object[Column]`` as written, or ``None`` when
     the prose was written here.
     """
@@ -50,7 +50,8 @@ def resolve_text(
 ) -> ResolvedText:
     """Follow one piece of metadata to its literal prose.
 
-    ``documents`` is every object in the repository — resolution needs siblings.
+    ``documents`` is every object in the repository, because resolution needs
+    siblings.
     Raises :class:`~weaver.errors.DiscoveryError` when the chain cycles.
     """
 
@@ -110,7 +111,7 @@ def _follow(
             f"{node}[{column}]" if column else node for node, column in seen
         )
         raise DiscoveryError(
-            f"metadata reference cycle: {trail} -> {target.node_id} — a reference "
+            f"metadata reference cycle: {trail} -> {target.node_id}. A reference "
             "copies text from its target, so a cycle has no text to copy"
         )
 
@@ -233,8 +234,8 @@ def column_note(document: SourceDocument, column: str) -> MetadataText | None:
     """One column's declared note, however the object declares its shape.
 
     A declared schema carries notes on its columns. An inferred one has no
-    declared columns to carry them, so its notes stay in the raw metadata block
-    — the same split :func:`weaver.ses.columns.metadata_column_references` makes.
+    declared columns to carry them, so its notes stay in the raw metadata block.
+    The same split :func:`weaver.ses.columns.metadata_column_references` makes.
     """
 
     ses = document.document

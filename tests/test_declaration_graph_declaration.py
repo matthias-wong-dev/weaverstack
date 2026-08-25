@@ -1,4 +1,4 @@
-"""Graph primitives — edge-agnostic, so build and load can share them."""
+"""Graph primitives: edge-agnostic, so build and load can share them."""
 
 from __future__ import annotations
 

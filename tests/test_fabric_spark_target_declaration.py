@@ -1,4 +1,4 @@
-"""Addressing a named Fabric Lakehouse — no session, no JVM.
+"""Addressing a named Fabric Lakehouse: no session, no JVM.
 
 The behaviour the whole multi-target arrangement rests on: a statement says
 which Lakehouse it means, instead of inheriting one from whatever the session
@@ -167,7 +167,7 @@ def test_listing_views_asks_the_destination_not_the_session(fabric):
 
 @weaver_test()
 def test_listing_tables_takes_the_views_back_out(fabric):
-    """``SHOW TABLES`` returns views as well — confirmed in a real workspace."""
+    """``SHOW TABLES`` returns views as well: confirmed in a real workspace."""
 
     spark = _Spark(
         listings={
@@ -186,7 +186,7 @@ def test_listing_tables_takes_the_views_back_out(fabric):
 
 @weaver_test()
 def test_a_schema_that_is_not_there_holds_nothing(fabric):
-    """Fabric raises for an absent schema; an inventory wants "empty"."""
+    """Fabric raises for an absent schema; an inventory needs "empty"."""
 
     assert SparkCatalogue(_Spark(), fabric).views("Sales") == ()
 

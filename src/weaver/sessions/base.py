@@ -67,7 +67,7 @@ class ReportingFrame:
     kind: str
     name: str
     detail: str | None = None
-    #: How deep this sits in the frames open when it started, so a reader can
+    #: How deep this sits in the frames open when it started, so the output can
     #: indent without reconstructing the stack.
     depth: int = 0
     started: float = field(default_factory=time.monotonic)
@@ -101,8 +101,8 @@ class ReportingFrame:
 class Session(ABC):
     """A reusable execution scope: resolution, resources and host capabilities.
 
-    Concrete hosts are :class:`~weaver.sessions.console.ConsoleSession` — Weaver
-    on a desktop, reaching into Fabric — and
+    Concrete hosts are :class:`~weaver.sessions.console.ConsoleSession`, Weaver on
+    a desktop reaching into Fabric, and
     :class:`~weaver.sessions.notebook.NotebookSession`, where Weaver is itself
     executing inside Fabric.
     """
@@ -252,7 +252,7 @@ class Session(ABC):
         return self.scope(workspace).store
 
     def transport_store(self, workspace: Workspace | None = None):
-        """The store this host writes *across* the boundary with.
+        """The store this host writes across the boundary with.
 
         The same as :meth:`store` wherever Weaver is already inside the
         workspace. A console reaching into Fabric has no within-workspace store,
@@ -350,8 +350,8 @@ class Session(ABC):
 
         A statement, not a question: nothing comes back. Asking is
         :meth:`query_tsql`, and a batch that answers more than once needs
-        ``query_result_sets`` — reading only the first result set of several
-        answers with whichever came back first, which is how a failing check
+        ``query_result_sets``. Reading only the first result set of several answers
+        with whichever came back first, which is how a failing check
         reports as passing.
         """
 
@@ -419,7 +419,7 @@ class Session(ABC):
     # --- reporting context --------------------------------------------------
     #
     # What is currently being presented and timed, and nothing more. A Session
-    # knows a Step is running; it does not know what the Step decided, which
+    # records that a Step is running, and not what the Step decided, which
     # node it belonged to, or whether the run as a whole succeeded.
 
     @property
@@ -524,8 +524,8 @@ class Session(ABC):
             self.telemetry.set_frames(self._frames)
         frame.elapsed = time.monotonic() - frame.started
         # Not an overwrite: a caller may have marked the frame failed from
-        # inside it, which is how work whose failure is *data* — a run node that
-        # reports a failure rather than raising one — still reads as failed.
+        # inside it, which is how work whose failure is data, such as a run node
+        # that reports a failure rather than raising one, still reads as failed.
         frame.failed = frame.failed or error is not None
         self.timings.append(frame)
         self.present(frame, "failed" if frame.failed else "completed", error)
@@ -574,9 +574,9 @@ class Session(ABC):
         """Release every resource this Session acquired, and nothing it was given.
 
         Closing is the durability barrier for asynchronous logging, so the order
-        here is the guarantee. A flusher writes *through this Session*, and a
-        closed Session refuses to hand out a scope — so the flushers drain while
-        the Session is still open, and only then is it marked closed and its
+        here is the guarantee. A flusher writes through this Session, and a
+        closed Session refuses to hand out a scope, so the flushers drain while the
+        Session is still open, and only then is it marked closed and its
         resources released. Marking it closed first would fail exactly the
         writes this barrier exists to complete, and only under enough load for
         the worker to still be behind.
@@ -648,7 +648,7 @@ class WorkspaceScope:
     def offer_spark_home(self, lakehouses) -> None:
         """Note Lakehouses a Spark session may attach to, if this host needs one.
 
-        Fabric creates a Livy session *against* a Lakehouse, so a host that
+        Fabric creates a Livy session against a Lakehouse, so a host that
         crosses needs the id of one. Which one does not affect where work lands:
         every generated statement names its own target in full.
         """

@@ -127,8 +127,8 @@ def test_the_shortcut_destination_is_its_own_node_between_source_and_consumer(tm
 
     ``dependency_edges`` says where the data comes from, so a shortcut edge names
     the source document. The graph says what must be built and in what order, and
-    there the shortcut destination is a thing in its own right — so impact reaches a
-    consumer *through* it rather than jumping the boundary.
+    there the shortcut destination is a thing in its own right, so impact reaches a
+    consumer through it rather than jumping the boundary.
     """
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
@@ -141,7 +141,7 @@ def test_the_shortcut_destination_is_its_own_node_between_source_and_consumer(tm
     pairs = {(edge.upstream, edge.downstream) for edge in graph.edges}
     assert (source, shortcut) in pairs
     assert (shortcut, consumer) in pairs
-    # The two-hop shortcut must *not* also be there, or the shortcut would be
+    # The two-hop shortcut must not also be there, or the shortcut would be
     # bypassable and a build could order the consumer before it.
     assert (source, consumer) not in pairs
 

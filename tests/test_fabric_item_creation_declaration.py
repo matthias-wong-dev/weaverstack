@@ -1,11 +1,11 @@
 """What Weaver asks Fabric for when it creates an item.
 
-A live workspace is the only place a wrong creation payload shows up — and it
+A live workspace is the only place a wrong creation payload shows up, and it
 shows up late, because a Lakehouse without schemas looks entirely normal until
 something needs a schema in it. Fabric settles this at creation and offers no way
 to change it afterwards, so the item has to be deleted and made again.
 
-Hence a fake client here: the request Weaver *composes* is checkable in CI, with
+Hence a fake client here: the request Weaver composes is checkable in CI, with
 no workspace, no credential and no capacity.
 """
 

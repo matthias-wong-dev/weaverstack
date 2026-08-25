@@ -1,19 +1,19 @@
-"""What a build removes, and what it spares — in pure Python.
+"""What a build removes, and what it spares: in pure Python.
 
 Prune is a set difference: the desired physical state of an item, against the
 physical state actually there. Both sides can be built directly, so none of this
-needs a Lakehouse. Previously it did — a test asserting "a declared table is
+needs a Lakehouse. Previously it did, a test asserting "a declared table is
 spared" had to stand up a target, build into it, and read the result back, which
 meant a prune defect and a build defect failed the same test.
 
 Three seams, tested separately because they fail for different reasons:
 
-``managed_sets``            what the item wants to exist
+``managed_sets``            what the item needs to exist
 ``render_inventory_prune``  desired plus actual, into removal actions
 ``item_prune_stage``        item scoping, target binding, action packaging
 
 Prune is the destructive direction, so most of what is asserted here is what it
-*does not* remove.
+does not remove.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 
 @pytest.fixture
 def estate(tmp_path):
-    """A table, a view over it, and a folder — one of each physical form."""
+    """A table, a view over it, and a folder: one of each physical form."""
 
     return single_document_repository(
         tmp_path,
@@ -72,7 +72,7 @@ def prune_kinds(stage) -> list[str]:
 def prune_targets(stage) -> set[str]:
     """What each prune action is about, read from its id.
 
-    Not from ``resource_node_id``, which is ``None`` on every prune action — a
+    Not from ``resource_node_id``, which is ``None`` on every prune action, a
     pruned object has no node in the repository, which is precisely why it is
     being pruned. The identity lives in the action id and the payload.
     """
@@ -92,12 +92,12 @@ def test_the_keep_set_is_what_the_item_declares(estate):
     managed = managed_sets(documents_of(estate), DELTA_TARGET)
 
     # Folded, because this set exists to be compared against whatever case the
-    # target reports — Fabric lowercases a managed table's directory, the local
+    # target reports, Fabric lowercases a managed table's directory, the local
     # metastore does the same, and neither promises the declared spelling.
     assert managed.tables == frozenset({"dwg.customer"})
     assert managed.views == frozenset({"dwg.activecustomer"})
     # `_.load` is the generated folder that owns the item's deployed runtime
-    # tree. It is declared like any other folder, so it is spared like one — and
+    # tree. It is declared like any other folder, so it is spared like one, and
     # an item with no load code never declares it, which is how the tree is
     # eventually removed.
     assert managed.folders == frozenset({"raw.customercsv", "_.load"})
@@ -194,7 +194,7 @@ def test_an_undeclared_view_folder_and_schema_are_each_removed(estate):
 
 @weaver_test()
 def test_an_empty_inventory_prunes_nothing_rather_than_everything(estate):
-    """Nothing there is nothing to remove — not everything to remove.
+    """Nothing there is nothing to remove, not everything to remove.
 
     The direction matters: a diff computed the wrong way round against a fresh
     target would emit a removal for every declared object, and the actions would
@@ -223,7 +223,7 @@ def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
     """One item is diffed against one target, and reaches no further.
 
     Items share physical targets in real estates, so a prune that ignored item
-    scoping would delete a neighbour's objects — and would look correct against
+    scoping would delete a neighbour's objects, and would look correct against
     a single-item fixture.
     """
 
@@ -252,7 +252,7 @@ def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
     )
 
     # `DWG.Customer` belongs to another item, but this item cannot know that from
-    # the inventory alone — so it is pruned. That is correct and worth pinning:
+    # the inventory alone, so it is pruned. That is correct and worth pinning:
     # separation comes from binding items to different targets, not from prune.
     assert any("Customer" in node for node in prune_targets(stage))
     assert not any("Neighbour" in node for node in prune_targets(stage))
@@ -266,7 +266,7 @@ def warehouse_estate(tmp_path):
     """A Warehouse item, which is the side nothing here used to cover.
 
     Every other estate in this module is a Lakehouse, and that asymmetry hid a
-    real defect: a Lakehouse's generated `_` is a *folder document*, so it enters
+    real defect: a Lakehouse's generated `_` is a folder document, so it enters
     the keep-set through the ordinary document path and needs no help, while a
     Warehouse's `_` is a schema no document declares. The two look interchangeable
     from a distance and are not.
@@ -293,7 +293,7 @@ def test_a_freshly_built_warehouse_is_pruned_of_nothing(warehouse_estate):
     """The claim the Fabric tier was making alone, one layer down and free.
 
     A build that creates `_` for its load procedures and then prunes it is not a
-    subtle failure — it destroys the schema it just made, every build. It was
+    subtle failure. It destroys the schema it just made, every build. It was
     invisible here because the keep-set's load half arrived as a defaulted
     argument that only production passed, which is why `item_prune_stage` now
     derives it instead of accepting it.

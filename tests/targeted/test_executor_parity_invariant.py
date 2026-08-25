@@ -2,8 +2,8 @@
 
 The parity argument rests on this and would be worthless without it: if an
 executor took one path on a desktop and another in a session, testing it from the
-checkout would prove the desktop branch while the wheel probes — which check
-*acquisition*, not behaviour — would never touch the other.
+checkout would prove the desktop branch while the wheel probes, which check
+acquisition, not behaviour, would never touch the other.
 
 AGENTS.md already states the rule: "an `if isinstance(workspace, …)` in core
 operation code means the abstraction is being broken; the fix belongs in the
@@ -28,7 +28,7 @@ EXECUTORS = (
     / "executors"
 )
 
-#: Names that would mean an executor is deciding *where* it is rather than doing
+#: Names that would mean an executor is deciding where it is rather than doing
 #: its job. Acquisition belongs to the factories; behaviour belongs here.
 ENVIRONMENT_TELLS = {
     "Workspace",
@@ -63,7 +63,7 @@ def test_there_are_executors_to_check():
 def test_an_executor_never_names_a_transport(module):
     """No executor mentions a workspace kind, a store class or a resolver class.
 
-    Naming one would be the executor choosing its own environment — the decision
+    Naming one would be the executor choosing its own environment, the decision
     the factories exist to make once, above it.
     """
 
@@ -85,7 +85,7 @@ def test_an_executor_never_names_a_transport(module):
     )
 
     assert not (named & ENVIRONMENT_TELLS), (
-        f"{module.name} names {sorted(named & ENVIRONMENT_TELLS)} — an executor "
+        f"{module.name} names {sorted(named & ENVIRONMENT_TELLS)}, an executor "
         "that can tell where it is running can behave differently there, and the "
         "desktop tests would only ever prove one branch"
     )
@@ -94,5 +94,5 @@ def test_an_executor_never_names_a_transport(module):
 # A blanket ban on `isinstance` was the first version of this file and it was
 # wrong: `tsql` and `spark_sql_batch` both use it to check that a decoded payload
 # is the array they expect, which is validating data rather than choosing a
-# branch by environment. The names above are the real signal — an executor cannot
-# behave differently in a session without being able to *tell* it is in one.
+# branch by environment. The names above are the real signal, an executor cannot
+# behave differently in a session without being able to tell it is in one.

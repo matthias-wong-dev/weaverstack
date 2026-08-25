@@ -9,8 +9,8 @@ never called by anything, and every later command answered
     the livy resource failed and has not been reacquired
 
 **Recovery belongs at a Task boundary, and nowhere else.** A `Resource.get()`
-that healed itself would hand a *replacement* Livy interpreter to a run already
-in progress — and that interpreter has none of the RuntimeScopes the run opened
+that healed itself would hand a replacement Livy interpreter to a run already
+in progress, and that interpreter has none of the RuntimeScopes the run opened
 in the dead one. The nodes would import into scopes that do not exist, and the
 run would carry on succeeding at nothing. So the failure stands, the Task fails,
 and the next Task acquires again.
@@ -134,7 +134,7 @@ def test_nothing_is_reacquired_part_way_through_a_task():
 
     A replacement interpreter has none of the RuntimeScopes the run opened in
     the dead one, so a run that continued on it would dispatch into scopes that
-    do not exist — succeeding at nothing, silently.
+    do not exist, succeeding at nothing, silently.
     """
 
     resource = _resource()
@@ -172,7 +172,7 @@ def test_the_next_task_recovers_after_one_has_failed():
 @weaver_test()
 def test_a_task_still_starts_when_the_allowance_is_spent():
     """Exhausted is the *user's* problem to hear about from the thing that
-    needed it, naming what it was for — not a Task that refuses to begin."""
+    needed it, naming what it was for, not a Task that refuses to begin."""
 
     resource = _resource(max_attempts=1)
     holder = _Session(resource)

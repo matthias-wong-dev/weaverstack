@@ -26,7 +26,7 @@ def _interpreter_is_gone(exc: BaseException) -> bool:
 
     Matched on the error type first, because that is the structural answer, and
     on the message only for :class:`~weaver.fabric.livy.LivyError`, which
-    reports the session's state as text. A cleanup failure that is *not* one of
+    reports the session's state as text. A cleanup failure that is not one of
     these is a defect worth hearing about, so the default is False.
     """
 
@@ -145,8 +145,9 @@ def _as_data(catalogue) -> dict | None:
 class FabricRunScope:
     """One run's imports, in the Fabric session that can perform them.
 
-    Holds a name and no modules — loaded module objects cannot cross a process
-    boundary — so everything it does is a program submitted through the Session.
+    Holds a name and no modules, because loaded module objects cannot cross a
+    process boundary, so everything it does is a program submitted through the
+    Session.
     """
 
     def __init__(self, session, workspace, run_id: str) -> None:
@@ -218,7 +219,7 @@ class FabricRunScope:
 
         A dead interpreter took the scope with it, so there is nothing to
         report. Any other failure leaves a scope open in a live session, where
-        the next run would inherit stale modules — so it is warned about and
+        the next run would inherit stale modules, so it is warned about and
         counted, and the run still succeeds.
         """
 
@@ -245,7 +246,7 @@ class FabricRunScope:
             warn(
                 f"the runtime scope for run {self.run_id} was not released: "
                 f"{type(exc).__name__}: {exc}. The Fabric session is still up, so "
-                "it still holds this run's imported modules — restart it if a "
+                "it still holds this run's imported modules. Restart it if a "
                 "rebuilt primitive appears not to have taken effect."
             )
 
@@ -266,7 +267,7 @@ class FabricRunScope:
         name = here.__name__
         if addressed:
             # The Session is built in the submitted body, around the
-            # interpreter's own ``spark`` global — the construction every other
+            # interpreter's own ``spark`` global, the construction every other
             # crossing performs. One built inside the call would have to go
             # looking for an active Spark session rather than being handed the
             # one the statement is running in.

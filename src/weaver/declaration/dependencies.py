@@ -27,7 +27,7 @@ class RelationReference:
     """One name a source file refers to, with its parts as written."""
 
     parts: tuple[str, ...]
-    #: True when the name is immediately followed by ``(`` — a table-valued
+    #: True when the name is immediately followed by ``(``, so a table-valued
     #: function call, not a managed object. ``cross apply Sales.SplitLines(…)``
     #: reads like a two-part relation but resolves to a function, so strict
     #: two-part validation exempts it the way it exempts CTEs and temp tables.
@@ -158,7 +158,7 @@ class _FlatToken:
 class LocatedReference:
     """One relation reference, and where in the text it was written.
 
-    Extraction reports what a file says; a *span* additionally lets a caller
+    Extraction reports what a file says; a span additionally lets a caller
     rewrite it. Build needs that: a two-part name in a view body resolves through
     whatever catalogue the session is currently pointed at, so the planner
     replaces each managed reference with a name that says which Lakehouse it
@@ -188,8 +188,8 @@ def rewrite_sql_references(sql_text: str, rewrite) -> str:
 
     ``rewrite`` receives a :class:`RelationReference` and returns the text to put
     in its place, or None to leave it exactly as written. Everything else in the
-    body — whitespace, comments, casing, the author's own delimiters — is
-    untouched, because a build must not quietly reformat a query it is going to
+    body is untouched: whitespace, comments, casing, the author's own delimiters.
+    A build must not reformat a query it is going to
     freeze and execute.
 
     Replacements are applied last-first so an earlier span's offsets stay valid.
@@ -211,7 +211,7 @@ def address_managed_references(sql_text: str, destination) -> str:
 
     Only ordinary two-part references are rewritten, and that is exactly the set
     the reader guarantees resolves inside the repository. What is left over is
-    outside it — a physically-qualified name, or a table-valued function — and
+    outside it, being a physically-qualified name or a table-valued function, and
     is the author naming something Weaver does not manage.
     """
 
@@ -317,7 +317,7 @@ def _add(
     """Record one occurrence, by position.
 
     Position, not name: extraction de-duplicates by name afterwards, but a
-    rewrite needs every place the name was written — and two rules can reach the
+    rewrite needs every place the name was written, and two rules can reach the
     same place, which is the one duplicate to drop here.
     """
 
@@ -381,7 +381,7 @@ def _relation_at(sql_text: str, start: int) -> LocatedReference | None:
         return None
     parts, begin, position = parsed
     # A ``(`` directly abutting the name is a call, ``Sales.SplitLines(…)``.
-    # A table hint is ``… with (nolock)`` — a keyword and a space intervene —
+    # A table hint is ``… with (nolock)``, where a keyword and a space intervene,
     # so requiring the paren to abut avoids mistaking a hinted table for one.
     call = position < len(sql_text) and sql_text[position] == "("
     return LocatedReference(
@@ -392,8 +392,8 @@ def _relation_at(sql_text: str, start: int) -> LocatedReference | None:
 def _parse_name(sql_text: str, start: int) -> tuple[tuple[str, ...], int, int] | None:
     """The parts of a relation name, where it begins, and where it ends.
 
-    The end offset is where the name stops — before any trailing whitespace — so
-    a caller can tell an abutting ``(`` (a function call) from a spaced one. The
+    The end offset is where the name stops, before any trailing whitespace, so a
+    caller can tell an abutting ``(`` (a function call) from a spaced one. The
     begin offset is what makes the name replaceable.
     """
 
@@ -421,7 +421,7 @@ def _parse_name(sql_text: str, start: int) -> tuple[tuple[str, ...], int, int] |
     if any(not part or part.startswith(("#", "@")) for part in parts):
         return None
     if len(parts) == 2 and parts[0].lower() in _PATH_FORMATS:
-        # delta.`abfss://…` — a format and a path, not schema and object.
+        # delta.`abfss://…` is a format and a path, not schema and object.
         return None
     return tuple(parts), begin, end
 

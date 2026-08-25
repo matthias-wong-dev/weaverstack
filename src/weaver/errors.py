@@ -31,7 +31,7 @@ class MetadataError(WeaverError):
 class LoadError(WeaverError):
     """Raised when an object cannot be executed or its context is unavailable.
 
-    Three optional pieces of context, each present only where the failure knew
+    Three optional pieces of context, each present only where the failure carried
     it:
 
     ``result``
@@ -61,12 +61,12 @@ class LoadError(WeaverError):
 class ValidationError(WeaverError):
     """Raised when a Test or Assumption cannot be evaluated.
 
-    Distinct from the validation *failing*: a Test that found discrepancies did
-    its job and reports rows. This is the other outcome — a key that does not
+    Distinct from the validation failing: a Test that found discrepancies did
+    its job and reports rows. This is the other outcome, a key that does not
     identify rows, two sides that cannot be compared, a missing primitive.
 
     ``result`` carries the validation's own failed-to-run result where there is
-    one, so a reader need not ask the estate what the counts were.
+    one, so the counts need not be asked of the estate.
     """
 
     def __init__(self, message: str, *, result: object | None = None) -> None:

@@ -10,7 +10,7 @@ call for opposite responses:
 
 Conflating them is how a shared catalogue host goes wrong. If "no `_` tables"
 were read as "no Warehouse", initialisation would try to create a Warehouse that
-exists — and if a missing Warehouse were read as an empty catalogue, the first
+exists, and if a missing Warehouse were read as an empty catalogue, the first
 build would fail somewhere far from the cause.
 """
 
@@ -129,8 +129,8 @@ def test_an_absent_table_reads_as_no_rows_rather_than_a_failure():
 def test_an_empty_catalogue_is_not_a_missing_warehouse():
     """The distinction, stated as the two answers a caller gets.
 
-    `prepare_catalogue` says whether the *Warehouse* had to be made. Whether its
-    `_` tables are there is a different question, answered by reading them — and
+    `prepare_catalogue` says whether the Warehouse had to be made. Whether its
+    `_` tables are there is a different question, answered by reading them, and
     a Warehouse that exists with no `_` gives "not created" and "no rows".
     """
 

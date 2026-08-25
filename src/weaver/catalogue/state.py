@@ -17,9 +17,15 @@ from ..declaration.model import (
     PROCEDURE_SHAPE,
     WeaverDocumentId,
     WeaverItemId,
+    WeaverSchemaId,
 )
 from ..errors import BuildError, ConfigError
-from .claims import CatalogueClaim, catalogue_schema, claim_rules_for_object_type
+from .claims import (
+    CatalogueClaim,
+    catalogue_columns,
+    catalogue_schema,
+    claim_rules_for_object_type,
+)
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
 from .tables import (
@@ -44,7 +50,7 @@ from .tables import (
 )
 
 #: What a Folder's stored schema carries, so a table and a folder of the same
-#: name stay apart. Only the object shape uses it — see :func:`catalogue_schema`.
+#: name stay apart. Only the object shape uses it. See :func:`catalogue_schema`.
 _FILES_PREFIX = "Files/"
 
 
@@ -61,17 +67,17 @@ class Catalogue:
     ``registered`` and ``rows``, so they are pure Python.
 
     ``rows`` is the row data by item and table. ``registered`` is the certified
-    documents derived from the Registry rows — identity, type, signature and
-    publication build_datetime, without the audit columns, which no build decision reads.
+    documents derived from the Registry rows: identity, type, signature and
+    publication build_datetime, without the audit columns, which no build reads.
 
-    A catalogue is *selectively materialised*. It holds the rows of the tables it
+    A catalogue is selectively materialised. It holds the rows of the tables it
     was asked for and nothing else, because reading everything is not free:
     ``_.Log`` is history and grows with the estate's age, and nothing consults
     it. What was read is :attr:`materialised`. Whether a table physically exists
     is a different question, and a target's inventory answers it.
 
-    Runtime rows are written through it — :meth:`submit` appends, :meth:`update`
-    merges on the table's key — and an updated row is visible to a reader of this
+    Runtime rows are written through it, where :meth:`submit` appends and
+    :meth:`update` merges on the table's key. An updated row is visible to this
     catalogue at once, before it has reached the Warehouse. :meth:`flush` is the
     durability barrier and the only place a write failure surfaces.
 
@@ -154,7 +160,7 @@ class Catalogue:
         return self._writer
 
     def submit(self, table, row: Mapping[str, object]) -> None:
-        """Record one appended row — a settled unit of work."""
+        """Record one appended row, being a settled unit of work."""
 
         self.writer.submit(table, row)
 
@@ -182,7 +188,7 @@ class Catalogue:
         """Every row of one table, across the items this catalogue holds.
 
         Rows this catalogue wrote replace the ones it read, keyed on the table's
-        own key, so a reader sees the catalogue as it now stands.
+        own key, so a read sees the catalogue as it now stands.
         """
 
         written = self._written.get(table.name, {})
@@ -219,7 +225,7 @@ class Catalogue:
         that item installed.
 
         Exactly one match, or a failure saying which. Two items may be bound to
-        one physical target, so a name that resolves twice is genuinely ambiguous
+        one physical target, so a name that resolves twice is ambiguous
         and anything that guessed would act on the wrong object.
         """
 
@@ -243,7 +249,7 @@ class Catalogue:
                 "name the target it was built into."
             )
         raise ConfigError(
-            f"{where} matches more than one installed object — "
+            f"{where} matches more than one installed object: "
             + ", ".join(sorted(str(identity) for identity in found))
             + ". Two logical items are bound to this target, so which one is "
             "meant cannot be settled here."
@@ -259,8 +265,8 @@ class Catalogue:
         module or procedure it compiles to, and the validation's own identity is
         in the dictionary that describes the declaration.
 
-        Exactly one match, or a failure saying which — the same rule
-        :meth:`installed_object` follows, and for the same reason.
+        Exactly one match, or a failure saying which. The same rule
+        :meth:`installed_object` follows, for the same reason.
         """
 
         bound = self._bound_to(target_name)
@@ -281,7 +287,7 @@ class Catalogue:
                 "name the target it was built into."
             )
         raise ConfigError(
-            f"{where} matches more than one installed validation — "
+            f"{where} matches more than one installed validation: "
             + ", ".join(sorted(str(identity) for identity in found))
             + ". Two logical items are bound to this target, so which one is "
             "meant cannot be settled here."
@@ -377,14 +383,14 @@ class Catalogue:
 
     @classmethod
     def from_repository(cls, repository) -> "Catalogue":
-        """Everything the source declares — the whole logical catalogue.
+        """Everything the source declares, being the whole logical catalogue.
 
         All of it, not the subset some build is ready to certify: with selection
         as an input, the desired state would be a statement about a build rather
         than about the repository. :meth:`retaining` and :meth:`for_targets`
         transform it later.
 
-        It carries no binding — no target name, Weaver version, Installation
+        It carries no binding: no target name, Weaver version, Installation
         row, publication build_datetime, or Registry certification for a shortcut
         destination, because a shortcut is a view in a Warehouse and a table in a
         Lakehouse and this does not know which. It does carry every logical
@@ -403,9 +409,9 @@ class Catalogue:
                 for identity in repository.source_documents
                 if identity.item == item
             }
-            # A runtime artefact is declared by the source exactly as a
-            # document is — derived from it, but a target in its own right — so
-            # it belongs in what the repository says should exist.
+            # A runtime artefact is declared by the source exactly as a document
+            # is, derived from it and a target in its own right, so it belongs in
+            # what the repository says should exist.
             declared.update(
                 artefact.identity
                 for artefact in item_runtime_artefacts(repository, item=item)
@@ -424,7 +430,7 @@ class Catalogue:
         The catalogue twin of
         :meth:`weaver.build_bundle.prune.TargetInventory.update_using`, and it
         exists for the same reason: a build's declared effect, applied, is a
-        *prediction* that can be checked. An estate built from a repository and
+        prediction that can be checked. An estate built from a repository and
         read back should hold the operational rows the plan said it would.
 
         Reads the plan's stated intent rather than parsing the DML its
@@ -451,7 +457,7 @@ class Catalogue:
     def diff(self, desired: "Catalogue") -> "CatalogueChanges":
         """How this catalogue would move toward the one ``desired`` describes.
 
-        Read it as *persisted* ``.diff(`` *derived from source* ``)``. This is
+        Read it as persisted ``.diff(`` derived from source ``)``. This is
         the report a reviewer sees before a bundle runs; the statements come
         from :func:`weaver.catalogue.reconcile.publish`, which compares the same
         two sides.
@@ -468,7 +474,7 @@ class CatalogueChanges:
     item and per table, so a bundle can be reviewed before it is installed.
 
     A row is unchanged when every non-key column matches, which is the same
-    condition publication tests before it emits anything — so a reported no-op
+    condition publication tests before it emits anything, so a reported no-op
     and a silent build are one fact rather than two that agree.
     """
 
@@ -476,7 +482,7 @@ class CatalogueChanges:
     desired: "Catalogue"
 
     def per_table(self):
-        """``{item: (TableChanges, ...)}`` — reporting only, never statements."""
+        """``{item: (TableChanges, ...)}`` for reporting, never statements."""
 
         from .reconcile import compare
         from .tables import DICTIONARY_TABLES, REGISTRY
@@ -591,7 +597,7 @@ class Reconciliation:
     #: Claims disproved by the inventory, to be deleted before physical work.
     stale_claims: tuple[CatalogueClaim, ...]
     #: The disproved objects, as readable labels. Nothing in the build consumes
-    #: this — it exists so a reconciliation decision can be seen and asserted
+    #: this. It exists so a reconciliation decision can be seen and asserted
     #: rather than inferred from the DML it eventually produces.
     stale_objects: tuple[str, ...] = ()
 
@@ -603,15 +609,16 @@ class RegisteredDocument:
     identity: WeaverDocumentId
     object_type: str
     signature: str
-    #: What the installed object is *for* — data, load, test or assumption.
+    #: What the installed object is for: data, load, test or assumption.
     #:
     #: Kept after parsing, because it is the only place the answer survives. A
-    #: physical shape once implied it — a file or a procedure could only be a
-    #: load artefact — but a Test compiles to a module and a procedure too, so
-    #: planning has to read what the row says.
+    #: physical shape once implied it, when a file or a procedure could only be a
+    #: load artefact. A Test compiles to a module and a procedure too, so
+    #: planning reads what the row says.
     object_role: str = ROLE_DATA
     #: When the build that last certified this object published it. ``None`` for
-    #: a row written before build datetimes existed, which orders as older than any build_datetime.
+    #: a row written before build datetimes existed, which orders as older than
+    #: any build_datetime.
     build_datetime: object = None
 
     @property
@@ -633,7 +640,7 @@ class RegisteredDocument:
 #: and a table that never existed has none to lose.
 #:
 #: Add a name here in the same change that adds the table, and only then: a table
-#: listed here that *was* in an older release would turn a repair case into a
+#: listed here that was in an older release would turn a repair case into a
 #: silent partial rebuild.
 INTRODUCED_TABLES = frozenset(
     {TEST_DICTIONARY.name, BOOKMARK.name, LOAD_STATUS.name, TEST_STATUS.name}
@@ -649,7 +656,7 @@ INTRODUCED_TABLES = frozenset(
 #: reading one would grow with the estate's age.
 READ_FOR_BUILD = PROJECTED_TABLES + CURRENT_STATE_TABLES
 
-#: The tables whose presence a build has to know about — the ones it reads, since
+#: The tables whose presence a build has to know about, being the ones it reads:
 #: a claim may only be raised against a table that is there.
 CHECKED_TABLES = READ_FOR_BUILD
 
@@ -742,7 +749,7 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
 
     That holds for dictionary tables too, tempting as the exception is. A build
     is scoped to the items it was pointed at, so recreating a dictionary would
-    republish rows for *those* items and leave every other item's Registry and
+    republish rows for those items and leave every other item's Registry and
     Installation rows claiming objects the dictionaries no longer describe.
     Repairing a partial catalogue needs authority over every installation, which
     a scoped build does not have.
@@ -758,13 +765,13 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             continue
         present.add(table.name)
         folded = set(columns)
-        # Published columns are required too, and deliberately: the merge writes
-        # one on every insert, so a catalogue without it can be *read* but not
-        # *written*. Exempting it here would let planning succeed and push the
+        # Published columns are required too, and: the merge writes
+        # one on every insert, so a catalogue without it can be read but not
+        # written. Exempting it here would let planning succeed and push the
         # failure into the install, where it surfaces as an engine complaint
         # about an unknown column rather than as a statement about the
         # catalogue's shape. The reader's null tolerance answers a different
-        # question — a column that exists but predates some rows — and both hold
+        # question, about a column that exists but predates some rows. Both hold
         # at once: require the column, tolerate the value.
         # Compared in the public spelling, because that is what the Warehouse
         # holds; the internal keys never reach a physical schema.
@@ -784,9 +791,9 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
             "catalogue schema is incompatible; missing required column(s): "
             + ", ".join(incompatible)
         )
-    # A table a *later* Weaver introduced is not a damaged catalogue. It holds no
-    # rows for anyone — nothing could ever have written to it — so creating it
-    # under a scoped build loses nothing, and the items this build was not
+    # A table a later Weaver introduced is not a damaged catalogue. It holds no
+    # rows for anyone, because nothing could ever have written to it, so creating
+    # it under a scoped build loses nothing, and the items this build was not
     # pointed at are correctly represented by having no rows in it yet. Refusing
     # here instead would mean that adding a dictionary table stopped every
     # existing estate from building until somebody repaired a catalogue that was
@@ -811,13 +818,13 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
         tuple(InstallationScope(item.item_type, item.item_name) for item in wanted)
     )
     # `_.Bookmark` as well as the projected tables. Nothing projects it, so it
-    # takes no part in publication — but a build decides which rows are obsolete,
-    # and deciding from rows it has read is the same arithmetic every other
+    # takes no part in publication. A build decides which rows are obsolete, and
+    # deciding from rows it has read is the same arithmetic every other
     # catalogue decision uses. An absent table reads as no rows.
     by_table = read_installations(catalogue, scopes=scopes, tables=READ_FOR_BUILD)
 
     # Seeded before grouping, and that is not tidiness. An item with no rows yet
-    # is an ordinary state — it has never been built — and it must still appear,
+    # is an ordinary state, having never been built, and it must still appear,
     # because everything downstream iterates the catalogue's items to decide what
     # to compare, reconcile and publish. An item that fell out here would look
     # like an item the build was never pointed at.
@@ -868,7 +875,7 @@ def read_installed_catalogue(
     and groups rows by the scope they carry.
 
     ``tables`` is what to materialise, and it defaults to everything an operation
-    reads — which is not everything the catalogue owns. ``_.Log`` is left out:
+    reads, which is not everything the catalogue owns. ``_.Log`` is left out:
     it is history, and reading it would grow with the estate's age for an answer
     nothing asks.
 
@@ -929,8 +936,8 @@ def catalogue_for(session, workspace=None, *, tables=READABLE_TABLES) -> Catalog
 def catalogue_in(workspace, *, tables=READABLE_TABLES) -> Catalogue:
     """The catalogue in one workspace, through a Session it opens for itself.
 
-    For a caller that names a catalogue rather than holding a Session — authored
-    code anchoring an object by name. The Session is the catalogue's, so
+    For a caller that names a catalogue rather than holding a Session, such as
+    authored code anchoring an object by name. The Session is the catalogue's, so
     :meth:`Catalogue.close` closes it and nothing else has to know it exists.
     """
 
@@ -967,10 +974,9 @@ def reconcile_catalogue_state(
             for identity, document in registered.items():
                 if identity.item != item:
                     continue
+                schema_name, object_name = catalogue_columns(identity)
                 if not inventory.has_object(
-                    catalogue_schema(identity),
-                    identity.object_id.object,
-                    document.object_type,
+                    schema_name, object_name, document.object_type
                 ):
                     stale[identity] = document
         # Reconciliation removes disproved declaration claims. Current runtime
@@ -1025,18 +1031,25 @@ def reconcile_catalogue_state(
 
 def _row_identity(
     item: WeaverItemId, row: Mapping[str, object], object_type: str
-) -> WeaverDocumentId:
+) -> WeaverDocumentId | WeaverSchemaId:
     """One Registry row's identity, built from its own columns.
 
     The row is the identity: item, schema, object and object type are four
     stored fields. Composing them into a line for the ``Schema.Object`` parser
-    could not express what the load layer installs — a path and a filename, or a
-    procedure named for what it loads — so it is constructed directly and the
+    could not express what the load layer installs, being a path and a filename
+    or a procedure named for what it loads, so it is constructed directly and the
     stored name stays the real name.
     """
 
     schema = str(row.get("schema_name") or "")
     name = str(row.get("object_name") or "")
+    if object_type == "schema":
+        # A schema shortcut names the schema in both columns, because the Registry
+        # keys on both (see `weaver.catalogue.projection._identity`). Reading it
+        # back as a two-part object identity would key it differently from the
+        # declaration, so classification would never find its signature and would
+        # rebuild the shortcut on every build.
+        return WeaverSchemaId(item, schema)
     if object_type == "file":
         return WeaverDocumentId(item, ObjectId(schema, name), shape=FILE_SHAPE)
     if object_type == "stored_procedure":

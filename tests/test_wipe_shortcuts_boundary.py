@@ -2,8 +2,8 @@
 
 A shortcut is the one thing in a Lakehouse that is not the Lakehouse's own data:
 it is a name this item holds for data another item owns. So the interesting
-assertion is not that the shortcut goes — it is that the thing it pointed at
-*stays*. A wipe of one Lakehouse must never reach through a pointer into
+assertion is not that the shortcut goes. It is that the thing it pointed at
+stays. A wipe of one Lakehouse must never reach through a pointer into
 another, which is why the shortcut is taken away through the workspace before
 any storage is swept.
 """

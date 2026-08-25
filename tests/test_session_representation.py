@@ -84,9 +84,9 @@ def test_the_default_is_what_the_session_started_with_and_never_accumulates():
     """A command naming a workspace does not make it the session's default.
 
     Inheritance is only ever from what ``weaver session`` was started with.
-    Learning a default from whichever command ran last would mean the *next*
+    Learning a default from whichever command ran last would mean the next
     command silently inherited another workspace's Environment and control
-    Lakehouse — a plausible-looking build into the wrong place.
+    Lakehouse, a plausible-looking build into the wrong place.
     """
 
     with ConsoleSession(workspace=_other("default")) as session:
@@ -144,7 +144,7 @@ def test_a_console_reaching_into_fabric_does_not_execute_here(console):
 
 @weaver_test()
 def test_a_console_has_no_spark_object_at_all(console):
-    """Not a Spark session that refuses — nothing to reach for.
+    """Not a Spark session that refuses: nothing to reach for.
 
     A console prepares work and crosses; Spark is on the other side of that
     crossing. Anything here holding a SparkSession would be a second execution
@@ -212,7 +212,7 @@ def test_the_livy_resource_is_started_before_anyone_is_handed_it(monkeypatch):
 
     ``for_workspace`` builds the object; ``start`` is what asks Fabric for the
     session. A resource that returned the unstarted object looked acquired to
-    everything above it — ready state, shared by the next caller — and the first
+    everything above it, ready state, shared by the next caller, and the first
     statement failed with "the Livy session has not been started" while no
     session had ever appeared in the workspace.
     """
@@ -237,10 +237,10 @@ def test_the_livy_resource_is_started_before_anyone_is_handed_it(monkeypatch):
             return SimpleNamespace(token="token", expires_on=2**31 - 1)
 
     built = FakeLivy()
-    # Everything is replaced *before* the scope exists, because a Resource binds
+    # Everything is replaced before the scope exists, because a Resource binds
     # its acquisition at construction: patching a method on the scope afterwards
-    # leaves the Resource holding the original, and this test would quietly
-    # reach a real credential — which on a build agent means asking Azure.
+    # leaves the Resource holding the original, and this test would reach a real
+    # credential, which on a build agent means asking Azure.
     monkeypatch.setattr("weaver.fabric.auth.credential", FakeCredential)
     monkeypatch.setattr(
         "weaver.fabric.LivySession.for_workspace",
@@ -264,7 +264,7 @@ def test_a_version_difference_warns_and_names_the_fix(monkeypatch):
 
     The console prepares work locally and runs it against the published wheel,
     so the two drift the moment either moves. During rapid development that is
-    usually harmless — putting a publish in front of every experiment is not.
+    usually harmless, putting a publish in front of every experiment is not.
     """
 
     with ConsoleSession(workspace=_fabric()) as session:
@@ -385,7 +385,7 @@ def test_a_session_that_died_is_marked_failed():
 
 @weaver_test()
 def test_a_wheel_too_old_to_import_weaver_says_to_publish():
-    """The raw ModuleNotFoundError sends a reader to look for a missing package.
+    """The raw ModuleNotFoundError points at a missing package.
 
     What is actually true is that the published wheel predates the console that
     submitted the program, and the fix is a publish.

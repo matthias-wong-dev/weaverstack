@@ -90,7 +90,6 @@ def test_managed_pytest_markers_are_generated_only_by_the_wrapper():
         "remote",
         "hosted",
         "full_integration",
-        "provision",
         "tds",
         "livy",
         "onelake",

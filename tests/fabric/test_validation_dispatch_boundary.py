@@ -3,7 +3,7 @@
 The same boundary as ``test_run_dispatch_boundary``, for the other half of the
 run: one import, one runtime context, a different engine call. What makes this
 its own file is that a Test's artefact returns a Spark frame and Weaver's
-comparison reads it — so the claim cannot be made without a real session, and a
+comparison reads it, so the claim cannot be made without a real session, and a
 double returning a frame-shaped object would be this suite modelling Spark.
 
 Three outcomes, chosen because each is settled by a different rule:
@@ -15,8 +15,8 @@ Three outcomes, chosen because each is settled by a different rule:
     Unreadable   could not be evaluated at all, which is not "found nothing"
 
 The last is the one that matters most. The answer a validation must never give
-is "found nothing" when what happened is that it could not look, and *invalid*
-rather than *failed* is how the report says so.
+is "found nothing" when what happened is that it could not look, and invalid
+rather than failed is how the report says so.
 
 ``hosted``, because the comparison is :mod:`weaver.runtime.test_compare` running
 inside the Fabric session as the installed wheel.
@@ -104,7 +104,7 @@ def test_a_validation_that_agrees_passes(report):
 
 @weaver_test(hosted=True)
 def test_a_disagreement_is_a_failure_carrying_what_it_found(report):
-    """Counted on both sides, because which side differs is what a reader acts on."""
+    """Counted on both sides, because which side differs is what gets acted on."""
 
     node = _node(report, "Disagrees")
 
@@ -117,7 +117,7 @@ def test_a_disagreement_is_a_failure_carrying_what_it_found(report):
 def test_a_validation_that_could_not_run_is_invalid_rather_than_failed(report):
     """The distinction the whole report rests on.
 
-    A Test that could not be evaluated has found nothing *and proved nothing*.
+    A Test that could not be evaluated has found nothing and proved nothing.
     Reporting it as failed would be wrong in one direction and reporting it as
     passed wrong in the other, so it is neither.
     """

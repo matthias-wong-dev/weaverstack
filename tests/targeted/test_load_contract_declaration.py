@@ -1,8 +1,8 @@
-"""The load contract primitive — what one object's load is told, and by whom.
+"""The load contract primitive: what one object's load is told, and by whom.
 
 Two claims, and the second is the interesting one.
 
-The contract must be *derived*, so that a Warehouse procedure and a Python table
+The contract must be derived, so that a Warehouse procedure and a Python table
 built from the same header cannot come to disagree about what it meant. And it
 must be readable by a module that has nothing else: an installed
 ``Sales__Customer.py`` in a session has no repository to reopen, no catalogue to
@@ -90,9 +90,9 @@ def test_declared_comparison_columns_narrow_the_change_test():
 def test_a_warehouse_table_carries_its_identity_column():
     """Only a Warehouse table has one, so only this contract names it.
 
-    It matters to the load because it is the one column an insert must *not*
+    It matters to the load because it is the one column an insert must not
     name: the engine generates it. It sits beside the primary key rather than
-    being it — a load could never match on a column the engine assigns.
+    being it, a load could never match on a column the engine assigns.
     """
 
     header = TABLE_HEADER.replace(
@@ -128,7 +128,7 @@ def test_an_incremental_load_never_deletes():
     """Absence from an incremental source says nothing about existence.
 
     An incremental source is a window on the truth, not the whole of it, so a
-    row missing from it has not been retired — it was simply not in the window.
+    row missing from it has not been retired. It was simply not in the window.
     """
 
     contract = LoadContract.from_document(
@@ -187,7 +187,7 @@ def test_only_declared_not_null_columns_reach_the_runtime():
     """A business column is nullable unless the declaration says otherwise.
 
     The primary key is stronger than not-null and is validated separately, so it
-    is not repeated here — counting it twice would let one blank key inflate the
+    is not repeated here, counting it twice would let one blank key inflate the
     rejection threshold.
     """
 
@@ -324,7 +324,7 @@ def test_a_malformed_explicit_read_tuple_is_refused(returned):
 def test_an_installed_module_carries_its_own_contract():
     """The whole point: a deployed module is sufficient by itself.
 
-    No repository is opened and no catalogue is read — the docstring the author
+    No repository is opened and no catalogue is read, the docstring the author
     wrote is what the load runs from, which is what makes `.load()` a primitive
     rather than the tail end of an orchestration.
     """
@@ -362,7 +362,7 @@ def test_a_module_edited_after_deployment_is_read_as_it_now_stands():
     """Metadata changes are visible immediately, with no rebuild in between.
 
     This is what makes a notebook loop workable: edit the docstring, reload, run
-    `.load()`. It is also why the module is at the operator's risk — nothing
+    `.load()`. It is also why the module is at the operator's risk. Nothing
     revalidates it against the repository it came from.
     """
 
@@ -384,7 +384,7 @@ def test_a_module_with_no_metadata_block_is_refused_by_name():
 def test_the_runtime_parser_still_refuses_a_broken_contract():
     """Runtime parsing is narrower than the repository's, not laxer.
 
-    It does not check filenames, classes or dependencies — those were settled
+    It does not check filenames, classes or dependencies, those were settled
     before installation. What a load depends on it still validates, so a header
     that cannot describe a load is refused here rather than misread.
     """

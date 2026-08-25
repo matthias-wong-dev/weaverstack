@@ -1,4 +1,4 @@
-"""Physical identities — the third level of the four-level model.
+"""Physical identities: the third level of the four-level model.
 
 Weaver names things the way SQL does::
 
@@ -17,14 +17,14 @@ Weaver names things the way SQL does::
 
 Level 4 is the only level written down in Workspace configuration. A level-3
 item is unique within its workspace, so it is named directly rather than
-aliased — but unique is not invariant, so those names are always supplied at the
-call site and never inferred.
+aliased. Unique is not invariant, so those names are always supplied at the call
+site and never inferred.
 
 Levels 2 and 1 come from the object's own metadata (``Schema.Object``) and do
 not appear here.
 
 This module is pure identity. Nothing here resolves an item to a path, an ID or
-an endpoint — that is the resolver's job.
+an endpoint. That is the resolver's job.
 """
 
 from __future__ import annotations
@@ -68,7 +68,7 @@ def _split(text: object, *, what: str) -> list[str]:
 
 @dataclass(frozen=True)
 class ItemRef:
-    """A uniquely-named item within a workspace — level three.
+    """A uniquely-named item within a workspace, at level three.
 
     A Lakehouse, a Warehouse or a Fabric Environment. Which of those it must be
     is decided by the slot it is used in, never by the name itself: the same
@@ -94,7 +94,7 @@ class ItemRef:
 
 @dataclass(frozen=True)
 class FolderTarget:
-    """A Lakehouse Files area — ``Sales/Files``.
+    """A Lakehouse Files area, written ``Sales/Files``.
 
     Folder objects land at ``Files/<Schema>/<Object>``.
     """
@@ -108,7 +108,7 @@ class FolderTarget:
             raise IdentityError(
                 f"folder target must be '<Lakehouse>/{FILES_AREA}', got {text!r}"
                 + (
-                    " — a folder object lands at Files/<Schema>/<Object>, so there is "
+                    ". A folder object lands at Files/<Schema>/<Object>, so there is "
                     "nothing to configure beneath the area"
                     if len(segments) > 2
                     else ""
@@ -129,7 +129,7 @@ class FolderTarget:
 class DeltaTarget:
     """A Lakehouse holding Delta tables.
 
-    Named bare — ``Sales``. The ``Tables`` area is implicit because the object
+    Named bare, as ``Sales``. The ``Tables`` area is implicit because the object
     kind already determines it.
     """
 
@@ -140,7 +140,8 @@ class DeltaTarget:
         segments = _split(text, what="delta target")
         if len(segments) != 1:
             raise IdentityError(
-                "delta target must name a Lakehouse only — the 'Tables' area is implicit, "
+                "delta target must name a Lakehouse only. The 'Tables' area is "
+                "implicit, "
                 f"got {text!r}"
             )
         return cls(lakehouse=ItemRef(segments[0]))
@@ -172,11 +173,11 @@ class WarehouseTarget:
 #
 # ``Lakehouse/Name`` and ``Warehouse/Name`` are what a caller writes at every
 # boundary that names a whole physical item: a build binding's left-hand side, a
-# wipe target, an unbind target, a load target. One parser, deliberately — four
+# wipe target, an unbind target, a load target. One parser, because four
 # spellings of one grammar is four places for it to drift, and the drift would
 # show up as one operation accepting a target another refuses.
 #
-# It returns the *existing* typed targets rather than a fifth wrapper, so what a
+# It returns the existing typed targets rather than a fifth wrapper, so what a
 # caller gets back is what the resolvers and executors already take.
 
 LAKEHOUSE_KIND = "Lakehouse"
@@ -194,8 +195,8 @@ def parse_physical_target(
     """``Lakehouse/Name`` or ``Warehouse/Name``, as the typed physical target.
 
     ``what`` names the caller's own noun so the message reads in that operation's
-    vocabulary — "a wipe target must …", "a load target must …". ``error`` is the
-    class the caller's boundary raises, because *which* error a malformed request
+    vocabulary: "a wipe target must …", "a load target must …". ``error`` is the
+    class the caller's boundary raises, because the error a malformed request
     produces belongs to the operation and not to the grammar.
     """
 

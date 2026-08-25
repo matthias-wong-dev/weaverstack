@@ -5,7 +5,7 @@ Every decision a shortcut involves is proven in pure Python
 left alone, has its schema created anyway, waits for its producer, or is stale
 because the producer moved on. None of that needs a workspace.
 
-What only Fabric can answer is what happens when the plan *runs*:
+What only Fabric can answer is what happens when the plan runs:
 
 **A OneLake shortcut is a workspace API call**, not a file operation, so only
 asking the workspace proves one exists.
@@ -18,19 +18,19 @@ action learned to wait for a real read to succeed.
 item that mutated Delta is closed by a refresh. Nothing below a real workspace
 exercises that refresh.
 
-So the bundle is generated *here*, in pure Python, and **only the shortcut action is
-run** out of it — not the estate around it. Schemas, tables, views, catalogue
+So the bundle is generated here, in pure Python, and **only the shortcut action is
+run** out of it, not the estate around it. Schemas, tables, views, catalogue
 publication and the refreshes are minutes of work that answer none of the
 questions above, and every one is proven elsewhere.
 
-And the action runs *from here too*, against the real workspace: creating a
+And the action runs from here too, against the real workspace: creating a
 OneLake shortcut is a REST call and refreshing an endpoint is another, so both
 reach Fabric perfectly well from this checkout. Only two things need a session,
-and neither imports Weaver — making the source table, and reading it back
+and neither imports Weaver, making the source table, and reading it back
 through its shortcut.
 
 That leaves exactly one claim needing the published wheel, and it has its own
-file: the executor's *wait* for asynchronous discovery is guarded by
+file: the executor's wait for asynchronous discovery is guarded by
 ``context.spark is not None``, so running the action from here skips it. See
 `test_shortcut_discovery_boundary.py`.
 """
@@ -48,8 +48,8 @@ from weaver.targets import ItemRef
 
 #: Logical names owned by this module alone. The catalogue is keyed by logical
 #: item, never by physical target, so two estates sharing a name share Registry
-#: rows — which is how an unrelated build could make this one's shortcut correctly
-#: stale and quietly remove the work it is about.
+#: rows, which is how an unrelated build could make this one's shortcut correctly
+#: stale and remove the work it is about.
 PRODUCER = "Lakehouse/ShortcutProducer"
 CONSUMER = "Lakehouse/ShortcutConsumer"
 
@@ -130,18 +130,27 @@ def generate(
     )
 
 
-def action_of(plan, kind: str):
+def action_of(plan, kind: str, *, naming: str | None = None):
     """One action out of a real plan, with the batch that binds it to a target.
 
     Taken from the generated bundle rather than hand-made, so what runs against
-    Fabric is provably what the build produces — the point of generating a bundle
-    at all when only one action is wanted from it.
+    Fabric is provably what the build produces. That is the point of generating a
+    bundle at all when only one action is wanted from it.
+
+    ``naming`` picks the action by its id, and a caller that means a particular
+    item has to give it. Weaver's runtime references are ordinary shortcuts, so a
+    plan over two items carries several ``create_shortcut`` actions and the first
+    is whichever item sorted first.
     """
 
     for _sequence, batch, action in plan.actions():
-        if action.kind == kind:
-            return batch, action
-    raise AssertionError(f"the plan carried no {kind} action")
+        if action.kind != kind:
+            continue
+        if naming is not None and naming not in action.id:
+            continue
+        return batch, action
+    named = "" if naming is None else f" naming {naming!r}"
+    raise AssertionError(f"the plan carried no {kind} action{named}")
 
 
 def run_from_here(
@@ -151,7 +160,7 @@ def run_from_here(
 
     The same `execute_install_action` an installation calls, with its frozen
     payload. The resolver is the Session's own, so a REST crossing the action
-    makes — creating a OneLake shortcut, refreshing an endpoint — is Session
+    makes, creating a OneLake shortcut, refreshing an endpoint, is Session
     telemetry rather than a harness-owned client outside it. `store` remains a
     caller-supplied capability: it reads the bundle payload from wherever the
     caller staged it, and a desktop caller has no session identity to acquire
@@ -185,7 +194,7 @@ def run_from_here(
         payload,
         context=InstallationContext(
             # From the Installer, as every production context gets them. An
-            # executor stays on the desktop and only its statements cross — a
+            # executor stays on the desktop and only its statements cross, a
             # table shortcut asking whether it has become readable, a table build
             # asking what shape its query has.
             spark_sql=installer.spark_sql(),
@@ -196,7 +205,7 @@ def run_from_here(
             targets=resolved,
             # A Warehouse shortcut is a T-SQL view, so it needs a SQL capability.
             # Injected here because a desktop caller has no session identity to
-            # acquire one from — which is exactly the difference the parity
+            # acquire one from, which is exactly the difference the parity
             # probes exist to cover.
             sql=sql,
         ),
@@ -246,8 +255,15 @@ def shortcut_estate(
         staging=fabric_staging_lakehouse.name,
         catalogue_sql=session_catalogue_sql,
     )
-    batch, shortcut_action = action_of(bundle.plan, "create_shortcut")
-    _refresh_batch, refresh_action = action_of(bundle.plan, "refresh_sql_endpoint")
+    # The consumer's, by name: the producer has runtime-reference shortcuts of
+    # its own and they are `create_shortcut` actions too.
+    consumer_item = CONSUMER.split("/", 1)[1]
+    batch, shortcut_action = action_of(
+        bundle.plan, "create_shortcut", naming=consumer_item
+    )
+    _refresh_batch, refresh_action = action_of(
+        bundle.plan, "refresh_sql_endpoint", naming=consumer_item
+    )
 
     at = {
         role: resolver.spark_destination(ItemRef(item.name))
@@ -285,8 +301,8 @@ def shortcut_estate(
 
     shortcut = at["consumer"].qualify("DWG", "PortableCustomer")
     # Fabric discovers a shortcut asynchronously, and running the action from
-    # here skipped the executor's own wait — so the read retries. That the
-    # *executor* waits is asserted in `test_shortcut_discovery_boundary.py`, where it can be.
+    # here skipped the executor's own wait, so the read retries. That the
+    # executor waits is asserted in `test_shortcut_discovery_boundary.py`, where it can be.
     seen = livy_session.run(
         "import time\n"
         "_deadline = time.monotonic() + 180\n"
@@ -367,14 +383,14 @@ def test_the_shortcut_exists_as_a_onelake_shortcut(shortcut_estate, fabric_clien
 def test_the_consumer_reads_the_producers_table_through_its_own_name(shortcut_estate):
     """The claim a shortcut makes, checked where it has to hold.
 
-    Checked by *reading*, not by listing: Fabric creates a shortcut synchronously
+    Checked by reading, not by listing: Fabric creates a shortcut synchronously
     and discovers it asynchronously, so a name in the catalogue is not yet a name
     a statement can use.
     """
 
     seen = shortcut_estate["payload"]["seen"]
 
-    # A read, not a listing, and it must succeed rather than merely return a
+    # A read, not a listing, and it must succeed rather than return a
     # name: build creates structure and never data, so zero rows is the success
     # case and an exception is the failure this waits out.
     assert seen["shortcut_rows"] == 0
@@ -402,7 +418,7 @@ def test_the_consumers_endpoint_reports_the_shortcuted_table(shortcut_estate):
 
 @weaver_test(remote=True)
 def test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real(shortcut_estate):
-    """That the refresh is *planned* is pure Python. That it found a real
+    """That the refresh is planned is pure Python. That it found a real
     endpoint and did work is not."""
 
     refresh = shortcut_estate["payload"]["refresh"]
@@ -419,7 +435,7 @@ def test_the_shortcut_survives_a_build_that_does_not_touch_it(
 ):
     """The one part of the incremental claim a workspace still has to answer.
 
-    That an unchanged shortcut over an unchanged source plans *no action* is decided
+    That an unchanged shortcut over an unchanged source plans no action is decided
     from signatures and build datetimes before any pointer is touched, and belongs in
     `tests/targeted/test_shortcut_planning_install.py`: installing an estate to watch a
     decision get made was the expensive habit this module is shedding.
@@ -461,8 +477,8 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
     """The other shortcut form, and the one that leans hardest on the endpoint.
 
     A Warehouse cannot hold a OneLake shortcut, so shortcutting a Lakehouse table
-    into one is a T-SQL view over that Lakehouse's SQL analytics endpoint —
-    which is exactly the metadata Fabric syncs *behind* a Delta mutation rather
+    into one is a T-SQL view over that Lakehouse's SQL analytics endpoint,
+    which is exactly the metadata Fabric syncs behind a Delta mutation rather
     than with it. Nothing local has an endpoint, so nothing local can say
     whether the view resolves.
 
@@ -507,7 +523,11 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
         catalogue_sql=session_catalogue_sql,
         sql=warehouse.executor,
     )
-    batch, shortcut_action = action_of(bundle.plan, "create_shortcut")
+    batch, shortcut_action = action_of(
+        bundle.plan,
+        "create_shortcut",
+        naming=WAREHOUSE_CONSUMER.split("/", 1)[1],
+    )
     at = resolver.spark_destination(ItemRef(producer.name))
     source = at.qualify("DWG", "Customer")
 
@@ -523,18 +543,18 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
     # (`weaver.build_bundle.executors.spark_case.exact_identifier_case`, switched
     # on by `fabric_destination`'s `preserve_table_identifier_case`). Fabric folds
     # a table identifier to lower case at creation otherwise, and a Warehouse
-    # collates case-sensitively — so a bare CREATE lands `customer` while the view
+    # collates case-sensitively, so a bare CREATE lands `customer` while the view
     # below asks, correctly, for `Customer`, and the shortcut fails with "Invalid
     # object name" as though the shortcut SQL were wrong. The conf is set inline
     # rather than through the helper because this body must not need the wheel.
     #
-    # The DROP is deliberately *outside* that scope, so it resolves
+    # The DROP is outside that scope, so it resolves
     # case-insensitively and catches a predecessor of any spelling. Inside the
     # scope it would miss `customer`, and `CREATE ... IF NOT EXISTS` would then
-    # match that predecessor case-insensitively and skip — which is exactly how
+    # match that predecessor case-insensitively and skip, which is exactly how
     # this failed. A build never does this: it refuses to drop a case variant
     # implicitly (test_fabric_creation_never_drops_a_legacy_case_variant_implicitly),
-    # so a fixture that wants one gone has to say so itself.
+    # so a fixture that needs one gone has to say so itself.
     livy_session.run(
         f"spark.sql('DROP TABLE IF EXISTS {source}')\n"
         "previous = spark.conf.get('spark.sql.caseSensitive')\n"
@@ -548,13 +568,13 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
     )
 
     # The producer's endpoint must catch up before the Warehouse can see the
-    # table through it — a REST call, made from here.
+    # table through it, a REST call, made from here.
     #
-    # Whether the plan *contains* that refresh is a claim in its own right: the
+    # Whether the plan contains that refresh is a claim in its own right: the
     # stage is only emitted when the item's planned work mutated Delta (see
     # `weaver.build_bundle.endpoints.item_refresh_stage`). A plan that dropped it
     # would leave the Warehouse reading an endpoint that never caught up, and the
-    # shortcut below would fail with "Invalid object name" — a symptom that reads
+    # shortcut below would fail with "Invalid object name", a symptom that reads
     # like broken shortcut SQL and is nothing of the kind. So the search says so
     # rather than falling through in silence.
     refreshes = [

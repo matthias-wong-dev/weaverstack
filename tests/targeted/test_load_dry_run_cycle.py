@@ -1,9 +1,9 @@
 """The whole orchestration path, with dispatch removed.
 
 A dry run is the composition test the load layer could not otherwise have: it
-exercises the *real* planning and resolution seams end to end — catalogue read,
+exercises the real planning and resolution seams end to end, catalogue read,
 reverse binding, dependency resolution, shortcut resolution, physical DAG,
-endpoint-refresh insertion, dispatch-location resolution, deterministic order —
+endpoint-refresh insertion, dispatch-location resolution, deterministic order,
 and stops at the boundary where a target would be touched.
 
 So the dispatchers here are not fakes that answer plausibly. They are callables
@@ -172,7 +172,7 @@ def test_load_dry_run_names_the_primitive_every_node_would_reach(session):
     A dry run is planned against a snapshot and asks no workspace anything, so
     it names the procedure or the deployed module the way the estate names it.
     Turning that into an absolute path is the resolver's business, and it
-    happens at dispatch — where the run is already talking to the host anyway.
+    happens at dispatch, where the run is already talking to the host anyway.
     """
 
     report = dry_run(session)

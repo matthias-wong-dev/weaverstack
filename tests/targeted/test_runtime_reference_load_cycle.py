@@ -25,12 +25,10 @@ from support.workspaces import WORKSPACE, given_workspace
 
 import weaver
 from weaver.build_bundle import Builder, WarehouseBinding, effective_item_bindings
-from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 from weaver.build_bundle.workflow import BuildState
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     BOOKMARK_SENTINEL,
-    PRESENTED_RUNTIME_TABLES,
     SHORTCUT,
 )
 from weaver.declaration import parse_item_repository
@@ -102,19 +100,9 @@ def _wiped_state(bindings):
             kind=target.kind,
             target_name=target.name,
         )
-    sources = {
-        table.name: ResolvedShortcutSource(
-            workspace_id="workspace-1",
-            item_id="catalogue-1",
-            item_name="Weaver",
-            path=f"Tables/_/{table.name}",
-        )
-        for table in PRESENTED_RUNTIME_TABLES
-    }
     return BuildState(
         catalogue=Catalogue(rows={}),
         target_inventories=inventories,
-        runtime_sources=sources,
     )
 
 

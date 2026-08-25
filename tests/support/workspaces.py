@@ -2,7 +2,7 @@
 
 The double is the HTTP client, which is a genuine boundary: it answers the two
 listings resolution asks for and reaches nothing. Everything above it is the
-production resolver, so a core test proves the arithmetic Fabric will use —
+production resolver, so a core test proves the arithmetic Fabric will use,
 which is the whole reason not to hand-write a resolver here.
 
 .. code-block:: python
@@ -90,8 +90,8 @@ class InventoryClient:
     def request(self, method: str, path: str, **_):
         """A write this inventory accepts and records, rather than performs.
 
-        The shape matches what the REST client returns — a response carrying
-        headers — because the caller reads an operation id off it.
+        The shape matches what the REST client returns, a response carrying
+        headers, because the caller reads an operation id off it.
         """
 
         self.requested.append(f"{method} {path}")

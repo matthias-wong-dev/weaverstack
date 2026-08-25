@@ -1,7 +1,7 @@
-"""``weaver compose`` — what it accepts, what it asks, and what it runs.
+"""``weaver compose``: what it accepts, what it asks, and what it runs.
 
-The composition is deliberately small, so what these prove is mostly what it
-*refuses*: a file that could run arbitrary programs, a sequence that ran because
+The composition is small, so what these prove is mostly what it
+refuses: a file that could run arbitrary programs, a sequence that ran because
 nothing answered a prompt, a second grammar for commands that already have one.
 
 The handlers are replaced throughout. What a build or a load does is proved
@@ -246,7 +246,7 @@ def test_yes_runs_a_composition_unattended(tmp_path, recorded, capsys):
     """The other half of the refusal above: a script says so and it runs.
 
     Approving the sequence approves each command in it, so a wipe inside one
-    does not ask again — there is nobody to ask.
+    does not ask again. There is nobody to ask.
     """
 
     calls, parser_factory, _ = recorded
@@ -478,7 +478,7 @@ def test_the_confirmed_sequence_is_not_confirmed_again_per_command(
     tmp_path, recorded, confirmed
 ):
     """Having agreed to four commands, being asked again about the first of
-    them is not a second safeguard — it is the first one repeated."""
+    them is not a second safeguard. It is the first one repeated."""
 
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)

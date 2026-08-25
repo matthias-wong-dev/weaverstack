@@ -45,7 +45,7 @@ from .metadata import ASSUMPTION, AUDIT_LIVE_DELETE_DATETIME, TEST, ObjectId
 from .tsql_load import RESULT_PARAMETER_NAMES, RESULT_PARAMETERS
 
 #: Signature salt for the generated entry points. Raise it when this generator
-#: changes — though the payload is signed by its own bytes as well, because the
+#: changes, though the payload is signed by its own bytes as well, because the
 #: dispatch chain changes with the objects the item installs.
 TSQL_ENTRY_VERSION = 1
 
@@ -60,7 +60,7 @@ LOAD_ENTRY = "Load"
 TEST_ENTRY = "Test"
 
 #: What a rethrow uses when the original number is below THROW's floor of 50000.
-#: A Fabric error such as *Invalid object name* carries its own low number, and
+#: A Fabric error such as Invalid object name carries its own low number, and
 #: the message still travels.
 RETHROW_ERROR = 51031
 
@@ -290,9 +290,9 @@ def _unknown(what: str) -> str:
 def _rethrow() -> str:
     """Raise again what the lower procedure raised, once the record is written.
 
-    Only what was *thrown*. A returned outcome — a validation finding
-    discrepancies, a load whose rejections were tolerated — is an answer rather
-    than a failure, and travels back as one.
+    Only what was thrown. A returned outcome is an answer rather than a failure
+    and travels back as one, whether a validation finding discrepancies or a load
+    whose rejections were tolerated.
 
     The original number is kept where THROW accepts it, so a caller can still
     match on Weaver's own refusal codes.
@@ -313,8 +313,8 @@ def _rethrow() -> str:
 def _refuse_unmatched() -> str:
     """Raise a name that matched nothing, having recorded nothing for it.
 
-    Nothing ran, so there is no outcome and no object to record one against —
-    and every identity column is not null, so a row would be refused by the
+    Nothing ran, so there is no outcome and no object to record one against, and
+    every identity column is not null, so a row would be refused by the
     catalogue and would hide the message saying what went wrong.
     """
 

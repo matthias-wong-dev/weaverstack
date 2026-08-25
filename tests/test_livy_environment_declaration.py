@@ -2,7 +2,7 @@
 
 A workspace that names an ``environment`` attaches it; one that does not starts
 on the workspace's default runtime, which is all a body of Spark SQL needs.
-Starting the session asserts no Weaver install — that is
+Starting the session asserts no Weaver install. That is
 :meth:`~weaver.fabric.livy.LivySession.ensure_weaver`, submitted by a crossing
 that carries a body importing Weaver, and the one place a missing Environment
 is refused.
@@ -157,7 +157,7 @@ def test_a_workspace_configuring_no_lakehouse_cannot_start_spark():
     """Fabric creates a Spark session against a Lakehouse, so one has to exist.
 
     The catalogue is a Warehouse, so the
-    home comes from the workspace's own Lakehouses — and a workspace that
+    home comes from the workspace's own Lakehouses, and a workspace that
     configures none is doing Warehouse work, which needs no Spark at all.
     """
 
@@ -206,7 +206,7 @@ def test_a_submission_is_retried_when_it_never_reached_fabric(monkeypatch):
     """A connection that was never established carries nothing.
 
     The server has not seen the request, so sending it again cannot run a
-    statement twice — which is what makes a refused connection safe to repeat
+    statement twice, which is what makes a refused connection safe to repeat
     for a POST as well as a read.
     """
 

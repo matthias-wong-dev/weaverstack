@@ -16,7 +16,7 @@ _URL_MARKER = "://"
 
 @dataclass(frozen=True)
 class Location:
-    """One resolved location — a filesystem path or a URL."""
+    """One resolved location: a filesystem path or a URL."""
 
     value: str
 
@@ -29,8 +29,8 @@ class Location:
         if not value:
             raise IdentityError("location must not be empty")
         # One separator, everywhere. A Windows caller reaches this with
-        # backslashes — a filesystem root normalises through `Path`, and
-        # `str()` of a `WindowsPath` uses them — while everything downstream
+        # backslashes, since a filesystem root normalises through `Path` and
+        # `str()` of a `WindowsPath` uses them, while everything downstream
         # treats "/" as the only separator: `join`, `name`, and the segment
         # splitting in the Weaver document reader. Left alone, a repository read from a
         # Windows checkout takes its whole path as its catalogue name.
@@ -53,8 +53,8 @@ class Location:
 
         if self.is_url:
             raise IdentityError(
-                f"{self.value!r} is a URL location and has no filesystem path — "
-                "use a Store to read or write it"
+                f"{self.value!r} is a URL location and has no filesystem path. "
+                "Use a Store to read or write it"
             )
         return Path(self.value)
 
@@ -88,7 +88,7 @@ class Location:
 class LakehouseSparkLocation:
     """One destination Lakehouse's physical roots, resolved once.
 
-    A Spark session is attached to *some* Lakehouse, because Fabric creates one
+    A Spark session is attached to some Lakehouse, because Fabric creates one
     against a Lakehouse. Which one carries no meaning: destination Lakehouses
     are reached through explicit roots instead, and never by making the session
     point somewhere else.

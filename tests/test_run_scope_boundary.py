@@ -21,8 +21,8 @@ Both handles answer the same :class:`~weaver.run.runtime_boundary.RunScope`, so
 the tests below assert what dispatch does with either rather than which one it
 was given.
 
-What only Fabric can prove — that two Python nodes really share imports, that a
-rebuild is really picked up by the next run — belongs in `tests/fabric`.
+What only Fabric can prove. That two Python nodes really share imports, that a
+rebuild is really picked up by the next run, belongs in `tests/fabric`.
 """
 
 from __future__ import annotations
@@ -286,7 +286,7 @@ def test_a_configuration_failure_is_not_mistaken_for_running_locally():
     """The narrow fallback above must stay narrow.
 
     Catching every ``CommandError`` from ``executes_here`` turned a bad
-    configuration — or a Session someone had already closed — into a local
+    configuration, or a Session someone had already closed, into a local
     RuntimeScope. The run then imported primitives into the console and reported
     success against an estate it had never reached.
     """
@@ -374,7 +374,7 @@ def test_closing_twice_ends_the_run_once():
 
 @weaver_test()
 def test_a_cleanup_that_cannot_reach_the_session_does_not_fail_the_run():
-    """If the Livy session is already gone, so is the scope — which is the
+    """If the Livy session is already gone, so is the scope, which is the
     outcome closing the scope exists to reach."""
 
     session = _Recording()
@@ -431,7 +431,7 @@ def test_a_warehouse_only_run_never_opens_a_runtime_scope():
     """The claim that keeps a declared requirement from becoming an acquisition.
 
     A run of nothing but stored procedures reaches no deployed module, so it
-    needs no scope — and on a desktop, opening one means a Livy session and a
+    needs no scope, and on a desktop, opening one means a Livy session and a
     scope-opening crossing for work that is entirely T-SQL.
     """
 
@@ -575,9 +575,9 @@ def test_a_live_session_that_could_not_release_a_scope_is_reported():
     """The opposite case, and the one that used to vanish.
 
     A healthy Livy answering with a protocol or serialisation failure means the
-    scope is *still open over there*, holding this run's imported modules. The
+    scope is still open over there, holding this run's imported modules. The
     next run inherits them, and a rebuilt primitive silently does not take
-    effect. The completed run still succeeds — it produced its result — but
+    effect. The completed run still succeeds, it produced its result, but
     somebody is told.
     """
 

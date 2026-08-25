@@ -64,7 +64,7 @@ def run_validation_primitive(
 ) -> dict:
     """Run one installed Lakehouse validation in a named scope.
 
-    It crosses as the estate's own description of it — the Registry row saying
+    It crosses as the estate's own description of it, the Registry row saying
     where the primitive lives and what it compares.
     """
 

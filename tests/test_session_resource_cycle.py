@@ -1,4 +1,4 @@
-"""A Session resource is acquired once while healthy, and dies only deliberately.
+"""A Session resource is acquired once while healthy, and dies only.
 
 These are the two rules the whole Session rests on. If concurrent callers can
 start two acquisitions, a capacity with one Spark slot deadlocks against itself;
@@ -129,7 +129,7 @@ def test_a_warm_up_nobody_asked_for_does_not_fail_the_next_command(executor):
 
     assert resource.state is ResourceState.NOT_STARTED
 
-    # The command that genuinely needs Spark tries again, rather than inheriting
+    # The command that needs Spark tries again, rather than inheriting
     # a failure from something it never asked for.
     assert resource.get() == "livy"
     assert resource.attempts == 1
@@ -218,7 +218,7 @@ def test_closing_mid_acquisition_waits_so_it_can_release_what_arrives(executor):
 
     ``weaver session`` warms Livy at the prompt; a user who exits immediately
     would otherwise abandon a session that is still starting, and it holds the
-    only slot until Fabric reaps it — so the next run queues behind a session
+    only slot until Fabric reaps it, so the next run queues behind a session
     nobody is using.
     """
 

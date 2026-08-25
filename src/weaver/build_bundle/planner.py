@@ -61,7 +61,6 @@ from .physical import (
 )
 from .prune import TargetInventory
 from .runtime_tables import (
-    render_runtime_references,
     render_runtime_state_reconciliation,
     runtime_state_invalidation,
 )
@@ -81,7 +80,6 @@ def generate_item_build_bundle(
     stale_claims: tuple = (),
     catalogue_binding: WarehouseBinding,
     shortcut_sources: Mapping[str, object] | None = None,
-    runtime_sources: object | None = None,
 ) -> BuildBundle:
     """Freeze the one incremental build model into an installable bundle."""
 
@@ -136,7 +134,7 @@ def generate_item_build_bundle(
             )
 
     # Freshness is read before ``registered`` is narrowed, because the whole
-    # point is to compare against an item this build does *not* include.
+    # point is to compare against an item this build does not include.
     stale_shortcuts = stale_shortcut_destinations(
         repository, catalogue.registered, bound_items=by_item
     )
@@ -159,13 +157,17 @@ def generate_item_build_bundle(
     catalogue_target = _catalogue_target(catalogue_binding, targets)
     if all(target.id != catalogue_target.id for target in targets):
         targets = targets + (catalogue_target,)
+    from ..catalogue.builtin import BUILTIN_ITEM
+
+    shortcut_target_by_item = dict(target_by_item)
+    shortcut_target_by_item.setdefault(BUILTIN_ITEM, catalogue_target)
 
     stages: list[PlannedStage] = []
     omitted: list[OmittedNode] = []
 
     # Collected once and used twice. These rows are deleted before any physical
-    # work, so publication compares against the catalogue without them — an
-    # object dropped and rebuilt whose projection did not change would otherwise
+    # work, so publication compares against the catalogue without them. An object
+    # dropped and rebuilt whose projection did not change would otherwise
     # compare equal, produce no merge, and stay deleted.
     deleted_claims = collect_claims(
         catalogue, removed | selected_for_drop, stale_claims=stale_claims
@@ -182,7 +184,7 @@ def generate_item_build_bundle(
         stages.append(catalogue_before)
 
     # Current state is invalidated here, between decertification and the first
-    # physical action, and never after it — see
+    # physical action, and never after it. See
     # :mod:`weaver.build_bundle.runtime_tables`. Against the catalogue this build
     # read: which rows are obsolete is arithmetic over rows it holds, and a build
     # creating the tables read none.
@@ -206,7 +208,7 @@ def generate_item_build_bundle(
                 item=item,
                 target=target_by_item[item],
                 inventory=inventories[item],
-                target_by_item=target_by_item,
+                target_by_item=shortcut_target_by_item,
                 selected_documents=selected_documents,
                 selected_shortcuts=selected_shortcuts,
                 shortcut_sources=shortcut_sources,
@@ -220,7 +222,6 @@ def generate_item_build_bundle(
                 removed=removed,
                 registered=registered,
                 catalogue_target=catalogue_target,
-                runtime_sources=runtime_sources,
             )
             layer_stages.extend(planned.stages)
             omitted.extend(planned.omitted)
@@ -235,7 +236,7 @@ def generate_item_build_bundle(
             target_by_item,
             catalogue_target=catalogue_target,
             # The catalogue as the claim deletions above will leave it, not as
-            # it was read — see `without_claims`.
+            # it was read. See `without_claims`.
             current=catalogue_after_deletions,
         )
     )
@@ -289,7 +290,7 @@ def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:
 def _selectable(
     repository: WeaverRepository, by_item: Mapping
 ) -> tuple[set, set, set, set]:
-    """The four selectable kinds, separately — see the comment at the call site."""
+    """The four selectable kinds, separately. See the comment at the call site."""
 
     return (
         {
@@ -393,7 +394,6 @@ def plan_item_build(
     selected_loads=(),
     removed=(),
     shortcut_sources=None,
-    runtime_sources=None,
 ) -> PlannedItem:
     """One item's physical plan, from prepared inputs.
 
@@ -413,6 +413,7 @@ def plan_item_build(
         target_by_item=target_by_item,
         selected=selected_for_build & selected_shortcuts,
         sources=shortcut_sources,
+        catalogue_target=catalogue_target,
     )
     artefacts = item_runtime_artefacts(
         repository,
@@ -424,9 +425,9 @@ def plan_item_build(
     )
     stages: list[PlannedStage] = []
 
-    # Prune is given every *declared* shortcut destination, never only the selected
+    # Prune is given every declared shortcut destination, never only the selected
     # ones: a shortcut this build decided not to touch is still desired state, and
-    # a prune that could not see it would delete the very thing incremental
+    # a prune that could not see it would delete the thing incremental
     # selection just chose to keep. Load artefacts are treated the same way, and
     # the stage derives them itself.
     prune = item_prune_stage(
@@ -453,7 +454,7 @@ def plan_item_build(
         target=target,
         inventory=inventory,
         # `_` is where a Warehouse's generated load procedures live, and no
-        # document declares an object in it — so like a shortcut's namespace it
+        # document declares an object in it, so like a shortcut's namespace it
         # would never be created if only documents were consulted. It is derived
         # from the artefacts, so an item with no procedures asks for no schema.
         extra_schemas=tuple(shortcuts.schemas) + load_schemas(artefacts),
@@ -462,18 +463,6 @@ def plan_item_build(
         stages.append(schemas)
     if shortcuts.stage is not None:
         stages.append(shortcuts.stage)
-    # Authored SQL may read a runtime table while a Warehouse table build
-    # executes it to discover and materialise its shape.
-    references = render_runtime_references(
-        repository,
-        item=item,
-        target=target,
-        catalogue_target=catalogue_target,
-        runtime_sources=runtime_sources,
-        selected=selected_for_build & selected_shortcuts,
-    )
-    if references is not None:
-        stages.append(references)
     stages.extend(
         item_build_stages(
             repository,

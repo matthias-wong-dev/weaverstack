@@ -1,7 +1,7 @@
-"""Folder execution — strictly create/drop a managed folder, or prune one.
+"""Folder execution: strictly create/drop a managed folder, or prune one.
 
 Building a Folder is creating its directory in the Lakehouse Files area; there is
-no data (staging files into it is *load*). Pruning one is removing a directory
+no data (staging files into it is load). Pruning one is removing a directory
 the build already decided, at freeze time, is unmanaged. Both resolve their path
 from the action's resource id and the bound target and touch no catalog:
 

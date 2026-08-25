@@ -310,7 +310,7 @@ def test_the_next_prompt_starts_on_a_fresh_line_after_progress(tmp_path):
     """The invariant the shell owns: settle the renderer, then draw the prompt.
 
     The handler returns with a Step still open, so the live progress line is on
-    screen and the cursor is part-way along it — the state that used to put
+    screen and the cursor is part-way along it, the state that used to put
     ``weaver>`` in the middle of a progress line.
     """
 

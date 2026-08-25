@@ -1,8 +1,8 @@
-"""``SesFixture.disposable()`` — the estate a test is allowed to edit.
+"""``SesFixture.disposable()``, the estate a test is allowed to edit.
 
-Some suites have to prove that a *changed* document really moves the catalogue;
+Some suites have to prove that a changed document really moves the catalogue;
 without that, "nothing was rebuilt" and "the build does nothing" are the same
-observation. So an estate has to be editable — and the estates live in
+observation. So an estate has to be editable, and the estates live in
 ``tests/fixtures``, which is repository source.
 
 Editing repository source from a test is worse here than untidy.
@@ -10,8 +10,8 @@ Editing repository source from a test is worse here than untidy.
 leaves a fixture modified changes the version the next build believes it is:
 the test run alters what it is testing.
 
-The fix is a copy, and this asserts the two properties a copy has to have — the
-edit lands, and the original is untouched — without shelling out to Git, which
+The fix is a copy, and this asserts the two properties a copy has to have. The
+edit lands, and the original is untouched, without shelling out to Git, which
 would test the tool rather than the helper.
 """
 
@@ -41,7 +41,7 @@ def test_the_copy_is_somewhere_else(tmp_path):
 
 @weaver_test()
 def test_the_copy_is_the_whole_estate(tmp_path):
-    """Every document, byte for byte — a build reads all of them."""
+    """Every document, byte for byte, a build reads all of them."""
 
     copy = MIXED_ESTATE_FIXTURE.disposable(tmp_path)
 

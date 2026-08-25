@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -10,6 +11,12 @@ from .errors import SqlConnectionError
 
 DEFAULT_SQL_PORT = 1433
 DEFAULT_CONNECT_TIMEOUT = 60
+
+#: How many times opening a connection is attempted, and how long to wait between
+#: attempts. A Fabric SQL endpoint refuses a connection while it is scaling, and
+#: nothing has been sent yet when it does, so opening again is safe.
+CONNECT_ATTEMPTS = 3
+CONNECT_BACKOFF = 3.0
 
 
 @dataclass(frozen=True)
@@ -78,14 +85,19 @@ def connect(
                 "mssql-python is required for Warehouse SQL execution"
             ) from exc
 
-    try:
-        return connector(
-            build_connection_string(endpoint),
-            timeout=timeout,
-            autocommit=True,
-            **dict(authentication.connection_arguments()),
-        )
-    except SqlConnectionError:
-        raise
-    except Exception as exc:
-        raise SqlConnectionError(f"failed to connect to {endpoint}: {exc}") from exc
+    for attempt in range(1, CONNECT_ATTEMPTS + 1):
+        try:
+            return connector(
+                build_connection_string(endpoint),
+                timeout=timeout,
+                autocommit=True,
+                **dict(authentication.connection_arguments()),
+            )
+        except SqlConnectionError:
+            raise
+        except Exception as exc:
+            if attempt == CONNECT_ATTEMPTS:
+                raise SqlConnectionError(
+                    f"failed to connect to {endpoint}: {exc}"
+                ) from exc
+            time.sleep(CONNECT_BACKOFF * attempt)

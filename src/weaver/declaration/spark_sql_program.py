@@ -1,7 +1,7 @@
 """What an authored Spark SQL table's body means, as a program.
 
 A Spark SQL table is authored as ordinary SQL that runs unchanged in a ``%%sql``
-cell, and it is *installed* as an importable Python primitive whose ``read()``
+cell, and it is installed as an importable Python primitive whose ``read()``
 executes that same text. Both ends need the same reading of the body, so there
 is one here rather than one each:
 
@@ -12,18 +12,18 @@ is one here rather than one each:
 
 Setup and query are told apart lexically, by what the statement starts with.
 Spark returns a DataFrame for every statement, so running one cannot answer
-whether it produced rows — which is why ``CREATE VIEW … AS SELECT`` is setup
+whether it produced rows, which is why ``CREATE VIEW … AS SELECT`` is setup
 despite containing a ``SELECT``, and ``WITH … SELECT`` is a query despite not
 starting with one.
 
 .. code-block:: text
 
-    0 queries       not a table — nothing produces rows
+    0 queries       not a table, because nothing produces rows
     1 query         the staging rows
     2 queries       the staging rows, then the keys to delete
     3 or more       ambiguous, and refused
 
-That is what ``read()`` returns everywhere else — ``(staging, deletes)`` — so a
+That is what ``read()`` returns everywhere else, as ``(staging, deletes)``, so a
 SQL-authored table reaches :func:`weaver.runtime.table_load.load_table` through
 the same door a Python-authored one does.
 
@@ -44,9 +44,9 @@ from ..sql_statements import SqlStatement, parse_statements, unterminated
 
 #: What a top-level statement may begin with and still produce rows. ``FROM`` is
 #: Spark's leading-from form (``FROM t SELECT …``); ``(`` is a parenthesised
-#: query, which is how a set operation is often written. Everything else — the
-#: whole of DDL, ``CACHE``, ``SET``, ``INSERT`` — is setup, and setup is what a
-#: statement is by default rather than by enumeration.
+#: query, which is how a set operation is often written. Everything else is
+#: setup, including the whole of DDL, ``CACHE``, ``SET`` and ``INSERT``, and setup
+#: is what a statement is by default rather than by enumeration.
 QUERY_HEADS = frozenset({"(", "FROM", "SELECT", "TABLE", "VALUES", "WITH"})
 
 
@@ -91,7 +91,7 @@ def parse_spark_sql_program(
 ) -> SparkSqlProgram:
     """Split and classify one authored body, refusing an unterminated statement.
 
-    Termination is required of *every* statement including the last, because the
+    Termination is required of every statement including the last, because the
     separator is what makes the body's shape a statement of intent rather than
     something inferred: a program whose final statement trails off is one whose
     author may or may not have finished writing it, and the parser cannot tell
@@ -120,20 +120,20 @@ def validate_query_contract(
     """Refuse a program whose queries cannot mean a load.
 
     Called from repository parsing, where it stops a build, and again from the
-    deployed primitive, where it stops a load — the same rule, checked at both
-    ends, because a module edited by hand after deployment never met the first.
+    deployed primitive, where it stops a load. One rule checked at both ends,
+    because a module edited by hand after deployment never met the first.
     """
 
     queries = program.queries
     if not queries:
         raise error(
             f"{what}: a Spark SQL table must end in a query that produces its "
-            "rows, and this body has none — setup statements alone stage nothing"
+            "rows, and this body has none. Setup statements alone stage nothing"
         )
     if len(queries) > 2:
         raise error(
             f"{what}: a Spark SQL table produces its rows and, at most, the keys "
-            f"to delete — {len(queries)} statements produce results. Turn the "
+            f"to delete, and {len(queries)} statements produce results. Turn the "
             "intermediate ones into temporary views."
         )
     if len(queries) == 1:
@@ -141,11 +141,11 @@ def validate_query_contract(
     if not primary_key:
         raise error(
             f"{what}: a second query names the rows to delete, which needs a "
-            "primary key to name them by — declare one, or return one query"
+            "primary key to name them by. Declare one, or return one query"
         )
     if not incremental:
         raise error(
-            f"{what}: a non-incremental table cannot name explicit deletes — the "
+            f"{what}: a non-incremental table cannot name explicit deletes. The "
             "source is the whole truth, so a row's absence from the staging "
             "query is what retires it. Return one query, or declare "
             "Incremental: true."

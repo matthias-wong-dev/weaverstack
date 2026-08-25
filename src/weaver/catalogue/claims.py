@@ -29,21 +29,36 @@ def catalogue_schema(identity: WeaverDocumentId) -> str:
 
     A Folder carries its ``Files/`` prefix because that prefix is part of what
     distinguishes it from a table of the same name. A load artefact does not get
-    one: its schema is already the real thing — the containing path for a file,
-    the Warehouse schema for a procedure — and prefixing it would store something
-    that is not the target's own name.
+    one. Its schema is already the real thing, being the containing path for a
+    file and the Warehouse schema for a procedure, and prefixing it would store
+    something that is not the target's own name.
     """
 
     prefix = "Files/" if identity.is_files else ""
     return f"{prefix}{identity.object_id.schema}"
 
 
+def catalogue_columns(identity) -> tuple[str, str]:
+    """The ``schema_name`` and ``object_name`` this identity is stored under.
+
+    A schema shortcut presents a namespace, so it names the schema in both
+    columns. One reader for what :func:`weaver.catalogue.projection._identity`
+    writes, so the two cannot drift.
+    """
+
+    from ..declaration.model import WeaverSchemaId
+
+    if isinstance(identity, WeaverSchemaId):
+        return identity.schema, identity.schema
+    return catalogue_schema(identity), identity.object_id.object
+
+
 def bookmark_row(identity: WeaverDocumentId, at=None) -> dict:
     """One ``_.Bookmark`` row for an object, keyed as the Registry keys it.
 
-    One builder for every writer — a build's invalidation, a run's advance, a
-    standalone load's — so the four columns are spelled the same way wherever a
-    bookmark is written. ``at`` is left out when only the key is wanted.
+    One builder for every writer, being a build's invalidation, a run's advance
+    and a standalone load's, so the four columns are spelled the same way wherever
+    a bookmark is written. ``at`` is left out when only the key is wanted.
     """
 
     row = {
@@ -64,8 +79,8 @@ class CatalogueClaimRule:
     table: CatalogueTable
     predicate_columns: tuple[str, str] = ("schema_name", "object_name")
 
-    def values(self, identity: WeaverDocumentId) -> tuple[str, str]:
-        return catalogue_schema(identity), identity.object_id.object
+    def values(self, identity) -> tuple[str, str]:
+        return catalogue_columns(identity)
 
     def owns(self, row: Mapping[str, object], identity: WeaverDocumentId) -> bool:
         expected = self.values(identity)
@@ -117,7 +132,7 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
         *_COMMON_OBJECT_RULES[1:],
     ),
     # A load artefact claims the Registry and nothing else. It declares no
-    # columns, no keys, no relationships and no dependencies — it is a deployed
+    # columns, no keys, no relationships and no dependencies. It is a deployed
     # module or a generated statement, and the only thing the catalogue records
     # about it is that Weaver installed it and at what signature.
     "file": (CatalogueClaimRule(REGISTRY),),
@@ -142,9 +157,9 @@ def without_claims(catalogue, claims):
     """The catalogue as the build's claim-deletion stage will leave it.
 
     A build removes the catalogue claims of everything it is about to drop
-    *before* it does any physical work, so a row can never stay certified while
+    before it does any physical work, so a row can never stay certified while
     the object behind it is being replaced. The catalogue the planner read still
-    contains those rows, though — it was read before any of this was decided.
+    contains those rows, having been read before any of this was decided.
 
     That matters now that publication is a difference. An object dropped and
     rebuilt whose projection did not change would compare equal against the
@@ -152,8 +167,8 @@ def without_claims(catalogue, claims):
     removed it and nothing put it back. Comparing against the state the deletes
     will actually produce is what makes "unchanged" mean unchanged.
 
-    It is a narrowing, never a widening — rows are only ever removed here — so
-    the worst a mistake in it can do is publish a row that did not need
+    It is a narrowing, never a widening, since rows are only removed here, so the
+    worst a mistake in it can do is publish a row that did not need
     publishing.
     """
 

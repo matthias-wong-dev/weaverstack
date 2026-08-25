@@ -30,7 +30,7 @@ def test_an_unknown_workspace_lists_what_there_is(
     """Takes the fixture it does not read, to inherit its skip.
 
     Listing what there is needs a reachable tenant, so without one this cannot
-    run — and unguarded it failed on the credential lookup instead of skipping,
+    run, and unguarded it failed on the credential lookup instead of skipping,
     which is the one thing the opt-in suite promises not to do.
     """
 

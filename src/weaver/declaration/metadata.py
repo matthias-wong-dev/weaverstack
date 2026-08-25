@@ -42,7 +42,7 @@ LANGUAGES = frozenset({PYTHON, SQL, SPARK_SQL})
 #: They declare their shape up front and use the underscored audit spelling.
 DELTA_LANGUAGES = frozenset({PYTHON, SPARK_SQL})
 
-# The three physical destinations. An object ID is unique *within* one of these,
+# The three physical destinations. An object ID is unique within one of these,
 # not across them: Sales.Order may exist as a folder, as a Delta table and as a
 # Warehouse table at the same time, because those are three different places.
 FOLDER_TARGET = "folder"
@@ -68,8 +68,8 @@ def namespace_for_target(target_kind: str) -> str:
 def target_kind_for(language: str, kind: str) -> str:
     """Where an object materialises, from its language and kind.
 
-    Routing is inferred, never configured — which is what removed the old
-    paired source-and-target build command.
+    Routing is inferred, not configured, which is what removed the old paired
+    source-and-target build command.
     """
 
     if kind == FOLDER:
@@ -103,7 +103,7 @@ STABILITY_ROWS = "Stability row threshold"
 
 #: Whether Weaver installs a load for this table. True unless declared otherwise.
 #:
-#: A table declaring ``false`` is one something other than a load populates —
+#: A table declaring ``false`` is one something other than a load populates.
 #: Weaver's own catalogue tables are written by the catalogue's DML. It gets no
 #: load artefact and no row-signature column, because both exist to serve a load
 #: it does not have, so what it declares is a structure.
@@ -113,7 +113,7 @@ STABILITY_ROWS = "Stability row threshold"
 HAS_LOAD_PROCEDURE = "Has load procedure"
 
 #: Deliberately not zero. A load that has never been run against a populated
-#: table has nothing to compare with, and a first load inserts everything — so
+#: table has nothing to compare with, and a first load inserts everything, so
 #: the defaults protect an established table without standing in the way of one
 #: being established.
 DEFAULT_DELETE_THRESHOLD = 5
@@ -123,7 +123,7 @@ DEFAULT_STABILITY_ROWS = 1_000_000
 # Keys accepted per kind. Anything else is a typo and is refused by name.
 #
 # The groups are semantic: each says what a set of keys is about, and each kind
-# composes the groups that apply to it. There is no set every document gets — a
+# composes the groups that apply to it. There is no set every document gets. A
 # Test has a description, notes and dependencies and materialises nothing, so
 # `Lineage`, `Static` and the shortcuts could not mean anything on it.
 
@@ -134,7 +134,7 @@ DOCUMENT_KEYS = frozenset({"Description", "Notes", "Revision notes"})
 #: cannot be inferred mechanically.
 DEPENDENCY_KEYS = frozenset({"Dependencies"})
 
-#: Where the *data* came from. A validation reads data but produces none, so it
+#: Where the data came from. A validation reads data but produces none, so it
 #: has no lineage of its own to declare.
 DATA_LINEAGE_KEYS = frozenset({"Lineage"})
 
@@ -202,8 +202,8 @@ _RETIRED_KEYS = {
     ),
 }
 
-# Multiple independent columns are a YAML list; a column *set* — one key or one
-# comparison tuple — is comma-separated.
+# Multiple independent columns are a YAML list. A column set, meaning one key or
+# one comparison tuple, is comma-separated.
 _LIST_KEYS = {"Not null"}
 _SET_KEYS = {"Primary key", "Comparison columns"}
 
@@ -212,7 +212,7 @@ _REFERENCE = re.compile(r"^\$([^\[\]$]+?)(?:\[([^\[\]$]+)\])?$")
 # A revision entry opens with a date. Which spelling is the developer's choice;
 # holding to one spelling within a document is not, because a mixed list cannot
 # be read in order at a glance. Day-first and month-first share a shape and are
-# not told apart — Weaver checks the shape, not the reading.
+# not told apart, because Weaver checks the shape rather than the reading.
 _REVISION_DATE_SHAPES = (
     ("YYYY-MM-DD", re.compile(r"^(\d{4})-(\d{1,2})-(\d{1,2})(?=\s|$)"), True),
     ("YYYY/MM/DD", re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})(?=\s|$)"), True),
@@ -238,7 +238,7 @@ _AUDIT_TYPES = {PYTHON: "timestamp", SPARK_SQL: "timestamp", SQL: "datetime2(6)"
 
 #: The delete datetime of a row that is still live. All three audit columns are
 #: physically not null, so a live row carries a sentinel maximum rather than an
-#: absence — which makes "as at" one range predicate instead of a null check.
+#: absence, so "as at" is one range predicate rather than a null check.
 AUDIT_LIVE_DELETE_DATETIME = "9999-12-31 23:59:59.999999"
 
 #: The row signature is a SHA-256 digest of a row's comparison columns, kept on
@@ -249,7 +249,7 @@ SIGNATURE_COLUMN = "Row signature"
 
 #: The signature's physical type follows the representation. A Warehouse stores
 #: the digest as bytes; Spark's ``sha2`` returns the hex text, so Delta stores
-#: that. The two engines are not required to agree byte for byte — a signature is
+#: that. The two engines need not agree byte for byte, because a signature is
 #: only ever compared with another signature from the same table.
 _SIGNATURE_TYPES = {PYTHON: "string", SPARK_SQL: "string", SQL: "varbinary(32)"}
 
@@ -258,7 +258,7 @@ def signature_column_name(language: str) -> str:
     """The physical spelling of the row-signature column for a representation.
 
     Delta gets lower snake case (``row_signature``), a Warehouse the spaced form
-    (``Row signature``) — the same rule the audit columns follow.
+    (``Row signature``), the same rule the audit columns follow.
     """
 
     if language in DELTA_LANGUAGES:
@@ -273,7 +273,7 @@ _RESERVED_SIGNATURE_NAMES = frozenset(
     for spelling in (SIGNATURE_COLUMN, SIGNATURE_COLUMN.replace(" ", "_"))
 )
 
-#: The identity column is a surrogate the *engine* generates: build declares it
+#: The identity column is a surrogate the engine generates: build declares it
 #: ``bigint identity not null`` and the Warehouse assigns a value to every
 #: inserted row. It is Weaver's column, so it is not part of the declared
 #: business schema or a query's output, and a load never inserts into it.
@@ -287,8 +287,8 @@ IDENTITY_LANGUAGES = frozenset({SQL})
 
 _IDENTITY_UNSUPPORTED = (
     "Identity is supported for Warehouse tables only. A Delta table has no "
-    "engine-generated identity to sit behind the column — Spark and Delta offer "
-    "none Weaver can rely on — so remove the Identity header and use the "
+    "engine-generated identity to sit behind the column, and Spark and Delta "
+    "offer none Weaver can rely on. Remove the Identity header and use the "
     "business key, or declare the object in a Warehouse item."
 )
 
@@ -320,9 +320,9 @@ def _audit_columns(language: str) -> tuple["Column", ...]:
         Column(
             name=audit_column_name(logical, language),
             type=_AUDIT_TYPES[language],
-            # Weaver populates all three on every loaded row — insert and update
-            # datetimes, and a sentinel maximum delete datetime for a live row —
-            # so none has a valid null state and all are physically not null.
+            # Weaver populates all three on every loaded row: insert and update
+            # datetimes, and a sentinel maximum delete datetime for a live row.
+            # So none has a valid null state and all are physically not null.
             not_null=True,
             is_audit=True,
         )
@@ -335,7 +335,7 @@ def _audit_columns(language: str) -> tuple["Column", ...]:
 
 @dataclass(frozen=True)
 class ObjectId:
-    """Levels two and one — ``Schema.Object`` within a repository."""
+    """Levels two and one: ``Schema.Object`` within a repository."""
 
     schema: str
     object: str
@@ -400,7 +400,7 @@ class Reference:
 
 @dataclass(frozen=True)
 class MetadataText:
-    """Either literal prose or exactly one reference — never a mix.
+    """Either literal prose or one reference, never a mix.
 
     ``See $Sales.Order`` is refused: mixed content cannot be resolved
     mechanically. Write ``$$`` for a literal dollar sign.
@@ -435,7 +435,7 @@ class ForeignKey:
     Semantic rather than physical: nothing is enforced by the engine and no
     index follows, so a key has no name, two objects may be related several
     times over, and an object may reference itself. The parent is a two-part
-    ``Schema.Object`` — a logical name in the same repository.
+    ``Schema.Object``, a logical name in the same repository.
     """
 
     columns: tuple[str, ...]
@@ -484,8 +484,8 @@ class WeaverDocument:
     dependencies: tuple[ObjectId, ...] = ()
     #: True when the document wrote a ``Dependencies`` key at all, including an
     #: empty list. An explicit none must suppress discovery the same way a
-    #: populated list replaces it — otherwise `Dependencies: []` would silently
-    #: mean "discover them for me".
+    #: populated list replaces it. Otherwise `Dependencies: []` would mean
+    #: "discover them for me".
     declares_dependencies: bool = False
     revision_notes: tuple[Revision, ...] = ()
     revision_date_format: str | None = None
@@ -556,7 +556,7 @@ class WeaverDocument:
         A not-null ``bigint`` the Warehouse generates: build declares it
         ``identity`` and every insert leaves it out. Weaver's own column, so it
         stands outside the business schema, though the primary key may name it.
-        Only a Warehouse table has one — see :data:`IDENTITY_LANGUAGES`.
+        Only a Warehouse table has one. See :data:`IDENTITY_LANGUAGES`.
         """
 
         if self.identity is None or self.kind != TABLE:
@@ -800,10 +800,10 @@ def parse_document(text: str, *, language: str) -> SesDocument:
             raise MetadataError("Incremental: true requires a Primary key")
         if comparison and not primary_key:
             raise MetadataError(
-                "Comparison columns require a Primary key — they drive upsert comparison, "
-                "which only happens when rows can be matched"
+                "Comparison columns require a Primary key. They drive upsert "
+                "comparison, which only happens when rows can be matched"
             )
-        # A Python table's authored module *is* its load, so there is no separate
+        # A Python table's authored module is its load, so there is no separate
         # artefact to decline. Declaring a table only something else populates
         # means declaring its structure, which SQL and Spark SQL can both do.
         if language == PYTHON and not has_load_procedure:
@@ -856,9 +856,9 @@ def _parse_validation(
     """Parse a Test or Assumption header.
 
     A separate path rather than a branch through the object parser: a validation
-    has no schema, lineage, build behaviour or shortcut. What the two share —
-    description, notes, revisions, dependencies — goes through the same helpers,
-    so they cannot drift.
+    has no schema, lineage, build behaviour or shortcut. What the two share,
+    being description, notes, revisions and dependencies, goes through the same
+    helpers, so they cannot drift.
     """
 
     if kind == ASSUMPTION and "Primary key" in raw:
@@ -870,9 +870,9 @@ def _parse_validation(
     _reject_unknown_keys(raw, kind)
 
     # No language is required to declare dependencies here, though Spark SQL is
-    # on an object. The header means the same either way — declared replaces
-    # inferred, and `Dependencies: []` means none — and only the obligation
-    # differs: a Spark SQL object may read by path, while a validation installs
+    # on an object. The header means the same either way: declared replaces
+    # inferred, and `Dependencies: []` means none. Only the obligation differs,
+    # in that a Spark SQL object may read by path, while a validation installs
     # last and nothing depends on it. See
     # :func:`weaver.declaration.repository.effective_dependencies`.
     declares_dependencies = "Dependencies" in raw
@@ -918,7 +918,7 @@ def _parse_id(raw: dict[str, Any]) -> tuple[str, ObjectId]:
 
 
 def _listed(items: list[str]) -> str:
-    """``a``, ``a and b``, ``a, b and c`` — a list a sentence can contain."""
+    """``a``, ``a and b``, ``a, b and c``: a list a sentence can contain."""
 
     if len(items) < 3:
         return " and ".join(items)
@@ -950,7 +950,7 @@ def _reject_unknown_keys(raw: dict[str, Any], kind: str) -> None:
             )
             + ")"
         )
-    # A validation declaration is the one place a *correctly spelled* key is
+    # A validation declaration is the one place a correctly spelled key is
     # commonly wrong, because everything describing materialised data behaviour
     # reads as plausible on a Test until you ask what it would do. Say so rather
     # than reporting a typo.
@@ -1059,8 +1059,8 @@ def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]
         )
     if not value:
         # `Dependencies: []` is a positive declaration of none, which is what the
-        # requirement below wants from a Spark SQL author: be explicit. A query
-        # built entirely from literals genuinely depends on nothing.
+        # requirement below needs from a Spark SQL author: be explicit. A query
+        # built entirely from literals depends on nothing.
         return ()
     seen: list[ObjectId] = []
     for entry in value:
@@ -1089,9 +1089,9 @@ def _parse_aliases(
 
     A Lakehouse object may publish a ``Warehouse shortcut`` and a Warehouse object
     a ``Lakehouse shortcut``; neither belongs on a Folder or on the opposite
-    engine. The shortcut may name a different ``Schema.Object`` from the native one
-    — a Staging table can surface as Sales.Customer — so it is parsed through
-    the same two-part model.
+    engine. The shortcut may name a different ``Schema.Object`` from the native
+    one, so that a Staging table can surface as Sales.Customer, and it is parsed
+    through the same two-part model.
     """
 
     target = target_kind_for(language, kind)
@@ -1177,7 +1177,7 @@ def _parse_revision_notes(value: Any) -> tuple[tuple[Revision, ...], str | None]
             shape = entry_shape
         elif entry_shape != shape:
             raise MetadataError(
-                f"Revision notes mix date formats — {shape} was used first, "
+                f"Revision notes mix date formats. {shape} was used first, "
                 f"then {entry_shape} in {text!r}. Use one spelling throughout an object."
             )
         note = text[len(date_text) :].strip()
@@ -1251,7 +1251,7 @@ def _parse_flag_with_default(raw: dict[str, Any], key: str, *, default: bool) ->
 
 
 def _parse_column_set(value: Any, key: str) -> tuple[str, ...]:
-    """A column *set* is comma-separated: one key, one comparison tuple."""
+    """A column set is comma-separated: one key, one comparison tuple."""
 
     if value is None:
         return ()
@@ -1272,7 +1272,7 @@ def _parse_column_set(value: Any, key: str) -> tuple[str, ...]:
 def _parse_unique_keys(
     value: Any, primary_key: tuple[str, ...]
 ) -> tuple[tuple[str, ...], ...]:
-    """Alternate keys — a YAML list, one comma-separated column *set* per entry.
+    """Alternate keys: a YAML list, one comma-separated column set per entry.
 
     Two levels, matching ``Primary key``: independent keys are a list, and one
     key's columns are a comma-separated set whose order is preserved. A key has
@@ -1307,15 +1307,15 @@ def _parse_unique_keys(
             raise MetadataError(
                 "a Unique keys entry repeats the Primary key ("
                 + ", ".join(columns)
-                + ") — the primary key is already unique, so remove it from Unique keys"
+                + "). The primary key is already unique, so remove it from "
+                "Unique keys"
             )
         keys.append(columns)
     return tuple(keys)
 
 
 #: A foreign key's parent: ``Schema.Object[Column, Column]``. Brackets are
-#: required — the parent columns are what make the relationship readable, and a
-#: bare parent name would leave them to be guessed.
+#: required, because the parent columns are what make the relationship readable.
 _FOREIGN_KEY_PARENT = re.compile(r"^([^\[\]]+)\[([^\[\]]+)\]$")
 
 
@@ -1379,7 +1379,7 @@ def _parse_foreign_keys(value: Any, object_id: ObjectId) -> tuple[ForeignKey, ..
         if len(parent_columns) != len(columns):
             raise MetadataError(
                 f"the Foreign keys entry for {', '.join(columns)} references "
-                f"{len(parent_columns)} parent column(s) — a relationship pairs its "
+                f"{len(parent_columns)} parent column(s). A relationship pairs its "
                 "columns, so the two sets must be the same size"
             )
         key = ForeignKey(
@@ -1430,7 +1430,8 @@ def _parse_file_keys(value: Any, *, kind: str) -> tuple[str, ...]:
         return ()
     if value is None:
         raise MetadataError(
-            "a Folder must declare File key — it is the scope of what Weaver manages, "
+            "a Folder must declare File key. It is the scope of what Weaver "
+            "manages, "
             "and reconciliation deletes nothing outside it"
         )
 
@@ -1522,7 +1523,7 @@ def _validate_columns(
     overlapping = [column for column in comparison if column in primary_key]
     if overlapping:
         raise MetadataError(
-            "Comparison columns must not include primary key columns — a matched row "
+            "Comparison columns must not include primary key columns. A matched row "
             "has equal keys by definition: " + ", ".join(overlapping)
         )
 
@@ -1572,8 +1573,8 @@ def _validate_columns(
         return
 
     # The identity column is Weaver's, not the author's, so it must not be
-    # declared in Schema — but the primary key may name it when the surrogate is
-    # the key, so it counts as a known column for the reference checks.
+    # declared in Schema. The primary key may name it when the surrogate is the
+    # key, so it counts as a known column for the reference checks.
     if identity is not None and identity in {
         column.name for column in declared_columns
     }:

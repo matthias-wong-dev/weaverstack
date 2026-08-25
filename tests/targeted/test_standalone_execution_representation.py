@@ -31,7 +31,7 @@ from weaver.errors import LoadError
 
 
 def _table(returned, *, incremental: bool = True):
-    """A table whose ``read()`` returns whatever a case wants."""
+    """A table whose ``read()`` returns whatever a case needs."""
 
     from weaver.declaration.metadata import PYTHON, parse_document
 
@@ -377,7 +377,7 @@ def _test(sides):
     """A Test whose two sides are whatever a case hands it.
 
     ``read()`` is Weaver's comparison and may not be overridden, so the sides are
-    what a case controls — which is also what an author controls.
+    what a case controls, which is also what an author controls.
     """
 
     from weaver.declaration.metadata import PYTHON, parse_document

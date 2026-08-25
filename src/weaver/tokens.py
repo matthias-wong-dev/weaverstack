@@ -12,7 +12,7 @@ import re
 
 from .errors import InstallError
 
-#: ``{{build_datetime}}`` — the instant this installation published its Registry.
+#: ``{{build_datetime}}``, the instant this installation published its Registry.
 #:
 #: A token rather than a literal frozen at generation time: a rendered clock
 #: would make the same repository produce different payload bytes on every run,

@@ -1,9 +1,9 @@
-"""Orchestration decisions, made without a session, a target or a session.
+"""Orchestration decisions, made without a session or a target.
 
-Everything a validation run *decides* rather than executes: which primitive to
+Everything a validation run decides rather than executes: which primitive to
 reach for, what a failure means, what reaches a durable record. A fake dispatch
 surface answers, so these are microseconds and cover the cases a real estate
-would be tedious to put into — a duplicate key, a missing primitive, a procedure
+would be tedious to put into: a duplicate key, a missing primitive, a procedure
 that must be executed exactly once.
 
 Two of these assert what the code does **not** do, and they are the ones worth
@@ -102,8 +102,8 @@ def _run(validation, executor=None, *, collect=False):
     """One installed validation, run the way the Runner dispatches one.
 
     What comes back is the judgement the validation made. Turning that into a
-    status is the Runner's, and turning *that* into `passed` or `failed` is the
-    test operation's projection — three steps that used to be one function.
+    status is the Runner's, and turning that into `passed` or `failed` is the
+    test operation's projection, three steps that used to be one function.
     """
 
     from weaver.test_execution import run_installed_validation
@@ -134,7 +134,7 @@ def _graph_of(validation):
 
 
 def _ran(validation, executor=None, *, collect=False):
-    """The same run, rendered as a validation node — status vocabulary and all."""
+    """The same run, rendered as a validation node: status vocabulary and all."""
 
     from types import SimpleNamespace
 
@@ -385,11 +385,11 @@ def test_a_targeted_run_executes_the_procedure_exactly_once():
 class _CountingFrame:
     """A frame that answers an aggregation and refuses to hand over rows.
 
-    Two claims in one object, and both are about what the code must *not* do.
+    Two claims in one object, and both are about what the code must not do.
     ``collect`` on the frame itself raises, so a suppressed run that
-    materialised diagnostic rows fails loudly rather than quietly pulling a
+    materialised diagnostic rows fails loudly rather than pulling a
     million of them to the driver. And every action is counted, so a run that
-    evaluated the comparison twice — once per side — fails too: two actions can
+    evaluated the comparison twice, once per side, fails too: two actions can
     observe different data if the tables move between them, and the two halves
     of one Test's answer would then describe different estates.
     """
@@ -436,7 +436,7 @@ class _Aggregated:
 
 @weaver_test()
 def test_a_suppressed_spark_run_never_materialises_a_row():
-    """The claim is about what is *not* done, so the frame refuses to be collected."""
+    """The claim is about what is not done, so the frame refuses to be collected."""
 
     from weaver.test_execution import _dispatch_python
 
@@ -624,7 +624,7 @@ def test_a_report_survives_a_transport_round_trip_without_its_rows():
 
 
 class _BatchExecutor:
-    """A Warehouse batch that returns evidence *and then* its projection.
+    """A Warehouse batch that returns evidence and then its projection.
 
     Which is what the generated validation batch does, and the shape that made
     the first implementation wrong: it read the first result set, found a
@@ -744,7 +744,7 @@ def test_a_passing_source_test_has_only_its_projection(tmp_path):
 
 @weaver_test()
 def test_a_source_dry_run_compiles_and_dispatches_nothing(tmp_path):
-    """What *would* run — so the file is still compiled, and nothing executed."""
+    """What would run, so the file is still compiled, and nothing executed."""
 
     executor = _BatchExecutor(())
 

@@ -1,13 +1,13 @@
 """Every incoming repository is copied before it is parsed.
 
-The contract is one sentence — a build reads a temporary snapshot and never the
-caller's own tree — and it is worth proving rather than reading, because the
+The contract is one sentence, a build reads a temporary snapshot and never the
+caller's own tree, and it is worth proving rather than reading, because the
 failure it prevents is silent. A build that parsed the source directly would
 describe a repository that never existed as a whole the moment anyone edited a
 file while it ran, and the bundle would be internally inconsistent with nothing
 to show for it.
 
-The tests below therefore assert the *observable* consequences: the parse reads
+The tests below therefore assert the observable consequences: the parse reads
 a path that is not the source, mutating the source afterwards changes neither
 the parsed repository nor the generated bundle, and a filesystem source gets no
 shortcut around any of it.
@@ -158,7 +158,7 @@ def test_a_file_source_is_refused_as_not_a_directory(tmp_path):
 # `.` is how a desktop caller names the repository they are standing in, and it
 # is the default the public build applies outside Fabric. Joined onto the
 # temporary root unresolved it would name the root itself, so the copy would
-# fail or land a level too high — which is exactly the bug the filesystem bypass
+# fail or land a level too high, which is exactly the bug the filesystem bypass
 # used to hide.
 
 

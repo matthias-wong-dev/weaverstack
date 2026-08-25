@@ -18,10 +18,10 @@ if TYPE_CHECKING:
 #: The validation generators' versions, separate for the reason the load
 #: generators' are: a change to the rendered Warehouse procedure has no bearing
 #: on what a Spark module should contain, and bumping one must not invalidate
-#: the other's artefacts. Each is a *signature salt*, never part of an identity.
+#: the other's artefacts. Each is a signature salt, never part of an identity.
 #:
 #: **Raise one whenever its generated output changes**, or an edit to a
-#: generator produces different bytes with an unchanged signature — and
+#: generator produces different bytes with an unchanged signature, and
 #: incremental selection, correctly, rebuilds nothing, leaving the estate
 #: running the previous generation's primitives.
 SPARK_VALIDATION_VERSION = 1
@@ -46,7 +46,7 @@ def generate_validation(
 ) -> GeneratedValidation:
     """The installable primitive for one validated validation declaration.
 
-    :func:`has_generated_validation` is the question to ask first — a Python
+    :func:`has_generated_validation` is the question to ask first, a Python
     validation is deployed verbatim and does not reach here.
     """
 

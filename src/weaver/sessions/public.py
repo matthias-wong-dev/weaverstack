@@ -21,7 +21,7 @@ and their cache, the REST client, the OneLake transport, the Livy session and on
 TDS connection per Warehouse. Four operations that share one pay for them once.
 
 Everything is lazy. Opening a Session resolves no items, starts no Livy session,
-opens no connection and publishes nothing — a caller that opens one and does
+opens no connection and publishes nothing, a caller that opens one and does
 nothing has cost a credential object.
 
 Which host it is depends on where this runs, and the caller does not choose: a
@@ -58,7 +58,7 @@ def session(
     acquired later, so a wrong object is refused at the call that supplied it
     rather than during whichever operation first reaches Fabric.
 
-    Other host-specific options are deliberately absent. Whether a Livy session
+    Other host-specific options are absent. Whether a Livy session
     needs the published wheel, and where a timing tree is drawn, are a console's
     business; a caller who needs to set them constructs that host directly.
     """

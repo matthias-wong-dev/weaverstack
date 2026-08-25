@@ -26,8 +26,8 @@ def lakehouse_artifact_segment(item: str) -> str:
     """A OneLake path segment for a **Lakehouse**, by id or by name.
 
     A GUID stands alone; a name needs its item type, as ``Weaver.Lakehouse``.
-    The rule is Lakehouse-specific — the ``.Lakehouse`` suffix — which is why the
-    name says so. OneLake file paths only ever address Lakehouses; a Warehouse
+    The rule is Lakehouse-specific, being the ``.Lakehouse`` suffix, which is why
+    the name says so. OneLake file paths only ever address Lakehouses; a Warehouse
     is reached over TDS, not here.
     """
 
@@ -77,7 +77,7 @@ def parse_onelake(location: Location, *, base_url: str = ONELAKE_DFS) -> OneLake
     prefix = base_url.rstrip("/") + "/"
     if not location.value.startswith(prefix):
         raise CommandError(
-            f"{location.value!r} is not a OneLake location — expected it to start "
+            f"{location.value!r} is not a OneLake location. Expected it to start "
             f"with {prefix}"
         )
     parts = [part for part in location.value[len(prefix) :].split("/") if part]
@@ -86,22 +86,22 @@ def parse_onelake(location: Location, *, base_url: str = ONELAKE_DFS) -> OneLake
     return OneLakePath(workspace=parts[0], item=parts[1], relative="/".join(parts[2:]))
 
 
-#: Where a person opens a Lakehouse. Not a storage endpoint — the portal.
+#: Where a person opens a Lakehouse. The portal, not a storage endpoint.
 
 
 class OneLakeDfsClient:
     """An ADLS Gen2 DFS client for one workspace, used **from outside Fabric**.
 
-    This is how a local caller — the CLI, or a Fabric integration test — reaches
-    into a workspace: authenticated HTTPS to the OneLake DFS endpoint. It
+    This is how a local caller reaches into a workspace, whether the CLI or a
+    Fabric integration test: authenticated HTTPS to the OneLake DFS endpoint. It
     satisfies the :class:`~weaver.store.Store` protocol so the CLI can hand it to
     the same code a ``FilesystemStore`` drives, but it is *cross-boundary access*, not
     the store Weaver uses when it runs inside Fabric. The in-Fabric,
     session-native store is a separate implementation for when it exists.
 
     Because it crosses a boundary, it is constructed explicitly by the caller
-    that crosses — never returned by a workspace-to-store factory, which returns the
-    NotebookUtils-backed ``FabricStore`` only inside a Fabric session.
+    that crosses, and never returned by a workspace-to-store factory, which returns
+    the NotebookUtils-backed ``FabricStore`` only inside a Fabric session.
     """
 
     def __init__(

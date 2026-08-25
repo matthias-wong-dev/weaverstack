@@ -21,7 +21,7 @@ from where the authored file is parsed, all the way to the failure:
                         → "Source: Lakehouse/Sales/Sales__Customer.py"
 
 **Carried, never reconstructed.** Deriving it later from an action id, a
-procedure name or a deployed path would be a guess presented as evidence — and
+procedure name or a deployed path would be a guess presented as evidence, and
 the guess is not always possible: a Spark SQL table is authored as ``.sql`` and
 deployed as ``.py`` under a different name.
 
@@ -125,7 +125,7 @@ def _plan(action: InstallAction) -> BuildPlan:
 def test_the_authored_path_round_trips_through_plan_yaml():
     """The requirement that stops provenance working only in memory.
 
-    A bundle can be written, archived and reopened — and once Build is
+    A bundle can be written, archived and reopened, and once Build is
     decomposed, the action that fails may be executed by a different transport
     from the one that planned it.
     """

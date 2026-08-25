@@ -52,9 +52,9 @@ def run_installed_validation(
                 validation, environment, collect_diagnostics
             )
     except Exception as exc:  # noqa: BLE001 - a check that could not run is evidence
-        # Raised so the run knows nothing was evaluated, and carrying a result
+        # Raised so the run records that nothing was evaluated, and carrying a result
         # of the *validation's* own kind so its reader gets the counts that
-        # belong to it — a load result here would offer counts it does not have.
+        # belong to it, a load result here would offer counts it does not have.
         message = f"{type(exc).__name__}: {exc}"
         failed = (
             AssumptionResult.failed_to_run(message)

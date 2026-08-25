@@ -51,7 +51,7 @@ def test_a_generated_load_procedure_is_not_exempt_from_the_wipe():
 
     The wipe enumerates `sys.procedures` and excludes only engine schemas, so a
     generated load procedure in `_` is removed like anything else. Named here
-    because the alternative — exempting a schema or a name prefix — is the kind
+    because the alternative, exempting a schema or a name prefix, is the kind
     of special case that would leave an estate half-wiped and look deliberate.
     """
 

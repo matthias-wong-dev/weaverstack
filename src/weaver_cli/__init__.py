@@ -1,4 +1,4 @@
-"""The optional desktop CLI — an adapter over :mod:`weaver`.
+"""The optional desktop CLI, an adapter over :mod:`weaver`.
 
 The dependency direction is one way: this package imports ``weaver``; the core
 never imports this package. The CLI owns argument parsing and presentation

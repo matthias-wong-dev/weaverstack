@@ -1,8 +1,8 @@
-"""T-SQL create generation — the self-contained Warehouse build scripts.
+"""T-SQL create generation, the self-contained Warehouse build scripts.
 
 These are generation-level checks: the produced script must be self-contained
 (materialise and drop its own temp shape table), run its query shape-only,
-validate metadata inside the SQL, and create only the authored main table — no
+validate metadata inside the SQL, and create only the authored main table, no
 generated view, no ``_Current`` and no ``_History``. Behavioural verification
 runs against the Play Warehouse under Fabric; here we pin the generated text.
 """
@@ -64,7 +64,7 @@ VIEW = """
 @weaver_test()
 def test_the_script_is_self_contained():
     content = _ddl("Reporting.CustomerReport.sql", INFERRED).content
-    # It creates its own temp shape table and drops it — no external state.
+    # It creates its own temp shape table and drops it, no external state.
     assert "if object_id('tempdb..#weaver_shape" in content
     assert content.rstrip().endswith(
         "drop table #weaver_shape_Reporting_CustomerReport;"
@@ -229,7 +229,7 @@ def test_declared_identity_leads_as_a_native_identity_bigint():
 def test_inferred_identity_is_added_at_the_front_with_a_collision_guard():
     content = _ddl("Reporting.CustomerReport.sql", IDENTITY_INFERRED).content
     # Added as the leading column of the dynamically built table. It leads the
-    # all_columns CTE, so it must name both columns — an unnamed literal there is
+    # all_columns CTE, so it must name both columns, an unnamed literal there is
     # a T-SQL error ("No column name was specified for column 1 of 'all_columns'").
     assert (
         "select 0 as column_ordinal, "
@@ -263,7 +263,7 @@ TWO_QUERY = """
 
 @weaver_test()
 def test_the_table_is_shaped_from_the_staging_query_not_the_last_one():
-    """Which SELECT the table *is* — the first result query, and only it.
+    """Which SELECT the table is, the first result query, and only it.
 
     The build and the load take that answer from the same reading, so a body
     whose last query names retired keys does not describe a one-column table.

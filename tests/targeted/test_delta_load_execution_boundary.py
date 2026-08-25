@@ -1,6 +1,6 @@
 """What a Delta keyed load submits, and what it no longer submits.
 
-The reconciliation *semantics* are proved against a real engine, in
+The reconciliation semantics are proved against a real engine, in
 ``tests/fabric/test_delta_table_load_primitive.py``, matched claim for claim with
 the Warehouse. What is proved here is the other half, and it is the half that
 changed: the **physical** shape of the execution.
@@ -11,15 +11,15 @@ on no rows submits no mutation for it, and whatever happens the relations are
 given back. An outcome with something to troubleshoot writes durable Delta
 evidence, and that is the only thing that does.
 
-What the load *decides* is one relation: every insert, update and delete it
+What the load decides is one relation: every insert, update and delete it
 settled on, classified before anything moves. So the counts are one grouped
 action, the writes are one merge, and the questions a load no longer has to ask
 are asserted here as actions it does not submit.
 
 The double records statements and answers cardinalities. It does not evaluate
 anything: no SQL is parsed, no relation is modelled, and every count is one the
-test set. What a statement *means* is a question for the Fabric file; what
-Weaver *submits* is answered by reading the recording, and answering it without
+test set. What a statement means is a question for the Fabric file; what
+Weaver submits is answered by reading the recording, and answering it without
 a tenant is what lets it be asserted on every commit.
 """
 
@@ -109,7 +109,7 @@ class _Spark:
     grouped pass over the settled changes; ``staging``, ``reject``, ``clean`` and
     ``delete`` are answered as the count of the relation carrying that role.
     Nothing here derives one from another, so a flow that stopped asking would
-    fail rather than quietly agree.
+    fail rather than agree.
     """
 
     counts: dict = field(default_factory=dict)
@@ -235,7 +235,7 @@ class _Type:
 class _Staged:
     """What ``read()`` handed over: a frame the load names but never persists.
 
-    It answers no rows at all, deliberately. A load that asked one of these what
+    It answers no rows at all. A load that asked one of these what
     it held would be running a Spark job to learn what the contract already
     says, so being asked is a failure rather than an answer.
     """
@@ -525,7 +525,7 @@ def test_all_three_counts_come_from_one_pass():
 def test_rows_deleted_is_what_was_classified_and_needs_no_target_recount():
     """Those keys are already narrowed to ones the target holds.
 
-    They are also disjoint from the rows written, so their number *is* what the
+    They are also disjoint from the rows written, so their number is what the
     target lost. Counting the target afterwards asked Delta the same question
     twice.
     """
@@ -669,7 +669,7 @@ def test_the_delete_evidence_is_the_keys_and_not_the_change_relation():
     """``_Delete`` answers what the load was going to remove, as it always has.
 
     The classification carries an operation and the values a write needs. What a
-    reader wants from ``_Delete`` is the keys, so it is written from a projection
+    reader needs from ``_Delete`` is the keys, so it is written from a projection
     rather than from the relation the load happens to hold internally.
     """
 
@@ -694,7 +694,7 @@ def test_the_delete_evidence_is_the_keys_and_not_the_change_relation():
 
 @weaver_test()
 def test_a_tolerated_refusal_that_deletes_nothing_leaves_no_delete_table():
-    """Evidence is what a reader would use, not a full set for symmetry."""
+    """Evidence is what gets used, not a full set for symmetry."""
 
     spark, result = _load(
         dict(NO_OP, reject=1, clean=2, inserted=1), fault_tolerant=True
@@ -923,7 +923,7 @@ def test_a_failure_partway_through_the_target_leaves_the_same_evidence():
 
     spark = _failed(BUSY, fail_on=AT_CHANGE_MUTATION)
 
-    # One mutation ran and the next did not, so the target is genuinely partway
+    # One mutation ran and the next did not, so the target is partway
     # through rather than untouched.
     assert len(spark.mutations) == 1
     assert "WHEN MATCHED THEN DELETE" in spark.mutations[0]

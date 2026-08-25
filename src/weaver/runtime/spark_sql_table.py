@@ -31,7 +31,7 @@ def read_spark_sql(spark: Any, *, sql: str, contract: LoadContract) -> Any:
 
     if not isinstance(sql, str) or not sql.strip():
         raise LoadError(
-            f"{contract.qualified}: this Spark SQL primitive carries no program — "
+            f"{contract.qualified}: this Spark SQL primitive carries no program, "
             "a generated module sets `sql` to the authored SQL it was built from"
         )
 
@@ -61,8 +61,8 @@ def _check_delete_columns(deletes: Any, contract: LoadContract) -> None:
     """The delete query names keys, and only keys.
 
     A delete is applied by joining on the primary key, so a result carrying
-    anything else was written against a different idea of what it was for — and
-    a result *missing* one would delete by a partial key, which is a different
+    anything else was written against a different idea of what it was for, and
+    a result missing one would delete by a partial key, which is a different
     and much worse mistake.
     """
 
@@ -71,7 +71,7 @@ def _check_delete_columns(deletes: Any, contract: LoadContract) -> None:
     if set(columns) != set(expected):
         raise LoadError(
             f"{contract.qualified}: the second query names the rows to delete, so "
-            f"it must return exactly the primary key {list(expected)} — it "
+            f"it must return exactly the primary key {list(expected)}. It "
             f"returned {list(columns)}"
         )
 

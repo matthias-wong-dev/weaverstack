@@ -2,8 +2,8 @@
 
 The cost being defended is asymmetric. Listing a workspace's items is one REST
 call; creating a Livy session is tens of seconds and a slice of a capacity. A
-build that starts the session and *then* discovers a missing Warehouse has paid
-the expensive thing to learn what the cheap thing already knew — and it reports
+build that starts the session and then discovers a missing Warehouse has paid
+the expensive thing to learn what the cheap thing already knew, and it reports
 the discovery as a Spark failure about a catalogue rather than as a sentence
 about an item nobody created.
 

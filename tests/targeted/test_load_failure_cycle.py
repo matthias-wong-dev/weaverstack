@@ -12,8 +12,8 @@ design:
 
 Raising earlier would leave nodes with no durable outcome at all, and "nothing
 was written for it" cannot be told apart from "the run died before reaching it".
-Not raising would make ``fault_tolerant=False`` — a caller saying *stop if
-anything fails* — indistinguishable from success to anyone who did not read the
+Not raising would make ``fault_tolerant=False``, a caller saying *stop if
+anything fails*, indistinguishable from success to anyone who did not read the
 report.
 
 The session is prepared rather than acquired and dispatch is injected, because
@@ -163,7 +163,7 @@ def _log_statements(session) -> list[str]:
     The whole path, not a shortcut through it: the Runner constructed the rows,
     the Session-managed flusher batched them, and the Session executed the
     T-SQL. Flushed here because a caller that never waited is exactly what the
-    flusher promises — the rows are in flight until something asks.
+    flusher promises, the rows are in flight until something asks.
     """
 
     session.session.flush()
@@ -279,7 +279,7 @@ def test_the_exception_carries_the_partial_report_and_the_evidence(session, disp
     error = raised.value
     assert error.report is not None
     # Other branches had already completed, so the run is partial rather than
-    # wholly failed — and the exception is raised on the node, not the tally.
+    # wholly failed, and the exception is raised on the node, not the tally.
     assert error.report.status in (TASK_FAILED, TASK_PARTIALLY_SUCCEEDED)
     assert error.report.by_node[ORDER].status == FAILED
     assert error.workflow_id
@@ -341,7 +341,7 @@ def test_a_tolerant_run_continues_independent_branches(session, dispatched):
 
 @weaver_test()
 def test_a_tolerant_run_still_blocks_descendants(session, dispatched):
-    """Tolerance decides whether *independent* branches continue, never whether
+    """Tolerance decides whether independent branches continue, never whether
     a node may run on a dependency that did not."""
 
     dispatched.answers[ORDER] = RuntimeError("boom")
@@ -378,9 +378,9 @@ def test_a_raised_rejection_is_a_failed_node_however_it_was_counted(
     """The case a count alone cannot answer.
 
     A refusal and a tolerated load both come back with ``succeeded=False`` and
-    ``rows_rejected > 0``, and they mean opposite things — one wrote the valid
+    ``rows_rejected > 0``, and they mean opposite things. One wrote the valid
     rows, the other wrote nothing. What separates them is that the refusal
-    *raised*, which is why the outcome keeps the exception rather than inferring
+    raised, which is why the outcome keeps the exception rather than inferring
     from the counts.
     """
 
@@ -417,7 +417,7 @@ def test_a_record_says_what_became_of_the_node(session, dispatched):
     """The frozen public vocabulary, and the node's own detail beside it.
 
     A dispatch that threw is an Error rather than a Failure: the load produced
-    no judgement about anything, and a reader deciding whether to look at the
+    no judgement about anything, and deciding whether to look at the
     data or at the code needs the two kept apart.
     """
 
@@ -428,7 +428,7 @@ def test_a_record_says_what_became_of_the_node(session, dispatched):
 
     assert _result_for(session, ORDER) == "Error"
     assert _result_for(session, SUMMARY) == "Blocked"
-    # And the detail a reader needs that no single value carries: whether the
+    # And the detail no single value carries: whether the
     # node touched the target at all.
     statements = "\n".join(_log_statements(session))
     assert "executed" in statements
@@ -468,9 +468,9 @@ def test_a_pending_node_receives_evidence_of_its_own(session, dispatched):
 def test_every_node_is_recorded_before_the_run_raises(session, dispatched):
     """A decided failure is a finished task, and its evidence is complete.
 
-    There is no completion row to look for — a workflow is its rows. So what
+    There is no completion row to look for, a workflow is its rows. So what
     has to hold is that every planned node was already recorded when the run
-    raised, or "no row for this node" would mean both *interrupted* and *an
+    raised, or "no row for this node" would mean both interrupted and *an
     ordinary load failed*.
     """
 

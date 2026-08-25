@@ -1,7 +1,7 @@
 """What a command says it will need, and what the Session does with it.
 
-The direction is the point. A Session cannot work out what a build wants — it
-has no idea what a build *is*, and a Session that decided would be a second
+The direction is the point. A Session cannot work out what a build needs. It
+has no idea what a build is, and a Session that decided would be a second
 place deciding what an operation does. So commands declare and the Session
 prepares.
 
@@ -15,7 +15,7 @@ Two levels, because arguments cannot know everything:
 And one rule that ties them together and is easy to lose: **preparing is not
 using.** A declaration buys a head start for an acquisition that is coming
 anyway. It never causes one. A run that declares Livy and turns out to be all
-T-SQL opens no Spark session — which is asserted where it can actually go wrong,
+T-SQL opens no Spark session, which is asserted where it can actually go wrong,
 in `tests/test_run_remote_boundary.py`.
 """
 
@@ -220,7 +220,7 @@ def test_declaring_nothing_expensive_starts_nothing_expensive(monkeypatch):
 def test_an_undeclared_warm_up_starts_only_the_reusable_resources(monkeypatch):
     """`weaver session` warms before any command is typed, so it has nothing to
     go on: it takes the credential, which every command needs, and leaves Spark
-    to the first command that says it wants it."""
+    to the first command that says it needs it."""
 
     scope = _scope(monkeypatch)
 
@@ -239,7 +239,7 @@ def test_a_build_binding_only_warehouses_declares_no_livy():
 
     A Warehouse-only build writes T-SQL into Warehouses and its catalogue into
     another, so it submits no Spark. Declaring Livy anyway would have the
-    console start a Spark session — a minute, and a capacity's only slot — for
+    console start a Spark session, a minute, and a capacity's only slot, for
     a build that never uses it.
     """
 

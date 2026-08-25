@@ -3,7 +3,7 @@
 The bug these cover is invisible in a short run and fatal in a long one: a client
 that snapshots the bearer keeps sending it until the API answers ``401``, and the
 Azure CLI's own cache means the string may already be nearly spent when it
-arrives. So the tests are about *time passing*, which is the one thing the
+arrives. So the tests are about time passing, which is the one thing the
 previous shape never modelled.
 """
 
@@ -117,7 +117,7 @@ def test_the_credential_is_built_once_and_kept(monkeypatch):
 
 @weaver_test()
 def test_a_supplied_string_is_honoured_exactly(monkeypatch):
-    """The caller owns it, and its lifetime — a Fabric session passes one on."""
+    """The caller owns it, and its lifetime, a Fabric session passes one on."""
 
     source = token_source("fixed", scope="scope")
 
@@ -142,8 +142,8 @@ def test_a_supplied_callable_is_asked_every_time():
 def test_every_fabric_client_reads_its_token_per_request(monkeypatch):
     """The three that used to cache the string permanently.
 
-    Each is long-lived — a REST client across a build, a DFS client across a
-    push, a Livy session across a whole suite — so each has to ask again.
+    Each is long-lived, a REST client across a build, a DFS client across a
+    push, a Livy session across a whole suite, so each has to ask again.
     """
 
     answers = iter([f"token-{index}" for index in range(1, 10)])

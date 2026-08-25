@@ -79,7 +79,7 @@ def prepare_catalogue(
     An existing Warehouse is the ordinary case rather than a collision: Weaver
     owns the ``_`` schema of its host and nothing else, so a Warehouse already
     holding a user's schemas is a perfectly good catalogue host. What is
-    distinguished here is only whether the Warehouse existed — whether its `_`
+    distinguished here is only whether the Warehouse existed. Whether its `_`
     tables are there is the build's question, answered by reading them.
     """
 
@@ -107,9 +107,9 @@ def prepare_catalogue(
 def _session_around(workspace, *, spark, store):
     """A Session wrapped around resources the caller already holds.
 
-    Both are *given*, so the Session closes neither. This is how a caller that
-    is already inside its own Spark session — a notebook, or a test holding one
-    open for a module — reaches the build path without the build acquiring a
+    Both are given, so the Session closes neither. This is how a caller that
+    is already inside its own Spark session, such as a notebook or a test holding
+    one open for a module, reaches the build path without the build acquiring a
     second one.
     """
 
@@ -137,7 +137,7 @@ def initialise_catalogue(
     Ordinary builds inject and bind the same Item directly.
 
     An empty source directory is the input because the built-in item is composed
-    into a *parsed* repository rather than authored into one: there is nothing
+    into a parsed repository rather than authored into one: there is nothing
     for a caller to supply, and supplying a real repository here would silently
     ignore it.
     """
@@ -155,7 +155,7 @@ def initialise_catalogue(
 
     # A Session built around what this caller already holds: the Spark it is
     # running in and the store it reads through are given, so nothing here
-    # acquires — or closes — a resource it did not open.
+    # acquires or closes a resource it did not open.
     owned = (
         None
         if session is not None

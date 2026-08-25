@@ -1,12 +1,13 @@
-"""The executor seam — dispatch only, no planning.
+"""The executor seam: dispatch only, no planning.
 
 An executor runs one action's payload against one resolved target and returns
 optional structured details, or raises. It never reads the repository, resolves
 a dependency or selects a target: those decisions are all in the bundle already.
 The installer owns timing, status and reporting; an executor owns the work.
 
-The context carries runtime capabilities — the resolver, the store, Warehouse
-SQL, Spark SQL — plus the one target the current batch is bound to. It carries no
+The context carries runtime capabilities, being the resolver, the store,
+Warehouse SQL and Spark SQL, plus the one target the current batch is bound to.
+It carries no
 planning input and no way back to the repository: everything an action needs is
 its payload.
 """
@@ -34,16 +35,16 @@ class ResolvedTarget:
     because Fabric answers them separately:
 
     ``location``
-        the physical roots — where the bytes are, as an ``abfss://`` URL.
+        the physical roots, where the bytes are, as an ``abfss://`` URL.
     ``destination``
-        the catalogue name — what a statement calls it, as Fabric's four-part
+        the catalogue name, what a statement calls it, as Fabric's four-part
         ``workspace.lakehouse.schema.object``.
 
     Neither substitutes for the other: a folder is created at a path and has no
     catalogue name, while a view exists only as a name.
 
     Resolved once per target rather than in each executor, so no executor
-    re-decides where an action lands — and so one session can build several
+    re-decides where an action lands, and so one session can build several
     destinations without switching what it is attached to.
 
     Both are None for a Warehouse target, which is reached over TDS.
@@ -64,9 +65,9 @@ class InstallationContext:
     present.
 
     ``targets`` holds every target the plan declared, already resolved. It exists
-    for the one action that spans two of them — a shortcut, which points a name in
-    ``target`` at an object in another — and it carries resolved targets rather
-    than ids so a second destination is addressed exactly as the batch's own is.
+    for the one action that spans two of them, a shortcut, which points a name in
+    ``target`` at an object in another. It carries resolved targets rather than
+    ids, so a second destination is addressed exactly as the batch's own is.
     """
 
     resolver: Any
@@ -76,8 +77,8 @@ class InstallationContext:
     #: One Spark SQL statement, wherever this host's Spark is, carrying Weaver's
     #: identifier-case scope with it.
     spark_sql: Any = None
-    #: Several Spark SQL statements as one piece of work — ordered, one
-    #: submission where they cross, one identifier-case scope over all of them.
+    #: Several Spark SQL statements as one piece of work: ordered, one submission
+    #: where they cross, one identifier-case scope over all of them.
     spark_sql_batch: Any = None
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
     #: This installation's publication instant, resolved into ``{{build_datetime}}``. One

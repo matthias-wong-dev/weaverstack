@@ -43,7 +43,7 @@ def test_a_target_oriented_command_takes_its_targets_positionally(command):
 
     ``load`` used to want ``--targets`` while its two neighbours took
     positionals, so the same three names had to be typed two ways depending on
-    the verb. There is nothing behind the difference to remember — which is
+    the verb. There is nothing behind the difference to remember, which is
     what made it worth removing rather than documenting.
     """
 

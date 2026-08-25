@@ -37,12 +37,12 @@ SALES = Target("Sales_LH")
 
 
 def Outcome(status: str = SUCCEEDED, rows=None, rejected: int = 0, message=None):
-    """What a controlled dispatch hands back — a real result, not a stand-in.
+    """What a controlled dispatch hands back, a real result, not a stand-in.
 
     The result contract is part of what the Runner enforces, so a fixture that
     handed back a convenient shape would be asserting against a check that never
     fired. These are the outcomes the plan asks a controlled dispatch to be able
-    to produce; ``Malformed`` is the one that deliberately is not.
+    to produce; ``Malformed`` is the one that is not.
     """
 
     from weaver.runtime.load_result import LoadResult
@@ -220,7 +220,7 @@ def test_fail_fast_stops_scheduling_but_still_reports_every_node():
     result = runner(nodes=[node("a"), node("b")]).run(dispatch=dispatch)
 
     assert dispatch.seen == ["a"]
-    # Independent of the failure, so not blocked — it simply never started.
+    # Independent of the failure, so not blocked. It simply never started.
     assert result.by_node["b"].status == PENDING
     assert len(result.nodes) == 2, "every planned node has an outcome"
 
@@ -369,7 +369,7 @@ def test_every_planned_node_reaches_the_sink_once_and_in_order():
     result = made.run(dispatch=dispatch, on_node=seen.append)
 
     # Graph order, not scheduling order: a blocked node is reported where it was
-    # planned, so a reader can follow the record against the plan.
+    # planned, so the record follows the plan.
     assert [one.node_id for one in seen] == list(result.order)
     assert len(seen) == len({one.node_id for one in seen})
 
@@ -410,7 +410,7 @@ def test_a_dry_run_validates_the_catalogue_graph_without_physical_checks():
 def test_a_primitive_that_returned_the_wrong_shape_is_a_failed_node():
     """Not an exception, but not a dispatch either.
 
-    Nothing ran to completion, so it must never read as a tolerated rejection —
+    Nothing ran to completion, so it must never read as a tolerated rejection,
     which is what inferring the status from the counts would produce.
     """
 
@@ -488,7 +488,7 @@ def test_a_node_result_hands_over_what_a_reader_needs_to_tell_outcomes_apart():
     result = runner(nodes=[node("a")]).run(dispatch=dispatch)
     handed = result.by_node["a"].to_mapping()
 
-    # Nothing was evaluated, and the mapping has to say so — otherwise this
+    # Nothing was evaluated, and the mapping has to say so, otherwise this
     # reads as a primitive that ran and reported failure.
     assert handed["raised"] is True
     assert handed["role"] == "load"
@@ -544,7 +544,7 @@ def test_a_process_exit_escapes_too():
 
 @weaver_test()
 def test_a_result_that_is_not_row_shaped_still_serializes():
-    """The Runner's contract is "it reports whether it succeeded" — and its
+    """The Runner's contract is "it reports whether it succeeded", and its
     serialization has to be exactly as narrow, or a future runtime result would
     execute perfectly and then fail while writing itself down."""
 
@@ -590,8 +590,8 @@ def test_a_result_that_describes_itself_no_further_still_serializes():
 # --- what a run costs, per node -----------------------------------------------
 #
 # One Sub-step per dispatched node, which is where a run's per-object timing
-# comes from. Recorded on the Session, so a Runner given none still runs — that
-# is the whole point of the dispatch seam, and timing must not quietly become a
+# comes from. Recorded on the Session, so a Runner given none still runs. That
+# is what the dispatch seam is for, and timing must not become a
 # reason to need a Session.
 
 
@@ -611,8 +611,8 @@ def test_each_dispatched_node_is_timed_as_a_substep():
 
 @weaver_test()
 def test_a_failed_node_is_a_failed_frame_though_nothing_was_raised():
-    """A failed node is a *result* here — the run records what happened before
-    it decides what to do about it — and the timing has to agree."""
+    """A failed node is a result here, the run records what happened before
+    it decides what to do about it, and the timing has to agree."""
 
     from weaver.sessions import ConsoleSession
 
@@ -648,7 +648,7 @@ def test_a_runner_with_no_session_still_runs():
 
 @weaver_test()
 def test_an_interrupted_run_still_closes_its_runtime_scope():
-    """A scope that outlived its run is one the next run would inherit — along
+    """A scope that outlived its run is one the next run would inherit: along
     with the modules a rebuild has since replaced.
 
     A failed node is data and never raises out of the loop, so the case that

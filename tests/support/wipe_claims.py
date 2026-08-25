@@ -28,7 +28,7 @@ def assert_a_wipe_removes_every_table(populated) -> None:
     """Every schema the target holds goes, and the default schema is not one.
 
     Removing ``dbo`` would not be clearing the Lakehouse but damaging it: Fabric
-    created it, Weaver never manages it, and nothing brings it back — the item is
+    created it, Weaver never manages it, and nothing brings it back, the item is
     simply left unable to resolve a schema it is supposed to have.
     """
 

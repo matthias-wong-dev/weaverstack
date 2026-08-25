@@ -1,8 +1,8 @@
 """Where one SQL statement ends and the next begins.
 
 Pure lexical claims, and the whole reason they are made in one place: both
-dialects and both sides of the system — repository parsing, load generation and
-the deployed primitive that runs its own embedded program — ask this question,
+dialects and both sides of the system, repository parsing, load generation and
+the deployed primitive that runs its own embedded program, ask this question,
 and a second answer would be a second set of bugs about string literals.
 
 Every case here is one a naive ``str.split(";")`` gets wrong.

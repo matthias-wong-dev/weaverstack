@@ -1,6 +1,6 @@
 """Build manifest models, canonical serialisation, and bundle validation.
 
-These tests never touch Spark or a repository — they pin the plan/bundle data
+These tests never touch Spark or a repository. They pin the plan/bundle data
 contract: a plan round-trips through ``plan.yml``, ``bundle_id`` is a stable
 function of content, a written bundle reloads, and loading refuses a corrupt or
 malformed one before any action could run. Actions come in two shapes: a
@@ -192,7 +192,7 @@ def test_write_then_load_returns_an_equal_plan(tmp_path):
     reloaded = load_bundle(location, store=store)
     assert reloaded.plan == bundle.plan
     # Outputs only. A bundle carries what it installs, never a second copy of
-    # the source it was planned from — the installer has no route back to a
+    # the source it was planned from, the installer has no route back to a
     # repository and needs none.
     assert not store.exists(location.join("repository"))
     assert store.exists(location.join("plan.yml"))
@@ -291,7 +291,7 @@ def test_validate_rejects_payload_executor_extension_mismatch():
     plan = _identified_plan()
     bad_action = replace(
         _view_action(), payload="payload/x/thing.py"
-    )  # spark_sql wants .spark.sql
+    )  # spark_sql needs .spark.sql
     batch = BuildBatch(id="b-x", target_id=TARGET.id, actions=(bad_action,))
     bad = replace(plan, sequences=(replace(plan.sequences[1], batches=(batch,)),))
     with pytest.raises(BuildError, match="extension"):

@@ -1,25 +1,25 @@
-"""An identical second build does nothing at all — the whole plan, not part of it.
+"""An identical second build does nothing at all, the whole plan, not part of it.
 
 The estate-convergence family next door proves a correct estate plans no
-*physical* work. That was always the easy half, and on its own it was
+physical work. That was always the easy half, and on its own it was
 misleading: catalogue publication used to be unconditional, so a build with
 nothing to do still deleted and re-merged every catalogue table and refreshed
 the Weaver endpoint afterwards. A test that filtered those kinds out before
 counting could report a no-op build that wrote the entire catalogue.
 
-So this asserts the complete action set. Not "no physical actions" — no actions.
+So this asserts the complete action set. Not "no physical actions", no actions.
 
 The state fed back is the state production computes. `desired_catalogue` is the
 function publication compares against, and `certifiable_identities` is the set
 the planner certifies; a fixture that restated either could agree with a broken
 planner and prove nothing. Here the only way the second build stays silent is if
-what a build *leaves* and what a build *expects to find* are genuinely the same
+what a build leaves and what a build expects to find are the same
 description.
 
-Pure Python throughout, and deliberately: the arithmetic being tested is the
+Pure Python throughout, and: the arithmetic being tested is the
 planner's, and every input to it can be constructed. The Spark and Fabric levels
-prove a different thing — that a real catalogue reads back into these
-structures — and are much too slow to be where this property is iterated on.
+prove a different thing. That a real catalogue reads back into these
+structures, and are much too slow to be where this property is iterated on.
 """
 
 from __future__ import annotations
@@ -111,7 +111,7 @@ def installed_catalogue(repository) -> Catalogue:
         certifiable_identities(repository, by_item),
         target_by_item,
     )
-    # Every catalogue table physically exists once a build has run — the built-in
+    # Every catalogue table physically exists once a build has run, the built-in
     # item creates them all. Saying so matters: reconciliation may only raise a
     # claim against a table that is there.
     return Catalogue(
@@ -151,7 +151,8 @@ def build(repository, tmp_path, *, catalogue, runtime_references: bool = True):
     bound = {binding.item: binding.to_bound_target() for binding in bindings.entries}
     inventories = {
         item: replace(
-            inventory, runtime_references=PRESENTED if runtime_references else ()
+            inventory,
+            runtime_references=PRESENTED if runtime_references else (),
         )
         if inventory.kind == "lakehouse"
         else inventory
@@ -167,7 +168,6 @@ def build(repository, tmp_path, *, catalogue, runtime_references: bool = True):
         catalogue_binding=WarehouseBinding(
             ItemRef("Weaver_Control"), workspace_name=WORKSPACE
         ),
-        runtime_sources=RUNTIME_SOURCES,
     )
 
 
@@ -191,7 +191,7 @@ def test_a_second_identical_build_generates_no_actions_whatever(estate, tmp_path
 def test_the_first_build_against_an_empty_catalogue_does_do_work(estate, tmp_path):
     """Guards the test above from passing vacuously.
 
-    If the fixture or the planner produced an empty plan for *every* input, the
+    If the fixture or the planner produced an empty plan for every input, the
     fixed-point assertion would be satisfied by a build that never worked at all.
     """
 
@@ -207,7 +207,7 @@ def test_the_first_build_installs_the_runtime_references_and_the_second_does_not
     A reference the first build did not install is one the second has to, and
     then the second build is not a no-op. Both halves are asserted, because a
     plan that never contains the stage satisfies the second half for the wrong
-    reason — which is how this went unnoticed.
+    reason, which is how this went unnoticed.
     """
 
     import tempfile
@@ -226,9 +226,11 @@ def test_the_first_build_installs_the_runtime_references_and_the_second_does_not
         )
         second = build(estate, root / "second", catalogue=installed_catalogue(estate))
 
-    assert [action.id for action in actions(first) if "runtime-reference" in action.id]
+    assert [
+        action.id for action in actions(first) if action.id.startswith("shortcuts-")
+    ]
     assert not [
-        action.id for action in actions(second) if "runtime-reference" in action.id
+        action.id for action in actions(second) if action.id.startswith("shortcuts-")
     ]
 
 
@@ -291,7 +293,7 @@ def test_the_second_build_changes_no_target(estate, tmp_path):
 def test_a_third_build_is_as_silent_as_the_second(estate, tmp_path):
     """Staying at the fixed point is a different claim from reaching it.
 
-    A build that published something the *next* build then had to undo would
+    A build that published something the next build then had to undo would
     still pass the test above; two silent builds in a row rule that out.
     """
 
@@ -312,15 +314,15 @@ def test_an_object_dropped_and_rebuilt_is_published_again(estate, tmp_path):
     """The bug the Fabric journey found, at the level it should have been caught.
 
     A build removes the catalogue claims of everything it is about to drop
-    *before* any physical work, so nothing stays certified while the object
+    before any physical work, so nothing stays certified while the object
     behind it is replaced. The catalogue the planner read still holds those
-    rows — it was read before any of that was decided.
+    rows. It was read before any of that was decided.
 
-    So a diff against the catalogue *as read* would compare an unchanged
+    So a diff against the catalogue as read would compare an unchanged
     projection equal, emit no merge, and leave the row deleted by the
     before-stage with nothing to put it back. The object would come out of the
-    build physically present and permanently uncertified, and the next load —
-    which reads the catalogue, not the estate — would not find it.
+    build physically present and permanently uncertified, and the next load,
+    which reads the catalogue, not the estate, would not find it.
 
     Here the whole estate is dropped and rebuilt while its declarations are
     unchanged, which is exactly that shape.
@@ -364,13 +366,13 @@ def test_an_unchanged_descendant_is_re_certified_by_the_build_that_rebuilds_it(
     """The bug end-to-end, through the planner, where it actually bit.
 
     `DWG.ActiveCustomer` is a view over `DWG.Customer`. Editing Customer makes
-    ActiveCustomer an *impacted descendant*: it is dropped and rebuilt, but its
+    ActiveCustomer an impacted descendant: it is dropped and rebuilt, but its
     own declaration did not change, so its projected catalogue rows are
     identical to what is persisted.
 
     That is the precise shape the diff got wrong. Its claims are deleted before
-    the physical work, and comparing against the catalogue as *read* found
-    nothing to do — so the view came out of the build present and permanently
+    the physical work, and comparing against the catalogue as read found
+    nothing to do, so the view came out of the build present and permanently
     uncertified. The next load reads the catalogue rather than the estate, and
     could not see it.
     """
@@ -382,7 +384,7 @@ def test_an_unchanged_descendant_is_re_certified_by_the_build_that_rebuilds_it(
     customer = estate.root.path / "Lakehouse" / "Sales" / "DWG__Customer.py"
     customer.write_text(
         customer.read_text(encoding="utf-8").replace(
-            "Description: ", "Description: revised — ", 1
+            "Description: ", "Description: revised, ", 1
         ),
         encoding="utf-8",
     )
@@ -443,8 +445,8 @@ def test_changing_one_document_publishes_that_change_and_no_more(estate, tmp_pat
     """The other side of the property, and what stops it being achieved by
     publishing nothing ever.
 
-    One edited declaration must reach the catalogue. What must *not* happen is
-    the rest of the estate being republished with it — which is what the old
+    One edited declaration must reach the catalogue. What must not happen is
+    the rest of the estate being republished with it, which is what the old
     unconditional rendering did on every build.
     """
 
@@ -461,7 +463,7 @@ def test_changing_one_document_publishes_that_change_and_no_more(estate, tmp_pat
 
     document.write_text(
         document.read_text(encoding="utf-8").replace(
-            "Description: ", "Description: revised — ", 1
+            "Description: ", "Description: revised, ", 1
         ),
         encoding="utf-8",
     )

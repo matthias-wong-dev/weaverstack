@@ -1,24 +1,24 @@
-"""Every InstallAction kind has a test that executes it, or is deliberately deferred.
+"""Every InstallAction kind has a test that executes it, or is deferred.
 
-The list below *is* the checklist, and it is legible from the terminal:
+The list below is the checklist, and it is legible from the terminal:
 
 ```text
 pytest --collect-only -q tests/targeted/test_install_action_invariant.py
 ```
 
 Each parametrised case reads ``[<kind>-<the test that executes it>]``. Each InstallAction kind names the test that runs it
-against a real engine and inspects what it made — and adding a kind without
+against a real engine and inspects what it made, and adding a kind without
 adding that test fails here, naming what is missing rather than leaving it to be
 noticed.
 
-Two things this deliberately does not do.
+Two things this does not do.
 
-It does not check that the named test *passes*, or that it asserts anything
+It does not check that the named test passes, or that it asserts anything
 useful. A test's own claim is its business; this only holds the estate to having
 one per kind.
 
-And it does not scan for tests by pattern. A convention that merely *hopes* every
-kind is covered is the state this replaces — the point is a written list someone
+And it does not scan for tests by pattern. A convention that hopes every
+kind is covered is the state this replaces, the point is a written list someone
 had to change on purpose, so that deferring a kind is a decision with a name
 attached rather than an omission.
 """
@@ -46,7 +46,7 @@ DEFERRED = {
 }
 
 #: Kinds whose Delta-side execution needs a real Lakehouse and is still waiting
-#: for the test that gives it one. Recorded here rather than quietly dropped,
+#: for the test that gives it one. Recorded here rather than dropped,
 #: because a checklist that lost an entry would read as covered.
 AWAITING_FABRIC = {
     "build_folder": "the Delta-side folder execution test needs a real Lakehouse",
@@ -70,9 +70,6 @@ COVERED = {
     "prune_view": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_schema": ("test_prune_table_action_removes_an_object_nothing_declares",),
     "prune_folder": ("test_prune_table_action_removes_an_object_nothing_declares",),
-    "create_runtime_reference": (
-        "test_a_built_warehouse_reads_back_as_the_fixture_predicts",
-    ),
     "refresh_sql_endpoint": (
         "test_each_mutated_lakehouse_had_its_endpoint_refreshed_for_real",
     ),
@@ -97,7 +94,7 @@ def declared_kinds() -> set[str]:
     Taken from the module rather than listed here, which is what makes this a
     tripwire: a new kind arrives on its own and has to be placed.
 
-    Omission reasons share the shape — lower-case strings on the same module —
+    Omission reasons share the shape, lower-case strings on the same module,
     and are not actions, so they are subtracted from their own declared set
     rather than by guessing at their names.
     """
@@ -153,7 +150,7 @@ def test_the_named_execution_test_exists(kind: str, test_name: str):
     """The list points at something real.
 
     Renaming a test without updating the checklist would otherwise leave the list
-    describing an estate nobody checks — the failure mode a written list has and
+    describing an estate nobody checks, the failure mode a written list has and
     a pattern match does not.
     """
 
@@ -179,8 +176,8 @@ def test_no_executor_declares_where_it_has_to_run():
 
     Executors used to declare ``needs_spark``, and the Installer read it to send
     those actions to a second Installer constructed inside a Fabric session.
-    They now reach for the capability their work needs — storage, REST, TDS, or
-    the Session's Spark SQL — and the Session knows what that means where it is.
+    They now reach for the capability their work needs, storage, REST, TDS, or
+    the Session's Spark SQL, and the Session knows what that means where it is.
     So there is no class of action that travels differently, and an executor
     that started declaring one again would bring the routing back with it.
     """

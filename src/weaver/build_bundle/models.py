@@ -27,7 +27,7 @@ BUILD_VIEW = "build_view"
 #: not be created while the endpoint still describes the previous shape.
 REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 
-#: Load kinds — what an item's final layer installs. ``write_file`` puts one
+#: Load kinds, meaning what an item's final layer installs. ``write_file`` puts one
 #: deployed module or generated statement into the runtime tree;
 #: ``build_procedure`` creates or replaces one generated load procedure.
 WRITE_FILE = "write_file"
@@ -39,7 +39,7 @@ DROP_TABLE = "drop_table"
 DROP_VIEW = "drop_view"
 
 #: Removals of load artefacts whose source has stopped claiming them. Distinct
-#: from prune because they come from the *catalogue* rather than from a diff
+#: from prune because they come from the catalogue rather than from a diff
 #: against the target: the previous Registry row says what was installed and
 #: where, so a deleted or renamed source produces the removal without anything
 #: having to enumerate the runtime tree.
@@ -52,12 +52,6 @@ PRUNE_TABLE = "prune_table"
 PRUNE_VIEW = "prune_view"
 PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
-
-#: Present the catalogue's runtime tables in a built target under their own
-#: names, so a generated procedure can read a bookmark and record what it did.
-#: Weaver runtime infrastructure rather than declared shortcuts — see
-#: :mod:`weaver.build_bundle.runtime_tables`.
-CREATE_RUNTIME_REFERENCE = "create_runtime_reference"
 
 #: Refresh the SQL analytics endpoint for one Lakehouse after its Delta tables
 #: have changed. The action is target-bound and payloadless: the planner decides
@@ -74,7 +68,7 @@ PUBLISH_REGISTRY = "publish_registry"
 #: Bring the catalogue's current-state tables into line with what this build will
 #: leave installed: remove the rows of objects it no longer runs, and the rows of
 #: the incarnations it is replacing. It leads physical work for the reason claim
-#: deletion does — see :mod:`weaver.build_bundle.runtime_tables`.
+#: deletion does. See :mod:`weaver.build_bundle.runtime_tables`.
 RECONCILE_RUNTIME_STATE = "reconcile_runtime_state"
 CATALOGUE_KINDS = frozenset(
     {
@@ -90,9 +84,9 @@ CATALOGUE_KINDS = frozenset(
 OMIT_TARGET_UNBOUND = "target_unbound"
 OMIT_DEPENDS_ON_OMITTED = "depends_on_omitted_node"
 OMIT_UNSUPPORTED_EXECUTOR = "unsupported_executor"
-#: A shortcut the current bindings give no physical form. The planner decides this
-#: — never the installer, which may only run a shortcut action already frozen for
-#: it — and records it so the absence is a stated decision rather than a gap.
+#: A shortcut the current bindings give no physical form. The planner decides
+#: this, never the installer, which may only run a shortcut action already frozen
+#: for it, and records it so the absence is stated rather than a gap.
 OMIT_SHORTCUT_UNSUPPORTED = "shortcut_unsupported"
 OMISSION_REASONS = frozenset(
     {
@@ -148,8 +142,8 @@ class InstallAction:
     ``id`` or a payload name: several authored files can compile to one deployed
     spelling, so a path derived later would be a guess.
 
-    An action with no authored source — a shortcut, an endpoint refresh, a prune,
-    a catalogue publication — has None.
+    An action with no authored source has None: a shortcut, an endpoint refresh, a
+    prune, a catalogue publication.
     """
 
     id: str
@@ -254,8 +248,8 @@ class BuildPlan:
     sequences: tuple[BuildSequence, ...]
     selection: BuildSelection
     omitted_nodes: tuple[OmittedNode, ...] = ()
-    #: What this plan will *mean* for each bound target, keyed by target id —
-    #: the objects it adds and removes. Part of the manifest, and therefore of
+    #: What this plan means for each bound target, keyed by target id: the objects
+    #: it adds and removes. Part of the manifest, and therefore of
     #: the bundle identity, so the summary a reviewer reads is the summary the
     #: installation was certified with. A sibling file outside the hash could be
     #: edited after certification, which is the thing frozen payloads exist to
@@ -264,9 +258,9 @@ class BuildPlan:
     #: The catalogue's current-state rows this plan ends the life of, by table.
     #: Declared beside the action that performs it, as ``target_changes`` is
     #: declared beside the actions that change a target: the reconciliation
-    #: action's payload is what runs, and this is what it means. A reader — or a
-    #: :class:`~weaver.catalogue.state.Catalogue` applying the plan in memory —
-    #: gets the decision without parsing DML.
+    #: action's payload is what runs, and this is what it means, so a
+    #: :class:`~weaver.catalogue.state.Catalogue` applying the plan in memory gets
+    #: the decision without parsing DML.
     runtime_state: tuple[RuntimeStateInvalidation, ...] = ()
 
     def to_mapping(self) -> dict[str, Any]:

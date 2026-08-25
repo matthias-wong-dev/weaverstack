@@ -3,13 +3,13 @@
 The estate is installed once and each move after it is an incremental build over
 a target that is already correct, so a whole build lifecycle costs roughly what a
 single install used to. It replaces three module estates that each paid a full
-install to ask what a *first* build does — the question the fast suite already
+install to ask what a first build does, the question the fast suite already
 answers, and not the one incremental logic lives in.
 
 **One test, not many, and that is the point.** Each phase asserts the physical
-state *immediately* after the transition it is about. Split into separate tests
+state immediately after the transition it is about. Split into separate tests
 sharing a fixture that had already run every move, each would instead be reading
-the final estate — and a later move could repair what an earlier one broke, so
+the final estate, and a later move could repair what an earlier one broke, so
 the earlier assertion would pass on evidence that no longer existed. A build
 lifecycle is a sequence; asserting it out of order asserts something else.
 
@@ -18,7 +18,7 @@ The phases, in the order they must run:
 ``install``    the estate from nothing, the only full build. The source
                repository is deleted between generation and installation, so
                this also proves a bundle installs from itself
-``unchanged``  build again having changed nothing — an estate that is already
+``unchanged``  build again having changed nothing, an estate that is already
                correct must cost nothing, which no one-shot estate could check
 ``prune``      seed objects the item does not declare, then build again
 ``broken``     last, because a failing install leaves the estate part-built and
@@ -35,11 +35,10 @@ from __future__ import annotations
 import hashlib
 from dataclasses import replace
 
-from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.runtime.delta_sql import delta_audit_names, delta_signature_name
 from weaver.targets import FolderTarget
 
-#: `full_integration` is this file's *only* selector — it carries neither `spark`
+#: `full_integration` is this file's only selector. It carries neither `spark`
 #: nor `fabric`, so `pytest -m fabric` runs the targeted probes and leaves the
 #: journey alone. That is the right default: the journey is the most expensive
 #: thing in the suite and should rarely be where a component defect is found
@@ -71,7 +70,7 @@ def _raise_if_the_transition_broke(step) -> None:
     A `Journey` records a failed move on the step rather than raising, so the
     run can report once and name the move. But an assertion that reaches
     straight for `step.bundle` then fails with `NoneType has no attribute
-    'plan'` — which names neither the move nor the cause, and sends the reader
+    'plan'`, which names neither the move nor the cause, and sends the reader
     to the assertion instead of to the build.
     """
 
@@ -85,11 +84,11 @@ def _raise_if_the_transition_broke(step) -> None:
 def _observe(env, step):
     """One round trip, and everything any assertion about this moment needs.
 
-    Taken *after* the transition's own outcome has been checked and kept on the
+    Taken after the transition's own outcome has been checked and kept on the
     step, so a failed install reports what failed rather than a bewildering error
     from querying an estate that was never built.
 
-    Deliberately the *same* evidence after every transition, not the subset each
+    Deliberately the same evidence after every transition, not the subset each
     one happens to check. A round trip is the cost; the statements inside it are
     nearly free, so narrowing the payload per phase would save nothing and would
     mean each transition proved a different thing about the estate.
@@ -122,9 +121,9 @@ def _observe(env, step):
 def _readable(env, seen) -> None:
     """Every declared object is present and answers a read.
 
-    Asserted from the evidence captured *at* each transition rather than by
+    Asserted from the evidence captured at each transition rather than by
     re-reading at the end, because "the estate still works" is a claim about a
-    moment — and a later move could otherwise repair what an earlier one broke.
+    moment, and a later move could otherwise repair what an earlier one broke.
     """
 
     assert {"customer", "order"} <= seen.values("tables", "tableName")
@@ -135,7 +134,7 @@ def _readable(env, seen) -> None:
     assert seen.scalar("summary") == 0
     assert seen.schema("dwg")
 
-    # Storage, not the catalogue — and over OneLake DFS from here rather than
+    # Storage, not the catalogue, and over OneLake DFS from here rather than
     # through the session, so it stays outside the Livy budget this file is
     # careful about.
     assert env.store.exists(_folder(env, "Raw", "CustomerCsv"))
@@ -204,22 +203,22 @@ emit({
 """
 
 
-def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> None:
+def _assert_installed(env, step) -> None:
     """The first build: everything declared exists, and nothing landed elsewhere.
 
-    ``items`` is the logical items the bundle must carry. It is a parameter
-    because the same Lakehouse estate is driven twice — alone, and with the
-    Warehouse that reports on it — and every other claim below is about the
-    Lakehouse either way.
+    Every claim here is about the Lakehouse, so the same function serves both
+    estates: the Lakehouse alone, and the Lakehouse with the Warehouse that
+    reports on it.
     """
 
     _raise_if_the_transition_broke(step)
     plan = step.bundle.plan
-    assert plan.format_version == SUPPORTED_FORMAT_VERSION
-    assert plan.repository_name == env.repository_root.name
-    assert {target.logical_item_name for target in plan.targets} == set(items)
-    assert plan.omitted_nodes == ()
 
+    # The plan's own shape is not asserted here. A bundle's format version,
+    # repository name, targets and omitted nodes are decided in this process and
+    # read the same against a TestSession, so they belong to the fast suite and
+    # are proven there. What a workspace is needed for starts below.
+    #
     # The source repository was deleted between generating this bundle and
     # installing it. A bundle carries everything it needs; it is not a pointer
     # back at a repository that has to still be there.
@@ -275,7 +274,7 @@ def _assert_validation_installed(env) -> None:
     """The estate's Tests and Assumptions are installed, and are not objects.
 
     Two claims in one place, because they are two halves of the same design. The
-    *runnable* things are where a build put them, under the item's own runtime
+    runnable things are where a build put them, under the item's own runtime
     root so their imports resolve; and nothing was materialised under a logical
     validation ID, because a Test is a declaration and not a data object.
     """
@@ -291,7 +290,7 @@ def _assert_validation_installed(env) -> None:
         assert env.store.exists(module), f"no validation module at {module}"
 
     # A compiled Spark SQL Assumption is a deployed Python module carrying the
-    # authored SQL — the same arrangement a Spark SQL table gets.
+    # authored SQL, the same arrangement a Spark SQL table gets.
     compiled = env.store.read(
         root.join("_").join("Load").join("assumptions").join("DWG__OrderHasCustomer.py")
     )
@@ -323,7 +322,7 @@ def _assert_authored_objects_reach_the_build(env) -> None:
     assert reached["empty_columns"] == reached["order_columns"]
 
     # Object identity resolves through the Lakehouse's own root, and staging
-    # through the session's mount of it — the same Files-relative object,
+    # through the session's mount of it, the same Files-relative object,
     # addressed as Spark reads it and as Python opens it.
     assert reached["folder_spark_path"] == reached["resolved_folder_path"]
     assert reached["folder_path"].endswith("/Files/Raw/CustomerCsv")
@@ -340,11 +339,11 @@ def _assert_unchanged(env, step) -> None:
 
     physical = step.kinds() - BOOKKEEPING
     assert physical == set(), (
-        f"a build with nothing to do performed {sorted(physical)} — something was "
+        f"a build with nothing to do performed {sorted(physical)}, something was "
         "rebuilt that did not need to be"
     )
 
-    # Doing nothing has to mean nothing, not quietly dropping something. Read
+    # Doing nothing has to mean nothing, not dropping something. Read
     # here, immediately after this transition, because that is what it claims.
     _readable(env, _observe(env, step))
 
@@ -396,9 +395,9 @@ def _assert_pruned(env, step) -> None:
 # journey shares one. Everything below that line is the same code the public
 # entry runs.
 #
-# The Session is a `NotebookSession` because this body *is* inside Fabric. A
-# `ConsoleSession` naming a Fabric workspace means the opposite — Weaver on a
-# desktop, reaching in — and correctly refuses to hand out a Spark session of
+# The Session is a `NotebookSession` because this body is inside Fabric. A
+# `ConsoleSession` naming a Fabric workspace means the opposite, Weaver on a
+# desktop, reaching in, and correctly refuses to hand out a Spark session of
 # its own, however many it is given. Which host a Session is, is not a detail
 # the caller may fudge; it is the whole distinction the two classes make.
 
@@ -458,7 +457,7 @@ latest = consumer.latest_files()
 deleted = consumer.deleted_since(before_load)
 
 # Read here rather than from the desktop, and that is not an economy. `_.Log` is
-# written asynchronously and the barrier is the Session closing, so a reader in
+# written asynchronously and the barrier is the Session closing, so a read in
 # another crossing could see a partial tail.
 emit({
     "dry": dry,
@@ -483,7 +482,7 @@ emit({
 def _why(report) -> str:
     """Every node's status and messages, for an assertion that has to explain.
 
-    A load run's detail is per node — the run-level message stream is usually
+    A load run's detail is per node, the run-level message stream is usually
     empty, because what went wrong went wrong somewhere in particular. An
     assertion reporting only the run level says "failed" and nothing else.
     """
@@ -518,7 +517,7 @@ def _assert_loaded(env, seen) -> None:
     assert dry["workflow_id"] is None
 
     # The two views own no load work, so the graph is the folder and the three
-    # tables — and the order is the one the dependencies force.
+    # tables, and the order is the one the dependencies force.
     #
     # ``DWG.NamedCustomer`` is the SQL-authored one, and it is here to prove that
     # orchestration cannot tell: it installs as a deployed module like the others
@@ -559,12 +558,12 @@ def _assert_loaded(env, seen) -> None:
 def _assert_load_materialised(env, journey) -> None:
     """Recognisable fixture values, where the estate says they should be.
 
-    The strategic physical claim, and deliberately not a matrix: four customers
+    The strategic physical claim, and not a matrix: four customers
     in, three of them active, and every order derived from a customer that must
     already have been loaded for the derivation to see it.
 
-    Its own step, so the evidence belongs to *this* moment rather than
-    overwriting the transition before it — the estate has moved since.
+    Its own step, so the evidence belongs to this moment rather than
+    overwriting the transition before it, the estate has moved since.
     """
 
     from support.build_env import Step
@@ -604,7 +603,7 @@ def _assert_task_log(env, seen) -> None:
 #: The summary view, rewritten. Changing it is what gives the failing transition
 #: something to build: by this point the estate is correct, so an unchanged
 #: repository would plan no work at all and there would be no payload to corrupt.
-#: That is incremental build working — and the reason a failure case in a journey
+#: That is incremental build working, and the reason a failure case in a journey
 #: has to create its own reason to run.
 CHANGED_SUMMARY = """/*
 View ID: DWG.ActiveCustomerSummary
@@ -712,7 +711,7 @@ def _assert_validated(env, seen) -> None:
     This is the claim the journey was missing: a build that installs and a load
     that fills are both provable on their own, and neither says whether the rows
     that landed are the rows the estate declared they would be. A Test does, and
-    it runs here — against real loaded data, through the installed catalogue,
+    it runs here, against real loaded data, through the installed catalogue,
     with the repository playing no part in deciding what runs.
     """
 
@@ -773,7 +772,7 @@ def _assert_failed(journey, step) -> None:
 
 
 def drive(journey):
-    """Install, rebuild unchanged, prune, then fail — asserting each in turn.
+    """Install, rebuild unchanged, prune, then fail: asserting each in turn.
 
     The whole journey, transport-free. Each transition observes the estate
     exactly once, immediately, and is asserted against that payload: the journey
@@ -831,7 +830,6 @@ def drive(journey):
 #
 # A Warehouse, so a real workspace is the only place this can run.
 
-CROSS_ITEM_ITEMS = frozenset({"Sales", "Reporting", "_weaver"})
 
 #: The load, over both physical sides. The Warehouse's report is a table with a
 #: generated load procedure of its own, so the run graph has work either side of
@@ -860,7 +858,7 @@ real = orchestrate(False)
 emit({"dry": dry, "real": real})
 """
 
-#: The validation, over both sides. The Warehouse's Test is the reconciliation —
+#: The validation, over both sides. The Warehouse's Test is the reconciliation,
 #: the claim neither side can make alone.
 CROSS_ITEM_VALIDATED = """
 from weaver.load_plan import PhysicalTargetRef
@@ -897,7 +895,7 @@ def _assert_warehouse_installed(env, step) -> None:
 
     The order is the claim. A Warehouse object reading an shortcut Delta table
     reaches it over the SQL analytics endpoint, which is eventually consistent
-    with the Lakehouse — so building the Warehouse before the refresh would read
+    with the Lakehouse, so building the Warehouse before the refresh would read
     a table the endpoint has not seen, and each side would be self-consistent
     while the crossing between them was stale.
     """
@@ -925,7 +923,7 @@ def _assert_warehouse_installed(env, step) -> None:
     assert held.get("Rpt.ActiveCustomerReport") == "VIEW", held
 
     # A Warehouse table carries a generated load procedure, and its Test one of
-    # its own — which is what gives the run graph something to dispatch on this
+    # its own, which is what gives the run graph something to dispatch on this
     # side of the crossing rather than only on the Lakehouse's.
     #
     # Beside them, the two generic entry points a person calls to run one by hand
@@ -985,7 +983,7 @@ def drive_across_items(journey):
     What is added is asserted immediately after the transition it belongs to,
     for the reason every phase here is: the journey mutates a live estate.
 
-    The failing build is deliberately absent. It corrupts a Lakehouse payload
+    The failing build is absent. It corrupts a Lakehouse payload
     and asserts what a part-built estate reports, which the Lakehouse journey
     already proves and which would leave this estate's Warehouse half in a state
     nothing after it could rely on.
@@ -995,7 +993,7 @@ def drive_across_items(journey):
 
     env.install_repo()
     step = journey.run("install", between=lambda e, _b: e.remove_repo())
-    _assert_installed(env, step, items=CROSS_ITEM_ITEMS)
+    _assert_installed(env, step)
     _assert_warehouse_installed(env, step)
 
     _assert_unchanged(env, journey.run("unchanged", before=lambda e: e.install_repo()))

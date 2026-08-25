@@ -20,7 +20,7 @@ def test_a_filesystem_location_offers_a_path():
 
 @weaver_test()
 def test_a_url_location_refuses_to_become_a_path():
-    """pathlib collapses '//' — better to raise than to corrupt the root."""
+    """pathlib collapses '//': better to raise than to corrupt the root."""
     with pytest.raises(IdentityError, match="URL location"):
         Location(ABFSS).path
 

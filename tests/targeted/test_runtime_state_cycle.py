@@ -1,4 +1,4 @@
-"""A build's effect on the estate *and* on the catalogue's runtime state.
+"""A build's effect on the estate and on the catalogue's runtime state.
 
 .. code-block:: text
 
@@ -59,7 +59,7 @@ CUSTOMER = ("DWG", "Customer")
 CSV = ("Files/Raw", "CustomerCsv")
 RECONCILE = ("DWG", "CustomerReconcile")
 
-#: One object in the *other* item, so scope can be asserted.
+#: One object in the other item, so scope can be asserted.
 OTHER = ("Sales", "Customer")
 
 

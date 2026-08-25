@@ -37,7 +37,6 @@ def weaver_test(
     remote: bool = False,
     hosted: bool = False,
     integration: bool = False,
-    provision: bool = False,
     resources=frozenset(),
 ) -> Callable:
     """Declare a test's Weaver position and necessary external resources."""
@@ -48,7 +47,6 @@ def weaver_test(
             ("remote", remote),
             ("hosted", hosted),
             ("integration", integration),
-            ("provision", provision),
         )
         if enabled
     ]
@@ -73,8 +71,6 @@ def weaver_test(
             marked = getattr(pytest.mark, scope)(marked)
         if scope == "integration":
             marked = pytest.mark.full_integration(marked)
-        if scope == "provision":
-            marked = pytest.mark.provision(marked)
         for resource in sorted(declared):
             marked = getattr(pytest.mark, resource)(marked)
         return marked
@@ -144,9 +140,22 @@ def event_snapshot() -> dict[int, int]:
     }
 
 
+def claim_completed(outcome) -> bool:
+    """Whether a test body ran to the end rather than raising.
+
+    Only a completed claim has a resource set worth comparing. A body that
+    skipped crossed nothing, and one that failed stopped part way, comparing
+    either reports declared resources as unused, and the mismatch is then
+    reported instead of the failure the developer needs to read.
+    """
+
+    return getattr(outcome, "excinfo", None) is None
+
+
 __all__ = [
     "WeaverTestDeclaration",
     "begin_test",
+    "claim_completed",
     "end_test",
     "event_snapshot",
     "observed_resources",

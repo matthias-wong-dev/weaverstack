@@ -1,12 +1,12 @@
-"""What ships as an example is what a reader will copy.
+"""What ships as an example is what gets copied.
 
 `examples/` is documentation that runs: a notebook a user opens in Fabric, a
 desktop script, a composition and a workspace configuration. A retired spelling
 surviving in one of them is worse than in a docstring, because the reader's
 first move is to paste it.
 
-The suite does not execute these — the notebook needs Fabric and the script
-needs a workspace — so nothing else would notice. This reads them.
+The suite does not execute these, the notebook needs Fabric and the script
+needs a workspace, so nothing else would notice. This reads them.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ RETIRED_SPELLINGS = (
 )
 
 
-#: Every file a reader reads. The Environment directory holds a built wheel and
+#: Every file an example presents. The Environment directory holds a built wheel and
 #: Fabric's own metadata, neither of which anybody copies from.
 def _example_files() -> list[Path]:
     return sorted(
@@ -71,7 +71,7 @@ def test_no_example_uses_a_retired_spelling(spelling):
     ]
 
     assert not carrying, (
-        f"{spelling!r} was retired; these examples would teach a reader to use "
+        f"{spelling!r} was retired; these examples would teach the use of "
         f"it: {carrying}"
     )
 
@@ -120,7 +120,7 @@ def test_the_catalogue_is_named_typed_wherever_an_example_names_one():
 
 # --- what an authored table returns -------------------------------------------
 
-#: Where authored objects live outside `src`: the examples a reader copies, and
+#: Where authored objects live outside `src`: the examples that get copied, and
 #: the fixture repositories the Fabric journeys build and load.
 AUTHORED_ROOTS = (EXAMPLES, ROOT / "tests" / "fixtures")
 

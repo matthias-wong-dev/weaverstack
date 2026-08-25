@@ -1,7 +1,7 @@
 """Workspace configuration.
 
 A Workspace identifies where resources live: one Microsoft Fabric workspace, by
-name. It does not say where Weaver code executes — desktop or notebook is a
+name. It does not say where Weaver code executes. Desktop or notebook is a
 Session question.
 """
 
@@ -85,7 +85,7 @@ class Workspace:
     """One Microsoft Fabric workspace, and the configuration it carries.
 
     Identifies where the resources are. It does not say where Weaver's own code
-    runs — desktop or notebook is a Session question.
+    runs. Desktop or notebook is a Session question.
     """
 
     workspace: str

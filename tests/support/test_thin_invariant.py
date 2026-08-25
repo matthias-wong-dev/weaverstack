@@ -1,7 +1,7 @@
 """The thin primitives meet the contract a run calls them through.
 
-They stand where a deployed module stands, and they are only ever *dispatched*
-in Fabric — so nothing in the pure suite exercises the method a run invokes on
+They stand where a deployed module stands, and they are only ever dispatched
+in Fabric, so nothing in the pure suite exercises the method a run invokes on
 them. That gap cost a Fabric round trip once: the run's lower interface was
 renamed and these were left implementing the upper one, and the first thing to
 notice was a real workspace twenty minutes later.
