@@ -35,7 +35,6 @@ from __future__ import annotations
 import hashlib
 from dataclasses import replace
 
-from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.runtime.delta_sql import delta_audit_names, delta_signature_name
 from weaver.targets import FolderTarget
 
@@ -204,22 +203,22 @@ emit({
 """
 
 
-def _assert_installed(env, step, *, items=frozenset({"Sales", "_weaver"})) -> None:
+def _assert_installed(env, step) -> None:
     """The first build: everything declared exists, and nothing landed elsewhere.
 
-    ``items`` is the logical items the bundle must carry. It is a parameter
-    because the same Lakehouse estate is driven twice — alone, and with the
-    Warehouse that reports on it — and every other claim below is about the
-    Lakehouse either way.
+    Every claim here is about the Lakehouse, so the same function serves both
+    estates: the Lakehouse alone, and the Lakehouse with the Warehouse that
+    reports on it.
     """
 
     _raise_if_the_transition_broke(step)
     plan = step.bundle.plan
-    assert plan.format_version == SUPPORTED_FORMAT_VERSION
-    assert plan.repository_name == env.repository_root.name
-    assert {target.logical_item_name for target in plan.targets} == set(items)
-    assert plan.omitted_nodes == ()
 
+    # The plan's own shape is not asserted here. A bundle's format version,
+    # repository name, targets and omitted nodes are decided in this process and
+    # read the same against a TestSession, so they belong to the fast suite and
+    # are proven there. What a workspace is needed for starts below.
+    #
     # The source repository was deleted between generating this bundle and
     # installing it. A bundle carries everything it needs; it is not a pointer
     # back at a repository that has to still be there.
@@ -831,7 +830,6 @@ def drive(journey):
 #
 # A Warehouse, so a real workspace is the only place this can run.
 
-CROSS_ITEM_ITEMS = frozenset({"Sales", "Reporting", "_weaver"})
 
 #: The load, over both physical sides. The Warehouse's report is a table with a
 #: generated load procedure of its own, so the run graph has work either side of
@@ -995,7 +993,7 @@ def drive_across_items(journey):
 
     env.install_repo()
     step = journey.run("install", between=lambda e, _b: e.remove_repo())
-    _assert_installed(env, step, items=CROSS_ITEM_ITEMS)
+    _assert_installed(env, step)
     _assert_warehouse_installed(env, step)
 
     _assert_unchanged(env, journey.run("unchanged", before=lambda e: e.install_repo()))
