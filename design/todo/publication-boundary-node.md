@@ -56,6 +56,35 @@ placed after the producer cannot observe it. Three ways out:
 Option 1. The observation is a fact the producer is uniquely placed to record,
 and the barrier is the only reader.
 
+## The node's shape
+
+``logical_id`` is ``None``, as the refresh node's is. ``_installed`` in
+``weaver.run.record`` reads it to decide whether a node leaves catalogue state, so
+a barrier carrying the producer's identity would write a second ``_.LoadStatus``
+row for an object that already has one. The Warehouse table it waits on is carried
+separately.
+
+```text
+node_id              publish:Warehouse/Serving/SERVE.Reporting
+logical_id           None
+physical_target      the Warehouse, so the Delta log is reachable
+publication_of       the producer's document id, for the log path
+publication_targets  the consuming shortcut destinations
+produced_by          the producer's node id, for the ledger
+```
+
+## The baseline
+
+A barrier runs after its producer and cannot observe what was published before.
+The producer records it in a run-scoped ``PublicationLedger`` the Runner owns and
+threads into dispatch, as it already threads ``open_runtime``. The ledger holds the
+producer node ids a barrier follows, so a Warehouse-only load reads no Delta log:
+the producer asks the ledger whether to observe, and the answer is no when nothing
+waits on it.
+
+The producer also records whether it moved rows. A barrier whose producer moved
+none settles without reaching Spark.
+
 ## The change
 
 - A `ONELAKE_PUBLICATION` primitive kind beside `ENDPOINT_REFRESH`, in
