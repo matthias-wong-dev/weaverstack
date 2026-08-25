@@ -666,12 +666,21 @@ REPOSITORY_EDITS = (
         '            "RegionId", "RegionName", "upper(RegionName) as RegionLabel"\n'
         "        )",
     ),
-    # A new column on the protected table. Its declaration changes and its
-    # physical table must not.
+    # Two changes to the protected table, both of the kind Prohibit rebuild
+    # permits: a description, and load code for the loads still to come. Its
+    # schema is left alone, because a declared column it does not have would
+    # need the physical table altered. See design/todo/preservative-build.md.
     (
         "Lakehouse/Curated/CUR__Customer.py",
-        "  UpdatedAt: timestamp",
-        "  UpdatedAt: timestamp\n  CustomerLabel: string",
+        "Description: One row per current customer, kept up to date incrementally.",
+        "Description: One row per current customer, kept current incrementally.",
+    ),
+    (
+        "Lakehouse/Curated/CUR__Customer.py",
+        "        changed = source.where(source.UpdatedAt > self.bookmark())",
+        "        changed = source.where(source.UpdatedAt > self.bookmark()).select(\n"
+        '            "CustomerId", "CustomerName", "UpdatedAt"\n'
+        "        )",
     ),
     # A view definition, which is replaced rather than migrated.
     (
@@ -721,6 +730,19 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
     before = acceptance.step("registry-before", lambda: _registry_rows(acceptance))
     acceptance.require("registry-before")
 
+    protected = f"{_item(acceptance, 'Lakehouse/Curated')}.`CUR`.`Customer`"
+    kept = acceptance.step(
+        "protected-before",
+        lambda: _observe(
+            acceptance,
+            {
+                "columns": f"describe table {protected}",
+                "rows": f"select CustomerId from {protected}",
+            },
+        ),
+    )
+    acceptance.require("protected-before")
+
     acceptance.step("edit", lambda: _edit(acceptance, REPOSITORY_EDITS))
     acceptance.require("edit")
 
@@ -747,6 +769,7 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
         {
             "region": f"describe table {landing}.`LAND`.`Region`",
             "protected": f"describe table {curated}.`CUR`.`Customer`",
+            "protected_rows": f"select CustomerId from {curated}.`CUR`.`Customer`",
             "view": f"describe table {curated}.`CUR`.`CustomerCurrent`",
         },
     )
@@ -755,8 +778,14 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
     # The unprotected table was rebuilt into its new shape.
     assert "regionlabel" in seen.values("region", "col_name")
 
-    # The protected table was not replaced, so its new column is not there.
-    assert "customerlabel" not in seen.values("protected", "col_name")
+    # The protected table was not touched at all: same columns, same rows. Its
+    # declaration changed, and Prohibit rebuild protects the data it holds.
+    assert seen.values("protected", "col_name") == kept.result.values(
+        "columns", "col_name"
+    )
+    assert _ids(seen, "protected_rows", "CustomerId") == _ids(
+        kept.result, "rows", "CustomerId"
+    )
 
     # A view is replaced rather than migrated, so its new column is there.
     assert "customerupper" in seen.values("view", "col_name")
