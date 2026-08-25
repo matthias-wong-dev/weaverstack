@@ -114,7 +114,11 @@ def test_a_warehouse_load_asks_for_its_result_by_name():
 def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
     tmp_path, monkeypatch
 ):
-    """TDS completion precedes readable shortcut files, so both are one load unit."""
+    """TDS completion precedes readable shortcut files, so both are one load unit.
+
+    The wait opens the files the new commit added rather than counting the
+    snapshot's rows, which Delta answers from the commit's own statistics.
+    """
 
     from weaver.declaration.metadata import ObjectId
     from weaver.declaration.model import WeaverDocumentId, WeaverItemId
@@ -131,7 +135,19 @@ def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
     log = root.join("Tables", "Sales", "Customer", "_delta_log")
     store = FilesystemStore()
     store.make_directory(log)
-    store.write(log / "00000000000000000000.json", b"{}")
+    store.write(
+        log / "00000000000000000000.json", b'{"add":{"path":"settled.parquet"}}'
+    )
+    published = b"\n".join(
+        (
+            b'{"commitInfo":{"operation":"WRITE"}}',
+            # Percent-encoded in the log, and a path expression needs it decoded.
+            b'{"add":{"path":"part-0001%20a%3Db.parquet"}}',
+            b'{"add":{"path":"part-0002.parquet"}}',
+            b'{"remove":{"path":"part-0002.parquet"}}',
+            b'{"remove":{"path":"settled.parquet"}}',
+        )
+    )
     events = []
     physical_row = {
         physical_name: ROW[logical_name]
@@ -143,7 +159,7 @@ def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
     class Sql:
         def call_procedure(self, _name, *, inputs, outputs):
             events.append("procedure")
-            store.write(log / "00000000000000000001.json", b"{}")
+            store.write(log / "00000000000000000001.json", published)
             return physical_row
 
     class Resolver:
@@ -206,26 +222,24 @@ def test_a_warehouse_load_consumed_from_onelake_waits_for_its_delta_files(
         ),
     )
 
-    monkeypatch.setattr("weaver.run.dispatch.ONELAKE_PUBLICATION_POLL_INTERVAL", 0.0)
+    monkeypatch.setattr("weaver.run.publication.PUBLICATION_POLL_INTERVAL", 0.0)
     result = dispatch_primitive(node, session=Session())
 
     assert result.rows_inserted == 1
-    assert events[:3] == ["resolve", "procedure", "resolve"]
+    assert [event for event in events if isinstance(event, str)][:2] == [
+        "resolve",
+        "procedure",
+    ]
+    # The file the interval added and kept, and only that one: a file added and
+    # then removed is never read, and one the load did not touch was already
+    # readable.
+    probe = (
+        "select * from parquet.`abfss://workspace/Published_LH/Tables/WH/Reporting"
+        "/part-0001 a=b.parquet` limit 1"
+    )
     assert [event for event in events if isinstance(event, tuple)] == [
-        (
-            "spark",
-            (
-                "select count(*) as rows\nfrom delta."
-                "`abfss://workspace/Published_LH/Tables/WH/Reporting`",
-            ),
-        ),
-        (
-            "spark",
-            (
-                "select count(*) as rows\nfrom delta."
-                "`abfss://workspace/Published_LH/Tables/WH/Reporting`",
-            ),
-        ),
+        ("spark", (probe,)),
+        ("spark", (probe,)),
     ]
 
 

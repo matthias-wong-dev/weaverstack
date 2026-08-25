@@ -821,6 +821,36 @@ This preserves the same architectural separation used throughout Weaver.
 - Build generates deployment artefacts.
 - Load executes those artefacts.
 
+## Cross-engine boundaries in a load
+
+A load graph orders two kinds of edge. Most are ordinary dependencies: the
+producer finishes and the consumer runs. The rest cross from one Fabric engine to
+another, where the producer finishing is not yet the same thing as the consumer
+being able to see what it produced. Weaver waits at both of them.
+
+```text
+Lakehouse producer  →  Warehouse consumer   the Lakehouse's SQL analytics
+                                            endpoint has to catch up
+Warehouse producer  →  Lakehouse consumer   the Warehouse's OneLake Delta
+                                            publication has to catch up
+```
+
+The first is the endpoint refresh barrier: a node of its own in the load graph,
+placed behind every selected load in the refreshed Lakehouse.
+
+The second is the OneLake publication wait, in `weaver.run.publication`. Fabric
+publishes a Warehouse table's Delta log in the background after the transaction
+commits, so a Lakehouse consumer reading that table through a shortcut can see
+the previous snapshot, or a new snapshot whose Parquet files it cannot open yet.
+The wait proves both: a commit that was not published before the load ran, and an
+opened read of each Parquet file that commit added, through the consuming
+shortcut's own path. It counts no rows, because Delta answers `count(*)` from the
+commit's statistics and would report a snapshot readable before its files are.
+
+The wait is selective. It happens only where the planner found a real Warehouse
+to Lakehouse shortcut crossing, and only when the load reported changed rows, so
+a Warehouse-only load still submits nothing to Spark.
+
 ---
 
 # Typical Development Cycle

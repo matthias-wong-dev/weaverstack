@@ -6,8 +6,6 @@ the installed primitive reference to the appropriate Session operation.
 
 from __future__ import annotations
 
-import time
-
 from .resolution import (
     ENDPOINT_REFRESH,
     PYTHON_FOLDER,
@@ -16,9 +14,6 @@ from .resolution import (
     WAREHOUSE_PROCEDURE,
 )
 from .result import RunError
-
-ONELAKE_PUBLICATION_TIMEOUT = 180.0
-ONELAKE_PUBLICATION_POLL_INTERVAL = 5.0
 
 
 def dispatch_primitive(
@@ -113,10 +108,11 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     from ..etl import load_procedure_name
     from ..runtime.load_result import LoadResult
     from ..targets import ItemRef, WarehouseTarget
+    from .publication import await_publication, published_commits
 
     target = WarehouseTarget(ItemRef(node.physical_target.name))
     readiness = tuple(getattr(node, "await_onelake", ()))
-    before = _warehouse_delta_signature(node, session, workspace) if readiness else None
+    before = published_commits(node, session, workspace) if readiness else None
     sql = session.sql_executor(target, workspace=workspace)
     row = sql.call_procedure(
         load_procedure_name(node.logical_id.object_id),
@@ -127,94 +123,8 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool):
     if before is not None and (
         result.rows_inserted or result.rows_updated or result.rows_deleted
     ):
-        _await_warehouse_delta_publication(node, session, workspace, before, readiness)
+        await_publication(node, session, workspace, before=before, readiness=readiness)
     return result
-
-
-def _warehouse_delta_signature(node, session, workspace) -> tuple:
-    """The published Delta commits for one Warehouse table at this instant."""
-
-    from ..fabric.resources import WAREHOUSE
-    from ..resolution import TABLES_AREA
-    from ..targets import ItemRef
-
-    resolver = session.resolver(workspace)
-    item = resolver.resolve(ItemRef(node.physical_target.name), item_type=WAREHOUSE)
-    root = resolver.external_root(item)
-    object_id = node.logical_id.object_id
-    log = root.join(TABLES_AREA, object_id.schema, object_id.object, "_delta_log")
-    store = session.transport_store(workspace)
-    if not store.exists(log):
-        return ()
-    return tuple(
-        sorted(
-            (
-                entry.name,
-                entry.etag,
-                entry.size,
-                entry.modified.isoformat() if entry.modified is not None else None,
-            )
-            for entry in store.list(log)
-            if not entry.is_directory and entry.name.endswith(".json")
-        )
-    )
-
-
-def _shortcut_delta_path(readiness, session, workspace) -> str:
-    """The destination path a downstream Lakehouse primitive will read."""
-
-    from ..targets import ItemRef
-
-    resolver = session.resolver(workspace)
-    location = resolver.lakehouse_spark_location(ItemRef(readiness.target.name))
-    return location.table_path(readiness.schema, readiness.object)
-
-
-def _await_warehouse_delta_publication(
-    node, session, workspace, before, readiness
-) -> None:
-    """Wait for a Warehouse commit and every consuming shortcut's Delta files."""
-
-    deadline = time.monotonic() + ONELAKE_PUBLICATION_TIMEOUT
-    commit_seen = False
-    last_error = None
-    while True:
-        if not commit_seen:
-            current = _warehouse_delta_signature(node, session, workspace)
-            commit_seen = bool(current and current != before)
-        if commit_seen:
-            try:
-                paths = (
-                    _shortcut_delta_path(destination, session, workspace)
-                    for destination in readiness
-                )
-                source_format = "delta"
-                session.execute_spark_sql_batch(
-                    [
-                        f"select count(*) as rows\nfrom {source_format}.`{path}`"
-                        for path in paths
-                    ],
-                    workspace=workspace,
-                )
-                return
-            except Exception as exc:  # Fabric settles this surface asynchronously.
-                last_error = exc
-        if time.monotonic() >= deadline:
-            identity = node.logical_id.object_id.qualified
-            if commit_seen:
-                detail = f": {type(last_error).__name__}: {last_error}"
-                raise RunError(
-                    f"Warehouse table {node.physical_target.name}/{identity} "
-                    "published a Delta commit, but its Lakehouse shortcut paths "
-                    f"were not readable within {int(ONELAKE_PUBLICATION_TIMEOUT)}s"
-                    f"{detail}"
-                ) from last_error
-            raise RunError(
-                f"Warehouse table {node.physical_target.name}/{identity} changed "
-                "over TDS but no new Delta commit appeared in OneLake within "
-                f"{int(ONELAKE_PUBLICATION_TIMEOUT)}s"
-            )
-        time.sleep(ONELAKE_PUBLICATION_POLL_INTERVAL)
 
 
 def _python(node, session, workspace, resolved, fault_tolerant: bool, open_runtime):
