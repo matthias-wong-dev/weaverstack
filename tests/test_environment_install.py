@@ -194,13 +194,26 @@ def test_staging_failures_other_than_404_are_re_raised(status_code):
 
 @weaver_test()
 def test_fabric_client_preserves_failure_status(monkeypatch):
-    response = types.SimpleNamespace(status_code=429, text="slow down", content=b"")
-    monkeypatch.setattr("requests.request", lambda *args, **kwargs: response)
+    """A throttle that never clears is reported as the throttle it was.
+
+    Retried first, because 429 means Fabric declined to act rather than acted and
+    failed. See ``tests/test_fabric_rest_retry_boundary.py`` for that decision.
+    """
+
+    response = types.SimpleNamespace(
+        status_code=429, text="slow down", content=b"", headers={}
+    )
+    attempts: list = []
+    monkeypatch.setattr(
+        "requests.request", lambda *args, **kwargs: attempts.append(1) or response
+    )
+    monkeypatch.setattr("weaver.fabric.client.time.sleep", lambda _seconds: None)
 
     with pytest.raises(FabricError) as info:
         FabricClient(token="token").get_json("workspaces")
 
     assert info.value.status_code == 429
+    assert len(attempts) == 4
 
 
 # --- publication diff-and-skip decisions, without touching Fabric ------------
