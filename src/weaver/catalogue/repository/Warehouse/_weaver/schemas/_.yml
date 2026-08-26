@@ -1,0 +1,6 @@
+Schema ID: _
+
+Description: >-
+  Weaver's own catalogue. These tables record what Weaver has built and what
+  it certifies as installed; they are declared as ordinary Weaver document
+  and built by Weaver itself, and are never authored or loaded by hand.
