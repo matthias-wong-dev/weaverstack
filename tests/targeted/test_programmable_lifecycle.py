@@ -105,12 +105,21 @@ def _actions(bundle, *kinds: str) -> list:
 
 @weaver_test()
 def test_a_programmable_is_discovered_with_its_procedure_identity(tmp_path):
+    """Authored content sits beside the generated procedures, same model."""
+
     repository = _repository(tmp_path, procedure=PROCEDURE_V1)
 
-    assert list(repository.programmables) == [_identity()]
-    programmable = repository.programmables[_identity()]
-    assert programmable.role == "programmable"
-    assert programmable.relative_path == f"{WAREHOUSE_ITEM}/programmables/dbo.RefreshSummary.sql"
+    assert [str(each) for each in repository.programmables] == [
+        "Warehouse/Reporting/procedure:_/Load DWG.Customer",
+        "Warehouse/Reporting/procedure:dbo/RefreshSummary",
+    ]
+    authored = next(
+        programmable
+        for programmable in repository.programmables.values()
+        if programmable.relative_path is not None
+    )
+    assert authored.role == "programmable"
+    assert authored.relative_path == f"{WAREHOUSE_ITEM}/programmables/dbo.RefreshSummary.sql"
 
 
 @weaver_test()

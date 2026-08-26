@@ -223,6 +223,16 @@ def item_validated_objects(
     compiles to is how the Test is run.
     """
 
+    if item.item_type == WAREHOUSE and not _is_builtin(item):
+        # A Warehouse validation compiles to a generated Programmable, so the
+        # procedure's origin is where the logical validation is read from.
+        found = {
+            programmable.origin
+            for programmable in repository.programmables.values()
+            if programmable.identity.item == item
+            and programmable.role in (ROLE_TEST, ROLE_ASSUMPTION)
+        }
+        return tuple(sorted((each for each in found if each is not None), key=str))
     found = {
         artefact.origin
         for artefact in item_validation_artefacts(repository, item=item)
@@ -270,14 +280,15 @@ def item_validation_artefacts(
 ) -> tuple[RuntimeArtefact, ...]:
     """One item's validation artefacts, derived from what it declares.
 
-    A Warehouse validation is a procedure in the generated ``_`` schema; a
-    Lakehouse one is a module under the deployed runtime tree, in a ``tests/``
-    or ``assumptions/`` subdirectory. Under that root rather than beside it,
-    because it is the item's Python import root: ``from Sales__Order import
-    Sales__Order`` then resolves from a validation as it does from a load.
+    A Lakehouse validation is a module under the deployed runtime tree, in a
+    ``tests/`` or ``assumptions/`` subdirectory. Under that root rather than
+    beside it, because it is the item's Python import root: ``from Sales__Order
+    import Sales__Order`` then resolves from a validation as it does from a
+    load. A Warehouse validation is a generated Programmable of the repository,
+    so its artefact comes from there and this producer claims nothing.
     """
 
-    if _is_builtin(item):
+    if _is_builtin(item) or item.item_type == WAREHOUSE:
         return ()
     model = next((each for each in repository.items if each.identity == item), None)
     if model is None:
@@ -350,24 +361,81 @@ def item_load_artefacts(
     return _lakehouse_artefacts(repository, item=item, destination=destination)
 
 
+def item_generated_programmables(
+    *, item: WeaverItemId, documents: Iterable
+) -> tuple["Programmable", ...]:
+    """The stored procedures Weaver generates for one Warehouse item.
+
+    One per Warehouse table Weaver loads and one per Warehouse validation,
+    derived from those declarations alone. They join the repository through the
+    same composition path as every other declaration, so authored, generated
+    and Weaver-owned procedures share one representation and one install,
+    register and prune lifecycle.
+    """
+
+    if item.item_type != WAREHOUSE or _is_builtin(item):
+        return ()
+
+    from .declaration.load import has_generated_load
+    from .declaration.programmable import generated_programmable
+
+    found = []
+    for source in documents:
+        identity = source.logical_id
+        if identity is None:
+            continue
+        if not source.is_validation:
+            # A table declaring `Has load procedure: false` is populated by
+            # something other than Weaver, so there is no procedure for it.
+            if source.kind != TABLE or not has_generated_load(source):
+                continue
+            generated = source.create_load(item=item)
+            found.append(
+                generated_programmable(
+                    load_procedure_id(item, identity.object_id),
+                    text=generated.payload.decode("utf-8"),
+                    signature=salted_signature(
+                        source.effective_signature, generated.template_version
+                    ),
+                    role=ROLE_LOAD,
+                    origin=identity,
+                )
+            )
+            continue
+
+        from .declaration.validation import validation_identity
+
+        object_type, template_version = validation_identity(source)
+        kind = source.document.kind
+        generated = source.create_validation(destination=None)
+        assert object_type == PROCEDURE_TYPE
+        found.append(
+            generated_programmable(
+                validation_procedure_id(item, kind, identity.object_id),
+                text=generated.payload.decode("utf-8"),
+                signature=salted_signature(
+                    source.effective_signature, template_version
+                ),
+                role=VALIDATION_ROLE[kind],
+                origin=identity,
+            )
+        )
+    return tuple(sorted(found, key=lambda each: str(each.identity)))
+
+
 def _warehouse_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[RuntimeArtefact, ...]:
-    """One generated load procedure per Warehouse table, and the entry points.
+    """One artefact per stored procedure this item manages.
 
-    ``_.Load`` and ``_.Test`` are installed beside them: the object procedures
-    are execution primitives that record nothing, and the entry points are what a
-    person calls to run one and have the outcome recorded. Registered like any
-    other artefact, so they are signed, selected incrementally and pruned when
-    the item's last load or validation goes.
-
-    The item's Programmables install through the same layer: one procedure per
-    declaration, whatever produced it.
+    Every Warehouse procedure is a Programmable of the repository: generated
+    load and validation procedures, authored content, and the entry points.
+    They install through one layer, are signed, selected incrementally, and
+    pruned when their declaration goes.
     """
 
     return (
         _programmable_artefacts(repository, item=item)
-        + _load_procedures(repository, item=item)
         + _entry_artefacts(repository, item=item)
     )
 
@@ -395,37 +463,6 @@ def _programmable_artefacts(
     return tuple(sorted(found, key=lambda artefact: str(artefact.identity)))
 
 
-def _load_procedures(
-    repository: WeaverRepository, *, item: WeaverItemId
-) -> tuple[RuntimeArtefact, ...]:
-    """One generated load procedure per Warehouse table Weaver loads."""
-
-    from .declaration.load import has_generated_load
-
-    artefacts = []
-    for identity, source in sorted(repository.source_documents.items(), key=_by_text):
-        if identity.item != item or source.kind != TABLE:
-            continue
-        # A table declaring `Has load procedure: false` is populated by something
-        # other than Weaver, so there is no procedure to install for it.
-        if not has_generated_load(source):
-            continue
-        generated = source.create_load(item=item)
-        artefacts.append(
-            RuntimeArtefact(
-                identity=load_procedure_id(item, identity.object_id),
-                object_type=generated.object_type,
-                signature=salted_signature(
-                    source.effective_signature, generated.template_version
-                ),
-                payload=generated.payload,
-                origin=identity,
-                source_path=source.relative_path,
-            )
-        )
-    return tuple(artefacts)
-
-
 def _entry_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[RuntimeArtefact, ...]:
@@ -446,20 +483,24 @@ def _entry_artefacts(
 
     found = []
     loadable = [
-        artefact.origin.object_id
-        for artefact in _load_procedures(repository, item=item)
-        if artefact.origin is not None
+        programmable.origin.object_id
+        for programmable in repository.programmables.values()
+        if programmable.origin is not None
+        and programmable.identity.item == item
+        and programmable.role == ROLE_LOAD
     ]
     if loadable:
         found.append(
             _entry_artefact(item, LOAD_ENTRY, generate_load_entry(item, loadable))
         )
     validations = {
-        artefact.origin.object_id: repository.source_documents[
-            artefact.origin
+        programmable.origin.object_id: repository.source_documents[
+            programmable.origin
         ].document.kind
-        for artefact in item_validation_artefacts(repository, item=item)
-        if artefact.origin is not None
+        for programmable in repository.programmables.values()
+        if programmable.origin is not None
+        and programmable.identity.item == item
+        and programmable.role in (ROLE_TEST, ROLE_ASSUMPTION)
     }
     if validations:
         found.append(

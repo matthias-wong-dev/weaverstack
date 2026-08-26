@@ -714,33 +714,47 @@ def _generated_content(authored: RepositoryPart) -> RepositoryPart:
     schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]] = {}
     source_documents: dict[WeaverDocumentId, SourceDocument] = {}
     schema_documents: dict[WeaverSchemaId, SchemaSes] = {}
+    programmables_by_item: dict[WeaverItemId, list] = {}
     for item in sorted(authored.items):
         if item == BUILTIN_ITEM:
             continue
+        documents = [
+            authored.source_documents[identity]
+            for identity in authored.documents.get(item, ())
+            + authored.validations.get(item, ())
+        ]
+        # Validations also require generated runtime declarations.
         item_files = generated_item_files(
             item,
-            # Validations also require generated runtime declarations.
-            documents=[
-                authored.source_documents[identity]
-                for identity in authored.documents.get(item, ())
-                + authored.validations.get(item, ())
-            ],
+            documents=documents,
             support_paths=list(authored.support_files),
         )
-        if not item_files:
-            continue
-        for relative, data in sorted(item_files.items()):
-            if "/schemas/" in relative:
-                schema = read_schema_document(relative, data)
-                identity = WeaverSchemaId(item, schema.schema_id)
-                schema_documents[identity] = schema
-                schemas_by_item.setdefault(item, []).append(identity)
-                continue
-            source = read_source_document(relative, data, item.item_type)
-            identity = WeaverDocumentId(item, source.object_id, is_files=True)
-            source_documents[identity] = replace(source, logical_id=identity)
-            documents_by_item.setdefault(item, []).append(identity)
-        generated_files.update(item_files)
+        if item_files:
+            for relative, data in sorted(item_files.items()):
+                if "/schemas/" in relative:
+                    schema = read_schema_document(relative, data)
+                    identity = WeaverSchemaId(item, schema.schema_id)
+                    schema_documents[identity] = schema
+                    schemas_by_item.setdefault(item, []).append(identity)
+                    continue
+                source = read_source_document(relative, data, item.item_type)
+                identity = WeaverDocumentId(item, source.object_id, is_files=True)
+                source_documents[identity] = replace(source, logical_id=identity)
+                documents_by_item.setdefault(item, []).append(identity)
+            generated_files.update(item_files)
+
+        from ..etl import item_generated_programmables
+
+        generated_programmables = item_generated_programmables(
+            item=item,
+            documents=[
+                document
+                for document in documents
+                if document.relative_path not in authored.declared_files
+            ],
+        )
+        if generated_programmables:
+            programmables_by_item[item] = list(generated_programmables)
 
     shortcuts: list = []
     pairs: list = []
@@ -766,6 +780,11 @@ def _generated_content(authored: RepositoryPart) -> RepositoryPart:
         },
         source_documents=source_documents,
         schema_documents=schema_documents,
+        programmables={
+            item: tuple(sorted(found, key=lambda each: str(each.identity)))
+            for item, found in programmables_by_item.items()
+            if found
+        },
         shortcuts=tuple(shortcuts),
         logical_shortcuts=tuple(pairs),
         declared_files=generated_files,
