@@ -231,22 +231,6 @@ def item_validated_objects(
     return tuple(sorted(found, key=str))
 
 
-def item_presents_runtime_tables(
-    repository: WeaverRepository, *, item: WeaverItemId
-) -> bool:
-    """Whether this item has anything whose operational state Weaver records.
-
-    A loadable object or a validation. An item with neither installs nothing that
-    reads or writes a runtime table, so a build gives it none of them, and the
-    item graph puts no edge from the built-in item to it.
-    """
-
-    return bool(
-        item_bookmarkable_objects(repository, item=item)
-        or item_validated_objects(repository, item=item)
-    )
-
-
 def item_runtime_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId, destination=None
 ) -> tuple[RuntimeArtefact, ...]:
@@ -539,7 +523,12 @@ def _lakehouse_artefacts(
                 )
             )
     declared = tuple(
-        declaration for declaration in repository.shortcuts if declaration.owner == item
+        declaration
+        # Weaver-owned references carry their identity and are infrastructure,
+        # not symbols a program imports. The deployed module holds what the
+        # item's own shortcuts.py declared.
+        for declaration in repository.shortcuts
+        if declaration.owner == item and declaration.destination_identity is None
     )
     if declared:
         # Generated rather than copied: the authored file says what to create,
@@ -911,7 +900,6 @@ __all__ = [
     "PROCEDURE_TYPE",
     "item_bookmarkable_objects",
     "item_load_artefacts",
-    "item_presents_runtime_tables",
     "load_artefacts",
     "artefacts_by_identity",
     "item_runtime_artefacts",

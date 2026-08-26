@@ -34,7 +34,7 @@ from weaver.build_bundle.runtime_tables import runtime_state_invalidation
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     BOOKMARK,
-    PRESENTED_RUNTIME_TABLES,
+    STANDARD_SURFACE_TABLES,
 )
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
@@ -72,7 +72,7 @@ def test_prepared_items_contain_every_injected_runtime_relation(estate, item_tex
     )
 
     assert {pair.destination.object_id.object for pair in references} == {
-        table.name for table in PRESENTED_RUNTIME_TABLES
+        table.name for table in STANDARD_SURFACE_TABLES
     }
     assert all(
         pair.destination.object_id == pair.source.object_id for pair in references
@@ -578,11 +578,11 @@ def test_runtime_relations_are_ordinary_logical_shortcut_declarations(estate):
 
     runtime = [
         declaration
-        for declaration in estate.planned_shortcuts
+        for declaration in estate.shortcuts
         if declaration.logical_source.item == BUILTIN_ITEM
     ]
     assert {declaration.destination.object_id.object for declaration in runtime} == {
-        table.name for table in PRESENTED_RUNTIME_TABLES
+        table.name for table in STANDARD_SURFACE_TABLES
     }
     assert all(declaration.is_logical for declaration in runtime)
 
@@ -696,7 +696,7 @@ def _plan_runtime_references(repository, *, catalogue_target):
     by_item = {item: warehouse, BUILTIN_ITEM: catalogue_target}
     selected = {
         WeaverDocumentId.parse(f"{WAREHOUSE_ITEM}/_.{table.name}")
-        for table in PRESENTED_RUNTIME_TABLES
+        for table in STANDARD_SURFACE_TABLES
     }
     return plan_item_shortcuts(
         repository,

@@ -289,9 +289,10 @@ def parse_item_repository(
     if not store.is_directory(root):
         raise DiscoveryError(f"repository root is not a directory: {root}")
 
-    authored = _read_authored_repository(root, store)
     owned = weaver_owned_content()
-    merged = merge_repository(authored, owned)
+    authored = _read_authored_repository(root, store)
+    generated = _generated_content(authored)
+    merged = merge_repository(owned, authored, generated)
     return compose_repository(merged, root=root, store=store)
 
 
@@ -338,9 +339,9 @@ def weaver_owned_content() -> RepositoryPart:
 def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     """Read one repository tree as its authored declarations.
 
-    Structure first, then documents, then the per-item runtime declarations
-    Weaver generates from them. What comes back is a part, not a repository:
-    composition with Weaver-owned content happens above this.
+    Structure first, then documents, schemas, validations and shortcuts. What
+    comes back is a part, not a repository: composition with Weaver-owned and
+    generated content happens above this.
     """
 
     prefix = root.value.rstrip("/") + "/"
@@ -571,11 +572,10 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         documents_by_item[item].append(identity)
 
     # Generate runtime declarations for items with load code.
-    from ..etl import ETL_SCHEMA, generated_item_files
+    from ..etl import ETL_SCHEMA
 
-    generated_files: dict[str, bytes] = {}
     for item in sorted(item_ids):
-        authored = [
+        authored_into_schema = [
             str(schema)
             for schema in schemas_by_item[item]
             if schema.schema == ETL_SCHEMA
@@ -584,39 +584,13 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             for identity in documents_by_item[item]
             if identity.object_id.schema == ETL_SCHEMA
         ]
-        if authored:
+        if authored_into_schema:
             raise DiscoveryError(
-                f"{sorted(authored)[0]}: schema {ETL_SCHEMA!r} is generated Weaver "
-                "infrastructure. It holds the runtime tree a load is deployed "
-                "into and the schema generated load procedures live in, so an "
-                "item may not author into it"
+                f"{sorted(authored_into_schema)[0]}: schema {ETL_SCHEMA!r} is "
+                "generated Weaver infrastructure. It holds the runtime tree a "
+                "load is deployed into and the schema generated load procedures "
+                "live in, so an item may not author into it"
             )
-
-    for item in sorted(item_ids):
-        item_files = generated_item_files(
-            item,
-            # Validations also require generated runtime declarations.
-            documents=[
-                source_documents[identity]
-                for identity in documents_by_item[item]
-                + validations_by_item.get(item, [])
-            ],
-            support_paths=support_files,
-        )
-        if not item_files:
-            continue
-        for relative, data in sorted(item_files.items()):
-            if "/schemas/" in relative:
-                schema = read_schema_document(relative, data)
-                identity = WeaverSchemaId(item, schema.schema_id)
-                schema_documents[identity] = schema
-                schemas_by_item[item].append(identity)
-                continue
-            source = read_source_document(relative, data, item.item_type)
-            identity = WeaverDocumentId(item, source.object_id, is_files=True)
-            source_documents[identity] = replace(source, logical_id=identity)
-            documents_by_item[item].append(identity)
-        generated_files.update(item_files)
 
     shortcuts = _read_item_declarations(
         root, store, shortcut_files, read=read_lakehouse_shortcuts
@@ -672,6 +646,81 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         store_files=tuple(files),
         support_files=tuple(support_files),
         support_file_contents=support_file_contents,
+    )
+
+
+def _generated_content(authored: RepositoryPart) -> RepositoryPart:
+    """The declarations Weaver generates from one repository's authored content.
+
+    Two contributions. The per-item runtime tree: a schema declaration and, for
+    a Lakehouse, the folder document that owns its deployed files. And the
+    standard Weaver catalogue surface: every normal item presents
+    ``_.Installation`` and the operational tables as ordinary logical shortcut
+    declarations, merged before resolution like any other content.
+    """
+
+    from ..catalogue.builtin import BUILTIN_ITEM, standard_surface_references
+    from ..etl import generated_item_files
+
+    generated_files: dict[str, bytes] = {}
+    documents_by_item: dict[WeaverItemId, list[WeaverDocumentId]] = {}
+    schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]] = {}
+    source_documents: dict[WeaverDocumentId, SourceDocument] = {}
+    schema_documents: dict[WeaverSchemaId, SchemaSes] = {}
+    for item in sorted(authored.items):
+        if item == BUILTIN_ITEM:
+            continue
+        item_files = generated_item_files(
+            item,
+            # Validations also require generated runtime declarations.
+            documents=[
+                authored.source_documents[identity]
+                for identity in authored.documents.get(item, ())
+                + authored.validations.get(item, ())
+            ],
+            support_paths=list(authored.support_files),
+        )
+        if not item_files:
+            continue
+        for relative, data in sorted(item_files.items()):
+            if "/schemas/" in relative:
+                schema = read_schema_document(relative, data)
+                identity = WeaverSchemaId(item, schema.schema_id)
+                schema_documents[identity] = schema
+                schemas_by_item.setdefault(item, []).append(identity)
+                continue
+            source = read_source_document(relative, data, item.item_type)
+            identity = WeaverDocumentId(item, source.object_id, is_files=True)
+            source_documents[identity] = replace(source, logical_id=identity)
+            documents_by_item.setdefault(item, []).append(identity)
+        generated_files.update(item_files)
+
+    shortcuts: list = []
+    pairs: list = []
+    for item in sorted(authored.items):
+        if item == BUILTIN_ITEM:
+            continue
+        declarations, logical_pairs = standard_surface_references(item)
+        shortcuts.extend(declarations)
+        pairs.extend(logical_pairs)
+
+    return RepositoryPart(
+        label="generated",
+        items=tuple(
+            sorted(
+                set(documents_by_item) | set(schemas_by_item) | {item for item in authored.items if item != BUILTIN_ITEM}
+            )
+        ),
+        documents={
+            item: tuple(sorted(found, key=str)) for item, found in documents_by_item.items()
+        },
+        schemas={
+            item: tuple(sorted(found, key=str)) for item, found in schemas_by_item.items()
+        },
+        source_documents=source_documents,
+        schema_documents=schema_documents,
+        shortcuts=tuple(shortcuts),
+        logical_shortcuts=tuple(pairs),
         declared_files=generated_files,
     )
 
@@ -740,7 +789,6 @@ def compose_repository(
         signature=_repository_signature(merged, store, root),
         logical_shortcuts=merged.logical_shortcuts,
         shortcuts=merged.shortcuts,
-        planned_shortcuts=merged.shortcuts,
         generated_files=merged.declared_files,
     )
     return resolve_item_dependencies(repository)

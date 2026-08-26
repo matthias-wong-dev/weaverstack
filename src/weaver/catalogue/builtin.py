@@ -15,7 +15,8 @@ from __future__ import annotations
 
 from importlib.resources import files as resource_files
 
-from ..declaration.model import WAREHOUSE, WeaverItemId
+from ..declaration.model import WAREHOUSE, WeaverDocumentId, WeaverItemId
+from .tables import CATALOGUE_SCHEMA
 
 #: The reserved Item that owns the catalogue declaration.
 BUILTIN_ITEM = WeaverItemId(WAREHOUSE, "_weaver")
@@ -42,3 +43,45 @@ def item_repository_files() -> dict[str, bytes]:
 
     walk(base, "")
     return found
+
+
+def standard_surface_references(item: WeaverItemId):
+    """The standard Weaver catalogue surface one normal item presents.
+
+    Each surface table is an ordinary logical shortcut declaration from the
+    item's namespace to the built-in item, merged into repository content
+    before dependency resolution like any other. The destination carries its
+    identity rather than decoding one from a ``Schema__Object`` name, because
+    the schema is Weaver's reserved ``_`` and not something the item declares.
+    """
+
+    from ..declaration.metadata import ObjectId
+    from ..declaration.model import (
+        LOGICAL_TARGET,
+        TABLE_SHORTCUT,
+        VIEW_SHORTCUT,
+        RepositoryShortcut,
+        ShortcutDeclaration,
+    )
+    from .tables import STANDARD_SURFACE_TABLES
+
+    declarations = []
+    pairs = []
+    for table in STANDARD_SURFACE_TABLES:
+        object_id = ObjectId(CATALOGUE_SCHEMA, table.name)
+        destination = WeaverDocumentId(item, object_id)
+        source = WeaverDocumentId(BUILTIN_ITEM, object_id)
+        declarations.append(
+            ShortcutDeclaration(
+                owner=item,
+                name=object_id.qualified,
+                shortcut_type=(
+                    VIEW_SHORTCUT if item.item_type == WAREHOUSE else TABLE_SHORTCUT
+                ),
+                target_type=LOGICAL_TARGET,
+                target=str(source),
+                destination_identity=destination,
+            )
+        )
+        pairs.append(RepositoryShortcut(destination=destination, source=source))
+    return tuple(declarations), tuple(pairs)

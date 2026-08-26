@@ -32,7 +32,7 @@ from support.weaver_test import register_session, weaver_test
 import weaver
 from weaver.catalogue.tables import (
     CATALOGUE_TABLES,
-    PRESENTED_RUNTIME_TABLES,
+    STANDARD_SURFACE_TABLES,
     RUNTIME_TABLES,
 )
 from weaver.sessions import ConsoleSession
@@ -253,10 +253,10 @@ def test_a_built_warehouse_is_given_views_over_the_catalogues_runtime_tables(
     present = user_objects(warehouse.executor)
     assert {
         CatalogObject(schema="_", name=table.name, kind="V")
-        for table in PRESENTED_RUNTIME_TABLES
+        for table in STANDARD_SURFACE_TABLES
     } <= present
     # And each resolves, a three-part name in another database, selected here.
-    for table in PRESENTED_RUNTIME_TABLES:
+    for table in STANDARD_SURFACE_TABLES:
         counted = warehouse.executor.query(
             f"select count(*) as n from [_].[{table.name}]"
         )

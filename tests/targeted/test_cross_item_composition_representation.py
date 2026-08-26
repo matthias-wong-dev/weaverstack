@@ -93,10 +93,21 @@ def test_the_estate_declares_both_physical_sides(repository):
     items = {str(model.identity) for model in repository.items}
 
     assert {"Lakehouse/Sales", "Warehouse/Reporting"} <= items
-    assert [
+    # Authored declarations are the ones a file carries; Weaver-owned ones
+    # arrive composed in and carry their identity instead of a name to decode.
+    authored = [
         (str(shortcut.destination), shortcut.target)
         for shortcut in repository.shortcuts
-    ] == [("Warehouse/Reporting/Rpt.PortableCustomer", "Lakehouse/Sales/DWG.Customer")]
+        if shortcut.destination_identity is None
+    ]
+    assert authored == [
+        ("Warehouse/Reporting/Rpt.PortableCustomer", "Lakehouse/Sales/DWG.Customer")
+    ]
+    assert all(
+        shortcut.destination_identity is None
+        or shortcut.relative_path == ""
+        for shortcut in repository.shortcuts
+    )
 
 
 @weaver_test()

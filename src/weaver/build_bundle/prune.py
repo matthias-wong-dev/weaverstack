@@ -11,7 +11,7 @@ from typing import Iterable, Mapping
 
 from ..catalogue.tables import (
     CATALOGUE_SCHEMA,
-    PRESENTED_RUNTIME_TABLES,
+    STANDARD_SURFACE_TABLES,
     is_protected,
 )
 from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
@@ -339,7 +339,7 @@ def read_lakehouse_inventory(
     # declare.
     references = tuple(
         table.name
-        for table in PRESENTED_RUNTIME_TABLES
+        for table in STANDARD_SURFACE_TABLES
         if store.exists(tables_root / CATALOGUE_SCHEMA / table.name)
     )
     files = () if control_item else _load_files(store, files_root)

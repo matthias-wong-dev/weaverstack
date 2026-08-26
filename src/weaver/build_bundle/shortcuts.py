@@ -169,7 +169,7 @@ def plan_item_shortcuts(
     declarations = sorted(
         (
             declaration
-            for declaration in repository.planned_shortcuts
+            for declaration in repository.shortcuts
             if declaration.owner == item
         ),
         key=lambda declaration: str(declaration.destination),

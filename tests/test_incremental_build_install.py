@@ -41,7 +41,7 @@ from weaver.catalogue.state import (
     Catalogue,
     reconcile_catalogue_state,
 )
-from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES, REGISTRY
+from weaver.catalogue.tables import STANDARD_SURFACE_TABLES, REGISTRY
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.locations import Location
@@ -154,7 +154,7 @@ def _raw_inventory(repository, target="Raw_Target", *, present=None):
                 for artefact in artefacts
                 if artefact.object_type == FILE_TYPE
             ),
-            runtime_references=tuple(table.name for table in PRESENTED_RUNTIME_TABLES),
+            runtime_references=tuple(table.name for table in STANDARD_SURFACE_TABLES),
         )
     }
 
@@ -538,7 +538,7 @@ def _shortcut_inventories(repository, *, shortcut_installed=True):
         ]
         views = list(objects) if target.kind == "warehouse" else []
         tables = [] if target.kind == "warehouse" else list(objects)
-        runtime = tuple(table.name for table in PRESENTED_RUNTIME_TABLES)
+        runtime = tuple(table.name for table in STANDARD_SURFACE_TABLES)
         if target.kind == "warehouse":
             views.extend(f"_.{name}" for name in runtime)
         if shortcut_installed and item == WeaverItemId.parse("Warehouse/Reporting"):

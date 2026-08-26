@@ -752,14 +752,11 @@ class WeaverRepository:
     #: The logical pairs the ``logical`` shortcuts stand for, which resolution,
     #: ordering and freshness are computed over.
     logical_shortcuts: tuple[RepositoryShortcut, ...] = ()
-    #: Every shortcut each item declares, as authored. This keeps the intent,
-    #: including the physical declarations that name a Fabric item and so have
-    #: no logical source.
+    #: Every shortcut each item declares, as authored and as generated. This
+    #: holds the intent, including the physical declarations that name a Fabric
+    #: item and so have no logical source, and the Weaver-owned standard
+    #: catalogue surface composed in before resolution.
     shortcuts: tuple[ShortcutDeclaration, ...] = ()
-    #: Authored and package-owned shortcut declarations presented to physical
-    #: planning. Repository preparation fills this after injecting runtime
-    #: relations, while :attr:`shortcuts` remains the authored surface.
-    planned_shortcuts: tuple[ShortcutDeclaration, ...] = ()
     dependency_edges: tuple[ItemDependency, ...] = ()
     dependency_graph: object | None = None
     #: The item-level graph over :attr:`items`, and its topological layers.

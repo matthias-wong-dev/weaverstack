@@ -28,15 +28,16 @@ PROCEDURE_ITEM = ("Warehouse", "Reporting")
 def install_runtime_references(executor: SqlExecutor, catalogue: str) -> None:
     """What a build gives every Warehouse it installs something runnable into.
 
-    The catalogue's runtime tables under their own names. A generated procedure
-    reads a bookmark and records what it did through these, so one installed by
-    hand needs the same references a built one is given.
+    The standard Weaver catalogue surface under its own names. A generated
+    procedure reads a bookmark and records what it did through these, and the
+    fixed entry points resolve their logical item through ``_.Installation``,
+    so one installed by hand needs the same references a built one is given.
     """
 
-    from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES
+    from weaver.catalogue.tables import STANDARD_SURFACE_TABLES
 
     executor.execute_script("if schema_id(N'_') is null exec('create schema [_]');")
-    for table in PRESENTED_RUNTIME_TABLES:
+    for table in STANDARD_SURFACE_TABLES:
         # One statement per batch: T-SQL requires CREATE VIEW to lead its own.
         executor.execute_script(
             f"create or alter view [_].[{table.name}] as "

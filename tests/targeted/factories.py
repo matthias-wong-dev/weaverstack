@@ -39,8 +39,8 @@ from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.state import Catalogue, RegisteredDocument
 from weaver.catalogue.tables import (
     CATALOGUE_SCHEMA,
-    PRESENTED_RUNTIME_TABLES,
     REGISTRY,
+    STANDARD_SURFACE_TABLES,
 )
 from weaver.declaration import parse_item_repository
 from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
@@ -48,7 +48,6 @@ from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.etl import (
     FILE_TYPE,
     PROCEDURE_TYPE,
-    item_presents_runtime_tables,
     item_runtime_artefacts,
     load_schemas,
 )
@@ -459,18 +458,16 @@ class FixtureInventory(TargetInventory):
         views = qualified(of_kind="View", files=False)
         folders = qualified(of_kind="Folder", files=True)
         artefacts = item_runtime_artefacts(repository, item=item)
-        if target_kind == SQL_TARGET and item_presents_runtime_tables(
-            repository, item=item
-        ):
-            # A built Warehouse holds the catalogue's runtime tables under their
-            # own names, so a generated procedure can read its own bookmark and
-            # record what it did.
+        if target_kind == SQL_TARGET and str(item) != "Warehouse/_weaver":
+            # A built Warehouse holds the standard Weaver catalogue surface
+            # under its own names, so a generated procedure can read its own
+            # bookmark and record what it did.
             views = tuple(
                 sorted(
                     views
                     + tuple(
                         f"{CATALOGUE_SCHEMA}.{table.name}"
-                        for table in PRESENTED_RUNTIME_TABLES
+                        for table in STANDARD_SURFACE_TABLES
                     )
                 )
             )
@@ -504,14 +501,8 @@ class FixtureInventory(TargetInventory):
             ),
             runtime_references=(
                 ()
-                if target_kind == SQL_TARGET
-                else tuple(
-                    sorted(
-                        table.name
-                        for table in PRESENTED_RUNTIME_TABLES
-                        if item_presents_runtime_tables(repository, item=item)
-                    )
-                )
+                if target_kind == SQL_TARGET or str(item) == "Warehouse/_weaver"
+                else tuple(sorted(table.name for table in STANDARD_SURFACE_TABLES))
             ),
         )
 
@@ -570,15 +561,15 @@ def catalogue_inventory(
 
     from weaver.catalogue.tables import (
         CATALOGUE_SCHEMA,
-        PRESENTED_RUNTIME_TABLES,
         PROJECTED_TABLES,
+        STANDARD_SURFACE_TABLES,
     )
 
     held = tuple(
         f"{CATALOGUE_SCHEMA}.{table.name}"
         for table in (
             *PROJECTED_TABLES,
-            *(PRESENTED_RUNTIME_TABLES if holding else ()),
+            *(STANDARD_SURFACE_TABLES if holding else ()),
         )
     )
     return target_inventory(

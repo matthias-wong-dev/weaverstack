@@ -953,10 +953,6 @@ class RuntimeTable:
     rather than inferred: an appended table has a key too, so the presence of one
     settles nothing. ``invalidated_by`` names the population whose rebuild ends a
     current-state row, and is None for history, which nothing invalidates.
-
-    ``presented`` says whether a built target is given this table under its own
-    name, being a view in a Warehouse and a OneLake shortcut in a Lakehouse, so a
-    generated procedure and authored Spark SQL can reach it.
     """
 
     name: str
@@ -965,7 +961,6 @@ class RuntimeTable:
     key: tuple[str, ...] = ()
     maintenance: str = HISTORY
     invalidated_by: str | None = None
-    presented: bool = True
 
     @property
     def is_current_state(self) -> bool:
@@ -1317,6 +1312,18 @@ TEST_STATUS = RuntimeTable(
 #: The catalogue tables maintained during execution.
 RUNTIME_TABLES = (LOG, BOOKMARK, LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
 
+#: The standard Weaver catalogue surface every normal bound item presents.
+#:
+#: A built target is given each of these under its own name, being a view in a
+#: Warehouse and a OneLake shortcut in a Lakehouse, so a generated procedure,
+#: authored Spark SQL and the fixed ``_.Load`` / ``_.Test`` entry points can
+#: reach Weaver's operational state. ``_.Installation`` is part of the surface:
+#: an installed item reads where it is bound, and the Warehouse entry points
+#: recover their logical item from it. When that item is the Warehouse holding
+#: the catalogue, the tables are already there and the planner creates nothing;
+#: that is physical planning, not a different logical surface.
+STANDARD_SURFACE_TABLES = (INSTALLATION,) + RUNTIME_TABLES
+
 #: The runtime tables describing one object's state now. A build ends the
 #: incarnation these describe; the rest is history and survives it.
 CURRENT_STATE_TABLES = tuple(
@@ -1325,9 +1332,6 @@ CURRENT_STATE_TABLES = tuple(
 
 #: The runtime tables recording what happened. Never invalidated.
 HISTORY_TABLES = tuple(table for table in RUNTIME_TABLES if table.is_history)
-
-#: The runtime tables a built target is given under their own names.
-PRESENTED_RUNTIME_TABLES = tuple(table for table in RUNTIME_TABLES if table.presented)
 
 #: Every catalogue table, however it is maintained.
 CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
