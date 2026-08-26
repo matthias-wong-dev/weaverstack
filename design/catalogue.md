@@ -482,19 +482,28 @@ In Python that is `_load()` against `load()` for a Table and a Folder, and
 `_.Test`. Nothing takes a parameter about it, so one row has one writer without a
 caller having to get a boolean right.
 
-`_.Load` and `_.Test` are the two generic entry points, generated per Warehouse
-item and registered like any other artefact — signed, incrementally selected, and
-pruned when the item's last load or validation goes. They carry the role `entry`,
-which nothing schedules: a load procedure with role `load` would be run by
-`weaver load`, and there is no object for an entry point to load. `_.Test`
-dispatches to a Test or an Assumption, because a person asking about a validation
-by name should not have to know which it was declared as; there is no `_.Assumption`.
+`_.Load` and `_.Test` are the two generic entry points: fixed Weaver-owned
+procedures whose content is the same for every Warehouse item and does not
+change when loadable objects or validations come and go. They are registered
+like any other artefact — signed, incrementally selected, and pruned when their
+item's procedures go. They carry the role `entry`, which nothing schedules: a
+load procedure with role `load` would be run by `weaver load`, and there is no
+object for an entry point to load. `_.Test` dispatches to a Test or an
+Assumption, because a person asking about a validation by name should not have
+to know which it was declared as; there is no `_.Assumption`.
 
-Dispatch inside them is a static chain over the objects the item installs rather
-than dynamic SQL. That is what lets the lower procedure's output parameters be
-read directly, makes a name the item does not install a refusal rather than a
-failure inside a string, and settles which kind a validation is at generation from
-the declaration.
+Dispatch reads the physical estate instead of enumerating it. `_.Load` checks
+`object_id` for the implementation procedure named after the requested object,
+and refuses an unknown name before anything is recorded. `_.Test` asks which of
+`_[Test X.Y]` and `_[Assumption X.Y]` exists, runs the one that does, and
+refuses an installation holding both as broken rather than choosing between
+them; what the Warehouse holds is the answer, not the Registry.
+
+Each entry point takes an optional `@item_name`. Supplied, it is used as given,
+so a caller that already knows the logical item needs no lookup. Omitted, the
+procedure recovers it from `_.Installation`: exactly one logical Warehouse item
+bound to this database, and any other answer is refused rather than guessed.
+Because these are Warehouse procedures, the item type needs no parameter.
 
 Generated load procedures own the `@weaver_*` variable namespace. Their physical
 outputs are `@weaver_succeeded`, `@weaver_rows_read`,
