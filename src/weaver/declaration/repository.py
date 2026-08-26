@@ -47,6 +47,7 @@ from .model import (
     WeaverSchemaId,
 )
 from .references import validate_repository_metadata
+from .programmable import PROGRAMMABLES_DIRECTORY, read_programmable
 from .schemas import SchemaSes, read_schema_document
 from .shortcuts import (
     LAKEHOUSE_FILE,
@@ -82,8 +83,8 @@ VALIDATION_DIRECTORIES = {"tests": TEST, "assumptions": ASSUMPTION}
 
 #: The subdirectories an item may author, for the message that lists them.
 _AUTHORED_SUBDIRECTORIES = (
-    "only schemas/, lib/, tests/, assumptions/ and Lakehouse Files/ are authored "
-    "subdirectories of an item"
+    "only schemas/, lib/, tests/, assumptions/, Warehouse programmables/ and "
+    "Lakehouse Files/ are authored subdirectories of an item"
 )
 
 
@@ -169,6 +170,8 @@ class RepositoryPart:
         default_factory=dict
     )
     schema_documents: Mapping[WeaverSchemaId, SchemaSes] = field(default_factory=dict)
+    #: The stored procedures this part contributes, by owning item.
+    programmables: Mapping[WeaverItemId, tuple] = field(default_factory=dict)
     shortcuts: tuple[ShortcutDeclaration, ...] = ()
     logical_shortcuts: tuple[RepositoryShortcut, ...] = ()
     #: Files whose bytes live in the store rather than in this part, which is
@@ -194,6 +197,7 @@ def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
 
     documents: dict[WeaverDocumentId, SourceDocument] = {}
     schemas: dict[WeaverSchemaId, SchemaSes] = {}
+    programmables: dict = {}
     shortcuts: dict[str, ShortcutDeclaration] = {}
     pairs: dict[str, RepositoryShortcut] = {}
     support: dict[str, bytes] = {}
@@ -206,6 +210,15 @@ def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
             _merge_insert(documents, identity, value, part.label, what="declaration")
         for identity, value in part.schema_documents.items():
             _merge_insert(schemas, identity, value, part.label, what="schema")
+        for item, contributed in part.programmables.items():
+            for programmable in contributed:
+                _merge_insert(
+                    programmables,
+                    programmable.identity,
+                    (item, programmable),
+                    part.label,
+                    what="programmable",
+                )
         for pair in part.logical_shortcuts:
             _merge_insert(
                 pairs, str(pair.destination), pair, part.label, what="logical shortcut"
@@ -231,6 +244,7 @@ def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
         documents=_by_item(parts, "documents", sorted(item_ids)),
         validations=_by_item(parts, "validations", sorted(item_ids)),
         schemas=_by_item(parts, "schemas", sorted(item_ids)),
+        programmables=_programmables_by_item(programmables),
         source_documents=documents,
         schema_documents=schemas,
         shortcuts=tuple(
@@ -259,6 +273,15 @@ def _by_item(
         for item, declarations in getattr(part, name).items():
             merged.setdefault(item, []).extend(declarations)
     return {item: tuple(found) for item, found in merged.items()}
+
+
+def _programmables_by_item(programmables: dict) -> dict[WeaverItemId, tuple]:
+    """The merged programmables, regrouped by owning item."""
+
+    merged: dict[WeaverItemId, list] = {}
+    for _identity, (item, programmable) in programmables.items():
+        merged.setdefault(item, []).append(programmable)
+    return {item: tuple(sorted(found, key=lambda each: str(each.identity))) for item, found in merged.items()}
 
 
 def _merge_insert(destination: dict, identity, value, label: str, *, what: str) -> None:
@@ -419,6 +442,8 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             continue
         if within[0] == "lib" and item.item_type == LAKEHOUSE:
             continue
+        if within == [PROGRAMMABLES_DIRECTORY] and item.item_type == WAREHOUSE:
+            continue
         if within[0] in VALIDATION_DIRECTORIES and len(within) == 1:
             continue
         raise DiscoveryError(f"{relative}: {_AUTHORED_SUBDIRECTORIES}")
@@ -459,6 +484,9 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     }
     #: Validation declarations, separate from materialised objects.
     validations_by_item: dict[WeaverItemId, list[WeaverDocumentId]] = {
+        item: [] for item in item_ids
+    }
+    programmables_by_item: dict[WeaverItemId, list] = {
         item: [] for item in item_ids
     }
 
@@ -514,6 +542,20 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
                 schema_documents, identity, schema, relative, what="schema"
             )
             schemas_by_item[item].append(identity)
+            continue
+
+        if within[0] == PROGRAMMABLES_DIRECTORY:
+            if len(within) != 2:
+                raise DiscoveryError(
+                    f"{relative}: a programmable lives directly under "
+                    f"{PROGRAMMABLES_DIRECTORY}/, with no further subdirectories"
+                )
+            programmable = read_programmable(
+                relative,
+                store.read(root.join(*relative.split("/"))),
+                owner=item,
+            )
+            programmables_by_item[item].append(programmable)
             continue
 
         if within[0] in VALIDATION_DIRECTORIES:
@@ -641,6 +683,11 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         },
         source_documents=source_documents,
         schema_documents=schema_documents,
+        programmables={
+            item: tuple(sorted(found, key=lambda each: str(each.identity)))
+            for item, found in programmables_by_item.items()
+            if found
+        },
         shortcuts=shortcuts,
         logical_shortcuts=logical_shortcuts,
         store_files=tuple(files),
@@ -738,6 +785,7 @@ def compose_repository(
         schemas = tuple(sorted(merged.schemas.get(item_id, ()), key=str))
         documents = tuple(sorted(merged.documents.get(item_id, ()), key=str))
         validations = tuple(sorted(merged.validations.get(item_id, ()), key=str))
+        programmables = merged.programmables.get(item_id, ())
         declared = {schema.schema for schema in schemas}
         # Validations must use an item-declared schema.
         for document_id in documents + validations:
@@ -753,6 +801,7 @@ def compose_repository(
                 schemas=schemas,
                 documents=documents,
                 validations=validations,
+                programmables=programmables,
             )
         )
 
@@ -784,6 +833,11 @@ def compose_repository(
         items=tuple(items),
         source_documents=source_documents,
         schema_documents=merged.schema_documents,
+        programmables={
+            programmable.identity: programmable
+            for model in items
+            for programmable in model.programmables
+        },
         support_files=merged.support_files,
         support_file_contents=merged.support_file_contents,
         signature=_repository_signature(merged, store, root),
@@ -979,6 +1033,13 @@ def _item_signature(
     for identity in item.schemas:
         schema = schema_documents[identity]
         entries.append((schema.relative_path, schema.source_hash))
+    # An authored programmable is item source: its content belongs to what the
+    # signature certifies. A generated one signs itself, as every artefact does.
+    for programmable in item.programmables:
+        if programmable.relative_path is not None:
+            entries.append(
+                (programmable.relative_path, programmable.signature)
+            )
 
     prefix = f"{item.identity.item_type}/{item.identity.item_name}/"
     for relative in support_files:

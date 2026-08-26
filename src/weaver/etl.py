@@ -360,11 +360,39 @@ def _warehouse_artefacts(
     person calls to run one and have the outcome recorded. Registered like any
     other artefact, so they are signed, selected incrementally and pruned when
     the item's last load or validation goes.
+
+    The item's Programmables install through the same layer: one procedure per
+    declaration, whatever produced it.
     """
 
-    return _load_procedures(repository, item=item) + _entry_artefacts(
-        repository, item=item
+    return (
+        _programmable_artefacts(repository, item=item)
+        + _load_procedures(repository, item=item)
+        + _entry_artefacts(repository, item=item)
     )
+
+
+def _programmable_artefacts(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[RuntimeArtefact, ...]:
+    """One artefact per stored procedure the repository manages for this item."""
+
+    found = []
+    for programmable in repository.programmables.values():
+        if programmable.identity.item != item:
+            continue
+        found.append(
+            RuntimeArtefact(
+                identity=programmable.identity,
+                object_type=PROCEDURE_TYPE,
+                signature=programmable.signature,
+                payload=programmable.payload,
+                role=programmable.role,
+                origin=programmable.origin,
+                source_path=programmable.relative_path,
+            )
+        )
+    return tuple(sorted(found, key=lambda artefact: str(artefact.identity)))
 
 
 def _load_procedures(

@@ -482,7 +482,13 @@ def test_external_references_are_item_local_and_one_source_may_repeat(tmp_path):
             f"  {item}/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
         )
     repository = parse_item_repository(Location(str(root)))
-    authored = repository.shortcuts
+    # Weaver-owned surface references are composed in as well; the authored
+    # declarations are the ones a file carries.
+    authored = [
+        shortcut
+        for shortcut in repository.shortcuts
+        if shortcut.destination_identity is None
+    ]
 
     assert len(authored) == 2
     assert authored[0].target == authored[1].target

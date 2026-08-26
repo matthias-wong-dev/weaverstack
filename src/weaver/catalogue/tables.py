@@ -50,6 +50,10 @@ ROLE_SHORTCUT = "shortcut"
 #: nothing schedules one. A load procedure with this role would be run by
 #: ``weaver load``, and there is no object for it to load.
 ROLE_ENTRY = "entry"
+#: An authored stored procedure an item manages. Weaver creates, replaces and
+#: prunes it, and nothing schedules it: it runs when a person or another system
+#: calls it.
+ROLE_PROGRAMMABLE = "programmable"
 OBJECT_ROLES = (
     ROLE_DATA,
     ROLE_LOAD,
@@ -57,6 +61,7 @@ OBJECT_ROLES = (
     ROLE_ASSUMPTION,
     ROLE_SHORTCUT,
     ROLE_ENTRY,
+    ROLE_PROGRAMMABLE,
 )
 
 #: The roles a runtime artefact carries, being everything installed to be run
@@ -89,6 +94,7 @@ OBJECT_ROLE_VOCABULARY = {
     ROLE_ASSUMPTION: "Assumption",
     ROLE_SHORTCUT: "Shortcut",
     ROLE_ENTRY: "Entry point",
+    ROLE_PROGRAMMABLE: "Programmable",
 }
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}

@@ -696,6 +696,10 @@ class WeaverItem:
     #: in the estate, and the answer must not include a Test because a
     #: Test has a Schema.Object identity too.
     validations: tuple[WeaverDocumentId, ...] = ()
+    #: The stored procedures this item manages, authored and generated alike.
+    #: A procedure is repository content with the ordinary managed lifecycle,
+    #: not something inferred from what else the item declares.
+    programmables: tuple[object, ...] = ()
     signature: str = ""
 
     def __post_init__(self) -> None:
@@ -706,10 +710,19 @@ class WeaverItem:
                 raise DiscoveryError(
                     f"every document must belong to item {self.identity}"
                 )
+        for programmable in self.programmables:
+            if programmable.identity.item != self.identity:
+                raise DiscoveryError(
+                    f"every programmable must belong to item {self.identity}"
+                )
         _reject_duplicates(self.schemas, what="schema")
         # One namespace across both, so a Test and a Table cannot both claim
         # Sales.Order inside one item.
         _reject_duplicates(self.documents + self.validations, what="document")
+        _reject_duplicates(
+            tuple(each.identity for each in self.programmables),
+            what="programmable",
+        )
 
     @property
     def declarations(self) -> tuple[WeaverDocumentId, ...]:
@@ -740,6 +753,10 @@ class WeaverRepository:
         default_factory=dict
     )
     schema_documents: Mapping[WeaverSchemaId, "SchemaSes"] = field(default_factory=dict)
+    #: The stored procedures the repository manages, by identity. Authored
+    #: content, generated infrastructure and Weaver's own entry points are all
+    #: here, behind one lifecycle.
+    programmables: Mapping[WeaverDocumentId, object] = field(default_factory=dict)
     support_files: tuple[str, ...] = ()
     #: The bytes of the support files a build has to carry, by the same
     #: repository-relative path. A ``lib/`` module is authored source that no
