@@ -310,9 +310,11 @@ its executor from the Session, so it reuses the warm connection and its crossing
 reach this ledger; a connection of its own emitted no Session telemetry, which is
 why earlier readings understated the reset.
 
-Earlier, `test_run_decomposition_boundary.py` stopped parametrising
-`weaver_repo_fixture` with the value it already defaults to, which forced an
-estate of its own for nothing.
+Then the estates themselves. `test_installed_estate_boundary.py` is three
+modules that each built the same repository, and six modules whose claims the
+acceptance journey or the core suite already make are gone. That took remote and
+hosted from 38m34s to about 24 minutes. The commit messages carry what each one
+covered and what stopped being covered.
 
 ## Test estate hygiene
 
