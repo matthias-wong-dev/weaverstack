@@ -363,6 +363,24 @@ what a session reports as its attachment and where it mounts it, so no local tes
 can settle it, and it costs one submission against the session the suite already
 holds.
 
+Measured after that pass, against `PYTEST_WORKSPACE`:
+
+```text
+pytest                          3,506 tests     9m 31s
+pytest -m "fabric and remote"     116 tests    16m 07s
+pytest -m "fabric and hosted"      25 tests     5m 30s
+pytest -m full_integration         11 tests    36m 40s
+```
+
+Remote is the larger half of remote plus hosted, and TDS is where it goes: 710
+operations and 497s of them, with the catalogue-upgrade builds at the top. Hosted
+carries two bundle installs, 103s of the 5m 30s.
+
+The journey's cost is its scope. Seven builds, five loads, four test runs and two
+wipes over a four-item estate, and Livy is 1,368s of it. Its own largest scenario
+is the failed build and its recovery, at 443s, which drives a failed build, a
+repair, two more builds, a load and a test.
+
 ## Test estate hygiene
 
 Fixed items reduce endpoint readiness variance and Fabric namespace churn.

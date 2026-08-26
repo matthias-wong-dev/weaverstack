@@ -23,8 +23,9 @@ against this estate, at no extra Livy cost:
 - one endpoint refresh stands between the Curated loads and the Serving loads;
 - a load reads the foreign estate through a table, a folder and a schema
   shortcut;
-- a failed build takes certification and bookmarks with it, and the repaired
-  build and the load after it put both back.
+- a failed build takes the certification and the bookmark of the table it was
+  replacing, leaves a protected table's alone, and the repaired build and the
+  load after it put the first pair back.
 """
 
 from __future__ import annotations
@@ -621,18 +622,21 @@ def test_an_unchanged_build_is_a_true_fixed_point(acceptance):
     resolver = acceptance.session.resolver(acceptance.workspace)
     landing_location = resolver.lakehouse_spark_location(ItemRef(landing_name))
     landing = _item(acceptance, "Lakehouse/Landing")
+    # `Source.Region` is a table shortcut into the foreign Warehouse's stable
+    # schema, so its two rows are the rows provisioning wrote and no scenario
+    # moves them.
     step.observation = _observe(
         acceptance,
         {
-            "named_product": (f"select ProductId from {landing}.`Source`.`Product`"),
-            "delta_product": (
-                "select ProductId from delta.`"
-                f"{landing_location.table_path('Source', 'Product')}`"
+            "named_region": (f"select RegionId from {landing}.`Source`.`Region`"),
+            "delta_region": (
+                "select RegionId from delta.`"
+                f"{landing_location.table_path('Source', 'Region')}`"
             ),
         },
     )
-    assert _ids(step.observation, "named_product", "ProductId") == [10, 20]
-    assert _ids(step.observation, "delta_product", "ProductId") == [10, 20]
+    assert _ids(step.observation, "named_region", "RegionId") == [1, 2]
+    assert _ids(step.observation, "delta_region", "RegionId") == [1, 2]
 
 
 # --- Scenario C: the first end-to-end load ----------------------------------
@@ -1164,8 +1168,12 @@ REPAIR_EDITS = (
 
 #: The estate's incremental object, as the catalogue keys it. Its load reads the
 #: source rows changed since the bookmark it holds, so an absent bookmark reads
-#: the whole source and a stale one reads almost nothing. Protected from rebuild,
-#: so the failing revision selects it without dropping it.
+#: the whole source and a stale one reads almost nothing.
+#:
+#: Declared ``Prohibit rebuild``, so the failing revision's change to it is not
+#: selected at all. That is what makes it the other half of this scenario: the
+#: incremental position of a protected object survives a build that fails around
+#: it.
 INCREMENTAL = ("Lakehouse", "Curated", "CUR", "Customer")
 
 #: The object the failing revision replaces. A new column on an unprotected table
@@ -1231,11 +1239,11 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     build discovers physical truth and converges without manual cleanup.
 
     Proof: one revision where Landing and Curated legitimately change and Serving
-    cannot install. The build fails, Landing's work is really there, the
-    replaced table is uncertified and every selected object has lost its
-    bookmark, and after repairing only the invalid definition the next build
-    succeeds, the estate reloads without accumulating rows, and the load after
-    that reads nothing.
+    cannot install. The build fails, Landing's work is really there, the replaced
+    table has lost its certification and its bookmark, and the protected table
+    has kept both. Repairing only the invalid definition makes the next build
+    succeed, and the load after it reseeds the replaced object from nothing while
+    the protected one carries on from where it was.
     """
 
     acceptance.require("test-changed")
@@ -1243,10 +1251,13 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     # The loads so far carried both objects forward, so each holds a bookmark of
     # its own and a certification from the build that made it.
     assert len(_certifications(acceptance, REPLACED)) == 1
+    assert len(_certifications(acceptance, INCREMENTAL)) == 1
+    before = {}
     for key in (REPLACED, INCREMENTAL):
         advanced = _bookmarks(acceptance, key)
         assert len(advanced) == 1, key
         assert advanced[0] > SENTINEL, key
+        before[key] = advanced[0]
 
     acceptance.step("break", lambda: _edit(acceptance, BREAKING_EDITS))
     acceptance.require("break")
@@ -1268,19 +1279,20 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     )
     assert "productlabel" in partial.values("product", "col_name")
 
-    # Certification and current state both go before any physical work, and
-    # publication is what puts certification back. This build never reached it.
-    #
-    # The two follow different rules, and this revision separates them.
-    # Decertification follows the drop, so the replaced table is uncertified.
-    # Invalidation follows the selection, so both objects lose their bookmark,
-    # including the protected one whose table stayed where it was. That ordering
-    # is the safety property: the next load reads the whole source rather than
+    # Decertification and invalidation both happen before any physical work, and
+    # publication is what puts certification back. This build never reached it,
+    # so the replaced table is uncertified and holds no bookmark. That ordering is
+    # the safety property: the next load reads the whole source rather than
     # reading almost nothing over a table that was replaced.
     assert _certifications(acceptance, REPLACED) == []
     assert _bookmarks(acceptance, REPLACED) == []
+
+    # And the protected table kept both. Its declaration changed in this same
+    # revision, and `Prohibit rebuild` keeps it out of the selection, so there
+    # was no incarnation to end: the physical table stands and the position it
+    # had loaded to is still recorded.
     assert len(_certifications(acceptance, INCREMENTAL)) == 1
-    assert _bookmarks(acceptance, INCREMENTAL) == []
+    assert _bookmarks(acceptance, INCREMENTAL) == [before[INCREMENTAL]]
 
     acceptance.step("repair", lambda: _edit(acceptance, REPAIR_EDITS))
     acceptance.require("repair")
@@ -1305,7 +1317,6 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     # and still no bookmark, because a build records how far nothing has loaded.
     assert len(_certifications(acceptance, REPLACED)) == 1
     assert _bookmarks(acceptance, REPLACED) == []
-    assert _bookmarks(acceptance, INCREMENTAL) == []
 
     # No manual cleanup: the corrected build settles on the next attempt.
     settled = acceptance.step(
@@ -1329,14 +1340,21 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     assert reloaded.succeeded, reloaded.to_mapping()
     _assert_load_status(acceptance, reloaded)
 
-    # The bookmarks are back, seeded by the load rather than by the build, and
-    # the load that seeded them read from the sentinel. Reading the whole window
-    # again merged on the key: three customers, not six.
-    for key in (REPLACED, INCREMENTAL):
-        reseeded = _bookmarks(acceptance, key)
-        assert len(reseeded) == 1, key
-        assert reseeded[0] > SENTINEL, key
-    assert _rows_read(acceptance, INCREMENTAL, reloaded.workflow_id) == [3]
+    # The replaced object's bookmark is back, seeded by the load rather than by
+    # the build, and later than the one the failed build took away. It read its
+    # source whole, which is what a non-incremental object always reads.
+    reseeded = _bookmarks(acceptance, REPLACED)
+    assert len(reseeded) == 1
+    assert reseeded[0] > before[REPLACED]
+    assert _rows_read(acceptance, REPLACED, reloaded.workflow_id) == [2]
+
+    # The protected object carried on from the position it kept. Nothing moved at
+    # the source, so its window was empty and it merged nothing: three customers,
+    # not six.
+    carried = _bookmarks(acceptance, INCREMENTAL)
+    assert len(carried) == 1
+    assert carried[0] > before[INCREMENTAL]
+    assert _rows_read(acceptance, INCREMENTAL, reloaded.workflow_id) == [0]
 
     curated = _item(acceptance, "Lakehouse/Curated")
     step = acceptance.steps["load-repaired"]
@@ -1358,20 +1376,6 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     acceptance.require("test-repaired")
     assert tested.totals()["failed"] == 0, tested.to_mapping()
     assert tested.totals()["invalid"] == 0, tested.to_mapping()
-
-    # One more load, over the item holding the reseeded bookmark. Nothing moved
-    # at the source, so the window is empty and the reseeded bookmark carried the
-    # incremental object forward.
-    acceptance.step(
-        "load-settled",
-        lambda: weaver.load(
-            [acceptance.physical["Lakehouse/Curated"]], session=acceptance.session
-        ),
-    )
-    acceptance.require("load-settled")
-    settled_load = acceptance["load-settled"].result
-    assert settled_load.succeeded, settled_load.to_mapping()
-    assert _rows_read(acceptance, INCREMENTAL, settled_load.workflow_id) == [0]
 
 
 # --- Scenario H: the ownership boundary -------------------------------------
