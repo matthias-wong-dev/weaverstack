@@ -1,11 +1,17 @@
-"""The catalogue shares a Warehouse without touching user-owned schemas."""
+"""The catalogue shares a Warehouse with a user-owned schema.
+
+Weaver owns ``_`` in the catalogue Warehouse and nothing else, so a neighbour's
+schema sits beside it. This reads the Warehouse and finds both.
+
+That a build reconciling the catalogue leaves the neighbour alone was a hosted
+claim here, costing a full cross-item build for one assertion. The acceptance
+journey builds and reconciles the same catalogue.
+"""
 
 from __future__ import annotations
 
 import pytest
 from support.weaver_test import weaver_test
-
-import weaver
 
 NEIGHBOUR_SCHEMA = "Finance"
 NEIGHBOUR_TABLE = "Ledger"
@@ -54,51 +60,6 @@ def _objects(sql, schema: str) -> set[str]:
         f"where TABLE_SCHEMA = N'{schema}'"
     )
     return {str(row["TABLE_NAME"]) for row in rows}
-
-
-@weaver_test(hosted=True, resources={"livy", "onelake", "rest", "tds"})
-def test_a_build_reconciling_the_catalogue_leaves_a_neighbour_untouched(
-    neighbour,
-    weaver_session,
-    fabric_workspace,
-    fabric_target_lakehouse,
-    fabric_empty_lakehouse,
-    tmp_path_factory,
-):
-    """Catalogue reconciliation leaves a neighbouring schema unchanged."""
-
-    from support.build_envs import CROSS_ITEM_JOURNEY_FIXTURE, DESKTOP_JOURNEY_NAMES
-
-    before = _objects(neighbour, NEIGHBOUR_SCHEMA)
-    assert before == {NEIGHBOUR_TABLE, NEIGHBOUR_VIEW}, (
-        "the neighbour was not seeded, so this would pass for the wrong reason"
-    )
-
-    fabric_empty_lakehouse(fabric_target_lakehouse.name)
-
-    estate = CROSS_ITEM_JOURNEY_FIXTURE.renamed(
-        tmp_path_factory.mktemp("shared-host"), DESKTOP_JOURNEY_NAMES
-    )
-    lakehouse = f"Lakehouse/{fabric_target_lakehouse.name}"
-    built = weaver.build(
-        str(estate.path),
-        bind=[f"{lakehouse}=Stock"],
-        session=weaver_session,
-    )
-    assert built.status == "succeeded", [
-        (failure.action_id, failure.message) for failure in built.errors
-    ]
-
-    assert _objects(neighbour, NEIGHBOUR_SCHEMA) == before
-    rows = neighbour.query(
-        f"select count(*) as n from [{NEIGHBOUR_SCHEMA}].[{NEIGHBOUR_VIEW}]"
-    )
-    assert rows[0]["n"] == 2
-
-    certified = neighbour.query(
-        "select count(*) as n from [_].[Registry] where [Item name] = N'Stock'"
-    )
-    assert certified[0]["n"] > 0
 
 
 @weaver_test(remote=True, resources={"tds"})

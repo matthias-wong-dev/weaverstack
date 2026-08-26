@@ -1593,29 +1593,6 @@ def _empty_the_catalogue(workspace, session) -> None:
 
 
 @pytest.fixture(scope="module")
-def fabric_session_env(request):
-    """A Fabric session and a destination, with nothing built into it.
-
-    For a module whose subject runs in the session and arranges its own target.
-    It skips the generate and install that `fabric_lakehouse_estate` pays for,
-    which is about a minute, and says in the asking that no installed object is
-    part of the claim.
-    """
-
-    with _fabric_build_context(
-        request.getfixturevalue("fabric_workspace_item"),
-        request.getfixturevalue("fabric_client"),
-        request.getfixturevalue("fabric_workspace"),
-        request.getfixturevalue("fabric_target_lakehouse"),
-        request.getfixturevalue("fabric_staging_lakehouse"),
-        request.getfixturevalue("livy_session"),
-        LAKEHOUSE_JOURNEY_FIXTURE,
-        weaver_session=request.getfixturevalue("weaver_session"),
-    ) as env:
-        yield env
-
-
-@pytest.fixture(scope="module")
 def fabric_lakehouse_estate(request, weaver_repo_fixture):
     """One Fabric Lakehouse estate, installed once per module."""
 

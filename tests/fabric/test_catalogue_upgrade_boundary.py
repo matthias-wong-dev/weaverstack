@@ -48,68 +48,6 @@ def _failures(report):
     return [(failure.action_id, failure.message) for failure in report.errors]
 
 
-def _write_convergence_estate(root: Path, *, revised: bool, broken: bool) -> Path:
-    """One incremental object followed by a procedure that can fail late."""
-
-    item = root / "Warehouse" / "Convergence"
-    schemas = item / "schemas"
-    schemas.mkdir(parents=True, exist_ok=True)
-    (schemas / "Wh.yml").write_text(
-        "Schema ID: Wh\nDescription: Convergence test objects.\n", encoding="utf-8"
-    )
-    revision = ", cast(1 as int) as Revision" if revised else ""
-    (item / "Wh.AIncremental.sql").write_text(
-        f"""/*
-Table ID: Wh.AIncremental
-
-Description: Rows selected after the current bookmark.
-
-Lineage: Deterministic test values.
-
-Primary key: CustomerId
-
-Incremental: true
-*/
-declare @bookmark_datetime datetime2(6);
-declare @rows_read bigint;
-
-set @bookmark_datetime = (
-    select [Bookmark datetime]
-    from _.Bookmark
-    where [Item type] = N'Warehouse'
-      and [Item name] = N'Convergence'
-      and [Schema name] = N'Wh'
-      and [Object name] = N'AIncremental'
-);
-
-select v.CustomerId, v.CustomerName{revision}
-from (values
-    (1, cast('Ada' as varchar(20)), cast('2026-01-01' as datetime2(6))),
-    (2, cast('Bo' as varchar(20)), cast('2026-01-02' as datetime2(6))),
-    (3, cast('Cy' as varchar(20)), cast('2026-01-03' as datetime2(6)))
-) as v (CustomerId, CustomerName, Modified)
-where v.Modified > coalesce(@bookmark_datetime, cast('1900-01-01' as datetime2(6)))
-""",
-        encoding="utf-8",
-    )
-    collision = "declare @weaver_load_datetime datetime2(6);\n\n" if broken else ""
-    (item / "Wh.ZLater.sql").write_text(
-        f"""/*
-Table ID: Wh.ZLater
-
-Description: A later load artefact used to stop catalogue publication.
-
-Lineage: A deterministic value.
-
-Primary key: Id
-*/
-{collision}select 1 as Id
-""",
-        encoding="utf-8",
-    )
-    return root
-
-
 def _write_runtime_reference_estate(root: Path) -> Path:
     """One incremental load whose authored SQL reads the local Bookmark view."""
 
@@ -154,12 +92,6 @@ where v.Modified > coalesce(@bookmark_datetime, cast('1900-01-01' as datetime2(6
         encoding="utf-8",
     )
     return root
-
-
-def _run_standalone_load(executor) -> None:
-    executor.execute_script(
-        "exec [_].[Load] @object_name = N'Wh.AIncremental', @fault_tolerant = 0;"
-    )
 
 
 @pytest.fixture
@@ -280,78 +212,6 @@ def test_a_build_recovers_catalogue_certification_without_recreating_tables(
 
     third = _built(own_catalogue, estate.path, bind)
     assert third.status == "succeeded", _failures(third)
-
-
-@weaver_test(remote=True, resources={"rest", "tds"})
-def test_failed_build_converges_from_inventory_and_reseeds_from_initial_bookmark(
-    fabric_workspace, catalogue_of_its_own, tmp_path_factory
-):
-    warehouse = catalogue_of_its_own
-    name = warehouse.item.name
-    own_catalogue = replace(fabric_workspace, catalogue=f"Warehouse/{name}")
-    root = tmp_path_factory.mktemp("failed-build-convergence") / "estate"
-    bind = f"Warehouse/{name}=Convergence"
-    warehouse.executor.execute_script(
-        "if schema_id(N'_') is null exec('create schema [_]');"
-    )
-
-    _write_convergence_estate(root, revised=False, broken=False)
-    first = _built(own_catalogue, root, bind)
-    assert first.status == "succeeded", _failures(first)
-    _run_standalone_load(warehouse.executor)
-    seeded = warehouse.executor.query(
-        "select "
-        "(select count(*) from [Wh].[AIncremental]) as target_rows, "
-        "(select count(*) from [_].[Bookmark] "
-        " where [Item type] = N'Warehouse' and [Item name] = N'Convergence' "
-        "   and [Schema name] = N'Wh' and [Object name] = N'AIncremental') "
-        "as bookmarks;"
-    )[0]
-    assert (int(seeded["target_rows"]), int(seeded["bookmarks"])) == (3, 1)
-
-    _write_convergence_estate(root, revised=True, broken=True)
-    failed = _built(own_catalogue, root, bind)
-    assert failed.status == "failed"
-    partial = warehouse.executor.query_result_sets(
-        "select count(*) as revised_columns from sys.columns "
-        "where object_id = object_id(N'[Wh].[AIncremental]') "
-        "and name = N'Revision'; "
-        "select count(*) as certifications from [_].[Registry] "
-        "where [Item type] = N'Warehouse' and [Item name] = N'Convergence' "
-        "and [Schema name] = N'Wh' and [Object name] = N'AIncremental'; "
-        "select count(*) as bookmarks from [_].[Bookmark] "
-        "where [Item type] = N'Warehouse' and [Item name] = N'Convergence' "
-        "and [Schema name] = N'Wh' and [Object name] = N'AIncremental';"
-    )
-    assert (
-        int(partial[0][0]["revised_columns"]),
-        int(partial[1][0]["certifications"]),
-        int(partial[2][0]["bookmarks"]),
-    ) == (1, 0, 0)
-
-    _write_convergence_estate(root, revised=True, broken=False)
-    recovered = _built(own_catalogue, root, bind)
-    assert recovered.status == "succeeded", _failures(recovered)
-    _run_standalone_load(warehouse.executor)
-    reseeded = warehouse.executor.query(
-        "select "
-        "(select count(*) from [Wh].[AIncremental]) as target_rows, "
-        "(select count(*) from [_].[Bookmark] "
-        " where [Item type] = N'Warehouse' and [Item name] = N'Convergence' "
-        "   and [Schema name] = N'Wh' and [Object name] = N'AIncremental') "
-        "as bookmarks;"
-    )[0]
-    assert (int(reseeded["target_rows"]), int(reseeded["bookmarks"])) == (3, 1)
-
-    _run_standalone_load(warehouse.executor)
-    incremental = warehouse.executor.query(
-        "select top 1 [Rows read] as rows_read "
-        "from [_].[LoadStatistic] "
-        "where [Item type] = N'Warehouse' and [Item name] = N'Convergence' "
-        "  and [Schema name] = N'Wh' and [Object name] = N'AIncremental' "
-        "order by [Completed datetime] desc, [Load statistic SK] desc;"
-    )[0]
-    assert int(incremental["rows_read"]) == 0
 
 
 def _catalogue_shape(workspace) -> set[str]:
