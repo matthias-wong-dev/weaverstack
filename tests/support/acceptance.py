@@ -1,8 +1,7 @@
 """One acceptance estate, driven through Weaver's public operations.
 
-:class:`~support.build_env.Journey` moves an estate through in-session generate
-and install. This moves one through ``build``, ``load``, ``test`` and ``wipe``
-from the desktop, which is what a user drives.
+This moves one estate through ``build``, ``load``, ``test`` and ``wipe`` from
+the desktop, which is what a user drives.
 
 The no-cascade contract is the same: a failed step is recorded, and every later
 step is skipped naming the step that broke, so a broken journey reports one

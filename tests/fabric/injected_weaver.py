@@ -9,9 +9,9 @@ and puts it first on ``sys.path``.
 The Environment still carries the dependencies (`pyyaml`, `sqlparse`,
 `mssql-python`). What it no longer has to carry is Weaver.
 
-The staged artefact is a built wheel rather than a copy of ``src``. Weaver
-reaches its bundled templates and ``warehouse_type_mapping.yml`` through
-``Path(__file__)``, so a packaging change that dropped them stays visible here.
+A built wheel is staged, and unpacked where it lands. Weaver reaches its bundled
+templates and ``warehouse_type_mapping.yml`` through ``Path(__file__)``, so a
+packaging change that dropped them from the wheel shows up here.
 """
 
 from __future__ import annotations

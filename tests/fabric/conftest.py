@@ -27,7 +27,6 @@ from support import external_estate, provisioning
 from support.build_env import (
     BuildEnv,
     InstallOutcome,
-    Journey,
     PopulatedLakehouse,
     _install_estate,
     _upload_tree,
@@ -1594,14 +1593,13 @@ def _empty_the_catalogue(workspace, session) -> None:
 
 
 @pytest.fixture(scope="module")
-def fabric_lakehouse_journey(request, weaver_repo_fixture):
-    """One Fabric estate for a journey to drive.
+def fabric_session_env(request):
+    """A Fabric session and a destination, with nothing built into it.
 
-    **The transitions are not run here.** A fixture that took every
-    move up front and handed the result to a set of tests would leave each one
-    inspecting the final estate, whatever transition it claimed to be about,
-    and a later move could repair what an earlier one broke, so the earlier
-    assertion would pass on evidence that no longer existed.
+    For a module whose subject runs in the session and arranges its own target.
+    It skips the generate and install that `fabric_lakehouse_estate` pays for,
+    which is about a minute, and says in the asking that no installed object is
+    part of the claim.
     """
 
     with _fabric_build_context(
@@ -1611,37 +1609,10 @@ def fabric_lakehouse_journey(request, weaver_repo_fixture):
         request.getfixturevalue("fabric_target_lakehouse"),
         request.getfixturevalue("fabric_staging_lakehouse"),
         request.getfixturevalue("livy_session"),
-        weaver_repo_fixture,
+        LAKEHOUSE_JOURNEY_FIXTURE,
         weaver_session=request.getfixturevalue("weaver_session"),
     ) as env:
-        yield Journey(env, "lakehouse")
-
-
-@pytest.fixture(scope="module")
-def fabric_cross_item_journey(request, weaver_repo_fixture):
-    """One Fabric estate spanning a Lakehouse and a Warehouse, for a journey.
-
-    The same arrangement as :func:`fabric_mixed_estate`. One bundle installing
-    both halves, so the ordering the build gives them is the ordering a real
-    estate has, and handed over untouched, because a journey's transitions are
-    its subject and a fixture that had already taken them would leave every
-    assertion reading the final estate.
-    """
-
-    warehouse = request.getfixturevalue("clean_disposable_warehouse")
-    with _fabric_build_context(
-        request.getfixturevalue("fabric_workspace_item"),
-        request.getfixturevalue("fabric_client"),
-        request.getfixturevalue("fabric_workspace"),
-        request.getfixturevalue("fabric_target_lakehouse"),
-        request.getfixturevalue("fabric_staging_lakehouse"),
-        request.getfixturevalue("livy_session"),
-        weaver_repo_fixture,
-        warehouse=warehouse,
-        weaver_session=request.getfixturevalue("weaver_session"),
-    ) as env:
-        env.warehouse = warehouse
-        yield Journey(env, "cross-item")
+        yield env
 
 
 @pytest.fixture(scope="module")

@@ -216,6 +216,90 @@ def _assert_load_status(journey, report) -> None:
     assert {row["workflow_id"] for row in rows} == {report.workflow_id}
 
 
+def _run_identities(report) -> set:
+    """Each settled node as the catalogue keys it: schema and object."""
+
+    from weaver.catalogue.claims import bookmark_row
+    from weaver.declaration.model import WeaverDocumentId, parse_installed_identity
+
+    identities = set()
+    for node in report.nodes:
+        if not node.logical_id:
+            continue
+        identity = parse_installed_identity(str(node.logical_id))
+        if not isinstance(identity, WeaverDocumentId):
+            continue
+        row = bookmark_row(identity)
+        identities.add((row["schema_name"], row["object_name"]))
+    return identities
+
+
+def _assert_run_evidence(journey, report, task_type: str) -> None:
+    """What a run left in `_.Log`, and in the tables that answer for its kind.
+
+    `_.LoadStatus` says the current state and `_assert_load_status` reads it. This
+    is the rest of the operational record: the history `_.Log` keeps of every
+    settled node, the counts `_.LoadStatistic` keeps of what a load moved, the
+    position `_.Bookmark` keeps for each loadable object, and the outcome
+    `_.TestStatus` keeps per validation.
+
+    Held here because this is the run that produced them. It moved from the
+    desktop journey, which drove a build, load and test of its own to reach the
+    same tables.
+    """
+
+    assert report.workflow_id
+    log = _catalogue_rows(
+        journey,
+        "select [Log SK] as log_sk, [Task type] as task_type, "
+        "[Schema name] as schema_name, [Object name] as object_name, "
+        "[Result] as result from [_].[Log] "
+        f"where [Workflow ID] = N'{report.workflow_id}'",
+    )
+    assert len(log) == len(report.nodes)
+    assert {row["task_type"] for row in log} == {task_type}
+    assert {row["result"] for row in log} == {"Succeeded"}
+    assert all(row["log_sk"] for row in log)
+
+    settled = _run_identities(report)
+    if task_type == "load":
+        statistics = _catalogue_rows(
+            journey,
+            "select [Schema name] as schema_name, [Object name] as object_name, "
+            "[Rows read] as rows_read, [Is reload] as is_reload "
+            f"from [_].[LoadStatistic] where [Workflow ID] = N'{report.workflow_id}'",
+        )
+        assert {
+            (row["schema_name"], row["object_name"]) for row in statistics
+        } == settled
+        assert not [row for row in statistics if row["is_reload"]]
+        # One object read something. An estate whose every count were zero would
+        # satisfy the shape of this with nothing having moved.
+        assert [row for row in statistics if (row["rows_read"] or 0) > 0]
+
+        bookmarks = _catalogue_rows(
+            journey,
+            "select [Schema name] as schema_name, [Object name] as object_name "
+            "from [_].[Bookmark]",
+        )
+        # A view has no load, so it is among the nodes and not here.
+        assert {
+            (row["schema_name"], row["object_name"]) for row in bookmarks
+        } <= settled
+        return
+
+    status = _catalogue_rows(
+        journey,
+        "select [Schema name] as schema_name, [Object name] as object_name, "
+        "[Test type] as kind, [Result] as result, [Failure count] as failures "
+        f"from [_].[TestStatus] where [Workflow ID] = N'{report.workflow_id}'",
+    )
+    assert {(row["schema_name"], row["object_name"]) for row in status} == settled
+    assert {row["result"] for row in status} == {"Succeeded"}
+    assert {row["kind"] for row in status} <= {"Test", "Assumption"}
+    assert {row["failures"] for row in status} == {0}
+
+
 def _ids(observation, name: str, column: str) -> list:
     return sorted(row[column] for row in observation[name])
 
@@ -426,6 +510,7 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
     loaded = acceptance["load"].result
     assert loaded.succeeded, loaded.to_mapping()
     _assert_load_status(acceptance, loaded)
+    _assert_run_evidence(acceptance, loaded, "load")
 
     step = acceptance.steps["load"]
     step.observation = _observe(acceptance, _estate_evidence(acceptance))
@@ -469,6 +554,7 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
     assert totals["failed"] == 0, tested.to_mapping()
     assert totals["invalid"] == 0, tested.to_mapping()
     assert totals["passed"], tested.to_mapping()
+    _assert_run_evidence(acceptance, tested, "test")
 
 
 # --- Scenario D: an unchanged load moves only what should move ---------------

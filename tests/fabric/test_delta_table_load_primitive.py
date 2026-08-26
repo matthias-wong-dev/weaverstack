@@ -392,11 +392,11 @@ def _header_literal() -> str:
 
 @weaver_test(hosted=True)
 def test_the_delta_keyed_load_refuses_incoming_rows_and_loads_the_survivors(
-    fabric_lakehouse_estate,
+    fabric_session_env,
 ):
     """The recoverable half, matched to the Warehouse claim for claim."""
 
-    seen = fabric_lakehouse_estate.env.run_python(
+    seen = fabric_session_env.run_python(
         _header_literal() + CONSTRAINED_BODY, label="delta keyed refusals"
     )
 
@@ -471,7 +471,7 @@ def test_the_delta_keyed_load_refuses_incoming_rows_and_loads_the_survivors(
 
 @weaver_test(hosted=True)
 def test_the_delta_keyed_load_refuses_a_target_its_changes_would_invalidate(
-    fabric_lakehouse_estate,
+    fabric_session_env,
 ):
     """The half that is not recoverable, matched to the Warehouse claim for claim.
 
@@ -480,7 +480,7 @@ def test_the_delta_keyed_load_refuses_a_target_its_changes_would_invalidate(
     the load, whatever ``fault_tolerant`` says, and leaves the target as it was.
     """
 
-    seen = fabric_lakehouse_estate.env.run_python(
+    seen = fabric_session_env.run_python(
         _header_literal() + MERGE_BODY, label="delta merge uniqueness"
     )
 
