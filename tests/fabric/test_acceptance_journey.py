@@ -29,8 +29,10 @@ from support.weaver_test import weaver_test
 import weaver
 from weaver.sessions.program import RemoteProgram
 
-#: A build stages its repository and reads target inventories over OneLake. A
-#: load and a test do neither: they submit programs and record centrally.
+#: What a scenario crosses, named for the operation it drives. The two sets hold
+#: the same four resources: a build and a run each reach Livy, OneLake, REST and
+#: TDS over this estate. Pytest compares a declaration with the crossings its
+#: claim body made, so a set that stopped being accurate would fail.
 BUILDING = {"livy", "onelake", "rest", "tds"}
 RUNNING = {"livy", "onelake", "rest", "tds"}
 

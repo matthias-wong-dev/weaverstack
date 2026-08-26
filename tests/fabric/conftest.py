@@ -786,6 +786,7 @@ def fabric_empty_lakehouse(
             target,
             resolver.spark_destination(target),
             fabric_workspace,
+            weaver_session,
         )
 
     return empty
@@ -1206,6 +1207,7 @@ def _fabric_build_context(
             target,
             destination,
             workspace,
+            weaver_session,
             warehouse=warehouse_name,
         )
 
@@ -1440,6 +1442,7 @@ def _empty_the_target(
     target,
     destination,
     workspace,
+    weaver_session,
     warehouse=None,
 ) -> None:
     """Leave the target Lakehouse and the Weaver catalogue as though nothing ran.
@@ -1482,301 +1485,56 @@ def _empty_the_target(
     for report in wipe_lakehouse(target, workspace, store=store):
         print(f"Fabric wipe: {report}")
 
-    _empty_the_catalogue(workspace)
+    _empty_the_catalogue(workspace, weaver_session)
 
 
-def _empty_the_catalogue(workspace) -> None:
+#: Clear `_` in one round trip. `string_agg` builds the drops the catalogue
+#: actually holds and `sp_executesql` runs them, which is the shape
+#: `generate_warehouse_wipe_sql` already proves Fabric Warehouse accepts. The
+#: schema goes only when there were tables under it, so an already empty
+#: catalogue costs one round trip and no DDL.
+_EMPTY_CATALOGUE_SQL = """set nocount on;
+
+declare @weaver_sql nvarchar(max);
+
+select
+    @weaver_sql = string_agg(
+        convert(
+            nvarchar(max),
+            N'drop table [_].' + quotename(name) + N';'
+        ),
+        char(10)
+    ) within group (order by object_id)
+from sys.tables
+where schema_name(schema_id) = N'_';
+
+if @weaver_sql is not null
+begin
+    exec sys.sp_executesql @weaver_sql;
+    exec('drop schema [_]');
+end;
+"""
+
+
+def _empty_the_catalogue(workspace, session) -> None:
     """Drop `_` in the catalogue Warehouse, leaving the Warehouse itself alone.
 
     Weaver owns `_` there and nothing else, so this is the whole of what a reset
     may touch, a neighbour's schema in the same Warehouse is not the suite's to
     remove any more than it is Weaver's.
+
+    The executor comes from the Session, which holds one connection per
+    Warehouse. A connection opened here would cost a credential acquisition and a
+    TDS connect per call, and its crossings would carry no Session telemetry, so
+    the reset would stay absent from the provisioning ledger.
     """
 
-    from weaver.fabric import FabricResolver, desktop_sql_executor
     from weaver.targets import WarehouseTarget
 
     target = WarehouseTarget(warehouse=workspace.catalogue_item)
-    sql = desktop_sql_executor(target, workspace, resolver=FabricResolver(workspace))
-    try:
-        rows = sql.query(
-            "select TABLE_NAME from INFORMATION_SCHEMA.TABLES "
-            "where TABLE_SCHEMA = N'_' and TABLE_TYPE = N'BASE TABLE'"
-        )
-        for row in rows:
-            sql.execute_script(f"drop table if exists [_].[{row['TABLE_NAME']}];")
-        if rows:
-            sql.execute_script("drop schema if exists [_];")
-        print(f"Fabric catalogue reset: dropped {len(rows)} `_` table(s)")
-    finally:
-        sql.close()
-
-
-@pytest.fixture
-def fabric_build_env(
-    fabric_workspace_item,
-    fabric_client,
-    fabric_workspace,
-    fabric_target_lakehouse,
-    fabric_staging_lakehouse,
-    livy_session,
-    weaver_session,
-    weaver_repo_fixture,
-):
-    """One Fabric build environment per test, over the run's catalogue,
-    target Lakehouse and Livy session. The target is emptied on the way in, which
-    is what a freshly created one used to provide."""
-
-    with _fabric_build_context(
-        fabric_workspace_item,
-        fabric_client,
-        fabric_workspace,
-        fabric_target_lakehouse,
-        fabric_staging_lakehouse,
-        livy_session,
-        weaver_repo_fixture,
-        weaver_session=weaver_session,
-    ) as env:
-        yield env
-
-
-def _warehouse_build_env(
-    fabric_workspace, staging, warehouse, weaver_repo_fixture, session
-) -> "BuildEnv":
-    """A Warehouse BuildEnv that runs **inside Fabric**, like the Lakehouse one.
-
-    Weaver is a Fabric tool: it is installed into the Environment and does the
-    work there. So both phases run in the Livy session, generation reads the
-    target Warehouse's system schema through Weaver's own Fabric-native mssql
-    connector (``fabric_sql_executor``, the session identity) to compile the prune
-    into the bundle, and installation runs the frozen T-SQL through that same
-    connector. The desktop uploads only the explicit Weaver repository source and
-    reads results back for assertions; it never plans and never compiles a bundle locally.
-    """
-
-    from weaver.build_bundle import BuildBundle, BuildPlan
-    from weaver.fabric import FabricResolver, OneLakeDfsClient
-    from weaver.targets import ItemRef as _ItemRef
-
-    resolver = FabricResolver(fabric_workspace, client=None)
-    store = OneLakeDfsClient()
-    # Staged in a Lakehouse's Files, because that is the only OneLake area
-    # there is. The catalogue is a Warehouse and has none, and no reason to
-    # hold a repository, which is staging for a build that reads it.
-    weaver = _ItemRef(staging.name)
-    warehouse_ref = _ItemRef(warehouse.item.name)
-    repository_relative = ("test_repositories", weaver_repo_fixture.name)
-    repository_root = resolver.files_root(weaver).join(*repository_relative)
-    # Desktop SQL is test infrastructure only: it stages fixtures and inspects the
-    # catalogue for assertions. Weaver itself never uses it here.
-    sql = warehouse.executor
-
-    def _workspace_literal() -> str:
-        return (
-            f"Workspace(workspace={fabric_workspace.workspace!r}, "
-            f"catalogue={fabric_workspace.catalogue!r}, "
-            f"environment={fabric_workspace.environment!r})"
-        )
-
-    def install_repo() -> None:
-        destination = repository_root
-        with provisioning.measured(provisioning.STAGE_REPOSITORY, resource="onelake"):
-            if store.exists(destination):
-                store.delete(destination, recursive=True)
-            _upload_tree(store, weaver_repo_fixture.path, destination)
-
-    def remove_repo() -> None:
-        store.delete(repository_root, recursive=True)
-
-    def generate(bundle_name: str = "whtest"):
-        # Generation runs IN Fabric and reads the Warehouse catalogue there
-        # through its own Fabric-native SQL, no sql= injection.
-        binds = ", ".join(
-            f"ItemBinding(WeaverItemId.parse({item!r}), "
-            f"WarehouseBinding(warehouse=ItemRef({warehouse_ref.name!r}), "
-            f"workspace_name=workspace.workspace))"
-            for item in weaver_repo_fixture.items
-        )
-        body = (
-            "from weaver.targets import ItemRef\n"
-            "from weaver.workspaces import Workspace\n"
-            "from weaver.declaration.model import WeaverItemId\n"
-            "from weaver.resolution import resolver_for, store_for\n"
-            "from weaver.declaration import parse_item_repository\n"
-            "from weaver.build_bundle import ItemBinding, ItemBindings, "
-            "WarehouseBinding, LakehouseBinding, effective_item_bindings\n"
-            "from weaver.sessions import NotebookSession\n"
-            "from weaver.build_bundle.workflow import (read_target_inventories, "
-            "read_reconciled_catalogue)\n"
-            "from weaver.build_bundle.shortcut_sources import ("
-            "physical_shortcuts, read_shortcut_sources)\n"
-            "from weaver.build_bundle.planner import generate_item_build_bundle\n"
-            f"workspace = {_workspace_literal()}\n"
-            "store = store_for(workspace)\n"
-            "resolver = resolver_for(workspace)\n"
-            f"repository_root = resolver.files_root(ItemRef({staging.name!r})).join"
-            f"(*{repository_relative!r})\n"
-            "repository = parse_item_repository(repository_root, store=store)\n"
-            f"selected = ItemBindings(({binds},))\n"
-            "bindings = effective_item_bindings("
-            "selected, control_item=workspace.catalogue_item, "
-            "workspace_name=workspace.workspace)\n"
-            "control = WarehouseBinding(workspace.catalogue_item, "
-            "workspace_name=workspace.workspace)\n"
-            "session = NotebookSession(workspace=workspace, spark=spark)\n"
-            "inventories = read_target_inventories(bindings, session=session)\n"
-            "reconciled = read_reconciled_catalogue("
-            "bindings, inventories=inventories, session=session, "
-            "repository=repository)\n"
-            # Through the same seam `read_build_state` uses, so which
-            # declarations are resolved is decided in one place. This harness
-            # assembles its own build state, and anything it re-derives here
-            # would silently drift from the product.
-            "shortcut_sources = read_shortcut_sources(\n"
-            "    physical_shortcuts(repository.shortcuts, bindings=bindings),\n"
-            "    resolver=resolver, store=store)\n"
-            "bundle = generate_item_build_bundle(\n"
-            "    repository,\n"
-            "    bindings=bindings,\n"
-            f"    output={staged_bundle_source(staging.name, bundle_name)},\n"
-            "    store=store, catalogue_binding=control,\n"
-            "    target_inventories=inventories, catalogue=reconciled.catalogue,\n"
-            "    stale_claims=reconciled.stale_claims,\n"
-            "    shortcut_sources=shortcut_sources)\n"
-            "emit({'name': bundle.location.name, 'bundle_id': bundle.bundle_id, "
-            "'plan': bundle.plan.to_mapping()})\n"
-        )
-        payload = _timed_session_run(
-            session, "Warehouse bundle generation", body, phase=provisioning.GENERATE
-        ).payload
-        plan = BuildPlan.from_mapping(payload["plan"])
-        return BuildBundle(
-            location=staged_bundle(resolver, staging.name, payload["name"]), plan=plan
-        )
-
-    def install(bundle) -> InstallOutcome:
-        # Installation runs IN Fabric too; the Warehouse SQL comes from the
-        # session identity, so no executor is injected.
-        bundle_name = bundle.location.name
-        body = (
-            "from weaver.workspaces import Workspace\n"
-            "from weaver.resolution import resolver_for, store_for\n"
-            "from weaver.build_bundle import Installer, load_bundle\n"
-            "from weaver.sessions import NotebookSession\n"
-            f"workspace = {_workspace_literal()}\n"
-            "store = store_for(workspace)\n"
-            "resolver = resolver_for(workspace)\n"
-            "installer = Installer(NotebookSession(workspace=workspace, spark=spark))\n"
-            f"bundle = load_bundle({staged_bundle_source(staging.name, bundle_name)}, "
-            "store=store)\n"
-            "report = installer.install(bundle)\n"
-            "emit({'status': report.status, 'bundle_id': report.bundle_id, "
-            "'sequences': [{'number': s.number, 'status': s.status} for s in report.sequences], "
-            "'actions': [{'id': a.action_id, 'status': a.status, "
-            "'error': (a.error_type + ': ' + str(a.error_message)) if a.error_type else None} "
-            "for a in report.action_results()]})\n"
-        )
-        payload = _timed_session_run(
-            session, "Warehouse bundle installation", body, phase=provisioning.INSTALL
-        ).payload
-        outcome = InstallOutcome(
-            status=payload["status"],
-            bundle_id=payload["bundle_id"],
-            sequence_status={s["number"]: s["status"] for s in payload["sequences"]},
-            action_status={a["id"]: a["status"] for a in payload["actions"]},
-            action_order=tuple(a["id"] for a in payload["actions"]),
-            action_error={
-                a["id"]: a["error"] for a in payload["actions"] if a["error"]
-            },
-        )
-        if outcome.status != "succeeded":
-            print("WAREHOUSE INSTALL ACTION ERRORS:", outcome.action_error)
-        return outcome
-
-    def query(statement: str) -> list:
-        return list(sql.query(statement))
-
-    def columns(table: str) -> list:
-        # Fabric Warehouses use a case-sensitive collation, so INFORMATION_SCHEMA
-        # and its columns must be referenced in their exact (upper) case.
-        schema, name = table.split(".", 1)
-        rows = sql.query(
-            "select COLUMN_NAME, DATA_TYPE, IS_NULLABLE from INFORMATION_SCHEMA.COLUMNS "
-            f"where TABLE_SCHEMA = N'{schema}' and TABLE_NAME = N'{name}'"
-        )
-        return [
-            {
-                "name": row["COLUMN_NAME"],
-                "type": row["DATA_TYPE"],
-                "nullable": str(row["IS_NULLABLE"]).upper() == "YES",
-            }
-            for row in rows
-        ]
-
-    def seed_orphans() -> None:
-        """Objects the bundle does not manage, for prune to reconcile away.
-
-        An orphan table and view inside a managed schema, plus a whole orphan
-        schema holding both, so the frozen drops must cover object-level and
-        schema-level reconciliation, in a dependency-safe order.
-        """
-
-        # One statement per call: T-SQL requires CREATE VIEW to be the first
-        # statement in its batch, so these cannot be bundled into one script.
-        for statement in (
-            "if not exists (select 1 from sys.schemas where name = N'Wh')"
-            " exec('create schema [Wh]');",
-            "if not exists (select 1 from sys.schemas where name = N'Legacy')"
-            " exec('create schema [Legacy]');",
-            "create table [Wh].[OldTable] ([x] int not null);",
-            "create view [Wh].[OldView] as select 1 as [x];",
-            "create table [Legacy].[Thing] ([x] int not null);",
-            "create view [Legacy].[ThingView] as select [x] from [Legacy].[Thing];",
-        ):
-            sql.execute_script(statement)
-
-    return BuildEnv(
-        label="warehouse",
-        workspace=fabric_workspace,
-        weaver=weaver,
-        target=warehouse_ref,
-        resolver=resolver,
-        store=store,
-        repository_root=repository_root,
-        generate_spark=None,
-        install_repo=install_repo,
-        remove_repo=remove_repo,
-        generate=generate,
-        install=install,
-        run_query=query,
-        run_columns=columns,
-        seed_orphans=seed_orphans,
-    )
-
-
-@pytest.fixture(scope="module")
-def warehouse_estate(
-    fabric_workspace,
-    fabric_staging_lakehouse,
-    clean_disposable_warehouse,
-    weaver_repo_fixture,
-    livy_session,
-):
-    """The Warehouse estate, built **in Fabric** and installed once per module.
-
-    One disposable Warehouse and one install for the whole module's checks. Prune
-    is on: reconciliation is part of a normal build, and Weaver reads the target's
-    system schema in-session through its own Fabric-native connector.
-    """
-
-    env = _warehouse_build_env(
-        fabric_workspace,
-        fabric_staging_lakehouse,
-        clean_disposable_warehouse,
-        weaver_repo_fixture,
-        livy_session,
-    )
-    yield _install_estate(env)
+    sql = session.sql_executor(target, workspace=workspace)
+    sql.execute_script(_EMPTY_CATALOGUE_SQL)
+    print("Fabric catalogue reset: `_` cleared")
 
 
 # --- the estates a Fabric test drives ----------------------------------------

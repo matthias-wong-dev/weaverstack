@@ -448,17 +448,62 @@ def test_a_generated_load_reads_the_catalogue_through_a_consumer_warehouse_view(
     assert int(evidence[2][0]["rows_read"]) == 0
 
 
-#: Which statement drops each kind of object, in the order dependencies allow: a
-#: view over a table goes before the table does.
-_DROP = (("V", "view"), ("P", "procedure"), ("U", "table"))
+#: Leave this Warehouse holding no ``_`` at all, in one round trip. Views before
+#: the procedures and tables they read, which is the order dependencies allow.
+#: A built catalogue holds thirty or more objects and this runs in a teardown
+#: three tests share, so `string_agg` builds the drops and `sp_executesql`
+#: runs them.
+_FORGET_CATALOGUE_SQL = """\
+set nocount on;
+
+declare @weaver_sql nvarchar(max);
+
+select
+    @weaver_sql = string_agg(
+        convert(nvarchar(max), N'drop view [_].' + quotename(name) + N';'),
+        char(10)
+    ) within group (order by object_id)
+from sys.views
+where schema_name(schema_id) = N'_';
+
+if @weaver_sql is not null
+begin
+    exec sys.sp_executesql @weaver_sql;
+end;
+
+set @weaver_sql = null;
+select
+    @weaver_sql = string_agg(
+        convert(nvarchar(max), N'drop procedure [_].' + quotename(name) + N';'),
+        char(10)
+    ) within group (order by object_id)
+from sys.procedures
+where schema_name(schema_id) = N'_';
+
+if @weaver_sql is not null
+begin
+    exec sys.sp_executesql @weaver_sql;
+end;
+
+set @weaver_sql = null;
+select
+    @weaver_sql = string_agg(
+        convert(nvarchar(max), N'drop table [_].' + quotename(name) + N';'),
+        char(10)
+    ) within group (order by object_id)
+from sys.tables
+where schema_name(schema_id) = N'_';
+
+if @weaver_sql is not null
+begin
+    exec sys.sp_executesql @weaver_sql;
+end;
+
+if schema_id(N'_') is not null exec('drop schema [_]');
+"""
 
 
 def _forget_the_catalogue_schema(executor) -> None:
     """Leave this Warehouse holding no ``_`` at all."""
 
-    held = {object for object in user_objects(executor) if object.schema == "_"}
-    for kind, statement in _DROP:
-        for object in sorted(held):
-            if object.kind == kind:
-                executor.execute_script(f"drop {statement} [_].[{object.name}];")
-    executor.execute_script("if schema_id(N'_') is not null exec('drop schema [_]');")
+    executor.execute_script(_FORGET_CATALOGUE_SQL)

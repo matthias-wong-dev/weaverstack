@@ -41,10 +41,9 @@ hand.
 | `@weaver_test(remote=True, ...)` | real Fabric, driven from this checkout; no published wheel | `pytest -m "fabric and remote"` |
 | `@weaver_test(hosted=True, ...)` | requires Weaver published in the Fabric Environment | `pytest -m "fabric and hosted"` |
 | `@weaver_test(integration=True, ...)` | a composed lifecycle journey | `pytest -m full_integration` |
-| `@weaver_test(provision=True, ...)` | creates or deletes Fabric items | `pytest -m provision` |
 
-Integration and provision are complete scopes. They do not also require a
-remote or hosted flag.
+Integration is a complete scope. It does not also require a remote or hosted
+flag.
 
 The first question when placing a test is what its claim requires:
 
@@ -54,7 +53,6 @@ The first question when placing a test is what its claim requires:
 - Hosted tests prove behaviour that depends on the installed package running
   in Fabric.
 - Integration proves that already-covered pieces compose.
-- Provision proves Fabric item lifecycle operations.
 
 ## Resources
 
