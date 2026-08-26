@@ -80,15 +80,19 @@ def warehouse_target(warehouse) -> ResolvedTarget:
 
 @weaver_test(hosted=True)
 def test_the_installed_package_imports_and_reports_a_version(
-    livy_session, fabric_workspace
+    livy_session, fabric_workspace, injected_weaver_bootstrap
 ):
     """The precondition for every other claim in this file.
 
-    The deterministic fingerprint answers two separate questions. The checkout's
-    version must be among the Environment's published wheels, and the session
-    must actually be running one of those published wheels. The second is not
-    immediate: Fabric can report a successful publish while new sessions still
-    start on the previous image. The answer there is to wait, not republish.
+    The deterministic fingerprint says which Weaver the session got. Where that
+    Weaver comes from is the mode's to decide: the suite stages this checkout's
+    wheel by default, and `WEAVER_PYTEST_INJECT_WEAVER=0` runs the Environment's.
+
+    Under the Environment there are two questions. The checkout's version must be
+    among the Environment's published wheels, and the session must be running one
+    of them. The second is not immediate: Fabric reports a successful publish
+    while new sessions still start on the previous image. The answer there is to
+    wait, not republish.
     """
 
     from weaver.fabric.client import FabricClient
@@ -106,6 +110,18 @@ def test_the_installed_package_imports_and_reports_a_version(
         "emit({'attr': weaver.__version__, 'dist': version('weaverstack')})\n",
     ).payload
     assert payload["attr"] == payload["dist"]
+    wanted = _checkout_version()
+
+    if injected_weaver_bootstrap is not None:
+        # The suite staged this checkout's wheel and put it first on the
+        # session's `sys.path`, so what the session reports is this checkout and
+        # the Environment's published set says nothing about it. Run with
+        # `WEAVER_PYTEST_INJECT_WEAVER=0` for the claim below.
+        assert payload["dist"] == wanted, (
+            f"this Fabric session is running weaverstack {payload['dist']}, and "
+            f"the injected checkout is {wanted}"
+        )
+        return
 
     client = FabricClient()
     environment = find_item(
@@ -116,7 +132,6 @@ def test_the_installed_package_imports_and_reports_a_version(
     )
     wheels = library_wheels(read_published(environment, client=client))
     published = {_wheel_version(name) for name in wheels}
-    wanted = _checkout_version()
 
     assert wanted in published, (
         f"this checkout is weaverstack {wanted}, but the Environment has "

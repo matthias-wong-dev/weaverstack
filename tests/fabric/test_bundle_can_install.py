@@ -31,6 +31,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from conftest import staged_bundle, staged_bundle_source
 from factories import (
     FixtureInventory,
@@ -183,13 +184,28 @@ def _load_identities(repository, item):
     }
 
 
+@pytest.fixture
+def emptied_producer(fabric_shortcut_lakehouses, fabric_empty_lakehouse):
+    """The producer Lakehouse, with nothing in it.
+
+    The claim below needs a planner with work to do, and a matching estate gives
+    it none. A bundle with no actions satisfies every assertion in the test.
+
+    It happens in a fixture because emptying is the premise. The reset crosses
+    TDS and REST, and this test's claim declares neither.
+    """
+
+    lakehouse = fabric_shortcut_lakehouses["producer"]
+    fabric_empty_lakehouse(lakehouse.name)
+    return lakehouse
+
+
 @weaver_test(hosted=True)
 def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
     tmp_path,
     fabric_workspace,
-    fabric_shortcut_lakehouses,
+    emptied_producer,
     fabric_staging_lakehouse,
-    fabric_empty_lakehouse,
     livy_session,
 ):
     """The one claim a session is worth paying for, made once.
@@ -207,8 +223,7 @@ def test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse(
 
     resolver = FabricResolver(fabric_workspace)
     store = OneLakeDfsClient()
-    lakehouse = fabric_shortcut_lakehouses["producer"]
-    fabric_empty_lakehouse(lakehouse.name)
+    lakehouse = emptied_producer
 
     repository = estate_repository(tmp_path / "repo")
     bundle = physical_bundle(
