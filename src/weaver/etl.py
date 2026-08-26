@@ -420,6 +420,28 @@ def item_generated_programmables(
                 origin=identity,
             )
         )
+
+    from .declaration.tsql_entry import (
+        LOAD_ENTRY,
+        TEST_ENTRY,
+        generate_load_entry,
+        generate_test_entry,
+    )
+    from .declaration.source import content_hash
+
+    for name, script, role in (
+        (LOAD_ENTRY, generate_load_entry(), ROLE_ENTRY),
+        (TEST_ENTRY, generate_test_entry(), ROLE_ENTRY),
+    ):
+        payload = script.encode("utf-8")
+        found.append(
+            generated_programmable(
+                entry_procedure_id(item, name),
+                text=script,
+                signature=content_hash(payload),
+                role=role,
+            )
+        )
     return tuple(sorted(found, key=lambda each: str(each.identity)))
 
 
@@ -429,15 +451,12 @@ def _warehouse_artefacts(
     """One artefact per stored procedure this item manages.
 
     Every Warehouse procedure is a Programmable of the repository: generated
-    load and validation procedures, authored content, and the entry points.
-    They install through one layer, are signed, selected incrementally, and
-    pruned when their declaration goes.
+    load and validation procedures, authored content, and Weaver's own fixed
+    entry points. One layer installs them, signs them, selects them
+    incrementally, and prunes them when their declaration goes.
     """
 
-    return (
-        _programmable_artefacts(repository, item=item)
-        + _entry_artefacts(repository, item=item)
-    )
+    return _programmable_artefacts(repository, item=item)
 
 
 def _programmable_artefacts(
@@ -461,63 +480,6 @@ def _programmable_artefacts(
             )
         )
     return tuple(sorted(found, key=lambda artefact: str(artefact.identity)))
-
-
-def _entry_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
-) -> tuple[RuntimeArtefact, ...]:
-    """``_.Load`` and ``_.Test``, where the item installs something they wrap.
-
-    Signed by their own bytes rather than by a source signature and a template
-    version, because the dispatch chain is derived from the whole set of objects
-    the item installs: adding one object changes the entry point, and nothing
-    else would say so.
-    """
-
-    from .declaration.tsql_entry import (
-        LOAD_ENTRY,
-        TEST_ENTRY,
-        generate_load_entry,
-        generate_test_entry,
-    )
-
-    found = []
-    loadable = [
-        programmable.origin.object_id
-        for programmable in repository.programmables.values()
-        if programmable.origin is not None
-        and programmable.identity.item == item
-        and programmable.role == ROLE_LOAD
-    ]
-    if loadable:
-        found.append(
-            _entry_artefact(item, LOAD_ENTRY, generate_load_entry(item, loadable))
-        )
-    validations = {
-        programmable.origin.object_id: repository.source_documents[
-            programmable.origin
-        ].document.kind
-        for programmable in repository.programmables.values()
-        if programmable.origin is not None
-        and programmable.identity.item == item
-        and programmable.role in (ROLE_TEST, ROLE_ASSUMPTION)
-    }
-    if validations:
-        found.append(
-            _entry_artefact(item, TEST_ENTRY, generate_test_entry(item, validations))
-        )
-    return tuple(found)
-
-
-def _entry_artefact(item: WeaverItemId, name: str, script: str) -> RuntimeArtefact:
-    payload = script.encode("utf-8")
-    return RuntimeArtefact(
-        identity=entry_procedure_id(item, name),
-        object_type=PROCEDURE_TYPE,
-        signature=content_hash(payload),
-        payload=payload,
-        role=ROLE_ENTRY,
-    )
 
 
 def entry_procedure_id(item: WeaverItemId, name: str) -> WeaverDocumentId:

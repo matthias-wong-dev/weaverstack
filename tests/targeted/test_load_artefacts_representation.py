@@ -130,10 +130,12 @@ def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
         f"{ITEM}/file:{LOAD_ROOT}/Files/Raw__Export.py",
         f"{ITEM}/file:{LOAD_ROOT}/lib/data/holidays.csv",
         f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py",
-        # The Warehouse's own procedure for the one table it loads, and the entry
-        # point a person calls to run it and have the outcome recorded.
+        # The Warehouse's own procedure for the one table it loads, and the two
+        # fixed entry points a person calls to run one and have the outcome
+        # recorded. Both are given to every Warehouse item, whatever it installs.
         f"{WAREHOUSE_ITEM}/procedure:_/Load",
         f"{WAREHOUSE_ITEM}/procedure:_/Load Sales.Customer",
+        f"{WAREHOUSE_ITEM}/procedure:_/Test",
     ]
 
 

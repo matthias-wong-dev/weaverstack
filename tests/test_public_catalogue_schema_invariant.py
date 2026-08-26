@@ -468,6 +468,7 @@ def test_object_role_vocabulary_is_frozen():
         "assumption": "Assumption",
         "shortcut": "Shortcut",
         "entry": "Entry point",
+        "programmable": "Programmable",
     }
 
 

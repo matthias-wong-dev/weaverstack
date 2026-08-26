@@ -45,6 +45,38 @@ def install_runtime_references(executor: SqlExecutor, catalogue: str) -> None:
         )
 
 
+def record_installation(executor: SqlExecutor) -> None:
+    """The Installation row that says which logical item this Warehouse is.
+
+    A build writes one per bound item; a hand-installed estate needs the same
+    row, because the fixed entry points recover their logical item from it when
+    a caller omits ``@item_name``.
+    """
+
+    item_type, item_name = PROCEDURE_ITEM
+    executor.execute_script(
+        "merge [_].[Installation] as target\n"
+        "using (select"
+        f" N'{item_type}' as [Item type]"
+        f", N'{item_name}' as [Item name]"
+        ", db_name() as [Target name]"
+        ", cast(N'test' as varchar(128)) as [Weaver version]"
+        ", cast(N'' as varchar(128)) as [Signature]"
+        ") as source\n"
+        "   on target.[Item type] = source.[Item type]"
+        "  and target.[Item name] = source.[Item name]\n"
+        "when matched then update set"
+        " target.[Target name] = source.[Target name]\n"
+        "when not matched then insert ("
+        " [Item type], [Item name], [Target name], [Weaver version], [Signature]"
+        ", [Row insert datetime], [Row update datetime], [Row delete datetime])"
+        " values (source.[Item type], source.[Item name], source.[Target name]"
+        ", source.[Weaver version], source.[Signature]"
+        ", sysdatetime(), sysdatetime()"
+        ", convert(datetime2(6), '9999-12-31 23:59:59.999999'));\n"
+    )
+
+
 def forget_runtime_state(schema: str, name: str) -> str:
     """Statements removing everything the catalogue records about one object.
 

@@ -192,7 +192,11 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
     )
     actions = actions_of(planned, "load")
 
+    # One implementation procedure, plus the two fixed entry points every
+    # Warehouse item is given: their content does not depend on what the
+    # item installs.
     assert [action.kind for action in actions] == [
+        "build_procedure",
         "build_procedure",
         "build_procedure",
     ]
@@ -202,9 +206,10 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
     assert {action.executor for action in actions} == {"tsql"}
     installed = {action.resource_node_id for action in actions}
     assert any(one.endswith("procedure:_/Load Sales.Customer") for one in installed)
-    # And the entry point beside it, installed by the same executor: a
+    # And the entry points beside it, installed by the same executor: a
     # create-or-alter is a script whichever procedure it builds.
     assert any(one.endswith("procedure:_/Load") for one in installed)
+    assert any(one.endswith("procedure:_/Test") for one in installed)
 
 
 @weaver_test()

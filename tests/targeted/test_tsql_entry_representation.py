@@ -1,8 +1,13 @@
-"""What the generated ``_.Load`` and ``_.Test`` contain.
+"""What the fixed ``_.Load`` and ``_.Test`` contain.
 
-Pure Python: they are generated from the item's declarations, so every input to
-the decision can be constructed. That a Fabric Warehouse accepts them is a
-claim about Fabric and is made where there is one.
+Pure Python: the entry points are generated from nothing but Weaver's own
+contract, so every claim here is made against the bytes a Warehouse installs.
+That a Fabric Warehouse accepts them is a claim about Fabric and is made where
+there is one.
+
+The property underneath all of them: the entry points are fixed. Nothing about
+the objects an item installs is enumerated into their text, so adding or
+removing a load or a validation cannot change what they are.
 """
 
 from __future__ import annotations
@@ -12,27 +17,19 @@ from support.weaver_test import weaver_test
 
 from weaver.catalogue.tables import (
     BOOKMARK,
+    INSTALLATION,
     LOAD_STATISTIC,
     LOAD_STATUS,
     LOG,
     TEST_STATUS,
 )
-from weaver.declaration.metadata import ASSUMPTION, TEST, ObjectId
-from weaver.declaration.model import WeaverItemId
 from weaver.declaration.tsql_entry import (
+    RETHROW_ERROR,
     WEAVER_ERROR_MAX,
     WEAVER_ERROR_MIN,
     generate_load_entry,
     generate_test_entry,
 )
-from weaver.errors import DiscoveryError
-
-ITEM = WeaverItemId("Warehouse", "Reporting")
-CUSTOMER = ObjectId("Sales", "Customer")
-ORDER = ObjectId("Sales", "Order")
-RECONCILE = ObjectId("Sales", "OrdersReconcile")
-UP_TO_DATE = ObjectId("Sales", "OrdersUpToDate")
-
 
 #: The branch that calls Weaver's own refusal Failed. A load has it; a validation
 #: does not.
@@ -44,12 +41,12 @@ _WEAVER_RANGE = (
 
 @pytest.fixture
 def load_script() -> str:
-    return generate_load_entry(ITEM, [CUSTOMER, ORDER])
+    return generate_load_entry()
 
 
 @pytest.fixture
 def validation_script() -> str:
-    return generate_test_entry(ITEM, {RECONCILE: TEST, UP_TO_DATE: ASSUMPTION})
+    return generate_test_entry()
 
 
 # --- what they are -------------------------------------------------------------
@@ -68,21 +65,23 @@ def test_there_is_no_generic_assumption_entry_point(validation_script):
     """``_.Test`` is the one validation entry point, for both kinds."""
 
     assert "create or alter procedure [_].[Assumption]" not in validation_script
-    assert "[_].[Test Sales.OrdersReconcile]" in validation_script
-    assert "[_].[Assumption Sales.OrdersUpToDate]" in validation_script
 
 
 @weaver_test()
-def test_which_kind_a_validation_is_comes_from_the_declaration(validation_script):
-    """Settled at generation, and written as the ``_`` schema stores it.
+def test_dispatch_reads_the_estate_instead_of_enumerating_it(
+    load_script, validation_script
+):
+    """object_id answers whether the implementation procedure exists."""
 
-    Generated SQL crosses no persistence boundary, so it writes the public value
-    Python's renderer would have produced.
-    """
-
-    assert "set @weaver_test_type = N'Test';" in validation_script
-    assert "set @weaver_test_type = N'Assumption';" in validation_script
-    assert "object_id(" not in validation_script
+    for script in (load_script, validation_script):
+        assert "object_id(@weaver_target" in script or (
+            "object_id(@weaver_test_procedure" in script
+        )
+        assert "sp_executesql" in script
+    assert "N'Load ' + @object_name" in load_script
+    # _.Test asks both kinds and lets exactly one exist.
+    assert "N'Test ' + @object_name" in validation_script
+    assert "N'Assumption ' + @object_name" in validation_script
 
 
 @weaver_test()
@@ -93,37 +92,80 @@ def test_a_name_that_matched_nothing_records_nothing(load_script, validation_scr
     """
 
     for script in (load_script, validation_script):
-        assert "set @weaver_unmatched = concat(@object_name" in script
         raised = script.index("throw 51030, @weaver_unmatched, 1;")
         assert raised < script.index("merge into")
 
 
 @weaver_test()
-def test_dispatch_is_a_static_chain_and_not_dynamic_sql(load_script, validation_script):
-    """What lets the lower procedure's output parameters be read directly."""
-
-    for script in (load_script, validation_script):
-        assert "sp_executesql" not in script
-        assert "exec (" not in script
-    assert "if @object_name = N'Sales.Customer'" in load_script
-    assert "else if @object_name = N'Sales.Order'" in load_script
-
-
-@weaver_test()
-def test_an_object_the_item_does_not_install_is_refused(load_script, validation_script):
+def test_an_unknown_object_is_refused(load_script, validation_script):
     """A name this Warehouse does not hold cannot be executed."""
 
     assert "is not a loadable object in this Warehouse" in load_script
     assert "is not a validation in this Warehouse" in validation_script
-    assert "throw 51030" in load_script
 
 
 @weaver_test()
-def test_an_item_with_nothing_to_wrap_gets_no_entry_point():
-    with pytest.raises(DiscoveryError, match="installs no loads"):
-        generate_load_entry(ITEM, [])
-    with pytest.raises(DiscoveryError, match="installs no validations"):
-        generate_test_entry(ITEM, {})
+def test_both_kinds_at_once_is_refused_as_broken(validation_script):
+    """Exactly one of _.[Test X.Y] and _.[Assumption X.Y] may exist."""
+
+    assert "is installed as both a Test and an Assumption" in validation_script
+
+
+@weaver_test()
+def test_the_kind_comes_from_which_procedure_exists(validation_script):
+    """Written as the ``_`` schema stores it, from physical existence alone."""
+
+    assert "set @weaver_test_type = N'Test';" in validation_script
+    assert "set @weaver_test_type = N'Assumption';" in validation_script
+
+
+@weaver_test()
+def test_a_malformed_object_name_is_refused(load_script):
+    """One dot separates a schema from its object; there is no second reading."""
+
+    assert "is not a Schema.Object name" in load_script
+    assert "charindex('.', @object_name)" in load_script
+
+
+# --- identity ------------------------------------------------------------------
+
+
+@weaver_test()
+def test_identity_comes_from_the_parameter_or_from_installation(
+    load_script, validation_script
+):
+    """Runner mode supplies it; a call by hand resolves it through the estate."""
+
+    for script in (load_script, validation_script):
+        assert "@item_name varchar(128) = null" in script
+        assert f"from [_].[{INSTALLATION.name}]" in script
+        assert "[Item type] = N'Warehouse'" in script
+        assert "[Target name] = db_name()" in script
+        # An ambiguous estate refuses rather than guesses.
+        assert "is not unique in _.Installation; supply @item_name" in script
+
+
+@weaver_test()
+def test_the_recorded_item_is_never_baked_in(load_script):
+    """Every write names @item_name, so both caller modes record correctly."""
+
+    assert "@item_name as [Item name]" in load_script
+    assert "N'Reporting'" not in load_script
+
+
+@weaver_test()
+def test_no_generated_implementation_abi_change_for_identity(load_script):
+    """The implementation procedure keeps its own signature; nothing is added."""
+
+    # The dynamic call carries only the policy inputs and the result outputs.
+    assert "@fault_tolerant = @fault_tolerant" in load_script
+    assert "@ignore_stability_threshold = @ignore_stability_threshold" in load_script
+    for logical in ("succeeded", "rows_read", "bookmark_datetime", "is_static_skip"):
+        assert f"@weaver_{logical} = @{logical} output" in load_script
+    call = load_script[
+        load_script.index("set @weaver_call"): load_script.index("end try")
+    ]
+    assert "item_name" not in call
 
 
 # --- the outcome they record ---------------------------------------------------
@@ -186,8 +228,6 @@ def test_what_the_lower_procedure_raised_is_raised_again_after_the_record(
 ):
     """Returning normally would make a failure look like a successful call."""
 
-    from weaver.declaration.tsql_entry import RETHROW_ERROR
-
     for script in (load_script, validation_script):
         raising = script.index("throw @weaver_number, @weaver_rethrow, 1;")
         assert raising > script.rindex("merge into")
@@ -237,14 +277,11 @@ def test_every_write_is_a_merge_because_the_tables_may_be_views(load_script):
 
 
 @weaver_test()
-def test_the_recorded_identity_is_the_items_own_and_the_dispatched_object(load_script):
-    """Baked in for the item, taken from the branch for the object."""
+def test_the_recorded_identity_is_the_dispatched_object(load_script):
+    """The object half comes from the request; the item half from resolution."""
 
-    assert "N'Warehouse' as [Item type]" in load_script
-    assert "N'Reporting' as [Item name]" in load_script
     assert "@weaver_schema as [Schema name]" in load_script
-    assert "set @weaver_schema = N'Sales';" in load_script
-    assert "set @weaver_object = N'Customer';" in load_script
+    assert "@weaver_object as [Object name]" in load_script
 
 
 @weaver_test()
@@ -271,7 +308,6 @@ def test_the_load_entry_takes_the_policy_a_caller_may_choose(load_script):
 
     assert "@fault_tolerant bit = 0" in load_script
     assert "@ignore_stability_threshold bit = 0" in load_script
-    assert "@fault_tolerant = @fault_tolerant" in load_script
 
 
 @weaver_test()
@@ -280,7 +316,7 @@ def test_no_column_may_be_left_unsupplied():
 
     from weaver.declaration.tsql_entry import _write
 
-    with pytest.raises(DiscoveryError, match="no value was supplied"):
+    with pytest.raises(Exception, match="no value was supplied"):
         _write(LOAD_STATUS, {"item_type": "N'Warehouse'"}, keyed=True)
 
 

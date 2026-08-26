@@ -23,7 +23,11 @@ from __future__ import annotations
 import re
 
 import pytest
-from sql_support import forget_runtime_state, install_runtime_references
+from sql_support import (
+    forget_runtime_state,
+    install_runtime_references,
+    record_installation,
+)
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
@@ -119,6 +123,7 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
     install_runtime_references(executor, fabric_workspace.catalogue_item.name)
+    record_installation(executor)
     _drop(executor)
     for table in ("ValidationExpected", "ValidationActual"):
         executor.execute_script(
@@ -128,17 +133,11 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
     documents = [_document(source) for source in PROCEDURES.values()]
     for document in documents:
         executor.execute_script(generate_validation(document).payload.decode("utf-8"))
-    # And the entry point over them, because the validation procedures record
-    # nothing: `exec _.[Test]` is what runs one by hand and writes the record.
-    executor.execute_script(
-        generate_test_entry(
-            ITEM,
-            {
-                document.document.object_id: document.document.kind
-                for document in documents
-            },
-        )
-    )
+    # And the fixed entry point over them, because the validation procedures
+    # record nothing: `exec _.[Test]` is what runs one by hand and writes the
+    # record. It dispatches on the physical procedures, so the item name it
+    # records against is supplied here.
+    executor.execute_script(generate_test_entry())
     yield executor
     _drop(executor)
 

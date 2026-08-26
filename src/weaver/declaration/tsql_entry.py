@@ -1,26 +1,38 @@
-"""The two generic entry points a person calls in a Warehouse.
+"""The two fixed generic entry points a person calls in a Warehouse.
 
 .. code-block:: sql
 
     exec _.[Load] @object_name = 'Sales.Customer', @fault_tolerant = 0;
     exec _.[Test] @object_name = 'Sales.OrdersReconcile';
 
-Each wraps the object's own procedure in ``TRY``/``CATCH``, maps what came back
-into the catalogue's result vocabulary, writes the operational record, and raises
-again anything the procedure raised. ``_.Test`` serves both kinds of validation,
-so a caller need not know which one a name was declared as.
+Each finds the object's own implementation procedure at runtime, wraps the call
+in ``TRY``/``CATCH``, maps what came back into the catalogue's result
+vocabulary, writes the operational record, and raises again anything the
+procedure raised. ``_.Test`` serves both kinds of validation, so a caller need
+not know which one a name was declared as.
 
-Two constraints shape the generated SQL.
+Two properties shape the generated SQL.
 
-**Dispatch is a static chain, not dynamic SQL.** These are generated for one
-item, so the objects it installs are known and each becomes a branch. That is
-what lets the lower procedure's output parameters be read directly, and it makes
-a name the item does not install a refusal rather than a failure inside a string.
+**The entry points are fixed.** They are Weaver-owned Programmables whose
+content is the same for every Warehouse item and does not change when loadable
+objects or validations are added or removed. Dispatch reads the physical estate
+instead of enumerating it: ``_.Load`` checks ``object_id`` for the
+implementation procedure named after the requested object, and ``_.Test``
+checks for ``_[Test X.Y]`` and ``_[Assumption X.Y]``, where the physical
+procedures themselves decide which kind ran. An unknown name is remembered and
+raised before any record is written.
 
-**Every write is a MERGE**, including the appends. In every Warehouse but the one
-the catalogue lives in these tables are views across databases, and Fabric
-refuses a plain ``INSERT`` through such a view while accepting a ``MERGE``'s. An
-appended row merges on a fresh surrogate, so it never matches.
+**Identity comes from the parameter, or from ``_.Installation``.** A program
+that knows the logical item it is dispatching supplies ``@item_name``. A person
+calling by hand omits it, and the procedure recovers the one logical Warehouse
+item bound to this database, refusing rather than guessing when the answer is
+not unique. Because these are Warehouse procedures, the item type needs no
+parameter.
+
+Every write remains a MERGE, including the appends. In every Warehouse but the
+one the catalogue lives in these tables are views across databases, and Fabric
+refuses a plain ``INSERT`` through such a view while accepting a ``MERGE``'s.
+An appended row merges on a fresh surrogate, so it never matches.
 
 See ``design/catalogue.md`` for who records and what the results mean.
 """
@@ -33,6 +45,7 @@ from ..catalogue.tables import (
     AUDIT_COLUMN_NAMES,
     BOOKMARK,
     CATALOGUE_SCHEMA,
+    INSTALLATION,
     LOAD_STATISTIC,
     LOAD_STATUS,
     LOG,
@@ -41,13 +54,13 @@ from ..catalogue.tables import (
 )
 from ..catalogue.tsql import identifier
 from ..errors import DiscoveryError
-from .metadata import ASSUMPTION, AUDIT_LIVE_DELETE_DATETIME, TEST, ObjectId
+from .metadata import AUDIT_LIVE_DELETE_DATETIME
 from .tsql_load import RESULT_PARAMETER_NAMES, RESULT_PARAMETERS
 
-#: Signature salt for the generated entry points. Raise it when this generator
-#: changes, though the payload is signed by its own bytes as well, because the
-#: dispatch chain changes with the objects the item installs.
-TSQL_ENTRY_VERSION = 1
+#: Signature salt for the fixed entry points. The payload is signed by its own
+#: bytes as well, so this salts nothing the text does not already say; raising
+#: it forces every installation to replace its entry points together.
+TSQL_ENTRY_VERSION = 2
 
 #: The error numbers Weaver's own generated code throws with. A load refused
 #: inside this range reads as Failed and anything else as Error; the Python side
@@ -68,66 +81,69 @@ RETHROW_ERROR = 51031
 #: names, which are identifier-width.
 _OBJECT_NAME_TYPE = "varchar(261)"
 
+#: How wide the optional logical item name is.
+_ITEM_NAME_TYPE = "varchar(128)"
 
-def generate_load_entry(item, objects: Sequence[ObjectId]) -> str:
-    """``_.[Load]`` for one Warehouse item, over the objects it loads."""
 
-    if not objects:
-        raise DiscoveryError(
-            f"{item} installs no loads, so it is given no _.Load to wrap them"
-        )
+def generate_load_entry() -> str:
+    """``_.[Load]``, the same fixed procedure for every Warehouse item."""
+
     return _procedure(
         name=_qualified(LOAD_ENTRY),
         parameters=(
             f"    @object_name {_OBJECT_NAME_TYPE}",
             "  , @fault_tolerant bit = 0",
             "  , @ignore_stability_threshold bit = 0",
+            f"  , @item_name {_ITEM_NAME_TYPE} = null",
         ),
         body="\n\n".join(
             [
                 _load_declarations(),
-                _try_catch(_load_dispatch(objects)),
+                _split_object_name(),
+                _resolve_item(),
+                _try_catch(
+                    _load_dispatch() + "\n\n" + _LOAD_EXECUTION
+                ),
                 _refuse_unmatched(),
                 _load_result(),
                 _write(LOG, _log_values(task_type="load"), keyed=False),
-                _write(LOAD_STATUS, _load_status_values(item), keyed=True),
-                _write(LOAD_STATISTIC, _load_statistic_values(item), keyed=False),
-                _bookmark_advance(item),
+                _write(LOAD_STATUS, _status_values(), keyed=True),
+                _write(LOAD_STATISTIC, _load_statistic_values(), keyed=False),
+                _bookmark_advance(),
                 _rethrow(),
             ]
         ),
     )
 
 
-def generate_test_entry(item, validations: Mapping[ObjectId, str]) -> str:
-    """``_.[Test]`` for one Warehouse item, over the validations it installs.
+def generate_test_entry() -> str:
+    """``_.[Test]``, the one validation entry point, for both kinds."""
 
-    ``validations`` maps each validation's ``Schema.Object`` to its declared kind,
-    so the branch that runs it calls the right lower procedure.
-    """
-
-    if not validations:
-        raise DiscoveryError(
-            f"{item} installs no validations, so it is given no _.Test to wrap them"
-        )
     return _procedure(
         name=_qualified(TEST_ENTRY),
-        parameters=(f"    @object_name {_OBJECT_NAME_TYPE}",),
+        parameters=(
+            f"    @object_name {_OBJECT_NAME_TYPE}",
+            f"  , @item_name {_ITEM_NAME_TYPE} = null",
+        ),
         body="\n\n".join(
             [
                 _test_declarations(),
-                _try_catch(_test_dispatch(validations)),
+                _split_object_name(),
+                _resolve_item(),
+                _try_catch(
+                    _test_dispatch() + "\n\n" + _TEST_EXECUTION
+                ),
                 _refuse_unmatched(),
                 _test_result(),
                 _write(LOG, _log_values(task_type="test"), keyed=False),
-                _write(TEST_STATUS, _test_status_values(item), keyed=True),
+                _write(TEST_STATUS, _test_status_values(), keyed=True),
                 _rethrow(),
             ]
         ),
     )
 
 
-# --- the shape of a wrapper ----------------------------------------------------
+# --- the shape of a wrapper -----------------------------------------------------
 
 
 def _procedure(*, name: str, parameters: Sequence[str], body: str) -> str:
@@ -172,6 +188,8 @@ def _common_declarations() -> tuple[str, ...]:
         "declare @weaver_log_sk varchar(128) = cast(newid() as varchar(36));",
         "declare @weaver_schema varchar(128) = null;",
         "declare @weaver_object varchar(128) = null;",
+        "declare @weaver_target nvarchar(261) = null;",
+        "declare @weaver_call nvarchar(max) = null;",
         "declare @weaver_error varchar(4000) = null;",
         "declare @weaver_error_number int = null;",
         "declare @weaver_rethrow nvarchar(2048) = null;",
@@ -202,89 +220,197 @@ def _test_declarations() -> str:
     )
 
 
-# --- dispatch ------------------------------------------------------------------
+# --- resolving what was asked for -----------------------------------------------
 
 
-def _load_dispatch(objects: Sequence[ObjectId]) -> str:
-    """One branch per loadable object, and a refusal for anything else."""
+def _split_object_name() -> str:
+    """Split the requested ``Schema.Object`` once, on its first dot.
 
-    branches = []
-    for index, object_id in enumerate(sorted(objects, key=lambda one: one.qualified)):
-        branches.append(
-            _branch(
-                index,
-                object_id,
-                _identity_locals(object_id)
-                + "\n"
-                + f"exec {_load_procedure(object_id)}\n"
-                "      @fault_tolerant = @fault_tolerant\n"
-                "    , @ignore_stability_threshold = @ignore_stability_threshold\n"
-                + _load_output_arguments(),
-            )
-        )
-    return "\n".join(branches) + "\n" + _unknown("loadable object")
-
-
-def _load_output_arguments() -> str:
-    """Map the lower procedure's private outputs into natural wrapper locals."""
-
-    lines = [
-        f"    , @{RESULT_PARAMETER_NAMES[logical]} = @{logical} output"
-        for logical, _type_name in RESULT_PARAMETERS
-    ]
-    lines[-1] += ";"
-    return "\n".join(lines)
-
-
-def _test_dispatch(validations: Mapping[ObjectId, str]) -> str:
-    """One branch per validation, calling the procedure its kind declares."""
-
-    branches = []
-    ordered = sorted(validations.items(), key=lambda pair: pair[0].qualified)
-    for index, (object_id, kind) in enumerate(ordered):
-        outputs = (
-            "      @violation_count = @violation_count output"
-            if kind == ASSUMPTION
-            else "      @missing_count = @missing_count output\n"
-            "    , @unexpected_count = @unexpected_count output"
-        )
-        branches.append(
-            _branch(
-                index,
-                object_id,
-                _identity_locals(object_id)
-                + f"\nset @weaver_test_type = N'{_stored_kind(kind)}';\n"
-                f"exec {_validation_procedure(kind, object_id)}\n"
-                f"{outputs};",
-            )
-        )
-    return "\n".join(branches) + "\n" + _unknown("validation")
-
-
-def _branch(index: int, object_id: ObjectId, body: str) -> str:
-    lead = "if" if index == 0 else "else if"
-    return (
-        f"{lead} @object_name = N'{_escape(object_id.qualified)}'\n"
-        "begin\n"
-        f"{_indent(body, 4)}\n"
-        "end"
-    )
-
-
-def _unknown(what: str) -> str:
-    """What an unrecognised name gets: a refusal naming what it is not.
-
-    Remembered rather than thrown from here, because this sits inside the TRY.
-    Raised by :func:`_refuse_unmatched` ahead of every write.
+    Neither half may carry a dot, so the first is the only one, and a bare name
+    is refused here rather than left to fail inside a string later.
     """
 
-    return (
-        "else\n"
-        "begin\n"
-        f"    set @weaver_unmatched = concat(@object_name, "
-        f"N' is not a {what} in this Warehouse');\n"
-        "end;"
+    return "\n".join(
+        (
+            "if charindex('.', @object_name) = 0",
+            "begin",
+            "    set @weaver_unmatched = concat(@object_name, "
+            "N' is not a Schema.Object name');",
+            "end",
+            "else",
+            "begin",
+            "    set @weaver_schema = substring(@object_name, 1, "
+            "charindex('.', @object_name) - 1);",
+            "    set @weaver_object = substring(@object_name, "
+            "charindex('.', @object_name) + 1, len(@object_name));",
+            "end;",
+        )
     )
+
+
+def _resolve_item() -> str:
+    """The logical item this call records against.
+
+    Supplied, it is used as given. Omitted, exactly one logical Warehouse item
+    bound to this database is the answer; anything else refuses, because
+    guessing would record work against the wrong item.
+    """
+
+    scope = INSTALLATION
+    item_type = scope.public_name_of("item_type")
+    item_name = scope.public_name_of("item_name")
+    target_name = scope.public_name_of("target_name")
+    return "\n".join(
+        (
+            "if @item_name is null and @weaver_unmatched is null",
+            "begin",
+            "    declare @weaver_installations int;",
+            "    select @weaver_installations = count(*)",
+            f"         , @item_name = min({identifier(item_name)})",
+            f"      from {_qualified(INSTALLATION.name)}",
+            f"     where {identifier(item_type)} = N'Warehouse'",
+            f"       and {identifier(target_name)} = db_name();",
+            "    if @weaver_installations <> 1",
+            "    begin",
+            "        set @weaver_unmatched = concat(",
+            "            N'the logical Weaver item for ', db_name(),",
+            "            N' is not unique in _.Installation; supply @item_name');",
+            "        set @item_name = null;",
+            "    end;",
+            "end;",
+        )
+    )
+
+
+def _load_dispatch() -> str:
+    """Find the object's own procedure, and prepare the call that runs it."""
+
+    from ..etl import LOAD_PROCEDURE_PREFIX
+
+    return "\n".join(
+        [
+            "if @weaver_unmatched is null",
+            "begin",
+            "    set @weaver_target = N'[' + replace(@weaver_schema, N']', N']]') "
+            "+ N'].[' + replace(N'" + LOAD_PROCEDURE_PREFIX + "' + @object_name, "
+            "N']', N']]') + N']';",
+            "    if object_id(@weaver_target, 'P') is null",
+            "    begin",
+            "        set @weaver_unmatched = concat(@object_name, ",
+            "            N' is not a loadable object in this Warehouse');",
+            "    end",
+            "    else",
+            "    begin",
+            "        set @weaver_call = N'exec ' + @weaver_target + N' '",
+            "            + N'@fault_tolerant = @fault_tolerant'",
+            "            + N', @ignore_stability_threshold = @ignore_stability_threshold'",
+            ]
+        + [
+            f"            + N', @{RESULT_PARAMETER_NAMES[logical]} = @{logical} output'"
+            for logical, _type_name in RESULT_PARAMETERS
+        ]
+        + [
+            "            + N';';",
+            "    end;",
+            "end;",
+        ]
+    )
+
+
+_LOAD_EXECUTION = (
+    "if @weaver_call is not null\n"
+    "begin\n"
+    "    exec sp_executesql @weaver_call,\n"
+    "        N'@fault_tolerant bit,\n"
+    "           @ignore_stability_threshold bit,\n"
+    + ",\n".join(
+        f"           @{RESULT_PARAMETER_NAMES[logical]} {type_name} output"
+        for logical, type_name in RESULT_PARAMETERS
+    )
+    + "',\n"
+    "        @fault_tolerant = @fault_tolerant,\n"
+    "        @ignore_stability_threshold = @ignore_stability_threshold,\n"
+    + ",\n".join(
+        f"        @{RESULT_PARAMETER_NAMES[logical]} = @{logical} output"
+        for logical, _type_name in RESULT_PARAMETERS
+    )
+    + ";\n"
+    "end;"
+)
+
+
+def _test_dispatch() -> str:
+    """Ask the physical procedures which kind this is, and refuse ambiguity.
+
+    ``_[Test X.Y]`` and ``_[Assumption X.Y]`` are different objects; exactly
+    one may exist. Registry is not consulted: what the Warehouse holds is the
+    answer, and holding both is a broken installation rather than a choice.
+    """
+
+    test_type_column = TEST_STATUS.column("test_type")
+    kind_test = test_type_column.to_public("test")
+    kind_assumption = test_type_column.to_public("assumption")
+    return "\n".join(
+        [
+            "if @weaver_unmatched is null",
+            "begin",
+            "    declare @weaver_test_procedure nvarchar(261) = N'[' "
+            "+ replace(@weaver_schema, N']', N']]') + N'].[' + replace(",
+            f"        N'Test ' + @object_name, N']', N']]') + N']';",
+            "    declare @weaver_assumption_procedure nvarchar(261) = N'[' "
+            "+ replace(@weaver_schema, N']', N']]') + N'].[' + replace(",
+            f"        N'Assumption ' + @object_name, N']', N']]') + N']';",
+            "    declare @weaver_has_test int =",
+            "        case when object_id(@weaver_test_procedure, 'P') is null "
+            "then 0 else 1 end;",
+            "    declare @weaver_has_assumption int =",
+            "        case when object_id(@weaver_assumption_procedure, 'P') is null "
+            "then 0 else 1 end;",
+            "    if @weaver_has_test = 1 and @weaver_has_assumption = 1",
+            "    begin",
+            "        set @weaver_unmatched = concat(@object_name,",
+            "            N' is installed as both a Test and an Assumption; "
+            "repair the installation');",
+            "    end",
+            "    else if @weaver_has_test = 0 and @weaver_has_assumption = 0",
+            "    begin",
+            "        set @weaver_unmatched = concat(@object_name,",
+            "            N' is not a validation in this Warehouse');",
+            "    end",
+            "    else if @weaver_has_test = 1",
+            "    begin",
+            f"        set @weaver_test_type = N'{kind_test}';",
+            "        set @weaver_target = @weaver_test_procedure;",
+            "        set @weaver_call = N'exec ' + @weaver_target + N' '",
+            "            + N'@missing_count = @missing_count output'",
+            "            + N', @unexpected_count = @unexpected_count output'",
+            "            + N';';",
+            "    end",
+            "    else",
+            "    begin",
+            f"        set @weaver_test_type = N'{kind_assumption}';",
+            "        set @weaver_target = @weaver_assumption_procedure;",
+            "        set @weaver_call = N'exec ' + @weaver_target + N' '",
+            "            + N'@violation_count = @violation_count output'",
+            "            + N';';",
+            "    end;",
+            "end;",
+        ]
+    )
+
+
+_TEST_EXECUTION = (
+    "if @weaver_call is not null\n"
+    "begin\n"
+    "    exec sp_executesql @weaver_call,\n"
+    "        N'@missing_count bigint output,\n"
+    "           @unexpected_count bigint output,\n"
+    "           @violation_count bigint output',\n"
+    "        @missing_count = @missing_count output,\n"
+    "        @unexpected_count = @unexpected_count output,\n"
+    "        @violation_count = @violation_count output;\n"
+    "end;"
+)
 
 
 def _rethrow() -> str:
@@ -326,39 +452,7 @@ def _refuse_unmatched() -> str:
     )
 
 
-def _identity_locals(object_id: ObjectId) -> str:
-    return (
-        f"set @weaver_schema = N'{_escape(object_id.schema)}';\n"
-        f"set @weaver_object = N'{_escape(object_id.object)}';"
-    )
-
-
-def _load_procedure(object_id: ObjectId) -> str:
-    from ..etl import load_procedure_name
-
-    return load_procedure_name(object_id)
-
-
-def _validation_procedure(kind: str, object_id: ObjectId) -> str:
-    from ..etl import validation_procedure_name
-
-    return validation_procedure_name(kind, object_id)
-
-
-def _stored_kind(kind: str) -> str:
-    """How ``[Test type]`` spells this kind, as the ``_`` schema stores it.
-
-    The public value: generated SQL crosses no persistence boundary, so it writes
-    what the column holds rather than the internal value Python writes.
-    """
-
-    from ..catalogue.tables import ROLE_ASSUMPTION, ROLE_TEST, TEST_STATUS
-
-    internal = {TEST: ROLE_TEST, ASSUMPTION: ROLE_ASSUMPTION}[kind]
-    return TEST_STATUS.column("test_type").to_public(internal)
-
-
-# --- what happened, in the catalogue's own words -------------------------------
+# --- what happened, in the catalogue's own words --------------------------------
 
 
 def _weaver_refusal() -> str:
@@ -407,7 +501,7 @@ def _test_result() -> str:
     )
 
 
-# --- writing the record --------------------------------------------------------
+# --- writing the record ---------------------------------------------------------
 
 
 def _log_values(*, task_type: str) -> dict[str, str]:
@@ -430,18 +524,18 @@ def _log_values(*, task_type: str) -> dict[str, str]:
     }
 
 
-def _identity_values(item) -> dict[str, str]:
+def _identity_values() -> dict[str, str]:
     return {
-        "item_type": f"N'{_escape(item.item_type)}'",
-        "item_name": f"N'{_escape(item.item_name)}'",
+        "item_type": "N'Warehouse'",
+        "item_name": "@item_name",
         "schema_name": "@weaver_schema",
         "object_name": "@weaver_object",
     }
 
 
-def _load_status_values(item) -> dict[str, str]:
+def _status_values() -> dict[str, str]:
     return {
-        **_identity_values(item),
+        **_identity_values(),
         "workflow_id": "@weaver_workflow",
         "result": "@weaver_result",
         "started_datetime": "@weaver_started",
@@ -450,11 +544,11 @@ def _load_status_values(item) -> dict[str, str]:
     }
 
 
-def _load_statistic_values(item) -> dict[str, str]:
+def _load_statistic_values() -> dict[str, str]:
     return {
         "load_statistic_sk": "@weaver_statistic_sk",
         "workflow_id": "@weaver_workflow",
-        **_identity_values(item),
+        **_identity_values(),
         "started_datetime": "@weaver_started",
         "completed_datetime": "@weaver_completed",
         "duration_milliseconds": _duration(),
@@ -468,9 +562,9 @@ def _load_statistic_values(item) -> dict[str, str]:
     }
 
 
-def _test_status_values(item) -> dict[str, str]:
+def _test_status_values() -> dict[str, str]:
     return {
-        **_identity_values(item),
+        **_identity_values(),
         "test_type": "@weaver_test_type",
         "workflow_id": "@weaver_workflow",
         "result": "@weaver_result",
@@ -559,7 +653,7 @@ def _listed(parts, *, separator: str = "") -> str:
     return ("\n, ".join(values)) if len(values) > 1 else values[0]
 
 
-def _bookmark_advance(item) -> str:
+def _bookmark_advance() -> str:
     """Advance the bookmark, for a clean load that established an instant.
 
     Two conditions, each ruling out a case the other does not: a clean result, so
@@ -568,7 +662,7 @@ def _bookmark_advance(item) -> str:
     """
 
     values = {
-        **_identity_values(item),
+        **_identity_values(),
         "bookmark_datetime": "@bookmark_datetime",
     }
     return (
@@ -581,10 +675,6 @@ def _bookmark_advance(item) -> str:
 
 def _qualified(name: str) -> str:
     return f"{identifier(CATALOGUE_SCHEMA)}.{identifier(name)}"
-
-
-def _escape(text: str) -> str:
-    return str(text).replace("'", "''")
 
 
 def _indent(text: str, spaces: int) -> str:
