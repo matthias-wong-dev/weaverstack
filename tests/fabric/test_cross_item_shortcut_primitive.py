@@ -29,10 +29,10 @@ reach Fabric perfectly well from this checkout. Only two things need a session,
 and neither imports Weaver, making the source table, and reading it back
 through its shortcut.
 
-That leaves exactly one claim needing the published wheel, and it has its own
-file: the executor's wait for asynchronous discovery is guarded by
-``context.spark is not None``, so running the action from here skips it. See
-`test_shortcut_discovery_boundary.py`.
+One claim is not here at all. The executor's wait for asynchronous discovery is
+guarded by ``context.spark is not None``, so running the action from here skips
+it. The acceptance journey installs its shortcuts through an ordinary build and
+then loads through them, which is where that wait is exercised.
 """
 
 from __future__ import annotations
@@ -212,6 +212,23 @@ def run_from_here(
     )
 
 
+def _forget_shortcuts(item, *, client) -> None:
+    """Leave this Lakehouse holding no shortcuts.
+
+    The consumer is a fixed item, and the acceptance journey binds
+    ``Lakehouse/Published`` to it. A claim below is that the consumer holds
+    exactly one shortcut, so this module empties it and the claim is about what
+    this module put there.
+
+    Removing a shortcut does not remove what it points at.
+    """
+
+    from weaver.fabric.shortcuts import delete_shortcut, list_shortcuts
+
+    for shortcut in list_shortcuts(item, client=client):
+        delete_shortcut(item, path=shortcut.path, name=shortcut.name, client=client)
+
+
 @pytest.fixture(scope="module")
 def shortcut_estate(
     fabric_workspace,
@@ -234,6 +251,7 @@ def shortcut_estate(
     store = OneLakeDfsClient()
     producer = fabric_shortcut_lakehouses["producer"]
     consumer = fabric_shortcut_lakehouses["consumer"]
+    _forget_shortcuts(consumer, client=fabric_client)
 
     root = tmp_path_factory.mktemp("shortcut-repo")
     shortcut_repository(root, producer=PRODUCER, consumer=CONSUMER)
@@ -301,8 +319,7 @@ def shortcut_estate(
 
     shortcut = at["consumer"].qualify("DWG", "PortableCustomer")
     # Fabric discovers a shortcut asynchronously, and running the action from
-    # here skipped the executor's own wait, so the read retries. That the
-    # executor waits is asserted in `test_shortcut_discovery_boundary.py`, where it can be.
+    # here skipped the executor's own wait, so the read retries.
     seen = livy_session.run(
         "import time\n"
         "_deadline = time.monotonic() + 180\n"

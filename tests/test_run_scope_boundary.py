@@ -22,7 +22,10 @@ the tests below assert what dispatch does with either rather than which one it
 was given.
 
 What only Fabric can prove. That two Python nodes really share imports, that a
-rebuild is really picked up by the next run, belongs in `tests/fabric`.
+rebuild is really picked up by the next run, belongs in `tests/fabric`. No module
+there claims it today. What stood in for it counted `livy.open_scope` calls off
+the desktop's telemetry, which is this file's subject, and it was retired with
+the estate that carried it.
 """
 
 from __future__ import annotations

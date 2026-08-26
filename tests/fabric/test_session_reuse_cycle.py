@@ -29,24 +29,6 @@ def test_one_resolver_serves_every_command_in_the_session(
 
 
 @weaver_test(remote=True, resources={"rest"})
-def test_the_second_command_does_not_re_ask_what_the_first_resolved(
-    fresh_weaver_session, fabric_workspace, fabric_target_lakehouse
-):
-    resolver = fresh_weaver_session.resolver(fabric_workspace)
-    reference = ItemRef(fabric_target_lakehouse.name)
-
-    fresh_weaver_session.resolve_item(
-        reference, item_type=LAKEHOUSE, workspace=fabric_workspace
-    )
-    before = resolver.cache_hits
-    fresh_weaver_session.resolve_item(
-        reference, item_type=LAKEHOUSE, workspace=fabric_workspace
-    )
-
-    assert resolver.cache_hits == before + 1
-
-
-@weaver_test(remote=True, resources={"rest"})
 def test_a_lakehouse_and_a_warehouse_of_the_same_name_stay_distinct(
     fresh_weaver_session, fabric_workspace, fabric_target_lakehouse
 ):

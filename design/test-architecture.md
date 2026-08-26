@@ -39,22 +39,21 @@ hand.
 |---|---|---|
 | `@weaver_test()` | pure Python; no tenant | `pytest` |
 | `@weaver_test(remote=True, ...)` | real Fabric, driven from this checkout; no published wheel | `pytest -m "fabric and remote"` |
-| `@weaver_test(hosted=True, ...)` | requires Weaver published in the Fabric Environment | `pytest -m "fabric and hosted"` |
+| `@weaver_test(hosted=True, ...)` | Weaver executes inside Fabric, from the checkout the suite injects | `pytest -m "fabric and hosted"` |
 | `@weaver_test(integration=True, ...)` | a composed lifecycle journey | `pytest -m full_integration` |
-| `@weaver_test(provision=True, ...)` | creates or deletes Fabric items | `pytest -m provision` |
 
-Integration and provision are complete scopes. They do not also require a
-remote or hosted flag.
+Integration is a complete scope. It does not also require a remote or hosted
+flag.
 
 The first question when placing a test is what its claim requires:
 
 - Pure Python proves declarations, parsing, rendering, planning, selection,
   dispatch, reconciliation, and failure semantics.
 - Remote tests prove a narrow platform boundary from the desktop position.
-- Hosted tests prove behaviour that depends on the installed package running
-  in Fabric.
+- Hosted tests prove behaviour that depends on Weaver running inside Fabric.
+  The suite stages this checkout's wheel on the session's `sys.path`, so no
+  publish stands between a Python change and a hosted run.
 - Integration proves that already-covered pieces compose.
-- Provision proves Fabric item lifecycle operations.
 
 ## Resources
 

@@ -25,14 +25,10 @@ def test_a_warehouse_query(...):
 def test_an_installed_program_runs(...):
     ...
 
-
-@weaver_test(provision=True, resources={"rest"})
-def test_an_item_is_created_and_deleted(...):
-    ...
 ```
 
 The declaration is the source of truth. Pytest generates `fabric`, `remote`,
-`hosted`, `full_integration`, `provision`, `tds`, `livy`, `onelake`, and `rest`
+`hosted`, `full_integration`, `tds`, `livy`, `onelake`, and `rest`
 markers from it for selection; contributors do not maintain those markers
 manually.
 
@@ -41,12 +37,11 @@ The scopes are:
 | scope | use |
 |---|---|
 | `remote` | Weaver runs from this checkout against Fabric; no published wheel is needed |
-| `hosted` | the claim requires Weaver published in the Fabric Environment |
+| `hosted` | Weaver executes inside Fabric, normally from the checkout the suite injects |
 | `integration` | a composed lifecycle journey |
-| `provision` | Fabric item creation and deletion |
 
-Integration and provision stand alone. They do not require an additional
-remote or hosted declaration.
+Integration stands alone. It does not require an additional remote or hosted
+declaration.
 
 ## Resource declarations
 
@@ -167,38 +162,62 @@ Delta tables through Spark and the Warehouse tables over TDS, so a fixture finds
 them rather than filling them in.
 
 Lakehouses must be schema-enabled. The suite empties fixed targets between
-estate transitions instead of recreating them. Provision tests separately
-exercise create/delete lifecycle behaviour.
+estate transitions. Nothing in it creates or deletes a Fabric item;
+`tests/fabric/provision_estate.py` does that, run by hand.
 
 The workspace capacity must be running. On a capacity that permits one Spark
 session, close notebooks and other sessions before starting the suite. The
 harness prints active or queued Spark sessions before requesting its shared
 Livy session and never cancels them.
 
-## Publishing the hosted package
+## Where the suite's Weaver comes from
 
 Remote tests exercise the current checkout immediately. Hosted and integration
-tests require the current Weaver wheel in a Fabric Environment:
+tests run Weaver inside Fabric, and the suite puts this checkout there itself.
+
+At session start the harness builds one wheel from the checkout, stages it under
+`PYTEST_STAGING/Files/injected_weaver`, and hands the Livy session a bootstrap
+that extracts it on the driver and puts it first on `sys.path`. A Python change
+therefore reaches a hosted test for the cost of a wheel build and an upload.
+`tests/fabric/injected_weaver.py` holds it.
+
+The Environment still has to exist and still carries the dependencies:
 
 ```bash
 .venv/bin/weaver fabric environment publish weaver \
   --workspace PYTEST_WORKSPACE
 ```
 
-Publish again when Weaver Python changes. A Livy session can run Spark SQL
-without the installed package; only operations that import Weaver require the
-Environment.
+Publish again when `deployment/fabric/environment.yml` changes. An Environment
+holding a Weaver wheel as well is harmless. The bootstrap reads
+`weaver.__file__` and fails the session unless the package came from the
+extraction directory, so an Environment carrying a wheel of this same version
+cannot satisfy it.
 
-That includes the estate a hosted test builds for itself. `fabric_lakehouse_estate`
-installs its bundle in the session, so a change to *generation* — the DDL a table
-is created with, the catalogue DML a build publishes — reaches a hosted test only
-after a republish. A hosted failure that looks like the change had no effect is
-usually a stale wheel.
+The staged artefact is a built wheel. Weaver reaches its bundled SQL templates
+and `warehouse_type_mapping.yml` through `Path(__file__)`, so a packaging change
+that dropped them from the wheel shows up here.
 
-A structural change to a table declaring `Prohibit rebuild: true` needs one further
-step: reconciliation will not replace it, so an installed one keeps its old shape
-until it is dropped. Weaver's own catalogue tables are the ones this applies to,
-and dropping the `_` schema's tables is enough — the next build recreates them.
+To run the published wheel, which is what exercises
+`weaver fabric environment publish` end to end:
+
+```bash
+WEAVER_PYTEST_INJECT_WEAVER=0 .venv/bin/python -m pytest -m "fabric and hosted"
+```
+
+Do that before a release. In that mode a stale wheel behaves as it always did: a
+hosted failure that looks like a change had no effect is usually one.
+`tests/fabric/test_published_weaver_primitive.py` is the smoke test for it: the
+published package imports, reports a version the Environment has published, and
+resolves a Lakehouse. It skips in the ordinary injected mode, where the
+Environment's published set says nothing about what the session is running.
+Ordinary hosted runs execute one Weaver, the injected one.
+
+A structural change to a table declaring `Prohibit rebuild: true` needs one
+further step: reconciliation will not replace it, so an installed one keeps its
+old shape until it is dropped. Weaver's own catalogue tables are the ones this
+applies to, and dropping the `_` schema's tables is enough. The next build
+recreates them.
 
 ## Running the strata
 
@@ -207,7 +226,6 @@ and dropping the `_` schema's tables is enough — the next build recreates them
 .venv/bin/python -m pytest -m "fabric and remote"
 .venv/bin/python -m pytest -m "fabric and hosted"
 .venv/bin/python -m pytest -m full_integration
-.venv/bin/python -m pytest -m provision
 .venv/bin/python -m pytest -m "fabric and remote and tds"
 .venv/bin/python -m pytest -m "fabric and remote and livy"
 .venv/bin/python -m pytest -m "fabric and remote and onelake"
@@ -252,45 +270,122 @@ subject crossed in its claim body, and putting fixture plumbing into that
 comparison would make every assertion-heavy test declare a resource its subject
 never touched.
 
-Measured over the whole `hosted` stratum against `PYTEST_WORKSPACE`, a 21-minute
-run:
+Measured over `-m "fabric or full_integration"` against `PYTEST_WORKSPACE`, a
+1h 27m run of 187 tests:
 
 ```text
-install the bundle         6 run(s)    366.4s  livy
-generate the bundle        6 run(s)     76.5s  livy
-reset the target           5 run(s)     54.6s  livy
-stage the repository       5 run(s)     30.0s  onelake
-total                                  527.6s
+install the bundle        13 run(s)    600.8s  livy
+generate the bundle       13 run(s)    160.7s  livy
+reset the target           8 run(s)     87.6s  livy
+stage the repository      11 run(s)     56.3s  onelake
+total                                  905.0s
 ```
 
-So one estate costs roughly a minute, six of them were built, and provisioning is
-**41% of the stratum**. That is the dominant single cost, and it is worth acting
-on: several of those six installs are the same repository fixture into the same
-target.
+So one estate costs roughly a minute, thirteen of them were built, and
+provisioning is **17% of the sweep**. The external crossings behind it:
 
-**Sharing the build is therefore worth doing and has not been done.** The obstacle
-is the reset, not the build: a module currently gets its estate by *emptying the
-target and the catalogue* and then installing into it, so sharing one installation
-means replacing that with a reset that clears the mutable data and the catalogue's
-runtime rows while leaving the structure and the projected rows. Whether that
-preserves isolation is a claim about execution order, and it can only be settled by
-running the modules in both orders and getting the same answers. Until that has
-been done, the suite pays for the builds — and the ledger above says what it is
-paying.
+```text
+livy      476 op(s)   1677.9s
+tds     1,860 op(s)   1066.4s     0.57s per operation
+rest      435 op(s)    179.4s
+onelake 1,016 op(s)    145.7s
+```
 
-Two things that were free have been taken. `test_run_decomposition_boundary.py`
-no longer parametrises `weaver_repo_fixture` with the value it already defaults
-to, which forced an estate of its own for nothing. And the provisioning cost is
-now measured rather than inferred, which is what any further reduction has to
-argue against.
+Livy dominates, and the five heaviest acceptance-journey scenarios are about 29
+minutes of the total. The journey drives one estate through build, load, test
+and wipe against a real workspace, and that scope is what costs the 29 minutes.
+
+**Sharing one installation across the modules that use the same repository is
+the largest remaining saving, and it has been declined.** The obstacle is the
+reset: a module gets its estate by emptying the target and the catalogue and
+then installing into it, so sharing one installation means a reset that clears
+the mutable data and the catalogue's runtime rows while leaving the structure and
+the projected rows. That makes isolation a claim about execution order, and it
+puts shared mutable state between modules. Module isolation stays explicit and
+the suite pays for the builds. Revisit only with evidence from running the
+modules in several orders and getting identical answers.
+
+The same reasoning declined a catalogue reset scoped to the items the next module
+binds. Clearing `_` and rebuilding it is expensive and understandable; ownership
+and invalidation rules in the harness are neither.
+
+What has been taken is the round trips inside those phases.
+`_empty_the_catalogue` and `_forget_the_catalogue_schema` each dropped one object
+per round trip and now build their drops with `string_agg` and run them with
+`sp_executesql`, which is one round trip each. `_empty_the_catalogue` also takes
+its executor from the Session, so it reuses the warm connection and its crossings
+reach this ledger; a connection of its own emitted no Session telemetry, which is
+why earlier readings understated the reset.
+
+Then the estates themselves. `test_installed_estate_boundary.py` is three
+modules that each built the same repository, and six modules whose claims the
+acceptance journey or the core suite already make are gone. That took remote and
+hosted from 38m34s to about 24 minutes. The figures in the ledger above were
+measured at that point.
+
+A second pass moved the remaining standalone Fabric machinery onto the
+acceptance estate, which builds and loads anyway:
+
+```text
+gone                                     where the claim is now
+test_load_orchestration_cycle.py         the acceptance load report: one endpoint
+                                         refresh, its edges, and the Warehouse
+                                         reading what the Lakehouse wrote
+test_external_shortcut_journey.py        the acceptance estate reads the foreign
+                                         workspace through a table, a folder and
+                                         a schema shortcut, by loading through them
+test_item_catalogue_fabric_boundary.py   the acceptance build's own catalogue:
+                                         every table present, `_weaver` installed
+                                         and certified table for table
+test_shared_catalogue_host_boundary.py   a user's schema seeded in the catalogue
+                                         Warehouse before the first build, read
+                                         back after the build and the rebuild
+```
+
+`test_installed_estate_boundary.py` submitted one body twice and asked it two
+questions; it now submits it once. Its run-decomposition section is gone, because
+scope opening, reuse and closing are the core suite's and catalogue-driven load
+composition is the acceptance journey's. Of its two File-key cases the tolerant
+one stayed, because it shows the rejection, the publication and the change
+document together.
+
+`test_published_weaver_primitive.py` was five capability probes and a whole
+installation. Every hosted test now runs an injected checkout inside Fabric and
+proves those capabilities by using them, so what is left is one release-mode
+smoke test for the published wheel.
+
+The Delta keyed matrix is decided without a tenant. One representative refusal
+runs against Spark, in `test_delta_keyed_refusal_primitive.py`, with no build and
+no estate behind it.
+
+What came back is `test_authored_object_attachment_primitive.py`. Fabric decides
+what a session reports as its attachment and where it mounts it, so no local test
+can settle it, and it costs one submission against the session the suite already
+holds.
+
+Measured after that pass, against `PYTEST_WORKSPACE`:
+
+```text
+pytest                          3,506 tests     9m 31s
+pytest -m "fabric and remote"     116 tests    16m 07s
+pytest -m "fabric and hosted"      25 tests     5m 30s
+pytest -m full_integration         11 tests    36m 40s
+```
+
+Remote is the larger half of remote plus hosted, and TDS is where it goes: 710
+operations and 497s of them, with the catalogue-upgrade builds at the top. Hosted
+carries two bundle installs, 103s of the 5m 30s.
+
+The journey's cost is its scope. Seven builds, five loads, four test runs and two
+wipes over a four-item estate, and Livy is 1,368s of it. Its own largest scenario
+is the failed build and its recovery, at 443s, which drives a failed build, a
+repair, two more builds, a load and a test.
 
 ## Test estate hygiene
 
 Fixed items reduce endpoint readiness variance and Fabric namespace churn.
 Fixtures clean the part of the estate they use and report cleanup failures
-without masking a test failure. Interrupted provision tests may leave items
-with the `weavertest_` prefix; these can be removed manually after confirming
-they belong to the test run.
+without masking a test failure.
 
 Tests must not depend on tenant-specific defaults outside this harness. Another
 tenant can run the suite by supplying the workspace, Environment, and fixed item

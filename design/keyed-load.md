@@ -362,10 +362,15 @@ only for an outcome that owes one, including an injected engine failure, whose
 evidence and release are asserted there too. It evaluates nothing, so what a
 statement *means* is not asked there.
 
-Behaviour needs an engine, and both are exercised against a real tenant:
-`tests/fabric/test_warehouse_load_primitive.py` and
-`tests/fabric/test_delta_table_load_primitive.py` run the same matrix, claim for
-claim. If they disagree the model has diverged.
+Behaviour needs an engine. `tests/fabric/test_warehouse_load_primitive.py`
+runs the matrix against a real Warehouse over TDS. The Delta half ran the same
+matrix against Spark and cost 407 seconds for two tests, which is why it went;
+`tests/targeted/test_delta_load_execution_boundary.py` decides that path without
+a tenant, and the acceptance journey loads real Delta tables incrementally,
+retirement included. One representative refusal still reaches Spark:
+`tests/fabric/test_delta_keyed_refusal_primitive.py` stages a blank key, a
+duplicate key, a null in a required column and a collision under each unique key,
+and asserts both outcomes the declaration can produce.
 
 Large-scale performance is manual and lives outside the suite. The benchmark work
 behind this design established that narrow grouped scans beat global staging

@@ -1,41 +1,265 @@
-"""A developer running a deployed load primitive in Fabric, by hand.
+"""Weaver installed in Fabric, against one built Lakehouse estate.
 
-This is a primitive test, and its claim is developer-facing: someone in a
-Fabric session can import a deployed object and run its load, with no planner,
-no catalogue orchestration and no estate-level entry point in the way.
+Two subjects that each need the wheel running in the session and an estate a
+bundle installed, and they share one. Building it costs about a minute, and it
+used to be built three times, once per module.
 
-That is also why it is ``hosted``. The subject is the API the *wheel installed
-in the session* offers, that `.load()` exists there and behaves, rather than
-the load semantics underneath it, which the core suite proves for a fraction of
-the cost.
+**Anchoring.** A name resolves through the real ``_.Installation`` and
+``_.Registry``, a load's bookmark reaches the catalogue Warehouse, and the
+Lakehouse's own reference to each catalogue runtime table resolves in Spark. The
+core suite proves what anchoring decides against a constructed catalogue; this is
+the part that exists only in a workspace.
 
-Two things about Fabric make these claims impossible to prove anywhere cheaper,
-and both once passed against a directory and failed against a workspace:
+**The developer-facing load API.** Someone in a Fabric session can import a
+deployed object and run its load, with no planner, no catalogue orchestration and
+no estate-level entry point in the way. The subject is what the installed wheel
+offers, rather than the load semantics underneath it, which the core suite proves
+for a fraction of the cost.
 
-.. code-block:: text
+Order matters here in the way it always did inside a module. The sections run in
+file order against one estate, and neither asserts on a starting state:
+anchoring builds twice and compares, and the developer primitives assert on what
+a primitive returns.
 
-    Files is object storage        -> a Folder needs a mount, not a URL
-    the tree is a deployed package -> imports resolve as Files.* and lib.*
-
-So this file asserts only what needs OneLake to be true. Detailed load semantics
-remain in the core suite; the two strategic regressions here prove that Folder
-change documents and reject evidence survive the real mount and authored API.
-
-One submission, one evidence payload, per the suite's rule: every question about
-the installed estate goes in one body and the assertions run here against what
-it brings back.
-
-It therefore carries ``fabric`` and ``hosted``: the first says where the
-resources are, the second says where Weaver runs. The platform question
-underneath it, what a mount is, is a ``fabric and remote`` test of its own and
-runs without a publish.
+Composing a run out of the catalogue graph is the acceptance journey's, and the
+scope and dispatch counts underneath it are the core suite's.
 """
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
 from support.weaver_test import weaver_test
+
+# --- Anchoring -----------------------------------------------------------------
+
+
+SENTINEL = datetime(1900, 1, 1, tzinfo=timezone.utc)
+
+#: One anchored life: freestanding first, then anchored, loaded, and read back
+#: through a second construction that reads the catalogue again.
+ANCHORED = r"""
+import sys
+from datetime import datetime, timezone
+
+from weaver import lakehouse_for
+from weaver.errors import LoadError
+
+destination = lakehouse_for(resolver, target)
+root = destination.files_root() + "/_/Load"
+sys.path.insert(0, root)
+
+from Files.Raw__CustomerCsv import Raw__CustomerCsv
+
+results = {}
+
+# Freestanding: it can be read, and it cannot be loaded. No place in the estate's
+# record of itself means no bookmark to read and none to record.
+free = Raw__CustomerCsv(spark, lakehouse=destination)
+results["freestanding_identity"] = (
+    None if free.installed is None else str(free.installed))
+try:
+    free.bookmark()
+except LoadError as refused:
+    results["freestanding_bookmark"] = str(refused)
+try:
+    free.load()
+except LoadError as refused:
+    results["freestanding_load"] = str(refused)
+
+# Anchored by name. The identity is resolved here, at construction, through the
+# real Installation and Registry rather than from the target's name.
+first = Raw__CustomerCsv(spark, lakehouse=destination, catalogue=workspace.catalogue)
+results["identity"] = str(first.installed)
+results["before"] = first.bookmark().isoformat()
+
+results["load"] = first.load().as_row()
+results["in_memory"] = first.bookmark().isoformat()
+
+# A second anchored construction reads the catalogue again, so what it answers
+# is what the Warehouse holds rather than what the first one remembers.
+second = Raw__CustomerCsv(spark, lakehouse=destination, catalogue=workspace.catalogue)
+results["persisted"] = second.bookmark().isoformat()
+
+# A validation, anchored and run the same way. Its identity comes from
+# `_.TestDictionary` rather than Registry, because it materialises nothing.
+#
+# Loaded by path: a compiled validation lands under `tests/` in the deployed
+# tree, so the import root alone does not name it, and `tests` is not a package
+# name worth claiming inside a Spark driver. What it imports in turn, the object
+# modules it was authored against, resolves through the root, which is on the
+# path already.
+import importlib.util
+
+_spec = importlib.util.spec_from_file_location(
+    "DWG__OrderAmounts", root + "/tests/DWG__OrderAmounts.py")
+_module = importlib.util.module_from_spec(_spec)
+# Registered before it is executed, because a Weaver object reads its own
+# contract from the module it was defined in: sys.modules is where it looks.
+sys.modules[_spec.name] = _module
+_spec.loader.exec_module(_module)
+DWG__OrderAmounts = _module.DWG__OrderAmounts
+
+free_test = DWG__OrderAmounts(spark, lakehouse=destination)
+results["validation_freestanding"] = (
+    None if free_test.installed is None else str(free_test.installed))
+try:
+    free_test.run()
+except LoadError as refused:
+    results["validation_refused"] = str(refused)
+
+checked = DWG__OrderAmounts(
+    spark, lakehouse=destination, catalogue=workspace.catalogue)
+results["validation_identity"] = str(checked.installed)
+results["validation_result"] = checked.run().to_mapping()
+
+# And the rest of what the standalone calls recorded, read back the same way.
+from weaver.catalogue.state import catalogue_in
+from weaver.catalogue.tables import LOAD_STATISTIC, LOAD_STATUS, TEST_STATUS
+
+def _named(rows, wanted):
+    return [row for row in rows if row.get("object_name") == wanted]
+
+with catalogue_in(
+    workspace, tables=(LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
+) as recorded:
+    results["status"] = [
+        str(row.get("result"))
+        for row in _named(recorded.table_rows(LOAD_STATUS), "CustomerCsv")
+    ]
+    results["statistics"] = [
+        [int(row.get("rows_read") or 0), bool(row.get("is_static_skip"))]
+        for row in _named(recorded.table_rows(LOAD_STATISTIC), "CustomerCsv")
+    ]
+    results["validation_status"] = [
+        [str(row.get("result")), str(row.get("test_type")),
+         int(row.get("failure_count") or 0)]
+        for row in _named(recorded.table_rows(TEST_STATUS), "OrderAmounts")
+    ]
+
+emit(results)
+"""
+
+
+@weaver_test(hosted=True)
+def test_an_anchored_object_resolves_and_records_itself_in_fabric(
+    fabric_lakehouse_estate,
+):
+    """Construction resolves the identity; a clean load moves the row.
+
+    The two constructions are what makes the second half a claim about the
+    Warehouse: an in-memory row would satisfy the first object and tell nothing
+    about what landed.
+    """
+
+    seen = fabric_lakehouse_estate.env.run_python(ANCHORED, label="anchor and load")
+
+    # Freestanding: no identity, no bookmark to give, and no load.
+    assert seen["freestanding_identity"] is None
+    assert "cannot read its bookmark or record one" in seen["freestanding_bookmark"]
+    assert "cannot read its bookmark or record one" in seen["freestanding_load"]
+
+    # Anchored, and the identity is the Registry's, the item that declared the
+    # folder, under its files identity, rather than the Lakehouse it was built into.
+    assert seen["identity"].endswith("/Files/Raw.CustomerCsv")
+
+    assert seen["load"]["succeeded"] is True
+    began = datetime.fromisoformat(seen["load"]["bookmark_datetime"])
+    assert began > SENTINEL
+
+    # The instant the load reported, held in memory and then read back from the
+    # catalogue Warehouse by an object that was constructed after it landed.
+    assert datetime.fromisoformat(seen["in_memory"]) == began
+    assert datetime.fromisoformat(seen["persisted"]) == began
+
+    # And the rest of the operational record the standalone interface wrote. A
+    # developer who ran this by hand can read what it did from the estate.
+    #
+    # Internal values, because this read the rows back through a `Catalogue`:
+    # the public sentence-case spellings exist at the persistence boundary and
+    # nothing above it sees them. A reader selecting from the view gets
+    # `Succeeded`. See ``tests/fabric/test_warehouse_load_primitive.py``.
+    assert seen["status"] == ["succeeded"]
+    assert seen["statistics"] and seen["statistics"][0][1] is False
+
+    # A validation divides the same way: freestanding it has no identity and no
+    # operational interface, anchored it resolves and records what it found.
+    assert seen["validation_freestanding"] is None
+    assert "not anchored" in seen["validation_refused"]
+    assert seen["validation_identity"].endswith("/DWG.OrderAmounts")
+    assert seen["validation_result"]["failure_count"] == 0
+    assert seen["validation_status"] == [["succeeded", "test", 0]]
+
+
+#: What the Lakehouse holds under ``Tables/_``, and whether each reference
+#: resolves. One body, because the references are one decision: the shortcuts are
+#: created by one action, and a table missing from it is a gap in that action.
+REFERENCE = r"""
+from weaver import lakehouse_for
+from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES
+from weaver.locations import Location
+
+destination = lakehouse_for(resolver, target)
+root = Location(destination.spark_root)
+results = {}
+results["tables"] = sorted(entry.name for entry in store.list(root / "Tables"))
+results["runtime"] = sorted(
+    entry.name for entry in store.list(root / "Tables" / "_")
+)
+results["resolved"] = {}
+for table in PRESENTED_RUNTIME_TABLES:
+    reference = destination.qualify("_", table.name)
+    counted = spark.sql(f"select count(*) as n from {reference}").collect()[0]["n"]
+    results["resolved"][table.name] = [reference, counted]
+emit(results)
+"""
+
+
+@weaver_test(hosted=True)
+def test_one_build_installs_the_lakehouse_references_and_the_next_plans_none(
+    fabric_lakehouse_estate,
+):
+    """One pass, and the shortcuts it ends with.
+
+    This estate's own build created the catalogue tables and pointed at them,
+    the item graph orders the two, and the source wait carries the moment between
+    Fabric creating a Warehouse table and publishing it to OneLake. So the build
+    here has nothing left to do, and Spark reads each runtime table in the
+    Lakehouse by the four-part name a statement would use.
+    """
+
+    from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES
+
+    env = fabric_lakehouse_estate.env
+
+    bundle = env.generate("reference")
+    planned = [
+        action.id
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "create_shortcut"
+    ]
+    outcome = env.install(bundle)
+    assert outcome.status == "succeeded", outcome.action_error
+    assert planned == [], "the references were installed by the build that made them"
+
+    seen = env.run_python(REFERENCE, label="read the runtime references")
+
+    # Shortcuts under `Tables/_`, which is Weaver's own rather than the item's.
+    assert "_" in seen["tables"], seen["tables"]
+    assert {table.name for table in PRESENTED_RUNTIME_TABLES} <= set(seen["runtime"])
+    for table in PRESENTED_RUNTIME_TABLES:
+        reference, counted = seen["resolved"][table.name]
+        assert reference.endswith(f"`_`.`{table.name}`")
+        # What it counts is the catalogue Warehouse's own table, so the number
+        # belongs to the estate rather than to this test; that a count came back
+        # through the shortcut at all is the claim.
+        assert isinstance(counted, int)
+
+
+# --- The developer-facing load API ---------------------------------------------
+
 
 #: Everything asked of the installed estate, in one round trip. It imports from
 #: the deployed tree the way the deployed tree is meant to be imported, loads the
@@ -321,8 +545,20 @@ finally:
 """
 
 
+@pytest.fixture(scope="module")
+def deployed(fabric_lakehouse_estate):
+    """One submission of ``BODY``, and the evidence both claims below read.
+
+    ``BODY`` already imports the deployed tree, loads the Folder and loads the
+    SQL-authored table. Two tests asking it two questions are two questions about
+    one moment, so it is submitted once.
+    """
+
+    return fabric_lakehouse_estate.env.run_python(BODY, label="the deployed estate")
+
+
 @weaver_test(hosted=True)
-def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_estate):
+def test_a_developer_can_run_a_deployed_folder_load_primitive(deployed):
     """Import the object the installer deployed, call ``.load()``, and be done.
 
     The folder is the subject because it is the primitive that most needs a real
@@ -331,9 +567,7 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_e
     and wrote into a local directory called ``abfss:/…``.
     """
 
-    env = fabric_lakehouse_estate.env
-
-    seen = env.run_python(BODY)
+    seen = deployed
 
     # The tree the installer wrote, laid out as authored: the item's own modules
     # at the root, and the `Files/` segment preserved rather than flattened.
@@ -356,9 +590,7 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_e
 
 
 @weaver_test(hosted=True)
-def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(
-    fabric_lakehouse_estate,
-):
+def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(deployed):
     """The conversion's claim, asked of Fabric.
 
     `DWG.NamedCustomer.sql` is authored in Spark SQL and installed as
@@ -368,9 +600,7 @@ def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(
     Python-authored one are the same primitive by the time anything runs.
     """
 
-    env = fabric_lakehouse_estate.env
-
-    seen = env.run_python(BODY)
+    seen = deployed
 
     assert "DWG__NamedCustomer.py" in seen["deployed"]
     # No installed `.sql` load file survives the conversion.
@@ -412,28 +642,16 @@ def test_authored_code_consumes_folder_changes_through_the_fabric_mount(
 
 
 @weaver_test(hosted=True)
-def test_an_intolerant_file_key_rejection_is_enforced_through_the_fabric_mount(
-    fabric_lakehouse_estate,
-):
-    seen = fabric_lakehouse_estate.env.run_python(
-        "FAULT_TOLERANT = False\n" + PROBE_CATALOGUE + FILE_KEY_REJECTION,
-        label="refuse a Folder File-key violation",
-    )
-
-    assert seen["raised"] is True
-    assert seen["result"]["succeeded"] is False
-    assert seen["result"]["rows_rejected"] == 1
-    assert seen["good_published"] is False
-    assert seen["bad_published"] is False
-    assert seen["bad_rejected"] is True
-    assert seen["change_documents"] == 0
-    assert seen["changes"] == []
-
-
-@weaver_test(hosted=True)
 def test_a_tolerant_file_key_rejection_is_enforced_through_the_fabric_mount(
     fabric_lakehouse_estate,
 ):
+    """The tolerant case, which is the one that shows every outcome at once.
+
+    A bad file is rejected, a good file is published, and the change document
+    records the survivor. What ``fault_tolerant=False`` decides instead is a
+    semantic the core suite owns; both settle on the same reject table.
+    """
+
     seen = fabric_lakehouse_estate.env.run_python(
         "FAULT_TOLERANT = True\n" + PROBE_CATALOGUE + FILE_KEY_REJECTION,
         label="tolerate a Folder File-key violation",

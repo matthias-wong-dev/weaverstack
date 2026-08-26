@@ -264,8 +264,10 @@ Delta table Weaver created. This test closes that gap.
 `tests/fixtures/cross-item-journey` is committed and referenced by nothing. It
 holds `Lakehouse/Sales` and `Warehouse/Reporting` with an `alias.yml`, two
 report views and a reconciliation test. Add a `SesFixture` for it in
-`tests/support/build_envs.py`, extend `journey_claims.py` with Warehouse claims
-and the endpoint-refresh barrier, and parametrise the Fabric journey on it.
+`tests/support/build_envs.py`, add the Warehouse claims and the endpoint-refresh
+barrier, and parametrise the Fabric journey on it. (`journey_claims.py` and the
+Fabric journeys this named have since been retired; the acceptance journey is
+where a lifecycle claim goes.)
 
 That gives a Lakehouse to Warehouse journey with an alias between them.
 

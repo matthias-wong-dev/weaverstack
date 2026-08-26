@@ -78,11 +78,12 @@ its converse `test_every_declared_change_names_an_action_that_runs`.
 ## 4. Check the bundle still installs
 
 A bundle carrying the new action must still execute against a real target, in
-order. Add the artefact to the estate in
-[`test_bundle_can_install.py`](../tests/fabric/test_bundle_can_install.py) and to
-the existence assertions there.
+order. Add the artefact to the acceptance estate under
+[`tests/fixtures/acceptance`](../tests/fixtures/acceptance) and to the estate
+assertions in
+[`test_acceptance_journey.py`](../tests/fabric/test_acceptance_journey.py).
 
-**Fails until done:** `test_a_whole_bundle_installs_in_its_own_order_against_a_real_lakehouse`.
+**Fails until done:** `test_a_realistic_estate_builds_from_nothing`.
 
 ## 5. Write the targeted action test
 

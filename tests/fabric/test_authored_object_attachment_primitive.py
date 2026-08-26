@@ -1,10 +1,13 @@
 """The notebook case: an object with no ``lakehouse=``, in a real Fabric session.
 
-Everything else about authored objects, identity from the class name, the paths
-a table and a folder resolve to, is asserted against the estate in
-``test_lakehouse_journey``, where it costs nothing extra. This one cannot join it:
-inference reads the Lakehouse the session has attached, only Fabric attaches one,
-and it needs no built estate at all.
+Identity from the class name and the paths a table and a folder resolve to are
+decided in the core suite. What is left is what only Fabric answers: which
+Lakehouse a session has attached, the ``/synfs/notebook`` mount it publishes for
+that attachment, and whether the root inference produces is the root the desktop
+resolver names over REST.
+
+No estate and no build. One Livy submission against the session the suite
+already holds.
 """
 
 from __future__ import annotations

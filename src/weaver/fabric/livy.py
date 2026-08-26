@@ -288,12 +288,14 @@ class LivySession:
         api_base_url: str = FABRIC_API,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         bootstrap: str | None = None,
+        weaver_bootstrap: str | None = None,
     ) -> None:
         self._token_source = token_source(token, scope=FABRIC_SCOPE)
         self.base = sessions_url(workspace_id, lakehouse_id, api_base_url=api_base_url)
         self.environment_id = environment_id
         self.poll_interval = poll_interval
         self.bootstrap = bootstrap
+        self.weaver_bootstrap = weaver_bootstrap
         self.session_url: str | None = None
         self._weaver_asserted = False
 
@@ -349,11 +351,13 @@ class LivySession:
         if environment_id is None and getattr(workspace, "environment", None):
             environment_id = _resolve_environment_id(workspace, resolver)
 
+        # A caller supplying its own start-up code carries `emit` in it, because
+        # every submitted body returns through `emit`.
+        kwargs.setdefault("bootstrap", emit_source())
         return cls(
             resolver.workspace.id,
             home.id,
             environment_id=environment_id,
-            bootstrap=emit_source(),
             **kwargs,
         )
 
@@ -368,9 +372,18 @@ class LivySession:
         where one is needed: an installed Weaver is what an Environment carries,
         and a session without one runs the default runtime perfectly well until
         something tries to import from it.
+
+        ``weaver_bootstrap`` supplies that import instead. The pytest harness
+        passes one that puts a wheel built from the checkout on ``sys.path``, so
+        a source change reaches Fabric without an Environment publish. The
+        Environment still carries the dependencies.
         """
 
         if self._weaver_asserted:
+            return
+        if self.weaver_bootstrap is not None:
+            self.run(self.weaver_bootstrap)
+            self._weaver_asserted = True
             return
         if not self.environment_id:
             from ..errors import CommandError

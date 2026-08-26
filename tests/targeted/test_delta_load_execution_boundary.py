@@ -1,9 +1,11 @@
 """What a Delta keyed load submits, and what it no longer submits.
 
-The reconciliation semantics are proved against a real engine, in
-``tests/fabric/test_delta_table_load_primitive.py``, matched claim for claim with
-the Warehouse. What is proved here is the other half, and it is the half that
-changed: the **physical** shape of the execution.
+The reconciliation semantics are proved here, exhaustively and without a tenant,
+and matched claim for claim with the Warehouse in
+``tests/fabric/test_warehouse_load_primitive.py``. One representative transition
+runs against a real Spark engine, in
+``tests/fabric/test_delta_keyed_refusal_primitive.py``. What is proved here as
+well is the other half, the physical shape of the execution.
 
 Every phase of the state machine is a persisted Spark relation named by a
 temporary view. So an ordinary load writes nothing durable, a phase that decided
