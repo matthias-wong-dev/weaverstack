@@ -100,6 +100,9 @@ def test_the_import_is_submitted_once_per_livy_session(monkeypatch):
     session = LivySession.__new__(LivySession)
     session._weaver_asserted = False
     session.environment_id = "env99"
+    # The Environment supplies the import here. A caller with its own bootstrap
+    # is the pytest harness injecting a checkout, and that path has its own test.
+    session.weaver_bootstrap = None
     submitted: list[str] = []
     monkeypatch.setattr(
         type(session), "run", lambda self, code, **kw: submitted.append(code)

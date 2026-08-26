@@ -170,30 +170,47 @@ session, close notebooks and other sessions before starting the suite. The
 harness prints active or queued Spark sessions before requesting its shared
 Livy session and never cancels them.
 
-## Publishing the hosted package
+## Where the suite's Weaver comes from
 
 Remote tests exercise the current checkout immediately. Hosted and integration
-tests require the current Weaver wheel in a Fabric Environment:
+tests run Weaver inside Fabric, and the suite puts this checkout there itself.
+
+At session start the harness builds one wheel from the checkout, stages it under
+`PYTEST_STAGING/Files/injected_weaver`, and hands the Livy session a bootstrap
+that extracts it on the driver and puts it first on `sys.path`. A Python change
+therefore reaches a hosted test for the cost of a wheel build and an upload.
+`tests/fabric/injected_weaver.py` holds it.
+
+The Environment still has to exist and still carries the dependencies:
 
 ```bash
 .venv/bin/weaver fabric environment publish weaver \
   --workspace PYTEST_WORKSPACE
 ```
 
-Publish again when Weaver Python changes. A Livy session can run Spark SQL
-without the installed package; only operations that import Weaver require the
-Environment.
+Publish again when `deployment/fabric/environment.yml` changes. An Environment
+holding a Weaver wheel as well is harmless; the injected checkout is imported
+first, and the bootstrap fails the run if it is not.
 
-That includes the estate a hosted test builds for itself. `fabric_lakehouse_estate`
-installs its bundle in the session, so a change to *generation* — the DDL a table
-is created with, the catalogue DML a build publishes — reaches a hosted test only
-after a republish. A hosted failure that looks like the change had no effect is
-usually a stale wheel.
+The staged artefact is a built wheel. Weaver reaches its bundled SQL templates
+and `warehouse_type_mapping.yml` through `Path(__file__)`, so a packaging change
+that dropped them from the wheel shows up here.
 
-A structural change to a table declaring `Prohibit rebuild: true` needs one further
-step: reconciliation will not replace it, so an installed one keeps its old shape
-until it is dropped. Weaver's own catalogue tables are the ones this applies to,
-and dropping the `_` schema's tables is enough — the next build recreates them.
+To run the published wheel, which is what exercises
+`weaver fabric environment publish` end to end:
+
+```bash
+WEAVER_PYTEST_INJECT_WEAVER=0 .venv/bin/python -m pytest -m "fabric and hosted"
+```
+
+Do that before a release. In that mode a stale wheel behaves as it always did: a
+hosted failure that looks like a change had no effect is usually one.
+
+A structural change to a table declaring `Prohibit rebuild: true` needs one
+further step: reconciliation will not replace it, so an installed one keeps its
+old shape until it is dropped. Weaver's own catalogue tables are the ones this
+applies to, and dropping the `_` schema's tables is enough. The next build
+recreates them.
 
 ## Running the strata
 

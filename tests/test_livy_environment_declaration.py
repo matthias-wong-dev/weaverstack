@@ -153,6 +153,38 @@ def test_importing_weaver_without_an_environment_is_an_error(monkeypatch):
 
 
 @weaver_test()
+def test_a_caller_supplying_its_own_bootstrap_needs_no_environment(monkeypatch):
+    """A caller can hand the session the Weaver it should import.
+
+    The pytest harness stages a wheel built from the checkout and passes a
+    bootstrap that puts it on ``sys.path``, so a source change reaches Fabric
+    for a wheel build and an upload. Publishing takes minutes. The Environment
+    still carries the dependencies, and it is no longer what supplies Weaver.
+    """
+
+    submitted: list[str] = []
+    session = LivySession.for_workspace(
+        _spark_workspace(),
+        resolver=_FakeResolver(),
+        token="t",
+        bootstrap="emit = print\n",
+        weaver_bootstrap="import weaver_from_a_wheel\n",
+    )
+
+    # Start-up code of the caller's own, so the injection reaches bodies that
+    # never go near `ensure_weaver`.
+    assert session.bootstrap.startswith("emit = print")
+    monkeypatch.setattr(
+        type(session), "run", lambda self, code, **kw: submitted.append(code)
+    )
+
+    session.ensure_weaver()
+    session.ensure_weaver()
+
+    assert submitted == ["import weaver_from_a_wheel\n"]
+
+
+@weaver_test()
 def test_a_workspace_configuring_no_lakehouse_cannot_start_spark():
     """Fabric creates a Spark session against a Lakehouse, so one has to exist.
 

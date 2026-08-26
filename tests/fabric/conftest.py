@@ -464,8 +464,42 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
     )
 
 
+#: Set to ``0`` to run the Environment's own Weaver. That is the mode which
+#: exercises `weaver fabric environment publish` end to end, so run the suite
+#: that way before a release.
+INJECT_ENV = "WEAVER_PYTEST_INJECT_WEAVER"
+
+
 @pytest.fixture(scope="session")
-def livy_session(fabric_workspace, fabric_client, request):
+def injected_weaver_bootstrap(
+    fabric_workspace, fabric_client, fabric_staging_lakehouse
+):
+    """Python that puts a wheel built from this checkout on the session's path.
+
+    The Environment carries the dependencies and the session imports Weaver from
+    here, so a Python change reaches Fabric for the cost of a wheel build and an
+    upload. Publishing takes about six minutes.
+    """
+
+    if os.environ.get(INJECT_ENV, "1") == "0":
+        print("Injected Weaver: off; the Environment supplies the package")
+        return None
+
+    from injected_weaver import bootstrap_source, stage_wheel
+
+    from weaver.fabric import FabricResolver, OneLakeDfsClient
+
+    resolver = FabricResolver(fabric_workspace, client=fabric_client)
+    started = time.monotonic()
+    url, version = stage_wheel(OneLakeDfsClient(), resolver, fabric_staging_lakehouse)
+    print(f"Injected Weaver {version}: staged in {time.monotonic() - started:.2f}s")
+    return bootstrap_source(url, version)
+
+
+@pytest.fixture(scope="session")
+def livy_session(
+    fabric_workspace, fabric_client, request, injected_weaver_bootstrap
+):
     """One Spark session in Fabric with the Weaver Environment attached.
 
     Skips, rather than fails, when the Environment is missing or carries no
@@ -517,11 +551,26 @@ def livy_session(fabric_workspace, fabric_client, request):
                 )
             )
 
+    from weaver.fabric import emit_source
+
+    # At session start as well as on `ensure_weaver`. The suite shares one Livy
+    # session, and several modules submit Weaver-importing bodies through
+    # `run` without going near the product's own path. Injecting once at the
+    # start puts every statement on the same Weaver, whichever route reaches it.
+    # The bootstrap is idempotent, so the second call does nothing.
+    start_up = emit_source()
+    if injected_weaver_bootstrap is not None:
+        start_up += injected_weaver_bootstrap
     try:
-        session = LivySession.for_workspace(fabric_workspace)
+        session = LivySession.for_workspace(
+            fabric_workspace,
+            bootstrap=start_up,
+            weaver_bootstrap=injected_weaver_bootstrap,
+        )
     except CommandError as exc:
         pytest.skip(
-            f"{exc}; run `weaver fabric environment publish` into the Environment first"
+            f"{exc}; the Environment carries Weaver's dependencies, so publish "
+            "into it before running the Fabric suite"
         )
     started = time.monotonic()
     try:

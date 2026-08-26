@@ -196,6 +196,13 @@ through `environment` on the workspace and imports the installed package. Nothin
 is copied into the workspace. Republish whenever Weaver Python changes. An
 unchanged source tree builds the same version and the publish is skipped.
 
+That is the product. The pytest suite reaches the same place by another route:
+it builds one wheel from the checkout, stages it in `PYTEST_STAGING` and puts it
+on the Livy session's `sys.path`, so a Python change reaches a hosted test
+without a publish. `WEAVER_PYTEST_INJECT_WEAVER=0` runs the published wheel
+instead, which is what holds the product route to account. See
+[fabric testing](design/fabric-testing.md).
+
 ### What this means when you add a feature
 
 Ask, in order:
