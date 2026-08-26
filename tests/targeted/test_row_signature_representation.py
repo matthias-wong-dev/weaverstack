@@ -20,7 +20,7 @@ compared with another signature from the same table.
 
 That the digests behave. That a changed row really does produce a different one,
 is proved by running a load (``tests/fabric/test_warehouse_load_primitive.py``
-and ``tests/fabric/test_delta_table_load_primitive.py``).
+and ``tests/fabric/test_delta_keyed_refusal_primitive.py``).
 """
 
 from __future__ import annotations

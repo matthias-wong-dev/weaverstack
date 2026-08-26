@@ -12,6 +12,11 @@ The Environment still carries the dependencies (`pyyaml`, `sqlparse`,
 A built wheel is staged, and unpacked where it lands. Weaver reaches its bundled
 templates and ``warehouse_type_mapping.yml`` through ``Path(__file__)``, so a
 packaging change that dropped them from the wheel shows up here.
+
+The bootstrap then reads ``weaver.__file__`` and fails the session unless it sits
+under the extraction directory. A version comparison is not enough: an
+Environment carrying a wheel of this same version passes one while the session
+runs the Environment's copy.
 """
 
 from __future__ import annotations
@@ -71,14 +76,19 @@ def _version_of(wheel: Path) -> str:
 def bootstrap_source(url: str, version: str) -> str:
     """Python that extracts the staged wheel and imports Weaver from it.
 
-    Idempotent. A session already holding the wanted version does nothing, so
-    this runs at session start, where every later statement sees it, and again on
-    the product's own `ensure_weaver` without disturbing what is loaded.
+    Idempotent. A session already holding a `weaver` imported from the extraction
+    directory does nothing, so this runs at session start, where every later
+    statement sees it, and again on the product's own `ensure_weaver` without
+    disturbing what is loaded.
 
     The `sys.modules` purge is what makes the checkout win over an Environment
-    that still carries a Weaver wheel. It runs only when the loaded version is
-    the wrong one, so objects already held by a test keep the class they came
-    from.
+    that still carries a Weaver wheel. It runs only when the loaded package came
+    from somewhere else, so objects already held by a test keep the class they
+    came from.
+
+    The check is the file, not the version. An Environment publishing this same
+    version satisfies a version comparison while the session runs the
+    Environment's copy.
     """
 
     target = f"{DRIVER_ROOT}/{_slug(version)}"
@@ -88,8 +98,17 @@ import os
 import sys
 import zipfile
 
-if getattr(sys.modules.get("weaver"), "__version__", None) != {version!r}:
-    _target = {target!r}
+_target = {target!r}
+
+
+def _came_from_the_injection(module):
+    origin = getattr(module, "__file__", None)
+    return bool(origin) and os.path.realpath(origin).startswith(
+        os.path.realpath(_target) + os.sep
+    )
+
+
+if not _came_from_the_injection(sys.modules.get("weaver")):
     if not os.path.isdir(_target):
         from notebookutils import fs as _fs
 
@@ -107,12 +126,23 @@ if getattr(sys.modules.get("weaver"), "__version__", None) != {version!r}:
 
 import weaver
 
-if weaver.__version__ != {version!r}:
+if not _came_from_the_injection(weaver):
     raise ImportError(
         "the injected checkout did not win: this session imported weaverstack "
         + weaver.__version__
         + " from "
         + str(weaver.__file__)
+        + ", and the injection extracted "
+        + {version!r}
+        + " to "
+        + _target
+    )
+if weaver.__version__ != {version!r}:
+    raise ImportError(
+        "the injected checkout is weaverstack "
+        + weaver.__version__
+        + ", and the staged wheel is "
+        + {version!r}
     )
 for _dependency in ("yaml", "sqlparse", "mssql_python"):
     importlib.import_module(_dependency)

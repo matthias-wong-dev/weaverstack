@@ -13,10 +13,23 @@ and every later scenario skips naming the step that broke.
 
 Table shortcut installation waits for both the named relation and the Delta path
 that authored Python loads read before the next item starts.
+
+Claims that used to have Fabric modules of their own and are now made here,
+against this estate, at no extra Livy cost:
+
+- the catalogue Warehouse holds Weaver's own tables and a user's schema beside
+  them, and a build reconciling ``_`` leaves the neighbour alone;
+- ``_weaver`` is installed and certified, table for table;
+- one endpoint refresh stands between the Curated loads and the Serving loads;
+- a load reads the foreign estate through a table, a folder and a schema
+  shortcut;
+- a failed build takes certification and bookmarks with it, and the repaired
+  build and the load after it put both back.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 
 import pytest
@@ -35,6 +48,13 @@ from weaver.sessions.program import RemoteProgram
 #: claim body made, so a set that stopped being accurate would fail.
 BUILDING = {"livy", "onelake", "rest", "tds"}
 RUNNING = {"livy", "onelake", "rest", "tds"}
+
+#: A schema a user owns inside the catalogue Warehouse. Weaver owns ``_`` there
+#: and nothing else, so every build in this journey reconciles a catalogue that
+#: has a neighbour sitting next to it.
+NEIGHBOUR_SCHEMA = "Finance"
+NEIGHBOUR_TABLE = "Ledger"
+NEIGHBOUR_VIEW = "OpenLedger"
 
 
 @pytest.fixture(scope="module")
@@ -80,6 +100,7 @@ def acceptance(
     journey.bind = [
         f"{name}={item.split('/', 1)[1]}" for item, name in physical.items()
     ]
+    _seed_the_neighbour(journey)
     return journey
 
 
@@ -154,6 +175,17 @@ def _warehouse_rows(journey, statement: str) -> list:
     return [dict(row) for row in executor.query(statement)]
 
 
+def _catalogue_sql(journey):
+    """TDS against the Warehouse the Weaver catalogue lives in."""
+
+    from weaver.targets import ItemRef, WarehouseTarget
+
+    catalogue = journey.workspace.catalogue.split("/", 1)[1]
+    return journey.session.sql_executor(
+        WarehouseTarget(ItemRef(catalogue)), workspace=journey.workspace
+    )
+
+
 def _catalogue_rows(journey, statement: str) -> list:
     """One query against the Weaver catalogue.
 
@@ -162,13 +194,88 @@ def _catalogue_rows(journey, statement: str) -> list:
     Registry and Shortcut are asked of the catalogue itself.
     """
 
-    from weaver.targets import ItemRef, WarehouseTarget
+    return [dict(row) for row in _catalogue_sql(journey).query(statement)]
 
-    catalogue = journey.workspace.catalogue.split("/", 1)[1]
-    executor = journey.session.sql_executor(
-        WarehouseTarget(ItemRef(catalogue)), workspace=journey.workspace
+
+def _seed_the_neighbour(journey) -> None:
+    """Put a user-owned table and view in the catalogue Warehouse.
+
+    Weaver owns ``_`` in that Warehouse and nothing else. Seeding this before the
+    first build is what makes every later reading of it a claim: the builds in
+    this journey each reconcile ``_`` with these two objects sitting beside it.
+    """
+
+    # One script per statement. A batch is compiled whole, so a create that names
+    # a schema an earlier statement in the same batch made is an invalid object
+    # name, and `create schema` and `create view` each have to begin their own.
+    sql = _catalogue_sql(journey)
+    for statement in (
+        f"if schema_id(N'{NEIGHBOUR_SCHEMA}') is null "
+        f"exec('create schema [{NEIGHBOUR_SCHEMA}]');",
+        f"drop view if exists [{NEIGHBOUR_SCHEMA}].[{NEIGHBOUR_VIEW}];",
+        f"drop table if exists [{NEIGHBOUR_SCHEMA}].[{NEIGHBOUR_TABLE}];",
+        f"create table [{NEIGHBOUR_SCHEMA}].[{NEIGHBOUR_TABLE}] "
+        "([Entry id] int not null, [Amount] decimal(10,2) not null);",
+        f"insert into [{NEIGHBOUR_SCHEMA}].[{NEIGHBOUR_TABLE}] "
+        "([Entry id], [Amount]) values (1, 10.00), (2, 20.00);",
+        f"create view [{NEIGHBOUR_SCHEMA}].[{NEIGHBOUR_VIEW}] as "
+        f"select [Entry id], [Amount] from [{NEIGHBOUR_SCHEMA}].[{NEIGHBOUR_TABLE}];",
+    ):
+        sql.execute_script(statement)
+
+
+def _assert_the_neighbour_survived(journey) -> None:
+    """The user's schema is there, whole, and still readable."""
+
+    rows = _catalogue_rows(
+        journey,
+        "select TABLE_NAME as name from INFORMATION_SCHEMA.TABLES "
+        f"where TABLE_SCHEMA = N'{NEIGHBOUR_SCHEMA}'",
     )
-    return [dict(row) for row in executor.query(statement)]
+    assert {row["name"] for row in rows} == {NEIGHBOUR_TABLE, NEIGHBOUR_VIEW}
+    readable = _catalogue_rows(
+        journey,
+        f"select count(*) as n from [{NEIGHBOUR_SCHEMA}].[{NEIGHBOUR_VIEW}]",
+    )
+    assert readable[0]["n"] == 2
+
+
+def _assert_the_catalogue_is_installed(journey) -> None:
+    """Weaver's own item, as the Warehouse holding ``_`` reports it.
+
+    Every catalogue table physically there, one Installation row saying which
+    Warehouse holds ``_``, and one Registry certification per table. A build
+    binds ``_weaver`` and reconciles it, so an estate that built is an estate
+    whose catalogue is installed.
+    """
+
+    from weaver.catalogue.tables import CATALOGUE_TABLES
+
+    expected = {table.name.casefold() for table in CATALOGUE_TABLES}
+    physical = {
+        str(row["name"]).casefold()
+        for row in _catalogue_rows(
+            journey,
+            "select name from sys.tables where schema_name(schema_id) = N'_'",
+        )
+    }
+    assert physical == expected, sorted(physical ^ expected)
+
+    installation = _catalogue_rows(
+        journey,
+        "select [Target name] as target from [_].[Installation] "
+        "where [Item type] = N'Warehouse' and [Item name] = N'_weaver'",
+    )
+    assert [row["target"] for row in installation] == [
+        str(journey.workspace.catalogue_item)
+    ]
+
+    certified = _catalogue_rows(
+        journey,
+        "select count(*) as n from [_].[Registry] "
+        "where [Item type] = N'Warehouse' and [Item name] = N'_weaver'",
+    )
+    assert certified[0]["n"] == len(CATALOGUE_TABLES)
 
 
 def _assert_load_status(journey, report) -> None:
@@ -300,6 +407,42 @@ def _assert_run_evidence(journey, report, task_type: str) -> None:
     assert {row["failures"] for row in status} == {0}
 
 
+def _assert_the_endpoint_barrier_is_in_the_graph(journey, report) -> None:
+    """The one crossing only a real workspace has, read off the run's own graph.
+
+    Serving reads Curated's Delta tables through its SQL analytics endpoint, and
+    the endpoint lags the Delta mutation. The barrier is a node so that it can be
+    ordered and inspected: every Curated load runs before it, and the Serving
+    loads run after it. Landing and Published are Lakehouses, so no endpoint
+    stands between them and there is one refresh in the whole run.
+    """
+
+    curated = journey.physical["Lakehouse/Curated"]
+    serving = journey.physical["Warehouse/Serving"]
+    refresh = f"refresh:{curated}"
+
+    assert [
+        node.node_id
+        for node in report.nodes
+        if node.primitive_kind == "endpoint_refresh"
+    ] == [refresh]
+
+    edges = {tuple(edge) for edge in report.edges}
+    assert (f"load:{curated}/CUR.Customer", refresh) in edges
+    assert (refresh, f"load:{serving}/SERVE.Customer") in edges
+
+    # Each node names the primitive it reached. A Warehouse load is the
+    # generated procedure; a Lakehouse load is the module the installer deployed,
+    # addressed through the Lakehouse that owns it rather than an attachment.
+    by_node = report.by_node
+    assert by_node[f"load:{serving}/SERVE.Customer"].dispatch_location == (
+        f"{serving}/[_].[Load SERVE.Customer]"
+    )
+    deployed = by_node[f"load:{curated}/CUR.Customer"].dispatch_location
+    assert deployed.startswith(f"{curated}/")
+    assert "/_/Load/" in deployed
+
+
 def _ids(observation, name: str, column: str) -> list:
     return sorted(row[column] for row in observation[name])
 
@@ -367,10 +510,11 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
     }
     assert seen.values("landing_shortcuts", "tableName") == {
         "customer",
-        "product",
         "transaction",
         "region",
     }
+    # The schema shortcut, which presents the foreign namespace whole. Landing
+    # declares no schema of this name and `LAND.Product` reads its tables.
     assert seen.values("landing_reference", "tableName") == {"customer", "product"}
     assert seen.values("cur", "tableName") == {
         "customer",
@@ -427,6 +571,9 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
         "SRC.Product",
         "SRC.RetiredCustomer",
     } <= serving, sorted(serving)
+
+    _assert_the_catalogue_is_installed(acceptance)
+    _assert_the_neighbour_survived(acceptance)
 
 
 # --- Scenario B: an unchanged build is a fixed point -------------------------
@@ -511,6 +658,7 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
     assert loaded.succeeded, loaded.to_mapping()
     _assert_load_status(acceptance, loaded)
     _assert_run_evidence(acceptance, loaded, "load")
+    _assert_the_endpoint_barrier_is_in_the_graph(acceptance, loaded)
 
     step = acceptance.steps["load"]
     step.observation = _observe(acceptance, _estate_evidence(acceptance))
@@ -888,6 +1036,10 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
     assert ("Landing", "LAND", "Transaction") in unchanged
     assert ("Curated", "CUR", "Product") in unchanged
 
+    # This build reconciled the catalogue again, and the schema beside `_` is
+    # still whole and still readable.
+    _assert_the_neighbour_survived(acceptance)
+
 
 @weaver_test(integration=True, resources=BUILDING)
 def test_the_changed_estate_reaches_a_new_fixed_point(acceptance):
@@ -968,9 +1120,14 @@ def test_the_rebuilt_estate_still_loads_and_validates(acceptance):
 
 # --- Scenario G: a failed build converges ------------------------------------
 
-#: One revision where an earlier item needs real physical work and a later one
-#: cannot install. The column is legitimate; the Warehouse query names something
-#: that is not there, which Fabric refuses when the statement runs.
+#: One revision where earlier items need real physical work and a later one
+#: cannot install. The column and the description are legitimate; the Warehouse
+#: query names something that is not there, which Fabric refuses when the
+#: statement runs.
+#:
+#: ``CUR.Customer`` is in it because it is the estate's incremental object. A
+#: build invalidates the current state of everything it selects, so this revision
+#: is what puts a bookmark's whole life inside one failed build and its recovery.
 BREAKING_EDITS = (
     (
         "Lakehouse/Landing/LAND__Product.py",
@@ -979,10 +1136,15 @@ BREAKING_EDITS = (
     ),
     (
         "Lakehouse/Landing/LAND__Product.py",
-        "        return Source__Product(self).dataframe()",
-        "        return Source__Product(self).dataframe().selectExpr(\n"
+        "        return Reference(self).Product.dataframe()",
+        "        return Reference(self).Product.dataframe().selectExpr(\n"
         '            "ProductId", "ProductName", "upper(ProductName) as ProductLabel"\n'
         "        )",
+    ),
+    (
+        "Lakehouse/Curated/CUR__Customer.py",
+        "Description: One row per current customer, kept current incrementally.",
+        "Description: One row per current customer, kept current by the window.",
     ),
     (
         "Warehouse/Serving/SERVE.Summary.sql",
@@ -991,7 +1153,7 @@ BREAKING_EDITS = (
     ),
 )
 
-#: Repairing only the invalid definition. The legitimate column stays.
+#: Repairing only the invalid definition. The legitimate changes stay.
 REPAIR_EDITS = (
     (
         "Warehouse/Serving/SERVE.Summary.sql",
@@ -1000,6 +1162,67 @@ REPAIR_EDITS = (
     ),
 )
 
+#: The estate's incremental object, as the catalogue keys it. Its load reads the
+#: source rows changed since the bookmark it holds, so an absent bookmark reads
+#: the whole source and a stale one reads almost nothing. Protected from rebuild,
+#: so the failing revision selects it without dropping it.
+INCREMENTAL = ("Lakehouse", "Curated", "CUR", "Customer")
+
+#: The object the failing revision replaces. A new column on an unprotected table
+#: means the physical table goes, so this is the one whose Registry claim the
+#: build deletes before it starts.
+REPLACED = ("Lakehouse", "Landing", "LAND", "Product")
+
+#: What a bookmark reads before anything has loaded.
+SENTINEL = datetime(1900, 1, 1)
+
+
+def _keyed(key) -> str:
+    """The four columns every current-state and Registry row is keyed by."""
+
+    item_type, item, schema, name = key
+    return (
+        f"[Item type] = N'{item_type}' and [Item name] = N'{item}' "
+        f"and [Schema name] = N'{schema}' and [Object name] = N'{name}'"
+    )
+
+
+def _certifications(journey, key) -> list:
+    """When each build certified this object, one row per certification."""
+
+    return [
+        row["built"]
+        for row in _catalogue_rows(
+            journey,
+            f"select [Build datetime] as built from [_].[Registry] where {_keyed(key)}",
+        )
+    ]
+
+
+def _bookmarks(journey, key) -> list:
+    """How far this object has loaded, one row per bookmark."""
+
+    return [
+        row["at"]
+        for row in _catalogue_rows(
+            journey,
+            f"select [Bookmark datetime] as at from [_].[Bookmark] where {_keyed(key)}",
+        )
+    ]
+
+
+def _rows_read(journey, key, workflow_id: str) -> list:
+    """What one run's load of this object read."""
+
+    return [
+        int(row["rows_read"] or 0)
+        for row in _catalogue_rows(
+            journey,
+            "select [Rows read] as rows_read from [_].[LoadStatistic] "
+            f"where {_keyed(key)} and [Workflow ID] = N'{workflow_id}'",
+        )
+    ]
+
 
 @weaver_test(integration=True, resources=BUILDING)
 def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptance):
@@ -1007,12 +1230,24 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     Intent: A failed build may leave partial physical state, and a corrected
     build discovers physical truth and converges without manual cleanup.
 
-    Proof: one revision where Landing legitimately changes and Serving cannot
-    install. The build fails, Landing's work is really there, and after repairing
-    only the invalid definition the next build succeeds and the estate is healthy.
+    Proof: one revision where Landing and Curated legitimately change and Serving
+    cannot install. The build fails, Landing's work is really there, the
+    replaced table is uncertified and every selected object has lost its
+    bookmark, and after repairing only the invalid definition the next build
+    succeeds, the estate reloads without accumulating rows, and the load after
+    that reads nothing.
     """
 
     acceptance.require("test-changed")
+
+    # The loads so far carried both objects forward, so each holds a bookmark of
+    # its own and a certification from the build that made it.
+    assert len(_certifications(acceptance, REPLACED)) == 1
+    for key in (REPLACED, INCREMENTAL):
+        advanced = _bookmarks(acceptance, key)
+        assert len(advanced) == 1, key
+        assert advanced[0] > SENTINEL, key
+
     acceptance.step("break", lambda: _edit(acceptance, BREAKING_EDITS))
     acceptance.require("break")
 
@@ -1033,6 +1268,20 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     )
     assert "productlabel" in partial.values("product", "col_name")
 
+    # Certification and current state both go before any physical work, and
+    # publication is what puts certification back. This build never reached it.
+    #
+    # The two follow different rules, and this revision separates them.
+    # Decertification follows the drop, so the replaced table is uncertified.
+    # Invalidation follows the selection, so both objects lose their bookmark,
+    # including the protected one whose table stayed where it was. That ordering
+    # is the safety property: the next load reads the whole source rather than
+    # reading almost nothing over a table that was replaced.
+    assert _certifications(acceptance, REPLACED) == []
+    assert _bookmarks(acceptance, REPLACED) == []
+    assert len(_certifications(acceptance, INCREMENTAL)) == 1
+    assert _bookmarks(acceptance, INCREMENTAL) == []
+
     acceptance.step("repair", lambda: _edit(acceptance, REPAIR_EDITS))
     acceptance.require("repair")
 
@@ -1052,6 +1301,12 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
         (failure.action_id, failure.message) for failure in repaired.errors
     ]
 
+    # The catalogue converged from what is physically there: certified again,
+    # and still no bookmark, because a build records how far nothing has loaded.
+    assert len(_certifications(acceptance, REPLACED)) == 1
+    assert _bookmarks(acceptance, REPLACED) == []
+    assert _bookmarks(acceptance, INCREMENTAL) == []
+
     # No manual cleanup: the corrected build settles on the next attempt.
     settled = acceptance.step(
         "rebuild-converged",
@@ -1070,10 +1325,31 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
         lambda: weaver.load(acceptance.targets, session=acceptance.session),
     )
     acceptance.require("load-repaired")
-    assert acceptance["load-repaired"].result.succeeded, acceptance[
-        "load-repaired"
-    ].result.to_mapping()
-    _assert_load_status(acceptance, acceptance["load-repaired"].result)
+    reloaded = acceptance["load-repaired"].result
+    assert reloaded.succeeded, reloaded.to_mapping()
+    _assert_load_status(acceptance, reloaded)
+
+    # The bookmarks are back, seeded by the load rather than by the build, and
+    # the load that seeded them read from the sentinel. Reading the whole window
+    # again merged on the key: three customers, not six.
+    for key in (REPLACED, INCREMENTAL):
+        reseeded = _bookmarks(acceptance, key)
+        assert len(reseeded) == 1, key
+        assert reseeded[0] > SENTINEL, key
+    assert _rows_read(acceptance, INCREMENTAL, reloaded.workflow_id) == [3]
+
+    curated = _item(acceptance, "Lakehouse/Curated")
+    step = acceptance.steps["load-repaired"]
+    step.observation = _observe(
+        acceptance,
+        {
+            "customer": (
+                f"select CustomerId, CustomerName from {curated}.`CUR`.`Customer` "
+                "order by CustomerId"
+            )
+        },
+    )
+    assert _ids(step.observation, "customer", "CustomerId") == [1, 2, 4]
 
     tested = acceptance.step(
         "test-repaired",
@@ -1082,6 +1358,20 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     acceptance.require("test-repaired")
     assert tested.totals()["failed"] == 0, tested.to_mapping()
     assert tested.totals()["invalid"] == 0, tested.to_mapping()
+
+    # One more load, over the item holding the reseeded bookmark. Nothing moved
+    # at the source, so the window is empty and the reseeded bookmark carried the
+    # incremental object forward.
+    acceptance.step(
+        "load-settled",
+        lambda: weaver.load(
+            [acceptance.physical["Lakehouse/Curated"]], session=acceptance.session
+        ),
+    )
+    acceptance.require("load-settled")
+    settled_load = acceptance["load-settled"].result
+    assert settled_load.succeeded, settled_load.to_mapping()
+    assert _rows_read(acceptance, INCREMENTAL, settled_load.workflow_id) == [0]
 
 
 # --- Scenario H: the ownership boundary -------------------------------------

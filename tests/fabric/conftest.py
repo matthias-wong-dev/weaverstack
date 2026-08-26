@@ -1605,33 +1605,3 @@ def fabric_lakehouse_estate(request, weaver_repo_fixture):
         weaver_session=request.getfixturevalue("weaver_session"),
     ) as env:
         yield _install_estate(env)
-
-
-@pytest.fixture(scope="module")
-def fabric_mixed_estate(request, weaver_repo_fixture):
-    """One estate spanning a Lakehouse and a Warehouse, installed together.
-
-    The one arrangement neither single-target context can express, and the one
-    the physical load graph most needs: a Delta table published into a Warehouse
-    through a shortcut is read across a SQL analytics endpoint, and that boundary
-    is where the refresh barrier lives. Nothing with one physical side has such a
-    boundary to cross.
-
-    Both halves are installed by one bundle, in the session, so the ordering the
-    build gives them is the ordering a real estate has.
-    """
-
-    warehouse = request.getfixturevalue("clean_disposable_warehouse")
-    with _fabric_build_context(
-        request.getfixturevalue("fabric_workspace_item"),
-        request.getfixturevalue("fabric_client"),
-        request.getfixturevalue("fabric_workspace"),
-        request.getfixturevalue("fabric_target_lakehouse"),
-        request.getfixturevalue("fabric_staging_lakehouse"),
-        request.getfixturevalue("livy_session"),
-        weaver_repo_fixture,
-        warehouse=warehouse,
-        weaver_session=request.getfixturevalue("weaver_session"),
-    ) as env:
-        env.warehouse = warehouse
-        yield _install_estate(env)

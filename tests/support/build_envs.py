@@ -153,30 +153,6 @@ MIXED_ESTATE_FIXTURE = SesFixture(_FIXTURES / "mixed-estate-item", ("Lakehouse/S
 WAREHOUSE_ESTATE_FIXTURE = SesFixture(
     _FIXTURES / "warehouse-estate-item", ("Warehouse/Reporting",)
 )
-#: The smallest estate a load run can be orchestrated over: a Folder that
-#: produces files, the Python table that reads them, and the Spark SQL table that
-#: reads that. Three objects, three dispatch kinds, one dependency chain, so a
-#: failure names the orchestration layer rather than an unrelated transition.
-#:
-#: Every object really loads, which is what separates it from the other Lakehouse
-#: fixtures: several of them raise from ``read()`` on purpose, to prove a build
-#: never calls one.
-LOAD_ORCHESTRATION_FIXTURE = SesFixture(
-    _FIXTURES / "load-orchestration", ("Lakehouse/Sales",)
-)
-#: The canonical physical load scenario, and the one no single-target estate
-#: can hold: a Delta table published into a Warehouse through a shortcut, read
-#: there across a SQL analytics endpoint, and consumed by a Warehouse table with
-#: a generated load procedure of its own. That crossing is where the
-#: endpoint-refresh barrier lives.
-#:
-#: Its logical names are its own. The catalogue is keyed by logical item, so an
-#: item name shared with another module would describe the same registered
-#: objects and make one estate's rows look like the other's.
-LOAD_ORCHESTRATION_WAREHOUSE_FIXTURE = SesFixture(
-    _FIXTURES / "load-orchestration-warehouse",
-    ("Lakehouse/Producer", "Warehouse/Consumer"),
-)
 #: The one Lakehouse estate a journey drives, and the only Fabric
 #: fixture that declares ``Lakehouse/Sales``.
 #:

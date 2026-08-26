@@ -1,5 +1,0 @@
-Schema ID: Sales
-
-Description: |
-  The three objects a load run has to order: a folder that produces files, the
-  table that reads them, and the table that reads that.

@@ -1,6 +1,6 @@
 """Weaver installed in Fabric, against one built Lakehouse estate.
 
-Three subjects that each need the wheel running in the session and an estate a
+Two subjects that each need the wheel running in the session and an estate a
 bundle installed, and they share one. Building it costs about a minute, and it
 used to be built three times, once per module.
 
@@ -16,18 +16,13 @@ no estate-level entry point in the way. The subject is what the installed wheel
 offers, rather than the load semantics underneath it, which the core suite proves
 for a fraction of the cost.
 
-**Run decomposition.** The desktop reads the catalogue, builds the graph here and
-dispatches each node to whatever runs it. One scope serves every Python node, and
-it is closed when the run ends. That middle claim is the guarantee decomposition
-most had to keep: a run opening a scope per node would pass every local test and
-lose the sharing that lets two objects of one item see each other's ``lib/``
-helpers. It is read off the desktop's own telemetry, because the counts are the
-claim.
-
 Order matters here in the way it always did inside a module. The sections run in
-file order against one estate, and none of them asserts on a starting state:
-anchoring builds twice and compares, the developer primitives assert on what a
-primitive returns, and decomposition reads the run's own telemetry.
+file order against one estate, and neither asserts on a starting state:
+anchoring builds twice and compares, and the developer primitives assert on what
+a primitive returns.
+
+Composing a run out of the catalogue graph is the acceptance journey's, and the
+scope and dispatch counts underneath it are the core suite's.
 """
 
 from __future__ import annotations
@@ -37,8 +32,6 @@ from pathlib import Path
 
 import pytest
 from support.weaver_test import weaver_test
-
-from weaver.load_report import LoadRunReport
 
 # --- Anchoring -----------------------------------------------------------------
 
@@ -552,8 +545,20 @@ finally:
 """
 
 
+@pytest.fixture(scope="module")
+def deployed(fabric_lakehouse_estate):
+    """One submission of ``BODY``, and the evidence both claims below read.
+
+    ``BODY`` already imports the deployed tree, loads the Folder and loads the
+    SQL-authored table. Two tests asking it two questions are two questions about
+    one moment, so it is submitted once.
+    """
+
+    return fabric_lakehouse_estate.env.run_python(BODY, label="the deployed estate")
+
+
 @weaver_test(hosted=True)
-def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_estate):
+def test_a_developer_can_run_a_deployed_folder_load_primitive(deployed):
     """Import the object the installer deployed, call ``.load()``, and be done.
 
     The folder is the subject because it is the primitive that most needs a real
@@ -562,9 +567,7 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_e
     and wrote into a local directory called ``abfss:/…``.
     """
 
-    env = fabric_lakehouse_estate.env
-
-    seen = env.run_python(BODY)
+    seen = deployed
 
     # The tree the installer wrote, laid out as authored: the item's own modules
     # at the root, and the `Files/` segment preserved rather than flattened.
@@ -587,9 +590,7 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(fabric_lakehouse_e
 
 
 @weaver_test(hosted=True)
-def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(
-    fabric_lakehouse_estate,
-):
+def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(deployed):
     """The conversion's claim, asked of Fabric.
 
     `DWG.NamedCustomer.sql` is authored in Spark SQL and installed as
@@ -599,9 +600,7 @@ def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(
     Python-authored one are the same primitive by the time anything runs.
     """
 
-    env = fabric_lakehouse_estate.env
-
-    seen = env.run_python(BODY)
+    seen = deployed
 
     assert "DWG__NamedCustomer.py" in seen["deployed"]
     # No installed `.sql` load file survives the conversion.
@@ -643,28 +642,16 @@ def test_authored_code_consumes_folder_changes_through_the_fabric_mount(
 
 
 @weaver_test(hosted=True)
-def test_an_intolerant_file_key_rejection_is_enforced_through_the_fabric_mount(
-    fabric_lakehouse_estate,
-):
-    seen = fabric_lakehouse_estate.env.run_python(
-        "FAULT_TOLERANT = False\n" + PROBE_CATALOGUE + FILE_KEY_REJECTION,
-        label="refuse a Folder File-key violation",
-    )
-
-    assert seen["raised"] is True
-    assert seen["result"]["succeeded"] is False
-    assert seen["result"]["rows_rejected"] == 1
-    assert seen["good_published"] is False
-    assert seen["bad_published"] is False
-    assert seen["bad_rejected"] is True
-    assert seen["change_documents"] == 0
-    assert seen["changes"] == []
-
-
-@weaver_test(hosted=True)
 def test_a_tolerant_file_key_rejection_is_enforced_through_the_fabric_mount(
     fabric_lakehouse_estate,
 ):
+    """The tolerant case, which is the one that shows every outcome at once.
+
+    A bad file is rejected, a good file is published, and the change document
+    records the survivor. What ``fault_tolerant=False`` decides instead is a
+    semantic the core suite owns; both settle on the same reject table.
+    """
+
     seen = fabric_lakehouse_estate.env.run_python(
         "FAULT_TOLERANT = True\n" + PROBE_CATALOGUE + FILE_KEY_REJECTION,
         label="tolerate a Folder File-key violation",
@@ -679,99 +666,3 @@ def test_a_tolerant_file_key_rejection_is_enforced_through_the_fabric_mount(
     assert seen["good_contents"] == "good"
     assert seen["change_documents"] == 1
     assert seen["changes"] == ["good.csv"]
-
-
-# --- Run decomposition ---------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def loaded(fabric_lakehouse_estate, weaver_session):
-    """One desktop-driven load of the installed estate, and what it spent.
-
-    Module-scoped: one run answers every question below, and running it again
-    would buy nothing and cost a Livy round trip per node.
-    """
-
-    import weaver
-
-    env = fabric_lakehouse_estate.env
-    before = _counts(weaver_session)
-    # No workspace argument: the Session carries this env's context, which is
-    # the same object it was opened with.
-    report = weaver.load(
-        [f"Lakehouse/{env.target.name}"],
-        session=weaver_session,
-    )
-    return report, _spent(before, _counts(weaver_session))
-
-
-def _counts(session) -> dict:
-    return {name: measure.calls for name, measure in session.telemetry.measures.items()}
-
-
-def _spent(before: dict, after: dict) -> dict:
-    """What this run alone submitted, since the Session outlives it."""
-
-    return {
-        name: calls - before.get(name, 0)
-        for name, calls in after.items()
-        if calls - before.get(name, 0) > 0
-    }
-
-
-@weaver_test(hosted=True)
-def test_a_desktop_runs_the_catalogue_graph_it_did_not_have_to_ship(loaded):
-    """The decomposed path, end to end, against real installed primitives."""
-
-    report, _ = loaded
-
-    assert isinstance(report, LoadRunReport)
-    assert report.succeeded, report.messages
-    assert report.nodes
-
-
-@weaver_test(hosted=True)
-def test_every_python_node_shared_one_runtime_scope(loaded):
-    """One scope per logical run, however many nodes it dispatched.
-
-    A run that opened a scope per node would still load every table, and would
-    silently stop two objects of one item sharing the ``lib/`` helpers their
-    author wrote them against.
-    """
-
-    _, spent = loaded
-
-    assert spent.get("livy.open_scope") == 1
-    assert spent.get("livy.run_python_primitive", 0) > 1, (
-        "this estate should have more than one Python node, or the claim is vacuous"
-    )
-
-
-@weaver_test(hosted=True)
-def test_the_scope_is_closed_when_the_run_ends(loaded):
-    """A scope left open is one the next run would inherit, and with it, the
-    modules a rebuild has since replaced."""
-
-    _, spent = loaded
-
-    assert spent.get("livy.close_scope") == 1
-
-
-@weaver_test(hosted=True)
-def test_the_run_does_not_stocktake_the_physical_estate(loaded):
-    """The catalogue is trusted until a primitive is dispatched."""
-
-    _, spent = loaded
-
-    assert spent.get("livy.spark_sql", 0) == 0
-    assert "livy.load" not in spent
-    assert "livy.read_catalogue" not in spent
-
-
-@weaver_test(hosted=True)
-def test_every_node_reports_where_it_was_dispatched(loaded):
-    """Dispatch addresses were derived from the catalogue graph."""
-
-    report, _ = loaded
-
-    assert all(node.dispatch_location for node in report.nodes)

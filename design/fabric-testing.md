@@ -37,7 +37,7 @@ The scopes are:
 | scope | use |
 |---|---|
 | `remote` | Weaver runs from this checkout against Fabric; no published wheel is needed |
-| `hosted` | the claim requires Weaver published in the Fabric Environment |
+| `hosted` | Weaver executes inside Fabric, normally from the checkout the suite injects |
 | `integration` | a composed lifecycle journey |
 
 Integration stands alone. It does not require an additional remote or hosted
@@ -189,8 +189,10 @@ The Environment still has to exist and still carries the dependencies:
 ```
 
 Publish again when `deployment/fabric/environment.yml` changes. An Environment
-holding a Weaver wheel as well is harmless; the injected checkout is imported
-first, and the bootstrap fails the run if it is not.
+holding a Weaver wheel as well is harmless. The bootstrap reads
+`weaver.__file__` and fails the session unless the package came from the
+extraction directory, so an Environment carrying a wheel of this same version
+cannot satisfy it.
 
 The staged artefact is a built wheel. Weaver reaches its bundled SQL templates
 and `warehouse_type_mapping.yml` through `Path(__file__)`, so a packaging change
@@ -205,6 +207,11 @@ WEAVER_PYTEST_INJECT_WEAVER=0 .venv/bin/python -m pytest -m "fabric and hosted"
 
 Do that before a release. In that mode a stale wheel behaves as it always did: a
 hosted failure that looks like a change had no effect is usually one.
+`tests/fabric/test_published_weaver_primitive.py` is the smoke test for it: the
+published package imports, reports a version the Environment has published, and
+resolves a Lakehouse. It skips in the ordinary injected mode, where the
+Environment's published set says nothing about what the session is running.
+Ordinary hosted runs execute one Weaver, the injected one.
 
 A structural change to a table declaring `Prohibit rebuild: true` needs one
 further step: reconciliation will not replace it, so an installed one keeps its
@@ -313,8 +320,48 @@ why earlier readings understated the reset.
 Then the estates themselves. `test_installed_estate_boundary.py` is three
 modules that each built the same repository, and six modules whose claims the
 acceptance journey or the core suite already make are gone. That took remote and
-hosted from 38m34s to about 24 minutes. The commit messages carry what each one
-covered and what stopped being covered.
+hosted from 38m34s to about 24 minutes. The figures in the ledger above were
+measured at that point.
+
+A second pass moved the remaining standalone Fabric machinery onto the
+acceptance estate, which builds and loads anyway:
+
+```text
+gone                                     where the claim is now
+test_load_orchestration_cycle.py         the acceptance load report: one endpoint
+                                         refresh, its edges, and the Warehouse
+                                         reading what the Lakehouse wrote
+test_external_shortcut_journey.py        the acceptance estate reads the foreign
+                                         workspace through a table, a folder and
+                                         a schema shortcut, by loading through them
+test_item_catalogue_fabric_boundary.py   the acceptance build's own catalogue:
+                                         every table present, `_weaver` installed
+                                         and certified table for table
+test_shared_catalogue_host_boundary.py   a user's schema seeded in the catalogue
+                                         Warehouse before the first build, read
+                                         back after the build and the rebuild
+```
+
+`test_installed_estate_boundary.py` submitted one body twice and asked it two
+questions; it now submits it once. Its run-decomposition section is gone, because
+scope opening, reuse and closing are the core suite's and catalogue-driven load
+composition is the acceptance journey's. Of its two File-key cases the tolerant
+one stayed, because it shows the rejection, the publication and the change
+document together.
+
+`test_published_weaver_primitive.py` was five capability probes and a whole
+installation. Every hosted test now runs an injected checkout inside Fabric and
+proves those capabilities by using them, so what is left is one release-mode
+smoke test for the published wheel.
+
+The Delta keyed matrix is decided without a tenant. One representative refusal
+runs against Spark, in `test_delta_keyed_refusal_primitive.py`, with no build and
+no estate behind it.
+
+What came back is `test_authored_object_attachment_primitive.py`. Fabric decides
+what a session reports as its attachment and where it mounts it, so no local test
+can settle it, and it costs one submission against the session the suite already
+holds.
 
 ## Test estate hygiene
 
