@@ -126,4 +126,3 @@ def test_make_directory_is_idempotent(store, files_root):
 def test_listing_a_missing_location_is_an_error(store, files_root):
     with pytest.raises(StoreError, match="does not exist"):
         store.list(files_root / "absent")
-

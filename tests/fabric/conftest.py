@@ -496,9 +496,7 @@ def injected_weaver_bootstrap(
 
 
 @pytest.fixture(scope="session")
-def livy_session(
-    fabric_workspace, fabric_client, request, injected_weaver_bootstrap
-):
+def livy_session(fabric_workspace, fabric_client, request, injected_weaver_bootstrap):
     """One Spark session in Fabric with the Weaver Environment attached.
 
     Skips, rather than fails, when the Environment is missing or carries no

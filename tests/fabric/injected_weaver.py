@@ -82,7 +82,7 @@ def bootstrap_source(url: str, version: str) -> str:
     """
 
     target = f"{DRIVER_ROOT}/{_slug(version)}"
-    return f'''
+    return f"""
 import importlib
 import os
 import sys
@@ -116,7 +116,7 @@ if weaver.__version__ != {version!r}:
     )
 for _dependency in ("yaml", "sqlparse", "mssql_python"):
     importlib.import_module(_dependency)
-'''
+"""
 
 
 def _slug(version: str) -> str:
