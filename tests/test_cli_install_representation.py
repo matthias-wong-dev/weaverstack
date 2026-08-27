@@ -39,8 +39,17 @@ def test_environment_publish_has_its_own_fabric_surface():
         ["fabric", "environment", "publish", "Runtime", "--workspace", "Sales"]
     )
 
-    assert parsed.environment == "Runtime"
+    assert parsed.environment_ref == "Runtime"
     assert parsed.workspace == "Sales"
+
+
+@weaver_test()
+def test_environment_publish_accepts_a_qualified_reference_without_workspace():
+    parsed = build_parser().parse_args(
+        ["fabric", "environment", "publish", "Platform/Runtime"]
+    )
+    assert parsed.environment_ref == "Platform/Runtime"
+    assert parsed.workspace is None
 
 
 @weaver_test()
@@ -124,3 +133,26 @@ def test_environment_publish_prints_its_result(monkeypatch, capsys):
     )
     assert handle_environment_publish(args) == 0
     assert '"published": true' in capsys.readouterr().out
+
+
+@weaver_test()
+def test_environment_publish_rejects_a_conflicting_workspace(monkeypatch):
+    cli = import_module("weaver_cli.main")
+    from weaver.errors import CommandError
+    from weaver.workspaces import Workspace
+
+    monkeypatch.setattr(
+        cli, "_resolve_workspace", lambda args: Workspace(workspace="Sales")
+    )
+    args = build_parser().parse_args(
+        [
+            "fabric",
+            "environment",
+            "publish",
+            "Platform/Runtime",
+            "--workspace",
+            "Sales",
+        ]
+    )
+    with pytest.raises(CommandError, match="conflicts"):
+        handle_environment_publish(args)

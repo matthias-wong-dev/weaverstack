@@ -42,8 +42,26 @@ TARGET_LAKEHOUSE = "Sales_LH"
 LAKEHOUSE_SQL = Path(__file__).parent / "fixtures" / "local-lakehouse"
 
 
-def pytest_collection_modifyitems(items):
-    """Require one declaration and make its generated markers agree."""
+def pytest_addoption(parser):
+    """Register --runslow to opt into slow tests."""
+    parser.addoption(
+        "--runslow",
+        action="store_true",
+        default=False,
+        help="run slow tests",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """Require one declaration and make its generated markers agree.
+
+    Skip tests marked 'slow' unless --runslow is passed.
+    """
+    if not config.getoption("--runslow"):
+        skip_marker = pytest.mark.skip(reason="need --runslow option to run")
+        for item in items:
+            if "slow" in item.keywords:
+                item.add_marker(skip_marker)
 
     errors = []
     for item in items:

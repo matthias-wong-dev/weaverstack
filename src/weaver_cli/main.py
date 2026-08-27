@@ -357,7 +357,11 @@ def build_parser() -> argparse.ArgumentParser:
     environment_publish = environment_commands.add_parser(
         "publish", help="Publish Weaver into a Fabric Environment."
     )
-    environment_publish.add_argument("environment", help="Fabric Environment name.")
+    environment_publish.add_argument(
+        "environment_ref",
+        metavar="ENVIRONMENT",
+        help="Fabric Environment name or Workspace/Environment reference.",
+    )
     _add_workspace_args(
         environment_publish, include_catalogue=False, include_environment=False
     )
@@ -500,27 +504,32 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
     """
 
     import json
+    from dataclasses import replace
 
-    from weaver.errors import CommandError
+    from weaver.fabric.environment import resolve_environment_owner
     from weaver.sessions.host import use_or_create_session
+    from weaver.workspaces import EnvironmentRef, Workspace
 
-    workspace = _resolve_workspace(args)
-    if not workspace.environment:
-        raise CommandError(
-            "A Fabric Environment is required to publish Weaver. "
-            "Use --environment or configure one for this workspace."
-        )
+    environment = EnvironmentRef.parse(args.environment_ref)
+    if (
+        environment.workspace is not None
+        and args.workspace is None
+        and args.workspace_config is None
+    ):
+        workspace = Workspace(workspace=environment.workspace, environment=environment)
+    else:
+        workspace = _resolve_workspace(args)
+        resolve_environment_owner(workspace.workspace, environment)
+        workspace = replace(workspace, environment=environment)
     _prefer_desktop_credential()
     from weaver.fabric import publish_environment
 
     started = time.perf_counter()
     with use_or_create_session(_session(args), workspace=workspace) as session:
-        with session.task(
-            "Publish Environment", f"{workspace.workspace}/{workspace.environment}"
-        ):
+        with session.task("Publish Environment", str(environment)):
             result = publish_environment(
                 workspace.workspace,
-                workspace.environment,
+                environment,
                 session=session,
             )
     total = time.perf_counter() - started
@@ -585,7 +594,10 @@ def _add_workspace_args(
     parser.add_argument("--workspace", help="Fabric Workspace name.")
     parser.add_argument("--workspace-config", help="Workspace configuration file.")
     if include_environment:
-        parser.add_argument("--environment", help="Fabric Environment name.")
+        parser.add_argument(
+            "--environment",
+            help="Fabric Environment name or Workspace/Environment reference.",
+        )
     if include_catalogue:
         parser.add_argument(
             "--catalogue",
@@ -713,7 +725,7 @@ def _command_context(workspace) -> dict:
 
     return {
         "catalogue": workspace.catalogue or None,
-        "environment": workspace.environment or None,
+        "environment": str(workspace.environment) if workspace.environment else None,
     }
 
 

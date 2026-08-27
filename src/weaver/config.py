@@ -8,6 +8,7 @@ from typing import Any
 from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from .errors import ConfigError
 from .workspaces import (
+    EnvironmentRef,
     ExecutionSettings,
     TargetDeclaration,
     Workspace,
@@ -65,7 +66,7 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
 def resolve_workspace(
     *,
     workspace: str | None = None,
-    environment: str | None = None,
+    environment: EnvironmentRef | str | None = None,
     catalogue: str | None = None,
     workspace_config: str | Path | None = None,
 ) -> Workspace:

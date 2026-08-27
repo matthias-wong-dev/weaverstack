@@ -133,7 +133,7 @@ def run_notebook(
     *,
     workspace: str,
     lakehouse: str,
-    environment: str,
+    environment,
     wait: bool = True,
     timeout: float = 7200.0,
     poll_interval: float = 10.0,
@@ -142,20 +142,32 @@ def run_notebook(
     """Run a notebook with an explicit default Lakehouse and Environment."""
 
     client = client or FabricClient()
+    from ..workspaces import EnvironmentRef
+
     physical_workspace = find_workspace(workspace, client=client)
     notebook = find_item(physical_workspace, name, item_type=NOTEBOOK, client=client)
     default_lakehouse = find_item(
         physical_workspace, lakehouse, item_type=LAKEHOUSE, client=client
     )
+    environment_ref = EnvironmentRef.parse(environment)
+    environment_workspace_name = environment_ref.owner(workspace)
+    environment_workspace = (
+        physical_workspace
+        if environment_workspace_name == workspace
+        else find_workspace(environment_workspace_name, client=client)
+    )
     attached_environment = find_item(
-        physical_workspace, environment, item_type=ENVIRONMENT, client=client
+        environment_workspace,
+        environment_ref.name,
+        item_type=ENVIRONMENT,
+        client=client,
     )
 
     def reference(item) -> dict:
         return {
             "referenceType": "ById",
             "itemId": item.id,
-            "workspaceId": physical_workspace.id,
+            "workspaceId": item.workspace_id,
         }
 
     payload = {

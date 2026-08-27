@@ -188,7 +188,8 @@ The Environment still has to exist and still carries the dependencies:
   --workspace PYTEST_WORKSPACE
 ```
 
-Publish again when `deployment/fabric/environment.yml` changes. An Environment
+Publish again when Weaver Python or its project dependencies change. Publication
+keeps the Environment definition and foreign custom libraries. An Environment
 holding a Weaver wheel as well is harmless. The bootstrap reads
 `weaver.__file__` and fails the session unless the package came from the
 extraction directory, so an Environment carrying a wheel of this same version
@@ -212,6 +213,12 @@ published package imports, reports a version the Environment has published, and
 resolves a Lakehouse. It skips in the ordinary injected mode, where the
 Environment's published set says nothing about what the session is running.
 Ordinary hosted runs execute one Weaver, the injected one.
+
+`tests/fabric/test_environment_publish_preservation_primitive.py` exercises the
+desktop publication command against the fixed Environment. It keeps a
+pre-existing user package, the exported `environment.yml`, and published Spark
+compute settings unchanged, confirms the Weaver wheel is present, and requires
+the second publication to be a no-op.
 
 A structural change to a table declaring `Prohibit rebuild: true` needs one
 further step: reconciliation will not replace it, so an installed one keeps its

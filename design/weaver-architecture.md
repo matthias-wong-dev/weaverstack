@@ -543,10 +543,27 @@ weaver build \
 The repository does not contain deployment-specific information. The Workspace
 determines where logical declarations are deployed.
 
-`--environment` names the Fabric Environment `weaver fabric environment publish`
-published to, and is needed by the commands that run Weaver-authored Python
-inside Fabric: `load` and `test`. A build and bundle installation execute
-frozen SQL and bundle payloads, so neither needs it.
+`--environment` accepts `Environment` for the workload workspace or
+`Workspace/Environment` for an Environment owned by another workspace. The same
+reference grammar applies to workspace configuration and `weaver fabric
+environment publish`. Commands that run Weaver-authored Python inside Fabric,
+including `load` and `test`, need this reference. A build and bundle installation
+execute frozen SQL and bundle payloads, so neither needs it.
+
+Environment publication installs Weaver into an existing Fabric Environment.
+It reads every page of the published and staged package sets, reuses compatible
+packages, adds absent Weaver requirements as custom wheels, and reports
+incompatible versions before staging. Wheel resolution targets the Python and
+ABI of the Environment's published Fabric runtime. Runtime 1.3 maps to
+CPython 3.11 and `cp311`; Runtime 2.0 maps to CPython 3.13 and `cp313`. An
+unrecognised runtime stops publication before mutation.
+
+An External library carries the dependency closure Fabric published for it. A
+missing requirement receives the binary dependency closure Weaver resolves. A
+custom wheel is reused only when its version is the resolved version whose
+dependency metadata Weaver read; otherwise publication stops before mutation.
+Weaver owns `weaverstack-*.whl`. The Environment definition and every other
+custom library remain user-owned.
 
 ---
 

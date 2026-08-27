@@ -653,4 +653,6 @@ def test_overrides_do_not_mutate_the_workspace_they_are_applied_to():
 
     assert original.catalogue == "Warehouse/Weaver"
     assert overridden.catalogue == "Warehouse/Other"
-    assert overridden.environment == "dev"
+    from weaver.workspaces import EnvironmentRef
+
+    assert overridden.environment == EnvironmentRef(None, "dev")

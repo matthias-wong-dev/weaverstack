@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.config import load_workspace, parse_workspace
+from weaver.config import load_workspace, parse_workspace, resolve_workspace
 from weaver.errors import ConfigError
-from weaver.workspaces import Workspace
+from weaver.workspaces import EnvironmentRef, Workspace
 
 
 @weaver_test()
@@ -34,7 +34,7 @@ def test_typical_configuration_parses_physical_defaults():
             },
         }
     )
-    assert workspace.environment == "WeaverRuntime"
+    assert workspace.environment == EnvironmentRef(None, "WeaverRuntime")
     assert workspace.execution.parallel_workers == 8
     assert str(workspace.lakehouses["Dev_Data"].item) == "Lakehouse/Sales"
     assert workspace.warehouses["Dev_Reporting"].execution.parallel_workers == 4
@@ -51,6 +51,26 @@ def test_physical_names_can_overlap_across_types():
     )
     assert "Data" in workspace.lakehouses
     assert "Data" in workspace.warehouses
+
+
+@weaver_test()
+def test_configuration_accepts_a_qualified_environment():
+    workspace = parse_workspace(
+        {"workspace": "Analytics", "environment": "Platform/WeaverRuntime"}
+    )
+    assert workspace.environment == EnvironmentRef("Platform", "WeaverRuntime")
+
+
+@weaver_test()
+def test_cli_environment_override_replaces_the_configured_reference(tmp_path):
+    config = tmp_path / "workspace.yml"
+    config.write_text(
+        "workspace: Analytics\nenvironment: LocalRuntime\n", encoding="utf-8"
+    )
+    workspace = resolve_workspace(
+        workspace_config=config, environment="Platform/SharedRuntime"
+    )
+    assert workspace.environment == EnvironmentRef("Platform", "SharedRuntime")
 
 
 @weaver_test()

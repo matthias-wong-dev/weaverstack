@@ -4,8 +4,13 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.declaration.model import WeaverItemId
-from weaver.errors import IdentityError
-from weaver.workspaces import ExecutionSettings, TargetDeclaration, Workspace
+from weaver.errors import ConfigError, IdentityError
+from weaver.workspaces import (
+    EnvironmentRef,
+    ExecutionSettings,
+    TargetDeclaration,
+    Workspace,
+)
 
 
 @weaver_test()
@@ -23,7 +28,29 @@ def test_workspace_sub_parameters_are_item_names():
         environment="WeaverRuntime",
     )
     assert workspace.catalogue == "Warehouse/Weaver"
-    assert workspace.environment == "WeaverRuntime"
+    assert workspace.environment == EnvironmentRef(None, "WeaverRuntime")
+
+
+@weaver_test()
+def test_environment_reference_grammar_preserves_its_owner():
+    assert EnvironmentRef.parse("Runtime") == EnvironmentRef(None, "Runtime")
+    assert EnvironmentRef.parse("Platform/Runtime") == EnvironmentRef(
+        "Platform", "Runtime"
+    )
+    assert str(EnvironmentRef.parse("Platform/Runtime")) == "Platform/Runtime"
+
+
+@pytest.mark.parametrize("value", ["/Runtime", "Platform/", "A/B/C"])
+@weaver_test()
+def test_malformed_environment_references_are_rejected(value):
+    with pytest.raises((ConfigError, IdentityError)):
+        EnvironmentRef.parse(value)
+
+
+@weaver_test()
+def test_workspace_accepts_a_qualified_environment_reference():
+    workspace = Workspace(workspace="Analytics", environment="Platform/WeaverRuntime")
+    assert workspace.environment == EnvironmentRef("Platform", "WeaverRuntime")
 
 
 @weaver_test()

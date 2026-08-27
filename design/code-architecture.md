@@ -288,6 +288,13 @@ the Weaver published in <workspace> is older than this console ...
 Publish the current wheel with `weaver fabric environment publish <environment> --workspace <workspace>`
 ```
 
+An Environment reference is either `Environment` in the workload workspace or
+`Workspace/Environment` in another workspace. Livy resolves the owning
+workspace, attaches the Environment ID, and continues to create the session
+against the workload workspace's Lakehouse. The cross-workspace acceptance test
+uses the same `{"id": "<environment-id>"}` Environment details payload as a
+local Environment. Fabric resolves the owning workspace from the item ID.
+
 The entry points are few and stable, and each is a named function rather than
 text inside a submitted body: a name is versioned, testable and greppable, and
 widening this surface is the coupling that has caused Fabric failures.

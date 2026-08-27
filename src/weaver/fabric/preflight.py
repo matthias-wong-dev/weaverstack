@@ -76,7 +76,7 @@ def required_items(
     bindings,
     *,
     control_item: str,
-    environment: str | None = None,
+    environment=None,
 ) -> tuple[RequiredItem, ...]:
     """Everything a desktop build must find, deduplicated and ordered.
 
@@ -90,7 +90,10 @@ def required_items(
         RequiredItem(str(control_item), WAREHOUSE, "Weaver catalogue")
     ]
     if environment:
-        wanted.append(RequiredItem(environment, ENVIRONMENT, "Environment"))
+        from ..workspaces import EnvironmentRef
+
+        environment_ref = EnvironmentRef.parse(environment)
+        wanted.append(RequiredItem(environment_ref.name, ENVIRONMENT, "Environment"))
     for binding in bindings.entries:
         item_type = _ITEM_TYPE_FOR_BINDING[binding.target.kind]
         wanted.append(
@@ -108,7 +111,7 @@ def preflight_fabric_targets(
     *,
     workspace: str,
     control_item: str,
-    environment: str | None = None,
+    environment=None,
     client=None,
 ) -> Preflight:
     """Resolve every required item from one workspace listing, or fail saying why.
@@ -117,8 +120,16 @@ def preflight_fabric_targets(
     only: a successful preflight leaves the workspace exactly as it found it.
     """
 
+    from ..workspaces import EnvironmentRef
+
     physical = find_workspace(workspace, client=client)
     inventory = list_items(physical, client=client)
+    environment_ref = EnvironmentRef.parse(environment) if environment else None
+    local_environment = (
+        environment_ref
+        if environment_ref and environment_ref.owner(workspace) == workspace
+        else None
+    )
 
     by_name_and_type: dict[tuple[str, str], list[Item]] = {}
     for item in inventory:
@@ -127,7 +138,7 @@ def preflight_fabric_targets(
     resolved: dict[str, Item] = {}
     problems: list[str] = []
     for required in required_items(
-        bindings, control_item=control_item, environment=environment
+        bindings, control_item=control_item, environment=local_environment
     ):
         matches = by_name_and_type.get((required.item_type, required.name), [])
         if not matches:
@@ -140,6 +151,20 @@ def preflight_fabric_targets(
             )
             continue
         resolved[f"{required.item_type}/{required.name}"] = matches[0]
+
+    if environment_ref and local_environment is None:
+        owner_name = environment_ref.owner(workspace)
+        owner = find_workspace(owner_name, client=client)
+        try:
+            environment_item = next(
+                item
+                for item in list_items(owner, item_type=ENVIRONMENT, client=client)
+                if item.name == environment_ref.name
+            )
+        except StopIteration:
+            problems.append(f"- Environment {str(environment_ref)!r} was not found")
+        else:
+            resolved[f"{ENVIRONMENT}/{str(environment_ref)}"] = environment_item
 
     if problems:
         raise PreflightError(

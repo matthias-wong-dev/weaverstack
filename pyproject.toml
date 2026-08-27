@@ -20,11 +20,9 @@ classifiers = [
     "Topic :: Database",
 ]
 
-# What *installed* Weaver needs to run — the packages a Fabric Environment must
-# carry, and what a desktop needs to reach one. Kept in step with
-# deployment/fabric/environment.yml (a test enforces it) so the two definitions
-# cannot drift. PySpark is not here and must not be: Fabric supplies it where
-# authored runtime code executes, and a desktop never holds a Spark session.
+# What installed Weaver needs to run. Environment publication reads this list,
+# excludes the desktop transports, and resolves the Fabric wheel closure.
+# PySpark is absent because Fabric supplies it where authored runtime code runs.
 dependencies = [
     "pyyaml",
     "sqlparse",
@@ -33,6 +31,7 @@ dependencies = [
     "requests>=2.31",
     "build>=1.2",
     "prompt_toolkit>=3.0",
+    "packaging>=24",
 ]
 
 [project.optional-dependencies]

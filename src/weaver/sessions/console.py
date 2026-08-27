@@ -33,6 +33,20 @@ def _duration(seconds: float | None) -> str:
     return f"{minutes}m{remainder:02d}s"
 
 
+def _environment_publish_command(workspace: Workspace) -> str:
+    """Return the publish command for a Workspace's Environment reference."""
+
+    reference = workspace.environment
+    if reference is None:
+        return "`weaver fabric environment publish <environment>`"
+    if reference.workspace:
+        return f"`weaver fabric environment publish {reference}`"
+    return (
+        f"`weaver fabric environment publish {reference} "
+        f'--workspace "{workspace.workspace}"`'
+    )
+
+
 @dataclass(frozen=True)
 class WarmUp:
     """What a warm-up started, and what it declined to start and why.
@@ -672,7 +686,8 @@ class ConsoleScope(WorkspaceScope):
         if published and published != local:
             warn(
                 f"this console runs weaverstack {local}; {self.name} has "
-                f"{published} published. Run `weaver fabric environment publish {self.workspace.environment} --workspace {self.workspace.workspace}` if the difference "
+                f"{published} published. Run "
+                f"{_environment_publish_command(self.workspace)} if the difference "
                 "matters"
             )
 
@@ -723,9 +738,8 @@ class ConsoleScope(WorkspaceScope):
             return CommandError(
                 f"{name} could not run: the Weaver published in {self.name} is "
                 f"older than this console ({__version__}) and does not carry "
-                f"{exc.evalue}. Publish the current wheel with `weaver fabric environment publish "
-                f"{getattr(self.workspace, 'environment', '<environment>')} "
-                f'--workspace "{self.name}"`'
+                f"{exc.evalue}. Publish the current wheel with "
+                f"{_environment_publish_command(self.workspace)}"
             )
         return exc
 

@@ -212,7 +212,8 @@ def _require_lakehouse_environment(session, *, workspace, requested, dry_run: bo
     target = next(target for target in requested if target.is_lakehouse)
     raise CommandError(
         f"{target} requires a Fabric Environment with Weaver installed. Pass "
-        "--environment <name>, or set environment in workspace configuration."
+        "--environment <Environment | Workspace/Environment>, or set environment "
+        "in workspace configuration."
     )
 
 
