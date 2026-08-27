@@ -402,8 +402,8 @@ selection. Managed markers are never written by hand.
 ```bash
 pytest                        # pure Python, no JVM and no tenant
 pytest -m "fabric and remote" # no published wheel needed
-pytest -m "fabric and hosted" # needs the wheel published to the Environment
-pytest -m full_integration    # composed lifecycle journeys
+pytest -m "fabric and hosted" # injects checkout wheel; no publish needed
+pytest -m full_integration    # injects checkout wheel; no publish needed
 ```
 
 The scope is one of core, remote, hosted or integration. Integration needs no
