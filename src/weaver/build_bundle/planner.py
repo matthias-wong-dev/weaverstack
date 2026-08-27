@@ -418,7 +418,7 @@ def plan_item_build(
     artefacts = item_runtime_artefacts(
         repository,
         item=item,
-        # The load layer installs these, so their bodies are rendered here
+        # The runtime layer installs these, so their bodies are rendered here
         # against the target this item is bound to. A Warehouse names its
         # objects over TDS and has no Spark destination.
         destination=None if target.kind == WAREHOUSE_TARGET else target.spark_target,
@@ -476,7 +476,7 @@ def plan_item_build(
     if refresh is not None:
         stages.append(refresh)
 
-    # The load layer closes the item, after its structure is built and its
+    # The runtime layer closes the item, after its structure is built and its
     # endpoint has caught up. Removals ride in it too: they come from the
     # previous Registry rows rather than from any diff against the target, so
     # they need no earlier barrier to be safe.

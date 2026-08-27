@@ -38,11 +38,11 @@ DROP_FOLDER = "drop_folder"
 DROP_TABLE = "drop_table"
 DROP_VIEW = "drop_view"
 
-#: Removals of load artefacts whose source has stopped claiming them. Distinct
-#: from prune because they come from the catalogue rather than from a diff
-#: against the target: the previous Registry row says what was installed and
-#: where, so a deleted or renamed source produces the removal without anything
-#: having to enumerate the runtime tree.
+#: Removals of runtime artefacts whose source has stopped claiming them.
+#: Distinct from prune because they come from the catalogue rather than from a
+#: diff against the target: the previous Registry row says what was installed
+#: and where, so a deleted or renamed source produces the removal without
+#: anything having to enumerate the runtime tree.
 DELETE_FILE = "delete_file"
 DROP_PROCEDURE = "drop_procedure"
 

@@ -403,10 +403,6 @@ def project_item_catalogue(
             # A schema shortcut presents the source item's namespace, so the
             # item does not own that schema and never declares it.
             if not declaration.is_schema
-            # A Weaver-owned reference presents the reserved catalogue schema,
-            # which no item declares and nothing describes; the Shortcut table
-            # records the relation, and this is not a namespace of theirs.
-            and declaration.destination_identity is None
         }
         # A generated load procedure puts a schema into use that no document
         # declares an object in, so it would otherwise be a schema the

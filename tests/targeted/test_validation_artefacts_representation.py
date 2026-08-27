@@ -246,7 +246,7 @@ def test_the_role_travels_with_the_artefact(estate):
 
     Four roles reach the Registry from here, and the shapes do not distinguish
     them: a load module and a Test module are both files, and a load procedure, a
-    Test procedure and an entry point are all procedures.
+    Test procedure and _.Load are all procedures.
     """
 
     from weaver.catalogue.tables import ROLE_PROGRAMMABLE

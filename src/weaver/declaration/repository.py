@@ -241,7 +241,8 @@ def _claim(folded: dict[str, object], key, label: str, *, what: str) -> None:
     if prior is not None:
         if str(prior) == rendered:
             raise DiscoveryError(
-                f"{rendered} ({what}) is contributed twice: once by {label} content"
+                f"{rendered} ({what}) is contributed twice, the second time by "
+                f"{label} content"
             )
         raise DiscoveryError(
             f"{rendered} ({what}, {label}) and {prior} differ only by case "

@@ -365,11 +365,9 @@ def item_generated_programmables(
 ) -> tuple["Programmable", ...]:
     """The stored procedures Weaver generates for one Warehouse item.
 
-    One per Warehouse table Weaver loads and one per Warehouse validation,
-    derived from those declarations alone. They join the repository through the
-    same composition path as every other declaration, so authored, generated
-    and Weaver-owned procedures share one representation and one install,
-    register and prune lifecycle.
+    One per Warehouse table Weaver loads, one per Warehouse validation. They
+    join the repository through the same composition path as every other
+    declaration.
     """
 
     if item.item_type != WAREHOUSE or _is_builtin(item):
@@ -426,21 +424,11 @@ def item_generated_programmables(
 def _warehouse_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[RuntimeArtefact, ...]:
-    """One artefact per stored procedure this item manages.
+    """One artefact per Programmable this item manages.
 
-    Every Warehouse procedure is a Programmable of the repository: generated
-    load and validation procedures, authored content, and Weaver's own fixed
-    entry points. One layer installs them, signs them, selects them
-    incrementally, and prunes them when their declaration goes.
+    Generated load and validation procedures, authored content and Weaver's own
+    fragments alike. One layer installs, signs, selects and prunes them.
     """
-
-    return _programmable_artefacts(repository, item=item)
-
-
-def _programmable_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
-) -> tuple[RuntimeArtefact, ...]:
-    """One artefact per stored procedure the repository manages for this item."""
 
     found = []
     for programmable in repository.programmables.values():
@@ -792,11 +780,14 @@ def artefacts_by_identity(
 __all__ = [
     "ETL_SCHEMA",
     "FILE_TYPE",
+    "FOLDER_DOCUMENT",
     "LOAD_FOLDER",
     "LOAD_PROCEDURE_PREFIX",
     "LOAD_ROOT",
     "RuntimeArtefact",
     "PROCEDURE_TYPE",
+    "has_deployable_source",
+    "item_generated_programmables",
     "item_bookmarkable_objects",
     "item_load_artefacts",
     "load_artefacts",

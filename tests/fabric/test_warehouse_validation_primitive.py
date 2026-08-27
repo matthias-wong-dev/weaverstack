@@ -213,8 +213,7 @@ def _runner_mode(executor, qualified: str, *, item_name: str) -> None:
     """The runner-style call, with the logical item supplied."""
 
     executor.execute_script(
-        f"exec [_].[Test] @object_name = N'{qualified}'"
-        f", @item_name = N'{item_name}';"
+        f"exec [_].[Test] @object_name = N'{qualified}', @item_name = N'{item_name}';"
     )
 
 

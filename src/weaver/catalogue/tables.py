@@ -1313,14 +1313,11 @@ RUNTIME_TABLES = (LOG, BOOKMARK, LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
 
 #: The standard Weaver catalogue surface every normal bound item presents.
 #:
-#: A built target is given each of these under its own name, being a view in a
+#: A built target is given each of these under its own name, a view in a
 #: Warehouse and a OneLake shortcut in a Lakehouse, so a generated procedure,
-#: authored Spark SQL and the fixed ``_.Load`` and ``_.Test`` can reach Weaver's
-#: operational state. ``_.Installation`` is part of the surface because
-#: ``_.Load`` and ``_.Test`` recover their logical item from it when a caller
-#: omits ``@item_name``. When the item is the Warehouse holding the catalogue,
-#: the tables are already there and the planner creates nothing; that is
-#: physical planning, not a different logical surface.
+#: authored Spark SQL, ``_.Load`` and ``_.Test`` reach Weaver's operational
+#: state. ``_.Installation`` is here because ``_.Load`` and ``_.Test`` recover
+#: their logical item from it when a caller omits ``@item_name``.
 STANDARD_SURFACE_TABLES = (INSTALLATION,) + RUNTIME_TABLES
 
 #: The runtime tables describing one object's state now. A build ends the

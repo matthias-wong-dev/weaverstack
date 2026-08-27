@@ -36,6 +36,7 @@ from weaver.build_bundle import (
 from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.prune import TargetInventory
 from weaver.build_bundle.targets import BoundTarget
+from weaver.catalogue.builtin import BUILTIN_ITEM
 from weaver.catalogue.state import Catalogue, RegisteredDocument
 from weaver.catalogue.tables import (
     CATALOGUE_SCHEMA,
@@ -458,7 +459,7 @@ class FixtureInventory(TargetInventory):
         views = qualified(of_kind="View", files=False)
         folders = qualified(of_kind="Folder", files=True)
         artefacts = item_runtime_artefacts(repository, item=item)
-        if target_kind == SQL_TARGET and str(item) != "Warehouse/_weaver":
+        if target_kind == SQL_TARGET and str(item) != str(BUILTIN_ITEM):
             # A built Warehouse holds the standard Weaver catalogue surface
             # under its own names, so a generated procedure can read its own
             # bookmark and record what it did.
@@ -501,7 +502,7 @@ class FixtureInventory(TargetInventory):
             ),
             runtime_references=(
                 ()
-                if target_kind == SQL_TARGET or str(item) == "Warehouse/_weaver"
+                if target_kind == SQL_TARGET or str(item) == str(BUILTIN_ITEM)
                 else tuple(sorted(table.name for table in STANDARD_SURFACE_TABLES))
             ),
         )

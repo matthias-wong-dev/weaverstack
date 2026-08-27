@@ -1,3 +1,19 @@
+/*
+The generic load entry point. `exec [_].[Load] @object_name = 'Sales.Customer'`
+runs [_].[Load Sales.Customer], maps what it returned into the catalogue's
+Result vocabulary, writes the operational record, and raises again anything the
+procedure raised.
+
+The implementation procedure is in [_], and the source object's schema is part
+of its name. `@item_name` omitted means recover it from [_].[Installation].
+
+Every write is a MERGE, including the appends. In every Warehouse but the one
+the catalogue lives in these tables are views across databases, and Fabric
+refuses a plain INSERT through such a view while accepting a MERGE's. An
+appended row merges on a surrogate generated a moment ago, so it never matches.
+
+Weaver-owned content. See weaver/fragments and design/catalogue.md.
+*/
 create or alter procedure [_].[Load]
     @object_name varchar(261)
   , @fault_tolerant bit = 0
@@ -70,18 +86,21 @@ begin
             end
             else
             begin
+                -- Both halves are the dynamic batch's own names: the left is
+                -- the implementation procedure's parameter, the right the
+                -- sp_executesql parameter bound to the outer variable below.
                 set @weaver_call = N'exec ' + @weaver_target + N' '
                     + N'@fault_tolerant = @fault_tolerant'
                     + N', @ignore_stability_threshold = @ignore_stability_threshold'
-                    + N', @weaver_succeeded = @succeeded output'
-                    + N', @weaver_rows_read = @rows_read output'
-                    + N', @weaver_rows_inserted = @rows_inserted output'
-                    + N', @weaver_rows_updated = @rows_updated output'
-                    + N', @weaver_rows_deleted = @rows_deleted output'
-                    + N', @weaver_rows_rejected = @rows_rejected output'
-                    + N', @weaver_error_message = @error_message output'
-                    + N', @weaver_bookmark_datetime = @bookmark_datetime output'
-                    + N', @weaver_is_static_skip = @is_static_skip output'
+                    + N', @weaver_succeeded = @weaver_succeeded output'
+                    + N', @weaver_rows_read = @weaver_rows_read output'
+                    + N', @weaver_rows_inserted = @weaver_rows_inserted output'
+                    + N', @weaver_rows_updated = @weaver_rows_updated output'
+                    + N', @weaver_rows_deleted = @weaver_rows_deleted output'
+                    + N', @weaver_rows_rejected = @weaver_rows_rejected output'
+                    + N', @weaver_error_message = @weaver_error_message output'
+                    + N', @weaver_bookmark_datetime = @weaver_bookmark_datetime output'
+                    + N', @weaver_is_static_skip = @weaver_is_static_skip output'
                     + N';';
             end;
         end;

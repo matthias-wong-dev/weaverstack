@@ -1,3 +1,17 @@
+/*
+The generic validation entry point, serving both kinds. `exec [_].[Test]
+@object_name = 'Sales.Reconcile'` runs whichever of [_].[Test Sales.Reconcile]
+and [_].[Assumption Sales.Reconcile] is installed, and refuses a Warehouse
+holding both. Physical existence is the answer; [_].[Registry] is not read.
+
+`@item_name` omitted means recover it from [_].[Installation].
+
+Every write is a MERGE, including the appends. In every Warehouse but the one
+the catalogue lives in these tables are views across databases, and Fabric
+refuses a plain INSERT through such a view while accepting a MERGE's.
+
+Weaver-owned content. See weaver/fragments and design/catalogue.md.
+*/
 create or alter procedure [_].[Test]
     @object_name varchar(261)
   , @item_name varchar(128) = null

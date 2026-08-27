@@ -96,10 +96,11 @@ def test_folder_schema_is_catalogued_as_files_slash_declared_schema(tmp_path):
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
 
     schemas = {row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)}
-    # `Files/_` is the generated runtime folder's schema. It is catalogued by the
-    # same rule as any other folder schema, which is the point: nothing about the
-    # load layer gets a namespace convention of its own.
-    assert schemas == {"Sales", "Files/Sales", "Files/_"}
+    # `Files/_` is the runtime folder's schema, catalogued by the same rule as any
+    # other folder schema: nothing about the load layer gets a namespace
+    # convention of its own. `_` is the Spark schema the item's shortcuts to the
+    # Weaver catalogue land in.
+    assert schemas == {"Sales", "Files/Sales", "Files/_", "_"}
 
 
 @weaver_test()
