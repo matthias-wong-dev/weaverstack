@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from support.weaver_test import weaver_test
 
 
@@ -35,6 +36,7 @@ def _published_environment_yml(client, environment) -> bytes:
 
 
 @weaver_test(remote=True)
+@pytest.mark.slow
 def test_publish_preserves_user_environment_state_and_is_idempotent(
     fabric_workspace, fabric_client
 ):
