@@ -25,23 +25,87 @@ class CatalogObject:
 PROCEDURE_ITEM = ("Warehouse", "Reporting")
 
 
+def entry_point_script(name: str) -> str:
+    """The checked-in ``_.Load`` or ``_.Test``, as a build installs it."""
+
+    from weaver.declaration.model import WAREHOUSE
+    from weaver.fragments import standard_fragment
+
+    return standard_fragment(WAREHOUSE)[f"programmables/_.{name}.sql"].decode("utf-8")
+
+
 def install_runtime_references(executor: SqlExecutor, catalogue: str) -> None:
     """What a build gives every Warehouse it installs something runnable into.
 
-    The catalogue's runtime tables under their own names. A generated procedure
-    reads a bookmark and records what it did through these, so one installed by
-    hand needs the same references a built one is given.
+    The standard Weaver catalogue surface under its own names. A generated
+    procedure reads a bookmark and records what it did through these, and the
+    fixed entry points resolve their logical item through ``_.Installation``,
+    so one installed by hand needs the same references a built one is given.
     """
 
-    from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES
+    from weaver.catalogue.tables import STANDARD_SURFACE_TABLES
 
     executor.execute_script("if schema_id(N'_') is null exec('create schema [_]');")
-    for table in PRESENTED_RUNTIME_TABLES:
+    for table in STANDARD_SURFACE_TABLES:
         # One statement per batch: T-SQL requires CREATE VIEW to lead its own.
         executor.execute_script(
             f"create or alter view [_].[{table.name}] as "
             f"select * from [{catalogue}].[_].[{table.name}];"
         )
+
+
+def record_installation(executor: SqlExecutor) -> None:
+    """Make this Warehouse the target of exactly one logical item.
+
+    A build writes one Installation row per bound item, and a hand-installed
+    estate needs the same row: the entry points recover their logical item from
+    ``_.Installation`` when a caller omits ``@item_name``, and refuse when the
+    answer is not unique.
+
+    So every other row naming this database goes first. ``_.Installation`` is
+    one table for the whole estate and several fixtures bind different logical
+    items to this Warehouse over a run, and a row another one left is what makes
+    the standalone lookup ambiguous.
+    """
+
+    item_type, item_name = PROCEDURE_ITEM
+    forget_installations(executor)
+    # A MERGE rather than an INSERT: Fabric refuses a plain INSERT through the
+    # cross-database view these tables are in every Warehouse but the
+    # catalogue's, and accepts a MERGE's.
+    executor.execute_script(
+        "merge [_].[Installation] as target\n"
+        "using (select"
+        f" N'{item_type}' as [Item type]"
+        f", N'{item_name}' as [Item name]"
+        ", db_name() as [Target name]"
+        ", cast(N'test' as varchar(128)) as [Weaver version]"
+        ", cast(N'' as varchar(128)) as [Signature]"
+        ") as source\n"
+        "   on target.[Item type] = source.[Item type]"
+        "  and target.[Item name] = source.[Item name]\n"
+        "when matched then update set"
+        " target.[Target name] = source.[Target name]\n"
+        "when not matched then insert ("
+        " [Item type], [Item name], [Target name], [Weaver version], [Signature]"
+        ", [Row insert datetime], [Row update datetime], [Row delete datetime])"
+        " values (source.[Item type], source.[Item name], source.[Target name]"
+        ", source.[Weaver version], source.[Signature]"
+        ", sysdatetime(), sysdatetime()"
+        ", convert(datetime2(6), '9999-12-31 23:59:59.999999'));\n"
+    )
+
+
+def forget_installations(executor: SqlExecutor) -> None:
+    """Remove every Installation row naming this Warehouse.
+
+    Called at setup so the standalone lookup has one answer, and at teardown so
+    the item this estate invented does not outlive it.
+    """
+
+    executor.execute_script(
+        "delete from [_].[Installation] where [Target name] = db_name();"
+    )
 
 
 def forget_runtime_state(schema: str, name: str) -> str:

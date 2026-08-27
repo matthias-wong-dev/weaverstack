@@ -23,12 +23,17 @@ from __future__ import annotations
 import re
 
 import pytest
-from sql_support import forget_runtime_state, install_runtime_references
+from sql_support import (
+    entry_point_script,
+    forget_installations,
+    forget_runtime_state,
+    install_runtime_references,
+    record_installation,
+)
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE, WeaverItemId
-from weaver.declaration.tsql_entry import generate_test_entry
 from weaver.declaration.tsql_validation import (
     RESULT_PARAMETERS,
     generate_tsql_validation_batch,
@@ -119,6 +124,7 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
     install_runtime_references(executor, fabric_workspace.catalogue_item.name)
+    record_installation(executor)
     _drop(executor)
     for table in ("ValidationExpected", "ValidationActual"):
         executor.execute_script(
@@ -128,19 +134,16 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
     documents = [_document(source) for source in PROCEDURES.values()]
     for document in documents:
         executor.execute_script(generate_validation(document).payload.decode("utf-8"))
-    # And the entry point over them, because the validation procedures record
-    # nothing: `exec _.[Test]` is what runs one by hand and writes the record.
-    executor.execute_script(
-        generate_test_entry(
-            ITEM,
-            {
-                document.document.object_id: document.document.kind
-                for document in documents
-            },
-        )
-    )
+    # And the fixed entry point over them, because the validation procedures
+    # record nothing: `exec _.[Test]` is what runs one by hand and writes the
+    # record. It dispatches on the physical procedures, so the item name it
+    # records against is supplied here.
+    executor.execute_script(entry_point_script("Test"))
     yield executor
     _drop(executor)
+    # Only at teardown: `_drop` also runs during setup, and the Installation row
+    # this estate needs is written before it.
+    forget_installations(executor)
 
 
 def _drop(executor) -> None:
@@ -201,9 +204,21 @@ def _counts(executor, procedure: str, *, kind: str = "Test", suppress: int = 1):
 
 
 def _standalone(executor, qualified: str) -> None:
-    """``exec _.[Test]``, which is what a person calls and what records."""
+    """``exec _.[Test]``, which is what a person calls and what records.
+
+    No ``@item_name``, so the entry point recovers the logical item from
+    ``_.Installation``.
+    """
 
     executor.execute_script(f"exec [_].[Test] @object_name = N'{qualified}';")
+
+
+def _runner_mode(executor, qualified: str, *, item_name: str) -> None:
+    """The runner-style call, with the logical item supplied."""
+
+    executor.execute_script(
+        f"exec [_].[Test] @object_name = N'{qualified}', @item_name = N'{item_name}';"
+    )
 
 
 def _test_status(executor, name: str) -> dict | None:
@@ -465,6 +480,19 @@ def test_the_entry_point_records_how_much_a_failing_test_found(estate):
     assert status["result"] == "Failed"
     # A changed row disagrees on both sides, which is two discrepancy rows.
     assert status["failures"] == 2
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_supplied_item_name_records_against_that_item(estate):
+    """Runner mode, where the logical item is supplied rather than resolved."""
+
+    _forget(estate, "OrdersReconcile")
+    _sides(estate, [(1, 10)], [(1, 10)])
+
+    _runner_mode(estate, f"{SCHEMA}.OrdersReconcile", item_name=ITEM.item_name)
+
+    status = _test_status(estate, "OrdersReconcile")
+    assert status["result"] == "Succeeded"
 
 
 @weaver_test(remote=True, resources={"tds"})

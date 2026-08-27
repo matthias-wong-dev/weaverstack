@@ -11,7 +11,6 @@ from .metadata import ObjectId
 from .model import (
     FILES,
     ItemDependency,
-    RepositoryShortcut,
     WeaverDocumentId,
     WeaverItemId,
     WeaverRepository,
@@ -102,7 +101,6 @@ def _reject_validation_producer(
 def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     """Return ``repository`` with exact item-owned edges and a global DAG."""
 
-    repository = _with_runtime_references(repository)
     native = repository.source_documents
     logical_pairs = {
         pair.destination: pair.source for pair in repository.logical_shortcuts
@@ -247,75 +245,6 @@ def _item_graph(
         return Graph((str(item.identity) for item in repository.items), sorted(edges))
     except GraphError as exc:
         raise GraphError(f"item {exc}") from exc
-
-
-def _with_runtime_references(repository: WeaverRepository) -> WeaverRepository:
-    """Inject the package-owned runtime relations before resolving dependencies.
-
-    ``_.Bookmark`` and the other presented runtime tables are ordinary logical
-    references from a consuming item's namespace to the built-in catalogue item.
-    Each relation has both halves every shortcut has: the declaration that is
-    planned and installed, and the resolved pair that dependency resolution and
-    catalogue projection consume. Injecting both here keeps runtime references on
-    the ordinary shortcut lifecycle from this point onward.
-    """
-
-    from ..catalogue.builtin import BUILTIN_ITEM
-    from ..catalogue.tables import CATALOGUE_SCHEMA, PRESENTED_RUNTIME_TABLES
-    from ..etl import item_presents_runtime_tables
-    from .model import (
-        LOGICAL_TARGET,
-        TABLE_SHORTCUT,
-        VIEW_SHORTCUT,
-        WAREHOUSE,
-        ShortcutDeclaration,
-    )
-
-    pairs = {pair.destination: pair for pair in repository.logical_shortcuts}
-    declarations = {
-        declaration.destination: declaration for declaration in repository.shortcuts
-    }
-    for item in repository.items:
-        owner = item.identity
-        if owner == BUILTIN_ITEM or not item_presents_runtime_tables(
-            repository, item=owner
-        ):
-            continue
-        for table in PRESENTED_RUNTIME_TABLES:
-            object_id = ObjectId(CATALOGUE_SCHEMA, table.name)
-            destination = WeaverDocumentId(owner, object_id)
-            source = WeaverDocumentId(BUILTIN_ITEM, object_id)
-            existing = pairs.get(destination)
-            if existing is not None and existing.source != source:
-                raise DiscoveryError(
-                    f"{destination}: Weaver's runtime reference conflicts with "
-                    f"logical shortcut target {existing.source}"
-                )
-            pairs[destination] = RepositoryShortcut(
-                destination=destination, source=source
-            )
-            declarations[destination] = ShortcutDeclaration(
-                owner=owner,
-                name=object_id.qualified,
-                shortcut_type=(
-                    VIEW_SHORTCUT if owner.item_type == WAREHOUSE else TABLE_SHORTCUT
-                ),
-                target_type=LOGICAL_TARGET,
-                target=str(source),
-                destination_identity=destination,
-            )
-    return replace(
-        repository,
-        logical_shortcuts=tuple(
-            sorted(pairs.values(), key=lambda pair: str(pair.destination))
-        ),
-        planned_shortcuts=tuple(
-            sorted(
-                declarations.values(),
-                key=lambda declaration: str(declaration.destination),
-            )
-        ),
-    )
 
 
 def _resolve_destination(

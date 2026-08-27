@@ -200,7 +200,7 @@ Intent: A Warehouse developer can load an installed object through _.Load.
 rather than:
 
 ```text
-Intent: generate_load_entry emits the expected SQL.
+Intent: _.Load contains the expected SQL.
 Intent: the fixture crosses TDS.
 ```
 

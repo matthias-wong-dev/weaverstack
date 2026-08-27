@@ -198,7 +198,7 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
 #: created by one action, and a table missing from it is a gap in that action.
 REFERENCE = r"""
 from weaver import lakehouse_for
-from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES
+from weaver.catalogue.tables import STANDARD_SURFACE_TABLES
 from weaver.locations import Location
 
 destination = lakehouse_for(resolver, target)
@@ -209,7 +209,7 @@ results["runtime"] = sorted(
     entry.name for entry in store.list(root / "Tables" / "_")
 )
 results["resolved"] = {}
-for table in PRESENTED_RUNTIME_TABLES:
+for table in STANDARD_SURFACE_TABLES:
     reference = destination.qualify("_", table.name)
     counted = spark.sql(f"select count(*) as n from {reference}").collect()[0]["n"]
     results["resolved"][table.name] = [reference, counted]
@@ -230,7 +230,7 @@ def test_one_build_installs_the_lakehouse_references_and_the_next_plans_none(
     Lakehouse by the four-part name a statement would use.
     """
 
-    from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES
+    from weaver.catalogue.tables import STANDARD_SURFACE_TABLES
 
     env = fabric_lakehouse_estate.env
 
@@ -248,8 +248,8 @@ def test_one_build_installs_the_lakehouse_references_and_the_next_plans_none(
 
     # Shortcuts under `Tables/_`, which is Weaver's own rather than the item's.
     assert "_" in seen["tables"], seen["tables"]
-    assert {table.name for table in PRESENTED_RUNTIME_TABLES} <= set(seen["runtime"])
-    for table in PRESENTED_RUNTIME_TABLES:
+    assert {table.name for table in STANDARD_SURFACE_TABLES} <= set(seen["runtime"])
+    for table in STANDARD_SURFACE_TABLES:
         reference, counted = seen["resolved"][table.name]
         assert reference.endswith(f"`_`.`{table.name}`")
         # What it counts is the catalogue Warehouse's own table, so the number

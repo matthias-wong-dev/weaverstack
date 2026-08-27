@@ -32,8 +32,8 @@ from support.weaver_test import register_session, weaver_test
 import weaver
 from weaver.catalogue.tables import (
     CATALOGUE_TABLES,
-    PRESENTED_RUNTIME_TABLES,
     RUNTIME_TABLES,
+    STANDARD_SURFACE_TABLES,
 )
 from weaver.sessions import ConsoleSession
 
@@ -253,10 +253,10 @@ def test_a_built_warehouse_is_given_views_over_the_catalogues_runtime_tables(
     present = user_objects(warehouse.executor)
     assert {
         CatalogObject(schema="_", name=table.name, kind="V")
-        for table in PRESENTED_RUNTIME_TABLES
+        for table in STANDARD_SURFACE_TABLES
     } <= present
     # And each resolves, a three-part name in another database, selected here.
-    for table in PRESENTED_RUNTIME_TABLES:
+    for table in STANDARD_SURFACE_TABLES:
         counted = warehouse.executor.query(
             f"select count(*) as n from [_].[{table.name}]"
         )
@@ -286,9 +286,14 @@ def test_a_generated_load_reads_the_catalogue_through_a_consumer_warehouse_view(
     )
     assert built.status == "succeeded", _failures(built)
 
+    # ``@item_name`` supplied: the tests above bind ``Reporting`` to this same
+    # Warehouse, so two logical items name it and the entry point refuses to
+    # guess between them. Recovering the item from ``_.Installation`` is the
+    # subject of the Warehouse primitive tests, not of this one.
     for _ in range(2):
         warehouse.executor.execute_script(
-            "exec [_].[Load] @object_name = N'Wh.Customer', @fault_tolerant = 0;"
+            "exec [_].[Load] @object_name = N'Wh.Customer'"
+            ", @fault_tolerant = 0, @item_name = N'RuntimeReference';"
         )
 
     evidence = warehouse.executor.query_result_sets(

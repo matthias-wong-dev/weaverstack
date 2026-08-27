@@ -45,23 +45,22 @@ ROLE_ASSUMPTION = "assumption"
 #: role rather than a type, because what it physically is still varies: a
 #: table, a folder, a view, or the schema a schema shortcut presents.
 ROLE_SHORTCUT = "shortcut"
-#: A generic entry point a person calls: ``_.Load`` and ``_.Test``, which wrap
-#: one object's own procedure and record what it did. A role of its own because
-#: nothing schedules one. A load procedure with this role would be run by
-#: ``weaver load``, and there is no object for it to load.
-ROLE_ENTRY = "entry"
+#: A stored procedure an item manages. Weaver creates, replaces and prunes it,
+#: and nothing schedules it: it runs when a person or another system calls it.
+#: ``_.Load``, ``_.Test`` and authored content all carry this.
+ROLE_PROGRAMMABLE = "programmable"
 OBJECT_ROLES = (
     ROLE_DATA,
     ROLE_LOAD,
     ROLE_TEST,
     ROLE_ASSUMPTION,
     ROLE_SHORTCUT,
-    ROLE_ENTRY,
+    ROLE_PROGRAMMABLE,
 )
 
 #: The roles a runtime artefact carries, being everything installed to be run
 #: rather than to hold rows. Asked where a selection has to be partitioned.
-RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_ENTRY)
+RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_PROGRAMMABLE)
 
 #: The roles a validation carries, by the kind that declares it.
 VALIDATION_ROLES = (ROLE_TEST, ROLE_ASSUMPTION)
@@ -88,7 +87,7 @@ OBJECT_ROLE_VOCABULARY = {
     ROLE_TEST: "Test",
     ROLE_ASSUMPTION: "Assumption",
     ROLE_SHORTCUT: "Shortcut",
-    ROLE_ENTRY: "Entry point",
+    ROLE_PROGRAMMABLE: "Programmable",
 }
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}
@@ -953,10 +952,6 @@ class RuntimeTable:
     rather than inferred: an appended table has a key too, so the presence of one
     settles nothing. ``invalidated_by`` names the population whose rebuild ends a
     current-state row, and is None for history, which nothing invalidates.
-
-    ``presented`` says whether a built target is given this table under its own
-    name, being a view in a Warehouse and a OneLake shortcut in a Lakehouse, so a
-    generated procedure and authored Spark SQL can reach it.
     """
 
     name: str
@@ -965,7 +960,6 @@ class RuntimeTable:
     key: tuple[str, ...] = ()
     maintenance: str = HISTORY
     invalidated_by: str | None = None
-    presented: bool = True
 
     @property
     def is_current_state(self) -> bool:
@@ -1317,6 +1311,15 @@ TEST_STATUS = RuntimeTable(
 #: The catalogue tables maintained during execution.
 RUNTIME_TABLES = (LOG, BOOKMARK, LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
 
+#: The standard Weaver catalogue surface every normal bound item presents.
+#:
+#: A built target is given each of these under its own name, a view in a
+#: Warehouse and a OneLake shortcut in a Lakehouse, so a generated procedure,
+#: authored Spark SQL, ``_.Load`` and ``_.Test`` reach Weaver's operational
+#: state. ``_.Installation`` is here because ``_.Load`` and ``_.Test`` recover
+#: their logical item from it when a caller omits ``@item_name``.
+STANDARD_SURFACE_TABLES = (INSTALLATION,) + RUNTIME_TABLES
+
 #: The runtime tables describing one object's state now. A build ends the
 #: incarnation these describe; the rest is history and survives it.
 CURRENT_STATE_TABLES = tuple(
@@ -1325,9 +1328,6 @@ CURRENT_STATE_TABLES = tuple(
 
 #: The runtime tables recording what happened. Never invalidated.
 HISTORY_TABLES = tuple(table for table in RUNTIME_TABLES if table.is_history)
-
-#: The runtime tables a built target is given under their own names.
-PRESENTED_RUNTIME_TABLES = tuple(table for table in RUNTIME_TABLES if table.presented)
 
 #: Every catalogue table, however it is maintained.
 CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES

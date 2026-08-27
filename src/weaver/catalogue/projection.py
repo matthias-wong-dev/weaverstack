@@ -458,7 +458,7 @@ def project_shortcut_registry(
 
     scope = InstallationScope(item.item_type, item.item_name)
     wanted = set(retained)
-    authored = tuple(
+    return tuple(
         {
             **_identity(scope, declaration.destination),
             "object_type": _shortcut_object_type(declaration, target_kind),
@@ -474,34 +474,6 @@ def project_shortcut_registry(
             key=lambda declaration: str(declaration.destination),
         )
     )
-    authored_destinations = {
-        declaration.destination
-        for declaration in repository.shortcuts
-        if declaration.owner == item
-    }
-    injected = tuple(
-        {
-            **_identity(scope, shortcut.destination),
-            "object_type": (
-                OBJECT_TYPE_FOR_KIND[VIEW]
-                if target_kind == WAREHOUSE_TARGET
-                else OBJECT_TYPE_FOR_KIND[TABLE]
-            ),
-            "object_role": ROLE_SHORTCUT,
-            "signature": shortcut.signature,
-        }
-        for shortcut in sorted(
-            (
-                shortcut
-                for shortcut in repository.logical_shortcuts
-                if shortcut.destination.item == item
-                and shortcut.destination in wanted
-                and shortcut.destination not in authored_destinations
-            ),
-            key=lambda shortcut: str(shortcut.destination),
-        )
-    )
-    return authored + injected
 
 
 def _shortcut_object_type(declaration, target_kind: str) -> str:

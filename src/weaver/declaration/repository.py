@@ -1,15 +1,20 @@
-"""Read and validate a Weaver repository through a Store.
+"""Read, merge and validate a Weaver repository through a Store.
 
 The first two directory levels identify the item type and logical item. The
 owning item determines each SQL document's dialect.
+
+Composition has one path. The authored tree, Weaver's own fragments and
+generated content are each read into a :class:`RepositoryPart`, combined through
+:func:`merge_repository`, and only then validated, signed and resolved into a
+:class:`~weaver.declaration.model.WeaverRepository`.
 """
 
 from __future__ import annotations
 
 import ast
 import hashlib
-from dataclasses import replace
-from typing import Iterable, Mapping
+from dataclasses import dataclass, field, replace
+from typing import Iterable, Mapping, TypeVar
 
 from ..errors import DiscoveryError
 from ..locations import Location
@@ -33,11 +38,17 @@ from .model import (
     LAKEHOUSE,
     WAREHOUSE,
     RepositoryShortcut,
+    ShortcutDeclaration,
     WeaverDocumentId,
     WeaverItem,
     WeaverItemId,
     WeaverRepository,
     WeaverSchemaId,
+)
+from .programmable import (
+    PROGRAMMABLES_DIRECTORY,
+    Programmable,
+    read_programmable,
 )
 from .references import validate_repository_metadata
 from .schemas import SchemaSes, read_schema_document
@@ -54,6 +65,10 @@ from .source import (
     language_for_filename,
     read_source_document,
 )
+
+_Key = TypeVar("_Key")
+_Value = TypeVar("_Value")
+_Declaration = TypeVar("_Declaration")
 
 #: Never read, never installed.
 IGNORED_DIRECTORIES = frozenset(
@@ -75,8 +90,8 @@ VALIDATION_DIRECTORIES = {"tests": TEST, "assumptions": ASSUMPTION}
 
 #: The subdirectories an item may author, for the message that lists them.
 _AUTHORED_SUBDIRECTORIES = (
-    "only schemas/, lib/, tests/, assumptions/ and Lakehouse Files/ are authored "
-    "subdirectories of an item"
+    "only schemas/, lib/, tests/, assumptions/, Warehouse programmables/ and "
+    "Lakehouse Files/ are authored subdirectories of an item"
 )
 
 
@@ -88,7 +103,6 @@ def _read_validation(
     root: Location,
     store: Store,
     source_documents: dict[WeaverDocumentId, SourceDocument],
-    validations_by_item: dict[WeaverItemId, list[WeaverDocumentId]],
 ) -> None:
     """Read one validation file into the repository."""
 
@@ -123,7 +137,6 @@ def _read_validation(
     identity = WeaverDocumentId(item, source.object_id)
     source = replace(source, logical_id=identity)
     _insert_exact_case(source_documents, identity, source, relative, what="declaration")
-    validations_by_item[item].append(identity)
 
 
 def _directory_for(kind: str) -> str:
@@ -131,6 +144,126 @@ def _directory_for(kind: str) -> str:
         if declared == kind:
             return directory
     return "the item root"  # pragma: no cover - every validation kind has one
+
+
+@dataclass(frozen=True)
+class RepositoryPart:
+    """The declarations one source contributes, awaiting merge.
+
+    Canonical maps keyed by identity. Per-item grouping is derived once, where
+    the merged part becomes a
+    :class:`~weaver.declaration.model.WeaverRepository`.
+
+    Parts carry a provenance label so a merge collision can say what collided.
+    """
+
+    label: str
+    items: tuple[WeaverItemId, ...] = ()
+    documents: Mapping[WeaverDocumentId, SourceDocument] = field(default_factory=dict)
+    schemas: Mapping[WeaverSchemaId, SchemaSes] = field(default_factory=dict)
+    programmables: Mapping[WeaverDocumentId, Programmable] = field(default_factory=dict)
+    shortcuts: tuple[ShortcutDeclaration, ...] = ()
+    logical_shortcuts: tuple[RepositoryShortcut, ...] = ()
+    #: Item source no Weaver document declares, by repository-relative path.
+    #: Held rather than re-read: a ``lib/`` file is deployed by the load layer,
+    #: so its bytes have to reach both the signature it is selected by and the
+    #: payload the bundle carries.
+    support_files: Mapping[str, bytes] = field(default_factory=dict)
+    #: Declaration bytes Weaver supplied, by repository-relative path.
+    declared_files: Mapping[str, bytes] = field(default_factory=dict)
+    #: Authored declaration paths, whose bytes stay in the store.
+    store_files: tuple[str, ...] = ()
+
+
+def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
+    """Combine repository parts into one, before resolution.
+
+    A unique identity is added, a duplicate identity is refused, and two
+    identities differing only by case are refused. No part takes precedence
+    over another, so a collision is a fault to repair at its source. Item
+    membership is not such an identity: composition is how one item comes to
+    hold both its authored declarations and the Weaver content serving them.
+    """
+
+    items: set[WeaverItemId] = set()
+    paths: dict[str, bytes] = {}
+    declared: dict[str, bytes] = {}
+    store_files: set[str] = set()
+    for part in parts:
+        items.update(part.items)
+        store_files.update(part.store_files)
+        paths.update(part.support_files)
+        declared.update(part.declared_files)
+    return RepositoryPart(
+        label="merged",
+        items=tuple(sorted(items)),
+        documents=_merge_keyed(
+            ((part.label, part.documents) for part in parts), what="declaration"
+        ),
+        schemas=_merge_keyed(
+            ((part.label, part.schemas) for part in parts), what="schema"
+        ),
+        programmables=_merge_keyed(
+            ((part.label, part.programmables) for part in parts), what="programmable"
+        ),
+        shortcuts=_merge_destinations(
+            ((part.label, part.shortcuts) for part in parts), what="shortcut"
+        ),
+        logical_shortcuts=_merge_destinations(
+            ((part.label, part.logical_shortcuts) for part in parts),
+            what="logical shortcut",
+        ),
+        support_files=paths,
+        declared_files=declared,
+        store_files=tuple(sorted(store_files)),
+    )
+
+
+def _merge_keyed(
+    contributions: Iterable[tuple[str, Mapping[_Key, _Value]]], *, what: str
+) -> dict[_Key, _Value]:
+    """Identity-keyed declarations from every part, refusing a collision."""
+
+    merged: dict[_Key, _Value] = {}
+    folded: dict[str, object] = {}
+    for label, contributed in contributions:
+        for identity, value in contributed.items():
+            _claim(folded, identity, label, what=what)
+            merged[identity] = value
+    return merged
+
+
+def _merge_destinations(
+    contributions: Iterable[tuple[str, Iterable[_Declaration]]], *, what: str
+) -> tuple[_Declaration, ...]:
+    """The same, for the shortcut collections, which are keyed by destination."""
+
+    merged: dict[str, _Declaration] = {}
+    folded: dict[str, object] = {}
+    for label, contributed in contributions:
+        for declaration in contributed:
+            key = str(declaration.destination)
+            _claim(folded, key, label, what=what)
+            merged[key] = declaration
+    return tuple(value for _key, value in sorted(merged.items()))
+
+
+def _claim(folded: dict[str, object], key, label: str, *, what: str) -> None:
+    """Reserve one identity, refusing a repeat and a case-only variant."""
+
+    rendered = str(key)
+    prior = folded.get(rendered.casefold())
+    if prior is not None:
+        if str(prior) == rendered:
+            raise DiscoveryError(
+                f"{rendered} ({what}) is contributed twice, the second time by "
+                f"{label} content"
+            )
+        raise DiscoveryError(
+            f"{rendered} ({what}, {label}) and {prior} differ only by case "
+            "and cannot coexist"
+        )
+    folded[rendered.casefold()] = key
 
 
 def parse_item_repository(
@@ -146,6 +279,111 @@ def parse_item_repository(
     if not store.is_directory(root):
         raise DiscoveryError(f"repository root is not a directory: {root}")
 
+    authored = _read_authored_repository(root, store)
+    merged = merge_repository(
+        _catalogue_part(),
+        authored,
+        *_standard_parts(authored),
+        _generated_content(authored),
+    )
+    return compose_repository(merged, root=root, store=store)
+
+
+def read_repository_fragment(
+    files: Mapping[str, bytes], *, item: WeaverItemId, label: str
+) -> RepositoryPart:
+    """One Weaver-owned fragment as repository content, for one item.
+
+    ``files`` is keyed by item-relative path and read through the same
+    declaration readers as an authored tree, so a fragment needs no parser of
+    its own.
+    """
+
+    documents: dict[WeaverDocumentId, SourceDocument] = {}
+    schemas: dict[WeaverSchemaId, SchemaSes] = {}
+    programmables: dict[WeaverDocumentId, Programmable] = {}
+    declared: dict[str, bytes] = {}
+    for relative, data in sorted(files.items()):
+        path = f"{item}/{relative}"
+        declared[path] = data
+        within = relative.split("/")
+        if within[0] == "schemas":
+            schema = read_schema_document(path, data)
+            schemas[WeaverSchemaId(item, schema.schema_id)] = schema
+        elif within[0] == PROGRAMMABLES_DIRECTORY:
+            programmable = read_programmable(path, data, owner=item, weaver_owned=True)
+            programmables[programmable.identity] = programmable
+        else:
+            source = read_source_document(path, data, item.item_type)
+            identity = WeaverDocumentId(
+                item, source.object_id, is_files=within[0] == FILES
+            )
+            documents[identity] = replace(source, logical_id=identity)
+    return RepositoryPart(
+        label=label,
+        items=(item,),
+        documents=documents,
+        schemas=schemas,
+        programmables=programmables,
+        declared_files=declared,
+    )
+
+
+def _documents_of(part: RepositoryPart, item: WeaverItemId) -> list[SourceDocument]:
+    return [
+        source for identity, source in part.documents.items() if identity.item == item
+    ]
+
+
+def _catalogue_part() -> RepositoryPart:
+    """Weaver's catalogue declaration, composed into every repository."""
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+    from ..fragments import CATALOGUE, fragment_files
+
+    return read_repository_fragment(
+        fragment_files(CATALOGUE), item=BUILTIN_ITEM, label="catalogue"
+    )
+
+
+def _standard_parts(authored: RepositoryPart) -> tuple[RepositoryPart, ...]:
+    """What every normal item receives, being the fragment for its type.
+
+    A Warehouse gets schema ``_``, the fixed ``_.Load`` and ``_.Test`` entry
+    points and its views over the catalogue. A Lakehouse gets schema ``_``, its
+    shortcuts to the catalogue and, when it has code to deploy, the folder
+    document owning the runtime tree that code lands in.
+    """
+
+    from ..catalogue.builtin import BUILTIN_ITEM, standard_surface_references
+    from ..etl import FOLDER_DOCUMENT, has_deployable_source
+    from ..fragments import standard_fragment
+
+    parts: list[RepositoryPart] = []
+    for item in sorted(authored.items):
+        if item == BUILTIN_ITEM:
+            continue
+        files = dict(standard_fragment(item.item_type))
+        if FOLDER_DOCUMENT in files and not has_deployable_source(
+            item,
+            documents=_documents_of(authored, item),
+            support_paths=authored.support_files,
+        ):
+            del files[FOLDER_DOCUMENT]
+        part = read_repository_fragment(files, item=item, label="standard")
+        declarations, pairs = standard_surface_references(item)
+        parts.append(replace(part, shortcuts=declarations, logical_shortcuts=pairs))
+    return tuple(parts)
+
+
+def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
+    """Read one repository tree as its authored declarations.
+
+    Structure first, then documents, schemas, validations and shortcuts. What
+    comes back is a part, not a repository: composition with Weaver-owned and
+    generated content happens above this.
+    """
+
     prefix = root.value.rstrip("/") + "/"
     entries: list[tuple[str, bool]] = []
     for entry in store.list(root, recursive=True):
@@ -160,10 +398,7 @@ def parse_item_repository(
             continue
         entries.append((relative, entry.is_directory))
 
-    from ..catalogue.builtin import BUILTIN_ITEM, item_repository_files
-
-    generated_files = item_repository_files()
-    builtin_prefix = "Warehouse/_weaver"
+    builtin_prefix = str(_builtin_item())
     authored_builtin = sorted(
         relative
         for relative, _is_directory in entries
@@ -171,7 +406,7 @@ def parse_item_repository(
     )
     if authored_builtin:
         raise DiscoveryError(
-            f"{authored_builtin[0]}: Warehouse/_weaver is package-owned and must "
+            f"{authored_builtin[0]}: {builtin_prefix} is package-owned and must "
             "not be authored"
         )
 
@@ -224,6 +459,8 @@ def parse_item_repository(
             continue
         if within[0] == "lib" and item.item_type == LAKEHOUSE:
             continue
+        if within == [PROGRAMMABLES_DIRECTORY] and item.item_type == WAREHOUSE:
+            continue
         if within[0] in VALIDATION_DIRECTORIES and len(within) == 1:
             continue
         raise DiscoveryError(f"{relative}: {_AUTHORED_SUBDIRECTORIES}")
@@ -255,15 +492,9 @@ def parse_item_repository(
 
     source_documents: dict[WeaverDocumentId, SourceDocument] = {}
     schema_documents: dict[WeaverSchemaId, SchemaSes] = {}
+    programmables: dict[WeaverDocumentId, Programmable] = {}
     support_files: list[str] = []
-    documents_by_item: dict[WeaverItemId, list[WeaverDocumentId]] = {
-        item: [] for item in item_ids
-    }
     schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]] = {
-        item: [] for item in item_ids
-    }
-    #: Validation declarations, separate from materialised objects.
-    validations_by_item: dict[WeaverItemId, list[WeaverDocumentId]] = {
         item: [] for item in item_ids
     }
 
@@ -321,6 +552,20 @@ def parse_item_repository(
             schemas_by_item[item].append(identity)
             continue
 
+        if within[0] == PROGRAMMABLES_DIRECTORY:
+            if len(within) != 2:
+                raise DiscoveryError(
+                    f"{relative}: a programmable lives directly under "
+                    f"{PROGRAMMABLES_DIRECTORY}/, with no further subdirectories"
+                )
+            programmable = read_programmable(
+                relative,
+                store.read(root.join(*relative.split("/"))),
+                owner=item,
+            )
+            programmables[programmable.identity] = programmable
+            continue
+
         if within[0] in VALIDATION_DIRECTORIES:
             _read_validation(
                 relative,
@@ -329,7 +574,6 @@ def parse_item_repository(
                 root=root,
                 store=store,
                 source_documents=source_documents,
-                validations_by_item=validations_by_item,
             )
             continue
 
@@ -374,96 +618,27 @@ def parse_item_repository(
         _insert_exact_case(
             source_documents, identity, source, relative, what="document"
         )
-        documents_by_item[item].append(identity)
 
-    builtin_item = BUILTIN_ITEM
-    item_ids.add(builtin_item)
-    documents_by_item[builtin_item] = []
-    schemas_by_item[builtin_item] = []
-    for relative, data in sorted(generated_files.items()):
-        if "/schemas/" in relative:
-            schema = read_schema_document(relative, data)
-            identity = WeaverSchemaId(builtin_item, schema.schema_id)
-            schema_documents[identity] = schema
-            schemas_by_item[builtin_item].append(identity)
-            continue
-        source = read_source_document(relative, data, builtin_item.item_type)
-        # Folder declarations are stored under Files/.
-        is_files = f"/{FILES}/" in relative
-        identity = WeaverDocumentId(builtin_item, source.object_id, is_files=is_files)
-        source_documents[identity] = replace(source, logical_id=identity)
-        documents_by_item[builtin_item].append(identity)
+    from ..etl import ETL_SCHEMA
 
-    # Generate runtime declarations for items with load code.
-    from ..etl import ETL_SCHEMA, generated_item_files
-
-    for item in sorted(item_ids):
-        if item == builtin_item:
-            continue
-        authored = [
-            str(schema)
-            for schema in schemas_by_item[item]
-            if schema.schema == ETL_SCHEMA
-        ] + [
-            source_documents[identity].relative_path
-            for identity in documents_by_item[item]
+    reserved = sorted(
+        [
+            schema.relative_path
+            for identity, schema in schema_documents.items()
+            if identity.schema == ETL_SCHEMA
+        ]
+        + [
+            source.relative_path
+            for identity, source in source_documents.items()
             if identity.object_id.schema == ETL_SCHEMA
         ]
-        if authored:
-            raise DiscoveryError(
-                f"{sorted(authored)[0]}: schema {ETL_SCHEMA!r} is generated Weaver "
-                "infrastructure. It holds the runtime tree a load is deployed "
-                "into and the schema generated load procedures live in, so an "
-                "item may not author into it"
-            )
-
-    for item in sorted(item_ids):
-        item_files = generated_item_files(
-            item,
-            # Validations also require generated runtime declarations.
-            documents=[
-                source_documents[identity]
-                for identity in documents_by_item[item]
-                + validations_by_item.get(item, [])
-            ],
-            support_paths=support_files,
-        )
-        if not item_files:
-            continue
-        generated_files = {**generated_files, **item_files}
-        for relative, data in sorted(item_files.items()):
-            if "/schemas/" in relative:
-                schema = read_schema_document(relative, data)
-                identity = WeaverSchemaId(item, schema.schema_id)
-                schema_documents[identity] = schema
-                schemas_by_item[item].append(identity)
-                continue
-            source = read_source_document(relative, data, item.item_type)
-            identity = WeaverDocumentId(item, source.object_id, is_files=True)
-            source_documents[identity] = replace(source, logical_id=identity)
-            documents_by_item[item].append(identity)
-
-    items: list[WeaverItem] = []
-    for item_id in sorted(item_ids):
-        schemas = tuple(sorted(schemas_by_item[item_id], key=str))
-        documents = tuple(sorted(documents_by_item[item_id], key=str))
-        validations = tuple(sorted(validations_by_item.get(item_id, ()), key=str))
-        declared = {schema.schema for schema in schemas}
-        # Validations must use an item-declared schema.
-        for document_id in documents + validations:
-            if document_id.object_id.schema not in declared:
-                source = source_documents[document_id]
-                raise DiscoveryError(
-                    f"{source.relative_path}: schema {document_id.object_id.schema!r} "
-                    f"is not declared by item {item_id}"
-                )
-        items.append(
-            WeaverItem(
-                item_id,
-                schemas=schemas,
-                documents=documents,
-                validations=validations,
-            )
+    )
+    if reserved:
+        raise DiscoveryError(
+            f"{reserved[0]}: schema {ETL_SCHEMA!r} is reserved for Weaver. It "
+            "holds the runtime tree a load is deployed into, the generated load "
+            "and validation procedures, and the item's surface over the "
+            "catalogue, so an item may not author into it"
         )
 
     shortcuts = _read_item_declarations(
@@ -486,12 +661,101 @@ def parse_item_repository(
     )
     validate_repository_metadata(source_documents.values(), shortcuts=logical_shortcuts)
 
-    source_documents = _with_build_signatures(
-        source_documents,
-        support_files=support_files,
-        store=store,
-        root=root,
+    # Every support file, not only the Python ones. `lib/` is an ordinary
+    # directory the runtime tree reproduces verbatim, and a module that reads a
+    # data file beside it needs that file to have travelled with it.
+    return RepositoryPart(
+        label="authored",
+        items=tuple(sorted(item_ids)),
+        documents=source_documents,
+        schemas=schema_documents,
+        programmables=programmables,
+        shortcuts=shortcuts,
+        logical_shortcuts=logical_shortcuts,
+        support_files={
+            relative: store.read(root.join(*relative.split("/")))
+            for relative in sorted(support_files)
+        },
+        store_files=tuple(files),
     )
+
+
+def _generated_content(authored: RepositoryPart) -> RepositoryPart:
+    """The Programmables Weaver derives from one repository's own declarations.
+
+    One per Warehouse table Weaver loads, one per Warehouse validation. Their
+    text follows what the item declares, which is what separates them from a
+    fragment.
+    """
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+    from ..etl import item_generated_programmables
+
+    programmables: dict[WeaverDocumentId, Programmable] = {}
+    for item in sorted(authored.items):
+        if item == BUILTIN_ITEM:
+            continue
+        for programmable in item_generated_programmables(
+            item=item, documents=_documents_of(authored, item)
+        ):
+            programmables[programmable.identity] = programmable
+    return RepositoryPart(label="generated", programmables=programmables)
+
+
+def compose_repository(
+    merged: RepositoryPart,
+    *,
+    root: Location,
+    store: Store,
+) -> WeaverRepository:
+    """Sign and resolve a merged part into the final repository."""
+
+    from .source import content_hash
+
+    support_hashes = {
+        relative: content_hash(content)
+        for relative, content in merged.support_files.items()
+    }
+    source_documents = _with_build_signatures(
+        merged.documents,
+        support_files=merged.support_files,
+        support_hashes=support_hashes,
+    )
+
+    items: list[WeaverItem] = []
+    for item_id in merged.items:
+        schemas = tuple(
+            sorted((each for each in merged.schemas if each.item == item_id), key=str)
+        )
+        declared = {each.schema for each in schemas}
+        documents: list[WeaverDocumentId] = []
+        validations: list[WeaverDocumentId] = []
+        for identity in sorted(
+            (each for each in source_documents if each.item == item_id), key=str
+        ):
+            source = source_documents[identity]
+            if identity.object_id.schema not in declared:
+                raise DiscoveryError(
+                    f"{source.relative_path}: schema "
+                    f"{identity.object_id.schema!r} is not declared by item {item_id}"
+                )
+            (validations if source.is_validation else documents).append(identity)
+        programmables = tuple(
+            merged.programmables[identity]
+            for identity in sorted(
+                (each for each in merged.programmables if each.item == item_id),
+                key=str,
+            )
+        )
+        items.append(
+            WeaverItem(
+                item_id,
+                schemas=schemas,
+                documents=tuple(documents),
+                validations=tuple(validations),
+                programmables=programmables,
+            )
+        )
 
     items = [
         replace(
@@ -499,54 +763,59 @@ def parse_item_repository(
             signature=_item_signature(
                 model,
                 source_documents=source_documents,
-                schema_documents=schema_documents,
-                support_files=support_files,
-                store=store,
-                root=root,
+                schema_documents=merged.schemas,
+                support_hashes=support_hashes,
             ),
         )
         for model in items
     ]
-
-    # Held rather than re-read: a ``lib/`` file is deployed by the load layer, so
-    # its bytes have to reach both the signature it is selected by and the
-    # payload the bundle carries, and neither may reopen the repository.
-    #
-    # Every support file, not only the Python ones. A `.py` filter here was
-    # reading across from the top level, where a Weaver document is python,
-    # sql or yml. But `lib/` is an ordinary directory the runtime tree
-    # reproduces verbatim, and a module that reads a data file beside it needs
-    # that file to have travelled with it.
-    support_file_contents = {
-        relative: store.read(root.join(*relative.split("/")))
-        for relative in sorted(support_files)
-    }
 
     repository = WeaverRepository(
         name=root.name,
         root=root,
         items=tuple(items),
         source_documents=source_documents,
-        schema_documents=schema_documents,
-        support_files=tuple(sorted(support_files)),
-        support_file_contents=support_file_contents,
-        signature=_item_repository_signature(
-            files, store, root, generated=generated_files
-        ),
-        logical_shortcuts=logical_shortcuts,
-        shortcuts=shortcuts,
-        planned_shortcuts=shortcuts,
-        generated_files=generated_files,
+        schema_documents=merged.schemas,
+        programmables={
+            programmable.identity: programmable
+            for model in items
+            for programmable in model.programmables
+        },
+        support_files=tuple(sorted(merged.support_files)),
+        support_file_contents=merged.support_files,
+        signature=_repository_signature(merged, store, root),
+        logical_shortcuts=merged.logical_shortcuts,
+        shortcuts=merged.shortcuts,
+        generated_files=merged.declared_files,
     )
     return resolve_item_dependencies(repository)
+
+
+def _repository_signature(part: RepositoryPart, store: Store, root: Location) -> str:
+    """Hash every declaration file the repository is composed from."""
+
+    from .source import content_hash
+
+    digest = hashlib.sha256()
+    declared = part.declared_files
+    for relative in sorted(set(part.store_files) | set(declared)):
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        content = (
+            declared[relative]
+            if relative in declared
+            else store.read(root.join(*relative.split("/")))
+        )
+        digest.update(content_hash(content).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _with_build_signatures(
     documents: Mapping[WeaverDocumentId, SourceDocument],
     *,
-    support_files: Iterable[str],
-    store: Store,
-    root: Location,
+    support_files: Mapping[str, bytes],
+    support_hashes: Mapping[str, str],
 ) -> dict[WeaverDocumentId, SourceDocument]:
     """Attach each document's own, statically reachable implementation hash.
 
@@ -556,10 +825,9 @@ def _with_build_signatures(
     statically: helper modules are parsed, never imported.
     """
 
-    from .source import PYTHON, content_hash
+    from .source import PYTHON
 
     helper_paths: dict[WeaverItemId, dict[tuple[str, ...], str]] = {}
-    helper_hashes: dict[str, str] = {}
     for relative in support_files:
         parts = relative.split("/")
         if len(parts) < 4 or parts[2] != "lib" or not relative.endswith(".py"):
@@ -567,18 +835,14 @@ def _with_build_signatures(
         item = WeaverItemId(parts[0], parts[1])
         module = tuple(parts[2:-1] + [parts[-1][:-3]])
         helper_paths.setdefault(item, {})[module] = relative
-        helper_hashes[relative] = content_hash(
-            store.read(root.join(*relative.split("/")))
-        )
 
     parsed_imports: dict[str, tuple[PythonImport, ...]] = {}
 
     def imports_for(relative: str) -> tuple[PythonImport, ...]:
         if relative in parsed_imports:
             return parsed_imports[relative]
-        data = store.read(root.join(*relative.split("/")))
         try:
-            text = data.decode("utf-8-sig")
+            text = support_files[relative].decode("utf-8-sig")
         except UnicodeDecodeError as exc:
             raise DiscoveryError(f"{relative}: must be UTF-8 text ({exc})") from exc
         try:
@@ -617,7 +881,7 @@ def _with_build_signatures(
             continue
         digest = hashlib.sha256()
         entries = [(source.relative_path, source.source_hash)] + [
-            (available[module], helper_hashes[available[module]])
+            (available[module], support_hashes[available[module]])
             for module in sorted(reached)
         ]
         for relative, signature in entries:
@@ -683,9 +947,7 @@ def _item_signature(
     *,
     source_documents: Mapping[WeaverDocumentId, SourceDocument],
     schema_documents: Mapping[WeaverSchemaId, SchemaSes],
-    support_files: Iterable[str],
-    store: Store,
-    root: Location,
+    support_hashes: Mapping[str, str],
 ) -> str:
     """Certify exactly one logical item's authored and generated inputs.
 
@@ -694,8 +956,6 @@ def _item_signature(
     participate: a logical dependency does not make an independently installed
     producer part of the consumer's source item.
     """
-
-    from .source import content_hash
 
     entries: list[tuple[str, str]] = []
     # Validation too: a changed Test is a changed item, and an item signature
@@ -706,16 +966,16 @@ def _item_signature(
     for identity in item.schemas:
         schema = schema_documents[identity]
         entries.append((schema.relative_path, schema.source_hash))
+    # An authored programmable is item source. Weaver's own fragments and the
+    # generated procedures sign themselves, as every runtime artefact does.
+    for programmable in item.programmables:
+        if programmable.relative_path is not None:
+            entries.append((programmable.relative_path, programmable.signature))
 
     prefix = f"{item.identity.item_type}/{item.identity.item_name}/"
-    for relative in support_files:
+    for relative, source_hash in support_hashes.items():
         if relative.startswith(prefix):
-            entries.append(
-                (
-                    relative,
-                    content_hash(store.read(root.join(*relative.split("/")))),
-                )
-            )
+            entries.append((relative, source_hash))
     digest = hashlib.sha256()
     digest.update(str(item.identity).encode("utf-8"))
     digest.update(b"\n")
@@ -749,31 +1009,12 @@ def _insert_exact_case(
     destination[identity] = value
 
 
-def _item_repository_signature(
-    paths: Iterable[str],
-    store: Store,
-    root: Location,
-    *,
-    generated: Mapping[str, bytes] | None = None,
-) -> str:
-    """Hash included item-oriented files; `_ignore/` never reaches this list."""
+def _builtin_item() -> WeaverItemId:
+    """The reserved catalogue item identity, imported late to avoid a cycle."""
 
-    from .source import content_hash
+    from ..catalogue.builtin import BUILTIN_ITEM
 
-    digest = hashlib.sha256()
-    generated = generated or {}
-    for relative in sorted(set(paths) | set(generated)):
-        digest.update(relative.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(
-            content_hash(
-                generated.get(relative)
-                if relative in generated
-                else store.read(root.join(*relative.split("/")))
-            ).encode("ascii")
-        )
-        digest.update(b"\n")
-    return digest.hexdigest()
+    return BUILTIN_ITEM
 
 
 def _read_item_declarations(root, store, files, *, read):

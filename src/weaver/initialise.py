@@ -132,9 +132,9 @@ def initialise_catalogue(
     A compatibility wrapper and nothing more. It owns no catalogue DDL, no
     catalogue publication and no control-plane preparation: it selects no
     authored item, and the built-in ``Warehouse/_weaver`` that every build
-    injects is therefore the whole of what it builds.
+    composes in is therefore the whole of what it builds.
 
-    Ordinary builds inject and bind the same Item directly.
+    Ordinary builds compose in and bind the same Item directly.
 
     An empty source directory is the input because the built-in item is composed
     into a parsed repository rather than authored into one: there is nothing

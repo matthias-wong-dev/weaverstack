@@ -1,0 +1,6 @@
+Schema ID: _
+
+Description: >-
+  Weaver's own schema. It holds the Load and Test entry points, the generated
+  load and validation procedures, and this item's views over the Weaver
+  catalogue.

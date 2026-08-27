@@ -35,13 +35,14 @@ repository/
 │   │   │   └── Sales.yml
 │   │   ├── shortcuts.py                Fabric shortcuts this item declares
 │   │   └── Sales.Rollup.sql            Spark SQL — it is in a Lakehouse
-│   └── _weaver/
-│       └── … generated catalogue sources …
+│   └── _weaver/                        refused: this item is Weaver's own
 ├── Warehouse/
 │   └── Reporting/
 │       ├── schemas/
 │       │   └── Sales.yml
 │       ├── shortcuts.yml               shortcuts this Warehouse declares
+│       ├── programmables/
+│       │   └── dbo.RefreshSummary.sql  a stored procedure this item manages
 │       └── Sales.Customer.sql          T-SQL — it is in a Warehouse
 └── _ignore/
     └── unfinished.py
@@ -170,9 +171,10 @@ does to one.
 Build materialises a Lakehouse declaration as a OneLake shortcut and a Warehouse
 one as a view. See [how build works](how-does-build-work.md#4a-shortcuts).
 
-The built-in `Warehouse/_weaver` item is generated and managed by Weaver inside
-the parsed repository in memory. It declares the catalogue tables and is never
-written into authored source; an authored `Warehouse/_weaver` is rejected.
+The built-in `Warehouse/_weaver` item is Weaver-owned repository content,
+checked into the package and composed into every parsed repository. It declares
+the catalogue tables through the ordinary repository readers, exactly as an
+authored item would be read; an authored `Warehouse/_weaver` is rejected.
 
 ## Build binds logical items
 
@@ -233,21 +235,55 @@ would make physical deployment history part of logical identity.
 - [Weaver architecture](weaver-architecture.md) — product behaviour and command lifecycle
 - [Agent guide](../AGENTS.md) — implementation invariants
 
-## Generated declarations
+## What Weaver composes in
 
-A parsed repository carries more than what was authored. Weaver composes two
-kinds of generated document into it and reads them through the same static
-readers as authored content, so there is no second parsing path:
+A parsed repository carries more than what was authored, and composition has one
+path. The authored tree, Weaver's own fragments and generated content are each
+read into a repository part, combined through `merge_repository`, and only then
+validated, signed and resolved into one repository. The rules: a unique identity
+is added, a duplicate identity is refused, identities differing only by case are
+refused, and there is no precedence.
 
-- `Warehouse/_weaver` — the catalogue's own tables, always;
-- an item's `schemas/_.yml`, and for a Lakehouse `Files/___Load.py` — the schema
-  its generated load procedures live in, and the folder its load code is deployed
-  into, present only while the item has load code.
+**Fragments** are checked-in files under `src/weaver/fragments/`, read through
+the same declaration readers as an authored tree:
+
+- `catalogue/` gives the `Warehouse/_weaver` item and its tables, always;
+- `standard/Warehouse/` gives schema `_`, and the `_.Load` and `_.Test` entry
+  points, for every normal Warehouse item;
+- `standard/Lakehouse/` gives schema `_`, and, only while the item has load code,
+  `Files/___Load.py`, the folder that code is deployed into.
+
+**Generated content** is what follows an item's own declarations: one
+implementation procedure per Warehouse table Weaver loads, `_.[Load X.Y]`, and
+one per Warehouse validation, `_.[Test X.Y]` or `_.[Assumption X.Y]`.
+
+**The standard catalogue surface** is a set of logical shortcut declarations.
+Every normal item presents `_.Installation` and the operational tables under its
+own names, so dependency resolution and physical planning see them like any other
+shortcut. When an item is bound to the Warehouse holding the catalogue, planning
+creates no views back over tables already there; that is physical planning, not a
+different logical surface.
 
 `___Load.py` is `_.Load`: a schema of `_` plus the `__` separator. A run of
 leading underscores is read as the schema it is, which is why the file can be
 named at all.
 
-Because those are generated, `_` is the one schema an ordinary item may not
-author into. Every other underscore schema is free — `_weaver` declares its own
-catalogue in `_`, because it is the item that owns it.
+`_` is therefore the one schema an ordinary item may not author into. Every other
+underscore schema is free. `_weaver` declares its own catalogue in `_`, because it
+is the item that owns it.
+
+### Programmables
+
+A Warehouse item authors stored procedures under
+`programmables/<Schema>.<Procedure>.sql`. Each file becomes a Programmable: a
+managed declaration carrying its procedure identity, its text, a signature and a
+role. Authored content, generated implementation procedures and the two entry
+points are all Programmables behind one lifecycle: discover, validate, sign,
+select, install through the ordinary T-SQL executor, register under their own
+role, prune when the source stops declaring them.
+
+An authored file's SQL must contain exactly one `create or alter procedure`
+statement, creating the procedure its filename names. Exactly one, so what Weaver
+installs is what it registers and prunes; `create or alter`, so replacing what is
+installed works. The `_` schema stays Weaver's: an authored programmable may not
+create into it.

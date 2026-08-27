@@ -141,14 +141,14 @@ def test_an_underscore_schema_must_still_be_declared(tmp_path):
 def test_schema_underscore_itself_belongs_to_weaver(tmp_path):
     """The one name an ordinary item may not author into.
 
-    It holds generated infrastructure, the deployed runtime tree and the load
-    procedures, so an authored object there would collide with something Weaver
-    generates, claims and prunes. Refused at interpretation, where the author can
-    still see which file caused it.
+    It holds the deployed runtime tree, the generated procedures and the item's
+    surface over the catalogue, so an authored object there would collide with
+    something Weaver claims and prunes. Refused at interpretation, where the
+    author can still see which file caused it.
     """
 
     registry = REGISTRY.replace("_Control.Registry", "_.Registry")
-    with pytest.raises(DiscoveryError, match="generated Weaver infrastructure"):
+    with pytest.raises(DiscoveryError, match="reserved for Weaver"):
         _repo(tmp_path, {"_.Registry.sql": registry}, schemas=("_",))
 
 

@@ -1,8 +1,8 @@
-"""What a repository's load layer owns, derived from the source alone.
+"""What a repository's runtime layer owns, derived from the source alone.
 
-A load artefact is a target in its own right: claimed, registered, signed,
+A runtime artefact is a target in its own right: claimed, registered, signed,
 selected incrementally, built and pruned when its source stops declaring it.
-This module answers which load artefacts a repository has, where they go, and
+This module answers which runtime artefacts a repository has, where they go, and
 what each one's signature is.
 
 Three artefacts, from three kinds of source:
@@ -30,7 +30,7 @@ exactly the artefacts it changed and leaves deployed Python untouched.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import TYPE_CHECKING, Iterable, Mapping
 
 from .declaration.metadata import FOLDER, PYTHON, SPARK_SQL, TABLE, ObjectId
 from .declaration.model import (
@@ -43,6 +43,10 @@ from .declaration.model import (
 )
 from .declaration.source import content_hash, salted_signature
 from .errors import BuildError
+
+if TYPE_CHECKING:
+    from .declaration.programmable import Programmable
+    from .declaration.source import SourceDocument
 
 #: Where generated infrastructure lives, in both physical forms. The Warehouse
 #: gets a schema named ``_`` holding the load procedures; the Lakehouse gets a
@@ -87,12 +91,9 @@ PROCEDURE_TYPE = "stored_procedure"
 ROLE_LOAD = "load"
 ROLE_TEST = "test"
 ROLE_ASSUMPTION = "assumption"
-#: A generic entry point a person calls, wrapping one object's own procedure and
-#: recording what it did. Its own role because nothing schedules one.
-ROLE_ENTRY = "entry"
-
-#: Which role a validation kind's artefact carries.
+#: Which role a validation kind's artefact carries, and the pair of them.
 VALIDATION_ROLE = {"Test": ROLE_TEST, "Assumption": ROLE_ASSUMPTION}
+VALIDATION_ROLES = (ROLE_TEST, ROLE_ASSUMPTION)
 
 PYTHON_SUFFIX = ".py"
 
@@ -153,7 +154,7 @@ class RuntimeArtefact:
 
     @property
     def is_validation(self) -> bool:
-        return self.role in (ROLE_TEST, ROLE_ASSUMPTION)
+        return self.role in VALIDATION_ROLES
 
     @property
     def is_file(self) -> bool:
@@ -223,28 +224,19 @@ def item_validated_objects(
     compiles to is how the Test is run.
     """
 
-    found = {
-        artefact.origin
-        for artefact in item_validation_artefacts(repository, item=item)
-        if artefact.origin is not None
-    }
-    return tuple(sorted(found, key=str))
-
-
-def item_presents_runtime_tables(
-    repository: WeaverRepository, *, item: WeaverItemId
-) -> bool:
-    """Whether this item has anything whose operational state Weaver records.
-
-    A loadable object or a validation. An item with neither installs nothing that
-    reads or writes a runtime table, so a build gives it none of them, and the
-    item graph puts no edge from the built-in item to it.
-    """
-
-    return bool(
-        item_bookmarkable_objects(repository, item=item)
-        or item_validated_objects(repository, item=item)
-    )
+    if item.item_type == WAREHOUSE:
+        origins = (
+            programmable.origin
+            for programmable in repository.programmables.values()
+            if programmable.identity.item == item
+            and programmable.role in VALIDATION_ROLES
+        )
+    else:
+        origins = (
+            artefact.origin
+            for artefact in item_validation_artefacts(repository, item=item)
+        )
+    return tuple(sorted({each for each in origins if each is not None}, key=str))
 
 
 def item_runtime_artefacts(
@@ -286,14 +278,15 @@ def item_validation_artefacts(
 ) -> tuple[RuntimeArtefact, ...]:
     """One item's validation artefacts, derived from what it declares.
 
-    A Warehouse validation is a procedure in the generated ``_`` schema; a
-    Lakehouse one is a module under the deployed runtime tree, in a ``tests/``
-    or ``assumptions/`` subdirectory. Under that root rather than beside it,
-    because it is the item's Python import root: ``from Sales__Order import
-    Sales__Order`` then resolves from a validation as it does from a load.
+    A Lakehouse validation is a module under the deployed runtime tree, in a
+    ``tests/`` or ``assumptions/`` subdirectory. Under that root rather than
+    beside it, because it is the item's Python import root: ``from Sales__Order
+    import Sales__Order`` then resolves from a validation as it does from a
+    load. A Warehouse validation is a generated Programmable of the repository,
+    so its artefact comes from there and this producer claims nothing.
     """
 
-    if _is_builtin(item):
+    if _is_builtin(item) or item.item_type == WAREHOUSE:
         return ()
     model = next((each for each in repository.items if each.identity == item), None)
     if model is None:
@@ -366,119 +359,92 @@ def item_load_artefacts(
     return _lakehouse_artefacts(repository, item=item, destination=destination)
 
 
+def item_generated_programmables(
+    *, item: WeaverItemId, documents: Iterable["SourceDocument"]
+) -> tuple["Programmable", ...]:
+    """The stored procedures Weaver generates for one Warehouse item.
+
+    One per Warehouse table Weaver loads, one per Warehouse validation. They
+    join the repository through the same composition path as every other
+    declaration.
+    """
+
+    if item.item_type != WAREHOUSE or _is_builtin(item):
+        return ()
+
+    from .declaration.load import has_generated_load
+    from .declaration.programmable import generated_programmable
+    from .declaration.validation import validation_identity
+
+    found: list[Programmable] = []
+    for source in documents:
+        identity = source.logical_id
+        if identity is None:
+            continue
+        if not source.is_validation:
+            # A table declaring `Has load procedure: false` is populated by
+            # something other than Weaver, so there is no procedure for it.
+            if source.kind != TABLE or not has_generated_load(source):
+                continue
+            generated = source.create_load(item=item)
+            found.append(
+                generated_programmable(
+                    load_procedure_id(item, identity.object_id),
+                    text=generated.payload.decode("utf-8"),
+                    signature=salted_signature(
+                        source.effective_signature, generated.template_version
+                    ),
+                    role=ROLE_LOAD,
+                    origin=identity,
+                )
+            )
+            continue
+
+        object_type, template_version = validation_identity(source)
+        # A Warehouse validation compiles to a procedure, whatever its kind.
+        assert object_type == PROCEDURE_TYPE
+        kind = source.document.kind
+        generated = source.create_validation(destination=None)
+        found.append(
+            generated_programmable(
+                validation_procedure_id(item, kind, identity.object_id),
+                text=generated.payload.decode("utf-8"),
+                signature=salted_signature(
+                    source.effective_signature, template_version
+                ),
+                role=VALIDATION_ROLE[kind],
+                origin=identity,
+            )
+        )
+
+    return tuple(sorted(found, key=lambda each: str(each.identity)))
+
+
 def _warehouse_artefacts(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[RuntimeArtefact, ...]:
-    """One generated load procedure per Warehouse table, and the entry points.
+    """One artefact per Programmable this item manages.
 
-    ``_.Load`` and ``_.Test`` are installed beside them: the object procedures
-    are execution primitives that record nothing, and the entry points are what a
-    person calls to run one and have the outcome recorded. Registered like any
-    other artefact, so they are signed, selected incrementally and pruned when
-    the item's last load or validation goes.
+    Generated load and validation procedures, authored content and Weaver's own
+    fragments alike. One layer installs, signs, selects and prunes them.
     """
-
-    return _load_procedures(repository, item=item) + _entry_artefacts(
-        repository, item=item
-    )
-
-
-def _load_procedures(
-    repository: WeaverRepository, *, item: WeaverItemId
-) -> tuple[RuntimeArtefact, ...]:
-    """One generated load procedure per Warehouse table Weaver loads."""
-
-    from .declaration.load import has_generated_load
-
-    artefacts = []
-    for identity, source in sorted(repository.source_documents.items(), key=_by_text):
-        if identity.item != item or source.kind != TABLE:
-            continue
-        # A table declaring `Has load procedure: false` is populated by something
-        # other than Weaver, so there is no procedure to install for it.
-        if not has_generated_load(source):
-            continue
-        generated = source.create_load(item=item)
-        artefacts.append(
-            RuntimeArtefact(
-                identity=load_procedure_id(item, identity.object_id),
-                object_type=generated.object_type,
-                signature=salted_signature(
-                    source.effective_signature, generated.template_version
-                ),
-                payload=generated.payload,
-                origin=identity,
-                source_path=source.relative_path,
-            )
-        )
-    return tuple(artefacts)
-
-
-def _entry_artefacts(
-    repository: WeaverRepository, *, item: WeaverItemId
-) -> tuple[RuntimeArtefact, ...]:
-    """``_.Load`` and ``_.Test``, where the item installs something they wrap.
-
-    Signed by their own bytes rather than by a source signature and a template
-    version, because the dispatch chain is derived from the whole set of objects
-    the item installs: adding one object changes the entry point, and nothing
-    else would say so.
-    """
-
-    from .declaration.tsql_entry import (
-        LOAD_ENTRY,
-        TEST_ENTRY,
-        generate_load_entry,
-        generate_test_entry,
-    )
 
     found = []
-    loadable = [
-        artefact.origin.object_id
-        for artefact in _load_procedures(repository, item=item)
-        if artefact.origin is not None
-    ]
-    if loadable:
+    for programmable in repository.programmables.values():
+        if programmable.identity.item != item:
+            continue
         found.append(
-            _entry_artefact(item, LOAD_ENTRY, generate_load_entry(item, loadable))
+            RuntimeArtefact(
+                identity=programmable.identity,
+                object_type=PROCEDURE_TYPE,
+                signature=programmable.signature,
+                payload=programmable.payload,
+                role=programmable.role,
+                origin=programmable.origin,
+                source_path=programmable.relative_path,
+            )
         )
-    validations = {
-        artefact.origin.object_id: repository.source_documents[
-            artefact.origin
-        ].document.kind
-        for artefact in item_validation_artefacts(repository, item=item)
-        if artefact.origin is not None
-    }
-    if validations:
-        found.append(
-            _entry_artefact(item, TEST_ENTRY, generate_test_entry(item, validations))
-        )
-    return tuple(found)
-
-
-def _entry_artefact(item: WeaverItemId, name: str, script: str) -> RuntimeArtefact:
-    payload = script.encode("utf-8")
-    return RuntimeArtefact(
-        identity=entry_procedure_id(item, name),
-        object_type=PROCEDURE_TYPE,
-        signature=content_hash(payload),
-        payload=payload,
-        role=ROLE_ENTRY,
-    )
-
-
-def entry_procedure_id(item: WeaverItemId, name: str) -> WeaverDocumentId:
-    """The identity of one of an item's generic entry points."""
-
-    return WeaverDocumentId(
-        item, ObjectId(schema=ETL_SCHEMA, object=name), shape=PROCEDURE_SHAPE
-    )
-
-
-def entry_procedure_name(name: str) -> str:
-    """How an entry point spells its own name in T-SQL."""
-
-    return f"{_tsql_ident(ETL_SCHEMA)}.{_tsql_ident(name)}"
+    return tuple(sorted(found, key=lambda artefact: str(artefact.identity)))
 
 
 def _lakehouse_artefacts(
@@ -539,7 +505,12 @@ def _lakehouse_artefacts(
                 )
             )
     declared = tuple(
-        declaration for declaration in repository.shortcuts if declaration.owner == item
+        declaration
+        # Weaver-owned references carry their identity and are infrastructure,
+        # not symbols a program imports. The deployed module holds what the
+        # item's own shortcuts.py declared.
+        for declaration in repository.shortcuts
+        if declaration.owner == item and declaration.destination_identity is None
     )
     if declared:
         # Generated rather than copied: the authored file says what to create,
@@ -748,118 +719,26 @@ def _by_text(entry):
 
 
 def _is_builtin(item: WeaverItemId) -> bool:
-    from .catalogue.builtin import ITEM_ROOT
+    from .catalogue.builtin import BUILTIN_ITEM
 
-    return str(item) == ITEM_ROOT
+    return item == BUILTIN_ITEM
 
 
 def _tsql_ident(name: str) -> str:
     return "[" + name.replace("]", "]]") + "]"
 
 
-#: The generated folder document that owns the deployed tree, and the schema
-#: declaration it needs. ``_`` + ``__`` + ``Load`` spells ``___Load``, which the
-#: parser reads as ``_.Load``. See
-#: :func:`weaver.declaration.source.python_id_parts`.
+#: The Weaver fragment file declaring the runtime tree a Lakehouse deploys into.
+#: Named here because whether an item receives it follows from what that item
+#: has to deploy. See :mod:`weaver.fragments`.
 FOLDER_DOCUMENT = f"Files/{ETL_SCHEMA}{'__'}{LOAD_FOLDER}.py"
-SCHEMA_DOCUMENT = f"schemas/{ETL_SCHEMA}.yml"
-
-_FOLDER_CLASS = f"{ETL_SCHEMA}{'__'}{LOAD_FOLDER}"
-
-
-def render_folder_document() -> str:
-    """The declaration for ``Files/_/Load``, generated per item that needs one.
-
-    An ordinary Folder document. The deployed tree could have been
-    a reserved path the prune was taught to skip, but then its removal would need
-    a rule of its own; declared as a folder it is claimed, registered, inventoried
-    and pruned by the machinery that already exists, and when the last load
-    artefact goes the folder stops being projected and the whole subtree is
-    removed by ordinary folder prune.
-
-    ``Static: true`` because nothing loads into it. A build writes the runtime
-    tree, and the files inside it are separately claimed objects of their own.
-    ``Incremental: false`` for the same reason: a Folder accumulates by default,
-    and nothing here accumulates, since each deployed file is replaced whole by
-    the claim that owns it.
-    """
-
-    return f'''\
-"""
-Folder ID: {ETL_SCHEMA}.{LOAD_FOLDER}
-
-Description: The runtime tree Weaver deploys this item's load code into.
-
-Lineage: Generated by Weaver from the item's own authored source.
-
-File key: "**/*"
-
-Incremental: false
-
-Static: true
-"""
-from weaver import Folder
-
-
-class {_FOLDER_CLASS}(Folder):
-    def read(self):
-        return self.staging_folder(), []
-'''
-
-
-def render_schema_document() -> str:
-    """The ``_`` schema declaration the generated folder document needs."""
-
-    return (
-        f"Schema ID: {ETL_SCHEMA}\n"
-        "\n"
-        "Description: Generated Weaver infrastructure, the runtime tree a "
-        "Lakehouse item's load code is deployed into, and the schema a "
-        "Warehouse item's generated load procedures live in.\n"
-    )
-
-
-def generated_item_files(
-    item: WeaverItemId, *, documents: Iterable, support_paths: Iterable[str]
-) -> dict[str, bytes]:
-    """The generated declarations one item needs, or nothing if it needs none.
-
-    Keyed by repository-relative path, so they compose with the built-in
-    catalogue item's generated files and are read by the same static readers as
-    authored content, so there is no second parsing path and no source mutated
-    on disk.
-
-    Takes the item's documents rather than a repository because it runs during
-    interpretation: the folder document has to exist before the artefacts landing
-    inside it can be claimed, since it is what owns the directory they land in.
-    """
-
-    if _is_builtin(item):
-        return {}
-    schema = {f"{item}/{SCHEMA_DOCUMENT}": render_schema_document().encode("utf-8")}
-    if item.item_type == WAREHOUSE:
-        # A Warehouse needs the schema its generated procedures live in and
-        # nothing else. There is no Files area, so no runtime tree and no folder
-        # to own one. A validation puts a procedure there too, so an item that
-        # only validates still needs the schema.
-        documents = tuple(documents)
-        return (
-            schema
-            if any(source.kind == TABLE or source.is_validation for source in documents)
-            else {}
-        )
-    if not has_deployable_source(
-        item, documents=documents, support_paths=support_paths
-    ):
-        return {}
-    return {
-        **schema,
-        f"{item}/{FOLDER_DOCUMENT}": render_folder_document().encode("utf-8"),
-    }
 
 
 def has_deployable_source(
-    item: WeaverItemId, *, documents: Iterable, support_paths: Iterable[str]
+    item: WeaverItemId,
+    *,
+    documents: Iterable["SourceDocument"],
+    support_paths: Iterable[str],
 ) -> bool:
     """Whether this Lakehouse item has anything for a load layer to deploy."""
 
@@ -869,8 +748,7 @@ def has_deployable_source(
         if source.language == SPARK_SQL and source.kind == TABLE:
             return True
         # A validation is deployed into the same tree whatever it was authored
-        # in, so an item that only validates still owns a runtime tree to put it
-        # in, so the folder its module lands in exists.
+        # in, so an item that only validates still owns a runtime tree.
         if source.is_validation:
             return True
     prefix = f"{item}/lib/"
@@ -904,14 +782,16 @@ def artefacts_by_identity(
 __all__ = [
     "ETL_SCHEMA",
     "FILE_TYPE",
+    "FOLDER_DOCUMENT",
     "LOAD_FOLDER",
     "LOAD_PROCEDURE_PREFIX",
     "LOAD_ROOT",
     "RuntimeArtefact",
     "PROCEDURE_TYPE",
+    "has_deployable_source",
+    "item_generated_programmables",
     "item_bookmarkable_objects",
     "item_load_artefacts",
-    "item_presents_runtime_tables",
     "load_artefacts",
     "artefacts_by_identity",
     "item_runtime_artefacts",
@@ -926,6 +806,4 @@ __all__ = [
     "load_schemas",
     "load_procedure_id",
     "load_procedure_name",
-    "entry_procedure_id",
-    "entry_procedure_name",
 ]

@@ -93,10 +93,20 @@ def test_the_estate_declares_both_physical_sides(repository):
     items = {str(model.identity) for model in repository.items}
 
     assert {"Lakehouse/Sales", "Warehouse/Reporting"} <= items
-    assert [
+    # Authored declarations are the ones a file carries; Weaver-owned ones
+    # arrive composed in and carry their identity instead of a name to decode.
+    authored = [
         (str(shortcut.destination), shortcut.target)
         for shortcut in repository.shortcuts
-    ] == [("Warehouse/Reporting/Rpt.PortableCustomer", "Lakehouse/Sales/DWG.Customer")]
+        if shortcut.destination_identity is None
+    ]
+    assert authored == [
+        ("Warehouse/Reporting/Rpt.PortableCustomer", "Lakehouse/Sales/DWG.Customer")
+    ]
+    assert all(
+        shortcut.destination_identity is None or shortcut.relative_path == ""
+        for shortcut in repository.shortcuts
+    )
 
 
 @weaver_test()
@@ -159,16 +169,16 @@ def test_the_warehouse_report_carries_a_load_procedure_and_a_test(plan):
     procedures = {
         action.id
         for _sequence, _batch, action in plan.actions()
-        if action.id.startswith("load-Warehouse--Reporting--procedure")
+        if action.id.startswith("runtime-Warehouse--Reporting--procedure")
     }
 
     assert procedures == {
-        "load-Warehouse--Reporting--procedure-_--Load-Rpt.CustomerReport",
-        "load-Warehouse--Reporting--procedure-_--Test-Rpt.ReportReconciles",
+        "runtime-Warehouse--Reporting--procedure-_--Load-Rpt.CustomerReport",
+        "runtime-Warehouse--Reporting--procedure-_--Test-Rpt.ReportReconciles",
         # And the two generic entry points, which are what a person calls to run
         # one of those by hand and have the outcome recorded.
-        "load-Warehouse--Reporting--procedure-_--Load",
-        "load-Warehouse--Reporting--procedure-_--Test",
+        "runtime-Warehouse--Reporting--procedure-_--Load",
+        "runtime-Warehouse--Reporting--procedure-_--Test",
     }
 
 

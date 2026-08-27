@@ -295,11 +295,20 @@ old/new action terminology         build_uploaded_item_repository
 operation-local resource ownership update_catalogue / @update_catalogue
 Bookmark-specific build plumbing   a bespoke write per runtime table
 the `provision` test scope          disposable-Lakehouse fixtures
+ROLE_ENTRY and entry artefacts     generate_load_entry / generate_test_entry
+planned_shortcuts                  _with_runtime_references
+per-part per-item declaration      generated_item_files
+  indexes in RepositoryPart
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the
 estate up is `tests/fabric/provision_estate.py`, run by hand, and no test creates
 or deletes an item.
+
+`_.Load` and `_.Test` are checked-in `.sql` under `src/weaver/fragments/`, read by
+`read_repository_fragment` like the catalogue declaration and the standard
+per-item schema and folder documents. Static Weaver-owned repository content is a
+fragment; nothing renders it from Python.
 
 **Who records is the interface.** A lower execution primitive never writes
 operational catalogue state. A run records centrally, and a standalone wrapper
@@ -393,8 +402,8 @@ selection. Managed markers are never written by hand.
 ```bash
 pytest                        # pure Python, no JVM and no tenant
 pytest -m "fabric and remote" # no published wheel needed
-pytest -m "fabric and hosted" # needs the wheel published to the Environment
-pytest -m full_integration    # composed lifecycle journeys
+pytest -m "fabric and hosted" # injects checkout wheel; no publish needed
+pytest -m full_integration    # injects checkout wheel; no publish needed
 ```
 
 The scope is one of core, remote, hosted or integration. Integration needs no

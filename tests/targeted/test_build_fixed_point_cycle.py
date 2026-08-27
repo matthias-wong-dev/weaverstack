@@ -46,7 +46,7 @@ from weaver.build_bundle.catalogue_actions import desired_catalogue
 from weaver.build_bundle.planner import certifiable_identities
 from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import PRESENTED_RUNTIME_TABLES, PROJECTED_TABLES
+from weaver.catalogue.tables import PROJECTED_TABLES, STANDARD_SURFACE_TABLES
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
 from weaver.spark import FabricSparkTarget
@@ -131,12 +131,12 @@ RUNTIME_SOURCES = {
         item_name="Weaver_Control",
         path=f"Tables/_/{table.name}",
     )
-    for table in PRESENTED_RUNTIME_TABLES
+    for table in STANDARD_SURFACE_TABLES
 }
 
 #: Every runtime table's name, as a Lakehouse inventory reports the references
 #: it already holds.
-PRESENTED = tuple(table.name for table in PRESENTED_RUNTIME_TABLES)
+PRESENTED = tuple(table.name for table in STANDARD_SURFACE_TABLES)
 
 
 def build(repository, tmp_path, *, catalogue, runtime_references: bool = True):

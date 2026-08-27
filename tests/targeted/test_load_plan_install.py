@@ -119,7 +119,7 @@ def actions_of(planned, phase: str):
 
 
 @weaver_test()
-def test_load_is_the_last_thing_an_item_does(lakehouse):
+def test_the_runtime_layer_is_the_last_thing_an_item_does(lakehouse):
     """The ordering claim, and the only one the layer makes.
 
     Its artefacts depend on the item's structural work being finished, which is
@@ -135,18 +135,18 @@ def test_load_is_the_last_thing_an_item_does(lakehouse):
         selected_loads=loads_of(lakehouse),
     )
 
-    assert phases(planned)[-1] == "load"
-    assert phases(planned).count("load") == 1
+    assert phases(planned)[-1] == "runtime"
+    assert phases(planned).count("runtime") == 1
 
 
 @weaver_test()
-def test_an_item_with_no_selected_load_work_gets_no_layer(lakehouse):
+def test_an_item_with_no_selected_runtime_work_gets_no_layer(lakehouse):
     """A phase with nothing to do is not a barrier, and takes no number."""
 
     selected = {key for key in lakehouse.source_documents if key.item == item_id()}
     planned = plan(lakehouse, selected_documents=selected, selected_for_build=selected)
 
-    assert "load" not in phases(planned)
+    assert "runtime" not in phases(planned)
 
 
 # --- what it installs ---------------------------------------------------------
@@ -157,7 +157,7 @@ def test_each_artefact_becomes_one_action_carrying_its_own_bytes(lakehouse):
     """The bundle carries the content, so the installer never reopens source."""
 
     planned = plan(lakehouse, selected_loads=loads_of(lakehouse))
-    actions = actions_of(planned, "load")
+    actions = actions_of(planned, "runtime")
     payloads = {
         name: data for stage in planned.stages for name, data in stage.payloads.items()
     }
@@ -190,9 +190,13 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
         selected_for_build=runtime_references_of(warehouse, item),
         selected_loads=loads_of(warehouse, item),
     )
-    actions = actions_of(planned, "load")
+    actions = actions_of(planned, "runtime")
 
+    # One implementation procedure, plus the two fixed entry points every
+    # Warehouse item is given: their content does not depend on what the
+    # item installs.
     assert [action.kind for action in actions] == [
+        "build_procedure",
         "build_procedure",
         "build_procedure",
     ]
@@ -202,9 +206,10 @@ def test_a_generated_procedure_is_ordinary_t_sql(warehouse):
     assert {action.executor for action in actions} == {"tsql"}
     installed = {action.resource_node_id for action in actions}
     assert any(one.endswith("procedure:_/Load Sales.Customer") for one in installed)
-    # And the entry point beside it, installed by the same executor: a
+    # And the entry points beside it, installed by the same executor: a
     # create-or-alter is a script whichever procedure it builds.
     assert any(one.endswith("procedure:_/Load") for one in installed)
+    assert any(one.endswith("procedure:_/Test") for one in installed)
 
 
 @weaver_test()
@@ -255,7 +260,7 @@ def test_a_source_that_stopped_claiming_its_file_removes_it(lakehouse):
         removed={gone},
         registered={gone: registered_document(gone, object_type="file")},
     )
-    actions = actions_of(planned, "load")
+    actions = actions_of(planned, "runtime")
 
     assert [action.kind for action in actions] == ["delete_file"]
     assert actions[0].resource_node_id == str(gone)
@@ -282,7 +287,7 @@ def test_a_removed_procedure_is_dropped_by_name(warehouse):
         removed={gone},
         registered={gone: registered_document(gone, object_type="stored_procedure")},
     )
-    actions = actions_of(planned, "load")
+    actions = actions_of(planned, "runtime")
     statement = next(
         stage.payloads[actions[0].payload]
         for stage in planned.stages
@@ -314,4 +319,4 @@ def test_a_removed_table_is_not_mistaken_for_a_load_artefact(lakehouse):
         registered={gone: registered_document(gone, object_type="table")},
     )
 
-    assert "load" not in phases(planned)
+    assert "runtime" not in phases(planned)

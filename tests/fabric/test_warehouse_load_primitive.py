@@ -48,15 +48,16 @@ from typing import Any
 import pytest
 from sql_support import (
     PROCEDURE_ITEM,
+    entry_point_script,
+    forget_installations,
     forget_runtime_state,
     install_runtime_references,
+    record_installation,
 )
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
-from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import WAREHOUSE, WeaverItemId
-from weaver.declaration.tsql_entry import generate_load_entry
 from weaver.declaration.tsql_load import (
     PROCEDURE_RESULT_PARAMETERS,
     logical_result_row,
@@ -136,6 +137,7 @@ def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Est
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
     install_runtime_references(executor, catalogue)
+    record_installation(executor)
     estate = Estate(executor, object_name)
     _drop(estate)
     executor.execute_script(
@@ -146,7 +148,7 @@ def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Est
     executor.execute_script(document.create_load(item=ITEM).payload.decode("utf-8"))
     # And the entry point over it, because the object's own procedure records
     # nothing: `exec _.[Load]` is what runs it by hand and writes the record.
-    executor.execute_script(generate_load_entry(ITEM, [ObjectId(SCHEMA, object_name)]))
+    executor.execute_script(entry_point_script("Load"))
     return estate
 
 
@@ -172,6 +174,9 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
     )
     yield built
     _drop(built)
+    # Only at teardown: `_drop` also runs during setup, and the Installation row
+    # this estate needs is written before it.
+    forget_installations(built.executor)
 
 
 @pytest.fixture(scope="module")
@@ -189,6 +194,7 @@ def static_estate(
     )
     yield built
     _drop(built)
+    forget_installations(built.executor)
 
 
 def _drop(estate: Estate) -> None:
@@ -273,12 +279,23 @@ def _standalone(estate: Estate, *, fault_tolerant: bool = False) -> None:
     """``exec _.[Load]``, which is what a person calls and what records.
 
     It reports through the catalogue rather than through output parameters: the
-    row it wrote is the answer, and reading that back is the claim.
+    row it wrote is the answer, and reading that back is the claim. No
+    ``@item_name`` is supplied, so the entry point recovers the logical item
+    from ``_.Installation``.
     """
 
     estate.executor.execute_script(
         f"exec [_].[Load] @object_name = N'{SCHEMA}.{estate.object_name}'"
         f", @fault_tolerant = {1 if fault_tolerant else 0};"
+    )
+
+
+def _runner_mode(estate: Estate, *, item_name: str, object_name: str) -> None:
+    """The runner-style call, with the logical item supplied."""
+
+    estate.executor.execute_script(
+        f"exec [_].[Load] @object_name = N'{SCHEMA}.{object_name}'"
+        f", @item_name = N'{item_name}';"
     )
 
 
@@ -588,6 +605,45 @@ def test_the_entry_point_records_a_clean_load_through_the_views(estate):
 
 
 @weaver_test(remote=True, resources={"tds"})
+def test_a_supplied_item_name_records_against_that_item(estate):
+    """Runner mode, where the logical item is supplied rather than resolved.
+
+    A supplied name is used as given, so the row lands against it without
+    ``_.Installation`` being read at all.
+    """
+
+    from sql_support import PROCEDURE_ITEM
+
+    _reset(estate)
+    _source_rows(estate, CLEAN)
+
+    _runner_mode(
+        estate,
+        item_name=PROCEDURE_ITEM[1],
+        object_name=estate.object_name,
+    )
+
+    assert _status(estate)["result"] == "Succeeded"
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_an_unknown_object_is_refused_before_anything_is_recorded(estate):
+    """A name this Warehouse holds no implementation procedure for."""
+
+    _reset(estate)
+
+    import pytest as _pytest
+
+    from weaver.sql import SqlExecutionError
+
+    with _pytest.raises(SqlExecutionError, match="is not a loadable object"):
+        estate.executor.query(
+            f"exec [_].[Load] @object_name = N'{SCHEMA}.NoSuchObject';"
+        )
+    assert _status(estate) is None
+
+
+@weaver_test(remote=True, resources={"tds"})
 def test_a_second_clean_load_moves_the_bookmark_on(estate):
     """The row is updated in place, which is the half an insert cannot prove."""
 
@@ -788,6 +844,7 @@ def _install_wide(
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
     install_runtime_references(executor, catalogue)
+    record_installation(executor)
     estate = WideEstate(executor, object_name, retires=incremental)
     _drop_wide(estate)
     executor.execute_script(f"create table [{SCHEMA}].[{estate.raw}] ({WIDE_RAW_DDL});")
@@ -904,6 +961,7 @@ def constrained_estate(
     )
     yield built
     _drop_wide(built)
+    forget_installations(built.executor)
 
 
 @pytest.fixture(scope="module")
@@ -919,6 +977,7 @@ def merge_estate(
     )
     yield built
     _drop_wide(built)
+    forget_installations(built.executor)
 
 
 # --- recoverable refusals -----------------------------------------------------

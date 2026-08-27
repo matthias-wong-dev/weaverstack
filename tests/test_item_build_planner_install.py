@@ -6,7 +6,7 @@ import json
 import shutil
 
 import pytest
-from factories import lakehouse_catalogue
+from factories import FixtureInventory, lakehouse_catalogue
 from support.sessions import given_installer
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
@@ -23,14 +23,16 @@ from weaver.build_bundle import (
 from weaver.build_bundle import (
     generate_item_build_bundle as _generate_item_build_bundle,
 )
+from weaver.build_bundle.planner import certifiable_identities
 from weaver.build_bundle.prune import (
     TargetInventory,
     read_lakehouse_inventory,
     read_warehouse_inventory,
 )
-from weaver.catalogue.state import Catalogue
+from weaver.catalogue.state import Catalogue, for_targets
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration import parse_item_repository
+from weaver.declaration.metadata import DELTA_TARGET
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import BuildError
 from weaver.locations import Location
@@ -871,18 +873,40 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
 @weaver_test()
 def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
     root = _estate(tmp_path)
-    (root / "Lakehouse/Curated/Sales__Customer.py").unlink()
     repository = _repository(root)
+    bindings = ItemBindings(
+        (
+            _binding("Lakehouse/Raw", "Raw_Dev"),
+            _binding("Lakehouse/Curated", "Curated_Dev"),
+        )
+    )
+    # Curated's estate is already correct: its target holds everything it
+    # declares, surface shortcuts included, and the catalogue certifies it.
+    curated_binding = _binding("Lakehouse/Curated", "Curated_Dev")
+    curated = curated_binding.to_bound_target()
+
+    catalogue = for_targets(
+        Catalogue.from_repository(repository),
+        repository,
+        certifiable_identities(repository, bindings.by_item),
+        {binding.item: binding.to_bound_target().kind for binding in bindings.entries},
+    )
     bundle = generate_item_build_bundle(
         repository,
-        bindings=ItemBindings(
-            (
-                _binding("Lakehouse/Raw", "Raw_Dev"),
-                _binding("Lakehouse/Curated", "Curated_Dev"),
-            )
-        ),
+        bindings=bindings,
         output=Location(str(tmp_path / "bundle")),
         store=FilesystemStore(),
+        target_inventories={
+            curated_binding.item: FixtureInventory.from_repository(
+                repository,
+                item=str(curated_binding.item),
+                target_kind=DELTA_TARGET,
+                target_id=curated.id,
+                kind="lakehouse",
+                target_name=curated.name,
+            )
+        },
+        catalogue=catalogue,
     )
 
     refreshed = {
@@ -890,8 +914,7 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
         for _sequence, batch, action in bundle.plan.actions()
         if action.kind == "refresh_sql_endpoint"
     }
-    assert "Lakehouse-Curated--lakehouse-Curated_Dev" not in refreshed
-    assert "Lakehouse-Raw--lakehouse-Raw_Dev" in refreshed
+    assert refreshed == {"Lakehouse-Raw--lakehouse-Raw_Dev"}
 
 
 @weaver_test()

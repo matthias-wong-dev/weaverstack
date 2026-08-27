@@ -148,7 +148,11 @@ def _by_role(artefacts):
 
 @weaver_test()
 def test_a_warehouse_validation_claims_a_procedure_in_the_generated_schema(estate):
-    artefacts = item_validation_artefacts(estate, item=WAREHOUSE, destination=SALES)
+    artefacts = [
+        one
+        for one in item_runtime_artefacts(estate, item=WAREHOUSE)
+        if one.role == ROLE_TEST
+    ]
 
     assert _by_role(artefacts) == {
         "Warehouse/Reporting/procedure:_/Test Sales.Reconciles": ROLE_TEST
@@ -242,13 +246,18 @@ def test_the_role_travels_with_the_artefact(estate):
 
     Four roles reach the Registry from here, and the shapes do not distinguish
     them: a load module and a Test module are both files, and a load procedure, a
-    Test procedure and an entry point are all procedures.
+    Test procedure and _.Load are all procedures.
     """
 
-    from weaver.etl import ROLE_ENTRY
+    from weaver.catalogue.tables import ROLE_PROGRAMMABLE
 
     for artefact in runtime_artefacts(estate):
-        assert artefact.role in (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_ENTRY)
+        assert artefact.role in (
+            ROLE_LOAD,
+            ROLE_TEST,
+            ROLE_ASSUMPTION,
+            ROLE_PROGRAMMABLE,
+        )
         assert artefact.is_validation == (artefact.role in (ROLE_TEST, ROLE_ASSUMPTION))
 
 
@@ -256,9 +265,7 @@ def test_the_role_travels_with_the_artefact(estate):
 def test_a_validation_records_the_declaration_it_came_from(estate):
     artefact = next(
         artefact
-        for artefact in item_validation_artefacts(
-            estate, item=WAREHOUSE, destination=SALES
-        )
+        for artefact in item_runtime_artefacts(estate, item=WAREHOUSE)
         if artefact.role == ROLE_TEST
     )
 
@@ -268,21 +275,28 @@ def test_a_validation_records_the_declaration_it_came_from(estate):
 # --- signatures ---------------------------------------------------------------
 
 
+def _warehouse_validations(root: Path):
+    """The warehouse's validation artefacts, whatever produces them."""
+
+    return [
+        one
+        for one in item_runtime_artefacts(_parse(root), item=WAREHOUSE)
+        if one.role == ROLE_TEST
+    ]
+
+
 @weaver_test()
 def test_an_edited_validation_changes_its_signature(tmp_path):
-    before = item_validation_artefacts(_parse(_estate(tmp_path)), item=WAREHOUSE)
-    after = item_validation_artefacts(
-        _parse(
-            _estate(
-                tmp_path,
-                **{
-                    "Warehouse/Reporting/tests/Sales.Reconciles.sql": WAREHOUSE_TEST.replace(
-                        "The report reconciles.", "The report reconciles exactly."
-                    )
-                },
-            )
-        ),
-        item=WAREHOUSE,
+    before = _warehouse_validations(_estate(tmp_path))
+    after = _warehouse_validations(
+        _estate(
+            tmp_path,
+            **{
+                "Warehouse/Reporting/tests/Sales.Reconciles.sql": WAREHOUSE_TEST.replace(
+                    "The report reconciles.", "The report reconciles exactly."
+                )
+            },
+        )
     )
 
     assert before[0].signature != after[0].signature
@@ -290,8 +304,8 @@ def test_an_edited_validation_changes_its_signature(tmp_path):
 
 @weaver_test()
 def test_an_untouched_validation_keeps_its_signature(tmp_path):
-    first = item_validation_artefacts(_parse(_estate(tmp_path)), item=WAREHOUSE)
-    second = item_validation_artefacts(_parse(_estate(tmp_path)), item=WAREHOUSE)
+    first = _warehouse_validations(_estate(tmp_path))
+    second = _warehouse_validations(_estate(tmp_path))
 
     assert first[0].signature == second[0].signature
 
@@ -302,11 +316,11 @@ def test_the_generator_version_salts_a_generated_validation(tmp_path, monkeypatc
 
     from weaver.declaration import validation
 
-    before = item_validation_artefacts(_parse(_estate(tmp_path)), item=WAREHOUSE)
+    before = _warehouse_validations(_estate(tmp_path))
     monkeypatch.setattr(
         validation, "TSQL_VALIDATION_VERSION", validation.TSQL_VALIDATION_VERSION + 1
     )
-    after = item_validation_artefacts(_parse(_estate(tmp_path)), item=WAREHOUSE)
+    after = _warehouse_validations(_estate(tmp_path))
 
     assert before[0].signature != after[0].signature
 
@@ -389,7 +403,7 @@ def test_an_item_with_neither_gets_no_runtime_tree(tmp_path):
 @weaver_test()
 def test_a_deleted_validation_stops_being_claimed(tmp_path):
     root = _estate(tmp_path)
-    assert item_validation_artefacts(_parse(root), item=WAREHOUSE)
+    assert _warehouse_validations(root)
 
     (root / "Warehouse/Reporting/tests/Sales.Reconciles.sql").unlink()
 

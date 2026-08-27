@@ -110,7 +110,7 @@ def _plan(action: InstallAction) -> BuildPlan:
         sequences=(
             BuildSequence(
                 number=60,
-                description="install load artefacts",
+                description="install runtime artefacts",
                 batches=(
                     BuildBatch(id="b-load", target_id=target.id, actions=(action,)),
                 ),

@@ -16,6 +16,7 @@ from ..locations import Location
 from .metadata import ObjectId
 
 if TYPE_CHECKING:
+    from .programmable import Programmable
     from .schemas import SchemaSes
     from .source import SourceDocument
 
@@ -696,6 +697,8 @@ class WeaverItem:
     #: in the estate, and the answer must not include a Test because a
     #: Test has a Schema.Object identity too.
     validations: tuple[WeaverDocumentId, ...] = ()
+    #: The stored procedures this item manages, authored and generated alike.
+    programmables: tuple["Programmable", ...] = ()
     signature: str = ""
 
     def __post_init__(self) -> None:
@@ -706,10 +709,19 @@ class WeaverItem:
                 raise DiscoveryError(
                     f"every document must belong to item {self.identity}"
                 )
+        for programmable in self.programmables:
+            if programmable.identity.item != self.identity:
+                raise DiscoveryError(
+                    f"every programmable must belong to item {self.identity}"
+                )
         _reject_duplicates(self.schemas, what="schema")
         # One namespace across both, so a Test and a Table cannot both claim
         # Sales.Order inside one item.
         _reject_duplicates(self.documents + self.validations, what="document")
+        _reject_duplicates(
+            tuple(each.identity for each in self.programmables),
+            what="programmable",
+        )
 
     @property
     def declarations(self) -> tuple[WeaverDocumentId, ...]:
@@ -740,26 +752,26 @@ class WeaverRepository:
         default_factory=dict
     )
     schema_documents: Mapping[WeaverSchemaId, "SchemaSes"] = field(default_factory=dict)
+    #: The stored procedures the repository manages, by identity. Authored
+    #: content, generated infrastructure and Weaver's own fragments alike.
+    programmables: Mapping[WeaverDocumentId, "Programmable"] = field(
+        default_factory=dict
+    )
     support_files: tuple[str, ...] = ()
-    #: The bytes of the support files a build has to carry, by the same
-    #: repository-relative path. A ``lib/`` module is authored source that no
-    #: Weaver document declares, and the load layer deploys it, so its content
-    #: has to reach signature derivation and the bundle without either of them
-    #: reopening the repository. Files nothing deploys, such as
-    #: ``shortcuts.yml``, are listed in :attr:`support_files` and not held here.
+    #: The bytes of those files, by the same path. A ``lib/`` module is authored
+    #: source that no Weaver document declares, and the load layer deploys it,
+    #: so its content has to reach signature derivation and the bundle without
+    #: either of them reopening the repository.
     support_file_contents: Mapping[str, bytes] = field(default_factory=dict)
     signature: str = ""
     #: The logical pairs the ``logical`` shortcuts stand for, which resolution,
     #: ordering and freshness are computed over.
     logical_shortcuts: tuple[RepositoryShortcut, ...] = ()
-    #: Every shortcut each item declares, as authored. This keeps the intent,
-    #: including the physical declarations that name a Fabric item and so have
-    #: no logical source.
+    #: Every shortcut each item declares, as authored and as generated. This
+    #: holds the intent, including the physical declarations that name a Fabric
+    #: item and so have no logical source, and the Weaver-owned standard
+    #: catalogue surface composed in before resolution.
     shortcuts: tuple[ShortcutDeclaration, ...] = ()
-    #: Authored and package-owned shortcut declarations presented to physical
-    #: planning. Repository preparation fills this after injecting runtime
-    #: relations, while :attr:`shortcuts` remains the authored surface.
-    planned_shortcuts: tuple[ShortcutDeclaration, ...] = ()
     dependency_edges: tuple[ItemDependency, ...] = ()
     dependency_graph: object | None = None
     #: The item-level graph over :attr:`items`, and its topological layers.
