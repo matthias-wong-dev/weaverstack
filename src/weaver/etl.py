@@ -46,6 +46,7 @@ from .errors import BuildError
 
 if TYPE_CHECKING:
     from .declaration.programmable import Programmable
+    from .declaration.source import SourceDocument
 
 #: Where generated infrastructure lives, in both physical forms. The Warehouse
 #: gets a schema named ``_`` holding the load procedures; the Lakehouse gets a
@@ -90,8 +91,9 @@ PROCEDURE_TYPE = "stored_procedure"
 ROLE_LOAD = "load"
 ROLE_TEST = "test"
 ROLE_ASSUMPTION = "assumption"
-#: Which role a validation kind's artefact carries.
+#: Which role a validation kind's artefact carries, and the pair of them.
 VALIDATION_ROLE = {"Test": ROLE_TEST, "Assumption": ROLE_ASSUMPTION}
+VALIDATION_ROLES = (ROLE_TEST, ROLE_ASSUMPTION)
 
 PYTHON_SUFFIX = ".py"
 
@@ -152,7 +154,7 @@ class RuntimeArtefact:
 
     @property
     def is_validation(self) -> bool:
-        return self.role in (ROLE_TEST, ROLE_ASSUMPTION)
+        return self.role in VALIDATION_ROLES
 
     @property
     def is_file(self) -> bool:
@@ -222,22 +224,19 @@ def item_validated_objects(
     compiles to is how the Test is run.
     """
 
-    if item.item_type == WAREHOUSE and not _is_builtin(item):
-        # A Warehouse validation compiles to a generated Programmable, so the
-        # procedure's origin is where the logical validation is read from.
-        found = {
+    if item.item_type == WAREHOUSE:
+        origins = (
             programmable.origin
             for programmable in repository.programmables.values()
             if programmable.identity.item == item
-            and programmable.role in (ROLE_TEST, ROLE_ASSUMPTION)
-        }
-        return tuple(sorted((each for each in found if each is not None), key=str))
-    found = {
-        artefact.origin
-        for artefact in item_validation_artefacts(repository, item=item)
-        if artefact.origin is not None
-    }
-    return tuple(sorted(found, key=str))
+            and programmable.role in VALIDATION_ROLES
+        )
+    else:
+        origins = (
+            artefact.origin
+            for artefact in item_validation_artefacts(repository, item=item)
+        )
+    return tuple(sorted({each for each in origins if each is not None}, key=str))
 
 
 def item_runtime_artefacts(
@@ -361,7 +360,7 @@ def item_load_artefacts(
 
 
 def item_generated_programmables(
-    *, item: WeaverItemId, documents: Iterable
+    *, item: WeaverItemId, documents: Iterable["SourceDocument"]
 ) -> tuple["Programmable", ...]:
     """The stored procedures Weaver generates for one Warehouse item.
 
@@ -375,8 +374,9 @@ def item_generated_programmables(
 
     from .declaration.load import has_generated_load
     from .declaration.programmable import generated_programmable
+    from .declaration.validation import validation_identity
 
-    found = []
+    found: list[Programmable] = []
     for source in documents:
         identity = source.logical_id
         if identity is None:
@@ -400,12 +400,11 @@ def item_generated_programmables(
             )
             continue
 
-        from .declaration.validation import validation_identity
-
         object_type, template_version = validation_identity(source)
+        # A Warehouse validation compiles to a procedure, whatever its kind.
+        assert object_type == PROCEDURE_TYPE
         kind = source.document.kind
         generated = source.create_validation(destination=None)
-        assert object_type == PROCEDURE_TYPE
         found.append(
             generated_programmable(
                 validation_procedure_id(item, kind, identity.object_id),
@@ -736,7 +735,10 @@ FOLDER_DOCUMENT = f"Files/{ETL_SCHEMA}{'__'}{LOAD_FOLDER}.py"
 
 
 def has_deployable_source(
-    item: WeaverItemId, *, documents: Iterable, support_paths: Iterable[str]
+    item: WeaverItemId,
+    *,
+    documents: Iterable["SourceDocument"],
+    support_paths: Iterable[str],
 ) -> bool:
     """Whether this Lakehouse item has anything for a load layer to deploy."""
 

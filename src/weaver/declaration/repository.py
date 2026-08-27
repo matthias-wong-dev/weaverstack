@@ -741,11 +741,10 @@ def compose_repository(
                 )
             (validations if source.is_validation else documents).append(identity)
         programmables = tuple(
-            programmable
-            for _key, programmable in sorted(
-                (str(identity), programmable)
-                for identity, programmable in merged.programmables.items()
-                if identity.item == item_id
+            merged.programmables[identity]
+            for identity in sorted(
+                (each for each in merged.programmables if each.item == item_id),
+                key=str,
             )
         )
         items.append(

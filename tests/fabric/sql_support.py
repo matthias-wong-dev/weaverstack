@@ -86,6 +86,30 @@ def record_installation(executor: SqlExecutor) -> None:
     )
 
 
+def forget_installation(executor: SqlExecutor) -> None:
+    """Remove the Installation row :func:`record_installation` wrote.
+
+    ``_.Installation`` is one shared table for the whole estate, and the entry
+    points refuse a Warehouse holding more than one row for it. A hand-installed
+    estate that left its row behind would make the next test's built item
+    ambiguous. Removed through a MERGE for the same reason it was written
+    through one: Fabric refuses a plain DML through a cross-database view.
+    """
+
+    item_type, item_name = PROCEDURE_ITEM
+    executor.execute_script(
+        "merge [_].[Installation] as target\n"
+        "using (select"
+        f" N'{item_type}' as [Item type]"
+        f", N'{item_name}' as [Item name]"
+        ") as source\n"
+        "   on target.[Item type] = source.[Item type]"
+        "  and target.[Item name] = source.[Item name]"
+        "  and target.[Target name] = db_name()\n"
+        "when matched then delete;\n"
+    )
+
+
 def forget_runtime_state(schema: str, name: str) -> str:
     """Statements removing everything the catalogue records about one object.
 

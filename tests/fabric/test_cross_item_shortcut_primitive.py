@@ -463,13 +463,16 @@ def test_the_shortcut_survives_a_build_that_does_not_touch_it(
     to every local test.
     """
 
+    from weaver.catalogue.tables import STANDARD_SURFACE_TABLES
     from weaver.fabric.shortcuts import list_shortcuts
 
     shortcuts = list_shortcuts(shortcut_estate["consumer"], client=fabric_client)
 
-    assert [shortcut.qualified for shortcut in shortcuts] == [
+    # The one action carries every declaration the item consumes, so Weaver's
+    # own catalogue surface lands beside the authored shortcut.
+    assert {shortcut.qualified for shortcut in shortcuts} == {
         "Tables/DWG/PortableCustomer"
-    ]
+    } | {f"Tables/_/{table.name}" for table in STANDARD_SURFACE_TABLES}
 
 
 # --- the Warehouse form -------------------------------------------------------
@@ -548,11 +551,13 @@ def test_a_warehouse_shortcut_is_a_view_over_the_bound_lakehouse(
     at = resolver.spark_destination(ItemRef(producer.name))
     source = at.qualify("DWG", "Customer")
 
-    # The shortcut lands in a schema the build's schema stage would have made. That
-    # stage is not the subject and is proven elsewhere, so it is arranged here
-    # over TDS rather than run.
+    # The shortcuts land in schemas the build's schema stage would have made:
+    # `DWG` for the authored view, and `_` for the Weaver catalogue surface the
+    # same action carries. That stage is not the subject and is proven elsewhere,
+    # so both are arranged here over TDS rather than run.
     warehouse.executor.execute_script(
         "if schema_id(N'DWG') is null exec(N'create schema DWG');"
+        "if schema_id(N'_') is null exec(N'create schema [_]');"
     )
     # And the source has to exist, which is the one thing needing a session.
     #
