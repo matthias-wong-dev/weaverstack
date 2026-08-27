@@ -23,12 +23,12 @@ from weaver.build_bundle import (
 from weaver.build_bundle import (
     generate_item_build_bundle as _generate_item_build_bundle,
 )
+from weaver.build_bundle.planner import certifiable_identities
 from weaver.build_bundle.prune import (
     TargetInventory,
     read_lakehouse_inventory,
     read_warehouse_inventory,
 )
-from weaver.build_bundle.planner import certifiable_identities
 from weaver.catalogue.state import Catalogue, for_targets
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration import parse_item_repository
@@ -884,8 +884,6 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
     # declares, surface shortcuts included, and the catalogue certifies it.
     curated_binding = _binding("Lakehouse/Curated", "Curated_Dev")
     curated = curated_binding.to_bound_target()
-    raw = _binding("Lakehouse/Raw", "Raw_Dev").to_bound_target()
-    from factories import item_bindings as factory_bindings
 
     catalogue = for_targets(
         Catalogue.from_repository(repository),

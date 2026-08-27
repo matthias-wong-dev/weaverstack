@@ -16,6 +16,7 @@ from ..locations import Location
 from .metadata import ObjectId
 
 if TYPE_CHECKING:
+    from .programmable import Programmable
     from .schemas import SchemaSes
     from .source import SourceDocument
 
@@ -697,9 +698,7 @@ class WeaverItem:
     #: Test has a Schema.Object identity too.
     validations: tuple[WeaverDocumentId, ...] = ()
     #: The stored procedures this item manages, authored and generated alike.
-    #: A procedure is repository content with the ordinary managed lifecycle,
-    #: not something inferred from what else the item declares.
-    programmables: tuple[object, ...] = ()
+    programmables: tuple["Programmable", ...] = ()
     signature: str = ""
 
     def __post_init__(self) -> None:
@@ -754,16 +753,15 @@ class WeaverRepository:
     )
     schema_documents: Mapping[WeaverSchemaId, "SchemaSes"] = field(default_factory=dict)
     #: The stored procedures the repository manages, by identity. Authored
-    #: content, generated infrastructure and Weaver's own entry points are all
-    #: here, behind one lifecycle.
-    programmables: Mapping[WeaverDocumentId, object] = field(default_factory=dict)
+    #: content, generated infrastructure and Weaver's own fragments alike.
+    programmables: Mapping[WeaverDocumentId, "Programmable"] = field(
+        default_factory=dict
+    )
     support_files: tuple[str, ...] = ()
-    #: The bytes of the support files a build has to carry, by the same
-    #: repository-relative path. A ``lib/`` module is authored source that no
-    #: Weaver document declares, and the load layer deploys it, so its content
-    #: has to reach signature derivation and the bundle without either of them
-    #: reopening the repository. Files nothing deploys, such as
-    #: ``shortcuts.yml``, are listed in :attr:`support_files` and not held here.
+    #: The bytes of those files, by the same path. A ``lib/`` module is authored
+    #: source that no Weaver document declares, and the load layer deploys it,
+    #: so its content has to reach signature derivation and the bundle without
+    #: either of them reopening the repository.
     support_file_contents: Mapping[str, bytes] = field(default_factory=dict)
     signature: str = ""
     #: The logical pairs the ``logical`` shortcuts stand for, which resolution,

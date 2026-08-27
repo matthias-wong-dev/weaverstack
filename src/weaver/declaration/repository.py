@@ -3,11 +3,10 @@
 The first two directory levels identify the item type and logical item. The
 owning item determines each SQL document's dialect.
 
-Composition has one path. The authored tree, Weaver-owned content and generated
-content are each read into a :class:`RepositoryPart`, combined through
-:data:`merge_repository`, and only then validated, signed and resolved into a
-:class:`~weaver.declaration.model.WeaverRepository`. Nothing is injected into a
-partly-built repository afterwards.
+Composition has one path. The authored tree, Weaver's own fragments and
+generated content are each read into a :class:`RepositoryPart`, combined through
+:func:`merge_repository`, and only then validated, signed and resolved into a
+:class:`~weaver.declaration.model.WeaverRepository`.
 """
 
 from __future__ import annotations
@@ -46,12 +45,12 @@ from .model import (
     WeaverRepository,
     WeaverSchemaId,
 )
-from .references import validate_repository_metadata
 from .programmable import (
     PROGRAMMABLES_DIRECTORY,
     Programmable,
     read_programmable,
 )
+from .references import validate_repository_metadata
 from .schemas import SchemaSes, read_schema_document
 from .shortcuts import (
     LAKEHOUSE_FILE,
@@ -133,9 +132,7 @@ def _read_validation(
 
     identity = WeaverDocumentId(item, source.object_id)
     source = replace(source, logical_id=identity)
-    _insert_exact_case(
-        source_documents, identity, source, relative, what="declaration"
-    )
+    _insert_exact_case(source_documents, identity, source, relative, what="declaration")
 
 
 def _directory_for(kind: str) -> str:
@@ -160,9 +157,7 @@ class RepositoryPart:
     items: tuple[WeaverItemId, ...] = ()
     documents: Mapping[WeaverDocumentId, SourceDocument] = field(default_factory=dict)
     schemas: Mapping[WeaverSchemaId, SchemaSes] = field(default_factory=dict)
-    programmables: Mapping[WeaverDocumentId, Programmable] = field(
-        default_factory=dict
-    )
+    programmables: Mapping[WeaverDocumentId, Programmable] = field(default_factory=dict)
     shortcuts: tuple[ShortcutDeclaration, ...] = ()
     logical_shortcuts: tuple[RepositoryShortcut, ...] = ()
     #: Item source no Weaver document declares, by repository-relative path.
@@ -211,9 +206,7 @@ def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
     )
 
 
-def _merge_keyed(
-    parts: tuple[RepositoryPart, ...], name: str, *, what: str
-) -> dict:
+def _merge_keyed(parts: tuple[RepositoryPart, ...], name: str, *, what: str) -> dict:
     """Every part's identity-keyed declarations, refusing a collision."""
 
     merged: dict = {}
@@ -302,9 +295,7 @@ def read_repository_fragment(
             schema = read_schema_document(path, data)
             schemas[WeaverSchemaId(item, schema.schema_id)] = schema
         elif within[0] == PROGRAMMABLES_DIRECTORY:
-            programmable = read_programmable(
-                path, data, owner=item, weaver_owned=True
-            )
+            programmable = read_programmable(path, data, owner=item, weaver_owned=True)
             programmables[programmable.identity] = programmable
         else:
             source = read_source_document(path, data, item.item_type)

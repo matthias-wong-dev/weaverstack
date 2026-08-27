@@ -1,8 +1,8 @@
-"""What a repository's load layer owns, derived from the source alone.
+"""What a repository's runtime layer owns, derived from the source alone.
 
-A load artefact is a target in its own right: claimed, registered, signed,
+A runtime artefact is a target in its own right: claimed, registered, signed,
 selected incrementally, built and pruned when its source stops declaring it.
-This module answers which load artefacts a repository has, where they go, and
+This module answers which runtime artefacts a repository has, where they go, and
 what each one's signature is.
 
 Three artefacts, from three kinds of source:
@@ -30,7 +30,7 @@ exactly the artefacts it changed and leaves deployed Python untouched.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from typing import TYPE_CHECKING, Iterable, Mapping
 
 from .declaration.metadata import FOLDER, PYTHON, SPARK_SQL, TABLE, ObjectId
 from .declaration.model import (
@@ -43,6 +43,9 @@ from .declaration.model import (
 )
 from .declaration.source import content_hash, salted_signature
 from .errors import BuildError
+
+if TYPE_CHECKING:
+    from .declaration.programmable import Programmable
 
 #: Where generated infrastructure lives, in both physical forms. The Warehouse
 #: gets a schema named ``_`` holding the load procedures; the Lakehouse gets a

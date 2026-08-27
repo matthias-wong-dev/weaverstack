@@ -70,8 +70,7 @@ class Programmable:
             )
         if self.relative_path is not None and self.origin is not None:
             raise DiscoveryError(
-                f"{self.identity}: a Programmable is authored or generated, "
-                "never both"
+                f"{self.identity}: a Programmable is authored or generated, never both"
             )
 
     @property
@@ -97,8 +96,7 @@ def read_programmable(
 
     if owner.item_type != WAREHOUSE:
         raise DiscoveryError(
-            f"{relative_path}: programmables belong to a Warehouse item, not "
-            f"{owner}"
+            f"{relative_path}: programmables belong to a Warehouse item, not {owner}"
         )
     stem = relative_path.rsplit("/", 1)[-1]
     if not stem.endswith(".sql"):

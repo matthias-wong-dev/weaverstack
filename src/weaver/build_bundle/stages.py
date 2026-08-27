@@ -32,15 +32,16 @@ from .payloads import payload_path
 #: schema to be created in, and shortcuts precede builds so every document is built
 #: against a namespace holding what the item imports. The refresh closes the
 #: item: until a mutated Lakehouse's SQL endpoint has caught up, a dependent
-#: item's view or shortcut would be built over stale metadata. Load follows it,
-#: unordered within its own layer, because nothing here runs those artefacts.
+#: item's view or shortcut would be built over stale metadata. The runtime
+#: artefacts follow it, unordered within their own layer, because nothing here
+#: runs them.
 PRUNE = "prune"
 DROP = "drop"
 SCHEMA = "schema"
 SHORTCUT = "shortcut"
 BUILD = "build"
 REFRESH = "refresh"
-LOAD = "load"
+RUNTIME = "runtime"
 CATALOGUE = "catalogue"
 
 _PHASE_ORDER = (
@@ -50,7 +51,7 @@ _PHASE_ORDER = (
     SHORTCUT,
     BUILD,
     REFRESH,
-    LOAD,
+    RUNTIME,
     CATALOGUE,
 )
 _PHASE_RANK = {phase: rank for rank, phase in enumerate(_PHASE_ORDER)}

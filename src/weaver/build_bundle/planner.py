@@ -54,9 +54,9 @@ from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .physical import (
     item_build_stages,
     item_drop_stages,
-    item_load_removals,
-    item_load_stages,
     item_prune_stage,
+    item_runtime_removals,
+    item_runtime_stages,
     item_schema_stage,
 )
 from .prune import TargetInventory
@@ -480,9 +480,11 @@ def plan_item_build(
     # endpoint has caught up. Removals ride in it too: they come from the
     # previous Registry rows rather than from any diff against the target, so
     # they need no earlier barrier to be safe.
-    stages.extend(item_load_stages(artefacts, selected_loads, item=item, target=target))
     stages.extend(
-        item_load_removals(removed, item=item, target=target, registered=registered)
+        item_runtime_stages(artefacts, selected_loads, item=item, target=target)
+    )
+    stages.extend(
+        item_runtime_removals(removed, item=item, target=target, registered=registered)
     )
     return PlannedItem(
         stages=tuple(stages),

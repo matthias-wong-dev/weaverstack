@@ -9,7 +9,7 @@ state; nothing here models what an installer would do.
 from __future__ import annotations
 
 import pytest
-from factories import WAREHOUSE_ITEM, FixtureCatalogue, FixtureInventory
+from factories import WAREHOUSE_ITEM, FixtureInventory, warehouse_table
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -25,8 +25,6 @@ from weaver.targets import ItemRef
 
 ITEM = WeaverItemId.parse(WAREHOUSE_ITEM)
 CATALOGUE_BINDING = WarehouseBinding(ItemRef("Weaver"), workspace_name=WORKSPACE)
-
-from factories import warehouse_table
 
 TABLE_SQL = warehouse_table("DWG.Customer")
 PROCEDURE_V1 = (
@@ -50,16 +48,24 @@ def _repository(
     name: str = "repo",
 ) -> object:
     root = tmp_path / name
-    _write(root, f"{WAREHOUSE_ITEM}/schemas/dbo.yml", "Schema ID: dbo\nDescription: dbo.\n")
-    _write(root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: DWG.\n")
+    _write(
+        root, f"{WAREHOUSE_ITEM}/schemas/dbo.yml", "Schema ID: dbo\nDescription: dbo.\n"
+    )
+    _write(
+        root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: DWG.\n"
+    )
     _write(root, f"{WAREHOUSE_ITEM}/DWG.Customer.sql", TABLE_SQL)
     if procedure is not None:
-        _write(root, f"{WAREHOUSE_ITEM}/programmables/dbo.RefreshSummary.sql", procedure)
+        _write(
+            root, f"{WAREHOUSE_ITEM}/programmables/dbo.RefreshSummary.sql", procedure
+        )
     return parse_item_repository(Location(str(root)))
 
 
 def _identity() -> WeaverDocumentId:
-    return WeaverDocumentId(ITEM, ObjectId(schema="dbo", object="RefreshSummary"), shape="procedure")
+    return WeaverDocumentId(
+        ITEM, ObjectId(schema="dbo", object="RefreshSummary"), shape="procedure"
+    )
 
 
 def _plan(repository, tmp_path, *, catalogue):
@@ -121,13 +127,18 @@ def test_a_programmable_is_discovered_with_its_procedure_identity(tmp_path):
         if programmable.relative_path is not None
     )
     assert authored.role == "programmable"
-    assert authored.relative_path == f"{WAREHOUSE_ITEM}/programmables/dbo.RefreshSummary.sql"
+    assert (
+        authored.relative_path
+        == f"{WAREHOUSE_ITEM}/programmables/dbo.RefreshSummary.sql"
+    )
 
 
 @weaver_test()
 def test_the_statement_and_the_filename_must_agree(tmp_path):
     root = tmp_path / "repo"
-    _write(root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n")
+    _write(
+        root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n"
+    )
     _write(root, f"{WAREHOUSE_ITEM}/DWG.Customer.sql", TABLE_SQL)
     _write(
         root,
@@ -144,7 +155,9 @@ def test_a_plain_create_is_refused(tmp_path):
     """Replace needs create-or-alter: the installer runs the text verbatim."""
 
     root = tmp_path / "repo"
-    _write(root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n")
+    _write(
+        root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n"
+    )
     _write(root, f"{WAREHOUSE_ITEM}/DWG.Customer.sql", TABLE_SQL)
     _write(
         root,
@@ -157,9 +170,31 @@ def test_a_plain_create_is_refused(tmp_path):
 
 
 @weaver_test()
+def test_a_second_procedure_in_one_file_is_refused(tmp_path):
+    """Weaver would install it and never register or prune it."""
+
+    root = tmp_path / "repo"
+    _write(
+        root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n"
+    )
+    _write(root, f"{WAREHOUSE_ITEM}/DWG.Customer.sql", TABLE_SQL)
+    _write(
+        root,
+        f"{WAREHOUSE_ITEM}/programmables/dbo.RefreshSummary.sql",
+        "create or alter procedure dbo.RefreshSummary\nas\nbegin\nend;\n"
+        "create or alter procedure dbo.Hidden\nas\nbegin\nend;\n",
+    )
+
+    with pytest.raises(DiscoveryError, match="exactly one"):
+        parse_item_repository(Location(str(root)))
+
+
+@weaver_test()
 def test_an_authored_programmable_may_not_claim_weavers_schema(tmp_path):
     root = tmp_path / "repo"
-    _write(root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n")
+    _write(
+        root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n"
+    )
     _write(root, f"{WAREHOUSE_ITEM}/DWG.Customer.sql", TABLE_SQL)
     _write(
         root,
@@ -176,8 +211,12 @@ def test_a_lakehouse_item_has_no_programmables_directory(tmp_path):
     from factories import ITEM as LAKEHOUSE_ITEM
 
     root = tmp_path / "repo"
-    _write(root, f"{LAKEHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n")
-    _write(root, f"{LAKEHOUSE_ITEM}/DWG__Customer.py", '"""\nTable ID: DWG.Customer\n"""\n')
+    _write(
+        root, f"{LAKEHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n"
+    )
+    _write(
+        root, f"{LAKEHOUSE_ITEM}/DWG__Customer.py", '"""\nTable ID: DWG.Customer\n"""\n'
+    )
     _write(
         root,
         f"{LAKEHOUSE_ITEM}/programmables/dbo.Refresh.sql",

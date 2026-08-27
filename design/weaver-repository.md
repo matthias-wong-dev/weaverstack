@@ -235,51 +235,55 @@ would make physical deployment history part of logical identity.
 - [Weaver architecture](weaver-architecture.md) — product behaviour and command lifecycle
 - [Agent guide](../AGENTS.md) — implementation invariants
 
-## Generated declarations
+## What Weaver composes in
 
-A parsed repository carries more than what was authored, and composition has
-one path. The authored tree, Weaver-owned content and generated content are
-each read into a repository part, combined through `merge_repository`, and only
-then validated, signed and resolved into one repository. The merge rules are
-deliberately simple: a unique identity is added, a duplicate identity is
-refused, identities differing only by case are refused, and there is no
-precedence — nothing overrides anything.
+A parsed repository carries more than what was authored, and composition has one
+path. The authored tree, Weaver's own fragments and generated content are each
+read into a repository part, combined through `merge_repository`, and only then
+validated, signed and resolved into one repository. The rules: a unique identity
+is added, a duplicate identity is refused, identities differing only by case are
+refused, and there is no precedence.
 
-What the non-authored contributions are:
+**Fragments** are checked-in files under `src/weaver/fragments/`, read through
+the same declaration readers as an authored tree:
 
-- `Warehouse/_weaver` — the catalogue's own tables, always;
-- an item's `schemas/_.yml`, and for a Lakehouse `Files/___Load.py` — the schema
-  its generated load procedures live in, and the folder its load code is deployed
-  into, present only while the item has load code;
-- the standard Weaver catalogue surface: every normal item presents
-  `_.Installation` and the operational tables as ordinary logical shortcut
-  declarations, so dependency resolution and physical planning see them like any
-  other shortcut. When an item is bound to the Warehouse that holds the
-  catalogue, planning creates no views back over tables already there; that is
-  physical planning, not a different logical surface;
-- Warehouse stored procedures: one per table Weaver loads and one per
-  validation, plus the two fixed entry points `_.Load` and `_.Test`.
+- `catalogue/` gives the `Warehouse/_weaver` item and its tables, always;
+- `standard/Warehouse/` gives schema `_`, and the `_.Load` and `_.Test` entry
+  points, for every normal Warehouse item;
+- `standard/Lakehouse/` gives schema `_`, and `Files/___Load.py`, the folder its
+  load code is deployed into, present only while the item has load code.
+
+**Generated content** is what follows an item's own declarations: one
+implementation procedure per Warehouse table Weaver loads, `_.[Load X.Y]`, and
+one per Warehouse validation, `_.[Test X.Y]` or `_.[Assumption X.Y]`.
+
+**The standard catalogue surface** is a set of logical shortcut declarations.
+Every normal item presents `_.Installation` and the operational tables under its
+own names, so dependency resolution and physical planning see them like any other
+shortcut. When an item is bound to the Warehouse holding the catalogue, planning
+creates no views back over tables already there; that is physical planning, not a
+different logical surface.
 
 `___Load.py` is `_.Load`: a schema of `_` plus the `__` separator. A run of
 leading underscores is read as the schema it is, which is why the file can be
 named at all.
 
-Because those are composed in, `_` is the one schema an ordinary item may not
-author into. Every other underscore schema is free — `_weaver` declares its own
-catalogue in `_`, because it is the item that owns it.
+`_` is therefore the one schema an ordinary item may not author into. Every other
+underscore schema is free. `_weaver` declares its own catalogue in `_`, because it
+is the item that owns it.
 
 ### Programmables
 
 A Warehouse item authors stored procedures under
 `programmables/<Schema>.<Procedure>.sql`. Each file becomes a Programmable: a
-managed declaration carrying its procedure identity, its text, a signature and
-a role. Authored content, generated implementation procedures and the fixed
-entry points are all Programmables behind one lifecycle — discover, validate,
-sign, select, install through the ordinary T-SQL executor, register under their
-own role, prune when the source stops declaring them.
+managed declaration carrying its procedure identity, its text, a signature and a
+role. Authored content, generated implementation procedures and the two entry
+points are all Programmables behind one lifecycle: discover, validate, sign,
+select, install through the ordinary T-SQL executor, register under their own
+role, prune when the source stops declaring them.
 
-An authored file's SQL must create the exact procedure its filename names, and
-must say `create or alter`, so replacing what is installed works. The reserved
-`_` schema stays Weaver's: an authored programmable may not create into it.
-Authored programmables carry the role `programmable`, outside the runnable
-roles, because Weaver manages them but nothing schedules them.
+An authored file's SQL must contain exactly one `create or alter procedure`
+statement, creating the procedure its filename names. Exactly one, so what Weaver
+installs is what it registers and prunes; `create or alter`, so replacing what is
+installed works. The `_` schema stays Weaver's: an authored programmable may not
+create into it.

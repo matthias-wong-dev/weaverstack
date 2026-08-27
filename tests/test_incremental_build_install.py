@@ -41,7 +41,7 @@ from weaver.catalogue.state import (
     Catalogue,
     reconcile_catalogue_state,
 )
-from weaver.catalogue.tables import STANDARD_SURFACE_TABLES, REGISTRY
+from weaver.catalogue.tables import REGISTRY, STANDARD_SURFACE_TABLES
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.locations import Location

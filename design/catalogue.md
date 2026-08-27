@@ -158,10 +158,11 @@ recorded exactly as declared with `is_within_item=false`.
 
 ## Weaver builds its own catalogue
 
-Weaver composes `Warehouse/_weaver` in memory from the authoritative table
-definitions and parses the generated schema and source files through the same
-static readers used for authored content. The ordinary item planner and installer
-build the result; authored source is unchanged.
+`Warehouse/_weaver` is checked-in repository content, held under
+`src/weaver/fragments/catalogue/` and composed into every parsed repository
+through the same static readers used for authored content. What a build composes
+is what is reviewed. The ordinary item planner and installer build the result;
+authored source is unchanged.
 
 Every build implicitly binds `Warehouse/_weaver` to the catalogue Warehouse.
 Missing tables are classified as new and created before the same bundle reaches
@@ -482,28 +483,26 @@ In Python that is `_load()` against `load()` for a Table and a Folder, and
 `_.Test`. Nothing takes a parameter about it, so one row has one writer without a
 caller having to get a boolean right.
 
-`_.Load` and `_.Test` are the two generic entry points: fixed Weaver-owned
-procedures whose content is the same for every Warehouse item and does not
-change when loadable objects or validations come and go. They are registered
-like any other artefact — signed, incrementally selected, and pruned when their
-item's procedures go. They carry the role `entry`, which nothing schedules: a
-load procedure with role `load` would be run by `weaver load`, and there is no
-object for an entry point to load. `_.Test` dispatches to a Test or an
-Assumption, because a person asking about a validation by name should not have
-to know which it was declared as; there is no `_.Assumption`.
+`_.Load` and `_.Test` are the two generic entry points, checked in under
+`src/weaver/fragments/standard/Warehouse/programmables/` and composed into every
+normal Warehouse item. They carry the role `programmable`: Weaver installs,
+signs, selects and prunes them, and nothing schedules them. `_.Test` dispatches
+to a Test or an Assumption, so a person asking about a validation by name need
+not know which it was declared as; there is no `_.Assumption`.
 
-Dispatch reads the physical estate instead of enumerating it. `_.Load` checks
-`object_id` for the implementation procedure named after the requested object,
-and refuses an unknown name before anything is recorded. `_.Test` asks which of
-`_[Test X.Y]` and `_[Assumption X.Y]` exists, runs the one that does, and
-refuses an installation holding both as broken rather than choosing between
-them; what the Warehouse holds is the answer, not the Registry.
+Dispatch reads the physical estate. `_.Load` validates `@object_name` as exactly
+`Schema.Object`, builds `_.[Load Schema.Object]` and checks it with
+`object_id(…, 'P')`; the implementation procedure is in `_`, and the source
+object's schema is part of its name. `_.Test` checks for `_.[Test X.Y]` and
+`_.[Assumption X.Y]`, runs whichever is there, and refuses an installation
+holding both. An unknown name is refused before any outcome row is written, and
+the Registry is not consulted.
 
-Each entry point takes an optional `@item_name`. Supplied, it is used as given,
-so a caller that already knows the logical item needs no lookup. Omitted, the
-procedure recovers it from `_.Installation`: exactly one logical Warehouse item
-bound to this database, and any other answer is refused rather than guessed.
-Because these are Warehouse procedures, the item type needs no parameter.
+Each takes an optional `@item_name`. Supplied, it is used as given, so a caller
+that has it pays for no lookup. Omitted, the procedure recovers it from
+`_.Installation`: exactly one logical Warehouse item bound to this database, and
+any other answer is refused rather than guessed. Because these are Warehouse
+procedures, the item type needs no parameter.
 
 Generated load procedures own the `@weaver_*` variable namespace. Their physical
 outputs are `@weaver_succeeded`, `@weaver_rows_read`,

@@ -56,7 +56,6 @@ from sql_support import (
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
-from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import WAREHOUSE, WeaverItemId
 from weaver.declaration.tsql_load import (
     PROCEDURE_RESULT_PARAMETERS,
@@ -287,7 +286,7 @@ def _standalone(estate: Estate, *, fault_tolerant: bool = False) -> None:
 
 
 def _runner_mode(estate: Estate, *, item_name: str, object_name: str) -> None:
-    """The runner-style call: the caller knows the item and supplies it."""
+    """The runner-style call, with the logical item supplied."""
 
     estate.executor.execute_script(
         f"exec [_].[Load] @object_name = N'{SCHEMA}.{object_name}'"
@@ -602,10 +601,10 @@ def test_the_entry_point_records_a_clean_load_through_the_views(estate):
 
 @weaver_test(remote=True, resources={"tds"})
 def test_a_supplied_item_name_records_against_that_item(estate):
-    """Runner mode: the caller knows the logical item and passes it.
+    """Runner mode, where the logical item is supplied rather than resolved.
 
-    The same call with a name the Installation lookup would have refused still
-    records, because a supplied name is used as given; the row lands against it.
+    A supplied name is used as given, so the row lands against it without
+    ``_.Installation`` being read at all.
     """
 
     from sql_support import PROCEDURE_ITEM

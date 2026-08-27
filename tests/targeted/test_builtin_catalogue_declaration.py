@@ -9,7 +9,6 @@ from __future__ import annotations
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.fragments import CATALOGUE, fragment_files
 from weaver.catalogue.tables import (
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
@@ -17,6 +16,7 @@ from weaver.catalogue.tables import (
 )
 from weaver.declaration.model import WAREHOUSE
 from weaver.declaration.source import read_source_document
+from weaver.fragments import CATALOGUE, fragment_files
 
 #: How each runtime table's lineage announces itself. The projected tables
 #: share one lineage; each runtime one carries its own.

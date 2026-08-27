@@ -46,7 +46,7 @@ from weaver.build_bundle.catalogue_actions import desired_catalogue
 from weaver.build_bundle.planner import certifiable_identities
 from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import STANDARD_SURFACE_TABLES, PROJECTED_TABLES
+from weaver.catalogue.tables import PROJECTED_TABLES, STANDARD_SURFACE_TABLES
 from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
 from weaver.spark import FabricSparkTarget

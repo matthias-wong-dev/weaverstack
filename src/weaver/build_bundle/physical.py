@@ -55,7 +55,7 @@ from .models import (
 )
 from .payloads import sha256_hex
 from .prune import managed_sets, render_inventory_prune
-from .stages import BUILD, DROP, LOAD, PRUNE, SCHEMA, PlannedStage
+from .stages import BUILD, DROP, PRUNE, RUNTIME, SCHEMA, PlannedStage
 from .targets import WAREHOUSE_TARGET
 
 _OBJECT_KIND = {TABLE: BUILD_TABLE, VIEW: BUILD_VIEW}
@@ -426,7 +426,7 @@ def render_document_build_action(identity, source, *, target) -> RenderedAction:
     )
 
 
-def render_load_build_action(artefact) -> RenderedAction:
+def render_runtime_build_action(artefact) -> RenderedAction:
     """The action and frozen payload one load artefact installs as.
 
     The load half of :func:`render_document_build_action`. A file is written
@@ -443,7 +443,7 @@ def render_load_build_action(artefact) -> RenderedAction:
         executor, kind = "tsql", BUILD_PROCEDURE
     return RenderedAction(
         action=InstallAction(
-            id=f"load-{action_slug}",
+            id=f"runtime-{action_slug}",
             kind=kind,
             resource_node_id=str(artefact.identity),
             executor=executor,
@@ -455,7 +455,7 @@ def render_load_build_action(artefact) -> RenderedAction:
     )
 
 
-def item_load_stages(
+def item_runtime_stages(
     artefacts,
     selected_for_build,
     *,
@@ -484,7 +484,7 @@ def item_load_stages(
     actions = []
     changes = []
     for artefact in sorted(selected, key=lambda value: str(value.identity)):
-        rendered = render_load_build_action(artefact)
+        rendered = render_runtime_build_action(artefact)
         payloads.update(rendered.payloads)
         actions.append(rendered.action)
         changes.append(
@@ -498,9 +498,9 @@ def item_load_stages(
         )
     return (
         PlannedStage(
-            phase=LOAD,
-            slug="load",
-            description="install load artefacts",
+            phase=RUNTIME,
+            slug="runtime",
+            description="install runtime artefacts",
             payloads=payloads,
             changes={target.id: tuple(changes)},
             batches=(
@@ -512,7 +512,7 @@ def item_load_stages(
     )
 
 
-def item_load_removals(
+def item_runtime_removals(
     removed,
     *,
     item: WeaverItemId,
@@ -551,7 +551,7 @@ def item_load_removals(
         if object_type == FILE_TYPE:
             actions.append(
                 InstallAction(
-                    id=f"load-remove-{action_slug}",
+                    id=f"runtime-remove-{action_slug}",
                     kind=DELETE_FILE,
                     resource_node_id=str(identity),
                     executor="load_file",
@@ -563,7 +563,7 @@ def item_load_removals(
                 change_removed(
                     FILE_KIND,
                     f"{identity.object_id.schema}/{identity.object_id.object}",
-                    f"load-remove-{action_slug}",
+                    f"runtime-remove-{action_slug}",
                 )
             )
             continue
@@ -577,7 +577,7 @@ def item_load_removals(
         payloads[filename] = content
         actions.append(
             InstallAction(
-                id=f"load-remove-{action_slug}",
+                id=f"runtime-remove-{action_slug}",
                 kind=DROP_PROCEDURE,
                 resource_node_id=str(identity),
                 executor="tsql",
@@ -589,16 +589,16 @@ def item_load_removals(
             change_removed(
                 PROCEDURE_KIND,
                 identity.object_id.qualified,
-                f"load-remove-{action_slug}",
+                f"runtime-remove-{action_slug}",
             )
         )
     if not actions:
         return ()
     return (
         PlannedStage(
-            phase=LOAD,
-            slug="load",
-            description="install load artefacts",
+            phase=RUNTIME,
+            slug="runtime",
+            description="install runtime artefacts",
             payloads=payloads,
             changes={target.id: tuple(changes)},
             batches=(

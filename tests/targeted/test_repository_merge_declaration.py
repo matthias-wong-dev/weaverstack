@@ -1,9 +1,8 @@
-"""What merge_repository accepts and what it refuses.
+"""The three merge rules, and that there is no fourth.
 
-The rules are deliberately simple: a unique identity is added, a duplicate
-identity is refused, identities differing only by case are refused. No
-precedence exists, so these tests also pin that nothing is overridden: a
-collision is an error, never a replacement.
+A unique identity is added, a duplicate identity is refused, and identities
+differing only by case are refused. No part takes precedence, so a collision is
+an error and never a replacement.
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ from weaver.declaration.model import (
     ShortcutDeclaration,
     WeaverDocumentId,
     WeaverItemId,
-    WeaverSchemaId,
 )
 from weaver.declaration.programmable import generated_programmable
 from weaver.declaration.repository import RepositoryPart, merge_repository

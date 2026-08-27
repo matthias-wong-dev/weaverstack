@@ -32,8 +32,8 @@ from support.weaver_test import register_session, weaver_test
 import weaver
 from weaver.catalogue.tables import (
     CATALOGUE_TABLES,
-    STANDARD_SURFACE_TABLES,
     RUNTIME_TABLES,
+    STANDARD_SURFACE_TABLES,
 )
 from weaver.sessions import ConsoleSession
 

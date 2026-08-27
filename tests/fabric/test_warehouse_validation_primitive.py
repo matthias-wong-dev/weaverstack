@@ -200,9 +200,22 @@ def _counts(executor, procedure: str, *, kind: str = "Test", suppress: int = 1):
 
 
 def _standalone(executor, qualified: str) -> None:
-    """``exec _.[Test]``, which is what a person calls and what records."""
+    """``exec _.[Test]``, which is what a person calls and what records.
+
+    No ``@item_name``, so the entry point recovers the logical item from
+    ``_.Installation``.
+    """
 
     executor.execute_script(f"exec [_].[Test] @object_name = N'{qualified}';")
+
+
+def _runner_mode(executor, qualified: str, *, item_name: str) -> None:
+    """The runner-style call, with the logical item supplied."""
+
+    executor.execute_script(
+        f"exec [_].[Test] @object_name = N'{qualified}'"
+        f", @item_name = N'{item_name}';"
+    )
 
 
 def _test_status(executor, name: str) -> dict | None:
@@ -464,6 +477,19 @@ def test_the_entry_point_records_how_much_a_failing_test_found(estate):
     assert status["result"] == "Failed"
     # A changed row disagrees on both sides, which is two discrepancy rows.
     assert status["failures"] == 2
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_supplied_item_name_records_against_that_item(estate):
+    """Runner mode, where the logical item is supplied rather than resolved."""
+
+    _forget(estate, "OrdersReconcile")
+    _sides(estate, [(1, 10)], [(1, 10)])
+
+    _runner_mode(estate, f"{SCHEMA}.OrdersReconcile", item_name=ITEM.item_name)
+
+    status = _test_status(estate, "OrdersReconcile")
+    assert status["result"] == "Succeeded"
 
 
 @weaver_test(remote=True, resources={"tds"})
