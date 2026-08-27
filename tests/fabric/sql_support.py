@@ -55,14 +55,24 @@ def install_runtime_references(executor: SqlExecutor, catalogue: str) -> None:
 
 
 def record_installation(executor: SqlExecutor) -> None:
-    """The Installation row that says which logical item this Warehouse is.
+    """Make this Warehouse the target of exactly one logical item.
 
-    A build writes one per bound item; a hand-installed estate needs the same
-    row, because the fixed entry points recover their logical item from it when
-    a caller omits ``@item_name``.
+    A build writes one Installation row per bound item, and a hand-installed
+    estate needs the same row: the entry points recover their logical item from
+    ``_.Installation`` when a caller omits ``@item_name``, and refuse when the
+    answer is not unique.
+
+    So every other row naming this database goes first. ``_.Installation`` is
+    one table for the whole estate and several fixtures bind different logical
+    items to this Warehouse over a run, and a row another one left is what makes
+    the standalone lookup ambiguous.
     """
 
     item_type, item_name = PROCEDURE_ITEM
+    forget_installations(executor)
+    # A MERGE rather than an INSERT: Fabric refuses a plain INSERT through the
+    # cross-database view these tables are in every Warehouse but the
+    # catalogue's, and accepts a MERGE's.
     executor.execute_script(
         "merge [_].[Installation] as target\n"
         "using (select"
@@ -86,27 +96,15 @@ def record_installation(executor: SqlExecutor) -> None:
     )
 
 
-def forget_installation(executor: SqlExecutor) -> None:
-    """Remove the Installation row :func:`record_installation` wrote.
+def forget_installations(executor: SqlExecutor) -> None:
+    """Remove every Installation row naming this Warehouse.
 
-    ``_.Installation`` is one shared table for the whole estate, and the entry
-    points refuse a Warehouse holding more than one row for it. A hand-installed
-    estate that left its row behind would make the next test's built item
-    ambiguous. Removed through a MERGE for the same reason it was written
-    through one: Fabric refuses a plain DML through a cross-database view.
+    Called at setup so the standalone lookup has one answer, and at teardown so
+    the item this estate invented does not outlive it.
     """
 
-    item_type, item_name = PROCEDURE_ITEM
     executor.execute_script(
-        "merge [_].[Installation] as target\n"
-        "using (select"
-        f" N'{item_type}' as [Item type]"
-        f", N'{item_name}' as [Item name]"
-        ") as source\n"
-        "   on target.[Item type] = source.[Item type]"
-        "  and target.[Item name] = source.[Item name]"
-        "  and target.[Target name] = db_name()\n"
-        "when matched then delete;\n"
+        "delete from [_].[Installation] where [Target name] = db_name();"
     )
 
 

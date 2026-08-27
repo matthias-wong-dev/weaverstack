@@ -25,7 +25,7 @@ import re
 import pytest
 from sql_support import (
     entry_point_script,
-    forget_installation,
+    forget_installations,
     forget_runtime_state,
     install_runtime_references,
     record_installation,
@@ -146,8 +146,8 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
 def _drop(executor) -> None:
     # The Installation row goes with it: it names this Warehouse as the target
     # of a logical item nothing built, and a row left behind makes the next
-    # test's built item ambiguous to the entry points.
-    forget_installation(executor)
+    # fixture's item ambiguous to the entry points.
+    forget_installations(executor)
     executor.execute_script(
         "drop procedure if exists [_].[Test];\n"
         + "\n".join(f"drop procedure if exists [_].[{name}];" for name in PROCEDURES)

@@ -49,7 +49,7 @@ import pytest
 from sql_support import (
     PROCEDURE_ITEM,
     entry_point_script,
-    forget_installation,
+    forget_installations,
     forget_runtime_state,
     install_runtime_references,
     record_installation,
@@ -196,8 +196,8 @@ def static_estate(
 def _drop(estate: Estate) -> None:
     # The Installation row goes with it: it names this Warehouse as the target
     # of a logical item nothing built, and a row left behind makes the next
-    # test's built item ambiguous to the entry points.
-    forget_installation(estate.executor)
+    # fixture's item ambiguous to the entry points.
+    forget_installations(estate.executor)
     name = estate.object_name
     estate.executor.execute_script(
         f"drop procedure if exists [_].[Load {SCHEMA}.{name}];\n"
@@ -859,7 +859,7 @@ def _install_wide(
 
 
 def _drop_wide(estate: WideEstate) -> None:
-    forget_installation(estate.executor)
+    forget_installations(estate.executor)
     name = estate.object_name
     statements = [f"drop procedure if exists [_].[Load {SCHEMA}.{name}];"]
     statements += [
