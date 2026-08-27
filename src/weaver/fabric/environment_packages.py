@@ -18,7 +18,9 @@ from typing import Iterable
 
 from ..errors import CommandError
 
-DESKTOP_ONLY = frozenset({"azure-identity", "requests", "build", "prompt-toolkit", "packaging"})
+DESKTOP_ONLY = frozenset(
+    {"azure-identity", "requests", "build", "prompt-toolkit", "packaging"}
+)
 FABRIC_PLATFORMS = (
     "manylinux_2_28_x86_64",
     "manylinux_2_17_x86_64",
