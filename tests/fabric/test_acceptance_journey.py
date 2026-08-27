@@ -385,10 +385,17 @@ def _assert_run_evidence(journey, report, task_type: str) -> None:
         # satisfy the shape of this with nothing having moved.
         assert [row for row in statistics if (row["rows_read"] or 0) > 0]
 
+        # Filter Bookmark rows to the logical items in this acceptance journey.
+        # The catalogue's Bookmark table is estate-wide; other logical items using
+        # the same catalogue will have their own rows there.
+        item_conditions = " or ".join(
+            f"([Item type] = N'{logical.split('/', 1)[0]}' and [Item name] = N'{logical.split('/', 1)[1]}')"
+            for logical in journey.physical.keys()
+        )
         bookmarks = _catalogue_rows(
             journey,
             "select [Schema name] as schema_name, [Object name] as object_name "
-            "from [_].[Bookmark]",
+            f"from [_].[Bookmark] where {item_conditions}",
         )
         # A view has no load, so it is among the nodes and not here.
         assert {
