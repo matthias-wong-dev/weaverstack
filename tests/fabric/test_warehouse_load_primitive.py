@@ -48,15 +48,16 @@ from typing import Any
 import pytest
 from sql_support import (
     PROCEDURE_ITEM,
+    entry_point_script,
     forget_runtime_state,
     install_runtime_references,
+    record_installation,
 )
 from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import WAREHOUSE, WeaverItemId
-from weaver.declaration.tsql_entry import generate_load_entry
 from weaver.declaration.tsql_load import (
     PROCEDURE_RESULT_PARAMETERS,
     logical_result_row,
@@ -147,7 +148,7 @@ def _install(executor, object_name: str, catalogue: str, *, static: bool) -> Est
     executor.execute_script(document.create_load(item=ITEM).payload.decode("utf-8"))
     # And the entry point over it, because the object's own procedure records
     # nothing: `exec _.[Load]` is what runs it by hand and writes the record.
-    executor.execute_script(generate_load_entry())
+    executor.execute_script(entry_point_script("Load"))
     return estate
 
 

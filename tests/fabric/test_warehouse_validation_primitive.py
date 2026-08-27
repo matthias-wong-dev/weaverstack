@@ -24,6 +24,7 @@ import re
 
 import pytest
 from sql_support import (
+    entry_point_script,
     forget_runtime_state,
     install_runtime_references,
     record_installation,
@@ -32,7 +33,6 @@ from support.weaver_test import weaver_test
 
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE, WeaverItemId
-from weaver.declaration.tsql_entry import generate_test_entry
 from weaver.declaration.tsql_validation import (
     RESULT_PARAMETERS,
     generate_tsql_validation_batch,
@@ -137,7 +137,7 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
     # record nothing: `exec _.[Test]` is what runs one by hand and writes the
     # record. It dispatches on the physical procedures, so the item name it
     # records against is supplied here.
-    executor.execute_script(generate_test_entry())
+    executor.execute_script(entry_point_script("Test"))
     yield executor
     _drop(executor)
 

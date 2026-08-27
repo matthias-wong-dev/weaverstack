@@ -1,10 +1,7 @@
 """The checked-in Weaver-owned catalogue against the catalogue's own contract.
 
-The built-in ``Warehouse/_weaver`` item is repository content, not generated
-Python, so what a build composes is exactly what is reviewed. These tests hold
-the checked-in documents against :mod:`weaver.catalogue.tables`: a table that
-gains or loses a column, a key or its protection without its document changing
-is refused here rather than discovered by a build.
+A table that gains or loses a column, a key or its protection without its
+document changing is refused here rather than discovered by a build.
 """
 
 from __future__ import annotations
@@ -12,7 +9,7 @@ from __future__ import annotations
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.catalogue.builtin import BUILTIN_ITEM, item_repository_files
+from weaver.fragments import CATALOGUE, fragment_files
 from weaver.catalogue.tables import (
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
@@ -38,7 +35,7 @@ def _documents() -> dict[str, tuple[str, object]]:
     """Every checked-in catalogue document, keyed by ``_.Name``."""
 
     found: dict[str, tuple[str, object]] = {}
-    for relative, data in item_repository_files().items():
+    for relative, data in fragment_files(CATALOGUE).items():
         if not relative.endswith(".sql"):
             continue
         source = read_source_document(relative, data, WAREHOUSE)
@@ -55,9 +52,7 @@ def test_every_catalogue_table_is_declared_and_nothing_else_is():
 
 @weaver_test()
 def test_the_catalogue_schema_is_declared():
-    files = item_repository_files()
-    schema_file = f"{BUILTIN_ITEM}/schemas/{CATALOGUE_SCHEMA}.yml"
-    assert schema_file in files
+    assert f"schemas/{CATALOGUE_SCHEMA}.yml" in fragment_files(CATALOGUE)
 
 
 @pytest.mark.parametrize("table", CATALOGUE_TABLES, ids=lambda table: table.name)
@@ -95,9 +90,7 @@ def test_the_declaration_matches_the_table_contract(table):
 @pytest.mark.parametrize("table", CATALOGUE_TABLES, ids=lambda table: table.name)
 @weaver_test()
 def test_a_table_declares_where_its_rows_come_from(table):
-    text = item_repository_files()[f"{BUILTIN_ITEM}/{table.qualified}.sql"].decode(
-        "utf-8"
-    )
+    text = fragment_files(CATALOGUE)[f"{table.qualified}.sql"].decode("utf-8")
     opening = (
         _RUNTIME_LINEAGE_OPENINGS[table.name]
         if table in RUNTIME_TABLES

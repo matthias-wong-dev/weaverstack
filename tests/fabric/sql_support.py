@@ -25,6 +25,15 @@ class CatalogObject:
 PROCEDURE_ITEM = ("Warehouse", "Reporting")
 
 
+def entry_point_script(name: str) -> str:
+    """The checked-in ``_.Load`` or ``_.Test``, as a build installs it."""
+
+    from weaver.declaration.model import WAREHOUSE
+    from weaver.fragments import standard_fragment
+
+    return standard_fragment(WAREHOUSE)[f"programmables/_.{name}.sql"].decode("utf-8")
+
+
 def install_runtime_references(executor: SqlExecutor, catalogue: str) -> None:
     """What a build gives every Warehouse it installs something runnable into.
 

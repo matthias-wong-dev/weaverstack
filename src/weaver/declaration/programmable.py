@@ -1,14 +1,12 @@
 """First-class Warehouse stored-procedure declarations.
 
-A Programmable is a managed stored procedure: authored content under
-``Warehouse/<Item>/programmables/<Schema>.<Procedure>.sql``, generated
-infrastructure derived from a logical declaration, or one of Weaver's own fixed
-entry points. One representation and one lifecycle -- discover, validate,
-sign, select, install, register, prune -- whichever kind it is.
+A Programmable is a managed stored procedure, whether authored under
+``Warehouse/<Item>/programmables/<Schema>.<Procedure>.sql``, generated from a
+logical declaration, or supplied by a Weaver fragment. One representation and
+one lifecycle: discover, validate, sign, select, install, register, prune.
 
-Identity is the existing ``PROCEDURE_SHAPE`` document identity: an ordinary
-schema and an object name that carries what the procedure is for. Nothing here
-invents a second procedure naming scheme.
+Identity is the ``PROCEDURE_SHAPE`` document identity, an ordinary schema and an
+object name carrying what the procedure is for.
 """
 
 from __future__ import annotations
@@ -24,9 +22,12 @@ from .source import content_hash
 #: Where an item authors its stored procedures.
 PROGRAMMABLES_DIRECTORY = "programmables"
 
-#: What an authored file's SQL must say, so a changed Programmable replaces
-#: rather than collides: the installer runs the text verbatim, and a plain
-#: ``CREATE`` fails once the procedure exists.
+#: What authored content carries in the Registry. Managed structure rather than
+#: scheduled work: nothing runs a Programmable but a caller.
+ROLE_PROGRAMMABLE = "programmable"
+
+#: The installer runs a Programmable's text verbatim, and a plain ``CREATE``
+#: fails once the procedure exists, so a replacement-safe form is required.
 _CREATE_PATTERN = re.compile(
     r"create\s+or\s+alter\s+procedure\s+"
     r"(?P<schema>\[[^\]]+(?:\]\][^\]]*)*\]|[\w@#$]+)"
@@ -41,14 +42,13 @@ class Programmable:
     """One managed stored procedure declaration, whatever its provenance.
 
     ``identity`` is the catalogue key, ``text`` the complete statement the
-    installer runs, and ``signature`` what incremental selection compares.
-    ``role`` says what the procedure is for and is carried rather than inferred,
-    exactly as it is for every runtime artefact.
+    installer runs, ``signature`` what incremental selection compares, and
+    ``role`` what the procedure is for.
 
-    ``relative_path`` marks authored content and records where it was written;
-    ``origin`` marks generated content and records the logical declaration it
-    was derived from. A Programmable never carries both: Weaver-owned content
-    such as the fixed entry points carries neither.
+    ``relative_path`` marks authored item source and records where it was
+    written; ``origin`` marks generated content and records the declaration it
+    was derived from. Weaver's own fragments carry neither, so they sign
+    themselves and no item signature moves when one changes.
     """
 
     identity: WeaverDocumentId
@@ -80,13 +80,19 @@ class Programmable:
 
 
 def read_programmable(
-    relative_path: str, data: bytes, *, owner: WeaverItemId
+    relative_path: str,
+    data: bytes,
+    *,
+    owner: WeaverItemId,
+    weaver_owned: bool = False,
 ) -> Programmable:
-    """One authored stored procedure, validated against its own filename.
+    """One stored procedure from a ``.sql`` file, validated against its name.
 
     The file lives at ``programmables/<Schema>.<Procedure>.sql`` and its SQL
-    must create that exact procedure, so the identity the catalogue registers
-    and the object the statement creates cannot drift apart.
+    creates that exact procedure, so the identity the catalogue registers and
+    the object the statement creates cannot drift apart. ``weaver_owned`` reads
+    a Weaver fragment, which may claim the reserved ``_`` schema and is not item
+    source.
     """
 
     if owner.item_type != WAREHOUSE:
@@ -96,37 +102,29 @@ def read_programmable(
         )
     stem = relative_path.rsplit("/", 1)[-1]
     if not stem.endswith(".sql"):
-        raise DiscoveryError(
-            f"{relative_path}: a programmable is a .sql file"
-        )
-    stem = stem[: -len(".sql")]
-    parts = stem.split(".")
+        raise DiscoveryError(f"{relative_path}: a programmable is a .sql file")
+    parts = stem[: -len(".sql")].split(".")
     if len(parts) != 2 or not all(parts):
         raise DiscoveryError(
             f"{relative_path}: name it <Schema>.<Procedure>.sql, one dot between "
             "the schema and the procedure"
         )
-    object_id = ObjectId(
-        schema=parts[0],
-        object=parts[1],
-    )
-    identity = WeaverDocumentId(owner, object_id, shape=PROCEDURE_SHAPE)
+    object_id = ObjectId(schema=parts[0], object=parts[1])
 
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise DiscoveryError(f"{relative_path}: must be UTF-8 text ({exc})") from exc
 
-    match = _CREATE_PATTERN.search(text)
-    if match is None:
+    declared = _CREATE_PATTERN.findall(text)
+    if len(declared) != 1:
         raise DiscoveryError(
-            f"{relative_path}: must contain one 'create or alter procedure "
-            "<Schema>.<Procedure>' statement, so a changed programmable can "
-            "replace what is installed"
+            f"{relative_path}: must contain exactly one 'create or alter "
+            "procedure <Schema>.<Procedure>' statement, so what Weaver installs "
+            "is what it registers and prunes"
         )
     created = ObjectId(
-        schema=_unbracket(match.group("schema")),
-        object=_unbracket(match.group("name")),
+        schema=_unbracket(declared[0][0]), object=_unbracket(declared[0][1])
     )
     if (
         created.schema.casefold() != object_id.schema.casefold()
@@ -136,34 +134,19 @@ def read_programmable(
             f"{relative_path}: the statement creates {created.qualified}, but the "
             f"file is named {object_id.qualified}. The two must agree."
         )
-    _refuse_reserved(created, relative_path)
-
-    return Programmable(
-        identity=identity,
-        text=text,
-        signature=content_hash(data),
-        role=_AUTHORED_ROLE,
-        relative_path=relative_path,
-    )
-
-
-def _refuse_reserved(object_id: ObjectId, relative_path: str) -> None:
-    """Weaver's reserved namespace stays Weaver's."""
-
-    from ..etl import ETL_SCHEMA
-
-    if object_id.schema == ETL_SCHEMA:
+    if not weaver_owned and created.schema == _reserved_schema():
         raise DiscoveryError(
-            f"{relative_path}: schema {ETL_SCHEMA!r} is reserved for Weaver's "
-            "generated infrastructure, so an authored programmable may not "
-            "create into it"
+            f"{relative_path}: schema {created.schema!r} is reserved for Weaver, "
+            "so an authored programmable may not create into it"
         )
 
-
-def _unbracket(name: str) -> str:
-    if name.startswith("[") and name.endswith("]"):
-        return name[1:-1].replace("]]", "]")
-    return name
+    return Programmable(
+        identity=WeaverDocumentId(owner, object_id, shape=PROCEDURE_SHAPE),
+        text=text,
+        signature=content_hash(data),
+        role=ROLE_PROGRAMMABLE,
+        relative_path=None if weaver_owned else relative_path,
+    )
 
 
 def generated_programmable(
@@ -174,7 +157,7 @@ def generated_programmable(
     role: str,
     origin: WeaverDocumentId | None = None,
 ) -> Programmable:
-    """One Weaver-generated or package-owned Programmable."""
+    """One Programmable Weaver generated from a logical declaration."""
 
     return Programmable(
         identity=identity,
@@ -185,12 +168,21 @@ def generated_programmable(
     )
 
 
-#: What authored content carries in the Registry. It is managed structure
-#: rather than scheduled work, so it is outside the runnable roles.
-_AUTHORED_ROLE = "programmable"
+def _reserved_schema() -> str:
+    from ..etl import ETL_SCHEMA
+
+    return ETL_SCHEMA
+
+
+def _unbracket(name: str) -> str:
+    if name.startswith("[") and name.endswith("]"):
+        return name[1:-1].replace("]]", "]")
+    return name
+
 
 __all__ = [
     "PROGRAMMABLES_DIRECTORY",
+    "ROLE_PROGRAMMABLE",
     "Programmable",
     "generated_programmable",
     "read_programmable",

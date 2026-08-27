@@ -45,14 +45,9 @@ ROLE_ASSUMPTION = "assumption"
 #: role rather than a type, because what it physically is still varies: a
 #: table, a folder, a view, or the schema a schema shortcut presents.
 ROLE_SHORTCUT = "shortcut"
-#: A generic entry point a person calls: ``_.Load`` and ``_.Test``, which wrap
-#: one object's own procedure and record what it did. A role of its own because
-#: nothing schedules one. A load procedure with this role would be run by
-#: ``weaver load``, and there is no object for it to load.
-ROLE_ENTRY = "entry"
-#: An authored stored procedure an item manages. Weaver creates, replaces and
-#: prunes it, and nothing schedules it: it runs when a person or another system
-#: calls it.
+#: A stored procedure an item manages. Weaver creates, replaces and prunes it,
+#: and nothing schedules it: it runs when a person or another system calls it.
+#: ``_.Load``, ``_.Test`` and authored content all carry this.
 ROLE_PROGRAMMABLE = "programmable"
 OBJECT_ROLES = (
     ROLE_DATA,
@@ -60,13 +55,12 @@ OBJECT_ROLES = (
     ROLE_TEST,
     ROLE_ASSUMPTION,
     ROLE_SHORTCUT,
-    ROLE_ENTRY,
     ROLE_PROGRAMMABLE,
 )
 
 #: The roles a runtime artefact carries, being everything installed to be run
 #: rather than to hold rows. Asked where a selection has to be partitioned.
-RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_ENTRY)
+RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_PROGRAMMABLE)
 
 #: The roles a validation carries, by the kind that declares it.
 VALIDATION_ROLES = (ROLE_TEST, ROLE_ASSUMPTION)
@@ -93,7 +87,6 @@ OBJECT_ROLE_VOCABULARY = {
     ROLE_TEST: "Test",
     ROLE_ASSUMPTION: "Assumption",
     ROLE_SHORTCUT: "Shortcut",
-    ROLE_ENTRY: "Entry point",
     ROLE_PROGRAMMABLE: "Programmable",
 }
 
@@ -1322,12 +1315,12 @@ RUNTIME_TABLES = (LOG, BOOKMARK, LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
 #:
 #: A built target is given each of these under its own name, being a view in a
 #: Warehouse and a OneLake shortcut in a Lakehouse, so a generated procedure,
-#: authored Spark SQL and the fixed ``_.Load`` / ``_.Test`` entry points can
-#: reach Weaver's operational state. ``_.Installation`` is part of the surface:
-#: an installed item reads where it is bound, and the Warehouse entry points
-#: recover their logical item from it. When that item is the Warehouse holding
-#: the catalogue, the tables are already there and the planner creates nothing;
-#: that is physical planning, not a different logical surface.
+#: authored Spark SQL and the fixed ``_.Load`` and ``_.Test`` can reach Weaver's
+#: operational state. ``_.Installation`` is part of the surface because
+#: ``_.Load`` and ``_.Test`` recover their logical item from it when a caller
+#: omits ``@item_name``. When the item is the Warehouse holding the catalogue,
+#: the tables are already there and the planner creates nothing; that is
+#: physical planning, not a different logical surface.
 STANDARD_SURFACE_TABLES = (INSTALLATION,) + RUNTIME_TABLES
 
 #: The runtime tables describing one object's state now. A build ends the

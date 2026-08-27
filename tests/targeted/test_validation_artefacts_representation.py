@@ -249,10 +249,15 @@ def test_the_role_travels_with_the_artefact(estate):
     Test procedure and an entry point are all procedures.
     """
 
-    from weaver.etl import ROLE_ENTRY
+    from weaver.catalogue.tables import ROLE_PROGRAMMABLE
 
     for artefact in runtime_artefacts(estate):
-        assert artefact.role in (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_ENTRY)
+        assert artefact.role in (
+            ROLE_LOAD,
+            ROLE_TEST,
+            ROLE_ASSUMPTION,
+            ROLE_PROGRAMMABLE,
+        )
         assert artefact.is_validation == (artefact.role in (ROLE_TEST, ROLE_ASSUMPTION))
 
 

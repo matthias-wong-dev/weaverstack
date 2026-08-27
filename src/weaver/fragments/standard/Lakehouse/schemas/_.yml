@@ -1,0 +1,5 @@
+Schema ID: _
+
+Description: >-
+  Weaver's own schema. It holds the runtime tree this item's load code is
+  deployed into, and this item's shortcuts to the Weaver catalogue.

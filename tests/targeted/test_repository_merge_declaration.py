@@ -29,8 +29,10 @@ REPORTING = WeaverItemId.parse("Warehouse/Reporting")
 SALES = WeaverItemId.parse("Lakehouse/Sales")
 
 
-def _programmable(schema: str, name: str) -> object:
-    return generated_programmable(
+def _part(label: str, schema: str, name: str) -> RepositoryPart:
+    """One part contributing one Programmable, named as given."""
+
+    programmable = generated_programmable(
         WeaverDocumentId(
             REPORTING,
             ObjectId(schema=schema, object=name),
@@ -40,65 +42,46 @@ def _programmable(schema: str, name: str) -> object:
         signature="sig",
         role="load",
     )
+    return RepositoryPart(
+        label=label,
+        items=(REPORTING,),
+        programmables={programmable.identity: programmable},
+    )
 
 
 @weaver_test()
 def test_unique_declarations_merge():
     """Weaver-owned content and a second contribution compose into one part."""
 
-    owned = RepositoryPart(label="package-owned", items=(BUILTIN_ITEM,))
-    extra = RepositoryPart(
-        label="generated",
-        items=(REPORTING,),
-        programmables={REPORTING: (_programmable("dbo", "Refresh"),)},
-    )
+    owned = RepositoryPart(label="catalogue", items=(BUILTIN_ITEM,))
 
-    merged = merge_repository(owned, extra)
+    merged = merge_repository(owned, _part("generated", "dbo", "Refresh"))
 
     assert BUILTIN_ITEM in merged.items
     assert REPORTING in merged.items
-    assert [
-        str(each.identity)
-        for each in merged.programmables[REPORTING]
-    ] == ["Warehouse/Reporting/procedure:dbo/Refresh"]
+    assert [str(each) for each in merged.programmables] == [
+        "Warehouse/Reporting/procedure:dbo/Refresh"
+    ]
 
 
 @weaver_test()
 def test_a_duplicate_identity_is_refused():
     """Two contributions claiming one procedure is a fault, never an override."""
 
-    first = RepositoryPart(
-        label="first",
-        items=(REPORTING,),
-        programmables={REPORTING: (_programmable("dbo", "Refresh"),)},
-    )
-    second = RepositoryPart(
-        label="second",
-        items=(REPORTING,),
-        programmables={REPORTING: (_programmable("dbo", "Refresh"),)},
-    )
-
     with pytest.raises(DiscoveryError, match="contributed twice"):
-        merge_repository(first, second)
+        merge_repository(
+            _part("first", "dbo", "Refresh"), _part("second", "dbo", "Refresh")
+        )
 
 
 @weaver_test()
 def test_a_case_only_collision_is_refused():
     """SQL folds case, so two spellings of one procedure cannot coexist."""
 
-    lower = RepositoryPart(
-        label="lower",
-        items=(REPORTING,),
-        programmables={REPORTING: (_programmable("dbo", "refresh"),)},
-    )
-    upper = RepositoryPart(
-        label="upper",
-        items=(REPORTING,),
-        programmables={REPORTING: (_programmable("dbo", "REFRESH"),)},
-    )
-
     with pytest.raises(DiscoveryError, match="differ only by case"):
-        merge_repository(lower, upper)
+        merge_repository(
+            _part("lower", "dbo", "refresh"), _part("upper", "dbo", "REFRESH")
+        )
 
 
 @weaver_test()
@@ -128,12 +111,12 @@ def test_shortcuts_follow_the_same_rules():
 
 
 @weaver_test()
-def test_the_package_contribution_cannot_be_composed_twice():
+def test_the_catalogue_fragment_cannot_be_composed_twice():
     """Composing Weaver-owned content twice is the duplicate case, refused."""
 
-    from weaver.declaration.repository import weaver_owned_content
+    from weaver.declaration.repository import _catalogue_part
 
-    owned = weaver_owned_content()
+    owned = _catalogue_part()
 
     with pytest.raises(DiscoveryError, match="contributed twice"):
         merge_repository(owned, owned)

@@ -125,33 +125,6 @@ def test_a_programmable_is_discovered_with_its_procedure_identity(tmp_path):
 
 
 @weaver_test()
-def test_the_entry_points_are_fixed_and_do_not_enumerate(tmp_path):
-    """Adding or removing objects leaves _.Load and _.Test byte-identical."""
-
-    one = _repository(tmp_path, procedure=PROCEDURE_V1, name="one")
-    root_two = tmp_path / "two"
-    # A second table and a validation join the item; the entry points must not
-    # notice.
-    import shutil
-
-    shutil.copytree(one.root.value, root_two)
-    (root_two / WAREHOUSE_ITEM / "DWG.Order.sql").write_text(
-        warehouse_table("DWG.Order"), encoding="utf-8"
-    )
-    two = parse_item_repository(Location(str(root_two)))
-
-    def entries(repository):
-        return {
-            programmable.identity.object_id.object: programmable.text
-            for programmable in repository.programmables.values()
-            if programmable.role == "entry"
-        }
-
-    assert entries(one) == entries(two)
-    assert set(entries(two)) == {"Load", "Test"}
-
-
-@weaver_test()
 def test_the_statement_and_the_filename_must_agree(tmp_path):
     root = tmp_path / "repo"
     _write(root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", "Schema ID: DWG\nDescription: x\n")
