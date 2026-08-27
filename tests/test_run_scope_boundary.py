@@ -41,6 +41,7 @@ from weaver.run.runtime_boundary import (
     DirectRunScope,
     FabricRunScope,
     LazyRunScope,
+    _workspace_literal,
     open_runtime_scope,
 )
 from weaver.runtime import session_scopes
@@ -171,6 +172,18 @@ def _fabric():
     return Workspace(
         workspace="My Workspace", catalogue="Warehouse/Weaver", environment="weaver"
     )
+
+
+@weaver_test()
+def test_a_workspace_without_an_environment_keeps_none_in_remote_source():
+    workspace = Workspace(workspace="Analytics", environment=None)
+
+    literal = _workspace_literal(workspace)
+
+    assert "environment=None" in literal
+    assert "environment='None'" not in literal
+    rebuilt = eval(literal, {"Workspace": Workspace})
+    assert rebuilt.environment is None
 
 
 def _sources(session):

@@ -214,6 +214,12 @@ resolves a Lakehouse. It skips in the ordinary injected mode, where the
 Environment's published set says nothing about what the session is running.
 Ordinary hosted runs execute one Weaver, the injected one.
 
+`tests/fabric/test_environment_publish_preservation_primitive.py` exercises the
+desktop publication command against the fixed Environment. It keeps a
+pre-existing user package, the exported `environment.yml`, and published Spark
+compute settings unchanged, confirms the Weaver wheel is present, and requires
+the second publication to be a no-op.
+
 A structural change to a table declaring `Prohibit rebuild: true` needs one
 further step: reconciliation will not replace it, so an installed one keeps its
 old shape until it is dropped. Weaver's own catalogue tables are the ones this

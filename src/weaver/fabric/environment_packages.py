@@ -19,13 +19,42 @@ from typing import Iterable
 from ..errors import CommandError
 
 DESKTOP_ONLY = frozenset({"azure-identity", "requests", "build", "prompt-toolkit"})
-FABRIC_PYTHON_VERSION = "3.11"
-FABRIC_ABI = "cp311"
 FABRIC_PLATFORMS = (
     "manylinux_2_28_x86_64",
     "manylinux_2_17_x86_64",
     "manylinux2014_x86_64",
 )
+
+
+@dataclass(frozen=True)
+class FabricRuntime:
+    """The Python wheel target supplied by one published Fabric runtime."""
+
+    version: str
+    python_version: str
+    abi: str
+
+
+SUPPORTED_FABRIC_RUNTIMES = {
+    "1.3": FabricRuntime("1.3", "3.11", "cp311"),
+    "2.0": FabricRuntime("2.0", "3.13", "cp313"),
+}
+
+
+def fabric_runtime(version: str) -> FabricRuntime:
+    """Return the explicit wheel target for a supported Fabric runtime."""
+
+    normalized = str(version).strip()
+    try:
+        return SUPPORTED_FABRIC_RUNTIMES[normalized]
+    except KeyError as exc:
+        shown = normalized or "missing"
+        supported = ", ".join(sorted(SUPPORTED_FABRIC_RUNTIMES))
+        raise CommandError(
+            f"Fabric Runtime {shown!r} is not supported for Environment "
+            f"publication. Supported runtimes: {supported}. No Environment "
+            "changes were staged."
+        ) from exc
 
 
 def normalise_distribution(name: str) -> str:
@@ -123,9 +152,12 @@ class RequirementPlan:
 
 
 def resolve_wheel_closure(
-    requirements: Iterable[str], destination: Path
+    requirements: Iterable[str],
+    destination: Path,
+    *,
+    runtime: FabricRuntime,
 ) -> tuple[ResolvedWheel, ...]:
-    """Download a Linux CPython 3.11 binary wheel closure."""
+    """Download a Linux binary wheel closure for the published runtime."""
 
     requested = tuple(requirements)
     destination.mkdir(parents=True, exist_ok=True)
@@ -141,9 +173,9 @@ def resolve_wheel_closure(
         "--implementation",
         "cp",
         "--python-version",
-        FABRIC_PYTHON_VERSION,
+        runtime.python_version,
         "--abi",
-        FABRIC_ABI,
+        runtime.abi,
     ]
     for platform in FABRIC_PLATFORMS:
         command.extend(("--platform", platform))
@@ -155,11 +187,14 @@ def resolve_wheel_closure(
             "Could not resolve the Fabric-compatible wheel closure required by "
             "Weaver. No Environment changes were staged.\n" + detail
         )
-    return describe_wheel_closure(destination, requested)
+    return describe_wheel_closure(destination, requested, runtime=runtime)
 
 
 def describe_wheel_closure(
-    directory: Path, top_level: Iterable[str]
+    directory: Path,
+    top_level: Iterable[str],
+    *,
+    runtime: FabricRuntime,
 ) -> tuple[ResolvedWheel, ...]:
     """Read versions and dependency constraints from downloaded wheels."""
 
@@ -179,13 +214,13 @@ def describe_wheel_closure(
     top_level_names = {
         normalise_distribution(requirement.name)
         for requirement in top_level_requirements
-        if _requirement_applies(requirement)
+        if _requirement_applies(requirement, runtime)
     }
     for requirement in top_level_requirements:
-        _add_constraint(constraints, requirement)
+        _add_constraint(constraints, requirement, runtime)
     for requirements in requirements_by_name.values():
         for requirement in requirements:
-            _add_constraint(constraints, requirement)
+            _add_constraint(constraints, requirement, runtime)
 
     missing = sorted(set(constraints) - set(paths))
     if missing:
@@ -202,7 +237,7 @@ def describe_wheel_closure(
                 {
                     normalise_distribution(requirement.name)
                     for requirement in requirements_by_name.get(name, ())
-                    if _requirement_applies(requirement)
+                    if _requirement_applies(requirement, runtime)
                 }
             )
         )
@@ -233,12 +268,12 @@ def _wheel_requirements(path: Path):
     return [Requirement(value) for value in message.get_all("Requires-Dist", ())]
 
 
-def _add_constraint(constraints, requirement) -> None:
+def _add_constraint(constraints, requirement, runtime: FabricRuntime) -> None:
     if requirement.url:
         raise CommandError(
             f"Fabric wheel resolution does not support direct URL requirement {requirement}"
         )
-    if not _requirement_applies(requirement):
+    if not _requirement_applies(requirement, runtime):
         return
     name = normalise_distribution(requirement.name)
     specifier = str(requirement.specifier)
@@ -248,11 +283,13 @@ def _add_constraint(constraints, requirement) -> None:
         constraints[name]
 
 
-def _requirement_applies(requirement) -> bool:
-    return not requirement.marker or requirement.marker.evaluate(_fabric_marker_env())
+def _requirement_applies(requirement, runtime: FabricRuntime) -> bool:
+    return not requirement.marker or requirement.marker.evaluate(
+        _fabric_marker_env(runtime)
+    )
 
 
-def _fabric_marker_env() -> dict[str, str]:
+def _fabric_marker_env(runtime: FabricRuntime) -> dict[str, str]:
     from packaging.markers import default_environment
 
     environment = default_environment()
@@ -261,8 +298,8 @@ def _fabric_marker_env() -> dict[str, str]:
             "implementation_name": "cpython",
             "platform_machine": "x86_64",
             "platform_system": "Linux",
-            "python_full_version": f"{FABRIC_PYTHON_VERSION}.0",
-            "python_version": FABRIC_PYTHON_VERSION,
+            "python_full_version": f"{runtime.python_version}.0",
+            "python_version": runtime.python_version,
             "sys_platform": "linux",
             "extra": "",
         }
@@ -339,6 +376,31 @@ def plan_requirements(
     closure_by_name = {wheel.name: wheel for wheel in closure}
     visited: set[str] = set()
 
+    def custom_closure_is_known(
+        packages: Iterable[RemotePackage], wheel: ResolvedWheel, location: str
+    ) -> bool:
+        unknown = tuple(
+            sorted(
+                {
+                    package.version
+                    for package in packages
+                    if package.source == "custom-wheel"
+                    and package.version != wheel.version
+                }
+            )
+        )
+        if not unknown:
+            return True
+        conflicts.append(
+            RequirementConflict(
+                wheel.name,
+                unknown,
+                f"=={wheel.version} (resolved wheel closure)",
+                location,
+            )
+        )
+        return False
+
     def include(name: str) -> None:
         nonlocal needs_publish
         if name in visited:
@@ -357,6 +419,8 @@ def plan_requirements(
                 )
             )
             return
+        if not custom_closure_is_known(supplied, wheel, "published"):
+            return
         pending = staging_by_name.get(wheel.name, ())
         bad = _incompatible_versions(pending, wheel.required)
         if bad:
@@ -368,6 +432,8 @@ def plan_requirements(
                     "staging",
                 )
             )
+            return
+        if not custom_closure_is_known(pending, wheel, "staging"):
             return
         if supplied:
             package = supplied[0]

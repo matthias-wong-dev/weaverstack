@@ -551,12 +551,19 @@ including `load` and `test`, need this reference. A build and bundle installatio
 execute frozen SQL and bundle payloads, so neither needs it.
 
 Environment publication installs Weaver into an existing Fabric Environment.
-It reads the published package set, reuses compatible packages, adds absent
-Weaver requirements as custom wheels, and reports incompatible versions before
-staging. An External library carries the dependency closure Fabric published for
-it. A missing requirement or custom wheel receives the binary dependency closure
-Weaver resolves. Weaver owns `weaverstack-*.whl`. The Environment definition and
-every other custom library remain user-owned.
+It reads every page of the published and staged package sets, reuses compatible
+packages, adds absent Weaver requirements as custom wheels, and reports
+incompatible versions before staging. Wheel resolution targets the Python and
+ABI of the Environment's published Fabric runtime. Runtime 1.3 maps to
+CPython 3.11 and `cp311`; Runtime 2.0 maps to CPython 3.13 and `cp313`. An
+unrecognised runtime stops publication before mutation.
+
+An External library carries the dependency closure Fabric published for it. A
+missing requirement receives the binary dependency closure Weaver resolves. A
+custom wheel is reused only when its version is the resolved version whose
+dependency metadata Weaver read; otherwise publication stops before mutation.
+Weaver owns `weaverstack-*.whl`. The Environment definition and every other
+custom library remain user-owned.
 
 ---
 

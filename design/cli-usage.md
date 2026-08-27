@@ -360,9 +360,12 @@ incompatible versions before mutation. It does not change the Environment
 definition or unrelated custom libraries. Weaver does not create Fabric
 Environments.
 
-Fabric resolves the dependency closure for External libraries. Weaver supplies
-a binary wheel closure when a requirement is absent or supplied as a custom
-wheel.
+Fabric resolves the dependency closure for External libraries. Weaver reads the
+Environment's published runtime and supplies a matching Linux binary wheel
+closure when a requirement is absent. Runtime 1.3 uses CPython 3.11 wheels and
+Runtime 2.0 uses CPython 3.13 wheels. Unknown runtimes stop before staging.
+A custom wheel is reused only when it matches the version Weaver resolved, so
+its dependency metadata describes the wheel that remains installed.
 
 There is no separate initialise lifecycle. The package-owned catalogue is built
 by the ordinary build: `Warehouse/_weaver` is composed into every parsed

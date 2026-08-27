@@ -191,15 +191,28 @@ class FabricClient:
         response = self.request("GET", path, expected=(200,))
         return response.json() if response.content else {}
 
-    def paged(self, path: str, *, key: str = "value") -> list[dict]:
-        """Every item across a paged listing."""
+    def paged(
+        self,
+        path: str,
+        *,
+        key: str = "value",
+        not_found_empty: bool = False,
+    ) -> list[dict]:
+        """Every item across a listing, optionally accepting an absent first page."""
 
         items: list[dict] = []
         next_path: str | None = path
+        first = True
         while next_path:
-            payload = self.get_json(next_path)
+            try:
+                payload = self.get_json(next_path)
+            except FabricError as exc:
+                if first and not_found_empty and exc.status_code == 404:
+                    return []
+                raise
             items.extend(payload.get(key, []))
             next_path = payload.get("continuationUri")
+            first = False
         return items
 
     def wait_for_operation(

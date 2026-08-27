@@ -316,10 +316,11 @@ def _carried(payload, installed):
 def _workspace_literal(workspace) -> str:
     if workspace is None:
         return "None"
+    environment = None if workspace.environment is None else str(workspace.environment)
     return (
         f"Workspace(workspace={workspace.workspace!r}, "
         f"catalogue={workspace.catalogue!r}, "
-        f"environment={str(workspace.environment)!r})"
+        f"environment={environment!r})"
     )
 
 

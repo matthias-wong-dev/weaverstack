@@ -22,6 +22,7 @@ from .environment_packages import (
     EnvironmentPackageConflict,
     ResolvedRequirement,
     custom_library_names,
+    fabric_runtime,
     plan_requirements,
     resolve_wheel_closure,
     runtime_requirements,
@@ -166,23 +167,29 @@ def _environment_base(environment: Item) -> str:
 def read_staging(environment: Item, *, client: FabricClient) -> dict:
     """Return the Environment's GA staging library list."""
 
-    try:
-        return client.get_json(f"{_staging_base(environment)}/libraries?beta=false")
-    except FabricError as exc:
-        if exc.status_code == 404:
-            return {}
-        raise
+    libraries = client.paged(
+        f"{_staging_base(environment)}/libraries?beta=false",
+        key="libraries",
+        not_found_empty=True,
+    )
+    return {"libraries": libraries}
 
 
 def read_published(environment: Item, *, client: FabricClient) -> dict:
     """Return the Environment's GA published library list."""
 
-    try:
-        return client.get_json(f"{_environment_base(environment)}/libraries?beta=false")
-    except FabricError as exc:
-        if exc.status_code == 404:
-            return {}
-        raise
+    libraries = client.paged(
+        f"{_environment_base(environment)}/libraries?beta=false",
+        key="libraries",
+        not_found_empty=True,
+    )
+    return {"libraries": libraries}
+
+
+def read_published_spark_compute(environment: Item, *, client: FabricClient) -> dict:
+    """Return the Environment's published GA Spark compute configuration."""
+
+    return client.get_json(f"{_environment_base(environment)}/sparkcompute?beta=false")
 
 
 def library_wheels(libraries: dict) -> list[str]:
@@ -273,7 +280,11 @@ def publish_and_wait(
 ) -> str:
     """Publish staged libraries and return the terminal state."""
 
-    client.request("POST", f"{_staging_base(environment)}/publish", expected=(200, 202))
+    client.request(
+        "POST",
+        f"{_staging_base(environment)}/publish?beta=false",
+        expected=(200, 202),
+    )
     deadline = time.time() + timeout
     seen = ""
     while time.time() < deadline:
@@ -378,7 +389,9 @@ def publish_environment(
             owner_name, reference.name, client=client
         )
 
-    with step("Read Environment libraries"):
+    with step("Read Environment state"):
+        spark_compute = read_published_spark_compute(item, client=client)
+        runtime = fabric_runtime(spark_compute.get("runtimeVersion", ""))
         published = read_published(item, client=client)
         staging = read_staging(item, client=client)
 
@@ -386,7 +399,9 @@ def publish_environment(
     with tempfile.TemporaryDirectory(prefix="weaver-fabric-wheels-") as temporary:
         t = time.perf_counter()
         with step("Resolve Weaver requirements"):
-            closure = resolve_wheel_closure(requirements, Path(temporary))
+            closure = resolve_wheel_closure(
+                requirements, Path(temporary), runtime=runtime
+            )
             try:
                 package_plan = plan_requirements(
                     closure, published=published, staging=staging

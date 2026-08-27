@@ -11,6 +11,7 @@ from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.fabric import environment as env_mod
+from weaver.fabric import environment_packages as packages_mod
 from weaver.fabric.client import FabricClient, FabricError
 from weaver.fabric.environment import (
     _version_from_wheel,
@@ -18,6 +19,7 @@ from weaver.fabric.environment import (
     find_existing_environment,
     is_weaver_wheel,
     read_published,
+    read_published_spark_compute,
     read_staging,
     resolve_environment_owner,
     staged_wheels,
@@ -26,8 +28,10 @@ from weaver.fabric.environment_packages import (
     EnvironmentPackageConflict,
     ResolvedWheel,
     describe_wheel_closure,
+    fabric_runtime,
     inspect_libraries,
     plan_requirements,
+    resolve_wheel_closure,
 )
 from weaver.fabric.resources import Item, ItemNotFoundError, WorkspaceItem
 
@@ -104,7 +108,9 @@ def test_wheel_closure_carries_transitive_constraints(tmp_path):
         requires=("beta>=2",),
     )
     _write_wheel(tmp_path / "beta-2.1-py3-none-any.whl", "beta", "2.1")
-    closure = describe_wheel_closure(tmp_path, ("alpha>=1",))
+    closure = describe_wheel_closure(
+        tmp_path, ("alpha>=1",), runtime=fabric_runtime("1.3")
+    )
     by_name = {wheel.name: wheel for wheel in closure}
     assert by_name["alpha"].required == ">=1"
     assert by_name["alpha"].dependencies == ("beta",)
@@ -127,12 +133,18 @@ class _ReadClient:
         self.response = response
         self.status_code = status_code
         self.paths = []
+        self.keys = []
+        self.not_found_empty = []
 
-    def get_json(self, path):
+    def paged(self, path, *, key="value", not_found_empty=False):
         self.paths.append(path)
+        self.keys.append(key)
+        self.not_found_empty.append(not_found_empty)
         if self.status_code is not None:
+            if self.status_code == 404 and not_found_empty:
+                return []
             raise FabricError("library lookup failed", status_code=self.status_code)
-        return self.response
+        return self.response.get(key, [])
 
 
 @weaver_test()
@@ -144,13 +156,100 @@ def test_library_reads_request_the_ga_contract():
         "workspaces/ws1/environments/env1/libraries?beta=false",
         "workspaces/ws1/environments/env1/staging/libraries?beta=false",
     ]
+    assert client.keys == ["libraries", "libraries"]
+    assert client.not_found_empty == [True, True]
+
+
+@weaver_test()
+def test_library_reads_include_every_page(monkeypatch):
+    first = "workspaces/ws1/environments/env1/libraries?beta=false"
+    second = "https://fabric.example/v1/next-page"
+    payloads = {
+        first: {
+            "libraries": [_external("pyyaml", "6.0.2")],
+            "continuationUri": second,
+        },
+        second: {"libraries": [_custom("company_lib-1.0-py3-none-any.whl")]},
+    }
+    client = FabricClient(token="token")
+    monkeypatch.setattr(client, "get_json", payloads.__getitem__)
+    assert read_published(_env(), client=client) == _libraries(
+        _external("pyyaml", "6.0.2"),
+        _custom("company_lib-1.0-py3-none-any.whl"),
+    )
+
+
+@weaver_test()
+def test_a_missing_later_library_page_is_not_treated_as_an_empty_list(monkeypatch):
+    first = "workspaces/ws1/environments/env1/libraries?beta=false"
+    second = "https://fabric.example/v1/next-page"
+    client = FabricClient(token="token")
+
+    def get_json(path):
+        if path == first:
+            return {
+                "libraries": [_external("pyyaml", "6.0.2")],
+                "continuationUri": second,
+            }
+        raise FabricError("next page failed", status_code=404)
+
+    monkeypatch.setattr(client, "get_json", get_json)
+    with pytest.raises(FabricError, match="next page failed"):
+        read_published(_env(), client=client)
+
+
+@weaver_test()
+def test_published_spark_compute_uses_the_ga_contract():
+    class _ComputeClient:
+        def __init__(self):
+            self.paths = []
+
+        def get_json(self, path):
+            self.paths.append(path)
+            return {"runtimeVersion": "2.0"}
+
+    client = _ComputeClient()
+    assert read_published_spark_compute(_env(), client=client) == {
+        "runtimeVersion": "2.0"
+    }
+    assert client.paths == ["workspaces/ws1/environments/env1/sparkcompute?beta=false"]
+
+
+@weaver_test()
+def test_fabric_runtime_maps_to_its_python_wheel_target():
+    assert (fabric_runtime("1.3").python_version, fabric_runtime("1.3").abi) == (
+        "3.11",
+        "cp311",
+    )
+    assert (fabric_runtime("2.0").python_version, fabric_runtime("2.0").abi) == (
+        "3.13",
+        "cp313",
+    )
+    with pytest.raises(CommandError, match="Runtime '3.0'.*No Environment changes"):
+        fabric_runtime("3.0")
+
+
+@weaver_test()
+def test_runtime_2_resolves_cp313_linux_wheels(monkeypatch, tmp_path):
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(packages_mod.subprocess, "run", run)
+    monkeypatch.setattr(packages_mod, "describe_wheel_closure", lambda *a, **k: ())
+    resolve_wheel_closure(["pyyaml"], tmp_path, runtime=fabric_runtime("2.0"))
+    command = commands[0]
+    assert command[command.index("--python-version") + 1] == "3.13"
+    assert command[command.index("--abi") + 1] == "cp313"
 
 
 @weaver_test()
 def test_unpublished_library_lists_are_empty():
     client = _ReadClient(status_code=404)
-    assert read_published(_env(), client=client) == {}
-    assert read_staging(_env(), client=client) == {}
+    assert read_published(_env(), client=client) == _libraries()
+    assert read_staging(_env(), client=client) == _libraries()
 
 
 @pytest.mark.parametrize("status_code", [401, 403, 429, 500])
@@ -315,15 +414,37 @@ def test_unpinned_external_package_cannot_prove_a_version_bound():
 
 
 @weaver_test()
-def test_compatible_user_custom_wheel_is_reused():
+def test_exact_resolved_user_custom_wheel_is_reused():
     plan = plan_requirements(
         [_wheel("sqlparse", "0.5.3", ">=0.5")],
-        published=_libraries(_custom("sqlparse-0.5.2-py3-none-any.whl")),
+        published=_libraries(_custom("sqlparse-0.5.3-py3-none-any.whl")),
         staging=_libraries(),
     )
     assert plan.upload == ()
-    assert plan.requirements[0].resolved_version == "0.5.2"
+    assert plan.requirements[0].resolved_version == "0.5.3"
     assert plan.requirements[0].source == "custom-wheel"
+
+
+@weaver_test()
+def test_compatible_custom_version_without_resolved_metadata_is_rejected():
+    with pytest.raises(EnvironmentPackageConflict) as info:
+        plan_requirements(
+            [_wheel("sqlparse", "0.5.3", ">=0.5")],
+            published=_libraries(_custom("sqlparse-0.5.2-py3-none-any.whl")),
+            staging=_libraries(),
+        )
+    assert info.value.conflicts[0].required == ("==0.5.3 (resolved wheel closure)")
+
+
+@weaver_test()
+def test_pending_custom_version_without_resolved_metadata_is_rejected():
+    with pytest.raises(EnvironmentPackageConflict) as info:
+        plan_requirements(
+            [_wheel("sqlparse", "0.5.3", ">=0.5")],
+            published=_libraries(_custom("sqlparse-0.5.3-py3-none-any.whl")),
+            staging=_libraries(_custom("sqlparse-0.5.2-py3-none-any.whl")),
+        )
+    assert info.value.conflicts[0].location == "staging"
 
 
 @weaver_test()
@@ -418,6 +539,11 @@ def _wire_publish(
     )
     monkeypatch.setattr(env_mod, "read_published", lambda *a, **k: published)
     monkeypatch.setattr(env_mod, "read_staging", lambda *a, **k: staging)
+    monkeypatch.setattr(
+        env_mod,
+        "read_published_spark_compute",
+        lambda *a, **k: {"runtimeVersion": "1.3"},
+    )
     monkeypatch.setattr(env_mod, "resolve_wheel_closure", lambda *a, **k: closure)
     monkeypatch.setattr(
         env_mod, "build_wheel", lambda *a, **k: Path("dist") / wheel_name
@@ -508,6 +634,34 @@ def test_package_conflict_fails_before_build_or_mutation(monkeypatch):
 
 
 @weaver_test()
+def test_unknown_published_runtime_fails_before_library_reads_or_mutation(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        env_mod,
+        "find_existing_environment",
+        lambda *a, **k: (WorkspaceItem("ws1", "Analytics"), _env()),
+    )
+    monkeypatch.setattr(
+        env_mod,
+        "read_published_spark_compute",
+        lambda *a, **k: {"runtimeVersion": "9.0"},
+    )
+    monkeypatch.setattr(
+        env_mod,
+        "read_published",
+        lambda *a, **k: pytest.fail("read libraries after unknown runtime"),
+    )
+    monkeypatch.setattr(
+        env_mod,
+        "upload_wheel",
+        lambda *a, **k: pytest.fail("staged after unknown runtime"),
+    )
+    with pytest.raises(CommandError, match="Runtime '9.0'.*No Environment changes"):
+        env_mod.publish_environment("Analytics", "Runtime", client=object())
+
+
+@weaver_test()
 def test_fabric_client_preserves_failure_status(monkeypatch):
     response = types.SimpleNamespace(
         status_code=429, text="slow down", content=b"", headers={}
@@ -529,10 +683,16 @@ def test_a_long_publish_reports_the_last_state(monkeypatch):
     monkeypatch.setattr(env_mod.time, "sleep", lambda _seconds: None)
 
     class _Client:
+        def __init__(self):
+            self.paths = []
+
         def request(self, *args, **kwargs):
+            self.paths.append(args[1])
             return None
 
+    client = _Client()
     with pytest.raises(FabricError, match="'Running'"):
-        env_mod.publish_and_wait(
-            _env(), client=_Client(), timeout=0.01, poll_interval=0
-        )
+        env_mod.publish_and_wait(_env(), client=client, timeout=0.01, poll_interval=0)
+    assert client.paths == [
+        "workspaces/ws1/environments/env1/staging/publish?beta=false"
+    ]
