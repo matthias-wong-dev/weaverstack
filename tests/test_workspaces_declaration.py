@@ -49,9 +49,7 @@ def test_malformed_environment_references_are_rejected(value):
 
 @weaver_test()
 def test_workspace_accepts_a_qualified_environment_reference():
-    workspace = Workspace(
-        workspace="Analytics", environment="Platform/WeaverRuntime"
-    )
+    workspace = Workspace(workspace="Analytics", environment="Platform/WeaverRuntime")
     assert workspace.environment == EnvironmentRef("Platform", "WeaverRuntime")
 
 

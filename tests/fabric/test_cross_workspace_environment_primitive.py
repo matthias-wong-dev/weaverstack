@@ -16,9 +16,7 @@ def test_a_qualified_environment_runs_weaver_in_the_consumer_workspace(
     from weaver.fabric.livy import LivySession
     from weaver.workspaces import Workspace
 
-    environment = (
-        f"{fabric_workspace.workspace}/{fabric_workspace.environment.name}"
-    )
+    environment = f"{fabric_workspace.workspace}/{fabric_workspace.environment.name}"
     consumer = Workspace(
         workspace=fabric_external_workspace_item.name,
         environment=environment,

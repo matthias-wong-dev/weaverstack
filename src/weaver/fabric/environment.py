@@ -155,15 +155,12 @@ def find_existing_environment(
 
 def _staging_base(environment: Item) -> str:
     return (
-        f"workspaces/{environment.workspace_id}/environments/"
-        f"{environment.id}/staging"
+        f"workspaces/{environment.workspace_id}/environments/{environment.id}/staging"
     )
 
 
 def _environment_base(environment: Item) -> str:
-    return (
-        f"workspaces/{environment.workspace_id}/environments/{environment.id}"
-    )
+    return f"workspaces/{environment.workspace_id}/environments/{environment.id}"
 
 
 def read_staging(environment: Item, *, client: FabricClient) -> dict:
@@ -181,9 +178,7 @@ def read_published(environment: Item, *, client: FabricClient) -> dict:
     """Return the Environment's GA published library list."""
 
     try:
-        return client.get_json(
-            f"{_environment_base(environment)}/libraries?beta=false"
-        )
+        return client.get_json(f"{_environment_base(environment)}/libraries?beta=false")
     except FabricError as exc:
         if exc.status_code == 404:
             return {}
@@ -212,10 +207,7 @@ def upload_wheel(environment: Item, wheel: Path, *, client: FabricClient) -> Non
 
     import requests
 
-    path = (
-        f"{_staging_base(environment)}/libraries/"
-        f"{quote(wheel.name, safe='')}"
-    )
+    path = f"{_staging_base(environment)}/libraries/{quote(wheel.name, safe='')}"
     url = f"{client.api_base_url}/{path}"
     try:
         response = send(
@@ -281,9 +273,7 @@ def publish_and_wait(
 ) -> str:
     """Publish staged libraries and return the terminal state."""
 
-    client.request(
-        "POST", f"{_staging_base(environment)}/publish", expected=(200, 202)
-    )
+    client.request("POST", f"{_staging_base(environment)}/publish", expected=(200, 202))
     deadline = time.time() + timeout
     seen = ""
     while time.time() < deadline:
@@ -416,7 +406,9 @@ def publish_environment(
         staged_weaver = {name for name in staged_custom if is_weaver_wheel(name)}
         wheel_changed = wheel.name not in published_weaver
         stale_weaver = (published_weaver | staged_weaver) - {wheel.name}
-        related_change = package_plan.needs_publish or wheel_changed or bool(stale_weaver)
+        related_change = (
+            package_plan.needs_publish or wheel_changed or bool(stale_weaver)
+        )
 
         uploaded_dependencies: list[str] = []
         t = time.perf_counter()
@@ -441,9 +433,7 @@ def publish_environment(
             status = publish_and_wait(item, client=client)
         timings["publish"] = time.perf_counter() - t
         if status.casefold() not in {"success", "succeeded"}:
-            raise FabricError(
-                f"Environment publish finished with status {status!r}."
-            )
+            raise FabricError(f"Environment publish finished with status {status!r}.")
         published_now = True
     else:
         status = "AlreadyInstalled"

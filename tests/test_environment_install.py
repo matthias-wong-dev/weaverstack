@@ -119,9 +119,7 @@ def test_ga_custom_libraries_are_read_by_name():
         _custom("weaverstack-0.1.0-py3-none-any.whl"),
         _external("pyyaml", "6.0.2"),
     )
-    assert staged_wheels(libraries) == [
-        "weaverstack-0.1.0-py3-none-any.whl"
-    ]
+    assert staged_wheels(libraries) == ["weaverstack-0.1.0-py3-none-any.whl"]
 
 
 class _ReadClient:
@@ -330,21 +328,15 @@ def test_compatible_user_custom_wheel_is_reused():
 
 @weaver_test()
 def test_external_requirement_reuses_fabrics_resolved_dependency_closure():
-    root = _wheel(
-        "mssql-python", "1.13.0", dependencies=("cryptography",)
-    )
-    dependency = _wheel(
-        "cryptography", "50.0.1", ">=2.5", top_level=False
-    )
+    root = _wheel("mssql-python", "1.13.0", dependencies=("cryptography",))
+    dependency = _wheel("cryptography", "50.0.1", ">=2.5", top_level=False)
     plan = plan_requirements(
         [root, dependency],
         published=_libraries(_external("mssql-python", "")),
         staging=_libraries(_external("mssql-python", "")),
     )
     assert plan.upload == ()
-    assert [requirement.name for requirement in plan.requirements] == [
-        "mssql-python"
-    ]
+    assert [requirement.name for requirement in plan.requirements] == ["mssql-python"]
 
 
 @weaver_test()
@@ -372,9 +364,7 @@ def test_existing_custom_requirement_stages_its_missing_dependencies():
 @weaver_test()
 def test_missing_requirement_selects_an_additive_wheel():
     wheel = _wheel("sqlparse", "0.5.3", ">=0.5")
-    plan = plan_requirements(
-        [wheel], published=_libraries(), staging=_libraries()
-    )
+    plan = plan_requirements([wheel], published=_libraries(), staging=_libraries())
     assert plan.upload == (wheel,)
     assert plan.requirements[0].source == "weaver-injected"
     assert plan.needs_publish is True
@@ -428,9 +418,7 @@ def _wire_publish(
     )
     monkeypatch.setattr(env_mod, "read_published", lambda *a, **k: published)
     monkeypatch.setattr(env_mod, "read_staging", lambda *a, **k: staging)
-    monkeypatch.setattr(
-        env_mod, "resolve_wheel_closure", lambda *a, **k: closure
-    )
+    monkeypatch.setattr(env_mod, "resolve_wheel_closure", lambda *a, **k: closure)
     monkeypatch.setattr(
         env_mod, "build_wheel", lambda *a, **k: Path("dist") / wheel_name
     )

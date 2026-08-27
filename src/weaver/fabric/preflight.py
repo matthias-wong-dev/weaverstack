@@ -93,9 +93,7 @@ def required_items(
         from ..workspaces import EnvironmentRef
 
         environment_ref = EnvironmentRef.parse(environment)
-        wanted.append(
-            RequiredItem(environment_ref.name, ENVIRONMENT, "Environment")
-        )
+        wanted.append(RequiredItem(environment_ref.name, ENVIRONMENT, "Environment"))
     for binding in bindings.entries:
         item_type = _ITEM_TYPE_FOR_BINDING[binding.target.kind]
         wanted.append(
@@ -164,9 +162,7 @@ def preflight_fabric_targets(
                 if item.name == environment_ref.name
             )
         except StopIteration:
-            problems.append(
-                f"- Environment {str(environment_ref)!r} was not found"
-            )
+            problems.append(f"- Environment {str(environment_ref)!r} was not found")
         else:
             resolved[f"{ENVIRONMENT}/{str(environment_ref)}"] = environment_item
 

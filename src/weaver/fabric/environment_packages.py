@@ -18,9 +18,7 @@ from typing import Iterable
 
 from ..errors import CommandError
 
-DESKTOP_ONLY = frozenset(
-    {"azure-identity", "requests", "build", "prompt-toolkit"}
-)
+DESKTOP_ONLY = frozenset({"azure-identity", "requests", "build", "prompt-toolkit"})
 FABRIC_PYTHON_VERSION = "3.11"
 FABRIC_ABI = "cp311"
 FABRIC_PLATFORMS = (
@@ -227,9 +225,7 @@ def _wheel_requirements(path: Path):
 
     with zipfile.ZipFile(path) as archive:
         metadata_names = [
-            name
-            for name in archive.namelist()
-            if name.endswith(".dist-info/METADATA")
+            name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
         ]
         if len(metadata_names) != 1:
             raise CommandError(f"Wheel {path.name!r} has no single METADATA file")
@@ -283,6 +279,7 @@ def inspect_libraries(libraries: dict) -> tuple[RemotePackage, ...]:
     """Read GA External and Custom library entries into versioned packages."""
 
     from packaging.utils import InvalidWheelFilename, parse_wheel_filename
+
     found: list[RemotePackage] = []
     for entry in libraries.get("libraries", ()) or ():
         kind = str(entry.get("libraryType") or "").casefold()
@@ -376,9 +373,7 @@ def plan_requirements(
             package = supplied[0]
             version = package.version or "unspecified"
             results.append(
-                ResolvedRequirement(
-                    wheel.name, wheel.required, version, package.source
-                )
+                ResolvedRequirement(wheel.name, wheel.required, version, package.source)
             )
             reused.append(
                 f"{wheel.name}=={package.version}"
@@ -395,9 +390,7 @@ def plan_requirements(
             package = pending[0]
             version = package.version or "unspecified"
             results.append(
-                ResolvedRequirement(
-                    wheel.name, wheel.required, version, package.source
-                )
+                ResolvedRequirement(wheel.name, wheel.required, version, package.source)
             )
             reused.append(
                 f"{wheel.name}=={package.version}"
@@ -419,17 +412,13 @@ def plan_requirements(
         for dependency in wheel.dependencies:
             include(dependency)
 
-    roots = sorted(
-        wheel.name for wheel in closure_by_name.values() if wheel.top_level
-    )
+    roots = sorted(wheel.name for wheel in closure_by_name.values() if wheel.top_level)
     for name in roots:
         include(name)
 
     if conflicts:
         raise EnvironmentPackageConflict(conflicts)
-    return RequirementPlan(
-        tuple(results), tuple(upload), tuple(reused), needs_publish
-    )
+    return RequirementPlan(tuple(results), tuple(upload), tuple(reused), needs_publish)
 
 
 def _packages_by_name(packages: Iterable[RemotePackage]):

@@ -13,13 +13,17 @@ def test_fabric_requirements_come_from_pyproject():
 
 @weaver_test()
 def test_fabric_requirements_include_hosted_runtime_packages():
-    names = {requirement.split("=", 1)[0].lower() for requirement in runtime_dependencies()}
+    names = {
+        requirement.split("=", 1)[0].lower() for requirement in runtime_dependencies()
+    }
     assert {"pyyaml", "sqlparse", "mssql-python"} <= names
 
 
 @weaver_test()
 def test_desktop_packages_are_excluded_from_fabric_requirements():
-    names = {requirement.split("=", 1)[0].lower() for requirement in runtime_dependencies()}
+    names = {
+        requirement.split("=", 1)[0].lower() for requirement in runtime_dependencies()
+    }
     assert not names & DESKTOP_ONLY
 
 
