@@ -59,7 +59,7 @@ EMPTY = Catalogue({})
 
 @pytest.mark.parametrize("item_text", [ITEM, WAREHOUSE_ITEM])
 @weaver_test()
-def test_prepared_items_contain_every_injected_runtime_relation(estate, item_text):
+def test_every_item_carries_the_whole_standard_surface(estate, item_text):
     """Preparation gives resolution, planning and pruning one relation set."""
 
     from weaver.catalogue.builtin import BUILTIN_ITEM

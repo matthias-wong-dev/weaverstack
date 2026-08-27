@@ -2,7 +2,7 @@
 
 This module invalidates the current-state rows whose incarnation a build is
 ending. Runtime-table references themselves are ordinary shortcut declarations,
-injected while the repository is prepared and planned by the shortcut planner.
+composed into the repository and planned by the shortcut planner.
 
 .. code-block:: text
 

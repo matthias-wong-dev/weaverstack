@@ -119,7 +119,7 @@ def actions_of(planned, phase: str):
 
 
 @weaver_test()
-def test_load_is_the_last_thing_an_item_does(lakehouse):
+def test_the_runtime_layer_is_the_last_thing_an_item_does(lakehouse):
     """The ordering claim, and the only one the layer makes.
 
     Its artefacts depend on the item's structural work being finished, which is
@@ -140,7 +140,7 @@ def test_load_is_the_last_thing_an_item_does(lakehouse):
 
 
 @weaver_test()
-def test_an_item_with_no_selected_load_work_gets_no_layer(lakehouse):
+def test_an_item_with_no_selected_runtime_work_gets_no_layer(lakehouse):
     """A phase with nothing to do is not a barrier, and takes no number."""
 
     selected = {key for key in lakehouse.source_documents if key.item == item_id()}

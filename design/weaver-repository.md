@@ -250,8 +250,8 @@ the same declaration readers as an authored tree:
 - `catalogue/` gives the `Warehouse/_weaver` item and its tables, always;
 - `standard/Warehouse/` gives schema `_`, and the `_.Load` and `_.Test` entry
   points, for every normal Warehouse item;
-- `standard/Lakehouse/` gives schema `_`, and `Files/___Load.py`, the folder its
-  load code is deployed into, present only while the item has load code.
+- `standard/Lakehouse/` gives schema `_`, and, only while the item has load code,
+  `Files/___Load.py`, the folder that code is deployed into.
 
 **Generated content** is what follows an item's own declarations: one
 implementation procedure per Warehouse table Weaver loads, `_.[Load X.Y]`, and

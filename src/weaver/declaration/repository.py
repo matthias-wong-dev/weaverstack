@@ -14,7 +14,7 @@ from __future__ import annotations
 import ast
 import hashlib
 from dataclasses import dataclass, field, replace
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, TypeVar
 
 from ..errors import DiscoveryError
 from ..locations import Location
@@ -65,6 +65,10 @@ from .source import (
     language_for_filename,
     read_source_document,
 )
+
+_Key = TypeVar("_Key")
+_Value = TypeVar("_Value")
+_Declaration = TypeVar("_Declaration")
 
 #: Never read, never installed.
 IGNORED_DIRECTORIES = frozenset(
@@ -193,12 +197,21 @@ def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
     return RepositoryPart(
         label="merged",
         items=tuple(sorted(items)),
-        documents=_merge_keyed(parts, "documents", what="declaration"),
-        schemas=_merge_keyed(parts, "schemas", what="schema"),
-        programmables=_merge_keyed(parts, "programmables", what="programmable"),
-        shortcuts=_merge_destinations(parts, "shortcuts", what="shortcut"),
+        documents=_merge_keyed(
+            ((part.label, part.documents) for part in parts), what="declaration"
+        ),
+        schemas=_merge_keyed(
+            ((part.label, part.schemas) for part in parts), what="schema"
+        ),
+        programmables=_merge_keyed(
+            ((part.label, part.programmables) for part in parts), what="programmable"
+        ),
+        shortcuts=_merge_destinations(
+            ((part.label, part.shortcuts) for part in parts), what="shortcut"
+        ),
         logical_shortcuts=_merge_destinations(
-            parts, "logical_shortcuts", what="logical shortcut"
+            ((part.label, part.logical_shortcuts) for part in parts),
+            what="logical shortcut",
         ),
         support_files=paths,
         declared_files=declared,
@@ -206,29 +219,31 @@ def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
     )
 
 
-def _merge_keyed(parts: tuple[RepositoryPart, ...], name: str, *, what: str) -> dict:
-    """Every part's identity-keyed declarations, refusing a collision."""
+def _merge_keyed(
+    contributions: Iterable[tuple[str, Mapping[_Key, _Value]]], *, what: str
+) -> dict[_Key, _Value]:
+    """Identity-keyed declarations from every part, refusing a collision."""
 
-    merged: dict = {}
+    merged: dict[_Key, _Value] = {}
     folded: dict[str, object] = {}
-    for part in parts:
-        for identity, value in getattr(part, name).items():
-            _claim(folded, identity, part.label, what=what)
+    for label, contributed in contributions:
+        for identity, value in contributed.items():
+            _claim(folded, identity, label, what=what)
             merged[identity] = value
     return merged
 
 
 def _merge_destinations(
-    parts: tuple[RepositoryPart, ...], name: str, *, what: str
-) -> tuple:
+    contributions: Iterable[tuple[str, Iterable[_Declaration]]], *, what: str
+) -> tuple[_Declaration, ...]:
     """The same, for the shortcut collections, which are keyed by destination."""
 
-    merged: dict[str, object] = {}
+    merged: dict[str, _Declaration] = {}
     folded: dict[str, object] = {}
-    for part in parts:
-        for declaration in getattr(part, name):
+    for label, contributed in contributions:
+        for declaration in contributed:
             key = str(declaration.destination)
-            _claim(folded, key, part.label, what=what)
+            _claim(folded, key, label, what=what)
             merged[key] = declaration
     return tuple(value for _key, value in sorted(merged.items()))
 
@@ -314,6 +329,12 @@ def read_repository_fragment(
     )
 
 
+def _documents_of(part: RepositoryPart, item: WeaverItemId) -> list[SourceDocument]:
+    return [
+        source for identity, source in part.documents.items() if identity.item == item
+    ]
+
+
 def _catalogue_part() -> RepositoryPart:
     """Weaver's catalogue declaration, composed into every repository."""
 
@@ -345,11 +366,7 @@ def _standard_parts(authored: RepositoryPart) -> tuple[RepositoryPart, ...]:
         files = dict(standard_fragment(item.item_type))
         if FOLDER_DOCUMENT in files and not has_deployable_source(
             item,
-            documents=[
-                source
-                for identity, source in authored.documents.items()
-                if identity.item == item
-            ],
+            documents=_documents_of(authored, item),
             support_paths=authored.support_files,
         ):
             del files[FOLDER_DOCUMENT]
@@ -679,12 +696,7 @@ def _generated_content(authored: RepositoryPart) -> RepositoryPart:
         if item == BUILTIN_ITEM:
             continue
         for programmable in item_generated_programmables(
-            item=item,
-            documents=[
-                source
-                for identity, source in authored.documents.items()
-                if identity.item == item
-            ],
+            item=item, documents=_documents_of(authored, item)
         ):
             programmables[programmable.identity] = programmable
     return RepositoryPart(label="generated", programmables=programmables)

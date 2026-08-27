@@ -117,7 +117,7 @@ def _build(estate):
     return bindings, result
 
 
-# --- the built-in item is injected and bound, without being asked for ---------
+# --- the built-in item is composed in and bound, without being asked for ------
 
 
 @weaver_test()

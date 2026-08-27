@@ -149,6 +149,18 @@ def test_the_fixed_entry_point_supplies_every_column_it_writes(name):
 
 
 @weaver_test()
+def test_the_load_entry_point_carries_the_whole_load_abi():
+    """``_.Load`` is checked in, so a changed ABI has to be carried into it."""
+
+    from weaver.declaration.tsql_load import RESULT_PARAMETER_NAMES
+
+    sql = standard_fragment(WAREHOUSE)["programmables/_.Load.sql"].decode("utf-8")
+
+    for physical in RESULT_PARAMETER_NAMES.values():
+        assert f"@{physical} = @{physical} output" in sql, physical
+
+
+@weaver_test()
 def test_authored_content_may_not_claim_a_weaver_surface_destination(tmp_path):
     """``_.Bookmark`` names Weaver's own relation, wherever it is written."""
 
