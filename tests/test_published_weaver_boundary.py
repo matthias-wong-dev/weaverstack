@@ -138,7 +138,10 @@ def test_a_body_that_cannot_import_weaver_is_told_to_install():
     source = environment_bootstrap()
 
     assert "import weaver" in source
-    assert "weaver fabric environment publish <env> --workspace <ws>" in source
+    assert (
+        "weaver fabric environment publish <Environment | Workspace/Environment>"
+        in source
+    )
 
 
 @weaver_test()

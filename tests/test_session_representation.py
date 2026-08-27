@@ -292,6 +292,23 @@ def test_a_matching_version_says_nothing(monkeypatch):
 
 
 @weaver_test()
+def test_a_shared_environment_warning_names_its_owning_workspace(monkeypatch):
+    workspace = Workspace(
+        workspace="Analytics",
+        catalogue="Warehouse/Weaver",
+        environment="Platform/weaver",
+    )
+    with ConsoleSession(workspace=workspace) as session:
+        scope = session.scope()
+        monkeypatch.setattr(scope, "livy_run", lambda *a, **k: "9.9.9-elsewhere")
+
+        scope.check_published_version(session.warn)
+
+        assert "publish Platform/weaver`" in session.warnings[0]
+        assert "--workspace" not in session.warnings[0]
+
+
+@weaver_test()
 def test_the_check_is_asked_once_per_workspace_not_once_per_command(monkeypatch):
     asked = []
 

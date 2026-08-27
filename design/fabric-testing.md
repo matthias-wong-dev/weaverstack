@@ -188,7 +188,8 @@ The Environment still has to exist and still carries the dependencies:
   --workspace PYTEST_WORKSPACE
 ```
 
-Publish again when `deployment/fabric/environment.yml` changes. An Environment
+Publish again when Weaver Python or its project dependencies change. Publication
+keeps the Environment definition and foreign custom libraries. An Environment
 holding a Weaver wheel as well is harmless. The bootstrap reads
 `weaver.__file__` and fails the session unless the package came from the
 extraction directory, so an Environment carrying a wheel of this same version

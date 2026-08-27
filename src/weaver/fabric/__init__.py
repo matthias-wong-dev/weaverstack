@@ -16,8 +16,6 @@ from .client import FabricClient, FabricError
 from .environment import (
     EnvironmentPublishResult,
     build_wheel,
-    find_or_create_environment,
-    missing_from_environment,
     publish_environment,
 )
 from .livy import (
@@ -75,8 +73,6 @@ __all__ = [
     "publish_environment",
     "EnvironmentPublishResult",
     "build_wheel",
-    "find_or_create_environment",
-    "missing_from_environment",
     "LivySession",
     "LivySessionInfo",
     "WorkspaceLivySession",

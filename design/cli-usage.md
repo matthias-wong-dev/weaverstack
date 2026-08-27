@@ -19,7 +19,7 @@ Commands accept the applicable subset of:
 ```text
 --workspace <Fabric-workspace-name>
 --workspace-config <path>
---environment <Fabric-Environment>
+--environment <Environment | Workspace/Environment>
 --catalogue <control-Lakehouse>
 ```
 
@@ -46,6 +46,10 @@ lakehouses:
 warehouses:
   Reporting_Dev: Warehouse/Reporting
 ```
+
+An unqualified Environment belongs to `Analytics` in this example. A shared
+Environment is written as `environment: Platform/Runtime`. CLI overrides use
+the same grammar.
 
 See [`examples/weaver_example.yml`](../examples/weaver_example.yml) for the
 expanded form, including per-target execution settings.
@@ -344,6 +348,22 @@ Install Weaver into a Fabric Environment:
 weaver fabric environment publish Runtime --workspace Analytics
 ```
 
+The qualified form names the owning workspace directly:
+
+```bash
+weaver fabric environment publish Platform/Runtime
+```
+
+The Environment must already exist. Publication reuses compatible published
+packages, stages missing Weaver requirements as custom wheels, and reports
+incompatible versions before mutation. It does not change the Environment
+definition or unrelated custom libraries. Weaver does not create Fabric
+Environments.
+
+Fabric resolves the dependency closure for External libraries. Weaver supplies
+a binary wheel closure when a requirement is absent or supplied as a custom
+wheel.
+
 There is no separate initialise lifecycle. The package-owned catalogue is built
 by the ordinary build: `Warehouse/_weaver` is composed into every parsed
 repository, bound to the configured catalogue Warehouse, and its tables are created
@@ -353,9 +373,9 @@ build.
 The catalogue Warehouse itself must already exist. It is a Fabric workspace item,
 so creating one is provisioning rather than building, and a build against a
 missing catalogue Warehouse fails preflight instead of quietly making one. A
-desktop build proves it — along with every bound Lakehouse and Warehouse, and
-the Environment where one is named — from a single workspace listing before it
-starts a Livy session.
+desktop build proves it, every bound Lakehouse and Warehouse, and a locally
+owned Environment from one workspace listing before it starts a Livy session.
+A qualified Environment is resolved in its owning workspace.
 
 ## Build
 

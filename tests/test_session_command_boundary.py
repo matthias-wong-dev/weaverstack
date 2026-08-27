@@ -468,7 +468,9 @@ def test_a_commands_catalogue_reaches_the_operation(transport, monkeypatch):
         assert resolved, "the load never resolved a workspace"
         assert resolved[0].catalogue == "Warehouse/Play_Weaver"
         assert resolved[0].workspace == "My Workspace"
-        assert resolved[0].environment == "weaver"
+        from weaver.workspaces import EnvironmentRef
+
+        assert resolved[0].environment == EnvironmentRef(None, "weaver")
 
 
 @weaver_test()

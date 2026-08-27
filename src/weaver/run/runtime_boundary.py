@@ -319,7 +319,7 @@ def _workspace_literal(workspace) -> str:
     return (
         f"Workspace(workspace={workspace.workspace!r}, "
         f"catalogue={workspace.catalogue!r}, "
-        f"environment={workspace.environment!r})"
+        f"environment={str(workspace.environment)!r})"
     )
 
 

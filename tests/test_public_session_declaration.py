@@ -19,7 +19,7 @@ from support.weaver_test import weaver_test
 import weaver
 from weaver.errors import CommandError, ConfigError
 from weaver.sessions import ConsoleSession
-from weaver.workspaces import Workspace
+from weaver.workspaces import EnvironmentRef, Workspace
 
 
 @weaver_test()
@@ -76,7 +76,7 @@ def test_configuration_supplies_what_was_not_named(tmp_path, desktop_credential)
 
     with weaver.session(workspace_config=config) as opened:
         assert opened.workspace.catalogue == "Warehouse/Configured"
-        assert opened.workspace.environment == "weaver"
+        assert opened.workspace.environment == EnvironmentRef(None, "weaver")
 
 
 @weaver_test()

@@ -25,6 +25,55 @@ CATALOGUE_KIND = "Warehouse"
 CLI_AREA = "cli"
 
 
+@dataclass(frozen=True)
+class EnvironmentRef:
+    """A Fabric Environment name and its optional owning workspace."""
+
+    workspace: str | None
+    name: str
+
+    def __post_init__(self) -> None:
+        if self.workspace is not None:
+            object.__setattr__(
+                self,
+                "workspace",
+                validate_name(self.workspace, what="Environment workspace"),
+            )
+        object.__setattr__(
+            self, "name", validate_name(self.name, what="Environment name")
+        )
+
+    @classmethod
+    def parse(cls, value: object) -> "EnvironmentRef":
+        """Parse ``Environment`` or ``Workspace/Environment``."""
+
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, str):
+            raise ConfigError(
+                "environment must be a string, got " + type(value).__name__
+            )
+        parts = value.strip().split("/")
+        if len(parts) == 1:
+            return cls(workspace=None, name=parts[0])
+        if len(parts) == 2:
+            return cls(workspace=parts[0], name=parts[1])
+        raise ConfigError(
+            "environment must be 'Environment' or 'Workspace/Environment', "
+            f"got {value!r}"
+        )
+
+    def owner(self, workload_workspace: str) -> str:
+        """Return the workspace that owns this Environment."""
+
+        return self.workspace or validate_name(
+            workload_workspace, what="workload workspace"
+        )
+
+    def __str__(self) -> str:
+        return f"{self.workspace}/{self.name}" if self.workspace else self.name
+
+
 def _catalogue_value(value: object) -> str:
     """One ``Warehouse/Name`` catalogue, checked and returned as written."""
 
@@ -89,7 +138,7 @@ class Workspace:
     """
 
     workspace: str
-    environment: str | None = None
+    environment: EnvironmentRef | str | None = None
     #: Where the Weaver catalogue lives, typed: ``Warehouse/Weaver``. Typed so the
     #: value says which kind of item it names rather than relying on the field's
     #: name to imply it.
@@ -106,7 +155,7 @@ class Workspace:
             object.__setattr__(
                 self,
                 "environment",
-                validate_name(self.environment, what="environment"),
+                EnvironmentRef.parse(self.environment),
             )
         if self.catalogue is not None:
             object.__setattr__(self, "catalogue", _catalogue_value(self.catalogue))

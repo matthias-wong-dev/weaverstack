@@ -41,6 +41,9 @@ weaver fabric environment publish weaver --workspace-config workspace.yml
 weaver build ./estate --workspace-config workspace.yml --bind Lakehouse/Sales_Dev
 ```
 
+The Fabric Environment must already exist. Publication preserves its package
+definition and unrelated custom libraries.
+
 See [CLI usage](design/cli-usage.md) for repository sources, physical-first
 bindings, wipe and unbind.
 

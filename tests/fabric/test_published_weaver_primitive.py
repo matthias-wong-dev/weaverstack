@@ -85,7 +85,7 @@ def test_the_published_wheel_imports_and_runs_in_the_session(
         "from weaver.resolution import resolver_for\n"
         f"workspace = Workspace(workspace={fabric_workspace.workspace!r}, "
         f"catalogue={fabric_workspace.catalogue!r}, "
-        f"environment={fabric_workspace.environment!r})\n"
+        f"environment={str(fabric_workspace.environment)!r})\n"
         "resolver = resolver_for(workspace)\n"
         f"root = resolver.lakehouse(ItemRef({fabric_target_lakehouse.name!r})).value\n"
         "emit({'dist': version('weaverstack'), 'root': root})\n",
@@ -94,7 +94,7 @@ def test_the_published_wheel_imports_and_runs_in_the_session(
     client = FabricClient()
     environment = find_item(
         find_workspace(fabric_workspace.workspace, client=client),
-        fabric_workspace.environment,
+        fabric_workspace.environment.name,
         item_type=ENVIRONMENT,
         client=client,
     )

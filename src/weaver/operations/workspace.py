@@ -66,8 +66,12 @@ def _operation_workspace(
     changes = {}
     if catalogue is not None and base.catalogue != catalogue:
         changes["catalogue"] = catalogue
-    if environment is not None and base.environment != environment:
-        changes["environment"] = environment
+    if environment is not None:
+        from ..workspaces import EnvironmentRef
+
+        environment_ref = EnvironmentRef.parse(environment)
+        if base.environment != environment_ref:
+            changes["environment"] = environment_ref
     if not changes:
         return base
 

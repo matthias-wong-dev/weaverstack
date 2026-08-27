@@ -285,6 +285,8 @@ class LivySession:
         *,
         token: str | None = None,
         environment_id: str | None = None,
+        environment_reference: str | None = None,
+        workspace_name: str | None = None,
         api_base_url: str = FABRIC_API,
         poll_interval: float = DEFAULT_POLL_INTERVAL,
         bootstrap: str | None = None,
@@ -293,6 +295,8 @@ class LivySession:
         self._token_source = token_source(token, scope=FABRIC_SCOPE)
         self.base = sessions_url(workspace_id, lakehouse_id, api_base_url=api_base_url)
         self.environment_id = environment_id
+        self.environment_reference = environment_reference
+        self.workspace_name = workspace_name
         self.poll_interval = poll_interval
         self.bootstrap = bootstrap
         self.weaver_bootstrap = weaver_bootstrap
@@ -350,6 +354,9 @@ class LivySession:
         environment_id = kwargs.pop("environment_id", None)
         if environment_id is None and getattr(workspace, "environment", None):
             environment_id = _resolve_environment_id(workspace, resolver)
+        environment_reference = kwargs.pop("environment_reference", None)
+        if environment_reference is None and getattr(workspace, "environment", None):
+            environment_reference = str(workspace.environment)
 
         # A caller supplying its own start-up code carries `emit` in it, because
         # every submitted body returns through `emit`.
@@ -358,6 +365,8 @@ class LivySession:
             resolver.workspace.id,
             home.id,
             environment_id=environment_id,
+            environment_reference=environment_reference,
+            workspace_name=workspace.workspace,
             **kwargs,
         )
 
@@ -412,12 +421,20 @@ class LivySession:
                     {"id": self.environment_id}
                 )
             }
-        created = _call("POST", self.base, self.token, payload)
-        session_id = created.get("id") or created.get("livyId")
-        if session_id is None:
-            raise LivyError(f"Livy did not return a session id: {created}")
-        self.session_url = f"{self.base}/{session_id}"
-        self._await("idle", timeout=timeout)
+        try:
+            created = _call("POST", self.base, self.token, payload)
+            session_id = created.get("id") or created.get("livyId")
+            if session_id is None:
+                raise LivyError(f"Livy did not return a session id: {created}")
+            self.session_url = f"{self.base}/{session_id}"
+            self._await("idle", timeout=timeout)
+        except LivyError as exc:
+            if self.environment_reference and self.workspace_name:
+                raise LivyError(
+                    f"Spark session in workspace {self.workspace_name!r} could not "
+                    f"attach Environment {self.environment_reference!r}: {exc}"
+                ) from exc
+            raise
         if self.bootstrap:
             self.run(self.bootstrap)
 
@@ -547,17 +564,26 @@ def emit_source() -> str:
 
 
 def _resolve_environment_id(workspace, resolver) -> str:
-    """The item id of the workspace's named Environment.
+    """The item ID of the workspace's Environment reference.
 
-    Resolved by type, so a same-named Lakehouse or Warehouse cannot be picked up
-    by mistake. Identity is ``workspace + type + name``.
+    A qualified reference resolves its owning workspace through the same REST
+    client. The Livy session remains attached to the workload workspace.
     """
 
-    from .resources import ENVIRONMENT, find_item
+    from ..workspaces import EnvironmentRef
+    from .resources import ENVIRONMENT, find_item, find_workspace
+
+    reference = EnvironmentRef.parse(workspace.environment)
+    owner_name = reference.owner(workspace.workspace)
+    owner = (
+        resolver.workspace
+        if owner_name == workspace.workspace
+        else find_workspace(owner_name, client=resolver.client)
+    )
 
     item = find_item(
-        resolver.workspace,
-        workspace.environment,
+        owner,
+        reference.name,
         item_type=ENVIRONMENT,
         client=resolver.client,
     )
@@ -572,7 +598,8 @@ def missing_environment(workspace=None) -> str:
     return (
         f"No Fabric Environment is configured{where}. Running Weaver in Fabric "
         "requires a Fabric Environment with Weaver installed. Pass "
-        "--environment <name>, or set environment in workspace configuration."
+        "--environment <Environment | Workspace/Environment>, or set environment "
+        "in workspace configuration."
     )
 
 
@@ -591,6 +618,6 @@ def environment_bootstrap() -> str:
         "    raise ImportError(\n"
         "        'this body imports Weaver, and the attached Fabric Environment '\n"
         "        'has no usable Weaver install; run '\n"
-        "        'weaver fabric environment publish <env> --workspace <ws>'\n"
+        "        'weaver fabric environment publish <Environment | Workspace/Environment>'\n"
         "    ) from _exc\n"
     )

@@ -1271,7 +1271,7 @@ def _fabric_build_context(
         return (
             f"Workspace(workspace={workspace.workspace!r}, "
             f"catalogue={workspace.catalogue!r}, "
-            f"environment={workspace.environment!r})"
+            f"environment={str(workspace.environment)!r})"
         )
 
     def generate(bundle_name: str = "buildtest"):

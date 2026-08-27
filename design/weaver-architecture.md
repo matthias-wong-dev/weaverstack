@@ -543,10 +543,20 @@ weaver build \
 The repository does not contain deployment-specific information. The Workspace
 determines where logical declarations are deployed.
 
-`--environment` names the Fabric Environment `weaver fabric environment publish`
-published to, and is needed by the commands that run Weaver-authored Python
-inside Fabric: `load` and `test`. A build and bundle installation execute
-frozen SQL and bundle payloads, so neither needs it.
+`--environment` accepts `Environment` for the workload workspace or
+`Workspace/Environment` for an Environment owned by another workspace. The same
+reference grammar applies to workspace configuration and `weaver fabric
+environment publish`. Commands that run Weaver-authored Python inside Fabric,
+including `load` and `test`, need this reference. A build and bundle installation
+execute frozen SQL and bundle payloads, so neither needs it.
+
+Environment publication installs Weaver into an existing Fabric Environment.
+It reads the published package set, reuses compatible packages, adds absent
+Weaver requirements as custom wheels, and reports incompatible versions before
+staging. An External library carries the dependency closure Fabric published for
+it. A missing requirement or custom wheel receives the binary dependency closure
+Weaver resolves. Weaver owns `weaverstack-*.whl`. The Environment definition and
+every other custom library remain user-owned.
 
 ---
 

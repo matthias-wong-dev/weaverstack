@@ -77,6 +77,28 @@ def test_a_workspace_with_an_environment_attaches_it(monkeypatch):
 
 
 @weaver_test()
+def test_a_qualified_environment_resolves_in_its_owning_workspace(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        "weaver.fabric.resources.find_workspace",
+        lambda name, *, client: types.SimpleNamespace(id="owner1", name=name),
+    )
+
+    def find(ws, name, *, item_type, client):
+        seen.update(workspace=ws.name, name=name)
+        return Item("env99", name, item_type, ws.id)
+
+    monkeypatch.setattr("weaver.fabric.resources.find_item", find)
+    workspace = _spark_workspace(environment="Platform/Weaver")
+
+    session = LivySession.for_workspace(workspace, resolver=_FakeResolver(), token="t")
+
+    assert session.environment_id == "env99"
+    assert session.environment_reference == "Platform/Weaver"
+    assert seen == {"workspace": "Platform", "name": "Weaver"}
+
+
+@weaver_test()
 def test_start_attaches_the_environment_as_a_spark_conf(monkeypatch):
     import json
 
