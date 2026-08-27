@@ -174,6 +174,9 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
     )
     yield built
     _drop(built)
+    # Only at teardown: `_drop` also runs during setup, and the Installation row
+    # this estate needs is written before it.
+    forget_installations(built.executor)
 
 
 @pytest.fixture(scope="module")
@@ -191,13 +194,10 @@ def static_estate(
     )
     yield built
     _drop(built)
+    forget_installations(built.executor)
 
 
 def _drop(estate: Estate) -> None:
-    # The Installation row goes with it: it names this Warehouse as the target
-    # of a logical item nothing built, and a row left behind makes the next
-    # fixture's item ambiguous to the entry points.
-    forget_installations(estate.executor)
     name = estate.object_name
     estate.executor.execute_script(
         f"drop procedure if exists [_].[Load {SCHEMA}.{name}];\n"
@@ -859,7 +859,6 @@ def _install_wide(
 
 
 def _drop_wide(estate: WideEstate) -> None:
-    forget_installations(estate.executor)
     name = estate.object_name
     statements = [f"drop procedure if exists [_].[Load {SCHEMA}.{name}];"]
     statements += [
@@ -962,6 +961,7 @@ def constrained_estate(
     )
     yield built
     _drop_wide(built)
+    forget_installations(built.executor)
 
 
 @pytest.fixture(scope="module")
@@ -977,6 +977,7 @@ def merge_estate(
     )
     yield built
     _drop_wide(built)
+    forget_installations(built.executor)
 
 
 # --- recoverable refusals -----------------------------------------------------

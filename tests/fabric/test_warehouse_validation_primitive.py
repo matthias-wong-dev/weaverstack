@@ -141,13 +141,12 @@ def estate(clean_disposable_warehouse, fabric_workspace, fabric_initialise_catal
     executor.execute_script(entry_point_script("Test"))
     yield executor
     _drop(executor)
+    # Only at teardown: `_drop` also runs during setup, and the Installation row
+    # this estate needs is written before it.
+    forget_installations(executor)
 
 
 def _drop(executor) -> None:
-    # The Installation row goes with it: it names this Warehouse as the target
-    # of a logical item nothing built, and a row left behind makes the next
-    # fixture's item ambiguous to the entry points.
-    forget_installations(executor)
     executor.execute_script(
         "drop procedure if exists [_].[Test];\n"
         + "\n".join(f"drop procedure if exists [_].[{name}];" for name in PROCEDURES)

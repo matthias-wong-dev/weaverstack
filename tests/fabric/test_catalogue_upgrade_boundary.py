@@ -286,9 +286,14 @@ def test_a_generated_load_reads_the_catalogue_through_a_consumer_warehouse_view(
     )
     assert built.status == "succeeded", _failures(built)
 
+    # ``@item_name`` supplied: the tests above bind ``Reporting`` to this same
+    # Warehouse, so two logical items name it and the entry point refuses to
+    # guess between them. Recovering the item from ``_.Installation`` is the
+    # subject of the Warehouse primitive tests, not of this one.
     for _ in range(2):
         warehouse.executor.execute_script(
-            "exec [_].[Load] @object_name = N'Wh.Customer', @fault_tolerant = 0;"
+            "exec [_].[Load] @object_name = N'Wh.Customer'"
+            ", @fault_tolerant = 0, @item_name = N'RuntimeReference';"
         )
 
     evidence = warehouse.executor.query_result_sets(
