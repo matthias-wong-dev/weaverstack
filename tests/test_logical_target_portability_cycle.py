@@ -178,6 +178,42 @@ def test_an_explicit_physical_target_overrides_the_configured_one(
     assert _physical(bindings)[ITEM] == "Landing_Scratch"
 
 
+@weaver_test()
+def test_one_build_refuses_two_items_sharing_one_physical_item(tmp_path, root):
+    """Where the shared-container rule stops.
+
+    Configuration accepts the mapping, load and test select by item, and a build
+    of either one on its own works. What one build cannot do is write both:
+    prune is scoped to the schemas each item manages, so one bundle would hold
+    two keep-sets for one target inventory.
+    """
+
+    from weaver.errors import BuildError
+    from weaver.operations.build import _item_bindings
+
+    config = tmp_path / "shared.yml"
+    config.write_text(
+        "workspace: Analytics\ncatalogue: Warehouse/Weaver\n\ntargets:\n"
+        "  Lakehouse/A: Shared\n  Lakehouse/B: Shared\n",
+        encoding="utf-8",
+    )
+    from weaver.config import load_workspace
+
+    workspace = load_workspace(config)
+
+    # Either one alone.
+    assert _physical({"bindings": _item_bindings(["Lakehouse/A"], workspace)}) == {
+        "Lakehouse/A": "Shared"
+    }
+    assert _physical({"bindings": _item_bindings(["Lakehouse/B"], workspace)}) == {
+        "Lakehouse/B": "Shared"
+    }
+
+    # Both at once, which is also what naming no target would ask for.
+    with pytest.raises(BuildError, match="Build them one at a time"):
+        _item_bindings(None, workspace)
+
+
 # --- load and test follow the catalogue ---------------------------------------
 
 

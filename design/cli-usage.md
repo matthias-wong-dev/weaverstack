@@ -404,6 +404,8 @@ consulted for it either.
 
 `wipe` and `unbind` keep physical positional targets. They address a Fabric item
 whether or not an installation exists, so they have no logical item to name.
+`health` keeps them too: it reports on what the estate holds, and reaches the
+same three sections with no target at all.
 
 So one repository, one set of logical names and one command sequence run against
 development and production, and the only thing that changes is the workspace
@@ -534,7 +536,8 @@ weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql"
 ## Health
 
 `weaver health` reports the installed estate's operational state, in three
-sections over one installed graph:
+sections over one installed graph. Its targets are physical positionals, and
+naming none reports on every target the catalogue binds an item to:
 
 ```bash
 weaver health --workspace-config examples/weaver_example.yml

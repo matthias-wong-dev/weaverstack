@@ -253,7 +253,14 @@ class ItemBinding:
 
 @dataclass(frozen=True)
 class ItemBindings:
-    """The sparse logical-to-physical bindings for one coordinated build."""
+    """The sparse logical-to-physical bindings for one coordinated build.
+
+    Two logical items may be deployed to one physical item, and workspace
+    configuration says so freely. One build writing both is refused: prune is
+    scoped to the schemas each item manages, and reconciling two keep-sets
+    against one target inventory in one bundle is a different design. Build them
+    one at a time.
+    """
 
     entries: tuple[ItemBinding, ...]
 
@@ -274,7 +281,10 @@ class ItemBindings:
             key = (target.physical_kind, target.item.name)
             if key in physical:
                 raise BuildError(
-                    f"physical {key[0]} target is bound more than once: {key[1]}"
+                    f"one build cannot write two logical items into {key[0]}/"
+                    f"{key[1]}. Prune is scoped to the schemas each item manages, "
+                    "and one bundle reconciling both against one inventory would "
+                    "have two keep-sets for it. Build them one at a time"
                 )
             physical.add(key)
 
