@@ -507,6 +507,7 @@ class LivySession:
 
     def _await_release(self, url: str, *, timeout: float) -> None:
         deadline = time.time() + timeout
+        session_id = url.rsplit("/", 1)[-1]
         while time.time() < deadline:
             try:
                 state = _call("GET", url, self.token, expected=(200, 404))
@@ -520,7 +521,27 @@ class LivySession:
                 "success",
                 "error",
             }:
-                return
+                # Livy reaches a terminal state before Fabric's scheduler frees
+                # the capacity slot. The Lakehouse collection is the authority
+                # for that second transition.
+                try:
+                    collection = _call(
+                        "GET", self.base, self.token, expected=(200,)
+                    )
+                except LivyError:
+                    time.sleep(self.poll_interval)
+                    continue
+                matching = next(
+                    (
+                        LivySessionInfo.from_mapping(item)
+                        for item in collection.get("items", ())
+                        if str(item.get("id") or item.get("livyId") or "")
+                        == session_id
+                    ),
+                    None,
+                )
+                if matching is None or not matching.active:
+                    return
             time.sleep(self.poll_interval)
         print(
             f"warning: Livy session {url.rsplit('/', 1)[-1]} did not report itself "

@@ -49,6 +49,7 @@ DEFAULT_ENVIRONMENT = "weaver"
 
 WAREHOUSE_READY_TIMEOUT = 600.0
 WAREHOUSE_POLL_INTERVAL = 5.0
+LIVY_WORKSPACE_HANDOFF_SECONDS = 30.0
 
 
 def _timed_session_run(session, label: str, body: str, *, phase: str | None = None):
@@ -469,6 +470,22 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
 INJECT_ENV = "WEAVER_PYTEST_INJECT_WEAVER"
 
 
+# The shared Livy fixture normally owns the capacity's Spark session slot for
+# the full run. A cross-workspace attachment primitive must open its own session
+# in the consumer workspace first. Collection ordering reserves that first slot;
+# this reference makes a scheduling regression fail before it reaches Fabric.
+_shared_livy_session = None
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_collection_modifyitems(items):
+    """Run exclusive Livy primitives before the shared session is acquired."""
+
+    exclusive = [item for item in items if "exclusive_livy_slot" in item.fixturenames]
+    if exclusive:
+        items[:] = exclusive + [item for item in items if item not in exclusive]
+
+
 @pytest.fixture(scope="session")
 def injected_weaver_bootstrap(
     fabric_workspace, fabric_client, fabric_staging_lakehouse
@@ -594,10 +611,27 @@ def livy_session(fabric_workspace, fabric_client, request, injected_weaver_boots
     request.config._weaver_livy_startup_seconds = startup
     print(f"Fabric Livy session startup: {startup:.2f}s")
     session.weaver_startup_seconds = startup
+    global _shared_livy_session
+    _shared_livy_session = session
     try:
         yield session
     finally:
+        _shared_livy_session = None
         session.close()
+
+
+@pytest.fixture
+def exclusive_livy_slot():
+    """Reserve the first capacity slot for a session this test opens itself."""
+
+    if _shared_livy_session is not None:
+        pytest.fail("exclusive Livy test ran after the shared session was acquired")
+    try:
+        yield
+    finally:
+        # Fabric's scheduler can report the consumer session Ended before a
+        # session in another workspace on the capacity can start successfully.
+        time.sleep(LIVY_WORKSPACE_HANDOFF_SECONDS)
 
 
 @pytest.fixture(scope="session")
