@@ -318,6 +318,19 @@ class Catalogue:
             if str(row.get("target_name") or "").casefold() == target_name.casefold()
         }
 
+    def dag(self):
+        """The installed managed graph these rows describe.
+
+        An immutable derived view: every managed logical node the catalogue
+        records, the resolved edges between them, and the topology over both.
+        Load planning, validation planning and health read it, so what depends
+        on what is settled once. See :mod:`weaver.installed`.
+        """
+
+        from ..installed import installed_dag
+
+        return installed_dag(self)
+
     def to_mapping(self) -> dict[str, object]:
         """A versioned JSON-safe representation for a remote state boundary."""
 

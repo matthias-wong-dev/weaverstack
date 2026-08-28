@@ -1,18 +1,11 @@
 """The installed validation estate, and the order it runs in.
 
-The sibling of :mod:`weaver.load_plan`, sharing its premise: the installed
-catalogue is authoritative and the repository is not reopened.
+Selection from the installed managed graph, whose validation nodes come from
+``_.TestDictionary`` and whose runnable artefacts come from ``_.Registry``.
 
-What makes this a module rather than more branches in that one is that a
-validation has no Registry row, because nothing is materialised under a logical
-Test ID. The estate comes from ``_.TestDictionary`` instead, and each declaration
-is
-connected to its installed primitive by computing the artefact identity with
-:func:`weaver.etl.validation_artefact_id`, the function the build claimed it
-with. A row whose computed artefact is absent from Registry is a missing
-installation, reported as an invalid node rather than skipped.
-
-Dependency rows are associated the same way, against logical IDs.
+A validation dispatches a compiled procedure or module that reports counts. It
+is selected by name and by target, and it is never ordered against another
+validation.
 """
 
 from __future__ import annotations
@@ -22,19 +15,20 @@ from types import MappingProxyType
 from typing import Mapping, Sequence
 
 from .catalogue.state import Catalogue
-from .catalogue.tables import DEPENDENCY, TEST_DICTIONARY
-from .declaration.metadata import ASSUMPTION, TEST, ObjectId
+from .catalogue.tables import TEST_DICTIONARY
+from .declaration.metadata import TEST
 from .declaration.model import WeaverDocumentId, WeaverItemId
 from .errors import ValidationError
-from .etl import validation_artefact_id
-from .load_plan import _installations
+from .installed import KIND_FOR_TEST_TYPE, TEST_TYPE_FOR_KIND, InstalledNode
 from .targets import PhysicalTargetRef
 
-#: How ``TestDictionary.test_type`` spells each kind, and back. The catalogue's
-#: vocabulary is lower case and a declaration's kind is title case, so the
-#: translation is pinned in one place rather than guessed at each reader.
-KIND_FOR_TEST_TYPE = {"test": TEST, "assumption": ASSUMPTION}
-TEST_TYPE_FOR_KIND = {kind: name for name, kind in KIND_FOR_TEST_TYPE.items()}
+__all__ = [
+    "KIND_FOR_TEST_TYPE",
+    "TEST_TYPE_FOR_KIND",
+    "InstalledValidation",
+    "ValidationEstate",
+    "validation_order",
+]
 
 
 @dataclass(frozen=True)
@@ -55,7 +49,20 @@ class InstalledValidation:
     object_type: str | None = None
     primary_key: tuple[str, ...] = ()
     description: str | None = None
-    dependencies: tuple[str, ...] = ()
+
+    @classmethod
+    def of(cls, node: InstalledNode) -> "InstalledValidation":
+        """One validation node of the installed graph, as dispatch reads it."""
+
+        return cls(
+            logical=node.identity,
+            kind=node.artefact_kind,
+            target=node.target,
+            artefact=node.artefact,
+            object_type=node.artefact_type,
+            primary_key=node.primary_key,
+            description=node.description,
+        )
 
     @property
     def is_installed(self) -> bool:
@@ -102,7 +109,6 @@ class InstalledValidation:
             "object_type": self.object_type,
             "primary_key": list(self.primary_key),
             "description": self.description,
-            "dependencies": list(self.dependencies),
         }
 
     @classmethod
@@ -117,7 +123,6 @@ class InstalledValidation:
             object_type=mapping.get("object_type"),
             primary_key=tuple(mapping.get("primary_key", ())),
             description=_text(mapping.get("description")),
-            dependencies=tuple(mapping.get("dependencies", ())),
         )
 
 
@@ -132,41 +137,20 @@ class ValidationEstate:
 
     @classmethod
     def from_catalogue(cls, catalogue: Catalogue) -> "ValidationEstate":
-        installations = _installations(catalogue)
-        dependencies = _validation_dependencies(catalogue)
-        found: dict[WeaverDocumentId, InstalledValidation] = {}
+        return cls.of(catalogue.dag())
 
-        for item, tables in catalogue.rows.items():
-            target = installations.get(item)
-            for row in tables.get(TEST_DICTIONARY.name, ()):
-                logical = WeaverDocumentId(
-                    item,
-                    ObjectId(
-                        schema=str(row.get("schema_name") or ""),
-                        object=str(row.get("object_name") or ""),
-                    ),
-                )
-                kind = _kind(row, logical)
-                if target is None:
-                    raise ValidationError(
-                        f"{logical} is declared but {item} has no installation "
-                        "row, so its physical target is unknown"
-                    )
-                artefact = validation_artefact_id(item, kind, logical.object_id)
-                registered = catalogue.registered.get(artefact)
-                found[logical] = InstalledValidation(
-                    logical=logical,
-                    kind=kind,
-                    target=target,
-                    artefact=artefact,
-                    object_type=registered.object_type if registered else None,
-                    primary_key=_column_set(row.get("primary_key")),
-                    description=_text(row.get("description")),
-                    dependencies=tuple(dependencies.get(logical, ())),
-                )
+    @classmethod
+    def of(cls, dag) -> "ValidationEstate":
+        """The validation nodes of one installed graph, keyed by logical identity."""
+
         return cls(
-            installations=MappingProxyType(dict(installations)),
-            validations=MappingProxyType(found),
+            installations=MappingProxyType(dict(dag.installations)),
+            validations=MappingProxyType(
+                {
+                    node.identity: InstalledValidation.of(node)
+                    for node in dag.validations()
+                }
+            ),
         )
 
     def for_targets(
@@ -232,65 +216,6 @@ def validation_order(
     return tuple(sorted(validations, key=lambda each: str(each.logical)))
 
 
-def _kind(row: Mapping[str, object], logical: WeaverDocumentId) -> str:
-    test_type = str(row.get("test_type") or "").strip().casefold()
-    try:
-        return KIND_FOR_TEST_TYPE[test_type]
-    except KeyError:
-        expected = ", ".join(sorted(KIND_FOR_TEST_TYPE))
-        raise ValidationError(
-            f"{logical} has unsupported test_type {test_type!r}; expected one of "
-            f"{expected}"
-        ) from None
-
-
-def _validation_dependencies(
-    catalogue: Catalogue,
-) -> dict[WeaverDocumentId, list[str]]:
-    """Dependency rows keyed by the logical validation that owns them.
-
-    Matched against ``TestDictionary`` keys rather than recovered through
-    Registry, because a validation has no Registry row to recover it through.
-    """
-
-    logical: dict[WeaverDocumentId, list[str]] = {}
-    for item, tables in catalogue.rows.items():
-        declared = {
-            (
-                str(row.get("schema_name") or ""),
-                str(row.get("object_name") or ""),
-            )
-            for row in tables.get(TEST_DICTIONARY.name, ())
-        }
-        for row in tables.get(DEPENDENCY.name, ()):
-            key = (
-                str(row.get("schema_name") or ""),
-                str(row.get("object_name") or ""),
-            )
-            if key not in declared:
-                continue
-            identity = WeaverDocumentId(item, ObjectId(schema=key[0], object=key[1]))
-            logical.setdefault(identity, []).append(
-                str(row.get("dependency_name") or "")
-            )
-    return {identity: sorted(names) for identity, names in logical.items()}
-
-
-def _column_set(value: object) -> tuple[str, ...]:
-    if not value:
-        return ()
-    return tuple(part.strip() for part in str(value).split(",") if part.strip())
-
-
 def _text(value: object) -> str | None:
     text = str(value or "").strip()
     return text or None
-
-
-__all__ = [
-    "KIND_FOR_TEST_TYPE",
-    "TEST_TYPE_FOR_KIND",
-    "InstalledValidation",
-    "ValidationEstate",
-    "validation_order",
-]

@@ -102,10 +102,15 @@ class Graph:
 
     # --- ordering ---------------------------------------------------------
 
-    def order(self) -> tuple[str, ...]:
-        """Every node, upstream before downstream, ties broken by name."""
+    def order(self, key=None) -> tuple[str, ...]:
+        """Every node, upstream before downstream, ties broken by name.
 
-        return self._order
+        ``key`` maps a node to what breaks a tie, for a caller whose nodes
+        carry an order of their own. A load dispatches by physical target before
+        logical name, so its plan reads target by target.
+        """
+
+        return self._order if key is None else self._topological_order(key)
 
     def layers(self) -> tuple[tuple[str, ...], ...]:
         """Waves that may run in parallel.
@@ -124,9 +129,18 @@ class Graph:
             grouped[level].append(node)
         return tuple(tuple(sorted(grouped[level])) for level in sorted(grouped))
 
-    def _topological_order(self) -> tuple[str, ...]:
+    def _topological_order(self, key=None) -> tuple[str, ...]:
+        """Kahn's algorithm, taking ready nodes in a settled order.
+
+        Sorting the ready set is what makes a plan inspectable, a log
+        reproducible and a test stable.
+        """
+
+        rank = (lambda node: node) if key is None else key
         remaining = {node: len(self._upstream[node]) for node in self._nodes}
-        ready = sorted(node for node, count in remaining.items() if count == 0)
+        ready = sorted(
+            (node for node, count in remaining.items() if count == 0), key=rank
+        )
         ordered: list[str] = []
 
         while ready:
@@ -136,7 +150,7 @@ class Graph:
                 remaining[child] -= 1
                 if remaining[child] == 0:
                     ready.append(child)
-            ready.sort()
+            ready.sort(key=rank)
 
         if len(ordered) != len(self._nodes):
             cycle = self._find_cycle(set(self._nodes) - set(ordered))

@@ -37,6 +37,7 @@ from weaver.build_bundle.bundle import SUPPORTED_FORMAT_VERSION
 from weaver.build_bundle.prune import TargetInventory
 from weaver.build_bundle.targets import BoundTarget
 from weaver.catalogue.builtin import BUILTIN_ITEM
+from weaver.catalogue.claims import catalogue_schema
 from weaver.catalogue.state import Catalogue, RegisteredDocument
 from weaver.catalogue.tables import (
     CATALOGUE_SCHEMA,
@@ -44,7 +45,12 @@ from weaver.catalogue.tables import (
     STANDARD_SURFACE_TABLES,
 )
 from weaver.declaration import parse_item_repository
-from weaver.declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET
+from weaver.declaration.metadata import (
+    DELTA_TARGET,
+    FOLDER_TARGET,
+    SQL_TARGET,
+    ObjectId,
+)
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.etl import (
     FILE_TYPE,
@@ -130,6 +136,123 @@ def registry_row(
         "object_role": object_role,
         "signature": signature,
         "build_datetime": build_datetime,
+    }
+
+
+def installation_row(item: str | WeaverItemId, target_name: str) -> dict:
+    """One Installation row binding a logical item to a physical target."""
+
+    if isinstance(item, str):
+        item = item_id(item)
+    return {
+        "item_type": item.item_type,
+        "item_name": item.item_name,
+        "target_name": target_name,
+        "weaver_version": "0.0.0+test",
+        "signature": "installation-signature",
+    }
+
+
+def dependency_row(
+    consumer: str | WeaverDocumentId,
+    reference: str,
+    *,
+    referenced: str | WeaverDocumentId | None = None,
+) -> dict:
+    """One Dependency row, holding the reference exactly as an author wrote it.
+
+    ``referenced`` is the edge Weaver resolved, recorded beside the spelling. It
+    defaults to the consumer's own item, which is where a two-part
+    ``Schema.Object`` resolves. A reference of any other shape left the estate,
+    so the referenced columns stay null, as they do for an edge that did not
+    resolve.
+    """
+
+    if isinstance(consumer, str):
+        consumer = document_id(consumer)
+    if referenced is None:
+        parts = reference.split(".")
+        if len(parts) == 2:
+            referenced = WeaverDocumentId(consumer.item, ObjectId(*parts))
+    elif isinstance(referenced, str):
+        referenced = document_id(referenced)
+    resolved = (
+        {
+            "referenced_item_type": None,
+            "referenced_item_name": None,
+            "referenced_schema_name": None,
+            "referenced_object_name": None,
+        }
+        if referenced is None
+        else {
+            "referenced_item_type": referenced.item.item_type,
+            "referenced_item_name": referenced.item.item_name,
+            "referenced_schema_name": catalogue_schema(referenced),
+            "referenced_object_name": referenced.object_id.object,
+        }
+    )
+    return {
+        "item_type": consumer.item.item_type,
+        "item_name": consumer.item.item_name,
+        "referencing_schema_name": catalogue_schema(consumer),
+        "referencing_object_name": consumer.object_id.object,
+        "dependency_reference": reference,
+        **resolved,
+        "signature": "dependency",
+    }
+
+
+def shortcut_row(
+    destination: str | WeaverDocumentId,
+    source: str | WeaverDocumentId,
+    *,
+    target_type: str = "logical",
+    shortcut_type: str = "table",
+) -> dict:
+    """One Shortcut row, as a consuming item's declaration publishes it."""
+
+    if isinstance(destination, str):
+        destination = document_id(destination)
+    if isinstance(source, str):
+        source = document_id(source)
+    return {
+        "item_type": destination.item.item_type,
+        "item_name": destination.item.item_name,
+        "shortcut_id": destination.object_id.qualified,
+        "schema_name": catalogue_schema(destination),
+        "object_name": destination.object_id.object,
+        "shortcut_type": shortcut_type,
+        "target_type": target_type,
+        "target_item_type": source.item.item_type,
+        "target_item_name": source.item.item_name,
+        "target_schema_name": catalogue_schema(source),
+        "target_object_name": source.object_id.object,
+        "target_workspace_name": None,
+        "signature": "shortcut",
+    }
+
+
+def validation_row(
+    logical: str | WeaverDocumentId,
+    *,
+    test_type: str = "test",
+    primary_key: str | None = None,
+    description: str = "A declared validation.",
+) -> dict:
+    """One TestDictionary row: the logical declaration, not its artefact."""
+
+    if isinstance(logical, str):
+        logical = document_id(logical)
+    return {
+        "item_type": logical.item.item_type,
+        "item_name": logical.item.item_name,
+        "schema_name": logical.object_id.schema,
+        "object_name": logical.object_id.object,
+        "test_type": test_type,
+        "description": description,
+        "description_reference": None,
+        "primary_key": primary_key,
+        "signature": "validation",
     }
 
 

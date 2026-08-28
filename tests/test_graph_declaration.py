@@ -60,6 +60,23 @@ def test_ties_are_broken_by_name_so_plans_are_reproducible():
 
 
 @weaver_test()
+def test_a_caller_may_break_ties_on_an_order_of_its_own():
+    """A run orders ready nodes by target, not by node id."""
+
+    graph = Graph("ABCD", [("A", "D")])
+    priority = {"A": 3, "B": 1, "C": 2, "D": 0}
+
+    assert graph.order(key=priority.get) == ("B", "C", "A", "D")
+
+
+@weaver_test()
+def test_a_caller_order_never_puts_a_node_before_its_upstream():
+    graph = Graph("ABC", [("A", "B"), ("B", "C")])
+
+    assert graph.order(key=lambda node: -ord(node)) == ("A", "B", "C")
+
+
+@weaver_test()
 def test_a_diamond_orders_both_middles_before_the_join():
     order = diamond().order()
     assert order.index("A") < order.index("B") < order.index("D")

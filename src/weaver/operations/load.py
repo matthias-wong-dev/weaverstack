@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Sequence
 
 from ..errors import CommandError, LoadError
-from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION, InstalledEstate
+from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 from ..load_report import (
     BLOCKED,
     FAILED,
@@ -143,8 +143,7 @@ def run_load(
             if state is not None
             else read_installed_catalogue(session=session, workspace=workspace)
         )
-        estate = InstalledEstate.from_catalogue(catalogue)
-        _refuse_uninstalled_targets(estate, requested)
+        _refuse_uninstalled_targets(catalogue.dag(), requested)
 
     with session.step("Build run graph"):
         if state is None:
@@ -266,14 +265,14 @@ def _raise_for_failure(report: LoadRunReport) -> None:
     )
 
 
-def _refuse_uninstalled_targets(estate: InstalledEstate, requested) -> None:
+def _refuse_uninstalled_targets(dag, requested) -> None:
     """Refuse a requested target the installed estate has never heard of."""
 
-    installed = set(estate.targets)
+    installed = set(dag.targets)
     unknown = [target for target in requested if target not in installed]
     if not unknown:
         return
-    known = ", ".join(str(target) for target in estate.targets) or "none"
+    known = ", ".join(str(target) for target in dag.targets) or "none"
     raise CommandError(
         "no installed estate in "
         + ", ".join(str(target) for target in unknown)

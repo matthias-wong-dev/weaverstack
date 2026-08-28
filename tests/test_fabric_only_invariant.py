@@ -96,6 +96,13 @@ RETIRED = (
     "advance_bookmark",
     "set_load_status",
     "record_test_status",
+    # Per-operation reversals of the catalogue. One installed graph answers what
+    # is installed and what reads what, and load, test and health read it.
+    "InstalledEstate",
+    "InstalledObject",
+    "InstalledDependency",
+    "ValidationDependencies",
+    "_validation_dependencies",
 )
 
 

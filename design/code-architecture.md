@@ -160,17 +160,59 @@ The handoff points, roughly in the order you meet them.
 |---|---|
 | `WeaverRepository` | authored files, parsed and structurally checked — never executed |
 | `Catalogue` | what Weaver installed, read from the catalogue Warehouse over TDS |
+| `InstalledDag` | the managed installed graph `Catalogue.dag()` derives: nodes, resolved edges, topology |
 | `TargetInventory` | what a physical target actually holds right now |
 | `BuildState` | `Catalogue` + inventories, as one snapshot the Builder is handed |
 | `BuildBundle` | the plan: sequences → batches → `InstallAction`s, plus frozen payloads |
 | `RunState` | the catalogue a run plans against and records itself in, read once |
 | `RunGraph` | the selected nodes and their edges |
+| `Graph` | the one topology implementation: order, layers, ancestry, subgraphs |
 | `RunResult` / reports | what happened, per node, per action |
 
 The representations are plain values. A test can construct a `BuildState`
 directly and assert a `RunGraph` without dispatching anything. `BuildBundle`
 serialises to and from canonical `plan.yml`, so a bundle can be archived,
 inspected, or executed by a different process from the one that planned it.
+
+### One graph implementation, three topologies
+
+`weaver.graph.Graph` owns the mechanics: known-node validation, self-dependency
+and cycle refusal, deterministic ordering, layers, roots and leaves, direct
+navigation, ancestors, descendants and subgraphs. Three models carry their own
+node metadata and hand it the topology.
+
+```text
+                       weaver.graph.Graph
+                       /       |             authored repository   installed estate   selected run
+     dependency_graph      InstalledDag       RunGraph
+     item_graph                 |
+     item_layers          load_plan / test_plan / health
+           |
+         build
+```
+
+The authored graphs and the installed graph answer different questions. The
+first is what the repository says depends on what, and build plans against it.
+The second is what the managed estate currently contains and how those installed
+nodes depend on one another.
+
+`Catalogue.dag()` is an immutable derived view of catalogue rows already in
+memory. It reads `_.Registry`, `_.Installation`, `_.Dependency`, `_.Shortcut`
+and `_.TestDictionary`, and it is the one place a persisted
+`dependency_reference` is interpreted: a Python import or a `Schema.Object`,
+resolved against the consuming item's shortcuts. Load planning, validation
+planning and health read the resolved graph and never a raw row.
+
+A Test and an Assumption are ordinary terminal nodes. Nothing reads one, and
+Weaver has no test-on-test ordering.
+
+Two node kinds are refused when the graph is built: a managed cycle, and one
+identity claimed by both an object and a validation. Two are recorded and left
+to whichever operation touches them: a read that names nothing installed, and
+two objects at one physical address.
+
+`RunGraph` and `LoadDag` break ties on their own `sort_key`, through
+`Graph.order(key=...)`, so a plan reads target by target.
 
 ### Carrying, not reconstructing
 
@@ -358,6 +400,8 @@ weaver/declaration/      parsing authored files into a WeaverRepository
 weaver/build_bundle/     Builder, BuildBundle, Installer, executors
 weaver/run/              Runner, RunGraph, RunState, dispatch, run evidence
 weaver/catalogue/        what is installed, its tables, and how they persist
+weaver/graph.py          deterministic DAG mechanics, shared by every topology
+weaver/installed.py      the installed managed graph, derived from a Catalogue
 weaver_cli/              argument parsing and rendering, and nothing else
 ```
 

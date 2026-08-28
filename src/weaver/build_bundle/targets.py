@@ -24,6 +24,7 @@ from ..targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, ItemRef
 if TYPE_CHECKING:  # names used only in annotations
     from ..spark import FabricSparkTarget
 
+
 @dataclass(frozen=True)
 class BoundTarget:
     """One physical destination, as flat serialisable data.

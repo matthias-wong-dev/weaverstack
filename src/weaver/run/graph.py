@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Mapping
 
+from ..errors import GraphError
+from ..graph import Graph
 from .result import RunError
 
 
@@ -69,58 +72,38 @@ class RunGraph:
     def by_id(self) -> Mapping[str, RunNode]:
         return {node.node_id: node for node in self.nodes}
 
+    @cached_property
+    def topology(self) -> Graph:
+        """The generic topology over these nodes, built once and kept.
+
+        Built on first use, so a cycle surfaces where a run would meet it.
+        """
+
+        try:
+            return Graph((node.node_id for node in self.nodes), self.edges)
+        except GraphError as exc:
+            raise RunError(f"the run graph contains a cycle: {exc}") from None
+
     def upstream(self, node_id: str) -> frozenset[str]:
-        return frozenset(
-            upstream for upstream, downstream in self.edges if downstream == node_id
-        )
+        return frozenset(self.topology.upstream_of(node_id))
 
     def descendants(self, node_id: str) -> frozenset[str]:
         """Every node that may not run once ``node_id`` has failed."""
 
-        reached: set[str] = set()
-        frontier = [node_id]
-        while frontier:
-            current = frontier.pop()
-            for upstream, downstream in self.edges:
-                if upstream == current and downstream not in reached:
-                    reached.add(downstream)
-                    frontier.append(downstream)
-        return frozenset(reached)
+        return frozenset(self.topology.descendants(node_id))
 
     def order(self) -> tuple[RunNode, ...]:
         """The deterministic topological order, or a refusal if there is a cycle.
 
-        Ready nodes are sorted rather than taken as they come, which is what
-        makes a dry run inspectable, a log reproducible and a test stable. The
-        cycle check is here rather than in a validator because the sort is the
-        one place that can see one.
+        Ties break on :attr:`RunNode.sort_key`, so a run reads target by
+        target and a log reproduces.
         """
 
-        remaining = {node.node_id: node for node in self.nodes}
-        pending = {
-            node_id: set(self.upstream(node_id)) & set(remaining)
-            for node_id in remaining
-        }
-        ordered: list[RunNode] = []
-        while pending:
-            ready = sorted(
-                (
-                    remaining[node_id]
-                    for node_id, waiting in pending.items()
-                    if not waiting
-                ),
-                key=lambda node: node.sort_key,
-            )
-            if not ready:
-                cycle = ", ".join(sorted(pending))
-                raise RunError(f"the run graph contains a cycle among: {cycle}")
-            for node in ready:
-                ordered.append(node)
-                del pending[node.node_id]
-            done = {node.node_id for node in ready}
-            for waiting in pending.values():
-                waiting -= done
-        return tuple(ordered)
+        found = self.by_id
+        return tuple(
+            found[node_id]
+            for node_id in self.topology.order(key=lambda node: found[node].sort_key)
+        )
 
 
 def graph_for(request, state) -> RunGraph:
@@ -140,13 +123,9 @@ def graph_for(request, state) -> RunGraph:
 
 
 def _load_graph(request, state) -> RunGraph:
-    from ..load_plan import InstalledEstate, load_dag
+    from ..load_plan import load_dag
 
-    dag = load_dag(
-        InstalledEstate.from_catalogue(state.catalogue),
-        targets=request.targets,
-        names=request.names,
-    )
+    dag = load_dag(state.catalogue.dag(), targets=request.targets, names=request.names)
     return RunGraph(
         nodes=tuple(
             RunNode(

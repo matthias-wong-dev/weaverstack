@@ -92,7 +92,7 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         # returns, never how it decided.
         "LoadDag",
         "LoadNode",
-        "InstalledEstate",
+        "InstalledDag",
         "LoadEnvironment",
         "load_dag",
         "resolve_load_plan",
