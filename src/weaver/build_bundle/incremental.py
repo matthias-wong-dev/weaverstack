@@ -202,22 +202,6 @@ def declared_signatures(
     return signatures
 
 
-def runtime_artefact_identities(
-    repository: WeaverRepository,
-) -> frozenset[WeaverDocumentId]:
-    """Everything this repository installs to be run rather than to hold rows.
-
-    Derived from the repository, because during a build the artefacts have been
-    claimed from the declaration and nothing is installed yet. The same question
-    from the other side is
-    :attr:`~weaver.catalogue.state.RegisteredDocument.object_role`.
-    """
-
-    from ..etl import runtime_artefacts
-
-    return frozenset(artefact.identity for artefact in runtime_artefacts(repository))
-
-
 def _artefacts_standing_for_their_origin(
     repository: WeaverRepository, selected: set[WeaverDocumentId]
 ) -> dict[WeaverDocumentId, "RuntimeArtefact"]:
@@ -254,10 +238,14 @@ def determine_impact(
 ) -> Impact:
     """Classify bound nodes and expand changed roots across the whole graph.
 
-    Propagation is not confined to one item: the graph carries shortcut
+    Propagation is not confined to one item: the graph carries logical shortcut
     destinations as nodes, so ``source → shortcut destination → consumer`` is an
     ordinary walk. Items not in the build are deferred by construction. They
     are not in ``selected``, so nothing reaches them.
+
+    A changed identity carries impact only where the graph holds it. More is
+    selectable than the graph holds, and the graph is the only thing that can
+    say which.
 
     ``stale_shortcuts`` are destinations the catalogue already proved out of date,
     their source rebuilt by an earlier build (see
@@ -300,26 +288,19 @@ def determine_impact(
     graph = repository.dependency_graph
     if graph is not None:
         by_text = {str(identity): identity for identity in selected_set}
-        runtime = runtime_artefact_identities(repository)
-        # A schema shortcut establishes a namespace rather than an object, so it
-        # is no more a node than a runtime artefact is: what appears inside
-        # belongs to the item it points at, and nothing in the repository can
-        # name it as a dependency.
-        namespaces = {
-            shortcut.destination
-            for shortcut in repository.shortcuts
-            if shortcut.is_schema
-        }
         for root in changed:
-            # A runtime artefact is not a node in the authored graph: nothing
-            # depends on a deployed module and it depends on nothing, its
-            # signature being its own content, so a changed one ends a walk
-            # rather than starting one.
+            # Impact propagates through the graph, so a changed identity carries
+            # it only where the graph holds that identity. Membership is asked of
+            # the graph rather than derived from a list of exceptions: several
+            # kinds of identity are selected, signed and registered without being
+            # a node, and each ends a walk rather than starting one.
             #
-            # Membership is asked of the repository rather than read from the
-            # identity's shape, which stopped answering when a Test began
-            # compiling to a module and a procedure of its own.
-            if root in runtime or root in namespaces:
+            # A runtime artefact is signed by its own content and nothing
+            # declares against it. A schema shortcut presents a namespace whose
+            # contents belong to the item it points at. A physical shortcut
+            # destination names a Fabric item this repository does not manage,
+            # so it has no producer here to order it against.
+            if str(root) not in graph:
                 continue
             for node in graph.descendants(str(root)):
                 descendant = by_text.get(node)

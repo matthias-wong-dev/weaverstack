@@ -32,7 +32,11 @@ class Graph:
         self, nodes: Iterable[str], edges: Iterable[tuple[str, str]] = ()
     ) -> None:
         self._nodes = tuple(sorted(set(nodes)))
-        known = set(self._nodes)
+        # Held rather than rebuilt per lookup: membership is asked of a graph in
+        # a loop, once per changed root, when impact expansion decides whether a
+        # root starts a walk.
+        self._known = frozenset(self._nodes)
+        known = self._known
 
         seen: set[tuple[str, str]] = set()
         collected: list[Edge] = []
@@ -72,10 +76,10 @@ class Graph:
         return len(self._nodes)
 
     def __contains__(self, node: str) -> bool:
-        return node in set(self._nodes)
+        return node in self._known
 
     def _require(self, node: str) -> None:
-        if node not in set(self._nodes):
+        if node not in self._known:
             raise GraphError(f"unknown node: {node!r}")
 
     def upstream_of(self, node: str) -> tuple[str, ...]:

@@ -90,6 +90,7 @@ def registered_document(
     identity: str | WeaverDocumentId,
     *,
     object_type: str = "table",
+    object_role: str = "data",
     signature: str = "signature-1",
     build_datetime=None,
 ) -> RegisteredDocument:
@@ -107,6 +108,7 @@ def registered_document(
     return RegisteredDocument(
         identity=identity,
         object_type=object_type,
+        object_role=object_role,
         signature=signature,
         build_datetime=build_datetime,
     )
@@ -939,6 +941,28 @@ def logical_shortcuts(consumer: str, **references: str) -> tuple[str, str]:
     return (
         f"{consumer}/shortcuts.py",
         "from weaver import Shortcut\n\n" + declarations + "\n",
+    )
+
+
+def physical_folder_shortcut(
+    owner: str, *, name: str, target: str, workspace: str
+) -> tuple:
+    """Where a Lakehouse declares a physical folder shortcut, and what it says.
+
+    ``name`` is the ``Schema.Object`` the destination is known by in ``owner``.
+    The target names a path beneath another item's ``Files``, which Weaver does
+    not manage, so this destination is not a node in the dependency graph.
+    """
+
+    return (
+        f"{owner}/shortcuts.py",
+        "from weaver import Shortcut\n\n"
+        f"{name.replace('.', '__')} = Shortcut(\n"
+        '    shortcut_type="folder",\n'
+        '    target_type="physical",\n'
+        f'    target="{target}",\n'
+        f'    workspace="{workspace}",\n'
+        ")\n",
     )
 
 
