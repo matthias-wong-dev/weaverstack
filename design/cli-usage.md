@@ -543,7 +543,7 @@ objects proven present: it exists in the Spark catalogue and nowhere in storage.
 `--json` writes the report to stdout and nothing else, at `format_version` 1,
 with `green | amber | red` as the machine vocabulary and UTC ISO-8601
 timestamps. Arrays stay present when empty, so a consumer never branches on a
-missing key. It is meant to be published as a daily health artefact.
+missing key. Publish it as a daily health artefact.
 
 ```python
 report = weaver.health()

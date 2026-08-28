@@ -1,4 +1,4 @@
-"""What ``weaver.health`` reads, and what it refuses to reach for.
+"""What ``weaver.health`` reads, and what it does not.
 
 Health answers from the catalogue, one bounded window of its history tables, and
 each selected target's physical state. It runs no authored code, so it opens no

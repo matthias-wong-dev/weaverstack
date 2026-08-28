@@ -451,8 +451,8 @@ def assess(
     because whether a selected object is behind its sources is a question about
     the whole managed graph.
 
-    ``inventories`` are read for the selected targets alone, and only where a
-    caller wants physical consistency proven. Without one, Build health reports
+    ``inventories`` are read for the selected targets alone, so a certified
+    object the target does not hold is reported. With none, Build health reports
     what the catalogue contradicts about itself.
     """
 

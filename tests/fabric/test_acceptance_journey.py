@@ -1023,13 +1023,15 @@ def test_loading_an_upstream_after_a_test_passed_turns_health_amber(acceptance):
     assert recovered.status == "green", recovered.to_mapping()
 
 
-@weaver_test(integration=True, resources={"tds"})
+@weaver_test(integration=True)
 def test_the_json_report_is_a_publishable_artefact(acceptance):
     """
     Intent: The JSON a scheduled check publishes is what the Python report says,
     over a real installed catalogue.
 
-    Proof: the report from the previous scenario, round-tripped through JSON.
+    Proof: the report the previous scenario already read, round-tripped through
+    JSON. It crosses nothing: the report is a value, and this is what a consumer
+    does with one.
     """
 
     import json
