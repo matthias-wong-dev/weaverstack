@@ -300,7 +300,9 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="LOGICAL[=PHYSICAL]",
         help=(
             "Logical Weaver item to build. Its physical item comes from "
-            "workspace configuration, or write LOGICAL=PHYSICAL to supply it."
+            "workspace configuration, or write LOGICAL=PHYSICAL to supply it. "
+            "Repeat to select more than one. Naming none builds every "
+            "configured item."
         ),
     )
     build.add_argument(
