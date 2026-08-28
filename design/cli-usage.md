@@ -235,6 +235,8 @@ starts exactly those, in the background, before the command wants them:
 weaver load Warehouse/Reporting   → auth, resolver, tds
 weaver load Lakehouse/Sales       → auth, resolver, onelake, livy
 weaver build ./repository         → auth, resolver, onelake, livy, tds
+weaver health                     → auth, resolver, tds, onelake
+weaver health Warehouse/Reporting → auth, resolver, tds
 ```
 
 A Warehouse load therefore never waits on a Spark session, which on a capacity
@@ -488,6 +490,68 @@ weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql"
 ```
 
 `weaver test` runs both Tests and Assumptions. See [validation](validation.md).
+
+## Health
+
+`weaver health` reports the installed estate's operational state, in three
+sections over one installed graph:
+
+```bash
+weaver health --workspace-config examples/weaver_example.yml
+```
+
+```text
+Weaver Health  Amber
+
+Load    Amber
+  Last load activity   6h 14m ago
+  17 succeeded · 1 pending
+  Amber  Lakehouse/Sales/Sales.OrderSummary
+         no load has settled since this object was built
+
+Tests   Green
+  6 succeeded
+
+Build   Green
+  Installed estate consistent (48 objects)
+
+Slowest loads
+  Lakehouse/Sales/Sales.Order              31.2s
+```
+
+The status words are the contract, so the output reads the same redirected to a
+file as it does on a terminal. Overall health is the worst section. Exit status
+is `0` for Green and `1` for Amber or Red, which is what makes it a scheduled
+check; a configuration or transport failure takes the ordinary command error
+path.
+
+With no target, the whole installed estate. Naming targets restricts the
+subjects reported on, and managed ancestry outside the selection is still read,
+because whether a selected object is behind its sources is a question about the
+whole graph.
+
+`--as-of` is the instant a settled load must be no older than, an ISO-8601
+instant carrying a zone. It defaults to 24 hours before the report started.
+`--no-inventory` skips the physical read that proves each certified object is
+there.
+
+Health runs no authored load or test Python, so there is no `--environment` and
+a Warehouse-only report starts no Spark session. A Lakehouse is read over
+storage for the same reason, which is why a Lakehouse view is not among the
+objects proven present: it exists in the Spark catalogue and nowhere in storage.
+
+`--json` writes the report to stdout and nothing else, at `format_version` 1,
+with `green | amber | red` as the machine vocabulary and UTC ISO-8601
+timestamps. Arrays stay present when empty, so a consumer never branches on a
+missing key. It is meant to be published as a daily health artefact.
+
+```python
+report = weaver.health()
+report.status            # "green" | "amber" | "red"
+report.load.status
+report.tests.findings    # each with a stable `code`
+report.to_mapping()      # what --json prints
+```
 
 ## Wipe
 

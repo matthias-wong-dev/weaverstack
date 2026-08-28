@@ -16,6 +16,7 @@ from .errors import (
     ValidationError,
     WeaverError,
 )
+from .health import HealthFinding, HealthReport, HealthSection, LoadActivity
 from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
 from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
 from .objects import (
@@ -30,6 +31,7 @@ from .objects import (
     WeaverObject,
 )
 from .operations.build import BuildResult, build
+from .operations.health import health
 from .operations.load import load
 from .operations.test import test
 from .operations.wipe import WipeReport, WipeResult, wipe
@@ -67,6 +69,11 @@ __all__ = [
     "LoadResult",
     "test",
     "ValidationRunReport",
+    "health",
+    "HealthReport",
+    "HealthSection",
+    "HealthFinding",
+    "LoadActivity",
     # the reusable context every operation accepts
     "session",
     "ValidationNodeReport",

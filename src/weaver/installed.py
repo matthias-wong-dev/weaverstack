@@ -19,6 +19,7 @@ subgraphs are the graph's.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence
 
@@ -236,7 +237,7 @@ class InstalledDag:
 
     Immutable, complete and deterministic. Every managed logical node the
     catalogue records is here, whether or not any operation selects it, so a
-    filtered view is a subgraph rather than a second construction.
+    filtered view is a subgraph of it.
     """
 
     nodes: tuple[InstalledNode, ...]
@@ -273,23 +274,31 @@ class InstalledDag:
 
         return self.unresolved.get(getattr(node, "identity", node), ())
 
-    @property
+    @cached_property
     def by_id(self) -> Mapping[str, InstalledNode]:
         return MappingProxyType({node.node_id: node for node in self.nodes})
 
-    def reads(self, node) -> tuple[InstalledEdge, ...]:
-        """The declared reads into this node, in resolution order.
+    @cached_property
+    def _reads(self) -> Mapping[str, tuple[InstalledEdge, ...]]:
+        """The declared reads into each node, indexed once.
 
-        Its shortcut edge is not among them: a shortcut destination is
-        materialised from its source rather than reading it.
+        A shortcut edge is left out: a shortcut destination is materialised from
+        its source rather than reading it.
         """
 
-        wanted = str(node)
-        return tuple(
-            edge
-            for edge in self.edges
-            if not edge.is_shortcut and str(edge.downstream) == wanted
+        found: dict[str, list[InstalledEdge]] = {}
+        for edge in self.edges:
+            if edge.is_shortcut:
+                continue
+            found.setdefault(str(edge.downstream), []).append(edge)
+        return MappingProxyType(
+            {node_id: tuple(edges) for node_id, edges in found.items()}
         )
+
+    def reads(self, node) -> tuple[InstalledEdge, ...]:
+        """The declared reads into this node, in resolution order."""
+
+        return self._reads.get(str(node), ())
 
     def node(self, identity) -> InstalledNode:
         """One node by identity or node id, or a refusal naming what is missing."""

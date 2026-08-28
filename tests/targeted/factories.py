@@ -256,6 +256,70 @@ def validation_row(
     }
 
 
+def load_status_row(
+    identity: str | WeaverDocumentId,
+    *,
+    result: str = "succeeded",
+    workflow_id: str = "workflow-1",
+    started_at=None,
+    completed_at=None,
+) -> dict:
+    """One ``_.LoadStatus`` row: how an object's most recent load ended."""
+
+    if isinstance(identity, str):
+        identity = document_id(identity)
+    return {
+        "item_type": identity.item.item_type,
+        "item_name": identity.item.item_name,
+        "schema_name": catalogue_schema(identity),
+        "object_name": identity.object_id.object,
+        "workflow_id": workflow_id,
+        "result": result,
+        "started_datetime": started_at,
+        "completed_datetime": completed_at,
+        "duration_milliseconds": None,
+    }
+
+
+def validation_status_row(
+    identity: str | WeaverDocumentId,
+    *,
+    result: str = "succeeded",
+    test_type: str = "test",
+    workflow_id: str = "workflow-1",
+    started_at=None,
+    completed_at=None,
+    failure_count=None,
+) -> dict:
+    """One ``_.TestStatus`` row: how a validation's most recent run ended."""
+
+    if isinstance(identity, str):
+        identity = document_id(identity)
+    return {
+        "item_type": identity.item.item_type,
+        "item_name": identity.item.item_name,
+        "schema_name": catalogue_schema(identity),
+        "object_name": identity.object_id.object,
+        "test_type": test_type,
+        "workflow_id": workflow_id,
+        "result": result,
+        "started_datetime": started_at,
+        "completed_datetime": completed_at,
+        "duration_milliseconds": None,
+        "failure_count": failure_count,
+    }
+
+
+def bookmark_row_for(identity: str | WeaverDocumentId, at) -> dict:
+    """One ``_.Bookmark`` row: how far an object has been loaded."""
+
+    from weaver.catalogue.claims import bookmark_row
+
+    if isinstance(identity, str):
+        identity = document_id(identity)
+    return bookmark_row(identity, at)
+
+
 class FixtureCatalogue(Catalogue):
     """The production `Catalogue`, with the ways a test needs to populate one.
 
