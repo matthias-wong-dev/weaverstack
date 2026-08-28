@@ -155,9 +155,7 @@ def _workspace_with(logical: str, physical: str):
     from weaver.workspaces import TargetDeclaration, Workspace
 
     item = WeaverItemId.parse(logical)
-    return Workspace(
-        workspace="Demo", targets={item: TargetDeclaration(item, physical)}
-    )
+    return Workspace(workspace="Demo", targets={item: TargetDeclaration(physical)})
 
 
 # --- a run item ---------------------------------------------------------------

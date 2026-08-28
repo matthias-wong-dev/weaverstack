@@ -260,15 +260,15 @@ def _refuse_occupied_targets(bindings: ItemBindings, *, session, workspace) -> N
         return
     occupancy = read_target_occupancy(catalogue_connection(session, workspace))
     for binding in ordinary:
-        target = binding.target.item.name
+        kind, name = binding.target.physical_kind, binding.target.item.name
         others = sorted(
             str(item)
-            for item in occupancy.get(target.casefold(), ())
+            for item in occupancy.get((kind.casefold(), name.casefold()), ())
             if item != binding.item and item != BUILTIN_ITEM
         )
         if others:
             raise BuildError(
-                f"{binding.target.physical_kind}/{target} is installed to by "
+                f"{kind}/{name} is installed to by "
                 + ", ".join(others)
                 + f", so {binding.item} cannot be built into it. Empty and "
                 f"unbind it first, or give {binding.item} a physical target of "

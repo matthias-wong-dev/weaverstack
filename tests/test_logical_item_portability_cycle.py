@@ -192,7 +192,7 @@ def test_a_shared_target_is_configuration_that_a_build_refuses(tmp_path, root):
     }
 
     # One build naming both, which is what naming no item would ask for.
-    with pytest.raises(BuildError, match="cannot hold two logical items"):
+    with pytest.raises(BuildError, match="cannot hold two items"):
         _item_bindings(None, workspace)
 
 
@@ -224,6 +224,45 @@ def test_a_build_refuses_a_target_another_item_is_already_installed_to(tmp_path)
             session=occupied,
             workspace=None,
         )
+
+
+@weaver_test()
+def test_the_occupancy_refusal_comes_before_the_inventories_and_spark():
+    """One Installation read, and the target inventories are a round trip each."""
+
+    from weaver.build_bundle.targets import ItemBindings, parse_build_item
+    from weaver.build_bundle.workflow import read_build_state
+    from weaver.errors import BuildError
+
+    occupied = _occupancy({"Lakehouse/Sales": "Shared"})
+    before = len(occupied.calls)
+
+    with pytest.raises(BuildError, match="is installed to by"):
+        read_build_state(
+            ItemBindings((parse_build_item("Lakehouse/Other=Lakehouse/Shared"),)),
+            required_catalogue_items=(),
+            session=occupied,
+            workspace=occupied.workspace,
+        )
+
+    assert not occupied.spark_sql
+    assert all(call.kind == "tsql" for call in occupied.calls[before:])
+
+
+@weaver_test()
+def test_a_target_is_a_kind_and_a_name_so_two_kinds_of_shared_do_not_collide():
+    """``Lakehouse/Shared`` and ``Warehouse/Shared`` are two Fabric items."""
+
+    from weaver.build_bundle.targets import ItemBindings, parse_build_item
+    from weaver.build_bundle.workflow import _refuse_occupied_targets
+
+    occupied = _occupancy({"Warehouse/Sales": "Shared"})
+
+    _refuse_occupied_targets(
+        ItemBindings((parse_build_item("Lakehouse/Other=Lakehouse/Shared"),)),
+        session=occupied,
+        workspace=None,
+    )
 
 
 @weaver_test()

@@ -58,13 +58,9 @@ def test_target_configuration_is_immutable():
     item = WeaverItemId.parse("Warehouse/Curated")
     workspace = Workspace(
         workspace="Analytics",
-        targets={
-            item: TargetDeclaration(
-                item, "Reporting", ExecutionSettings(parallel_workers=8)
-            )
-        },
+        targets={item: TargetDeclaration("Reporting", ExecutionSettings(8))},
     )
-    assert workspace.settings_for_warehouse("Reporting").parallel_workers == 8
+    assert workspace.settings_for(item).parallel_workers == 8
     with pytest.raises(TypeError):
         workspace.targets[WeaverItemId.parse("Warehouse/Other")] = workspace.targets[
             item
@@ -72,18 +68,26 @@ def test_target_configuration_is_immutable():
 
 
 @weaver_test()
-def test_a_declaration_must_agree_with_the_key_it_is_filed_under():
-    """The key is the logical item, so a declaration naming another is a mistake."""
+def test_execution_settings_reach_only_the_item_that_declared_them():
+    """Two items may deploy to one Warehouse, and each keeps its own settings."""
 
-    with pytest.raises(ConfigError, match="must name one logical item"):
-        Workspace(
-            workspace="Analytics",
-            targets={
-                WeaverItemId.parse("Lakehouse/Landing"): TargetDeclaration(
-                    WeaverItemId.parse("Lakehouse/Other"), "Landing_Dev"
-                )
-            },
-        )
+    fast = WeaverItemId.parse("Warehouse/Curated")
+    slow = WeaverItemId.parse("Warehouse/Archive")
+    workspace = Workspace(
+        workspace="Analytics",
+        execution=ExecutionSettings(parallel_workers=1),
+        targets={
+            fast: TargetDeclaration("Shared", ExecutionSettings(parallel_workers=8)),
+            slow: TargetDeclaration("Shared"),
+        },
+    )
+
+    assert workspace.settings_for(fast).parallel_workers == 8
+    assert workspace.settings_for(slow).parallel_workers == 1
+    assert (
+        workspace.settings_for(WeaverItemId.parse("Warehouse/Absent"))
+        == workspace.execution
+    )
 
 
 @weaver_test()

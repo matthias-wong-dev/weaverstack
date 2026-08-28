@@ -62,7 +62,7 @@ Environment is written as `environment: Platform/Runtime`. CLI overrides use
 the same grammar.
 
 See [`examples/weaver_example.yml`](../examples/weaver_example.yml) for the
-expanded form, including per-target execution settings.
+expanded form, including per-item execution settings.
 
 ## Session
 
@@ -245,8 +245,8 @@ starts exactly those, in the background, before the command wants them:
 weaver load --item Warehouse/Reporting   → auth, resolver, tds
 weaver load --item Lakehouse/Sales       → auth, resolver, tds, onelake, livy
 weaver build ./repository         → auth, resolver, onelake, livy, tds
-weaver health                     → auth, resolver, tds, onelake
-weaver health Warehouse/Reporting → auth, resolver, tds
+weaver health                            → auth, resolver, tds, onelake
+weaver health --item Warehouse/Reporting → auth, resolver, tds
 ```
 
 A Warehouse load therefore never waits on a Spark session, which on a capacity
@@ -392,28 +392,34 @@ desktop build proves it, every bound Lakehouse and Warehouse, and a locally
 owned Environment from one workspace listing before it starts a Livy session.
 A qualified Environment is resolved in its owning workspace.
 
-## Targets
+## Items and targets
 
-Build, load and test name logical Weaver items with a repeated `--item`. Where
-each one is physically deployed has two owners, and which one answers depends on
-the operation:
+An item is a Weaver identity such as `Lakehouse/Sales`. A target is the Fabric
+item it deploys to, named by kind and display name, so `Lakehouse/Shared` and
+`Warehouse/Shared` are two targets. Which one a command names, and where the
+physical half comes from:
 
 | Operation | Caller names | Physical source |
 |---|---|---|
-| build | logical item | an explicit `LOGICAL=PHYSICAL` target, or `targets:` in workspace configuration |
-| load | logical item | the catalogue's `_.Installation` |
-| test | logical item | the catalogue's `_.Installation` |
-| catalogue | physical Warehouse | `--catalogue`, or workspace configuration |
+| build | item, `--item` | an explicit `ITEM=TARGET`, or `targets:` in workspace configuration |
+| load | item, `--item` | the catalogue's `_.Installation` |
+| test | item, `--item` | the catalogue's `_.Installation` |
+| health | item, `--item`, or the whole estate | the catalogue's `_.Installation` |
+| wipe | target, positional | the caller |
+| unbind | target, positional | the caller |
+| catalogue | Warehouse target | `--catalogue`, or workspace configuration |
 
-A build establishes the installation binding, so it is the one operation that
-names both halves. Once an item is built the catalogue is authoritative: a load
-or a test target carrying `=` is refused, and workspace configuration is not
-consulted for it either.
+A build establishes the installation, so it is the one operation that names both
+halves. Once an item is built the catalogue is authoritative: a load, test or
+health item carrying `=` is refused, and workspace configuration is not consulted
+for it either.
 
-`wipe` and `unbind` keep physical positional targets. They address a Fabric item
-whether or not an installation exists, so they have no logical item to name.
-`health` keeps them too: it reports on what the estate holds, and reaches the
-same three sections with no target at all.
+`wipe` and `unbind` address a Fabric item whether or not an installation exists,
+so they name a target and have no item to resolve.
+
+Configuration may map two items to one target, which a constrained environment
+does. Only one of them is installed there at a time: a build into a target
+another item is installed to is refused, and `wipe` then `unbind` releases it.
 
 So one repository, one set of logical names and one command sequence run against
 development and production, and the only thing that changes is the workspace

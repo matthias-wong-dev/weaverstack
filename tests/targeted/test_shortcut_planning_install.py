@@ -635,7 +635,7 @@ def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_p
         workspace="Demo",
         catalogue="Warehouse/Weaver",
         targets={
-            item_id(CONSUMER): TargetDeclaration(item_id(CONSUMER), "Curated_LH"),
+            item_id(CONSUMER): TargetDeclaration("Curated_LH"),
         },
     )
     bindings = ItemBindings(

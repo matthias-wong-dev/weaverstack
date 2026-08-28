@@ -231,7 +231,13 @@ class Catalogue:
         return BOOKMARK_SENTINEL
 
     def installed_object(
-        self, *, target_name: str, schema: str, object: str, is_files: bool
+        self,
+        *,
+        target_kind: str,
+        target_name: str,
+        schema: str,
+        object: str,
+        is_files: bool,
     ) -> WeaverDocumentId:
         """Which installed object a physical target's ``Schema.Object`` is.
 
@@ -245,7 +251,7 @@ class Catalogue:
         """
 
         stored = f"{_FILES_PREFIX}{schema}" if is_files else schema
-        bound = self.bound_to(target_name)
+        bound = self.bound_to(kind=target_kind, name=target_name)
         found = [
             identity
             for identity, document in self.registered.items()
@@ -256,7 +262,7 @@ class Catalogue:
         ]
         if len(found) == 1:
             return found[0]
-        where = f"{stored}.{object} in {target_name}"
+        where = f"{stored}.{object} in {target_kind}/{target_name}"
         if not found:
             raise ConfigError(
                 f"{where} is not an object the Weaver catalogue records as "
@@ -271,7 +277,7 @@ class Catalogue:
         )
 
     def installed_validation(
-        self, *, target_name: str, schema: str, object: str
+        self, *, target_kind: str, target_name: str, schema: str, object: str
     ) -> WeaverDocumentId:
         """Which declared validation a physical target's ``Schema.Object`` is.
 
@@ -284,7 +290,7 @@ class Catalogue:
         :meth:`installed_object` follows, for the same reason.
         """
 
-        bound = self.bound_to(target_name)
+        bound = self.bound_to(kind=target_kind, name=target_name)
         found = [
             identity
             for identity in self._validations()
@@ -294,7 +300,7 @@ class Catalogue:
         ]
         if len(found) == 1:
             return found[0]
-        where = f"{schema}.{object} in {target_name}"
+        where = f"{schema}.{object} in {target_kind}/{target_name}"
         if not found:
             raise ConfigError(
                 f"{where} is not a validation the Weaver catalogue records as "
@@ -324,8 +330,12 @@ class Catalogue:
             for row in self.table_rows(TEST_DICTIONARY)
         )
 
-    def bound_to(self, target_name: str) -> set:
+    def bound_to(self, *, kind: str, name: str) -> set:
         """The items this catalogue's rows bind to one physical target.
+
+        A physical target is a kind and a display name, so ``Lakehouse/Sales``
+        and ``Warehouse/Sales`` are two of them. A row's kind is its item's:
+        a Lakehouse item deploys to a Lakehouse.
 
         Bounded by whatever scope these rows were read under. A build's read is
         scoped to the items it was pointed at, so this cannot answer whether some
@@ -333,9 +343,9 @@ class Catalogue:
         """
 
         return {
-            _item_of(row)
-            for row in self.table_rows(INSTALLATION)
-            if str(row.get("target_name") or "").casefold() == target_name.casefold()
+            item
+            for item, target in _installed_targets(self.table_rows(INSTALLATION))
+            if target == (kind.casefold(), name.casefold())
         }
 
     def dag(self):
@@ -773,7 +783,7 @@ def _registered_documents(
     return MappingProxyType(registered)
 
 
-def read_target_occupancy(catalogue: Any) -> dict[str, frozenset]:
+def read_target_occupancy(catalogue: Any) -> dict[tuple[str, str], frozenset]:
     """Which items each physical target is installed to, across the whole estate.
 
     One unscoped read of ``_.Installation`` and nothing else. Every other
@@ -782,16 +792,30 @@ def read_target_occupancy(catalogue: Any) -> dict[str, frozenset]:
     question that scope cannot answer: whether a target this build writes into
     already belongs to an item outside it.
 
-    Keyed by target name, folded, because that is how the Warehouse compares one.
-    An absent table reads as no rows, as it does everywhere else.
+    Keyed by ``(kind, name)``, folded, because that is a physical target's
+    identity and how the Warehouse compares a name. An absent table reads as no
+    rows, as it does everywhere else.
     """
 
-    occupied: dict[str, set] = {}
-    for row in read_table(catalogue, INSTALLATION):
-        target = str(row.get("target_name") or "").strip()
-        if target:
-            occupied.setdefault(target.casefold(), set()).add(_item_of(row))
+    occupied: dict[tuple[str, str], set] = {}
+    for item, target in _installed_targets(read_table(catalogue, INSTALLATION)):
+        occupied.setdefault(target, set()).add(item)
     return {target: frozenset(items) for target, items in occupied.items()}
+
+
+def _installed_targets(rows):
+    """Each installation row as its item and its folded ``(kind, name)`` target.
+
+    The kind comes from the item, because a Lakehouse item deploys to a Lakehouse
+    and a Warehouse item to a Warehouse. ``_.Installation`` stores the display
+    name alone for that reason.
+    """
+
+    for row in rows:
+        name = str(row.get("target_name") or "").strip()
+        if name:
+            item = _item_of(row)
+            yield item, (item.item_type.casefold(), name.casefold())
 
 
 def read_catalogue_state(catalogue: Any, items) -> Catalogue:

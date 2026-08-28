@@ -46,11 +46,7 @@ def test_notebook_run_uses_one_configured_lakehouse(monkeypatch):
         workspace="Analytics",
         catalogue="Warehouse/Weaver",
         environment="Weaver",
-        targets={
-            WeaverItemId.parse("Lakehouse/Sales"): TargetDeclaration(
-                WeaverItemId.parse("Lakehouse/Sales"), "Sales"
-            )
-        },
+        targets={WeaverItemId.parse("Lakehouse/Sales"): TargetDeclaration("Sales")},
     )
     seen = []
     monkeypatch.setattr(CLI_MAIN, "_fabric_cli_workspace", lambda args: workspace)

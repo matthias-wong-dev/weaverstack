@@ -162,11 +162,11 @@ def wipe(
                     )
 
             unbound = None
-            catalogue_name = resolved_workspace.catalogue_name
-            # Either type: the catalogue is a Warehouse, and a wipe of the
-            # Warehouse holding it is the case this skips.
-            whole_items = {target.physical_name for target in parsed}
-            if not dry_run and catalogue_name and catalogue_name not in whole_items:
+            catalogue = resolved_workspace.catalogue
+            # Typed, because Lakehouse/Weaver and Warehouse/Weaver are two items
+            # and only the Warehouse can be the catalogue.
+            wiped = {str(target).casefold() for target in parsed}
+            if not dry_run and catalogue and catalogue.casefold() not in wiped:
                 with opened.step("Unbind catalogue claims"):
                     unbound = _unbind_physical_targets(
                         resolved_workspace, parsed, session=opened

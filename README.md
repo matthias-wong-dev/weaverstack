@@ -45,8 +45,8 @@ The Fabric Environment must already exist. Publication preserves its package
 definition and unrelated custom libraries.
 
 A Weaver **item** is logical, `Lakehouse/Sales`. A **target** is the Fabric item
-it is deployed to, `Sales_Dev`. Build, load and test name items: a build reads the
-target from workspace configuration, a load or a test reads it from the Weaver
+it is deployed to, `Sales_Dev`. Build, load, test and health name items: a build
+reads the target from workspace configuration, the rest read it from the Weaver
 catalogue. So one sequence runs against development and production, and only
 `--workspace-config` changes.
 

@@ -159,5 +159,5 @@ def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
             execution = _execution(value.get("execution"), where=f"{where}.execution")
         else:
             raise ConfigError(f"{where} must be a physical item name or mapping")
-        declarations[item] = TargetDeclaration(item, physical, execution)
+        declarations[item] = TargetDeclaration(physical, execution)
     return declarations

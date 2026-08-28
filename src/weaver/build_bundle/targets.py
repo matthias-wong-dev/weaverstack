@@ -223,7 +223,7 @@ class WarehouseBinding:
 
 @dataclass(frozen=True)
 class ItemBinding:
-    """One exact logical Weaver item bound to one typed physical item."""
+    """One Weaver item bound to one typed physical target."""
 
     item: WeaverItemId
     target: LakehouseBinding | WarehouseBinding
@@ -231,7 +231,7 @@ class ItemBinding:
     def __post_init__(self) -> None:
         if self.item.item_type != self.target.physical_kind:
             raise BuildError(
-                f"logical item {self.item} requires a {self.item.item_type} binding, "
+                f"{self.item} requires a {self.item.item_type} binding, "
                 f"not a {self.target.physical_kind} one"
             )
 
@@ -264,9 +264,7 @@ class ItemBindings:
         physical: set[tuple[str, str]] = set()
         for binding in self.entries:
             if binding.item in seen:
-                raise BuildError(
-                    f"logical item is bound more than once: {binding.item}"
-                )
+                raise BuildError(f"item is bound more than once: {binding.item}")
             seen.add(binding.item)
             if binding.item == BUILTIN_ITEM:
                 continue
@@ -274,7 +272,7 @@ class ItemBindings:
             key = (target.physical_kind, target.item.name)
             if key in physical:
                 raise BuildError(
-                    f"{key[0]}/{key[1]} cannot hold two logical items. A build "
+                    f"{key[0]}/{key[1]} cannot hold two items. A build "
                     "diffs one item's declarations against everything the target "
                     "holds, so give each item a physical target of its own"
                 )

@@ -37,7 +37,7 @@ def test_typical_configuration_maps_logical_items_to_physical_ones():
     assert workspace.environment == EnvironmentRef(None, "WeaverRuntime")
     assert workspace.execution.parallel_workers == 8
     assert str(workspace.target_for(_item("Lakehouse/Sales"))) == "Dev_Data"
-    assert workspace.settings_for_warehouse("Dev_Reporting").parallel_workers == 4
+    assert workspace.settings_for(_item("Warehouse/Reporting")).parallel_workers == 4
 
 
 @weaver_test()
@@ -65,11 +65,10 @@ def test_the_logical_key_decides_which_kind_of_item_the_value_names():
 @pytest.mark.parametrize("kind", ["Lakehouse", "Warehouse"])
 @weaver_test()
 def test_two_logical_items_may_share_one_physical_item(kind):
-    """Valid configuration. The mapping says where each item is deployed.
+    """Valid configuration, which a constrained environment writes.
 
-    A physical Lakehouse hosts as many logical items as an estate puts in it.
-    What is unsafe is two logical objects at one address inside it, and the
-    installed graph refuses that where an operation has to address it.
+    Configuration says where each item deploys. Only one is installed there at a
+    time: a build into a target another item is installed to is refused.
     """
 
     workspace = parse_workspace(

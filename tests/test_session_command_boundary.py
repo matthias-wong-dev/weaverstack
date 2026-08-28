@@ -392,7 +392,7 @@ def test_a_bare_build_target_offers_no_lakehouse_to_the_shell(transport):
 def test_a_logical_load_command_starts_no_spark_before_the_catalogue_is_read(
     transport,
 ):
-    """A logical target says nothing about which Lakehouse to attach to.
+    """An item says nothing about which Lakehouse to attach to.
 
     So the shell's preparation offers nothing and starts nothing. The physical
     Lakehouse is the catalogue's answer, and the operation offers it after

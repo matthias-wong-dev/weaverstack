@@ -460,7 +460,7 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
         # targets, so nothing here decides where anything is deployed.
         targets={
             WeaverItemId.parse("Lakehouse/Sales"): TargetDeclaration(
-                WeaverItemId.parse("Lakehouse/Sales"), _fixed_name("target")
+                _fixed_name("target")
             )
         },
     )

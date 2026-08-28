@@ -175,13 +175,22 @@ def test_one_build_cannot_write_two_items_into_one_physical_target(tmp_path):
     other's objects, so the binding set refuses the pairing outright.
     """
 
-    with pytest.raises(BuildError, match="cannot hold two logical items"):
+    with pytest.raises(BuildError, match="cannot hold two items"):
         ItemBindings(
             (
                 _binding("Lakehouse/Raw", "Shared"),
                 _binding("Lakehouse/Curated", "Shared"),
             )
         )
+
+    # A target is a kind and a display name, so one name in two kinds is two
+    # Fabric items and one build may write both.
+    ItemBindings(
+        (
+            _binding("Lakehouse/Raw", "Shared"),
+            _binding("Warehouse/Curated", "Shared"),
+        )
+    )
 
 
 @weaver_test()

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
-from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
+from .declaration.model import LAKEHOUSE, WeaverItemId
 from .errors import ConfigError
 from .targets import validate_name
 
@@ -92,7 +92,7 @@ def _catalogue_value(value: object) -> str:
 
 @dataclass(frozen=True)
 class ExecutionSettings:
-    """Technical parallelism settings for a Workspace or one physical item."""
+    """Technical parallelism settings for a Workspace or one Weaver item."""
 
     parallel_workers: int | None = None
 
@@ -106,34 +106,28 @@ class ExecutionSettings:
 
 @dataclass(frozen=True)
 class TargetDeclaration:
-    """One Weaver item, and the physical Fabric item it deploys to.
+    """Where one Weaver item deploys in this environment.
 
-    The item's type decides the physical half's kind, so the value is one display
-    name.
+    The item is the mapping key in :attr:`Workspace.targets`, and its type
+    decides the physical kind, so this carries one display name.
     """
 
-    item: WeaverItemId
     #: The environment-specific Fabric item display name.
     physical: str
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
 
     def __post_init__(self) -> None:
         object.__setattr__(
-            self,
-            "physical",
-            validate_name(self.physical, what=f"physical target for {self.item}"),
+            self, "physical", validate_name(self.physical, what="physical target")
         )
 
-    @property
-    def target(self):
-        """The typed physical target this declaration names."""
+    def target_for(self, item: WeaverItemId):
+        """The typed physical target this declaration names for ``item``."""
 
         from .targets import DeltaTarget, ItemRef, WarehouseTarget
 
-        item = ItemRef(self.physical)
-        if self.item.item_type == LAKEHOUSE:
-            return DeltaTarget(item)
-        return WarehouseTarget(item)
+        ref = ItemRef(self.physical)
+        return DeltaTarget(ref) if item.item_type == LAKEHOUSE else WarehouseTarget(ref)
 
 
 def _target_declarations(
@@ -141,8 +135,8 @@ def _target_declarations(
 ) -> Mapping[WeaverItemId, TargetDeclaration]:
     """Validate one item-keyed target mapping.
 
-    Two items naming one physical target is accepted here. Whether an operation
-    can act on that is the operation's question.
+    Two items naming one physical target is accepted here. A build into a target
+    another item is installed to is refused there.
     """
 
     resolved: dict[WeaverItemId, TargetDeclaration] = {}
@@ -150,11 +144,6 @@ def _target_declarations(
         item = key if isinstance(key, WeaverItemId) else WeaverItemId.parse(str(key))
         if not isinstance(declaration, TargetDeclaration):
             raise ConfigError(f"targets[{str(item)!r}] must be a TargetDeclaration")
-        if declaration.item != item:
-            raise ConfigError(
-                f"targets[{str(item)!r}] declares {declaration.item}; the key and "
-                "the declaration must name one logical item"
-            )
         resolved[item] = declaration
     return MappingProxyType(resolved)
 
@@ -210,20 +199,12 @@ class Workspace:
             )
         return ItemRef(self.catalogue.split("/", 1)[1])
 
-    @property
-    def catalogue_name(self) -> str | None:
-        """The catalogue Warehouse's item name, or ``None`` where none resolved.
-
-        Untyped, because a caller comparing it against a physical item name has
-        one of those and not a typed value. :attr:`catalogue_item` is the
-        resolvable form.
-        """
-
-        return self.catalogue.split("/", 1)[1] if self.catalogue else None
-
     def target_for(self, item: WeaverItemId):
         """Where this configuration deploys one item, typed. A build's answer."""
 
+        return self._declaration(item).target_for(item)
+
+    def _declaration(self, item: WeaverItemId) -> TargetDeclaration:
         declaration = self.targets.get(item)
         if declaration is None:
             raise ConfigError(
@@ -231,7 +212,7 @@ class Workspace:
                 f"Add a targets: entry for {item}, or name the target as "
                 f"{item}={item.item_type}/<physical name>."
             )
-        return declaration.target
+        return declaration
 
     @property
     def configured_items(self) -> tuple[WeaverItemId, ...]:
@@ -250,35 +231,21 @@ class Workspace:
             sorted(
                 {
                     declaration.physical
-                    for declaration in self.targets.values()
-                    if declaration.item.item_type == LAKEHOUSE
+                    for item, declaration in self.targets.items()
+                    if item.item_type == LAKEHOUSE
                 }
             )
         )
 
-    def settings_for_warehouse(self, name: str) -> ExecutionSettings:
-        """Parallelism for one physical Warehouse, or the workspace's own.
+    def settings_for(self, item: WeaverItemId) -> ExecutionSettings:
+        """Parallelism for one Weaver item, or the workspace's own.
 
-        Keyed by the physical name because parallelism is a property of the
-        connection. Two logical items declaring different settings for one
-        Warehouse is refused here rather than reconciled, so nothing silently
-        picks one of them.
+        Keyed by the item an operation selected. A physical Warehouse two items
+        may deploy to carries no settings of its own, so what one item declares
+        reaches only that item's own work.
         """
 
-        declared = {
-            declaration.execution.parallel_workers
-            for declaration in self.targets.values()
-            if declaration.item.item_type == WAREHOUSE
-            and declaration.physical == name
-            and declaration.execution.parallel_workers is not None
-        }
-        if not declared:
+        declaration = self.targets.get(item)
+        if declaration is None or declaration.execution.parallel_workers is None:
             return self.execution
-        if len(declared) > 1:
-            raise ConfigError(
-                f"{WAREHOUSE}/{name} is given more than one parallel_workers: "
-                + ", ".join(str(workers) for workers in sorted(declared))
-                + ". Declare one value for the Warehouse, or give each logical "
-                "item a Warehouse of its own"
-            )
-        return ExecutionSettings(parallel_workers=declared.pop())
+        return declaration.execution

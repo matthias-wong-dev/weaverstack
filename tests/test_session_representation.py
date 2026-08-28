@@ -116,9 +116,7 @@ def test_context_identity_ignores_which_targets_were_declared():
         catalogue="Warehouse/Weaver",
         environment="weaver",
         targets={
-            WeaverItemId.parse("Lakehouse/Sales"): TargetDeclaration(
-                WeaverItemId.parse("Lakehouse/Sales"), "Sales_LH"
-            ),
+            WeaverItemId.parse("Lakehouse/Sales"): TargetDeclaration("Sales_LH"),
         },
     )
 
