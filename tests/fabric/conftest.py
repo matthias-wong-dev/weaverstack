@@ -899,37 +899,50 @@ def fabric_initialise_catalogue(fabric_workspace, weaver_session):
 
 
 @pytest.fixture(scope="module")
-def clean_disposable_warehouse(session_disposable_warehouse):
-    from weaver.physical_wipe import wipe_sql_target
-
-    wipe_sql_target(
-        session_disposable_warehouse.target,
-        session_disposable_warehouse.workspace,
-        sql=session_disposable_warehouse.executor,
-    )
-
+def clean_disposable_warehouse(session_disposable_warehouse, warehouse_session):
+    _empty_warehouse(session_disposable_warehouse, warehouse_session)
     yield session_disposable_warehouse
 
 
 @pytest.fixture
-def emptied_disposable_warehouse(session_disposable_warehouse):
+def emptied_disposable_warehouse(session_disposable_warehouse, warehouse_session):
     """The fixed Warehouse, emptied for one test rather than one module.
 
     ``clean_disposable_warehouse`` empties once per module, which is enough while
-    a module's tests bind one logical item to it. A test binding a different item
+    a module's tests build one item into it. A test building a different item
     needs the physical names the previous one left to be gone: two items can
     declare the same ``Schema.Object``, and the rows behind it are not this
     test's.
     """
 
+    _empty_warehouse(session_disposable_warehouse, warehouse_session)
+    yield session_disposable_warehouse
+
+
+def _empty_warehouse(estate, session) -> None:
+    """Empty the fixed Warehouse and remove the catalogue's claims on it.
+
+    One cleaning path for both scopes. The claims go with the objects: an
+    `_.Installation` row surviving an emptied Warehouse says an item owns objects
+    that are no longer there, and a build of a different item into it is refused
+    on that basis. See
+    `weaver.build_bundle.workflow._refuse_occupied_targets`.
+
+    The estate is fixed and reused, so a claim outlives the run that made it.
+    Emptying is how this suite isolates, which is why the cleaning path has to
+    leave the catalogue agreeing with the Warehouse.
+    """
+
+    from weaver.operations.wipe import unbind_catalogue_claims
     from weaver.physical_wipe import wipe_sql_target
 
-    wipe_sql_target(
-        session_disposable_warehouse.target,
-        session_disposable_warehouse.workspace,
-        sql=session_disposable_warehouse.executor,
+    wipe_sql_target(estate.target, estate.workspace, sql=estate.executor)
+    unbind_catalogue_claims(
+        estate.workspace,
+        lakehouses=(),
+        warehouses=(estate.item.name,),
+        session=session,
     )
-    yield session_disposable_warehouse
 
 
 @pytest.fixture(scope="session")
