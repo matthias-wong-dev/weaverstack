@@ -440,7 +440,7 @@ weaver build \
   --item Warehouse/Reporting=Warehouse/Reporting_Alternative
 ```
 
-Without `=`, the physical item comes from the configuration's `targets:` mapping.
+Without `=`, the target comes from the configuration's `targets:` mapping.
 With `=`, it is supplied here and no configuration is consulted for that item.
 Both sides are typed and the two types must agree. Naming no `--item` at all
 builds every logical item the configuration declares.

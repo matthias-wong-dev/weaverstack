@@ -103,7 +103,7 @@ def build(
 ) -> BuildResult:
     """Build an authored repository.
 
-    ``items`` are the logical Weaver items to build, each written
+    ``items`` are the Weaver items to build, each written
     ``Lakehouse/Landing`` or ``Lakehouse/Landing=Lakehouse/Landing_Dev``. Naming
     none builds every item the workspace configuration declares.
 
@@ -228,7 +228,7 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
 
 
 def _item_bindings(items, workspace: Workspace):
-    """Each requested logical item bound to the physical target it builds into.
+    """Each requested item bound to the physical target it builds into.
 
     The one build-side resolution. An explicit ``=PHYSICAL`` wins; otherwise the
     workspace configuration answers.

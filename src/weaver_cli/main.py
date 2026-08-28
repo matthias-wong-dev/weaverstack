@@ -47,8 +47,8 @@ def _kind_and_name(value) -> tuple[str, str]:
 def _kind_requirements(values) -> set[str]:
     """What the named items or targets imply, by their type alone.
 
-    A logical Lakehouse item is installed in a Lakehouse, so the type on the left
-    of the slash answers for either vocabulary.
+    A Lakehouse item is installed in a Lakehouse, so the type left of the slash
+    answers for either vocabulary.
     """
 
     from weaver.sessions.requirements import LIVY, ONELAKE, TDS
@@ -284,7 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="ITEM[=TARGET]",
         help=(
-            "Logical Weaver item to build. Its physical target comes from "
+            "Weaver item to build. Its physical target comes from "
             "workspace configuration, or write ITEM=TARGET to supply it. Repeat "
             "to select more than one. Naming none builds every configured item."
         ),
@@ -328,7 +328,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="ITEM",
         help=(
-            "Logical Weaver item to load, as Lakehouse/Name or Warehouse/Name. "
+            "Weaver item to load, as Lakehouse/Name or Warehouse/Name. "
             "Repeat to select more than one."
         ),
     )
@@ -368,7 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="ITEM",
         help=(
-            "Logical Weaver item to validate, as Lakehouse/Name or "
+            "Weaver item to validate, as Lakehouse/Name or "
             "Warehouse/Name. Repeat to select more than one."
         ),
     )
@@ -1036,9 +1036,10 @@ def _refuse_retired_target(args: argparse.Namespace) -> None:
 
     if getattr(args, "retired_target", None):
         raise CommandError(
-            "--target is replaced by --item on build, load and test. A Weaver "
-            "item is logical; the physical target it is installed in comes from "
-            "workspace configuration or the Weaver catalogue.\n"
+            "--target is replaced by --item on build, load and test. These "
+            "commands name Weaver items; the physical target each one is "
+            "installed in comes from workspace configuration or the Weaver "
+            "catalogue.\n"
             "New: --item Lakehouse/Landing"
         )
 

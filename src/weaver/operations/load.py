@@ -44,11 +44,11 @@ def load(
     dry_run: bool = False,
     session=None,
 ) -> LoadRunReport:
-    """Load the installed objects the requested logical items own.
+    """Load the installed objects the named items own.
 
-    ``items`` are installed logical Weaver items, and they are a hard execution
-    boundary: with no name filter every loadable object they own runs in
-    dependency order, and a dependency never adds an unrequested item.
+    ``items`` are installed Weaver items, and they are a hard execution boundary:
+    with no name filter every loadable object they own runs in dependency order,
+    and a dependency never adds an unnamed item.
 
     ``names`` selects exact installed ``Schema.Object`` loadables inside those
     items. It is an operator override: only those nodes run, without dependency

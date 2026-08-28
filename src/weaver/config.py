@@ -136,13 +136,13 @@ def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
     if not isinstance(raw, dict):
         raise ConfigError("targets must be a mapping")
     declarations: dict[WeaverItemId, TargetDeclaration] = {}
-    for logical_text, value in raw.items():
-        where = f"targets[{logical_text!r}]"
+    for written, value in raw.items():
+        where = f"targets[{written!r}]"
         try:
-            item = WeaverItemId.parse(logical_text)
+            item = WeaverItemId.parse(written)
         except (IdentityError, TypeError, ValueError) as exc:
             raise ConfigError(
-                f"{where} is not a logical item identity such as Lakehouse/Landing"
+                f"{where} is not an item identity such as Lakehouse/Landing"
             ) from exc
         if isinstance(value, str):
             physical = value

@@ -43,7 +43,7 @@ def test(
     strict: bool = False,
     session=None,
 ) -> ValidationRunReport:
-    """Run the installed validations the requested logical items own.
+    """Run the installed validations the named items own.
 
     ``name`` runs one installed validation and returns its diagnostic rows
     alongside its counts; ``file`` compiles and runs a source file without

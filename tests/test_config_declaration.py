@@ -131,7 +131,7 @@ def test_cli_environment_override_replaces_the_configured_reference(tmp_path):
 
 @weaver_test()
 def test_an_untyped_target_key_is_rejected():
-    with pytest.raises(ConfigError, match="logical item identity"):
+    with pytest.raises(ConfigError, match="item identity"):
         parse_workspace({"workspace": "Analytics", "targets": {"Data": "Dev_Data"}})
 
 
