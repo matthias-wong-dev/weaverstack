@@ -456,9 +456,9 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
         # A Spark session attaches to a Lakehouse, and the catalogue is no
         # longer one. The target Lakehouse is the home; which it is carries no
         # meaning, because every statement names the Lakehouse it is about.
-        lakehouses={
-            _fixed_name("target"): TargetDeclaration(
-                item=WeaverItemId.parse("Lakehouse/Sales")
+        targets={
+            WeaverItemId.parse("Lakehouse/Sales"): TargetDeclaration(
+                WeaverItemId.parse("Lakehouse/Sales"), _fixed_name("target")
             )
         },
     )

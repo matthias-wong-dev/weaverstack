@@ -551,7 +551,9 @@ class ConsoleScope(WorkspaceScope):
                 "this workspace names no Environment. Pass --environment, or set "
                 "one in workspace configuration."
             )
-        if self.spark_home is None and not getattr(self.workspace, "lakehouses", None):
+        if self.spark_home is None and not getattr(
+            self.workspace, "configured_lakehouses", None
+        ):
             return (
                 "Fabric attaches a Spark session to a Lakehouse, and none has "
                 "been named. Give the command a Lakehouse target."

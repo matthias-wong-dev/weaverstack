@@ -71,7 +71,7 @@ def test_a_warehouse_load_asks_for_tds_and_not_for_spark():
     """The case the whole mechanism is for: T-SQL work should not wait on a
     Spark session, and on a small capacity should not queue for one."""
 
-    declared = _declared("load", "Warehouse/Reporting")
+    declared = _declared("load", "--target", "Warehouse/Curated")
 
     assert TDS in declared
     assert LIVY not in declared
@@ -79,15 +79,28 @@ def test_a_warehouse_load_asks_for_tds_and_not_for_spark():
 
 @weaver_test()
 def test_a_lakehouse_load_asks_for_spark_and_files():
-    declared = _declared("load", "Lakehouse/Sales")
+    declared = _declared("load", "--target", "Lakehouse/Landing")
 
     assert {ONELAKE, LIVY} <= declared
-    assert TDS not in declared
+
+
+@weaver_test()
+def test_every_load_asks_for_tds_because_it_reads_the_catalogue_first():
+    """A logical request says nothing about which physical Lakehouse to attach to.
+
+    So the catalogue is read over TDS before Spark is wanted at all, whichever
+    kind of item was named.
+    """
+
+    assert TDS in _declared("load", "--target", "Lakehouse/Landing")
+    assert TDS in _declared("test", "--target", "Lakehouse/Landing")
 
 
 @weaver_test()
 def test_a_mixed_request_asks_for_both():
-    declared = _declared("test", "Lakehouse/Sales", "Warehouse/Reporting")
+    declared = _declared(
+        "test", "--target", "Lakehouse/Landing", "--target", "Warehouse/Curated"
+    )
 
     assert {TDS, LIVY, ONELAKE} <= declared
 
@@ -103,10 +116,10 @@ def test_a_build_asks_for_everything_it_might_touch():
 @weaver_test()
 def test_every_command_that_reaches_a_workspace_asks_for_a_credential():
     for words in (
-        ("load", "Lakehouse/Sales"),
-        ("test", "Lakehouse/Sales"),
+        ("load", "--target", "Lakehouse/Landing"),
+        ("test", "--target", "Lakehouse/Landing"),
         ("build", "."),
-        ("wipe", "Lakehouse/Sales"),
+        ("wipe", "Lakehouse/Sales_LH"),
     ):
         assert AUTH in _declared(*words), words
 
@@ -234,20 +247,23 @@ def test_an_undeclared_warm_up_starts_only_the_reusable_resources(monkeypatch):
 
 
 @weaver_test()
-def test_a_build_binding_only_warehouses_declares_no_livy():
+def test_a_build_of_only_warehouses_declares_no_livy():
     """The migration's headline claim, at the point it costs something.
 
     A Warehouse-only build writes T-SQL into Warehouses and its catalogue into
     another, so it submits no Spark. Declaring Livy anyway would have the
     console start a Spark session, a minute, and a capacity's only slot, for
     a build that never uses it.
+
+    Read from the logical half, which is the half a bare ``--target`` has. Both
+    halves are the same kind, so the left one answers.
     """
 
     from weaver.sessions.requirements import LIVY, ONELAKE, TDS
     from weaver_cli.main import _requires_build
 
     declared = _requires_build(
-        SimpleNamespace(item_bindings=["Warehouse/Reporting=Analysis"])
+        SimpleNamespace(targets=["Warehouse/Curated=Warehouse/Analysis"])
     )
 
     assert TDS in declared
@@ -256,12 +272,12 @@ def test_a_build_binding_only_warehouses_declares_no_livy():
 
 
 @weaver_test()
-def test_a_build_binding_a_lakehouse_still_declares_livy():
+def test_a_build_of_a_lakehouse_still_declares_livy():
     from weaver.sessions.requirements import LIVY, ONELAKE
     from weaver_cli.main import _requires_build
 
     declared = _requires_build(
-        SimpleNamespace(item_bindings=["Lakehouse/Sales", "Warehouse/Reporting"])
+        SimpleNamespace(targets=["Lakehouse/Landing", "Warehouse/Curated"])
     )
 
     assert LIVY in declared
@@ -269,12 +285,12 @@ def test_a_build_binding_a_lakehouse_still_declares_livy():
 
 
 @weaver_test()
-def test_a_build_that_names_no_binding_declares_the_superset():
-    """Bindings can come from configuration, so silence is not "nothing"."""
+def test_a_build_that_names_no_target_declares_the_superset():
+    """Targets can come from configuration, so silence is not "nothing"."""
 
     from weaver.sessions.requirements import LIVY, ONELAKE, TDS
     from weaver_cli.main import _requires_build
 
-    declared = _requires_build(SimpleNamespace(item_bindings=None))
+    declared = _requires_build(SimpleNamespace(targets=None))
 
     assert {LIVY, ONELAKE, TDS} <= declared

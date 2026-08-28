@@ -102,71 +102,217 @@ def test_identities_are_immutable():
         target.lakehouse = ItemRef("Other")
 
 
-# --- the binding grammar ------------------------------------------------------
+# --- the build target grammar -------------------------------------------------
 #
-# `Lakehouse/SalesDev=Sales`: the left-hand side is typed and supplies the type
-# for both sides, so the logical item is named alone.
+# `Lakehouse/Landing=Lakehouse/Landing_Dev`: the logical item leads, and the
+# physical item follows where the caller supplies one. Both sides are typed and
+# both types must agree.
 
 
 @weaver_test()
-def test_a_binding_types_both_sides_from_the_physical_one():
-    from weaver.build_bundle.targets import parse_item_binding
+def test_a_build_target_may_name_the_logical_item_alone():
+    """The portable form. Where it deploys is the workspace configuration's answer."""
 
-    binding = parse_item_binding("Lakehouse/SalesDev=Sales")
+    from weaver.build_bundle.targets import parse_build_target
 
-    assert str(binding.item) == "Lakehouse/Sales"
-    assert binding.target.item.name == "SalesDev"
+    binding = parse_build_target(
+        "Lakehouse/Landing",
+        workspace=_workspace_with("Lakehouse/Landing", "Landing_Dev"),
+    )
+
+    assert str(binding.item) == "Lakehouse/Landing"
+    assert binding.target.item.name == "Landing_Dev"
 
 
 @weaver_test()
-def test_a_warehouse_binding_reads_the_same_way():
-    from weaver.build_bundle.targets import parse_item_binding
+def test_a_build_target_may_supply_the_physical_item_itself():
+    from weaver.build_bundle.targets import parse_build_target
 
-    binding = parse_item_binding("Warehouse/ReportingDev=Reporting")
+    binding = parse_build_target("Lakehouse/Landing=Lakehouse/Landing_Dev")
 
-    assert str(binding.item) == "Warehouse/Reporting"
-    assert binding.target.item.name == "ReportingDev"
+    assert str(binding.item) == "Lakehouse/Landing"
+    assert binding.target.item.name == "Landing_Dev"
+
+
+@weaver_test()
+def test_a_warehouse_build_target_reads_the_same_way():
+    from weaver.build_bundle.targets import parse_build_target
+
+    binding = parse_build_target("Warehouse/Curated=Warehouse/Curated_Dev")
+
+    assert str(binding.item) == "Warehouse/Curated"
+    assert binding.target.item.name == "Curated_Dev"
+
+
+@weaver_test()
+def test_both_routes_to_one_physical_item_produce_one_binding():
+    """Configuration and an explicit physical target are two ways to say it once."""
+
+    from weaver.build_bundle.targets import parse_build_target
+
+    configured = parse_build_target(
+        "Lakehouse/Landing",
+        workspace=_workspace_with("Lakehouse/Landing", "Landing_Dev"),
+    )
+    explicit = parse_build_target("Lakehouse/Landing=Lakehouse/Landing_Dev")
+
+    assert configured.item == explicit.item
+    assert configured.target.item == explicit.target.item
+    assert configured.to_bound_target().id == explicit.to_bound_target().id
+
+
+@weaver_test()
+def test_an_explicit_physical_target_needs_no_configured_entry():
+    from weaver.build_bundle.targets import parse_build_target
+
+    binding = parse_build_target(
+        "Lakehouse/Landing=Lakehouse/Landing_Dev",
+        workspace=_workspace_with("Warehouse/Curated", "Curated_Dev"),
+    )
+
+    assert binding.target.item.name == "Landing_Dev"
 
 
 @weaver_test()
 def test_the_same_bare_name_under_two_types_is_two_items():
-    """`Lakehouse/Sales` and `Warehouse/Sales` are distinct logical items.
+    """`Lakehouse/Sales` and `Warehouse/Sales` are distinct logical items."""
 
-    Which is why the physical side supplying the type is enough: the bare name
-    on the right is never ambiguous once the left has been read.
-    """
+    from weaver.build_bundle.targets import parse_build_target
 
-    from weaver.build_bundle.targets import parse_item_binding
-
-    lakehouse = parse_item_binding("Lakehouse/SalesDev=Sales")
-    warehouse = parse_item_binding("Warehouse/SalesWh=Sales")
+    lakehouse = parse_build_target("Lakehouse/Sales=Lakehouse/Sales_LH")
+    warehouse = parse_build_target("Warehouse/Sales=Warehouse/Sales_WH")
 
     assert lakehouse.item != warehouse.item
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Lakehouse/Landing=Warehouse/Curated_Dev",
+        "Warehouse/Curated=Lakehouse/Landing_Dev",
+    ],
+)
 @weaver_test()
-def test_a_typed_logical_item_is_refused_and_says_what_to_write():
-    """Not a type mismatch to check, a sentence that cannot be written.
-
-    The old grammar said the word twice and let the two disagree, so the error
-    it needed was about disagreement. This one has nothing to disagree with.
-    """
-
-    import pytest
-
-    from weaver.build_bundle.targets import parse_item_binding
+def test_the_two_halves_must_be_the_same_kind(text):
+    from weaver.build_bundle.targets import parse_build_target
     from weaver.errors import BuildError
 
-    with pytest.raises(BuildError, match="Lakehouse/SalesDev=Sales"):
-        parse_item_binding("Lakehouse/SalesDev=Lakehouse/Sales")
+    with pytest.raises(BuildError, match="both must be"):
+        parse_build_target(text)
 
 
 @weaver_test()
-def test_a_logical_item_of_the_wrong_type_cannot_be_smuggled_in():
-    import pytest
+def test_an_untyped_physical_target_is_refused():
+    """The physical half is typed, so a kind mismatch reads as one."""
 
-    from weaver.build_bundle.targets import parse_item_binding
+    from weaver.build_bundle.targets import parse_build_target
     from weaver.errors import BuildError
 
-    with pytest.raises(BuildError, match="named without a type"):
-        parse_item_binding("Lakehouse/SalesDev=Warehouse/Sales")
+    with pytest.raises(BuildError, match="Lakehouse/Name or Warehouse/Name"):
+        parse_build_target("Lakehouse/Landing=Landing_Dev")
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Lakehouse/Landing=", "=Lakehouse/Landing", "a=b=c", "", "   "],
+)
+@weaver_test()
+def test_malformed_build_targets_are_refused(text):
+    from weaver.build_bundle.targets import parse_build_target
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError):
+        parse_build_target(text)
+
+
+@weaver_test()
+def test_an_untyped_logical_item_is_refused():
+    from weaver.build_bundle.targets import parse_build_target
+    from weaver.errors import BuildError
+
+    with pytest.raises(BuildError, match="logical Weaver item"):
+        parse_build_target("Landing")
+
+
+@weaver_test()
+def test_a_logical_item_with_no_configured_target_says_both_ways_to_fix_it():
+    from weaver.build_bundle.targets import parse_build_target
+    from weaver.errors import ConfigError
+
+    with pytest.raises(ConfigError, match="no physical target"):
+        parse_build_target(
+            "Lakehouse/Landing",
+            workspace=_workspace_with("Lakehouse/Other", "Other_LH"),
+        )
+
+
+def _workspace_with(logical: str, physical: str):
+    from weaver.declaration.model import WeaverItemId
+    from weaver.workspaces import TargetDeclaration, Workspace
+
+    item = WeaverItemId.parse(logical)
+    return Workspace(
+        workspace="Demo", targets={item: TargetDeclaration(item, physical)}
+    )
+
+
+# --- the run target grammar ---------------------------------------------------
+#
+# A load or a test names logical items only. Where each one runs is the
+# catalogue's answer, so a run target has no physical half to override it with.
+
+
+@pytest.mark.parametrize("what", ["load", "test"])
+@pytest.mark.parametrize("text", ["Lakehouse/Landing", "Warehouse/Curated"])
+@weaver_test()
+def test_a_run_target_is_one_logical_item(what, text):
+    from weaver.operations.items import parse_run_item
+
+    assert str(parse_run_item(text, what=what)) == text
+
+
+@pytest.mark.parametrize("what", ["load", "test"])
+@weaver_test()
+def test_a_run_target_carrying_a_physical_half_is_refused(what):
+    from weaver.errors import CommandError
+    from weaver.operations.items import parse_run_item
+
+    with pytest.raises(CommandError, match="read from the Weaver catalogue"):
+        parse_run_item("Lakehouse/Landing=Lakehouse/Anything", what=what)
+
+
+@weaver_test()
+def test_the_refusal_says_what_to_write_instead():
+    from weaver.errors import CommandError
+    from weaver.operations.items import parse_run_item
+
+    with pytest.raises(CommandError, match=r"Write Lakehouse/Landing\."):
+        parse_run_item("Lakehouse/Landing=Lakehouse/Landing_Dev", what="load")
+
+
+@pytest.mark.parametrize("text", ["Landing", "Lakehouse", "Lakehouse/A/B", ""])
+@weaver_test()
+def test_a_malformed_run_target_is_refused(text):
+    from weaver.errors import CommandError
+    from weaver.operations.items import parse_run_item
+
+    with pytest.raises(CommandError):
+        parse_run_item(text, what="load")
+
+
+@weaver_test()
+def test_a_run_needs_at_least_one_target():
+    from weaver.errors import CommandError
+    from weaver.operations.items import requested_items
+
+    with pytest.raises(CommandError, match="load needs at least one target"):
+        requested_items([], what="load")
+
+
+@weaver_test()
+def test_a_repeated_run_target_is_named_once():
+    from weaver.operations.items import requested_items
+
+    assert requested_items(
+        ["Lakehouse/Landing", "Lakehouse/Landing"], what="load"
+    ) == requested_items(["Lakehouse/Landing"], what="load")

@@ -46,8 +46,10 @@ def test_notebook_run_uses_one_configured_lakehouse(monkeypatch):
         workspace="Analytics",
         catalogue="Warehouse/Weaver",
         environment="Weaver",
-        lakehouses={
-            "Sales": TargetDeclaration(item=WeaverItemId.parse("Lakehouse/Sales"))
+        targets={
+            WeaverItemId.parse("Lakehouse/Sales"): TargetDeclaration(
+                WeaverItemId.parse("Lakehouse/Sales"), "Sales"
+            )
         },
     )
     seen = []

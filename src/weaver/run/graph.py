@@ -125,7 +125,7 @@ def graph_for(request, state) -> RunGraph:
 def _load_graph(request, state) -> RunGraph:
     from ..load_plan import load_dag
 
-    dag = load_dag(state.catalogue.dag(), targets=request.targets, names=request.names)
+    dag = load_dag(state.catalogue.dag(), items=request.items, names=request.names)
     return RunGraph(
         nodes=tuple(
             RunNode(
@@ -155,9 +155,9 @@ def _test_graph(request, state) -> RunGraph:
 
     estate = ValidationEstate.from_catalogue(state.catalogue)
     if request.name is not None:
-        selected = (estate.named(request.name, request.targets),)
+        selected = (estate.named(request.name, request.items),)
     else:
-        selected = validation_order(estate.for_targets(request.targets))
+        selected = validation_order(estate.for_items(request.items))
     return RunGraph(
         nodes=tuple(
             RunNode(
@@ -175,7 +175,7 @@ def _test_graph(request, state) -> RunGraph:
         # the estate and reports, and none produces what another consumes. An
         # ordering exists for reporting, not for readiness.
         edges=(),
-        requested=tuple(request.targets),
+        requested=tuple(request.items),
     )
 
 

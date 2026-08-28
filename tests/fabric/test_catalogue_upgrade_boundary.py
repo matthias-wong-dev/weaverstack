@@ -38,10 +38,10 @@ from weaver.catalogue.tables import (
 from weaver.sessions import ConsoleSession
 
 
-def _built(workspace, estate, bind):
+def _built(workspace, estate, target):
     with ConsoleSession(workspace=workspace) as session:
         register_session(session)
-        return weaver.build(str(estate), bind=[bind], session=session)
+        return weaver.build(str(estate), targets=[target], session=session)
 
 
 def _failures(report):
@@ -135,7 +135,7 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     name = warehouse.item.name
     own_catalogue = replace(fabric_workspace, catalogue=f"Warehouse/{name}")
     estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("upgrade"))
-    bind = f"Warehouse/{name}=Reporting"
+    target = f"Warehouse/Reporting=Warehouse/{name}"
 
     # Setup, not the claim. This Warehouse is the catalogue and the estate's
     # target, so both items of the build want `_`: the built-in item for the
@@ -148,7 +148,7 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
 
     # One Warehouse holding both `_` and the user's own schemas, which is a
     # supported arrangement: Weaver owns `_` there and nothing else.
-    first = _built(own_catalogue, estate.path, bind)
+    first = _built(own_catalogue, estate.path, target)
     assert first.status == "succeeded", _failures(first)
 
     # Older than this Weaver, as an installation predating the tables would be.
@@ -160,7 +160,7 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     shape = _catalogue_shape(own_catalogue)
     assert not {table.name.casefold() for table in RUNTIME_TABLES} & shape
 
-    second = _built(own_catalogue, estate.path, bind)
+    second = _built(own_catalogue, estate.path, target)
     assert second.status == "succeeded", _failures(second)
 
     upgraded = _catalogue_shape(own_catalogue)
@@ -169,7 +169,7 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     # A third build reconciles against the table rather than introducing it, so
     # it is the ordinary case again. That it plans nothing is the core suite's
     # fixed-point claim; what is worth a Fabric round trip is that it runs.
-    third = _built(own_catalogue, estate.path, bind)
+    third = _built(own_catalogue, estate.path, target)
     assert third.status == "succeeded", _failures(third)
 
 
@@ -185,19 +185,19 @@ def test_a_build_recovers_catalogue_certification_without_recreating_tables(
     estate = WAREHOUSE_ESTATE_FIXTURE.disposable(
         tmp_path_factory.mktemp("catalogue-recovery")
     )
-    bind = f"Warehouse/{name}=Reporting"
+    target = f"Warehouse/Reporting=Warehouse/{name}"
     warehouse.executor.execute_script(
         "if schema_id(N'_') is null exec('create schema [_]');"
     )
 
-    first = _built(own_catalogue, estate.path, bind)
+    first = _built(own_catalogue, estate.path, target)
     assert first.status == "succeeded", _failures(first)
 
     warehouse.executor.execute_script(
         "delete from [_].[Registry] "
         "where [Item type] = N'Warehouse' and [Item name] = N'_weaver';"
     )
-    second = _built(own_catalogue, estate.path, bind)
+    second = _built(own_catalogue, estate.path, target)
     assert second.status == "succeeded", _failures(second)
 
     evidence = warehouse.executor.query_result_sets(
@@ -210,7 +210,7 @@ def test_a_build_recovers_catalogue_certification_without_recreating_tables(
     assert int(evidence[0][0]["physical_tables"]) == expected
     assert int(evidence[1][0]["certified_tables"]) == expected
 
-    third = _built(own_catalogue, estate.path, bind)
+    third = _built(own_catalogue, estate.path, target)
     assert third.status == "succeeded", _failures(third)
 
 

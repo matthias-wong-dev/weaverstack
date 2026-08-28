@@ -4,8 +4,8 @@ Selection from the installed managed graph, whose validation nodes come from
 ``_.TestDictionary`` and whose runnable artefacts come from ``_.Registry``.
 
 A validation dispatches a compiled procedure or module that reports counts. It
-is selected by name and by target, and it is never ordered against another
-validation.
+is selected by name and by logical item, and it is never ordered against another
+validation. The physical target stays on it for execution.
 """
 
 from __future__ import annotations
@@ -153,28 +153,26 @@ class ValidationEstate:
             ),
         )
 
-    def for_targets(
-        self, targets: Sequence[PhysicalTargetRef]
+    def for_items(
+        self, items: Sequence[WeaverItemId]
     ) -> tuple[InstalledValidation, ...]:
-        """Everything installed in the requested physical targets, in ID order.
+        """Every validation the requested logical items own, in ID order.
 
-        By target rather than by item, because a request names a target and
-        several logical items may be bound to one. The same grammar a load
-        request uses, and the same meaning.
+        By logical item, because that is what a request names. Two items
+        installed in one Warehouse own their own validations, and a request for
+        one of them runs that one's checks.
         """
 
-        wanted = set(targets)
+        wanted = set(items)
         return tuple(
             validation
             for _identity, validation in sorted(
                 self.validations.items(), key=lambda pair: str(pair[0])
             )
-            if validation.target in wanted
+            if validation.logical.item in wanted
         )
 
-    def named(
-        self, name: str, targets: Sequence[PhysicalTargetRef]
-    ) -> InstalledValidation:
+    def named(self, name: str, items: Sequence[WeaverItemId]) -> InstalledValidation:
         """One validation by its logical ``Schema.Object``, within the request.
 
         A miss is an error rather than an empty run: someone who named a
@@ -184,22 +182,22 @@ class ValidationEstate:
 
         candidates = [
             validation
-            for validation in self.for_targets(targets)
+            for validation in self.for_items(items)
             if validation.qualified.casefold() == name.casefold()
         ]
         if not candidates:
             known = ", ".join(
-                sorted(validation.qualified for validation in self.for_targets(targets))
+                sorted(validation.qualified for validation in self.for_items(items))
             )
             raise ValidationError(
                 f"no validation named {name!r} is installed in the requested "
-                f"target(s). Installed: {known or 'none'}"
+                f"item(s). Installed: {known or 'none'}"
             )
         if len(candidates) > 1:
             found = ", ".join(str(validation.logical) for validation in candidates)
             raise ValidationError(
                 f"{name!r} names more than one installed validation ({found}). "
-                "qualify the request with a single target"
+                "qualify the request with a single item"
             )
         return candidates[0]
 

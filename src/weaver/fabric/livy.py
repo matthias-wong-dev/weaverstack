@@ -150,13 +150,13 @@ def _spark_home(workspace):
     from ..errors import CommandError
     from ..targets import ItemRef
 
-    configured = sorted(getattr(workspace, "lakehouses", ()) or ())
+    configured = getattr(workspace, "configured_lakehouses", ()) or ()
     if not configured:
         raise CommandError(
             "starting a Spark session needs a Lakehouse to attach to, and none "
-            "was named. Give the operation a Lakehouse target, or add one to "
-            "`lakehouses` in workspace configuration. Warehouse-only work needs "
-            "no Spark session."
+            "was named. Give the operation a Lakehouse target, or add a Lakehouse "
+            "entry to `targets` in workspace configuration. Warehouse-only work "
+            "needs no Spark session."
         )
     return ItemRef(configured[0])
 

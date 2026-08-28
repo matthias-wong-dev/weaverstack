@@ -177,7 +177,7 @@ def seed_external_warehouse(workspace_name: str, name: str) -> None:
 
     executor = desktop_sql_executor(
         WarehouseTarget(ItemRef(name)),
-        Workspace(workspace=workspace_name, lakehouses={}),
+        Workspace(workspace=workspace_name, targets={}),
     )
     try:
         executor.execute_script(external_seed.warehouse_ddl())
@@ -352,7 +352,7 @@ def main() -> int:
             client,
             Workspace(
                 workspace=workspace.name,
-                lakehouses={},
+                targets={},
             ),
         )
     )

@@ -97,10 +97,13 @@ def acceptance(
     journey.external_warehouse = fabric_external_warehouse
     journey.physical = physical
     journey.warehouse_target = disposable_warehouse.target
+    #: What load, test and health name: the logical items.
+    journey.items = sorted(physical)
+    #: What a wipe names: the physical targets it empties.
     journey.targets = sorted(physical.values())
-    journey.bind = [
-        f"{name}={item.split('/', 1)[1]}" for item, name in physical.items()
-    ]
+    #: What a build names: both halves, so this journey needs no configured
+    #: `targets:` mapping to bind its fixed items to this tenant's own.
+    journey.build_targets = [f"{item}={name}" for item, name in physical.items()]
     _seed_the_neighbour(journey)
     return journey
 
@@ -482,7 +485,7 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
         "build",
         lambda: weaver.build(
             acceptance.repository,
-            bind=acceptance.bind,
+            targets=acceptance.build_targets,
             session=acceptance.session,
         ),
     )
@@ -601,7 +604,7 @@ def test_an_unchanged_build_is_a_true_fixed_point(acceptance):
         "rebuild",
         lambda: weaver.build(
             acceptance.repository,
-            bind=acceptance.bind,
+            targets=acceptance.build_targets,
             session=acceptance.session,
         ),
     )
@@ -662,7 +665,7 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
     acceptance.require("build")
     acceptance.step(
         "load",
-        lambda: weaver.load(acceptance.targets, session=acceptance.session),
+        lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("load")
     loaded = acceptance["load"].result
@@ -706,7 +709,7 @@ def test_seeded_foreign_data_flows_through_every_layer(acceptance):
 
     tested = acceptance.step(
         "test",
-        lambda: weaver.test(acceptance.targets, session=acceptance.session),
+        lambda: weaver.test(acceptance.items, session=acceptance.session),
     ).result
     acceptance.require("test")
     totals = tested.totals()
@@ -734,7 +737,7 @@ def test_an_unchanged_load_moves_only_the_appending_branch(acceptance):
 
     acceptance.step(
         "reload",
-        lambda: weaver.load(acceptance.targets, session=acceptance.session),
+        lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("reload")
     assert acceptance["reload"].result.succeeded, acceptance[
@@ -785,7 +788,7 @@ def test_foreign_source_movement_propagates_through_the_whole_chain(acceptance):
 
     acceptance.step(
         "load-mutated",
-        lambda: weaver.load(acceptance.targets, session=acceptance.session),
+        lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("load-mutated")
     assert acceptance["load-mutated"].result.succeeded, acceptance[
@@ -825,7 +828,7 @@ def test_foreign_source_movement_propagates_through_the_whole_chain(acceptance):
 
     tested = acceptance.step(
         "test-mutated",
-        lambda: weaver.test(acceptance.targets, session=acceptance.session),
+        lambda: weaver.test(acceptance.items, session=acceptance.session),
     ).result
     acceptance.require("test-mutated")
     assert tested.totals()["failed"] == 0, tested.to_mapping()
@@ -983,7 +986,7 @@ def test_loading_an_upstream_after_a_test_passed_turns_health_amber(acceptance):
     acceptance.step(
         "load-upstream",
         lambda: weaver.load(
-            [acceptance.physical["Lakehouse/Landing"]],
+            ["Lakehouse/Landing"],
             names=["LAND.Customer"],
             session=acceptance.session,
         ),
@@ -1006,12 +1009,12 @@ def test_loading_an_upstream_after_a_test_passed_turns_health_amber(acceptance):
     # The estate reloads and revalidates back to Green.
     acceptance.step(
         "reload-after-stale",
-        lambda: weaver.load(acceptance.targets, session=acceptance.session),
+        lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("reload-after-stale")
     acceptance.step(
         "retest-after-stale",
-        lambda: weaver.test(acceptance.targets, session=acceptance.session),
+        lambda: weaver.test(acceptance.items, session=acceptance.session),
     )
     acceptance.require("retest-after-stale")
 
@@ -1172,7 +1175,7 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
         "rebuild-changed",
         lambda: weaver.build(
             acceptance.repository,
-            bind=acceptance.bind,
+            targets=acceptance.build_targets,
             session=acceptance.session,
         ),
     )
@@ -1243,7 +1246,7 @@ def test_the_changed_estate_reaches_a_new_fixed_point(acceptance):
         "rebuild-settled",
         lambda: weaver.build(
             acceptance.repository,
-            bind=acceptance.bind,
+            targets=acceptance.build_targets,
             session=acceptance.session,
         ),
     )
@@ -1271,7 +1274,7 @@ def test_the_rebuilt_estate_still_loads_and_validates(acceptance):
     acceptance.require("rebuild-settled")
     acceptance.step(
         "load-changed",
-        lambda: weaver.load(acceptance.targets, session=acceptance.session),
+        lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("load-changed")
     assert acceptance["load-changed"].result.succeeded, acceptance[
@@ -1297,7 +1300,7 @@ def test_the_rebuilt_estate_still_loads_and_validates(acceptance):
 
     tested = acceptance.step(
         "test-changed",
-        lambda: weaver.test(acceptance.targets, session=acceptance.session),
+        lambda: weaver.test(acceptance.items, session=acceptance.session),
     ).result
     acceptance.require("test-changed")
     assert tested.totals()["failed"] == 0, tested.to_mapping()
@@ -1448,7 +1451,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     # must not skip the repair that follows.
     failed = weaver.build(
         acceptance.repository,
-        bind=acceptance.bind,
+        targets=acceptance.build_targets,
         session=acceptance.session,
     )
     assert failed.status != "succeeded", failed.to_mapping()
@@ -1483,7 +1486,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
         "rebuild-repaired",
         lambda: weaver.build(
             acceptance.repository,
-            bind=acceptance.bind,
+            targets=acceptance.build_targets,
             session=acceptance.session,
         ),
     )
@@ -1505,7 +1508,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
         "rebuild-converged",
         lambda: weaver.build(
             acceptance.repository,
-            bind=acceptance.bind,
+            targets=acceptance.build_targets,
             session=acceptance.session,
         ),
     ).result
@@ -1515,7 +1518,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     # And the healed estate loads and validates.
     acceptance.step(
         "load-repaired",
-        lambda: weaver.load(acceptance.targets, session=acceptance.session),
+        lambda: weaver.load(acceptance.items, session=acceptance.session),
     )
     acceptance.require("load-repaired")
     reloaded = acceptance["load-repaired"].result
@@ -1553,7 +1556,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
 
     tested = acceptance.step(
         "test-repaired",
-        lambda: weaver.test(acceptance.targets, session=acceptance.session),
+        lambda: weaver.test(acceptance.items, session=acceptance.session),
     ).result
     acceptance.require("test-repaired")
     assert tested.totals()["failed"] == 0, tested.to_mapping()
@@ -1637,7 +1640,7 @@ def _foreign_warehouse(journey):
 
     return journey.session.sql_executor(
         WarehouseTarget(ItemRef(journey.external_warehouse.name)),
-        workspace=Workspace(workspace=journey.external.name, lakehouses={}),
+        workspace=Workspace(workspace=journey.external.name, targets={}),
     )
 
 

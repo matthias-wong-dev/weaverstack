@@ -17,17 +17,16 @@ from support.sessions import given_session
 from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient, given_workspace
 
+from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.fabric.resolution import FabricResolver
 from weaver.load_report import TASK_SUCCEEDED
 from weaver.operations.load import run_load
 from weaver.run import RunState
 from weaver.store import FilesystemStore
-from weaver.targets import PhysicalTargetRef
 
-RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
-MISTYPED = PhysicalTargetRef("lakehouse", "Rwa_LH")
-VIEWS = PhysicalTargetRef("lakehouse", "Views_LH")
+MISTYPED = WeaverItemId.parse("Lakehouse/Rwa")
+VIEWS = WeaverItemId.parse(ITEM)
 
 
 class Refreshing(FabricResolver):
@@ -51,12 +50,18 @@ def _session(tmp_path, *, items=("Weaver_LH", "Raw_LH")):
 
 
 @weaver_test()
-def test_a_target_the_catalogue_does_not_know_is_refused(tmp_path):
+def test_an_item_the_catalogue_does_not_know_is_refused(tmp_path):
+    """Named as the caller named it, and told where to look for the answer.
+
+    A typo is refused as the logical item it was written as. The old phrasing
+    named a physical target the caller never wrote.
+    """
+
     repository = load_estate(tmp_path / "repository")
     catalogue = installed_catalogue(repository, load_estate_bindings())
     workspace, session = _session(tmp_path)
 
-    with pytest.raises(CommandError, match="no installed estate") as raised:
+    with pytest.raises(CommandError, match="has no installation") as raised:
         run_load(
             session,
             workspace=workspace,
@@ -65,8 +70,11 @@ def test_a_target_the_catalogue_does_not_know_is_refused(tmp_path):
             dry_run=True,
         )
 
-    assert "Lakehouse/Rwa_LH" in str(raised.value)
-    assert "Lakehouse/Raw_LH" in str(raised.value)
+    message = str(raised.value)
+    assert "Lakehouse/Rwa" in message
+    # Which catalogue was asked, and what it does hold.
+    assert "Warehouse/Weaver_LH" in message
+    assert "Lakehouse/Raw" in message
 
 
 VIEW_ONLY = """/*
@@ -83,7 +91,7 @@ select 1 as CustomerId;
 
 
 @weaver_test()
-def test_an_installed_target_with_no_load_work_is_a_successful_no_op(tmp_path):
+def test_an_installed_item_with_no_load_work_is_a_successful_no_op(tmp_path):
     repository = single_document_repository(
         tmp_path / "views", documents={"DWG.Nothing.sql": VIEW_ONLY}
     )

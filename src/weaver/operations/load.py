@@ -1,7 +1,12 @@
 """Public ``weaver.load(...)`` entry point and orchestration.
 
-Loads read installed state from the catalogue, construct and resolve a physical
-DAG, then dispatch primitives and record what each one did.
+A load names logical Weaver items. It reads installed state from the catalogue
+over TDS, resolves each requested item to the physical target ``_.Installation``
+binds it to, constructs and resolves a physical DAG, then dispatches primitives
+and records what each one did.
+
+The catalogue read comes before any Spark session, so a request for an item the
+catalogue has never heard of costs one TDS round trip rather than a Livy session.
 """
 
 from __future__ import annotations
@@ -10,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from ..declaration.model import WeaverItemId
 from ..errors import CommandError, LoadError
 from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 from ..load_report import (
@@ -21,11 +27,8 @@ from ..load_report import (
     LoadNodeReport,
     LoadRunReport,
 )
-from ..targets import (
-    PhysicalTargetRef,
-    lakehouse_names,
-    parse_physical_target,
-)
+from ..targets import lakehouse_names
+from .items import installed_targets, requested_items
 
 #: The task type this operation records under. Restated rather than imported,
 #: because this module reaches ``weaver.run`` inside the function that needs it;
@@ -46,15 +49,18 @@ def load(
     dry_run: bool = False,
     session=None,
 ) -> LoadRunReport:
-    """Load installed objects within the requested physical targets.
+    """Load the installed objects the requested logical items own.
 
-    ``targets`` are typed physical items such as ``Lakehouse/Curated`` and
-    ``Warehouse/Reporting``, and they are a hard execution boundary. With no
-    name filter, every loadable object hosted there runs in dependency order;
-    dependencies never add an unrequested target.
+    ``targets`` are logical Weaver items such as ``Lakehouse/Landing`` and
+    ``Warehouse/Curated``, and they are a hard execution boundary. Where each one
+    physically runs is read from the catalogue's ``_.Installation``, which is
+    authoritative once an item is built: neither the caller nor workspace
+    configuration can send a load somewhere else. With no name filter, every
+    loadable object those items own runs in dependency order; dependencies never
+    add an unrequested item.
 
     ``names`` selects exact installed ``Schema.Object`` loadables inside those
-    targets. It is an operator override: only those nodes run, without dependency
+    items. It is an operator override: only those nodes run, without dependency
     expansion or dependency ordering.
 
     ``workspace``, ``catalogue`` and ``environment`` are names, resolved as
@@ -70,13 +76,7 @@ def load(
                 → a configuration error naming what is missing
     """
 
-    values = (targets,) if isinstance(targets, str) else tuple(targets)
-    if not values:
-        raise CommandError("load needs at least one target")
-    requested = tuple(
-        parse_physical_target(value, what="load target", error=CommandError)
-        for value in values
-    )
+    requested = requested_items(targets, what="load")
     selected_names = _load_names(names)
 
     from .workspace import operation_workspace
@@ -92,19 +92,14 @@ def load(
 
     from ..sessions.host import use_or_create_session
 
-    refs = tuple(PhysicalTargetRef.of(target) for target in requested)
-
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
-        # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
-        # needs one of the Lakehouses this load is actually for.
-        opened.offer_spark_home(lakehouse_names(refs))
         with opened.task(
             "Load (dry run)" if dry_run else "Load", ", ".join(map(str, requested))
         ):
             return run_load(
                 opened,
                 workspace=resolved_workspace,
-                requested=refs,
+                requested=requested,
                 names=selected_names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
@@ -115,13 +110,19 @@ def run_load(
     session,
     *,
     workspace,
-    requested: Sequence[PhysicalTargetRef],
+    requested: Sequence[WeaverItemId],
     names: Sequence[str] = (),
     state=None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
 ) -> LoadRunReport:
-    """Run the catalogue graph through a Session."""
+    """Run the catalogue graph through a Session.
+
+    The order matters. The catalogue is read first, because a logical request
+    does not yet say which physical Lakehouse a Spark session would attach to.
+    A missing installation is refused after that read and before any Livy
+    session starts.
+    """
 
     from ..run import (
         Runner,
@@ -143,7 +144,14 @@ def run_load(
             if state is not None
             else read_installed_catalogue(session=session, workspace=workspace)
         )
-        _refuse_uninstalled_targets(catalogue.dag(), requested)
+        installed = installed_targets(
+            catalogue.dag(), requested, catalogue=workspace.catalogue
+        )
+
+    # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
+    # needs one of the Lakehouses this load is actually for. The physical name,
+    # which only the catalogue knows.
+    session.offer_spark_home(lakehouse_names(installed.values()))
 
     with session.step("Build run graph"):
         if state is None:
@@ -262,21 +270,6 @@ def _raise_for_failure(report: LoadRunReport) -> None:
         result=first.result,
         report=report,
         workflow_id=report.workflow_id,
-    )
-
-
-def _refuse_uninstalled_targets(dag, requested) -> None:
-    """Refuse a requested target the installed estate has never heard of."""
-
-    installed = set(dag.targets)
-    unknown = [target for target in requested if target not in installed]
-    if not unknown:
-        return
-    known = ", ".join(str(target) for target in dag.targets) or "none"
-    raise CommandError(
-        "no installed estate in "
-        + ", ".join(str(target) for target in unknown)
-        + f". The catalogue binds no logical item to it. Installed: {known}"
     )
 
 

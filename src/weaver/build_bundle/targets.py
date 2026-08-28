@@ -19,7 +19,13 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from ..errors import BuildError
-from ..targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, ItemRef
+from ..targets import (
+    LAKEHOUSE_TARGET,
+    WAREHOUSE_TARGET,
+    ItemRef,
+    physical_item,
+    physical_kind,
+)
 
 if TYPE_CHECKING:  # names used only in annotations
     from ..spark import FabricSparkTarget
@@ -321,76 +327,84 @@ def effective_item_bindings(
     )
 
 
-def parse_item_binding(text: str, *, workspace=None) -> ItemBinding:
-    """Parse a typed physical selector with an optional logical override.
+def parse_build_target(text: str, *, workspace=None) -> ItemBinding:
+    """Parse one build target: ``LOGICAL`` or ``LOGICAL=PHYSICAL``.
 
-    ``Lakehouse/Sales`` uses the configured default. The self-contained form
-    ``Lakehouse/SalesDev=Sales`` needs no configured target declaration: the
-    physical Lakehouse ``SalesDev`` holds the logical item ``Sales``. The
-    left-hand side is typed and supplies the type for both, so the logical item
-    is named alone.
+    ``Lakehouse/Landing`` names the logical item and takes its physical
+    destination from workspace configuration. ``Lakehouse/Landing=Lakehouse/
+    Landing_Dev`` supplies the destination itself and consults no configuration.
 
-    That is why a typed right-hand side is refused rather than accepted and
-    checked. ``Lakehouse/SalesDev=Warehouse/Sales`` is not a binding whose
-    types disagree. It is a sentence that cannot be written.
+    Both sides are typed and both types must agree. A build establishes an
+    installation binding, so it is the one operation that names both halves.
     """
 
-    if not isinstance(text, str) or text.count("=") > 1:
-        raise BuildError(
-            "a binding must be Lakehouse/Physical or Lakehouse/Physical=LogicalName"
-        )
-    physical_text, separator, logical_text = text.partition("=")
-    physical_text = physical_text.strip()
+    if not isinstance(text, str):
+        raise BuildError(f"a build target must be a string, got {type(text).__name__}")
+    if text.count("=") > 1:
+        raise BuildError(_BUILD_TARGET_GRAMMAR + f", got {text!r}")
+    logical_text, separator, physical_text = text.partition("=")
     logical_text = logical_text.strip()
-    if not physical_text or (separator and not logical_text):
-        raise BuildError(
-            "a binding must be Lakehouse/Physical or Lakehouse/Physical=LogicalName"
-        )
+    physical_text = physical_text.strip()
+    if not logical_text or (separator and not physical_text):
+        raise BuildError(_BUILD_TARGET_GRAMMAR + f", got {text!r}")
 
-    physical_type, physical = _parse_physical_item(physical_text)
+    item = _parse_logical_item(logical_text)
     if separator:
-        # The left-hand side supplies the type for both, so the right names the
-        # logical item alone. Spelling it `=Lakehouse/Sales` would say the type
-        # twice and let the two disagree.
-        if "/" in logical_text:
+        physical_type, physical = _parse_physical_item(physical_text)
+        if physical_type != item.item_type:
             raise BuildError(
-                f"a binding's logical item is named without a type: write "
-                f"{physical_text}={logical_text.rpartition('/')[2]} rather than "
-                f"{physical_text}={logical_text}. The physical side already says "
-                f"this is a {physical_type}"
+                f"logical {item} cannot be built into {physical_text}; both must "
+                f"be {item.item_type}"
             )
-        item = WeaverItemId(physical_type, logical_text)
     else:
         if workspace is None:
             raise BuildError(
-                f"binding {physical_text!r} needs a Workspace configuration default "
-                "or an explicit =LogicalName"
+                f"build target {logical_text!r} needs a Workspace configuration "
+                f"entry or an explicit ={item.item_type}/<physical name>"
             )
-        item = workspace.declaration_for(physical_type, physical.name).item
-    if item.item_type != physical_type:
-        raise BuildError(
-            f"physical {physical_text} cannot be bound to logical {item}; "
-            f"both must be {physical_type}"
-        )
+        target = workspace.target_for(item)
+        physical_type, physical = physical_kind(target), physical_item(target)
+
     workspace_name = getattr(workspace, "workspace", None)
-    target = (
+    binding = (
         LakehouseBinding(physical, workspace_name=workspace_name)
         if physical_type == LAKEHOUSE
         else WarehouseBinding(physical, workspace_name=workspace_name)
     )
-    return ItemBinding(item, target)
+    return ItemBinding(item, binding)
+
+
+#: What a malformed build target is told to write instead.
+_BUILD_TARGET_GRAMMAR = (
+    "a build target must be Lakehouse/Landing or "
+    "Lakehouse/Landing=Lakehouse/Landing_Dev"
+)
+
+
+def _parse_logical_item(text: str) -> WeaverItemId:
+    """The build target's logical half, as the one logical identity parser reads it."""
+
+    from ..errors import IdentityError
+
+    try:
+        return WeaverItemId.parse(text)
+    except IdentityError as exc:
+        raise BuildError(
+            f"a build target names a logical Weaver item as "
+            f"{LAKEHOUSE}/Name or {WAREHOUSE}/Name, got {text!r}: {exc}"
+        ) from None
 
 
 def _parse_physical_item(text: str) -> tuple[str, ItemRef]:
-    """The binding's physical half, through the grammar every operation shares.
+    """The build target's physical half, through the grammar every operation shares.
 
     The logical item types and the grammar's spellings happen to be the same two
     words, so the kind is used directly rather than translated.
     """
 
-    from ..targets import parse_physical_target, physical_item, physical_kind
+    from ..targets import parse_physical_target
 
     target = parse_physical_target(
-        text, what="binding physical target", error=BuildError
+        text, what="build target physical item", error=BuildError
     )
     return physical_kind(target), physical_item(target)

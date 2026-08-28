@@ -55,18 +55,35 @@ def test_workspace_accepts_a_qualified_environment_reference():
 
 @weaver_test()
 def test_target_configuration_is_immutable():
+    item = WeaverItemId.parse("Warehouse/Curated")
     workspace = Workspace(
         workspace="Analytics",
-        warehouses={
-            "Reporting": TargetDeclaration(
-                WeaverItemId.parse("Warehouse/Reporting"),
-                ExecutionSettings(parallel_workers=8),
+        targets={
+            item: TargetDeclaration(
+                item, "Reporting", ExecutionSettings(parallel_workers=8)
             )
         },
     )
     assert workspace.settings_for_warehouse("Reporting").parallel_workers == 8
     with pytest.raises(TypeError):
-        workspace.warehouses["Inventory"] = workspace.warehouses["Reporting"]
+        workspace.targets[WeaverItemId.parse("Warehouse/Other")] = workspace.targets[
+            item
+        ]
+
+
+@weaver_test()
+def test_a_declaration_must_agree_with_the_key_it_is_filed_under():
+    """The key is the logical item, so a declaration naming another is a mistake."""
+
+    with pytest.raises(ConfigError, match="must name one logical item"):
+        Workspace(
+            workspace="Analytics",
+            targets={
+                WeaverItemId.parse("Lakehouse/Landing"): TargetDeclaration(
+                    WeaverItemId.parse("Lakehouse/Other"), "Landing_Dev"
+                )
+            },
+        )
 
 
 @weaver_test()

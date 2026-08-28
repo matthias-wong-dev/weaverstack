@@ -5,8 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
-from .errors import ConfigError
+from .declaration.model import WeaverItemId
+from .errors import ConfigError, IdentityError
 from .workspaces import (
     EnvironmentRef,
     ExecutionSettings,
@@ -19,9 +19,11 @@ _KEYS = {
     "environment",
     "catalogue",
     "execution",
-    "lakehouses",
-    "warehouses",
+    "targets",
 }
+
+#: The physical-keyed sections one logical-first ``targets:`` mapping replaced.
+_RETIRED_KEYS = ("lakehouses", "warehouses")
 
 
 def load_workspace(path: str | Path) -> Workspace:
@@ -41,6 +43,13 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
 
     if not isinstance(payload, dict):
         raise ConfigError("Workspace configuration must be a mapping")
+    retired = [key for key in _RETIRED_KEYS if key in payload]
+    if retired:
+        raise ConfigError(
+            ", ".join(f"{key}:" for key in retired)
+            + " is replaced by one logical-first targets: mapping. Write "
+            "'targets:' with entries such as 'Lakehouse/Landing: Landing_Dev'."
+        )
     unknown = set(payload) - _KEYS
     if unknown:
         raise ConfigError(
@@ -54,8 +63,7 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
         "environment": payload.get("environment"),
         "catalogue": payload.get("catalogue"),
         "execution": _execution(payload.get("execution"), where="execution"),
-        "lakehouses": _targets(payload.get("lakehouses"), item_type=LAKEHOUSE),
-        "warehouses": _targets(payload.get("warehouses"), item_type=WAREHOUSE),
+        "targets": _targets(payload.get("targets")),
     }
     try:
         return Workspace(**common)
@@ -94,8 +102,7 @@ def resolve_workspace(
         "execution": configured.execution
         if configured is not None
         else ExecutionSettings(),
-        "lakehouses": configured.lakehouses if configured is not None else {},
-        "warehouses": configured.warehouses if configured is not None else {},
+        "targets": configured.targets if configured is not None else {},
     }
     return Workspace(**common)
 
@@ -111,37 +118,50 @@ def _execution(raw: Any, *, where: str) -> ExecutionSettings:
     return ExecutionSettings(parallel_workers=raw.get("parallel_workers"))
 
 
-def _targets(raw: Any, *, item_type: str) -> dict[str, TargetDeclaration]:
-    field_name = "lakehouses" if item_type == LAKEHOUSE else "warehouses"
+def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
+    """Parse the ``targets:`` mapping: one logical item to one physical name.
+
+    .. code-block:: yaml
+
+        targets:
+          Lakehouse/Landing: Landing_Dev
+          Warehouse/Curated:
+            name: Curated_Dev
+            execution:
+              parallel_workers: 4
+
+    The key's item type says which kind of Fabric item the value names, so one
+    mapping serves Lakehouses and Warehouses. Two logical items may name one
+    physical item.
+    """
+
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise ConfigError(f"{field_name} must be a mapping")
-    declarations: dict[str, TargetDeclaration] = {}
-    for physical_name, value in raw.items():
-        where = f"{field_name}[{physical_name!r}]"
+        raise ConfigError("targets must be a mapping")
+    declarations: dict[WeaverItemId, TargetDeclaration] = {}
+    for logical_text, value in raw.items():
+        where = f"targets[{logical_text!r}]"
+        try:
+            item = WeaverItemId.parse(logical_text)
+        except (IdentityError, TypeError, ValueError) as exc:
+            raise ConfigError(
+                f"{where} is not a logical item identity such as Lakehouse/Landing"
+            ) from exc
         if isinstance(value, str):
-            item_text = value
+            physical = value
             execution = ExecutionSettings()
         elif isinstance(value, dict):
-            unknown = set(value) - {"item", "execution"}
+            unknown = set(value) - {"name", "execution"}
             if unknown:
                 raise ConfigError(
                     f"{where} has unknown keys: " + ", ".join(sorted(unknown))
                 )
-            if "item" not in value:
-                raise ConfigError(f"{where} must define 'item'")
-            item_text = value["item"]
+            if "name" not in value:
+                raise ConfigError(f"{where} must define 'name'")
+            physical = value["name"]
             execution = _execution(value.get("execution"), where=f"{where}.execution")
         else:
-            raise ConfigError(f"{where} must be an item name or mapping")
-        try:
-            item = WeaverItemId.parse(item_text)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError(
-                f"{where} has invalid logical item {item_text!r}"
-            ) from exc
-        if item.item_type != item_type:
-            raise ConfigError(f"{where} must name a {item_type} item, got {item}")
-        declarations[str(physical_name)] = TargetDeclaration(item, execution)
+            raise ConfigError(f"{where} must be a physical item name or mapping")
+        declarations[item] = TargetDeclaration(item, physical, execution)
     return declarations

@@ -45,7 +45,11 @@ def _target_kind_and_name(value) -> tuple[str, str]:
 
 
 def _target_requirements(targets) -> set[str]:
-    """What the named physical targets imply, by their type alone."""
+    """What the named targets imply, by their type alone.
+
+    Logical or physical: a logical Lakehouse item is installed in a Lakehouse, so
+    the type on the left of the slash answers either way.
+    """
 
     from weaver.sessions.requirements import LIVY, ONELAKE, TDS
 
@@ -61,22 +65,29 @@ def _target_requirements(targets) -> set[str]:
 
 
 def _requires_targets(args) -> frozenset[str]:
-    from weaver.sessions.requirements import AUTH, RESOLVER, requirements
+    """What a load or test will want, from the logical items it names.
+
+    A logical item's type is its physical target's type, so the coarse routing a
+    command declares is knowable from the request without resolving anything.
+    The catalogue is a Warehouse, so a run always reaches TDS.
+    """
+
+    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
 
     return requirements(
-        AUTH, RESOLVER, *_target_requirements(getattr(args, "targets", ()))
+        AUTH, RESOLVER, TDS, *_target_requirements(getattr(args, "targets", ()))
     )
 
 
 def _requires_build(args) -> frozenset[str]:
-    """What a build will want, from the targets it was told to bind.
+    """What a build will want, from the logical items it was told to build.
 
     A build that names only Warehouses needs no Spark: its objects are T-SQL and
     the catalogue it writes is a Warehouse too. Declaring Livy anyway would have
     the console start a Spark session, costing a minute and a capacity's only
     slot, for a build that never submits one.
 
-    A build that names nothing has not said, so it gets the superset: bindings
+    A build that names nothing has not said, so it gets the superset: targets
     can come from workspace configuration, and what a repository turns out to
     hold is not knowable from arguments.
     """
@@ -90,13 +101,28 @@ def _requires_build(args) -> frozenset[str]:
         requirements,
     )
 
-    bindings = getattr(args, "item_bindings", None)
-    if not bindings:
+    targets = getattr(args, "targets", None)
+    if not targets:
         return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
-    # `PHYSICAL[=LOGICAL]`, and the physical half names the kind.
-    targets = [str(value).split("=", 1)[0] for value in bindings]
+    # `LOGICAL[=PHYSICAL]`, and the logical half names the kind. Both halves
+    # agree, so the left one answers without resolving the right.
+    logical = [str(value).split("=", 1)[0] for value in targets]
     # The catalogue is a Warehouse, so a build always reaches TDS.
-    return requirements(AUTH, RESOLVER, TDS, *_target_requirements(targets))
+    return requirements(AUTH, RESOLVER, TDS, *_target_requirements(logical))
+
+
+def _requires_wipe(args) -> frozenset[str]:
+    """What emptying named physical targets will want.
+
+    The coarse set. A wipe addresses physical resources whether or not an
+    installation exists, so its targets stay physical and say their own kind.
+    """
+
+    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
+
+    return requirements(
+        AUTH, RESOLVER, TDS, *_target_requirements(getattr(args, "targets", ()))
+    )
 
 
 def _requires_health(args) -> frozenset[str]:
@@ -159,22 +185,48 @@ def _target_lakehouses(targets) -> tuple[str, ...]:
     return tuple(names)
 
 
-def command_lakehouses(parsed) -> tuple[str, ...]:
-    """The physical Lakehouses one parsed command names.
+def _physical_target_lakehouses(args) -> tuple[str, ...]:
+    """The Lakehouses a command whose targets are physical names outright."""
 
-    Fabric creates a Livy session against a Lakehouse, so warming Spark for a
-    command needs one of the Lakehouses that command is for. Read from the same
-    arguments its requirements are read from, so the two cannot disagree about
-    which targets a command has.
+    return _target_lakehouses(getattr(args, "targets", None) or ())
+
+
+def _build_target_lakehouses(args) -> tuple[str, ...]:
+    """The Lakehouses a build target names on its physical side.
+
+    ``--target Lakehouse/Landing=Lakehouse/Landing_Dev`` says the physical item,
+    so warming Spark against it needs no resolution. The bare
+    ``--target Lakehouse/Landing`` says only the logical one, and the build
+    resolves it through workspace configuration and offers it itself.
     """
 
-    tokens = [
-        # `PHYSICAL[=LOGICAL]`, and the physical half names the kind.
-        str(value).split("=", 1)[0]
-        for value in getattr(parsed, "item_bindings", None) or ()
-    ]
-    tokens += [str(value) for value in getattr(parsed, "targets", None) or ()]
-    return _target_lakehouses(tokens)
+    named = []
+    for value in getattr(args, "targets", None) or ():
+        _logical, separator, physical = str(value).partition("=")
+        if separator:
+            named.append(physical)
+    return _target_lakehouses(named)
+
+
+def command_lakehouses(parsed) -> tuple[str, ...]:
+    """The physical Lakehouses one parsed command names. Empty when it names none.
+
+    Fabric creates a Livy session against a Lakehouse, so warming Spark for a
+    command needs the id of one, and only a physical name will do. Declared per
+    command, as its requirements are.
+
+    ``load --target Lakehouse/Landing`` declares none. It names a logical item
+    whose installation may be ``Landing_Dev``, and offering ``Landing`` would
+    attach a Spark session to a Lakehouse the estate does not use, or to none at
+    all. Which physical target a logical item is installed in is the catalogue's
+    answer, so the operation reads it and offers it: see
+    :func:`weaver.operations.load.run_load`. Teaching the CLI to read
+    ``_.Installation`` would make one-shot, shell, compose and notebook paths
+    four places that resolve it.
+    """
+
+    declares = getattr(parsed, "lakehouses", None)
+    return tuple(declares(parsed)) if declares is not None else ()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -235,7 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
     check.set_defaults(handler=handle_check)
 
     build = subcommands.add_parser(
-        "build", help="Build repository objects into bound targets."
+        "build", help="Build repository objects into their logical items."
     )
     build.add_argument(
         "repository",
@@ -243,11 +295,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Repository folder. Defaults to the current directory or Notebook Resources.",
     )
     build.add_argument(
-        "--bind",
-        dest="item_bindings",
+        "--target",
+        dest="targets",
         action="append",
-        metavar="PHYSICAL[=LOGICAL]",
-        help="Physical target with an optional logical target override.",
+        metavar="LOGICAL[=PHYSICAL]",
+        help=(
+            "Logical Weaver item to build. Its physical item comes from "
+            "workspace configuration, or write LOGICAL=PHYSICAL to supply it."
+        ),
+    )
+    build.add_argument(
+        "--bind",
+        dest="retired_bind",
+        action="append",
+        help=argparse.SUPPRESS,
     )
     build.add_argument(
         "--bundle-only",
@@ -261,16 +322,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build.add_argument("--json", action="store_true", help="emit the result as JSON")
     _add_workspace_args(build)
-    build.set_defaults(handler=handle_build, requires=_requires_build)
+    build.set_defaults(
+        handler=handle_build,
+        requires=_requires_build,
+        lakehouses=_build_target_lakehouses,
+    )
 
     load = subcommands.add_parser(
-        "load", help="Load installed objects in named targets."
+        "load", help="Load installed objects in named logical items."
     )
     load.add_argument(
-        "targets",
-        nargs="+",
-        metavar="TARGET",
-        help="Lakehouse/Name or Warehouse/Name",
+        "--target",
+        dest="targets",
+        action="append",
+        metavar="LOGICAL",
+        help=(
+            "Logical Weaver item to load, as Lakehouse/Name or Warehouse/Name. "
+            "Repeat to select more than one."
+        ),
     )
     load.add_argument(
         "--name",
@@ -294,13 +363,17 @@ def build_parser() -> argparse.ArgumentParser:
     load.set_defaults(handler=handle_load, requires=_requires_targets)
 
     validate = subcommands.add_parser(
-        "test", help="Run installed Tests and Assumptions in named targets."
+        "test", help="Run installed Tests and Assumptions in named logical items."
     )
     validate.add_argument(
-        "targets",
-        nargs="+",
-        metavar="TARGET",
-        help="Lakehouse/Name or Warehouse/Name",
+        "--target",
+        dest="targets",
+        action="append",
+        metavar="LOGICAL",
+        help=(
+            "Logical Weaver item to validate, as Lakehouse/Name or "
+            "Warehouse/Name. Repeat to select more than one."
+        ),
     )
     selection = validate.add_mutually_exclusive_group()
     selection.add_argument(
@@ -347,7 +420,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report.add_argument("--json", action="store_true", help="emit the report as JSON")
     _add_workspace_args(report, include_environment=False)
-    report.set_defaults(handler=handle_health, requires=_requires_health)
+    report.set_defaults(
+        handler=handle_health,
+        requires=_requires_health,
+        lakehouses=_physical_target_lakehouses,
+    )
 
     wipe = subcommands.add_parser(
         "wipe", help="Clear a physical Lakehouse or Warehouse."
@@ -371,7 +448,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--yes", action="store_true", help="Skip the confirmation prompt."
     )
     wipe.add_argument("--json", action="store_true", help="emit the result as JSON")
-    wipe.set_defaults(handler=handle_wipe, requires=_requires_build)
+    wipe.set_defaults(
+        handler=handle_wipe,
+        requires=_requires_wipe,
+        lakehouses=_physical_target_lakehouses,
+    )
 
     install = subcommands.add_parser(
         "install",
@@ -503,7 +584,7 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
     from weaver.fabric.notebooks import run_notebook
 
     workspace = _fabric_cli_workspace(args)
-    configured_lakehouses = tuple(workspace.lakehouses)
+    configured_lakehouses = workspace.configured_lakehouses
     lakehouse = args.lakehouse
     if lakehouse is None and len(configured_lakehouses) == 1:
         lakehouse = configured_lakehouses[0]
@@ -1347,6 +1428,12 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
 
 def handle_build(args: argparse.Namespace) -> int:
+    if getattr(args, "retired_bind", None):
+        raise CommandError(
+            "--bind is replaced by --target, and the two halves have swapped.\n"
+            "Old: --bind Lakehouse/Landing_Dev=Landing\n"
+            "New: --target Lakehouse/Landing=Lakehouse/Landing_Dev"
+        )
     if args.bundle_path and not args.bundle_only:
         raise CommandError("--bundle-path requires --bundle-only")
     return _until_fixed(args, lambda: _build_once(args))
@@ -1361,7 +1448,7 @@ def _build_once(args: argparse.Namespace) -> int:
     with _running_session(args, workspace) as opened:
         result = weaver.build(
             args.repository,
-            bind=args.item_bindings,
+            targets=args.targets,
             bundle_only=args.bundle_only,
             bundle_path=args.bundle_path,
             session=opened,

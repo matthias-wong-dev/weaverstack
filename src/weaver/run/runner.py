@@ -60,18 +60,25 @@ def _node_substep(session, node):
         yield frame
 
 
-#: Run every loadable object installed in the requested targets.
+#: Run every loadable object installed in the requested logical items.
 LOAD = "load"
-#: Run the installed Tests and Assumptions in the requested targets.
+#: Run the installed Tests and Assumptions in the requested logical items.
 TEST = "test"
 
 
 @dataclass(frozen=True)
 class RunRequest:
-    """The requested scope and the policy the run is executed under."""
+    """The requested scope and the policy the run is executed under.
+
+    The scope is logical: ``items`` are the installed Weaver items a caller
+    named. Where each one physically runs comes from ``_.Installation`` through
+    :class:`weaver.installed.InstalledDag`, and stays on the nodes for dispatch.
+    Selection is by item, so two items sharing one physical Lakehouse do not
+    select each other's work.
+    """
 
     kind: str
-    targets: tuple
+    items: tuple
     #: One installed node by name, where the caller asked for exactly one.
     name: str | None = None
     #: Exact installed loadables by ``Schema.Object``. ``load`` only.
@@ -86,8 +93,8 @@ class RunRequest:
     def __post_init__(self) -> None:
         from ..errors import CommandError
 
-        if not self.targets:
-            raise CommandError(f"{self.kind} needs at least one target")
+        if not self.items:
+            raise CommandError(f"{self.kind} needs at least one logical item")
         if self.name is not None and self.file is not None:
             raise CommandError(
                 "a run selects name= or file=, not both. One names something "
@@ -99,13 +106,13 @@ class RunRequest:
             raise CommandError("a test selects one installed validation with name=")
 
     @classmethod
-    def load(cls, targets: Sequence, **policy) -> "RunRequest":
+    def load(cls, items: Sequence, **policy) -> "RunRequest":
         policy["names"] = tuple(policy.get("names") or ())
-        return cls(kind=LOAD, targets=tuple(targets), **policy)
+        return cls(kind=LOAD, items=tuple(items), **policy)
 
     @classmethod
-    def test(cls, targets: Sequence, **policy) -> "RunRequest":
-        return cls(kind=TEST, targets=tuple(targets), **policy)
+    def test(cls, items: Sequence, **policy) -> "RunRequest":
+        return cls(kind=TEST, items=tuple(items), **policy)
 
     @property
     def selection(self) -> str | tuple[str, ...] | None:
@@ -120,7 +127,7 @@ class RunRequest:
     def to_mapping(self) -> dict:
         return {
             "kind": self.kind,
-            "targets": [str(target) for target in self.targets],
+            "items": [str(item) for item in self.items],
             "name": self.name,
             "names": list(self.names),
             "file": self.file,
@@ -475,7 +482,7 @@ class Runner:
         graph = self.graph
         return RunResult(
             kind=self.request.kind,
-            requested=tuple(str(target) for target in self.request.targets),
+            requested=tuple(str(item) for item in self.request.items),
             status=run_status(nodes, dry_run=self.request.dry_run),
             dry_run=self.request.dry_run,
             fault_tolerant=self.request.fault_tolerant,
