@@ -81,7 +81,8 @@ def installed_targets(dag, items, *, catalogue: str | None = None):
         known = ", ".join(sorted(str(item) for item in dag.installations)) or "none"
         raise CommandError(
             ", ".join(str(item) for item in missing)
-            + f" has no installation{where}. Build it first. Installed: {known}"
+            + (" have" if len(missing) > 1 else " has")
+            + f" no installation{where}. Build it first. Installed: {known}"
         )
     return installed
 
