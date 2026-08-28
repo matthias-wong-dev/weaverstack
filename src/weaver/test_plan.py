@@ -3,9 +3,8 @@
 Selection from the installed managed graph, whose validation nodes come from
 ``_.TestDictionary`` and whose runnable artefacts come from ``_.Registry``.
 
-A validation dispatches a compiled procedure or module that reports counts. It
-is selected by name and by logical item, and it is never ordered against another
-validation. The physical target stays on it for execution.
+A validation dispatches a compiled procedure or module that reports counts. It is
+selected by name and by item, and it is never ordered against another validation.
 """
 
 from __future__ import annotations
@@ -161,12 +160,7 @@ class ValidationEstate:
     def for_items(
         self, items: Sequence[WeaverItemId]
     ) -> tuple[InstalledValidation, ...]:
-        """Every validation the requested logical items own, in ID order.
-
-        By logical item, because that is what a request names. Two items
-        installed in one Warehouse own their own validations, and a request for
-        one of them runs that one's checks.
-        """
+        """Every validation the named items own, in ID order."""
 
         wanted = set(items)
         return tuple(
@@ -178,11 +172,10 @@ class ValidationEstate:
         )
 
     def named(self, name: str, items: Sequence[WeaverItemId]) -> InstalledValidation:
-        """One validation by its logical ``Schema.Object``, within the request.
+        """One validation by its ``Schema.Object``, within the named items.
 
-        A miss is an error rather than an empty run: someone who named a
-        validation is asking about that validation, and reporting nothing would
-        answer a question they did not ask.
+        A miss is an error rather than an empty run: reporting nothing would
+        answer a question nobody asked.
         """
 
         candidates = [

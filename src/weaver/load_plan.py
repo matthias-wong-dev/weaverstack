@@ -1,13 +1,9 @@
 """Build the physical load graph from the installed managed graph.
 
-A request names logical Weaver items. The graph holds the loadables those items
-own, their load dependencies, and the endpoint refresh and OneLake publication
-barriers between them. What depends on what is :mod:`weaver.installed`'s answer;
-this module decides which of those nodes run, where a barrier goes between two
-of them, and in what order.
-
-Selection is by logical item. Each node keeps the physical target its item is
-installed in, because that is the address dispatch and barrier placement use.
+What depends on what is :mod:`weaver.installed`'s answer; this module decides
+which of those nodes run, where a barrier goes between two of them, and in what
+order. Selection is by item; each node keeps the physical target dispatch and
+barrier placement need.
 """
 
 from __future__ import annotations
@@ -105,9 +101,8 @@ class LoadDag:
 
     nodes: tuple[LoadNode, ...]
     edges: tuple[tuple[str, str], ...]
-    #: The logical items this plan was asked for. Logical, because that is what
-    #: the caller named and what bounded the traversal.
-    requested: tuple[WeaverItemId, ...] = ()
+    #: The items this plan was asked for, which bounded its traversal.
+    items: tuple[WeaverItemId, ...] = ()
     messages: tuple[LoadMessage, ...] = ()
 
     @classmethod
@@ -161,17 +156,11 @@ def load_dag(
     items: Sequence[WeaverItemId],
     names: Sequence[str] = (),
 ) -> LoadDag:
-    """The physical load graph for one set of requested logical items.
+    """The physical load graph for one set of items.
 
-    With no name filter, every installed loadable object belonging to the
-    requested items. Dependencies order them but never enlarge the scope: an
-    edge is kept only where both ends were named. The boundary is the logical
-    item and not the physical target, so requesting one of two items installed
-    in one Lakehouse loads that item alone.
-
-    With ``names``, exactly those ``Schema.Object`` loadables within the
-    requested items. An operator override, so dependencies add neither nodes
-    nor ordering edges.
+    Dependencies order the selection but never enlarge it: an edge is kept only
+    where both ends were named. ``names`` narrows it to exact ``Schema.Object``
+    loadables, an operator override that adds neither nodes nor ordering edges.
     """
 
     requested = tuple(dict.fromkeys(items))
@@ -219,7 +208,7 @@ class _Planner:
         dag = LoadDag(
             nodes=tuple(sorted(self.nodes.values(), key=lambda node: node.sort_key)),
             edges=tuple(sorted(self.edges)),
-            requested=requested,
+            items=requested,
             messages=tuple(self.messages),
         )
         # Ordering is what proves acyclicity, so it is done here rather than left
@@ -270,13 +259,11 @@ class _Planner:
         return tuple(selected)
 
     def _refuse_ambiguity(self, items: tuple[WeaverItemId, ...]) -> None:
-        """Stop if any target this request dispatches into holds a duplicated address.
+        """Stop if a target this request dispatches into holds a duplicated address.
 
         By physical target, because the collision is physical: two logical
-        objects at one address make a dispatch into that target ambiguous
-        whether or not the item that produced the other claim was selected. Only
-        the targets this run touches are checked, since dependency traversal is
-        bounded by the requested items.
+        objects at one address make a dispatch there ambiguous whether or not the
+        item that made the other claim was selected.
         """
 
         for target in dict.fromkeys(

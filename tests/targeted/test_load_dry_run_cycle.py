@@ -117,7 +117,7 @@ def dry_run(session, *targets, names=(), fault_tolerant=False):
         session.session,
         workspace=session.workspace,
         state=RunState(catalogue=session.catalogue),
-        requested=targets or (RAW, REPORTING),
+        items=targets or (RAW, REPORTING),
         names=names,
         fault_tolerant=fault_tolerant,
         dry_run=True,

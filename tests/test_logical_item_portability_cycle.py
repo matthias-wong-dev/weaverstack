@@ -1,19 +1,9 @@
 """One repository, one command sequence, two environments.
 
-The claim the logical target interface exists for: switching from development to
-production changes the workspace configuration and nothing else. The same
-repository, the same logical target names, the same build, load and test.
-
-.. code-block:: text
-
-    build   logical item  →  workspace configuration  →  physical item
-    load    logical item  →  _.Installation           →  physical item
-    test    logical item  →  _.Installation           →  physical item
-
-Two owners, and the difference between them is what this file proves. A build
-consumes deployment configuration, because it is what establishes the binding. A
-load and a test consume installed state, because once an item is built the
-catalogue is where it lives. Set the two to disagree and each follows its own.
+Switching environments changes the workspace configuration and nothing else.
+Every claim here follows from the two owners of an item's physical target
+disagreeing: configuration answers for a build, and the catalogue for a load or a
+test. See design/cli-usage.md for the rule itself.
 """
 
 from __future__ import annotations
@@ -35,7 +25,7 @@ from weaver.run import RunState
 from weaver.sessions.testing import TestSession
 from weaver.workspaces import Workspace
 
-#: The logical item the repository below authors. One name, both environments.
+#: The item the repository below authors. One name, both environments.
 LANDING = WeaverItemId.parse(ITEM)
 
 DEV = """\
@@ -54,12 +44,11 @@ targets:
   {item}: Landing
 """
 
-#: The sequence a developer types. Identical in both environments apart from the
-#: configuration it selects.
+#: The sequence a developer types, identical apart from the config it selects.
 SEQUENCE = (
-    "build ./repository --target {item} --workspace-config {config}",
-    "load --target {item} --workspace-config {config}",
-    "test --target {item} --workspace-config {config}",
+    "build ./repository --item {item} --workspace-config {config}",
+    "load --item {item} --workspace-config {config}",
+    "test --item {item} --workspace-config {config}",
 )
 
 
@@ -115,17 +104,17 @@ def _physical(seen) -> dict[str, str]:
 
 
 @weaver_test()
-def test_the_same_target_builds_into_each_environments_own_item(
+def test_the_same_item_builds_into_each_environments_own_target(
     tmp_path, root, bindings
 ):
-    """One logical name, two physical destinations, one command."""
+    """One item name, two targets, one command line."""
 
     built = {}
     for name, text in (("dev", DEV), ("prod", PROD)):
         with pytest.raises(Halt):
             weaver.build(
                 str(root.path),
-                targets=[ITEM],
+                items=[ITEM],
                 workspace_config=_config(tmp_path, text, f"{name}.yml"),
                 session=TestSession(workspace=Workspace(workspace="Nowhere")),
             )
@@ -148,8 +137,8 @@ def test_the_same_target_builds_into_each_environments_own_item(
 
 
 @weaver_test()
-def test_naming_no_target_builds_every_configured_item(tmp_path, root, bindings):
-    """Configuration is a target list as well as a mapping."""
+def test_naming_no_item_builds_every_configured_one(tmp_path, root, bindings):
+    """Configuration is an item list as well as a mapping."""
 
     with pytest.raises(Halt):
         weaver.build(
@@ -162,15 +151,13 @@ def test_naming_no_target_builds_every_configured_item(tmp_path, root, bindings)
 
 
 @weaver_test()
-def test_an_explicit_physical_target_overrides_the_configured_one(
-    tmp_path, root, bindings
-):
+def test_an_explicit_target_overrides_the_configured_one(tmp_path, root, bindings):
     """The one place a caller may say where a build lands."""
 
     with pytest.raises(Halt):
         weaver.build(
             str(root.path),
-            targets=[f"{ITEM}=Lakehouse/Landing_Scratch"],
+            items=[f"{ITEM}=Lakehouse/Landing_Scratch"],
             workspace_config=_config(tmp_path, DEV, "dev.yml"),
             session=TestSession(workspace=Workspace(workspace="Nowhere")),
         )
@@ -179,15 +166,14 @@ def test_an_explicit_physical_target_overrides_the_configured_one(
 
 
 @weaver_test()
-def test_one_build_refuses_two_items_sharing_one_physical_item(tmp_path, root):
-    """Where the shared-container rule stops.
+def test_a_shared_target_is_configuration_that_a_build_refuses(tmp_path, root):
+    """Accepted as configuration, refused by a build.
 
-    Configuration accepts the mapping, load and test select by item, and a build
-    of either one on its own works. What one build cannot do is write both:
-    prune is scoped to the schemas each item manages, so one bundle would hold
-    two keep-sets for one target inventory.
+    A build diffs one item's keep-set against everything its target holds, so a
+    second item installed there would be pruned.
     """
 
+    from weaver.config import load_workspace
     from weaver.errors import BuildError
     from weaver.operations.build import _item_bindings
 
@@ -197,21 +183,36 @@ def test_one_build_refuses_two_items_sharing_one_physical_item(tmp_path, root):
         "  Lakehouse/A: Shared\n  Lakehouse/B: Shared\n",
         encoding="utf-8",
     )
-    from weaver.config import load_workspace
-
     workspace = load_workspace(config)
 
-    # Either one alone.
-    assert _physical({"bindings": _item_bindings(["Lakehouse/A"], workspace)}) == {
-        "Lakehouse/A": "Shared"
-    }
-    assert _physical({"bindings": _item_bindings(["Lakehouse/B"], workspace)}) == {
-        "Lakehouse/B": "Shared"
+    # Config-time: accepted, as the plan requires.
+    assert {str(item) for item in workspace.configured_items} == {
+        "Lakehouse/A",
+        "Lakehouse/B",
     }
 
-    # Both at once, which is also what naming no target would ask for.
-    with pytest.raises(BuildError, match="Build them one at a time"):
+    # One build naming both, which is what naming no item would ask for.
+    with pytest.raises(BuildError, match="cannot hold two logical items"):
         _item_bindings(None, workspace)
+
+
+@weaver_test()
+def test_a_build_refuses_a_target_another_item_is_already_installed_to(tmp_path, root):
+    """The half configuration cannot see, so it is refused after the catalogue read."""
+
+    from weaver.build_bundle.targets import ItemBindings, parse_build_item
+    from weaver.build_bundle.workflow import _refuse_occupied_targets
+    from weaver.errors import BuildError
+
+    installed = _installed(root.repository, physical="Shared")
+    bindings = ItemBindings((parse_build_item(f"{ITEM}=Lakehouse/Shared"),))
+
+    # The item already installed there may be rebuilt.
+    _refuse_occupied_targets(bindings, installed)
+
+    other = ItemBindings((parse_build_item("Lakehouse/Other=Lakehouse/Shared"),))
+    with pytest.raises(BuildError, match="is installed to by"):
+        _refuse_occupied_targets(other, installed)
 
 
 # --- load and test follow the catalogue ---------------------------------------
@@ -239,12 +240,7 @@ def _configured(tmp_path, *, physical: str) -> Workspace:
 
 @weaver_test()
 def test_a_load_uses_the_installed_target_and_not_the_configured_one(tmp_path, root):
-    """The key proof. Configuration says one thing, the catalogue another.
-
-    A build consumes configuration because it decides where to deploy. A load
-    consumes the catalogue because the item is already deployed, and the estate
-    is where it actually is.
-    """
+    """The key proof: configuration says one thing and the catalogue another."""
 
     from weaver.operations.load import run_load
 
@@ -255,7 +251,7 @@ def test_a_load_uses_the_installed_target_and_not_the_configured_one(tmp_path, r
     session = TestSession(workspace=workspace)
 
     report = run_load(
-        session, workspace=workspace, state=state, requested=(LANDING,), dry_run=True
+        session, workspace=workspace, state=state, items=(LANDING,), dry_run=True
     )
 
     # What the caller asked for, in the caller's own vocabulary.
@@ -269,7 +265,7 @@ def test_a_load_uses_the_installed_target_and_not_the_configured_one(tmp_path, r
 
 @weaver_test()
 def test_a_test_uses_the_installed_target_and_not_the_configured_one(tmp_path, root):
-    """Test reads the same authority a load reads, for the same reason."""
+    """Test reads the authority a load reads."""
 
     from weaver.operations.test import run_test
 
@@ -279,20 +275,14 @@ def test_a_test_uses_the_installed_target_and_not_the_configured_one(tmp_path, r
     )
     session = TestSession(workspace=workspace)
 
-    run_test(
-        session, workspace=workspace, state=state, requested=(LANDING,), dry_run=True
-    )
+    run_test(session, workspace=workspace, state=state, items=(LANDING,), dry_run=True)
 
     assert session.scope(workspace).spark_home == "Landing_Installed"
 
 
 @weaver_test()
-def test_no_run_target_may_carry_a_physical_half(tmp_path, root):
-    """Once an item is built, the catalogue is authoritative.
-
-    A caller cannot send a load somewhere other than where the item is, and a
-    workspace configuration cannot either, which the two tests above prove.
-    """
+def test_no_run_item_may_carry_a_physical_half(tmp_path, root):
+    """A caller cannot send a run anywhere but where the item is installed."""
 
     from weaver.errors import CommandError
 
@@ -300,7 +290,7 @@ def test_no_run_target_may_carry_a_physical_half(tmp_path, root):
     session = TestSession(workspace=workspace)
 
     for operation in (weaver.load, weaver.test):
-        with pytest.raises(CommandError, match="read from the Weaver catalogue"):
+        with pytest.raises(CommandError, match="comes from the Weaver catalogue"):
             operation([f"{ITEM}=Lakehouse/Anything"], session=session)
 
 
@@ -308,17 +298,13 @@ def test_no_run_target_may_carry_a_physical_half(tmp_path, root):
 
 
 @weaver_test()
-def test_the_notebook_api_names_the_same_logical_items(tmp_path, root, bindings):
-    """Not a CLI translation. The public functions take the logical identities.
-
-    Asserted at the public functions, because that is the interface a notebook
-    calls and argparse is not in front of it.
-    """
+def test_the_notebook_api_names_the_same_items(tmp_path, root, bindings):
+    """Asserted at the public functions, which argparse is not in front of."""
 
     with pytest.raises(Halt):
         weaver.build(
             str(root.path),
-            targets=[ITEM],
+            items=[ITEM],
             workspace_config=_config(tmp_path, DEV, "dev.yml"),
             session=TestSession(workspace=Workspace(workspace="Nowhere")),
         )
@@ -336,7 +322,7 @@ def test_the_notebook_api_names_the_same_logical_items(tmp_path, root, bindings)
             TestSession(workspace=workspace),
             workspace=workspace,
             state=state,
-            requested=(LANDING,),
+            items=(LANDING,),
             dry_run=True,
         )
         assert report is not None
@@ -347,11 +333,7 @@ def test_the_notebook_api_names_the_same_logical_items(tmp_path, root, bindings)
 
 @weaver_test()
 def test_one_composition_serves_both_environments(tmp_path):
-    """The sequence is the program. The configuration is the environment.
-
-    Parsed rather than run: what is claimed is that the command text is the same
-    text, and that each verb reaches the operation with the same logical scope.
-    """
+    """Parsed rather than run: the claim is that the command text is identical."""
 
     from weaver_cli.compose import composition_words
     from weaver_cli.main import build_parser
@@ -367,7 +349,7 @@ def test_one_composition_serves_both_environments(tmp_path):
 
     for dev, prod in zip(parsed["dev"], parsed["prod"], strict=True):
         # The same logical scope, verb by verb.
-        assert dev.targets == prod.targets == [ITEM]
+        assert dev.items == prod.items == [ITEM]
         # And the only difference between the two lines.
         assert dev.workspace_config != prod.workspace_config
 

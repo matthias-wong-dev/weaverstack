@@ -22,7 +22,7 @@ _KEYS = {
     "targets",
 }
 
-#: The physical-keyed sections one logical-first ``targets:`` mapping replaced.
+#: The physical-keyed sections ``targets:`` replaced.
 _RETIRED_KEYS = ("lakehouses", "warehouses")
 
 
@@ -47,8 +47,8 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
     if retired:
         raise ConfigError(
             ", ".join(f"{key}:" for key in retired)
-            + " is replaced by one logical-first targets: mapping. Write "
-            "'targets:' with entries such as 'Lakehouse/Landing: Landing_Dev'."
+            + " is replaced by one item-keyed targets: mapping. Write 'targets:' "
+            "with entries such as 'Lakehouse/Landing: Landing_Dev'."
         )
     unknown = set(payload) - _KEYS
     if unknown:
@@ -119,7 +119,7 @@ def _execution(raw: Any, *, where: str) -> ExecutionSettings:
 
 
 def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
-    """Parse the ``targets:`` mapping: one logical item to one physical name.
+    """Parse ``targets:``, which maps one Weaver item to one Fabric item name.
 
     .. code-block:: yaml
 
@@ -129,10 +129,6 @@ def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
             name: Curated_Dev
             execution:
               parallel_workers: 4
-
-    The key's item type says which kind of Fabric item the value names, so one
-    mapping serves Lakehouses and Warehouses. Two logical items may name one
-    physical item.
     """
 
     if raw is None:

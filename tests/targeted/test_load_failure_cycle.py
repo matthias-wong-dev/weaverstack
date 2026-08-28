@@ -153,7 +153,7 @@ def _run(session, *, fault_tolerant=False, targets=(RAW, REPORTING)):
         session.session,
         workspace=session.workspace,
         state=RunState(catalogue=session.catalogue),
-        requested=targets,
+        items=targets,
         fault_tolerant=fault_tolerant,
         dry_run=False,
     )

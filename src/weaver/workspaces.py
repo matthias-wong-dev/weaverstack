@@ -106,11 +106,10 @@ class ExecutionSettings:
 
 @dataclass(frozen=True)
 class TargetDeclaration:
-    """One logical Weaver item, and the physical Fabric item it deploys to.
+    """One Weaver item, and the physical Fabric item it deploys to.
 
-    The logical item carries the type, so the physical half is one display name.
-    ``Lakehouse/Landing`` deploys to a Lakehouse and ``Warehouse/Curated`` to a
-    Warehouse.
+    The item's type decides the physical half's kind, so the value is one display
+    name.
     """
 
     item: WeaverItemId
@@ -127,12 +126,7 @@ class TargetDeclaration:
 
     @property
     def target(self):
-        """The typed physical target this declaration names.
-
-        A :class:`weaver.targets.DeltaTarget` for a Lakehouse item and a
-        :class:`weaver.targets.WarehouseTarget` for a Warehouse one. The type
-        comes from the logical key, which is why one mapping serves both.
-        """
+        """The typed physical target this declaration names."""
 
         from .targets import DeltaTarget, ItemRef, WarehouseTarget
 
@@ -145,13 +139,10 @@ class TargetDeclaration:
 def _target_declarations(
     declarations: Mapping[WeaverItemId, TargetDeclaration],
 ) -> Mapping[WeaverItemId, TargetDeclaration]:
-    """Validate one logical-keyed target mapping.
+    """Validate one item-keyed target mapping.
 
-    Two logical items may name one physical item. The mapping says where each
-    logical item is deployed, and a physical Lakehouse or Warehouse hosts as
-    many logical items as an estate puts in it. An address two logical objects
-    both claim inside one of them is a physical collision, refused where an
-    operation has to address it: see :attr:`weaver.installed.InstalledDag.ambiguous`.
+    Two items naming one physical target is accepted here. Whether an operation
+    can act on that is the operation's question.
     """
 
     resolved: dict[WeaverItemId, TargetDeclaration] = {}
@@ -183,9 +174,7 @@ class Workspace:
     #: name to imply it.
     catalogue: str | None = None
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
-    #: Where each logical Weaver item is deployed in this environment, keyed by
-    #: the logical item. The key's item type says whether the physical half is a
-    #: Lakehouse or a Warehouse, so one mapping serves both.
+    #: Where each Weaver item is deployed in this environment, keyed by the item.
     targets: Mapping[WeaverItemId, TargetDeclaration] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -222,12 +211,7 @@ class Workspace:
         return ItemRef(self.catalogue.split("/", 1)[1])
 
     def target_for(self, item: WeaverItemId):
-        """The typed physical target this configuration deploys one item to.
-
-        The build half of the logical-to-physical question. Load and test read
-        the installed answer from the catalogue instead: see
-        :meth:`weaver.installed.InstalledDag.target_for`.
-        """
+        """Where this configuration deploys one item, typed. A build's answer."""
 
         declaration = self.targets.get(item)
         if declaration is None:
@@ -240,16 +224,15 @@ class Workspace:
 
     @property
     def configured_items(self) -> tuple[WeaverItemId, ...]:
-        """Every logical item this configuration deploys, in identity order."""
+        """Every item this configuration deploys, in identity order."""
 
         return tuple(sorted(self.targets, key=str))
 
     @property
     def configured_lakehouses(self) -> tuple[str, ...]:
-        """The physical Lakehouse names this configuration deploys into.
+        """The Lakehouses this configuration deploys into, sorted.
 
-        Sorted, so a workspace answers the same way twice. What a Livy session
-        falls back to when no operation offered it a Lakehouse to attach to.
+        What a Livy session falls back to when no operation offered it one.
         """
 
         return tuple(
@@ -266,17 +249,25 @@ class Workspace:
         """Parallelism for one physical Warehouse, or the workspace's own.
 
         Keyed by the physical name because parallelism is a property of the
-        connection. Where two logical items share a Warehouse and declare
-        different settings, the lower worker count wins.
+        connection. Two logical items declaring different settings for one
+        Warehouse is refused here rather than reconciled, so nothing silently
+        picks one of them.
         """
 
-        workers = [
+        declared = {
             declaration.execution.parallel_workers
             for declaration in self.targets.values()
             if declaration.item.item_type == WAREHOUSE
             and declaration.physical == name
             and declaration.execution.parallel_workers is not None
-        ]
-        if not workers:
+        }
+        if not declared:
             return self.execution
-        return ExecutionSettings(parallel_workers=min(workers))
+        if len(declared) > 1:
+            raise ConfigError(
+                f"{WAREHOUSE}/{name} is given more than one parallel_workers: "
+                + ", ".join(str(workers) for workers in sorted(declared))
+                + ". Declare one value for the Warehouse, or give each logical "
+                "item a Warehouse of its own"
+            )
+        return ExecutionSettings(parallel_workers=declared.pop())

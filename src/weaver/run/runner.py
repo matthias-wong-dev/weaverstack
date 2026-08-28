@@ -68,12 +68,9 @@ TEST = "test"
 
 @dataclass(frozen=True)
 class RunRequest:
-    """The requested scope and the policy the run is executed under.
+    """The items a run was asked for, and the policy it is executed under.
 
-    The scope is logical: ``items`` are the installed Weaver items a caller
-    named. Where each one physically runs comes from ``_.Installation`` through
-    :class:`weaver.installed.InstalledDag`, and stays on the nodes for dispatch.
-    Selection is by item, so two items sharing one physical Lakehouse do not
+    Selection is by item, so two items installed in one physical target do not
     select each other's work.
     """
 

@@ -101,7 +101,7 @@ def runner(*, nodes, edges=(), **policy) -> Runner:
 
     state = RunState(catalogue=Catalogue(rows={}))
     made = Runner(state, RunRequest.load([SALES], **policy))
-    made._graph = RunGraph(nodes=tuple(nodes), edges=tuple(edges), requested=(SALES,))
+    made._graph = RunGraph(nodes=tuple(nodes), edges=tuple(edges), items=(SALES,))
     return made
 
 

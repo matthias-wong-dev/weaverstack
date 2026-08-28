@@ -196,13 +196,13 @@ From the CLI:
 ```bash
 weaver build \
   ./estate \
-  --target Lakehouse/Raw=Lakehouse/Raw_Dev \
-  --target Warehouse/Reporting=Warehouse/Reporting_Dev \
+  --item Lakehouse/Raw=Lakehouse/Raw_Dev \
+  --item Warehouse/Reporting=Warehouse/Reporting_Dev \
   --workspace Analytics --environment Runtime \
   --catalogue Warehouse/Control
 ```
 
-From Python inside the target environment, `weaver.build(source, targets=...)` is
+From Python inside the target environment, `weaver.build(source, items=...)` is
 the ordinary source-neutral operation. It copies
 a remote source once to a session-local temporary directory when required, parses it,
 ensures the catalogue, reads target and catalogue state, reconciles, and

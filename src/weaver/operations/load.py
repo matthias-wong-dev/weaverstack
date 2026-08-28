@@ -1,12 +1,7 @@
 """Public ``weaver.load(...)`` entry point and orchestration.
 
-A load names logical Weaver items. It reads installed state from the catalogue
-over TDS, resolves each requested item to the physical target ``_.Installation``
-binds it to, constructs and resolves a physical DAG, then dispatches primitives
-and records what each one did.
-
-The catalogue read comes before any Spark session. An item with no installation
-row is refused after that one TDS round trip.
+Read the catalogue, resolve the requested items, construct and resolve a physical
+DAG, dispatch primitives, record what each one did.
 """
 
 from __future__ import annotations
@@ -38,7 +33,7 @@ TASK_TYPE = "load"
 
 
 def load(
-    targets: str | Sequence[str],
+    items: str | Sequence[str],
     *,
     names: str | Sequence[str] | None = None,
     workspace: str | None = None,
@@ -51,13 +46,9 @@ def load(
 ) -> LoadRunReport:
     """Load the installed objects the requested logical items own.
 
-    ``targets`` are logical Weaver items such as ``Lakehouse/Landing`` and
-    ``Warehouse/Curated``, and they are a hard execution boundary. Where each one
-    physically runs is read from the catalogue's ``_.Installation``, which is
-    authoritative once an item is built: neither the caller nor workspace
-    configuration can send a load somewhere else. With no name filter, every
-    loadable object those items own runs in dependency order; dependencies never
-    add an unrequested item.
+    ``items`` are installed logical Weaver items, and they are a hard execution
+    boundary: with no name filter every loadable object they own runs in
+    dependency order, and a dependency never adds an unrequested item.
 
     ``names`` selects exact installed ``Schema.Object`` loadables inside those
     items. It is an operator override: only those nodes run, without dependency
@@ -76,7 +67,7 @@ def load(
                 → a configuration error naming what is missing
     """
 
-    requested = requested_items(targets, what="load")
+    requested = requested_items(items, what="load")
     selected_names = _load_names(names)
 
     from .workspace import operation_workspace
@@ -99,7 +90,7 @@ def load(
             return run_load(
                 opened,
                 workspace=resolved_workspace,
-                requested=requested,
+                items=requested,
                 names=selected_names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
@@ -110,7 +101,7 @@ def run_load(
     session,
     *,
     workspace,
-    requested: Sequence[WeaverItemId],
+    items: Sequence[WeaverItemId],
     names: Sequence[str] = (),
     state=None,
     fault_tolerant: bool = False,
@@ -118,9 +109,9 @@ def run_load(
 ) -> LoadRunReport:
     """Run the catalogue graph through a Session.
 
-    The catalogue is read first. A logical request names no physical Lakehouse
-    for a Spark session to attach to, so the Spark home is offered after the read
-    and a missing installation is refused before any Livy session starts.
+    Ordered so the catalogue read comes before the Spark home is offered: the
+    physical Lakehouse to attach to is recorded there, and a missing installation
+    is therefore refused before Livy starts.
     """
 
     from ..run import (
@@ -144,12 +135,11 @@ def run_load(
             else read_installed_catalogue(session=session, workspace=workspace)
         )
         installed = installed_targets(
-            catalogue.dag(), requested, catalogue=workspace.catalogue
+            catalogue.dag(), items, catalogue=workspace.catalogue
         )
 
     # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
-    # needs one of the Lakehouses this load is for. The physical name, which the
-    # catalogue holds.
+    # needs one of the Lakehouses this load is for.
     session.offer_spark_home(lakehouse_names(installed.values()))
 
     with session.step("Build run graph"):
@@ -158,7 +148,7 @@ def run_load(
         runner = Runner(
             state,
             RunRequest.load(
-                requested,
+                items,
                 names=names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,

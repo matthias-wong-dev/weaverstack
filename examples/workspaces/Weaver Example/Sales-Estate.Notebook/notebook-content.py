@@ -68,7 +68,7 @@ for report in wipe_result.reports:
 build_result = weaver.build(
     repository,
     catalogue="Warehouse/Weaver",
-    targets=[
+    items=[
         "Lakehouse/Sales=Lakehouse/Sales",
         "Warehouse/Reporting=Warehouse/Reporting",
     ],

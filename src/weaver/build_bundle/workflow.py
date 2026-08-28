@@ -223,11 +223,35 @@ def read_build_state(
                 resolver=session.resolver(workspace),
                 store=session.transport_store(workspace),
             )
+    _refuse_occupied_targets(bindings, catalogue)
     return BuildState(
         catalogue=catalogue,
         target_inventories=inventories,
         shortcut_sources=sources,
     )
+
+
+def _refuse_occupied_targets(bindings: ItemBindings, catalogue) -> None:
+    """Refuse a target the catalogue already binds to a different logical item.
+
+    :func:`weaver.build_bundle.physical.item_prune_stage` diffs one item's
+    keep-set against the whole target inventory, so building into a target
+    holding another item's objects would prune them.
+    """
+
+    for binding in bindings.entries:
+        target = binding.target.item.name
+        others = sorted(
+            str(item) for item in catalogue.bound_to(target) if item != binding.item
+        )
+        if others:
+            raise BuildError(
+                f"{binding.target.physical_kind}/{target} is installed to by "
+                + ", ".join(others)
+                + f", so {binding.item} cannot be built into it. Empty and "
+                f"unbind it first, or give {binding.item} a physical target of "
+                "its own"
+            )
 
 
 def _read_catalogue(*, session, workspace, required):

@@ -97,7 +97,7 @@ def test_a_logical_item_with_no_entry_says_what_to_add():
 @pytest.mark.parametrize("retired", ["lakehouses", "warehouses"])
 @weaver_test()
 def test_the_retired_physical_keyed_sections_are_refused(retired):
-    with pytest.raises(ConfigError, match="logical-first targets: mapping"):
+    with pytest.raises(ConfigError, match="item-keyed targets: mapping"):
         parse_workspace(
             {"workspace": "Analytics", retired: {"Data": "Lakehouse/Sales"}}
         )

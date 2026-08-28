@@ -6,9 +6,9 @@ catalogue: Warehouse/Weaver
 execution:
   parallel_workers: 4
 
-# Logical Weaver items are keys; the value is the physical Fabric item each one
-# is deployed to in this environment. The key's item type says whether that
-# value names a Lakehouse or a Warehouse, so one mapping serves both.
+# Weaver items are the keys; each value is the Fabric item it is deployed to in
+# this environment. The key's type says whether that value names a Lakehouse or
+# a Warehouse.
 targets:
   Lakehouse/Sales: Sales
 

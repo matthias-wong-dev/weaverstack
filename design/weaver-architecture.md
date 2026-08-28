@@ -517,30 +517,14 @@ A Workspace is one Microsoft Fabric workspace, and identifies:
 - the workspace, by name
 - the Warehouse holding the catalogue
 - the Fabric Environment carrying the published Weaver, where one is named
-- where each logical Weaver item is deployed, as `targets:`
+- where each Weaver item is deployed, as `targets:`
 
 It says where the resources are. Where Weaver's own code runs is a Session
 question, not a property of the Workspace.
 
-`targets:` is keyed by the logical item, and the key's item type says whether the
-value names a Lakehouse or a Warehouse:
-
-```yaml
-targets:
-  Lakehouse/Raw: Raw_DEV
-  Warehouse/Reporting: Reporting_DEV
-```
-
-That is deployment configuration, which is a build's question. A load and a test
-read where an item is installed from the catalogue instead. So the same
-repository, the same logical target names and the same command sequence run
-against development and production, and the workspace configuration is the only
-thing that changes.
-
-Two logical items may name one physical item. The mapping says where each item is
-deployed; it does not claim that a Fabric item hosts only one. An address two
-logical objects both claim inside one is a physical collision, refused where an
-operation has to address it.
+`targets:` is deployment configuration, so it is a build's input. A load and a
+test read where an item is installed from the catalogue instead. See
+[CLI usage](cli-usage.md) for the syntax.
 
 For example:
 
@@ -548,7 +532,7 @@ For example:
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --target Lakehouse/Raw
+    --item Lakehouse/Raw
 ```
 
 or
@@ -558,7 +542,7 @@ weaver build \
     ./estate \
     --workspace MyWorkspace \
     --catalogue Warehouse/Weaver \
-    --target Lakehouse/Raw=Lakehouse/Raw_DEV
+    --item Lakehouse/Raw=Lakehouse/Raw_DEV
 ```
 
 The repository does not contain deployment-specific information. The Workspace
@@ -662,32 +646,30 @@ reconciles them against physical inventory.
 
 `build` reconciles the declared workspace with the physical workspace.
 
-Each target names one logical Weaver item.
+Each `--item` names one logical Weaver item.
 
 ```bash
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --target Lakehouse/Raw \
-    --target Lakehouse/Curated \
-    --target Warehouse/Reporting
+    --item Lakehouse/Raw \
+    --item Lakehouse/Curated \
+    --item Warehouse/Reporting
 ```
 
-Where a target is deployed is the workspace configuration's `targets:` mapping.
-A caller may supply the physical item instead, which consults no configuration
-for that item.
+Where an item is deployed comes from workspace configuration, or from the item's
+own `=TARGET`.
 
 ```bash
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --target Lakehouse/Raw=Lakehouse/Raw_DEV \
-    --target Warehouse/Reporting=Warehouse/Reporting_DEV
+    --item Lakehouse/Raw=Lakehouse/Raw_DEV \
+    --item Warehouse/Reporting=Warehouse/Reporting_DEV
 ```
 
-`load` and `test` name logical items and nothing else. Where each one runs is
-read from the catalogue's `_.Installation`, which is authoritative once an item
-is built.
+`load` and `test` name items only, and read where each one runs from
+`_.Installation`.
 
 The build process performs the following steps.
 
@@ -743,7 +725,7 @@ The developer therefore uses a single command.
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --target Lakehouse/Raw
+    --item Lakehouse/Raw
 ```
 
 ---
@@ -756,7 +738,7 @@ A Build Bundle may be explicitly retained for a split build/deploy workflow.
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --target Lakehouse/Raw \
+    --item Lakehouse/Raw \
     --bundle-only \
     --bundle-path ./dist/raw-bundle
 ```
@@ -812,33 +794,21 @@ run records centrally, and `_.Load`, `_.Test`, `Table.load()` and
 `Validation.run()` record synchronously for a developer running one by hand. See
 [the central catalogue](catalogue.md).
 
-A load names the logical Weaver items it may touch:
+A load names the items it may touch:
 
 ```bash
-weaver load --target Lakehouse/Raw --target Warehouse/Curated \
+weaver load --item Lakehouse/Raw --item Warehouse/Curated \
     --workspace-config workspace.yml
 ```
 
-Where each one physically runs is read from `_.Installation`. The catalogue is
-authoritative once an item is built, so a load target carries no physical half
-and workspace configuration is not consulted for one.
+The named set is a hard boundary. Dependencies order the loadables inside it and
+never add another item, and the boundary is the item rather than its target, so
+two items installed in one Lakehouse do not select each other's work. Crossing
+between named items inserts the endpoint-refresh and OneLake-publication barriers
+their targets require.
 
-Dependencies order loadables only within that explicit item set. Naming one item
-is therefore a hard boundary: a dependency does not implicitly add another. The
-boundary is the item and not the physical target, so two items installed in one
-Lakehouse do not select each other's work. Naming several items permits
-dependency edges between exactly those items, including the endpoint-refresh and
-OneLake-publication barriers their physical targets require.
-
-An exact operator-selected load repeats ``--name`` for each installed
-``Schema.Object``:
-
-```bash
-weaver load --target Warehouse/Curated \
-    --workspace-config workspace.yml \
-    --name DWG.Customer \
-    --name DWG.Order
-```
+`--name` narrows a load to exact installed `Schema.Object` loadables, running
+only those and ordering nothing.
 
 Name selection runs only those objects. It does not expand or order them through
 declared dependencies.
@@ -937,9 +907,9 @@ weaver wipe \
 weaver build \
     ./estate \
     --workspace-config workspace-dev.yml \
-    --target Lakehouse/Raw \
-    --target Lakehouse/Curated \
-    --target Warehouse/Reporting
+    --item Lakehouse/Raw \
+    --item Lakehouse/Curated \
+    --item Warehouse/Reporting
 
 weaver load \
     --workspace-config workspace-dev.yml
@@ -953,9 +923,9 @@ The normal workflow is:
 weaver build \
     ./estate \
     --workspace-config workspace-dev.yml \
-    --target Lakehouse/Raw \
-    --target Lakehouse/Curated \
-    --target Warehouse/Reporting
+    --item Lakehouse/Raw \
+    --item Lakehouse/Curated \
+    --item Warehouse/Reporting
 
 weaver load \
     --workspace-config workspace-dev.yml

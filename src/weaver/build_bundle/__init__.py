@@ -40,7 +40,7 @@ from .targets import (
     LakehouseBinding,
     WarehouseBinding,
     effective_item_bindings,
-    parse_build_target,
+    parse_build_item,
 )
 from .workflow import (
     BuildState,
@@ -64,7 +64,7 @@ __all__ = [
     "LakehouseBinding",
     "ItemBinding",
     "ItemBindings",
-    "parse_build_target",
+    "parse_build_item",
     "effective_item_bindings",
     "WarehouseBinding",
     "OmittedNode",

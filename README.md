@@ -38,28 +38,20 @@ One Workspace configuration can abbreviate the full desktop lifecycle:
 
 ```bash
 weaver fabric environment publish weaver --workspace-config workspace.yml
-weaver build ./estate --workspace-config workspace.yml --target Lakehouse/Sales
+weaver build ./estate --workspace-config workspace.yml --item Lakehouse/Sales
 ```
 
 The Fabric Environment must already exist. Publication preserves its package
 definition and unrelated custom libraries.
 
-Build, load and test name logical Weaver items. Where each one is deployed is
-workspace configuration's answer for a build, and the Weaver catalogue's answer
-for a load or a test:
+A Weaver **item** is logical, `Lakehouse/Sales`. A **target** is the Fabric item
+it is deployed to, `Sales_Dev`. Build, load and test name items: a build reads the
+target from workspace configuration, and a load or test reads it from the Weaver
+catalogue. So one sequence runs against development and production, and only
+`--workspace-config` changes.
 
-| Operation | Caller names | Physical source |
-|---|---|---|
-| build | logical item | an explicit `LOGICAL=PHYSICAL` target, or workspace configuration |
-| load | logical item | the catalogue's `_.Installation` |
-| test | logical item | the catalogue's `_.Installation` |
-| catalogue | physical Warehouse | `--catalogue`, or workspace configuration |
-
-So the same sequence runs against development and production by changing only
-`--workspace-config`.
-
-See [CLI usage](design/cli-usage.md) for repository sources, logical and physical
-targets, wipe and unbind.
+See [CLI usage](design/cli-usage.md) for the full syntax, repository sources,
+wipe and unbind.
 
 ## Documentation
 

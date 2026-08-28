@@ -10,9 +10,9 @@ waited a minute for it, and closed it on the way out, so a developer running
 .. code-block:: text
 
     weaver> wipe  Lakehouse/Sales_LH
-    weaver> build ./repository --target Lakehouse/Sales=Lakehouse/Sales_LH
-    weaver> load  --target Lakehouse/Sales
-    weaver> test  --target Lakehouse/Sales
+    weaver> build ./repository --item Lakehouse/Sales=Lakehouse/Sales_LH
+    weaver> load  --item Lakehouse/Sales
+    weaver> test  --item Lakehouse/Sales
 
 started three Spark sessions in a shell whose banner said it had started one.
 On a capacity that permits a single concurrent session that is not slow;
@@ -205,8 +205,8 @@ def test_reading_the_catalogue_starts_no_livy_at_all(transport, capsys):
     parser = build_parser()
 
     with ConsoleSession(workspace=_workspace()) as session:
-        _run(session, parser, ["load", "--target", "Lakehouse/Sales", "--dry-run"])
-        _run(session, parser, ["test", "--target", "Lakehouse/Sales", "--dry-run"])
+        _run(session, parser, ["load", "--item", "Lakehouse/Sales", "--dry-run"])
+        _run(session, parser, ["test", "--item", "Lakehouse/Sales", "--dry-run"])
 
     assert transport.acquired == 0
     assert transport.submitted == []
@@ -223,8 +223,8 @@ def test_each_command_still_did_its_own_work(transport, capsys):
     parser = build_parser()
 
     with ConsoleSession(workspace=_workspace()) as session:
-        _run(session, parser, ["load", "--target", "Lakehouse/Sales", "--dry-run"])
-        _run(session, parser, ["test", "--target", "Lakehouse/Sales", "--dry-run"])
+        _run(session, parser, ["load", "--item", "Lakehouse/Sales", "--dry-run"])
+        _run(session, parser, ["test", "--item", "Lakehouse/Sales", "--dry-run"])
 
     # Each command reached the estate over TDS, and none of them imported
     # Weaver to do it: reading the catalogue is T-SQL against the Warehouse.
@@ -246,8 +246,8 @@ def test_no_command_ships_its_whole_run_across(transport):
     parser = build_parser()
 
     with ConsoleSession(workspace=_workspace()) as session:
-        _run(session, parser, ["load", "--target", "Lakehouse/Sales", "--dry-run"])
-        _run(session, parser, ["test", "--target", "Lakehouse/Sales", "--dry-run"])
+        _run(session, parser, ["load", "--item", "Lakehouse/Sales", "--dry-run"])
+        _run(session, parser, ["test", "--item", "Lakehouse/Sales", "--dry-run"])
 
     assert not any("weaver.load(" in code for code in transport.submitted)
     assert not any("weaver.test(" in code for code in transport.submitted)
@@ -261,7 +261,7 @@ def test_a_command_given_no_session_still_works_on_its_own(transport):
     parsed = parser.parse_args(
         [
             "load",
-            "--target",
+            "--item",
             "Lakehouse/Sales",
             "--dry-run",
             "--workspace",
@@ -328,9 +328,9 @@ def test_a_warehouse_only_command_needs_no_lakehouse_and_starts_no_spark(transpo
         _prepare(
             session,
             parser,
-            ["build", ".", "--target", "Warehouse/Curated=Warehouse/Curated_WH"],
+            ["build", ".", "--item", "Warehouse/Curated=Warehouse/Curated_WH"],
         )
-        _run(session, parser, ["load", "--target", "Warehouse/Curated", "--dry-run"])
+        _run(session, parser, ["load", "--item", "Warehouse/Curated", "--dry-run"])
 
     assert transport.acquired == 0
     assert transport.homes == []
@@ -340,7 +340,7 @@ def test_a_warehouse_only_command_needs_no_lakehouse_and_starts_no_spark(transpo
 def test_a_build_target_naming_its_physical_lakehouse_attaches_there(transport):
     """The Lakehouse comes from the command, not from workspace configuration.
 
-    This workspace configures none. ``--target Lakehouse/Sales=Lakehouse/Sales_LH``
+    This workspace configures none. ``--item Lakehouse/Sales=Lakehouse/Sales_LH``
     says the physical item outright, so the shell can place a session against it
     with nothing resolved.
     """
@@ -355,9 +355,9 @@ def test_a_build_target_naming_its_physical_lakehouse_attaches_there(transport):
             [
                 "build",
                 ".",
-                "--target",
+                "--item",
                 "Lakehouse/Sales=Lakehouse/Sales_LH",
-                "--target",
+                "--item",
                 "Warehouse/Curated=Warehouse/Curated_WH",
             ],
         )
@@ -371,7 +371,7 @@ def test_a_build_target_naming_its_physical_lakehouse_attaches_there(transport):
 
 @weaver_test()
 def test_a_bare_build_target_offers_no_lakehouse_to_the_shell(transport):
-    """``--target Lakehouse/Sales`` names no physical item, so nothing is offered.
+    """``--item Lakehouse/Sales`` names no physical item, so nothing is offered.
 
     Where it deploys is workspace configuration's answer, and the build reads it
     and offers it after normalising its targets. The shell resolves nothing.
@@ -381,7 +381,7 @@ def test_a_bare_build_target_offers_no_lakehouse_to_the_shell(transport):
     workspace = _warehouse_only()
 
     with ConsoleSession(workspace=workspace) as session:
-        _prepare(session, parser, ["build", ".", "--target", "Lakehouse/Sales"])
+        _prepare(session, parser, ["build", ".", "--item", "Lakehouse/Sales"])
 
         assert session.scope(workspace).spark_home is None
 
@@ -406,7 +406,7 @@ def test_a_logical_load_command_starts_no_spark_before_the_catalogue_is_read(
         session.warm()
         assert transport.acquired == 0, "opening a session started Spark"
 
-        _prepare(session, parser, ["load", "--target", "Lakehouse/Sales", "--dry-run"])
+        _prepare(session, parser, ["load", "--item", "Lakehouse/Sales", "--dry-run"])
 
         assert session.scope(workspace).spark_home is None
         assert transport.acquired == 0
@@ -434,7 +434,7 @@ def test_the_first_resolved_lakehouse_run_starts_one_session_and_the_next_reuses
             session,
             workspace=workspace,
             state=state,
-            requested=(_SALES,),
+            items=(_SALES,),
             dry_run=True,
         )
         session.scope(workspace).livy.get()
@@ -444,7 +444,7 @@ def test_the_first_resolved_lakehouse_run_starts_one_session_and_the_next_reuses
             session,
             workspace=workspace,
             state=state,
-            requested=(_SALES,),
+            items=(_SALES,),
             dry_run=True,
         )
         session.scope(workspace).livy.get()
@@ -475,7 +475,7 @@ def test_the_logical_item_name_is_never_the_spark_home(transport, tmp_path):
             session,
             workspace=workspace,
             state=state,
-            requested=(_SALES,),
+            items=(_SALES,),
             dry_run=True,
         )
 
@@ -504,7 +504,7 @@ def test_an_item_with_no_installation_starts_no_spark(transport, tmp_path):
                 session,
                 workspace=workspace,
                 state=state,
-                requested=(WeaverItemId.parse("Lakehouse/Absent"),),
+                items=(WeaverItemId.parse("Lakehouse/Absent"),),
                 dry_run=True,
             )
 
@@ -518,7 +518,7 @@ def test_an_item_with_no_installation_starts_no_spark(transport, tmp_path):
 def test_load_and_test_offer_the_installed_lakehouse(operation, tmp_path):
     """Each operation offers its own Lakehouse, not only the shell's warm-up.
 
-    A one-shot ``weaver load --target Lakehouse/Sales`` opens its own Session
+    A one-shot ``weaver load --item Lakehouse/Sales`` opens its own Session
     and no preparation hook runs, so the routing has to come from the operation.
     It offers the physical name the catalogue gave it.
     """
@@ -535,7 +535,7 @@ def test_load_and_test_offer_the_installed_lakehouse(operation, tmp_path):
         session,
         workspace=workspace,
         state=RunState(catalogue=_installed(tmp_path, physical="Sales_Dev")),
-        requested=(_SALES,),
+        items=(_SALES,),
         dry_run=True,
     )
 
@@ -600,9 +600,9 @@ def test_a_commands_catalogue_reaches_the_operation(transport, monkeypatch):
             parser,
             [
                 "load",
-                "--target",
+                "--item",
                 "Lakehouse/Play_LH",
-                "--target",
+                "--item",
                 "Warehouse/Play_WH",
                 "--catalogue",
                 "Warehouse/Play_Weaver",
@@ -645,7 +645,7 @@ def test_the_session_keeps_its_own_workspace_while_the_command_runs(
         _run(
             session,
             parser,
-            ["load", "--target", "Lakehouse/Sales", "--catalogue", "Warehouse/Other"],
+            ["load", "--item", "Lakehouse/Sales", "--catalogue", "Warehouse/Other"],
         )
 
         assert seen == [workspace], "the Session answered with another workspace"
@@ -672,7 +672,7 @@ def test_a_command_supplies_the_catalogue_a_session_was_opened_without(
             parser,
             [
                 "load",
-                "--target",
+                "--item",
                 "Warehouse/Play_WH",
                 "--catalogue",
                 "Warehouse/Play_Weaver",
@@ -694,7 +694,7 @@ def test_a_command_naming_the_sessions_workspace_runs_in_it(transport, monkeypat
         _run(
             session,
             parser,
-            ["load", "--target", "Warehouse/Play_WH", "--workspace", "My Workspace"],
+            ["load", "--item", "Warehouse/Play_WH", "--workspace", "My Workspace"],
         )
 
         assert resolved, "the load never resolved a workspace"
@@ -713,7 +713,7 @@ def test_a_command_naming_another_workspace_is_refused(transport, monkeypatch):
 
     with ConsoleSession(workspace=_warehouse_only()) as session:
         parsed = parser.parse_args(
-            ["load", "--target", "Warehouse/Play_WH", "--workspace", "Other"]
+            ["load", "--item", "Warehouse/Play_WH", "--workspace", "Other"]
         )
         parsed.session = session
 

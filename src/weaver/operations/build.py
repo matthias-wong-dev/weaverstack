@@ -92,7 +92,7 @@ class BuildResult:
 def build(
     source=None,
     *,
-    targets: str | Sequence[str] | None = None,
+    items: str | Sequence[str] | None = None,
     workspace: str | None = None,
     catalogue: str | None = None,
     environment: str | None = None,
@@ -103,13 +103,9 @@ def build(
 ) -> BuildResult:
     """Build an authored repository.
 
-    ``targets`` are the logical Weaver items this build is for, written
-    ``Lakehouse/Landing`` or ``Lakehouse/Landing=Lakehouse/Landing_Dev``. The
-    bare form takes its physical destination from the workspace configuration's
-    ``targets:`` mapping; the second supplies it and consults no configuration.
-    With none, every logical item that configuration declares. Build is the one
-    operation that names both halves, because it is what establishes the
-    installation binding load and test then read.
+    ``items`` are the logical Weaver items to build, each written
+    ``Lakehouse/Landing`` or ``Lakehouse/Landing=Lakehouse/Landing_Dev``. Naming
+    none builds every item the workspace configuration declares.
 
     Every other value is a name: ``workspace``, ``catalogue`` and ``environment``
     are strings, resolved the same way each operation resolves them: an explicit
@@ -138,7 +134,7 @@ def build(
         session=session,
     )
 
-    selected = _item_bindings(targets, resolved_workspace)
+    selected = _item_bindings(items, resolved_workspace)
     from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
 
     workspace_name = getattr(resolved_workspace, "workspace", None)
@@ -231,30 +227,28 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
     return location, FilesystemStore()
 
 
-def _item_bindings(targets, workspace: Workspace):
-    """Each requested logical item bound to the physical item it builds into.
+def _item_bindings(items, workspace: Workspace):
+    """Each requested logical item bound to the physical target it builds into.
 
-    The one build-side resolution of logical to physical. An explicit
-    ``=PHYSICAL`` wins; otherwise the workspace configuration answers. Named
-    targets are a hard build scope, and naming none means every logical item
-    configuration declares.
+    The one build-side resolution. An explicit ``=PHYSICAL`` wins; otherwise the
+    workspace configuration answers.
     """
 
-    from ..build_bundle.targets import ItemBindings, parse_build_target
+    from ..build_bundle.targets import ItemBindings, parse_build_item
 
-    if targets is None:
+    if items is None:
         values = [str(item) for item in workspace.configured_items]
-    elif isinstance(targets, str):
-        values = [targets]
+    elif isinstance(items, str):
+        values = [items]
     else:
-        values = list(targets)
+        values = list(items)
     if not values:
         raise BuildError(
-            "build needs at least one logical target, or a targets: mapping in "
-            "workspace configuration"
+            "build needs at least one item, or a targets: mapping in workspace "
+            "configuration"
         )
     return ItemBindings(
-        tuple(parse_build_target(value, workspace=workspace) for value in values)
+        tuple(parse_build_item(value, workspace=workspace) for value in values)
     )
 
 

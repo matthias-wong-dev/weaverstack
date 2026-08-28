@@ -129,7 +129,7 @@ def _graph_of(validation):
                 installed=validation,
             ),
         ),
-        requested=(validation.target,),
+        items=(validation.target,),
     )
 
 
@@ -215,7 +215,7 @@ def test_a_lakehouse_run_requires_an_environment_before_it_dispatches(tmp_path):
                 session,
                 workspace=workspace,
                 state=state,
-                requested=(WeaverItemId.parse(ITEM),),
+                items=(WeaverItemId.parse(ITEM),),
             )
 
         assert session.calls == []
@@ -711,7 +711,7 @@ def _file_node(tmp_path, executor, **kwargs):
 
     return source_file_node(
         _FileSession(executor),
-        requested=[WAREHOUSE_TARGET],
+        targets=[WAREHOUSE_TARGET],
         path=_source(tmp_path, "Sales.OrdersReconcile.sql", FILE_TEST),
         started=datetime.now(timezone.utc),
         **kwargs,

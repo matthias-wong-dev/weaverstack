@@ -38,16 +38,16 @@ DEV = """\
 compose:
   dev:
     - weaver wipe Lakehouse/Sales_LH Warehouse/Curated_WH
-    - weaver build ./repository --target Lakehouse/Sales=Lakehouse/Sales_LH
-    - weaver load --target Warehouse/Curated
-    - weaver test --target Warehouse/Curated
+    - weaver build ./repository --item Lakehouse/Sales=Lakehouse/Sales_LH
+    - weaver load --item Warehouse/Curated
+    - weaver test --item Warehouse/Curated
 """
 
 RUNS = """\
 compose:
   verify:
-    - weaver load --target Warehouse/Curated
-    - weaver test --target Warehouse/Curated
+    - weaver load --item Warehouse/Curated
+    - weaver test --item Warehouse/Curated
 """
 
 
@@ -132,9 +132,9 @@ def test_an_empty_composition_is_refused(tmp_path):
 
 @weaver_test()
 def test_an_entry_is_a_weaver_command_line():
-    assert composition_words("weaver load --target Lakehouse/Sales") == [
+    assert composition_words("weaver load --item Lakehouse/Sales") == [
         "load",
-        "--target",
+        "--item",
         "Lakehouse/Sales",
     ]
 
@@ -147,9 +147,9 @@ def test_the_weaver_prefix_is_optional():
     line written for the file need not.
     """
 
-    assert composition_words("load --target Lakehouse/Sales") == [
+    assert composition_words("load --item Lakehouse/Sales") == [
         "load",
-        "--target",
+        "--item",
         "Lakehouse/Sales",
     ]
 
@@ -166,11 +166,11 @@ def test_quoted_arguments_survive_exactly():
 @pytest.mark.parametrize(
     "entry",
     [
-        "weaver load --target Lakehouse/Sales | tee log",
-        "weaver load --target Lakehouse/Sales && weaver test --target Lakehouse/Sales",
-        "weaver load --target Lakehouse/Sales > out.txt",
-        "weaver load --target $TARGET",
-        "weaver load --target `echo Lakehouse/Sales`",
+        "weaver load --item Lakehouse/Sales | tee log",
+        "weaver load --item Lakehouse/Sales && weaver test --item Lakehouse/Sales",
+        "weaver load --item Lakehouse/Sales > out.txt",
+        "weaver load --item $TARGET",
+        "weaver load --item `echo Lakehouse/Sales`",
     ],
 )
 @weaver_test()
@@ -293,7 +293,7 @@ def test_a_bad_entry_is_found_before_the_first_command_runs(tmp_path, recorded):
     calls, parser_factory, _ = recorded
     path = _write(
         tmp_path,
-        "compose:\n  dev:\n    - weaver load --target Lakehouse/Sales\n"
+        "compose:\n  dev:\n    - weaver load --item Lakehouse/Sales\n"
         "    - weaver frobnicate\n",
     )
 
@@ -332,9 +332,9 @@ def test_every_command_runs_in_order_with_its_arguments(
     assert len(calls) == 4
     assert calls[0].targets == ["Lakehouse/Sales_LH", "Warehouse/Curated_WH"]
     assert calls[1].repository == "./repository"
-    assert calls[1].targets == ["Lakehouse/Sales=Lakehouse/Sales_LH"]
-    assert calls[2].targets == ["Warehouse/Curated"]
-    assert calls[3].targets == ["Warehouse/Curated"]
+    assert calls[1].items == ["Lakehouse/Sales=Lakehouse/Sales_LH"]
+    assert calls[2].items == ["Warehouse/Curated"]
+    assert calls[3].items == ["Warehouse/Curated"]
 
 
 @weaver_test()
@@ -377,7 +377,7 @@ def test_commands_can_supply_the_composition_workspace(
         "compose:\n"
         "  dev:\n"
         f'    - wipe Lakehouse/Sales_LH --workspace-config "{config}"\n'
-        f'    - load --target Lakehouse/Sales --workspace-config "{config}"\n',
+        f'    - load --item Lakehouse/Sales --workspace-config "{config}"\n',
     )
     opened = []
 

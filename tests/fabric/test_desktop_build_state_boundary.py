@@ -186,7 +186,7 @@ def test_a_build_runs_against_a_workspace_naming_no_environment(
         register_session(session)
         built = weaver.build(
             str(estate.path),
-            targets=[f"Warehouse/Reporting={warehouse}"],
+            items=[f"Warehouse/Reporting={warehouse}"],
             session=session,
         )
 

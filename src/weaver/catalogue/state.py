@@ -245,7 +245,7 @@ class Catalogue:
         """
 
         stored = f"{_FILES_PREFIX}{schema}" if is_files else schema
-        bound = self._bound_to(target_name)
+        bound = self.bound_to(target_name)
         found = [
             identity
             for identity, document in self.registered.items()
@@ -284,7 +284,7 @@ class Catalogue:
         :meth:`installed_object` follows, for the same reason.
         """
 
-        bound = self._bound_to(target_name)
+        bound = self.bound_to(target_name)
         found = [
             identity
             for identity in self._validations()
@@ -324,7 +324,7 @@ class Catalogue:
             for row in self.table_rows(TEST_DICTIONARY)
         )
 
-    def _bound_to(self, target_name: str) -> set:
+    def bound_to(self, target_name: str) -> set:
         """The logical items the catalogue binds to one physical target."""
 
         return {

@@ -103,7 +103,7 @@ def acceptance(
     journey.targets = sorted(physical.values())
     #: What a build names: both halves, so this journey needs no configured
     #: `targets:` mapping to bind its fixed items to this tenant's own.
-    journey.build_targets = [f"{item}={name}" for item, name in physical.items()]
+    journey.build_items = [f"{item}={name}" for item, name in physical.items()]
     _seed_the_neighbour(journey)
     return journey
 
@@ -485,7 +485,7 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
         "build",
         lambda: weaver.build(
             acceptance.repository,
-            targets=acceptance.build_targets,
+            items=acceptance.build_items,
             session=acceptance.session,
         ),
     )
@@ -604,7 +604,7 @@ def test_an_unchanged_build_is_a_true_fixed_point(acceptance):
         "rebuild",
         lambda: weaver.build(
             acceptance.repository,
-            targets=acceptance.build_targets,
+            items=acceptance.build_items,
             session=acceptance.session,
         ),
     )
@@ -1175,7 +1175,7 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
         "rebuild-changed",
         lambda: weaver.build(
             acceptance.repository,
-            targets=acceptance.build_targets,
+            items=acceptance.build_items,
             session=acceptance.session,
         ),
     )
@@ -1246,7 +1246,7 @@ def test_the_changed_estate_reaches_a_new_fixed_point(acceptance):
         "rebuild-settled",
         lambda: weaver.build(
             acceptance.repository,
-            targets=acceptance.build_targets,
+            items=acceptance.build_items,
             session=acceptance.session,
         ),
     )
@@ -1451,7 +1451,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     # must not skip the repair that follows.
     failed = weaver.build(
         acceptance.repository,
-        targets=acceptance.build_targets,
+        items=acceptance.build_items,
         session=acceptance.session,
     )
     assert failed.status != "succeeded", failed.to_mapping()
@@ -1486,7 +1486,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
         "rebuild-repaired",
         lambda: weaver.build(
             acceptance.repository,
-            targets=acceptance.build_targets,
+            items=acceptance.build_items,
             session=acceptance.session,
         ),
     )
@@ -1508,7 +1508,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
         "rebuild-converged",
         lambda: weaver.build(
             acceptance.repository,
-            targets=acceptance.build_targets,
+            items=acceptance.build_items,
             session=acceptance.session,
         ),
     ).result

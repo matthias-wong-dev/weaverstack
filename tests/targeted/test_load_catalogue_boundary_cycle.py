@@ -66,7 +66,7 @@ def test_an_item_the_catalogue_does_not_know_is_refused(tmp_path):
             session,
             workspace=workspace,
             state=RunState(catalogue=catalogue),
-            requested=(MISTYPED,),
+            items=(MISTYPED,),
             dry_run=True,
         )
 
@@ -102,7 +102,7 @@ def test_an_installed_item_with_no_load_work_is_a_successful_no_op(tmp_path):
         session,
         workspace=workspace,
         state=RunState(catalogue=catalogue),
-        requested=(VIEWS,),
+        items=(VIEWS,),
         fault_tolerant=False,
     )
 

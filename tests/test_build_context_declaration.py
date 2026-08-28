@@ -89,7 +89,7 @@ def repository(tmp_path):
 
 def _build(repository, **kwargs):
     return weaver.build(
-        str(repository), targets="Lakehouse/Sales=Lakehouse/Sales_LH", **kwargs
+        str(repository), items="Lakehouse/Sales=Lakehouse/Sales_LH", **kwargs
     )
 
 
@@ -162,7 +162,7 @@ def public_shortcut_build(tmp_path, monkeypatch):
             session.sql_executor = lambda *_args, **_kwargs: EmptySql()
             result = weaver.build(
                 str(root),
-                targets="Lakehouse/Play=Lakehouse/Play_LH",
+                items="Lakehouse/Play=Lakehouse/Play_LH",
                 session=session,
                 bundle_only=True,
                 bundle_path=output,
@@ -367,7 +367,7 @@ def test_a_warehouse_only_build_offers_none(captured, tmp_path):
     with pytest.raises(Halt):
         weaver.build(
             str(root),
-            targets="Warehouse/Reporting=Warehouse/Reporting_WH",
+            items="Warehouse/Reporting=Warehouse/Reporting_WH",
             session=session,
         )
 
@@ -450,7 +450,7 @@ def test_a_repository_error_is_reported_before_any_fabric_call(tmp_path, monkeyp
     with pytest.raises(BuildError):
         weaver.build(
             str(empty),
-            targets="Lakehouse/Sales=Lakehouse/Sales_LH",
+            items="Lakehouse/Sales=Lakehouse/Sales_LH",
             workspace="Analytics",
             catalogue="Warehouse/Weaver",
             environment="WeaverEnv",

@@ -74,7 +74,7 @@ def report(judged):
     return run_test(
         judged.session,
         workspace=judged.workspace,
-        requested=[judged.item],
+        items=[judged.item],
         state=judged.state,
     )
 

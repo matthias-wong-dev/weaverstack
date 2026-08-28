@@ -1,10 +1,8 @@
 """Public ``weaver.test(...)`` entry point and orchestration.
 
-A test names logical Weaver items. Item and named runs select from installed
-catalogue state; a file run compiles a source validation without installing or
-publishing it, and still reads the catalogue for the physical target its logical
-item is installed in. Reports distinguish failed validations from validations
-that could not be evaluated.
+Item and named runs select from installed catalogue state. A file run compiles a
+source validation without installing or publishing it. Reports distinguish failed
+validations from validations that could not be evaluated.
 """
 
 from __future__ import annotations
@@ -33,7 +31,7 @@ TASK_TYPE = "test"
 
 
 def test(
-    targets: str | Sequence[str],
+    items: str | Sequence[str],
     *,
     name: str | None = None,
     file: str | Path | None = None,
@@ -47,15 +45,11 @@ def test(
 ) -> ValidationRunReport:
     """Run the installed validations the requested logical items own.
 
-    ``targets`` are logical Weaver items such as ``Lakehouse/Landing``. Where
-    each one physically runs is read from the catalogue's ``_.Installation``, as
-    a load reads it.
-
     ``name`` runs one installed validation and returns its diagnostic rows
     alongside its counts; ``file`` compiles and runs a source file without
     installing it. Mutually exclusive: one names something the estate has, the
-    other something it may not. A file run names one logical item, which is the
-    installed environment the source validation is run against.
+    other something it may not. A file run takes exactly one item, which is the
+    installed environment its source validation runs against.
     """
 
     if name is not None and file is not None:
@@ -64,7 +58,7 @@ def test(
             "and the other runs a source file that may not be"
         )
 
-    requested = requested_items(targets, what="test")
+    requested = requested_items(items, what="test")
     resolved = operation_workspace(
         "test",
         workspace=workspace,
@@ -83,7 +77,7 @@ def test(
             return run_test(
                 opened,
                 workspace=resolved,
-                requested=requested,
+                items=requested,
                 name=name,
                 file=file,
                 dry_run=dry_run,
@@ -95,7 +89,7 @@ def run_test(
     session,
     *,
     workspace,
-    requested: Sequence[WeaverItemId],
+    items: Sequence[WeaverItemId],
     name: str | None = None,
     file: str | Path | None = None,
     state=None,
@@ -110,10 +104,8 @@ def run_test(
 
     ``state`` lets a caller provide an already-read catalogue snapshot.
 
-    The catalogue is read before the Environment check and before any Spark
-    session. A logical request names no physical Lakehouse for a Spark session
-    to attach to. A file run reads the catalogue too: the source validation runs
-    against the target its logical item is installed in.
+    Ordered as :func:`weaver.operations.load.run_load` is. A file run reads the
+    catalogue for the same reason: the physical target is recorded there.
     """
 
     from ..run import Runner, RunRequest, RunState
@@ -125,16 +117,15 @@ def run_test(
                 catalogue=read_installed_catalogue(session=session, workspace=workspace)
             )
         installed = installed_targets(
-            state.catalogue.dag(), requested, catalogue=workspace.catalogue
+            state.catalogue.dag(), items, catalogue=workspace.catalogue
         )
-    targets = tuple(installed[item] for item in requested)
+    targets = tuple(installed[item] for item in items)
 
     _require_lakehouse_environment(
-        session, workspace=workspace, requested=targets, dry_run=dry_run
+        session, workspace=workspace, targets=targets, dry_run=dry_run
     )
     # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
-    # needs one of the Lakehouses this run is for. The physical name, which the
-    # catalogue holds.
+    # needs one of the Lakehouses this run is for.
     session.offer_spark_home(lakehouse_names(targets))
     started = datetime.now(timezone.utc)
 
@@ -143,7 +134,7 @@ def run_test(
 
         node = source_file_node(
             session,
-            requested=targets,
+            targets=targets,
             path=Path(file),
             started=started,
             dry_run=dry_run,
@@ -161,7 +152,7 @@ def run_test(
         runner = Runner(
             state,
             RunRequest.test(
-                requested,
+                items,
                 name=name,
                 dry_run=dry_run,
                 # Validations are independent: each reads the estate and
@@ -216,16 +207,16 @@ def _dispatch_collecting(*, collect: bool):
     return dispatch
 
 
-def _require_lakehouse_environment(session, *, workspace, requested, dry_run: bool):
+def _require_lakehouse_environment(session, *, workspace, targets, dry_run: bool):
     """Fail before planning when a desktop Lakehouse run cannot start."""
 
     from ..sessions.base import ACROSS_BOUNDARY
 
-    if dry_run or workspace.environment or not lakehouse_names(requested):
+    if dry_run or workspace.environment or not lakehouse_names(targets):
         return
     if session.position(workspace) != ACROSS_BOUNDARY:
         return
-    target = next(target for target in requested if target.is_lakehouse)
+    target = next(target for target in targets if target.is_lakehouse)
     raise CommandError(
         f"{target} requires a Fabric Environment with Weaver installed. Pass "
         "--environment <Environment | Workspace/Environment>, or set environment "

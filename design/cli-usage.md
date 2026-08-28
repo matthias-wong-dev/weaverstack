@@ -30,11 +30,11 @@ file:
 weaver build ./estate \
   --workspace Analytics \
   --catalogue Warehouse/Weaver \
-  --target Lakehouse/Sales=Lakehouse/Sales_Dev
+  --item Lakehouse/Sales=Lakehouse/Sales_Dev
 ```
 
-A configuration is shorthand for the same values. Logical Weaver items are the
-keys and the physical Fabric item each one is deployed to is the value:
+A configuration is shorthand for the same values. Items are the keys and the
+Fabric item each one is deployed to is the value:
 
 ```yaml
 workspace: Analytics
@@ -46,8 +46,16 @@ targets:
   Warehouse/Reporting: Reporting_Dev
 ```
 
-The key's item type says whether the value names a Lakehouse or a Warehouse, so
-one mapping serves both. Two logical items may name one physical item.
+The key's type says whether the value names a Lakehouse or a Warehouse, so one
+mapping serves both. Per-item execution settings hang off the key:
+
+```yaml
+targets:
+  Warehouse/Reporting:
+    name: Reporting_Dev
+    execution:
+      parallel_workers: 4
+```
 
 An unqualified Environment belongs to `Analytics` in this example. A shared
 Environment is written as `environment: Platform/Runtime`. CLI overrides use
@@ -74,9 +82,9 @@ Available: build, compose, load, test, wipe.
 Commands are written as they are in a terminal; the leading `weaver` is optional. `help` for options, `exit` to leave.
 
 weaver> wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev --yes
-weaver> build . --target Lakehouse/Sales
-weaver> weaver load --target Lakehouse/Sales --target Warehouse/Reporting
-weaver> weaver test --target Lakehouse/Sales
+weaver> build . --item Lakehouse/Sales
+weaver> weaver load --item Lakehouse/Sales --item Warehouse/Reporting
+weaver> weaver test --item Lakehouse/Sales
 weaver> compose all
 weaver> exit
 ```
@@ -105,9 +113,9 @@ refused, because a Weaver command line is not run by a shell.
 **Several complete commands can be pasted at once**, one per line:
 
 ```text
-weaver build ./repository --target Lakehouse/Sales
-weaver load --target Lakehouse/Sales --target Warehouse/Reporting
-weaver test --target Lakehouse/Sales
+weaver build ./repository --item Lakehouse/Sales
+weaver load --item Lakehouse/Sales --item Warehouse/Reporting
+weaver test --item Lakehouse/Sales
 ```
 
 They run in order in the one session. Blank lines and lines beginning with `#`
@@ -128,7 +136,7 @@ targets are the command's:
 
 ```text
 weaver session --workspace "Weaver Example" --environment weaver
-weaver> weaver load --target Lakehouse/Sales --target Warehouse/Reporting --catalogue Warehouse/Curated
+weaver> weaver load --item Lakehouse/Sales --item Warehouse/Reporting --catalogue Warehouse/Curated
 ```
 
 That load reads `Warehouse/Curated`, in `Weaver Example`, with the Environment
@@ -234,8 +242,8 @@ arguments — `auth`, `resolver`, `onelake`, `tds`, `livy` — and the Session
 starts exactly those, in the background, before the command wants them:
 
 ```text
-weaver load --target Warehouse/Reporting   → auth, resolver, tds
-weaver load --target Lakehouse/Sales       → auth, resolver, tds, onelake, livy
+weaver load --item Warehouse/Reporting   → auth, resolver, tds
+weaver load --item Lakehouse/Sales       → auth, resolver, tds, onelake, livy
 weaver build ./repository         → auth, resolver, onelake, livy, tds
 weaver health                     → auth, resolver, tds, onelake
 weaver health Warehouse/Reporting → auth, resolver, tds
@@ -292,15 +300,15 @@ estate that carries on.
 ## Compose
 
 The development loop is the same four commands every time, each carrying the
-targets the last one had. `compose.yml` writes the sequence down:
+items the last one had. `compose.yml` writes the sequence down:
 
 ```yaml
 compose:
   dev:
-    - wipe Lakehouse/Sales Warehouse/Reporting
-    - build ./repository --target Lakehouse/Sales
-    - load Warehouse/Reporting
-    - test Warehouse/Reporting
+    - wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev
+    - build ./repository --item Lakehouse/Sales --item Warehouse/Reporting
+    - load --item Lakehouse/Sales --item Warehouse/Reporting
+    - test --item Lakehouse/Sales --item Warehouse/Reporting
 ```
 
 ```bash
@@ -314,10 +322,10 @@ The sequence is displayed and confirmed before anything runs:
 ```text
 Compose: dev  (compose.yml)
 
-1. wipe Lakehouse/Sales Warehouse/Reporting
-2. build ./repository --target Lakehouse/Sales
-3. load Warehouse/Reporting
-4. test Warehouse/Reporting
+1. wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev
+2. build ./repository --item Lakehouse/Sales --item Warehouse/Reporting
+3. load --item Lakehouse/Sales --item Warehouse/Reporting
+4. test --item Lakehouse/Sales --item Warehouse/Reporting
 
 Execute this sequence? [y/N]
 ```
@@ -386,7 +394,7 @@ A qualified Environment is resolved in its owning workspace.
 
 ## Targets
 
-Build, load and test name logical Weaver items with a repeated `--target`. Where
+Build, load and test name logical Weaver items with a repeated `--item`. Where
 each one is physically deployed has two owners, and which one answers depends on
 the operation:
 
@@ -412,11 +420,11 @@ development and production, and the only thing that changes is the workspace
 configuration:
 
 ```bash
-weaver build ./estate --target Lakehouse/Sales --target Warehouse/Reporting \
+weaver build ./estate --item Lakehouse/Sales --item Warehouse/Reporting \
   --workspace-config dev.yml
-weaver load  --target Lakehouse/Sales --target Warehouse/Reporting \
+weaver load  --item Lakehouse/Sales --item Warehouse/Reporting \
   --workspace-config dev.yml
-weaver test  --target Lakehouse/Sales --target Warehouse/Reporting \
+weaver test  --item Lakehouse/Sales --item Warehouse/Reporting \
   --workspace-config dev.yml
 ```
 
@@ -428,13 +436,13 @@ A build target is `LOGICAL` or `LOGICAL=PHYSICAL`:
 weaver build \
   ./estate \
   --workspace-config examples/weaver_example.yml \
-  --target Lakehouse/Sales \
-  --target Warehouse/Reporting=Warehouse/Reporting_Alternative
+  --item Lakehouse/Sales \
+  --item Warehouse/Reporting=Warehouse/Reporting_Alternative
 ```
 
 Without `=`, the physical item comes from the configuration's `targets:` mapping.
 With `=`, it is supplied here and no configuration is consulted for that item.
-Both sides are typed and the two types must agree. Naming no `--target` at all
+Both sides are typed and the two types must agree. Naming no `--item` at all
 builds every logical item the configuration declares.
 
 Every build adds the implicit binding from `Warehouse/_weaver` to the configured
@@ -475,10 +483,10 @@ for `weaver build`, which always checks source itself.
 
 ## Test
 
-Run the installed Tests and Assumptions the named logical items own:
+Run the installed Tests and Assumptions the named items own:
 
 ```bash
-weaver test --target Lakehouse/Sales --workspace-config examples/weaver_example.yml
+weaver test --item Lakehouse/Sales --workspace-config examples/weaver_example.yml
 ```
 
 The exit code is the verdict — non-zero when anything failed or could not be
@@ -493,7 +501,7 @@ validations are counted without collecting.
 Name one to see the rows:
 
 ```bash
-weaver test --target Lakehouse/Sales --name Sales.OrderSummaryReconciliation
+weaver test --item Lakehouse/Sales --name Sales.OrderSummaryReconciliation
 ```
 
 The counts and the rows come from **one** execution. A Test run twice would
@@ -503,11 +511,10 @@ over.
 Run a validation that has not been built:
 
 ```bash
-weaver test --target Lakehouse/Sales --file tests/Sales.OrderSummaryReconciliation.sql
+weaver test --item Lakehouse/Sales --file tests/Sales.OrderSummaryReconciliation.sql
 ```
 
-The logical item names the installed environment the source validation runs
-against, and the catalogue says which physical target that is.
+The item names the installed environment the source validation runs against.
 
 `--file` compiles the source with the same compiler a build uses and executes
 the result without installing it — no Registry row, no `TestDictionary` row, no
@@ -536,8 +543,8 @@ weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql"
 ## Health
 
 `weaver health` reports the installed estate's operational state, in three
-sections over one installed graph. Its targets are physical positionals, and
-naming none reports on every target the catalogue binds an item to:
+sections over one installed graph. Naming no target reports on every target the
+catalogue binds an item to:
 
 ```bash
 weaver health --workspace-config examples/weaver_example.yml

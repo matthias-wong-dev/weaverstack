@@ -45,7 +45,7 @@ weaver.wipe(
 
 result = weaver.build(
     repository,
-    targets=[
+    items=[
         "Lakehouse/Sales=Lakehouse/Sales",
         "Warehouse/Reporting=Warehouse/Reporting",
     ],
@@ -158,7 +158,7 @@ and one authored in Python cannot come to behave differently.
 Or orchestrate the lot, in dependency order, from either mode:
 
 ``` bash
-weaver load --target Lakehouse/Sales --target Warehouse/Reporting \
+weaver load --item Lakehouse/Sales --item Warehouse/Reporting \
   --workspace-config "examples/weaver_example.yml"
 ```
 

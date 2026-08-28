@@ -52,10 +52,10 @@ def test_a_lifecycle_command_repeats_one_target_option(command):
     from weaver_cli.main import build_parser
 
     parsed = build_parser().parse_args(
-        [command, "--target", "Lakehouse/Landing", "--target", "Warehouse/Curated"]
+        [command, "--item", "Lakehouse/Landing", "--item", "Warehouse/Curated"]
     )
 
-    assert parsed.targets == ["Lakehouse/Landing", "Warehouse/Curated"]
+    assert parsed.items == ["Lakehouse/Landing", "Warehouse/Curated"]
 
 
 @weaver_test()
@@ -67,6 +67,19 @@ def test_wipe_still_names_physical_targets_positionally():
     parsed = build_parser().parse_args(["wipe", "Lakehouse/Sales_LH"])
 
     assert parsed.targets == ["Lakehouse/Sales_LH"]
+
+
+@weaver_test()
+def test_the_retired_target_option_says_what_replaced_it():
+    """``--target`` named a physical item on build, load and test."""
+
+    from weaver.errors import CommandError
+    from weaver_cli.main import build_parser, handle_load
+
+    parsed = build_parser().parse_args(["load", "--target", "Lakehouse/Landing"])
+
+    with pytest.raises(CommandError, match="--target is replaced by --item"):
+        handle_load(parsed)
 
 
 @weaver_test()
@@ -109,7 +122,7 @@ def test_the_retired_bind_grammar_says_what_replaced_it():
         ["build", ".", "--bind", "Lakehouse/Landing_Dev=Landing"]
     )
 
-    with pytest.raises(CommandError, match="--bind is replaced by --target") as raised:
+    with pytest.raises(CommandError, match="--bind is replaced by --item") as raised:
         handle_build(parsed)
 
-    assert "--target Lakehouse/Landing=Lakehouse/Landing_Dev" in str(raised.value)
+    assert "--item Lakehouse/Landing=Lakehouse/Landing_Dev" in str(raised.value)

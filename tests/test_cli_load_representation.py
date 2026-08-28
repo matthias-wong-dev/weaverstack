@@ -60,8 +60,8 @@ def recorded(monkeypatch, desktop_credential):
 
     calls: list[dict] = []
 
-    def fake_load(targets, **kwargs):
-        calls.append({"targets": targets, **kwargs})
+    def fake_load(items, **kwargs):
+        calls.append({"items": items, **kwargs})
         return _report()
 
     monkeypatch.setattr(weaver, "load", fake_load)
@@ -93,7 +93,7 @@ def _report(
 
 
 def _command(*args: str) -> list[str]:
-    return ["load", "--target", "Lakehouse/Sales", "--workspace", "Demo", *args]
+    return ["load", "--item", "Lakehouse/Sales", "--workspace", "Demo", *args]
 
 
 # --- the options the contract names -------------------------------------------
@@ -105,7 +105,7 @@ def test_the_command_exposes_every_option_the_contract_names():
     load = parser.parse_args(
         [
             "load",
-            "--target",
+            "--item",
             "Lakehouse/Sales",
             "--workspace",
             "My Workspace",
@@ -122,7 +122,7 @@ def test_the_command_exposes_every_option_the_contract_names():
         ]
     )
 
-    assert load.targets == ["Lakehouse/Sales"]
+    assert load.items == ["Lakehouse/Sales"]
     assert load.workspace == "My Workspace"
     assert load.catalogue == "Warehouse/Weaver"
     assert load.workspace_config == "environment.yml"
@@ -136,35 +136,29 @@ def test_more_than_one_target_is_one_request():
     parser = build_parser()
 
     load = parser.parse_args(
-        ["load", "--target", "Lakehouse/Sales", "--target", "Warehouse/Reporting"]
+        ["load", "--item", "Lakehouse/Sales", "--item", "Warehouse/Reporting"]
     )
 
-    assert load.targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
+    assert load.items == ["Lakehouse/Sales", "Warehouse/Reporting"]
 
 
 @weaver_test()
-def test_targets_are_required():
-    """Refused by the operation, so a notebook call and a command line agree.
-
-    ``--target`` repeats, so argparse accepts none of it. What a load needs is
-    core's claim, and stating it there is what makes
-    ``weaver.load([])`` refuse the same way.
-    """
+def test_items_are_required():
+    """Core's claim, so a notebook call refuses the way a command line does."""
 
     from weaver.errors import CommandError
     from weaver.operations.load import load as load_operation
 
-    with pytest.raises(CommandError, match="load needs at least one target"):
+    with pytest.raises(CommandError, match="load needs at least one item"):
         load_operation([], workspace="Demo")
 
 
 @pytest.mark.parametrize("command", ["load", "test"])
 @weaver_test()
-def test_naming_no_target_is_a_weaver_sentence(command, capsys):
+def test_naming_no_item_is_a_weaver_sentence(command, capsys):
     """argparse gives ``None`` for a repeated option nobody wrote.
 
-    Passed through to the operation, which refuses it in one sentence. Handing
-    the CLI a list to build first turned it into a TypeError traceback.
+    Building a list from it in the CLI turned that into a TypeError traceback.
     """
 
     exit_code = main(
@@ -172,17 +166,17 @@ def test_naming_no_target_is_a_weaver_sentence(command, capsys):
     )
 
     assert exit_code == 1
-    assert f"{command} needs at least one target" in capsys.readouterr().err
+    assert f"{command} needs at least one item" in capsys.readouterr().err
 
 
 # --- what reaches the API -----------------------------------------------------
 
 
 @weaver_test()
-def test_the_targets_reach_the_api_as_written(recorded):
+def test_the_items_reach_the_api_as_written(recorded):
     main(_command())
 
-    assert recorded[0]["targets"] == ["Lakehouse/Sales"]
+    assert recorded[0]["items"] == ["Lakehouse/Sales"]
 
 
 @weaver_test()
@@ -238,7 +232,7 @@ def test_workspace_configuration_is_still_supported(recorded, tmp_path):
         encoding="utf-8",
     )
 
-    main(["load", "--target", "Lakehouse/Sales", "--workspace-config", str(config)])
+    main(["load", "--item", "Lakehouse/Sales", "--workspace-config", str(config)])
 
     assert recorded[0]["session"].workspace.catalogue == "Warehouse/Configured"
 
@@ -254,7 +248,7 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
     main(
         [
             "load",
-            "--target",
+            "--item",
             "Lakehouse/Sales",
             "--workspace-config",
             str(config),
@@ -268,7 +262,7 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
 
 @weaver_test()
 def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
-    exit_code = main(["load", "--target", "Lakehouse/Sales"])
+    exit_code = main(["load", "--item", "Lakehouse/Sales"])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -567,7 +561,7 @@ def livy(monkeypatch):
 def _fabric(*args: str) -> list[str]:
     return [
         "load",
-        "--target",
+        "--item",
         "Lakehouse/Sales",
         "--workspace",
         "My Workspace",

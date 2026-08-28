@@ -61,11 +61,12 @@ class RunNode:
 
 @dataclass(frozen=True)
 class RunGraph:
-    """The selected runtime graph: nodes, edges and what was requested."""
+    """The selected runtime graph: nodes, edges and the items selected for."""
 
     nodes: tuple[RunNode, ...] = ()
     edges: tuple[tuple[str, str], ...] = ()
-    requested: tuple = ()
+    #: The logical items this graph was selected for.
+    items: tuple = ()
     messages: tuple = ()
 
     @property
@@ -144,7 +145,7 @@ def _load_graph(request, state) -> RunGraph:
             for node in dag.nodes
         ),
         edges=dag.edges,
-        requested=dag.requested,
+        items=dag.items,
         messages=dag.messages,
     )
 
@@ -175,7 +176,7 @@ def _test_graph(request, state) -> RunGraph:
         # the estate and reports, and none produces what another consumes. An
         # ordering exists for reporting, not for readiness.
         edges=(),
-        requested=tuple(request.items),
+        items=tuple(request.items),
     )
 
 

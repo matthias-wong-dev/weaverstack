@@ -41,7 +41,7 @@ from weaver.sessions import ConsoleSession
 def _built(workspace, estate, target):
     with ConsoleSession(workspace=workspace) as session:
         register_session(session)
-        return weaver.build(str(estate), targets=[target], session=session)
+        return weaver.build(str(estate), items=[target], session=session)
 
 
 def _failures(report):

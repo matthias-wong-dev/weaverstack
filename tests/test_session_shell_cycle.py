@@ -118,9 +118,9 @@ def every_command(monkeypatch):
 @pytest.mark.parametrize(
     "line",
     [
-        "weaver build . --target Lakehouse/Sales=Lakehouse/Sales_LH",
-        "weaver load --target Lakehouse/Sales --target Warehouse/Curated",
-        "weaver test --target Warehouse/Curated",
+        "weaver build . --item Lakehouse/Sales=Lakehouse/Sales_LH",
+        "weaver load --item Lakehouse/Sales --item Warehouse/Curated",
+        "weaver test --item Warehouse/Curated",
         "weaver wipe Lakehouse/Sales_LH --yes",
     ],
 )
@@ -260,8 +260,8 @@ def test_secondary_commands_remain_accepted_in_a_session():
 COMPOSITION = """\
 compose:
   dev:
-    - weaver build ./repository --target Lakehouse/Sales=Lakehouse/Sales_LH
-    - weaver load --target Warehouse/Curated
+    - weaver build ./repository --item Lakehouse/Sales=Lakehouse/Sales_LH
+    - weaver load --item Warehouse/Curated
 """
 
 
@@ -493,7 +493,7 @@ def test_a_build_target_naming_its_lakehouse_offers_it(recorded):
         session,
         "build",
         ".",
-        "--target",
+        "--item",
         "Lakehouse/Sales=Lakehouse/Sales_LH",
         "--workspace",
         "A_Workspace",
@@ -507,7 +507,7 @@ def test_a_build_target_naming_its_lakehouse_offers_it(recorded):
 def test_a_logical_load_offers_nothing_to_the_prompt(recorded):
     """The prompt resolves no logical item, so it offers no Lakehouse.
 
-    ``load --target Lakehouse/Sales`` names an item that may be installed in
+    ``load --item Lakehouse/Sales`` names an item that may be installed in
     ``Sales_Dev``. Which one is the catalogue's answer, and the operation reads
     it and offers it. Livy is still declared, because a Lakehouse item usually
     holds Python primitives, and declaring is not acquiring.
@@ -519,7 +519,7 @@ def test_a_logical_load_offers_nothing_to_the_prompt(recorded):
     _prepared(
         session,
         "load",
-        "--target",
+        "--item",
         "Lakehouse/Sales",
         "--workspace",
         "A_Workspace",
@@ -540,7 +540,7 @@ def test_a_warehouse_only_command_offers_no_lakehouse_and_wants_no_spark(recorde
         session,
         "build",
         ".",
-        "--target",
+        "--item",
         "Warehouse/Curated=Warehouse/Analysis",
         "--workspace",
         "A_Workspace",
@@ -571,7 +571,7 @@ def test_a_command_wanting_spark_is_told_why_livy_is_not_starting(recorded, caps
         session,
         "build",
         ".",
-        "--target",
+        "--item",
         "Lakehouse/Sales=Lakehouse/Sales_LH",
         "--workspace",
         "A_Workspace",
