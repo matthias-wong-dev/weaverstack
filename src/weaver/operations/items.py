@@ -52,10 +52,10 @@ def parse_run_item(text: object, *, what: str) -> WeaverItemId:
         )
     try:
         return WeaverItemId.parse(written)
-    except IdentityError as exc:
+    except IdentityError:
         raise CommandError(
             f"a {what} target must name a logical Weaver item as "
-            f"{LAKEHOUSE}/Name or {WAREHOUSE}/Name, got {text!r}: {exc}"
+            f"{LAKEHOUSE}/Name or {WAREHOUSE}/Name, got {text!r}"
         ) from None
 
 

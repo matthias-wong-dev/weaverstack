@@ -1088,7 +1088,7 @@ def _run_load(
 
     with use_or_create_session(session, workspace=workspace) as opened:
         return weaver.load(
-            list(targets),
+            targets,
             names=names,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
@@ -1175,7 +1175,7 @@ def _run_test(workspace, *, targets, name, file, dry_run: bool, session=None):
 
     with use_or_create_session(session, workspace=workspace) as opened:
         return weaver.test(
-            list(targets),
+            targets,
             name=name,
             file=file,
             dry_run=dry_run,

@@ -388,10 +388,10 @@ def _parse_logical_item(text: str) -> WeaverItemId:
 
     try:
         return WeaverItemId.parse(text)
-    except IdentityError as exc:
+    except IdentityError:
         raise BuildError(
             f"a build target names a logical Weaver item as "
-            f"{LAKEHOUSE}/Name or {WAREHOUSE}/Name, got {text!r}: {exc}"
+            f"{LAKEHOUSE}/Name or {WAREHOUSE}/Name, got {text!r}"
         ) from None
 
 

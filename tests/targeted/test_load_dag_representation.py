@@ -74,6 +74,50 @@ def test_the_installed_graph_maps_logical_items_to_physical_targets(estate):
 
 
 @weaver_test()
+def test_the_installed_graph_answers_where_one_logical_item_lives(estate):
+    """The runtime authority a load and a test both read.
+
+    One reading of ``_.Installation``, in one place. Nothing else interprets it.
+    """
+
+    assert estate.target_for(PRODUCER) == RAW
+    assert estate.target_for(CONSUMER) == REPORTING
+
+    with pytest.raises(CatalogueStateError, match="has no installation row"):
+        estate.target_for(WeaverItemId.parse("Lakehouse/Absent"))
+
+
+@weaver_test()
+def test_two_logical_items_may_share_one_physical_target():
+    """The estate this whole selection boundary exists for.
+
+    Both items are installed in ``Shared_LH``, and the graph says so for each of
+    them. What each item owns is a separate question, which the selection tests
+    below answer.
+    """
+
+    catalogue = _catalogue(
+        **{
+            "Lakehouse/Raw": _rows(
+                Installation=[_installation("Lakehouse/Raw", "Shared_LH")],
+                Registry=[_registry("Lakehouse/Raw", "Sales", "Order")],
+            ),
+            "Lakehouse/Staging": _rows(
+                Installation=[_installation("Lakehouse/Staging", "Shared_LH")],
+                Registry=[_registry("Lakehouse/Staging", "Sales", "Customer")],
+            ),
+        }
+    )
+    estate = catalogue.dag()
+    shared = PhysicalTargetRef("lakehouse", "Shared_LH")
+
+    assert estate.target_for(WeaverItemId.parse("Lakehouse/Raw")) == shared
+    assert estate.target_for(WeaverItemId.parse("Lakehouse/Staging")) == shared
+    # One target, named once, whichever items are bound to it.
+    assert estate.targets == (shared,)
+
+
+@weaver_test()
 def test_load_dag_finds_the_installed_primitive_for_each_dispatch_kind(estate):
     dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 

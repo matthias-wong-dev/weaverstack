@@ -158,6 +158,23 @@ def test_targets_are_required():
         load_operation([], workspace="Demo")
 
 
+@pytest.mark.parametrize("command", ["load", "test"])
+@weaver_test()
+def test_naming_no_target_is_a_weaver_sentence(command, capsys):
+    """argparse gives ``None`` for a repeated option nobody wrote.
+
+    Passed through to the operation, which refuses it in one sentence. Handing
+    the CLI a list to build first turned it into a TypeError traceback.
+    """
+
+    exit_code = main(
+        [command, "--workspace", "Demo", "--catalogue", "Warehouse/Weaver"]
+    )
+
+    assert exit_code == 1
+    assert f"{command} needs at least one target" in capsys.readouterr().err
+
+
 # --- what reaches the API -----------------------------------------------------
 
 
