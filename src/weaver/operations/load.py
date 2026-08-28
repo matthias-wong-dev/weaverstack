@@ -5,8 +5,8 @@ over TDS, resolves each requested item to the physical target ``_.Installation``
 binds it to, constructs and resolves a physical DAG, then dispatches primitives
 and records what each one did.
 
-The catalogue read comes before any Spark session, so a request for an item the
-catalogue has never heard of costs one TDS round trip rather than a Livy session.
+The catalogue read comes before any Spark session. An item with no installation
+row is refused after that one TDS round trip.
 """
 
 from __future__ import annotations
@@ -118,10 +118,9 @@ def run_load(
 ) -> LoadRunReport:
     """Run the catalogue graph through a Session.
 
-    The order matters. The catalogue is read first, because a logical request
-    does not yet say which physical Lakehouse a Spark session would attach to.
-    A missing installation is refused after that read and before any Livy
-    session starts.
+    The catalogue is read first. A logical request names no physical Lakehouse
+    for a Spark session to attach to, so the Spark home is offered after the read
+    and a missing installation is refused before any Livy session starts.
     """
 
     from ..run import (
@@ -149,8 +148,8 @@ def run_load(
         )
 
     # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
-    # needs one of the Lakehouses this load is actually for. The physical name,
-    # which only the catalogue knows.
+    # needs one of the Lakehouses this load is for. The physical name, which the
+    # catalogue holds.
     session.offer_spark_home(lakehouse_names(installed.values()))
 
     with session.step("Build run graph"):

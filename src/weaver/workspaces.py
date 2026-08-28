@@ -184,8 +184,8 @@ class Workspace:
     catalogue: str | None = None
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     #: Where each logical Weaver item is deployed in this environment, keyed by
-    #: the logical item. One mapping rather than two, because the key's item type
-    #: already says whether the physical half is a Lakehouse or a Warehouse.
+    #: the logical item. The key's item type says whether the physical half is a
+    #: Lakehouse or a Warehouse, so one mapping serves both.
     targets: Mapping[WeaverItemId, TargetDeclaration] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

@@ -68,8 +68,8 @@ def test_two_logical_items_may_share_one_physical_item(kind):
     """Valid configuration. The mapping says where each item is deployed.
 
     A physical Lakehouse hosts as many logical items as an estate puts in it.
-    What is unsafe is two logical objects at one address inside it, which the
-    installed graph refuses where an operation has to address it.
+    What is unsafe is two logical objects at one address inside it, and the
+    installed graph refuses that where an operation has to address it.
     """
 
     workspace = parse_workspace(

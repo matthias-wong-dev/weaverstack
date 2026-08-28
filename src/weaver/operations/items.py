@@ -4,9 +4,9 @@ A run selects installed logical Weaver items. Where each one physically lives is
 recorded in the catalogue's ``_.Installation``, so a run target carries no
 physical half and cannot override the installed one.
 
-Kept in core rather than in the CLI, so ``weaver.load(["Lakehouse/Landing"])``
-in a notebook and ``weaver load --target Lakehouse/Landing`` on a desktop refuse
-and accept the same text.
+Core owns this parsing. ``weaver.load(["Lakehouse/Landing"])`` in a notebook and
+``weaver load --target Lakehouse/Landing`` on a desktop accept and refuse the
+same text.
 """
 
 from __future__ import annotations
@@ -35,9 +35,8 @@ def requested_items(
 def parse_run_item(text: object, *, what: str) -> WeaverItemId:
     """One run target: ``Lakehouse/Name`` or ``Warehouse/Name``, logical.
 
-    A value carrying ``=`` is refused by name: it is the build grammar, and a
-    run that accepted it would let a caller send work somewhere other than where
-    the catalogue says the item is installed.
+    A value carrying ``=`` is the build grammar, and it is refused by name. The
+    catalogue is authoritative about where an installed item runs.
     """
 
     if not isinstance(text, str):

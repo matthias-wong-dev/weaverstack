@@ -196,7 +196,7 @@ def _build_target_lakehouses(args) -> tuple[str, ...]:
 
     ``--target Lakehouse/Landing=Lakehouse/Landing_Dev`` says the physical item,
     so warming Spark against it needs no resolution. The bare
-    ``--target Lakehouse/Landing`` says only the logical one, and the build
+    ``--target Lakehouse/Landing`` says the logical one alone, and the build
     resolves it through workspace configuration and offers it itself.
     """
 
@@ -216,13 +216,12 @@ def command_lakehouses(parsed) -> tuple[str, ...]:
     command, as its requirements are.
 
     ``load --target Lakehouse/Landing`` declares none. It names a logical item
-    whose installation may be ``Landing_Dev``, and offering ``Landing`` would
-    attach a Spark session to a Lakehouse the estate does not use, or to none at
-    all. Which physical target a logical item is installed in is the catalogue's
-    answer, so the operation reads it and offers it: see
-    :func:`weaver.operations.load.run_load`. Teaching the CLI to read
-    ``_.Installation`` would make one-shot, shell, compose and notebook paths
-    four places that resolve it.
+    whose installation may be ``Landing_Dev``, and ``Landing`` is a name the
+    workspace need not hold at all. Which physical target a logical item is
+    installed in is the catalogue's answer, and the operation reads it and offers
+    it: see :func:`weaver.operations.load.run_load`. Resolution has one owner, so
+    the CLI reads no ``_.Installation`` on any of the one-shot, shell, compose and
+    notebook paths.
     """
 
     declares = getattr(parsed, "lakehouses", None)

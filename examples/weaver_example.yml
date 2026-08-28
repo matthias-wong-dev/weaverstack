@@ -6,12 +6,13 @@ catalogue: Warehouse/Weaver
 execution:
   parallel_workers: 4
 
-# Physical target names are keys; logical items are their configured defaults.
-lakehouses:
-  Sales: Lakehouse/Sales
+# Logical Weaver items are keys; the value is the physical Fabric item each one
+# is deployed to in this environment. The key's item type says whether that
+# value names a Lakehouse or a Warehouse, so one mapping serves both.
+targets:
+  Lakehouse/Sales: Sales
 
-warehouses:
-  Reporting:
-    item: Warehouse/Reporting
+  Warehouse/Reporting:
+    name: Reporting
     execution:
       parallel_workers: 2

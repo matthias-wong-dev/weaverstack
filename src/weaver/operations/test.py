@@ -111,9 +111,9 @@ def run_test(
     ``state`` lets a caller provide an already-read catalogue snapshot.
 
     The catalogue is read before the Environment check and before any Spark
-    session, because a logical request does not yet say which physical Lakehouse
-    would be attached to. A file run reads it for the same reason: the source
-    validation runs against the installed target, not against its item's name.
+    session. A logical request names no physical Lakehouse for a Spark session
+    to attach to. A file run reads the catalogue too: the source validation runs
+    against the target its logical item is installed in.
     """
 
     from ..run import Runner, RunRequest, RunState
@@ -133,8 +133,8 @@ def run_test(
         session, workspace=workspace, requested=targets, dry_run=dry_run
     )
     # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
-    # needs one of the Lakehouses this run is actually for. The physical name,
-    # which only the catalogue knows.
+    # needs one of the Lakehouses this run is for. The physical name, which the
+    # catalogue holds.
     session.offer_spark_home(lakehouse_names(targets))
     started = datetime.now(timezone.utc)
 

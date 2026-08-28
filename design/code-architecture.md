@@ -80,8 +80,8 @@ Commands say up front what they will need, coarsely, and the Session starts thos
 in the background:
 
 ```text
-weaver load Warehouse/Reporting   → auth, resolver, tds
-weaver load Lakehouse/Sales       → auth, resolver, onelake, livy
+weaver load --target Warehouse/Reporting   → auth, resolver, tds
+weaver load --target Lakehouse/Sales       → auth, resolver, tds, onelake, livy
 ```
 
 Commands declare the capabilities they may need. Preparation starts them in the
@@ -139,6 +139,11 @@ and fail-fast, and aggregates the result. One Runner serves both `weaver load`
 and `weaver test`; what differs is which nodes are selected and which primitive
 runs, not how a run behaves when one of them fails.
 
+`RunRequest.items` is the requested scope, and it is logical. `InstalledDag`
+turns each item into the physical target `_.Installation` binds it to, and that
+target stays on every node for dispatch and barrier placement. Selection is by
+item, so two items installed in one Lakehouse do not select each other's work.
+
 `Runner` delegates node execution through the `dispatch` callable. Production
 execution supplies the estate-backed dispatcher; tests can supply a controlled
 dispatcher for the same state machine.
@@ -164,6 +169,7 @@ The handoff points, roughly in the order you meet them.
 | `TargetInventory` | what a physical target actually holds right now |
 | `BuildState` | `Catalogue` + inventories, as one snapshot the Builder is handed |
 | `BuildBundle` | the plan: sequences → batches → `InstallAction`s, plus frozen payloads |
+| `RunRequest` | the logical items a run was asked for, and the policy it runs under |
 | `RunState` | the catalogue a run plans against and records itself in, read once |
 | `RunGraph` | the selected nodes and their edges |
 | `Graph` | the one topology implementation: order, layers, ancestry, subgraphs |

@@ -224,7 +224,7 @@ def test_a_load_uses_the_installed_target_and_not_the_configured_one(tmp_path, r
 
     # What the caller asked for, in the caller's own vocabulary.
     assert report.requested == (ITEM,)
-    # And where it ran, which only the catalogue knew.
+    # And where it ran, which the catalogue supplied.
     assert {node.physical_target for node in report.nodes} == {
         "Lakehouse/Landing_Installed"
     }
@@ -275,8 +275,8 @@ def test_no_run_target_may_carry_a_physical_half(tmp_path, root):
 def test_the_notebook_api_names_the_same_logical_items(tmp_path, root, bindings):
     """Not a CLI translation. The public functions take the logical identities.
 
-    Asserted because a change that lived only in argparse handlers would leave a
-    notebook on the old grammar while every command line moved.
+    Asserted at the public functions, because that is the interface a notebook
+    calls and argparse is not in front of it.
     """
 
     with pytest.raises(Halt):
