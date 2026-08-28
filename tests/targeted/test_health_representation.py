@@ -29,6 +29,7 @@ from factories import (
 )
 from support.weaver_test import weaver_test
 
+from weaver.catalogue.history import LoadHistory
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     BOOKMARK,
@@ -60,7 +61,6 @@ from weaver.health import (
     TEST_FAILED,
     TEST_PENDING,
     TEST_STALE_DEPENDENCY,
-    LoadActivity,
     assess,
     worst,
 )
@@ -121,6 +121,7 @@ class _Estate:
         result: str = "succeeded",
         moved=None,
         declared: bool = True,
+        is_static: bool = False,
     ) -> "_Estate":
         """One installed object, with the state its most recent load left.
 
@@ -133,7 +134,7 @@ class _Estate:
         tables[REGISTRY.name].append(registry_row(parsed, object_type=object_type))
         if declared and object_type in ("table", "view"):
             tables[TABLE_DICTIONARY.name].append(
-                _dictionary_row(parsed, object_type=object_type)
+                _dictionary_row(parsed, object_type=object_type, is_static=is_static)
             )
         if loadable:
             tables[REGISTRY.name].append(_load_artefact(parsed))
@@ -204,24 +205,27 @@ class _Estate:
             )
         return self
 
-    def catalogue(self) -> Catalogue:
+    def catalogue(self, *, load_history=None) -> Catalogue:
         return Catalogue(
             rows={
                 item: {name: tuple(rows) for name, rows in tables.items()}
                 for item, tables in self._rows.items()
-            }
+            },
+            load_history=load_history,
         )
 
     def report(self, **asked):
         return assess(
-            self.catalogue(),
+            self.catalogue(load_history=asked.pop("load_history", None)),
             as_of=asked.pop("as_of", YESTERDAY),
             generated_at=asked.pop("generated_at", NOW),
             **asked,
         )
 
 
-def _dictionary_row(identity, *, object_type: str = "table") -> dict:
+def _dictionary_row(
+    identity, *, object_type: str = "table", is_static: bool = False
+) -> dict:
     from weaver.catalogue.claims import catalogue_schema
 
     return {
@@ -239,7 +243,7 @@ def _dictionary_row(identity, *, object_type: str = "table") -> dict:
         "identity_column": None,
         "comparison_columns": None,
         "is_incremental": None,
-        "is_static": None,
+        "is_static": is_static,
         "prohibit_rebuild": None,
         "signature": "declaration",
     }
@@ -524,6 +528,119 @@ def test_target_filtering_reports_the_selection_and_reads_the_rest():
     assert codes(report.load) == (LOAD_STALE_ANCESTOR,)
 
 
+# --- a Static object is loaded once -------------------------------------------
+#
+# Static is for a small reference dataset that is loaded once, so
+# age says nothing about it and neither does an ancestor that moved. Its own
+# bookmark still counts against everything downstream: a genuine reload of a
+# reference table is what puts its consumers behind.
+
+
+@weaver_test()
+def test_a_static_object_loaded_months_ago_stays_green():
+    report = (
+        _Estate()
+        .table(f"{RAW}/Ref.Country", loaded=at(3000), moved=at(3000), is_static=True)
+        .report()
+    )
+
+    assert report.load.status == GREEN
+    assert report.load.findings == ()
+
+
+@weaver_test()
+def test_a_static_object_is_not_made_stale_by_an_ancestor():
+    report = (
+        _Estate()
+        .table(f"{RAW}/Ref.Source", loaded=at(1), moved=at(1))
+        .table(f"{RAW}/Ref.Country", loaded=at(3000), moved=at(3000), is_static=True)
+        .reads(f"{RAW}/Ref.Country", "Ref.Source")
+        .report()
+    )
+
+    assert about(report.load, LOAD_STALE_ANCESTOR) == ()
+    assert about(report.load, LOAD_STALE_TIME) == ()
+
+
+@weaver_test()
+def test_a_static_object_that_has_never_loaded_is_amber():
+    report = _Estate().table(f"{RAW}/Ref.Country", is_static=True).report()
+
+    assert report.load.status == AMBER
+    assert codes(report.load) == (LOAD_PENDING,)
+
+
+@pytest.mark.parametrize("result", ["failed", "error", "blocked"])
+@weaver_test()
+def test_a_static_object_that_did_not_load_is_red(result):
+    report = (
+        _Estate()
+        .table(f"{RAW}/Ref.Country", loaded=at(1), result=result, is_static=True)
+        .report()
+    )
+
+    assert report.load.status == RED
+    assert codes(report.load) == (LOAD_FAILED,)
+
+
+@weaver_test()
+def test_a_static_object_that_rejected_rows_is_amber():
+    report = (
+        _Estate()
+        .table(f"{RAW}/Ref.Country", loaded=at(1), result="rejected", is_static=True)
+        .report()
+    )
+
+    assert report.load.status == AMBER
+    assert codes(report.load) == (LOAD_REJECTED,)
+
+
+@weaver_test()
+def test_a_static_bookmark_is_lineage_for_what_reads_it():
+    """Ref.Country loaded in January, Fact.Customer in February: Green."""
+
+    report = (
+        _Estate()
+        .table(f"{RAW}/Ref.Country", loaded=at(1400), moved=at(1400), is_static=True)
+        .table(f"{RAW}/Fact.Customer", loaded=at(700), moved=at(700))
+        .reads(f"{RAW}/Fact.Customer", "Ref.Country")
+        .report(as_of=at(2000))
+    )
+
+    assert report.load.status == GREEN
+
+
+@weaver_test()
+def test_a_genuine_static_reload_puts_its_consumers_behind():
+    """Ref.Country reloaded in August, Fact.Customer still at February."""
+
+    report = (
+        _Estate()
+        .table(f"{RAW}/Ref.Country", loaded=at(1), moved=at(1), is_static=True)
+        .table(f"{RAW}/Fact.Customer", loaded=at(700), moved=at(700))
+        .reads(f"{RAW}/Fact.Customer", "Ref.Country")
+        .report(as_of=at(2000))
+    )
+
+    assert report.load.status == AMBER
+    stale = about(report.load, LOAD_STALE_ANCESTOR)
+    assert [finding.object_id for finding in stale] == [f"{RAW}/Fact.Customer"]
+    assert f"{RAW}/Ref.Country" in stale[0].message
+
+
+@weaver_test()
+def test_a_static_reload_makes_a_validation_over_it_stale():
+    report = (
+        _Estate()
+        .table(f"{RAW}/Ref.Country", loaded=at(1), moved=at(1), is_static=True)
+        .validation(f"{RAW}/Ref.Integrity", result="succeeded", ran=at(700))
+        .reads(f"{RAW}/Ref.Integrity", "Ref.Country")
+        .report()
+    )
+
+    assert codes(report.tests) == (TEST_STALE_DEPENDENCY,)
+
+
 # --- validation health --------------------------------------------------------
 
 
@@ -778,17 +895,12 @@ def test_the_mapping_is_json_safe():
         .table(f"{RAW}/Sales.Order", loaded=at(30), moved=at(30))
         .validation(f"{RAW}/Sales.Integrity", result="failed", ran=at(1))
         .report(
-            load_activity=(
-                LoadActivity(
-                    object_id=f"{RAW}/Sales.Order",
-                    target="Lakehouse/Raw_LH",
-                    workflow_id="workflow-1",
-                    started_at=at(30),
-                    completed_at=at(29),
-                    duration_ms=3600000,
-                    rows_read=5412,
-                    rows_inserted=12,
-                ),
+            load_history=LoadHistory(
+                workflow_id="workflow-1",
+                started_at=at(30),
+                completed_at=at(29),
+                counts={"succeeded": 1},
+                statistics=(_statistic("Sales.Order", rows_read=5412),),
             )
         )
     )
@@ -796,6 +908,7 @@ def test_the_mapping_is_json_safe():
     recovered = json.loads(json.dumps(report.to_mapping()))
 
     assert recovered["as_of"] == YESTERDAY.isoformat()
+    assert recovered["latest_load"]["workflow_id"] == "workflow-1"
     assert recovered["load_activity"][0]["rows_read"] == 5412
 
 
@@ -810,23 +923,40 @@ def test_arrays_stay_present_when_empty():
 # --- the bounded activity window ----------------------------------------------
 
 
-def _activity(name: str, *, duration_ms=None, **counts) -> LoadActivity:
-    return LoadActivity(
-        object_id=f"{RAW}/{name}",
-        target="Lakehouse/Raw_LH",
-        workflow_id="workflow-1",
-        duration_ms=duration_ms,
-        **counts,
-    )
+def _window(*statistics) -> LoadHistory:
+    """One catalogue's bounded window, in the shape its read carries."""
+
+    return LoadHistory(workflow_id="workflow-1", statistics=tuple(statistics))
+
+
+def _statistic(name: str, *, duration_ms=None, **counts) -> dict:
+    return {
+        "load_statistic_sk": name,
+        "workflow_id": "workflow-1",
+        "item_type": "Lakehouse",
+        "item_name": "Raw",
+        "schema_name": name.split(".")[0],
+        "object_name": name.split(".")[1],
+        "started_datetime": None,
+        "completed_datetime": None,
+        "duration_milliseconds": duration_ms,
+        "rows_read": counts.get("rows_read", 0),
+        "rows_inserted": counts.get("rows_inserted", 0),
+        "rows_updated": counts.get("rows_updated", 0),
+        "rows_deleted": counts.get("rows_deleted", 0),
+        "rows_rejected": counts.get("rows_rejected", 0),
+        "is_reload": False,
+        "is_static_skip": False,
+    }
 
 
 @weaver_test()
 def test_the_slowest_loads_come_from_the_whole_window():
     report = _Estate().report(
-        load_activity=(
-            _activity("Sales.A", duration_ms=31200),
-            _activity("Sales.B", duration_ms=12800),
-            _activity("Sales.C"),
+        load_history=_window(
+            _statistic("Sales.A", duration_ms=31200),
+            _statistic("Sales.B", duration_ms=12800),
+            _statistic("Sales.C"),
         )
     )
 
@@ -838,7 +968,7 @@ def test_the_slowest_loads_come_from_the_whole_window():
 
 @weaver_test()
 def test_a_load_with_no_duration_is_left_out_of_the_slowest():
-    report = _Estate().report(load_activity=(_activity("Sales.C"),))
+    report = _Estate().report(load_history=_window(_statistic("Sales.C")))
 
     assert report.slowest() == ()
     assert len(report.load_activity) == 1
@@ -847,9 +977,9 @@ def test_a_load_with_no_duration_is_left_out_of_the_slowest():
 @weaver_test()
 def test_movement_is_what_a_load_changed_rather_than_what_it_read():
     report = _Estate().report(
-        load_activity=(
-            _activity("Sales.A", rows_read=5000),
-            _activity("Sales.B", rows_inserted=12, rows_deleted=3),
+        load_history=_window(
+            _statistic("Sales.A", rows_read=5000),
+            _statistic("Sales.B", rows_inserted=12, rows_deleted=3),
         )
     )
 
@@ -858,19 +988,22 @@ def test_movement_is_what_a_load_changed_rather_than_what_it_read():
 
 @weaver_test()
 def test_counts_are_preserved_exactly():
-    activity = _activity(
-        "Sales.A",
-        rows_read=5412,
-        rows_inserted=12,
-        rows_updated=3,
-        rows_deleted=0,
-        rows_rejected=4,
+    report = _Estate().report(
+        load_history=_window(
+            _statistic(
+                "Sales.A",
+                rows_read=5412,
+                rows_inserted=12,
+                rows_updated=3,
+                rows_deleted=0,
+                rows_rejected=4,
+            )
+        )
     )
-    report = _Estate().report(load_activity=(activity,))
 
     assert report.load_activity[0].to_mapping() == {
         "object_id": f"{RAW}/Sales.A",
-        "target": "Lakehouse/Raw_LH",
+        "target": None,
         "workflow_id": "workflow-1",
         "started_at": None,
         "completed_at": None,
@@ -883,3 +1016,11 @@ def test_counts_are_preserved_exactly():
         "is_reload": False,
         "is_static_skip": False,
     }
+
+
+@weaver_test()
+def test_a_catalogue_read_without_a_window_reports_no_activity():
+    report = _Estate().table(f"{RAW}/Sales.Order", loaded=at(1)).report()
+
+    assert report.latest_load is None
+    assert report.load_activity == ()

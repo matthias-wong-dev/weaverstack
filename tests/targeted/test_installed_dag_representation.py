@@ -29,6 +29,7 @@ from weaver.catalogue.tables import (
     INSTALLATION,
     REGISTRY,
     SHORTCUT,
+    TABLE_DICTIONARY,
     TEST_DICTIONARY,
 )
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
@@ -70,6 +71,20 @@ def _load_artefact(identity: WeaverDocumentId) -> dict:
     )
 
 
+def _static_row(identity: WeaverDocumentId) -> dict:
+    """The one TableDictionary column the graph reads: is this loaded once."""
+
+    return {
+        "item_type": identity.item.item_type,
+        "item_name": identity.item.item_name,
+        "schema_name": identity.object_id.schema,
+        "object_name": identity.object_id.object,
+        "object_type": "table",
+        "is_static": True,
+        "signature": "declaration",
+    }
+
+
 def _validation_artefact(logical: WeaverDocumentId, kind: str) -> dict:
     artefact = validation_artefact_id(logical.item, kind, logical.object_id)
     return registry_row(
@@ -93,6 +108,7 @@ class _Estate:
                 REGISTRY.name: [],
                 DEPENDENCY.name: [],
                 SHORTCUT.name: [],
+                TABLE_DICTIONARY.name: [],
                 TEST_DICTIONARY.name: [],
             },
         )
@@ -105,6 +121,7 @@ class _Estate:
         object_type: str = "table",
         object_role: str = "data",
         loadable: bool = True,
+        is_static: bool = False,
     ) -> "_Estate":
         parsed = document_id(identity)
         tables = self._tables(parsed.item)
@@ -113,6 +130,8 @@ class _Estate:
         )
         if loadable and object_type in ("table", "folder") and object_role == "data":
             tables[REGISTRY.name].append(_load_artefact(parsed))
+        if is_static:
+            tables[TABLE_DICTIONARY.name].append(_static_row(parsed))
         return self
 
     def view(self, identity: str) -> "_Estate":
@@ -477,6 +496,21 @@ def test_an_object_whose_load_primitive_is_absent_is_not_loadable():
     assert node.expects_artefact
     assert not node.is_installed
     assert not node.is_loadable
+
+
+@weaver_test()
+def test_a_node_carries_whether_its_declaration_said_it_loads_once():
+    """Static reaches the node here, so nothing above reads a dictionary row."""
+
+    dag = (
+        _Estate()
+        .object(f"{RAW}/Ref.Country", is_static=True)
+        .object(f"{RAW}/Sales.Order")
+        .dag()
+    )
+
+    assert dag.node(f"{RAW}/Ref.Country").is_static
+    assert not dag.node(f"{RAW}/Sales.Order").is_static
 
 
 @weaver_test()

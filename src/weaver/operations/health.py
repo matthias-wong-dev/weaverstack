@@ -100,29 +100,24 @@ def run_health(
     """
 
     from ..catalogue.connection import catalogue_connection
-    from ..catalogue.history import latest_load_workflow, load_statistics
     from ..catalogue.state import read_installed_catalogue
-    from ..health import latest_load, load_activity
 
     connection = catalogue_connection(session, workspace)
     with session.step("Read catalogue"):
-        catalogue = read_installed_catalogue(connection, tables=HEALTH_TABLES)
-
-    selected = _selected(catalogue, requested)
-
-    with session.step("Read recent activity"):
-        window = latest_load_workflow(connection)
-        statistics = (
-            ()
-            if window is None
-            else load_statistics(connection, workflow_id=window["workflow_id"])
+        # Current state and the bounded window of recent activity, in one read.
+        # Everything below reasons from this catalogue and asks the Warehouse
+        # nothing further.
+        catalogue = read_installed_catalogue(
+            connection, tables=HEALTH_TABLES, load_history=True
         )
 
-    dag = catalogue.dag()
+    selected = _selected(catalogue, requested)
     read = {}
     if inventories:
         with session.step("Read installed objects"):
-            read = _inventories(session, workspace=workspace, targets=selected, dag=dag)
+            read = _inventories(
+                session, workspace=workspace, targets=selected, dag=catalogue.dag()
+            )
 
     return assess(
         catalogue,
@@ -130,8 +125,6 @@ def run_health(
         generated_at=generated_at,
         targets=selected if requested else None,
         inventories=read,
-        latest_load=latest_load(window),
-        load_activity=load_activity(statistics, targets=dag.installations),
     )
 
 

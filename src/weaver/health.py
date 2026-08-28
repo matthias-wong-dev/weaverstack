@@ -21,9 +21,15 @@ instant. Whether an object is behind its sources is a question about data
 movement, so ``_.Bookmark`` is compared instead: a bookmark advances for a clean
 load that established an instant, and a Static skip moves nothing.
 
-This module is pure. It takes a catalogue, statuses and bounded history, and
-returns a report. See :mod:`weaver.operations.health` for the operation that
-gathers them.
+A Static object is asked neither. It is loaded once, so it stays Green however
+long ago that was. Its bookmark still counts against everything downstream,
+which is what makes a genuine reload of a reference table put its consumers
+behind.
+
+This module is pure. Everything it reads is on the catalogue it is given: the
+graph, the status tables, the bookmarks, and the bounded window of recent
+activity that catalogue was read with. See :mod:`weaver.operations.health` for
+the operation that reads it.
 """
 
 from __future__ import annotations
@@ -380,30 +386,32 @@ class HealthReport:
         }
 
 
-def latest_load(found: Mapping[str, object] | None) -> LoadWorkflow | None:
-    """One ``_.Log`` window, as the catalogue's history reader returned it."""
+def latest_load(history) -> LoadWorkflow | None:
+    """The window a catalogue was read with, as a report carries it."""
 
-    if not found:
+    if history is None:
         return None
     return LoadWorkflow(
-        workflow_id=str(found["workflow_id"]),
-        started_at=_aware(found.get("started_datetime")),
-        completed_at=_aware(found.get("completed_datetime")),
-        counts=MappingProxyType(dict(found.get("counts") or {})),
+        workflow_id=history.workflow_id,
+        started_at=_aware(history.started_at),
+        completed_at=_aware(history.completed_at),
+        counts=MappingProxyType(dict(history.counts)),
     )
 
 
-def load_activity(rows, *, targets=None) -> tuple[LoadActivity, ...]:
-    """``_.LoadStatistic`` rows as activity, with each object's target named.
+def load_activity(history, *, targets=None) -> tuple[LoadActivity, ...]:
+    """The window's ``_.LoadStatistic`` rows, with each object's target named.
 
     ``targets`` maps a logical item to the physical target it is bound to, which
     a statistic row does not carry: it holds logical identity, and where that
     object lives is the Installation's to say.
     """
 
+    if history is None:
+        return ()
     bound = dict(targets or {})
     found = []
-    for row in rows:
+    for row in history.statistics:
         identity = _row_identity(row)
         target = bound.get(identity.item)
         duration = row.get("duration_milliseconds")
@@ -442,10 +450,12 @@ def assess(
     generated_at: datetime,
     targets: Sequence[PhysicalTargetRef] | None = None,
     inventories: Mapping[PhysicalTargetRef, object] | None = None,
-    latest_load: LoadWorkflow | None = None,
-    load_activity: Sequence[LoadActivity] = (),
 ) -> HealthReport:
     """One catalogue's operational state, as a report.
+
+    Everything comes from the catalogue: what is installed, what depends on what,
+    the current status tables, the bookmarks, and the bounded window of recent
+    activity it was read with.
 
     ``targets`` restricts what is reported on. Ancestry outside it is still read,
     because whether a selected object is behind its sources is a question about
@@ -457,6 +467,7 @@ def assess(
     """
 
     dag = catalogue.dag()
+    history = catalogue.load_history
     selected = None if targets is None else tuple(dict.fromkeys(targets))
     evaluation = _Assessment(
         dag,
@@ -472,8 +483,8 @@ def assess(
         tests=evaluation.tests(),
         build=evaluation.build(),
         targets=tuple(str(target) for target in (selected or dag.targets)),
-        latest_load=latest_load,
-        load_activity=tuple(load_activity),
+        latest_load=latest_load(history),
+        load_activity=load_activity(history, targets=dag.installations),
     )
 
 
@@ -562,7 +573,17 @@ class _Assessment:
             )
 
     def _load_freshness(self, node: InstalledNode, status):
+        """Whether this object is overdue, and whether it is behind its sources.
+
+        A Static object is asked neither. It is loaded once, so age says nothing
+        about it and neither does an ancestor that moved. Its own bookmark still
+        counts against everything downstream: a genuine reload of a reference
+        table is exactly what puts its consumers behind.
+        """
+
         if status is None or status.result in _NO_DATA_ESTABLISHED:
+            return
+        if node.is_static:
             return
         if status.completed_at is not None and status.completed_at < self.as_of:
             yield self._finding(

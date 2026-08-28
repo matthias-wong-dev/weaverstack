@@ -95,6 +95,7 @@ class Catalogue:
         *,
         registered: Mapping[WeaverDocumentId, "RegisteredDocument"] | None = None,
         materialised: frozenset[str] | None = None,
+        load_history: Any = None,
         writer: Any = None,
         session: Any = None,
         owns_session: bool = False,
@@ -111,12 +112,26 @@ class Catalogue:
         self.materialised = frozenset(
             materialised if materialised is not None else carried
         )
+        self._load_history = load_history
         self._writer = writer
         self._session = session
         self._owns_session = owns_session
         # Rows this catalogue has written, by table and key. Consulted ahead of
         # what was read, so a caller sees its own update immediately.
         self._written: dict[str, dict[tuple, dict]] = {}
+
+    @property
+    def load_history(self):
+        """The bounded window of history this catalogue was read with, if any.
+
+        A :class:`weaver.catalogue.history.LoadHistory`, being the most recent
+        load workflow and the statistics it appended. Held apart from ``rows``,
+        because ``_.Log`` and ``_.LoadStatistic`` grow with the estate's age and
+        :meth:`table_rows` answers for a materialised table. ``None`` where the
+        read did not ask for one.
+        """
+
+        return self._load_history
 
     # --- the Session it reaches its Warehouse through -----------------------
 
@@ -463,6 +478,7 @@ class Catalogue:
         return Catalogue(
             rows=without_invalidated(self.rows, invalidation),
             materialised=self.materialised,
+            load_history=self._load_history,
             writer=self._writer,
             session=self._session,
         )
@@ -877,7 +893,12 @@ def read_catalogue_state(catalogue: Any, items) -> Catalogue:
 
 
 def read_installed_catalogue(
-    catalogue: Any, *, tables=READABLE_TABLES, writer=None, session=None
+    catalogue: Any,
+    *,
+    tables=READABLE_TABLES,
+    load_history: bool = False,
+    writer=None,
+    session=None,
 ) -> Catalogue:
     """Read the installed catalogue, without being told what is in it.
 
@@ -892,10 +913,18 @@ def read_installed_catalogue(
     it is history, and reading it would grow with the estate's age for an answer
     nothing asks.
 
+    ``load_history`` reads the most recent load workflow and the statistics it
+    appended, bounded by the engine, and carries them on the returned catalogue
+    as :attr:`Catalogue.load_history`. Apart from ``tables``, because a window
+    is not a materialised table. This is the one place an operation acquires it:
+    the estate is read into a catalogue, and everything reasons from that.
+
     The shape check is weaker than the build's: a missing table reads as no rows
     rather than a fault, because an estate with no shortcuts has never had a
     Shortcut table written.
     """
+
+    from .history import read_load_history
 
     rows: dict[WeaverItemId, dict[str, list[Mapping[str, object]]]] = {}
     for table in tables:
@@ -918,6 +947,7 @@ def read_installed_catalogue(
             }
         ),
         materialised=frozenset(table.name for table in tables),
+        load_history=read_load_history(catalogue) if load_history else None,
         writer=writer,
         session=session,
     )

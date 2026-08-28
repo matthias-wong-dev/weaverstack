@@ -27,11 +27,13 @@ from .catalogue.claims import catalogue_columns
 from .catalogue.state import Catalogue
 from .catalogue.tables import (
     DEPENDENCY,
+    FOLDER_DICTIONARY,
     INSTALLATION,
     ROLE_ASSUMPTION,
     ROLE_DATA,
     ROLE_TEST,
     SHORTCUT,
+    TABLE_DICTIONARY,
     TEST_DICTIONARY,
     VALIDATION_ROLES,
 )
@@ -129,6 +131,10 @@ class InstalledNode:
     #: them. Empty for anything else.
     primary_key: tuple[str, ...] = ()
     description: str | None = None
+    #: Whether the object is loaded once rather than refreshed, as its Table or
+    #: Folder dictionary row declared it. Carried here so nothing downstream
+    #: goes back to a dictionary row to ask.
+    is_static: bool = False
 
     @property
     def node_id(self) -> str:
@@ -625,11 +631,15 @@ def _registered(catalogue: Catalogue, installations):
             physical_owner[key] = identity
         data[identity] = node
 
-    # The load artefact is attached second, because it is a Registry row of its
-    # own and both rows have to be read before either can be joined to the other.
+    # The load artefact and the declared behaviour are attached second. Both
+    # live in rows of their own, and all of them have to be read before either
+    # can be joined to the Registry row it belongs to.
+    static = _static_declarations(catalogue)
     for identity, node in list(data.items()):
         if node.role != ROLE_DATA:
             continue
+        node = replace(node, is_static=identity in static)
+        data[identity] = node
         for kind, candidate in primitive_candidates(identity, node.object_type):
             data[identity] = replace(
                 node,
@@ -643,6 +653,31 @@ def _registered(catalogue: Catalogue, installations):
         artefacts,
         {target: tuple(found) for target, found in ambiguous.items()},
     )
+
+
+def _static_declarations(catalogue: Catalogue) -> frozenset[WeaverDocumentId]:
+    """The objects declared Static, from the two dictionaries that declare it.
+
+    A Static object is loaded once rather than refreshed. Read here, where the
+    node is assembled, so nothing above the graph reads a dictionary row.
+    """
+
+    found = set()
+    for table in (TABLE_DICTIONARY, FOLDER_DICTIONARY):
+        for row in catalogue.table_rows(table):
+            if not row.get("is_static"):
+                continue
+            item = WeaverItemId(
+                str(row.get("item_type") or ""), str(row.get("item_name") or "")
+            )
+            found.add(
+                stored_identity(
+                    item,
+                    str(row.get("schema_name") or ""),
+                    str(row.get("object_name") or ""),
+                )
+            )
+    return frozenset(found)
 
 
 def _validations(catalogue: Catalogue, installations):

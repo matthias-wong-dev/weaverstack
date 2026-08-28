@@ -98,6 +98,35 @@ A Test or Assumption is stale when managed data in its ancestry moved after it
 passed. Time alone does not make a validation stale: its freshness is tied to
 whether the data it reads moved.
 
+### Static objects
+
+A Static object is loaded once. It is normally a small reference dataset that is
+meant to sit still, so neither freshness question applies to it:
+
+```text
+Static + never successfully loaded   Amber / pending
+Static + failed, error or blocked    Red
+Static + rejected                    Amber
+Static + successfully loaded         Green
+```
+
+Neither `as_of` nor an ancestor that moved is asked of one. A reference table
+loaded months ago stays Green.
+
+Its bookmark still counts against everything downstream. That is the lineage
+evidence a consumer needs:
+
+```text
+Static Ref.Country loaded January     Fact.Customer loaded February   Green
+Static Ref.Country loaded August      Fact.Customer loaded February   Amber
+```
+
+A genuine reload of a reference table is exactly what puts its consumers behind.
+
+`is_static` reaches the evaluator on `InstalledNode`, carried from the Table or
+Folder dictionary row when the graph is built. Health reads the graph and never
+a dictionary row.
+
 ---
 
 ## Build health
@@ -131,7 +160,33 @@ ordinary command error path rather than fabricating a finding. See
 
 `_.Log` and `_.LoadStatistic` grow with the estate's age, so health reads one
 window: the most recent load workflow, and the statistics that workflow's loads
-appended.
+appended. The engine does the filtering and the limiting, so the cost is one
+workflow's worth however long the estate has been running.
+
+The window is acquired behind `read_installed_catalogue(..., load_history=True)`
+and carried on the catalogue as `Catalogue.load_history`. It sits apart from
+`rows`, because `Catalogue.table_rows` answers for a materialised table and a
+window is not one. `LoadHistory.is_truncated` says when what it holds is a
+prefix.
+
+```text
+Warehouse
+    │
+    read_installed_catalogue(...)
+    ├─ current catalogue state
+    └─ bounded latest-load history
+    │
+Catalogue
+    ├─ dag()
+    ├─ runtime status
+    ├─ bookmarks
+    └─ load_history
+    │
+  health
+```
+
+One operation reads the installed estate into a `Catalogue` and everything
+reasons from that `Catalogue`. Health asks the Warehouse nothing further.
 
 The runtime records orchestrated `weaver.load()` runs and standalone object
 `.load()` calls under the same `load` task type, so the surface is phrased as
@@ -160,7 +215,7 @@ starts a Livy session.
 
 ```text
 weaver/health.py                the report model and the evaluator, pure
-weaver/catalogue/history.py     the bounded reads of _.Log and _.LoadStatistic
-weaver/operations/health.py     the operation that gathers what the evaluator takes
+weaver/catalogue/history.py     the bounded window of _.Log and _.LoadStatistic
+weaver/operations/health.py     the operation that reads the estate into a Catalogue
 weaver_cli/main.py              the parser, the terminal renderer and --json
 ```
