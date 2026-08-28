@@ -66,6 +66,9 @@ packages = ["src/weaver", "src/weaver_cli"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+    # Execution-cost selector. This is independent of the generated declaration
+    # markers and requires --runslow.
+    "slow: an opt-in test whose live operation is too expensive for the ordinary selection",
     # Place. Every test that needs a real workspace carries it, so `-m fabric`
     # is the whole set rather than a subset that quietly excludes the expensive
     # half — which is what `fabric` meaning *both* place and precondition cost.

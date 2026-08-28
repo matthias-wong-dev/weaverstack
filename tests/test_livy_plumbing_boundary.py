@@ -145,21 +145,29 @@ def test_workspace_session_listing_finds_other_lakehouses_and_can_filter_ended(
 
 
 class _Api:
-    """Records calls, and reports a session that takes a while to die.
+    """Records calls, and reports a session that takes a while to release.
 
     ``states`` are the answers to successive ``GET``s; ``None`` stands for the
     404 Fabric gives once the session is gone. The last answer repeats, so a
     session that never admits it has died can be modelled.
     """
 
-    def __init__(self, states):
+    def __init__(self, states, scheduler_states=("Ended",)):
         self.states = list(states)
+        self.scheduler_states = list(scheduler_states)
         self.calls = []
 
     def __call__(self, method, url, token, payload=None, expected=()):
         self.calls.append((method, url))
         if method == "DELETE":
             return {}
+        if url.endswith("/sessions"):
+            scheduler_state = (
+                self.scheduler_states[0]
+                if len(self.scheduler_states) == 1
+                else self.scheduler_states.pop(0)
+            )
+            return {"items": [{"id": "7", "schedulerState": scheduler_state}]}
         state = self.states[0] if len(self.states) == 1 else self.states.pop(0)
         return {} if state is None else {"state": state}
 
@@ -180,8 +188,29 @@ def test_close_waits_for_the_session_to_report_itself_gone(monkeypatch):
     _closing_session(api, monkeypatch).close()
 
     assert api.calls[0][0] == "DELETE"
-    # It kept asking until the session said it had gone, rather than assuming.
-    assert [method for method, _ in api.calls] == ["DELETE", "GET", "GET", "GET"]
+    assert [method for method, _ in api.calls] == [
+        "DELETE",
+        "GET",
+        "GET",
+        "GET",
+        "GET",
+    ]
+
+
+@weaver_test()
+def test_close_waits_for_fabric_scheduler_after_livy_is_dead(monkeypatch):
+    api = _Api(["dead"], scheduler_states=["Ending", "Ended"])
+
+    _closing_session(api, monkeypatch).close()
+
+    assert [
+        url.endswith("/sessions") for method, url in api.calls if method == "GET"
+    ] == [
+        False,
+        True,
+        False,
+        True,
+    ]
 
 
 @weaver_test()

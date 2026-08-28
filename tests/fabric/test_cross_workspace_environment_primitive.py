@@ -10,6 +10,7 @@ def test_a_qualified_environment_runs_weaver_in_the_consumer_workspace(
     fabric_workspace,
     fabric_external_workspace_item,
     fabric_external_lakehouse,
+    exclusive_livy_slot,
 ):
     """The ID-only Livy attachment contract for a cross-workspace Environment."""
 

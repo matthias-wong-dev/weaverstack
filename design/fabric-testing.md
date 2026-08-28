@@ -81,6 +81,14 @@ One pytest run reuses:
 - one Livy session;
 - one TDS connection per Warehouse.
 
+The cross-workspace Environment attachment primitive opens a session in its
+consumer workspace. Its exclusive Livy fixture schedules it before any test
+acquires the shared session. Fabric can reject a consumer-workspace session
+after a session has run in the primary workspace, even after the first session's
+scheduler reports it ended. The primitive closes before the suite starts its
+shared primary-workspace session, then the fixture allows thirty seconds for
+the cross-workspace capacity handoff.
+
 Fixtures register the shared Session explicitly with the active test. Pytest
 records telemetry offsets around the test body, so events from a previous test
 cannot be attributed to a later one.
