@@ -128,9 +128,15 @@ class InstalledValidation:
 
 @dataclass(frozen=True)
 class ValidationEstate:
-    """What the catalogue says is validatable, reversed for orchestration."""
+    """What the catalogue says is validatable, keyed by logical identity.
 
-    installations: Mapping[WeaverItemId, PhysicalTargetRef]
+    Each validation carries the physical target its item is installed in, which
+    is where it runs. Selection reads the logical item off the identity, so the
+    estate holds no installation mapping of its own:
+    :attr:`weaver.installed.InstalledDag.installations` is the one reading of
+    ``_.Installation``.
+    """
+
     validations: Mapping[WeaverDocumentId, InstalledValidation] = field(
         default_factory=dict
     )
@@ -144,7 +150,6 @@ class ValidationEstate:
         """The validation nodes of one installed graph, keyed by logical identity."""
 
         return cls(
-            installations=MappingProxyType(dict(dag.installations)),
             validations=MappingProxyType(
                 {
                     node.identity: InstalledValidation.of(node)

@@ -245,7 +245,9 @@ def test_a_built_warehouse_is_given_views_over_the_catalogues_runtime_tables(
     name = warehouse.item.name
     estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("reference"))
 
-    built = _built(fabric_workspace, estate.path, f"Warehouse/Reporting=Warehouse/{name}")
+    built = _built(
+        fabric_workspace, estate.path, f"Warehouse/Reporting=Warehouse/{name}"
+    )
     assert built.status == "succeeded", _failures(built)
 
     # Views rather than tables: the rows live in the catalogue Warehouse, and

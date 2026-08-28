@@ -454,8 +454,10 @@ def fabric_workspace(fabric_workspace_item, fabric_catalogue, environment_name):
         catalogue=f"Warehouse/{fabric_catalogue.name}",
         environment=environment_name,
         # A Spark session attaches to a Lakehouse, and the catalogue is no
-        # longer one. The target Lakehouse is the home; which it is carries no
-        # meaning, because every statement names the Lakehouse it is about.
+        # longer one. This entry supplies the fallback home; which Lakehouse it
+        # is carries no meaning, because every statement names the Lakehouse it
+        # is about. Every build in this suite names both halves of its own
+        # targets, so nothing here decides where anything is deployed.
         targets={
             WeaverItemId.parse("Lakehouse/Sales"): TargetDeclaration(
                 WeaverItemId.parse("Lakehouse/Sales"), _fixed_name("target")
