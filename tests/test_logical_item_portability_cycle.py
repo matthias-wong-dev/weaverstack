@@ -197,74 +197,120 @@ def test_a_shared_target_is_configuration_that_a_build_refuses(tmp_path, root):
 
 
 @weaver_test()
-def test_a_build_refuses_a_target_another_item_is_already_installed_to(tmp_path, root):
-    """The half configuration cannot see, so it is refused after the catalogue read."""
+def test_a_build_refuses_a_target_another_item_is_already_installed_to(tmp_path):
+    """The half configuration cannot see.
+
+    Read unscoped, which is the point: a build's own catalogue read is scoped to
+    the items it was pointed at, so the occupying item's Installation row is not
+    in it. Scoping this would make the check pass on the one estate it exists for.
+    """
 
     from weaver.build_bundle.targets import ItemBindings, parse_build_item
     from weaver.build_bundle.workflow import _refuse_occupied_targets
     from weaver.errors import BuildError
 
-    installed = _installed(root.repository, physical="Shared")
-    bindings = ItemBindings((parse_build_item(f"{ITEM}=Lakehouse/Shared"),))
+    occupied = _occupancy({"Lakehouse/Sales": "Shared"})
 
     # The item already installed there may be rebuilt.
-    _refuse_occupied_targets(bindings, installed)
+    _refuse_occupied_targets(
+        ItemBindings((parse_build_item("Lakehouse/Sales=Lakehouse/Shared"),)),
+        session=occupied,
+        workspace=None,
+    )
 
-    other = ItemBindings((parse_build_item("Lakehouse/Other=Lakehouse/Shared"),))
     with pytest.raises(BuildError, match="is installed to by"):
-        _refuse_occupied_targets(other, installed)
+        _refuse_occupied_targets(
+            ItemBindings((parse_build_item("Lakehouse/Other=Lakehouse/Shared"),)),
+            session=occupied,
+            workspace=None,
+        )
 
 
 @weaver_test()
-def test_the_catalogue_item_shares_a_host_with_proven_isolation(tmp_path, root):
+def test_the_catalogue_item_shares_a_host_with_proven_isolation():
     """``Warehouse/_weaver`` is exempt both ways, and has to be.
 
     Weaver owns ``_`` in a Warehouse and nothing else, so the catalogue may live
-    in one already holding a user's schemas. The inventory reads enforce that:
-    the catalogue item sees only ``_`` and every other item excludes it. The
-    Fabric harness builds exactly this arrangement.
+    in one already holding a user's schemas, and the Fabric harness builds
+    exactly that. The inventory reads enforce it: the catalogue item sees only
+    ``_``, and every other item excludes it.
     """
 
     from weaver.build_bundle.targets import ItemBindings, parse_build_item
     from weaver.build_bundle.workflow import _refuse_occupied_targets
     from weaver.catalogue.builtin import BUILTIN_ITEM
-    from weaver.catalogue.state import Catalogue
 
-    # Only the catalogue is installed here, so the exemption is what is tested.
-    installed = _also_installing(Catalogue({}), BUILTIN_ITEM, "Shared")
+    occupied = _occupancy({str(BUILTIN_ITEM): "Shared"})
 
     # An ordinary item builds into the Warehouse the catalogue lives in.
-    ordinary = ItemBindings((parse_build_item("Lakehouse/Other=Lakehouse/Shared"),))
-    _refuse_occupied_targets(ordinary, installed)
-
+    _refuse_occupied_targets(
+        ItemBindings((parse_build_item("Lakehouse/Other=Lakehouse/Shared"),)),
+        session=occupied,
+        workspace=None,
+    )
     # And the catalogue item builds into a Warehouse ordinary items are in.
-    builtin = ItemBindings((parse_build_item(f"{BUILTIN_ITEM}=Warehouse/Shared"),))
-    _refuse_occupied_targets(builtin, installed)
+    _refuse_occupied_targets(
+        ItemBindings((parse_build_item(f"{BUILTIN_ITEM}=Warehouse/Shared"),)),
+        session=occupied,
+        workspace=None,
+    )
 
 
-def _also_installing(catalogue, item, target: str):
-    """The same catalogue, with one more ``_.Installation`` row."""
+def _occupancy(installed: dict[str, str]):
+    """A Session whose catalogue Warehouse holds one Installation row per entry.
 
-    from dataclasses import replace
+    Answered at the TDS boundary, so the read under test is the production one:
+    an unscoped `read_table` over `_.Installation`.
+    """
+
+    from support.sessions import given_session
+    from support.workspaces import given_workspace
 
     from weaver.catalogue.tables import INSTALLATION
+    from weaver.declaration.model import WeaverItemId
 
-    rows = {key: dict(tables) for key, tables in catalogue.rows.items()}
-    existing = rows.setdefault(item, {}).get(INSTALLATION.name, ())
-    rows[item][INSTALLATION.name] = (
-        *existing,
-        {
-            "item_type": item.item_type,
-            "item_name": item.item_name,
-            "target_name": target,
-            "weaver_version": "0.0.0",
-            "signature": "installation",
-        },
+    session = given_session(workspace=given_workspace(catalogue="Warehouse/Weaver"))
+    session.answer_tsql(
+        "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+        "WHERE TABLE_SCHEMA = N'_'",
+        [
+            {
+                "TABLE_NAME": INSTALLATION.name,
+                "COLUMN_NAME": INSTALLATION.public_name_of(name),
+            }
+            for name in INSTALLATION.column_names
+        ],
     )
-    return replace(catalogue, rows=rows)
+    rows = []
+    for written, target in installed.items():
+        item = WeaverItemId.parse(written)
+        rows.append(
+            {
+                "item_type": item.item_type,
+                "item_name": item.item_name,
+                "target_name": target,
+                "weaver_version": "0.0.0",
+                "signature": "installation",
+            }
+        )
+    for statement in _installation_reads(session):
+        session.answer_tsql(statement, rows)
+    return session
 
 
-# --- load and test follow the catalogue ---------------------------------------
+def _installation_reads(session):
+    """The statement an unscoped Installation read issues, asked of the reader."""
+
+    from weaver.catalogue.connection import catalogue_connection
+    from weaver.catalogue.state import read_target_occupancy
+
+    before = len(session.tsql)
+    read_target_occupancy(catalogue_connection(session, session.workspace))
+    return [
+        statement
+        for statement in session.tsql[before:]
+        if "Installation" in statement or "[_].[Installation]" in statement
+    ]
 
 
 def _installed(repository, *, physical: str):

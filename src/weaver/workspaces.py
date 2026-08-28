@@ -210,6 +210,17 @@ class Workspace:
             )
         return ItemRef(self.catalogue.split("/", 1)[1])
 
+    @property
+    def catalogue_name(self) -> str | None:
+        """The catalogue Warehouse's item name, or ``None`` where none resolved.
+
+        Untyped, because a caller comparing it against a physical item name has
+        one of those and not a typed value. :attr:`catalogue_item` is the
+        resolvable form.
+        """
+
+        return self.catalogue.split("/", 1)[1] if self.catalogue else None
+
     def target_for(self, item: WeaverItemId):
         """Where this configuration deploys one item, typed. A build's answer."""
 

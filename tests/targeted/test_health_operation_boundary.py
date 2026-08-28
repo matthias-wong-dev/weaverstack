@@ -24,7 +24,7 @@ from weaver.catalogue.tables import INSTALLATION, LOAD_STATISTIC, LOG, REGISTRY
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.health import latest_load, load_activity
-from weaver.operations.health import HEALTH_TABLES, _as_of, _selected, run_health
+from weaver.operations.health import HEALTH_TABLES, _as_of, run_health
 from weaver.sessions.testing import TestSession
 from weaver.targets import PhysicalTargetRef
 
@@ -91,20 +91,50 @@ def _installed_catalogue() -> Catalogue:
 
 
 @weaver_test()
-def test_no_target_means_every_target_the_catalogue_binds():
-    assert _selected(_installed_catalogue(), ()) == (RAW_LH,)
+def test_no_item_means_every_target_the_catalogue_binds():
+    report = _health(_installed_catalogue())
+
+    assert report.targets == (str(RAW_LH),)
 
 
 @weaver_test()
-def test_an_unknown_target_is_an_ordinary_command_error():
-    with pytest.raises(CommandError, match="no installed estate in"):
-        _selected(_installed_catalogue(), (REPORTING_WH,))
+def test_one_item_reports_on_the_target_it_is_installed_in():
+    """Resolved through `_.Installation`, as a load resolves it."""
+
+    report = _health(_installed_catalogue(), items=(WeaverItemId.parse(RAW),))
+
+    assert report.targets == (str(RAW_LH),)
+
+
+@weaver_test()
+def test_an_item_with_no_installation_is_an_ordinary_command_error():
+    with pytest.raises(CommandError, match="has no installation"):
+        _health(_installed_catalogue(), items=(WeaverItemId.parse(REPORTING),))
 
 
 @weaver_test()
 def test_the_refusal_lists_what_is_installed():
-    with pytest.raises(CommandError, match="Installed: Lakehouse/Raw_LH"):
-        _selected(_installed_catalogue(), (REPORTING_WH,))
+    with pytest.raises(CommandError, match=f"Installed: {RAW}"):
+        _health(_installed_catalogue(), items=(WeaverItemId.parse(REPORTING),))
+
+
+def _health(catalogue, *, items=()):
+    """One health report over a catalogue this test wrote, reading no estate."""
+
+    from unittest.mock import patch
+
+    workspace = given_workspace(catalogue="Warehouse/Weaver")
+    with patch(
+        "weaver.catalogue.state.read_installed_catalogue", return_value=catalogue
+    ):
+        return run_health(
+            TestSession(workspace=workspace),
+            workspace=workspace,
+            items=items,
+            as_of=NOW,
+            generated_at=NOW,
+            inventories=False,
+        )
 
 
 # --- bounded history ----------------------------------------------------------

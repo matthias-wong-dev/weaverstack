@@ -28,9 +28,10 @@ from ..catalogue.tables import (
     TEST_DICTIONARY,
     TEST_STATUS,
 )
+from ..declaration.model import WeaverItemId
 from ..errors import CommandError
 from ..health import DEFAULT_AGE_HOURS, HealthReport, assess
-from ..targets import PhysicalTargetRef, parse_physical_target
+from .items import installed_targets, requested_items
 from .workspace import operation_workspace
 
 #: What health reads of the catalogue, table by table. Each one is read over
@@ -60,7 +61,7 @@ HEALTH_TABLES = (
 
 
 def health(
-    targets: str | Sequence[str] | None = None,
+    items: str | Sequence[str] | None = None,
     *,
     as_of: str | datetime | None = None,
     workspace: str | None = None,
@@ -71,10 +72,10 @@ def health(
 ) -> HealthReport:
     """The installed estate's operational health.
 
-    ``targets`` restricts the subjects reported on. With none, every physical
-    target the catalogue binds an item to. Managed ancestry outside the
-    selection is still read, because whether a selected object is behind its
-    sources is a question about the whole graph.
+    ``items`` restricts the subjects reported on. With none, every target the
+    catalogue binds an item to. Managed ancestry outside the selection is still
+    read, because whether a selected object is behind its sources is a question
+    about the whole graph.
 
     ``as_of`` is the instant a settled load must be no older than. It defaults
     to one day before the operation started. An aware datetime or an ISO-8601
@@ -87,7 +88,7 @@ def health(
     """
 
     started = datetime.now(timezone.utc)
-    requested = _requested(targets)
+    requested = () if items is None else requested_items(items, what="health")
     resolved = operation_workspace(
         "health",
         workspace=workspace,
@@ -102,7 +103,7 @@ def health(
             return run_health(
                 opened,
                 workspace=resolved,
-                requested=requested,
+                items=requested,
                 as_of=_as_of(as_of, started=started),
                 generated_at=started,
                 inventories=inventories,
@@ -113,7 +114,7 @@ def run_health(
     session,
     *,
     workspace,
-    requested: Sequence[PhysicalTargetRef] = (),
+    items: Sequence[WeaverItemId] = (),
     as_of: datetime,
     generated_at: datetime,
     inventories: bool = True,
@@ -137,38 +138,31 @@ def run_health(
             connection, tables=HEALTH_TABLES, load_history=True
         )
 
-    selected = _selected(catalogue, requested)
+    dag = catalogue.dag()
+    # Item to target, from the same `_.Installation` a load resolves through.
+    # Inventories and the report's subjects are physical: that is where the
+    # objects are.
+    selected = (
+        dag.targets
+        if not items
+        else tuple(
+            dict.fromkeys(
+                installed_targets(dag, items, catalogue=workspace.catalogue).values()
+            )
+        )
+    )
     read = {}
     if inventories:
         with session.step("Read installed objects"):
-            read = _inventories(
-                session, workspace=workspace, targets=selected, dag=catalogue.dag()
-            )
+            read = _inventories(session, workspace=workspace, targets=selected, dag=dag)
 
     return assess(
         catalogue,
         as_of=as_of,
         generated_at=generated_at,
-        targets=selected if requested else None,
+        targets=selected if items else None,
         inventories=read,
     )
-
-
-def _selected(catalogue, requested) -> tuple[PhysicalTargetRef, ...]:
-    """The targets this report is about, refusing one the catalogue does not bind."""
-
-    installed = catalogue.dag().targets
-    if not requested:
-        return installed
-    unknown = [target for target in requested if target not in installed]
-    if unknown:
-        known = ", ".join(str(target) for target in installed) or "none"
-        raise CommandError(
-            "no installed estate in "
-            + ", ".join(str(target) for target in unknown)
-            + f". The catalogue binds no logical item to it. Installed: {known}"
-        )
-    return tuple(dict.fromkeys(requested))
 
 
 def _inventories(session, *, workspace, targets, dag):
@@ -215,18 +209,6 @@ def _inventories(session, *, workspace, targets, dag):
                 ),
             )
     return found
-
-
-def _requested(targets) -> tuple[PhysicalTargetRef, ...]:
-    if targets is None:
-        return ()
-    values = (targets,) if isinstance(targets, str) else tuple(targets)
-    return tuple(
-        PhysicalTargetRef.of(
-            parse_physical_target(value, what="health target", error=CommandError)
-        )
-        for value in values
-    )
 
 
 def _as_of(value, *, started: datetime) -> datetime:

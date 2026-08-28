@@ -7,7 +7,7 @@ resolved, and that lives in :mod:`weaver.operations.workspace`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -105,11 +105,17 @@ def wipe(
     catalogue: str | None = None,
     environment: str | None = None,
     workspace_config: str | Path | None = None,
-    unbind_from: str | None = None,
     dry_run: bool = False,
     session=None,
 ) -> WipeResult:
     """Empty one or more whole Lakehouse or Warehouse items.
+
+    ``targets`` are physical: a wipe addresses a Fabric item whether or not an
+    installation exists.
+
+    A resolved catalogue also has its claims for those targets removed. Wiping
+    the Warehouse the catalogue lives in skips that, because deleting rows from
+    tables that are about to be removed is work nobody needs.
 
     Takes a Session as the other operations do: a wipe resolves the same item
     names, reaches the same OneLake paths and opens the same Warehouse
@@ -127,8 +133,8 @@ def wipe(
         environment=environment,
         workspace_config=workspace_config,
         session=session,
-        # A wipe empties a physical item, which needs no catalogue. The
-        # catalogue only comes into it if `--unbind-from` asks for the claims.
+        # A wipe empties a physical item, which needs no catalogue. One that
+        # resolves has its claims for the wiped targets removed as well.
         needs_catalogue=False,
     )
     from ..sessions.host import use_or_create_session
@@ -156,28 +162,14 @@ def wipe(
                     )
 
             unbound = None
-            control = unbind_from or resolved_workspace.catalogue
-            # Compared as item names, because the two arrive spelled
-            # differently: `unbind_from` names an item and the workspace's
-            # catalogue is typed. Wiping the catalogue itself skips the unbind
-            # entirely, deleting rows from tables that are about to be removed
-            # is work nobody needs.
-            control_name = str(control).rpartition("/")[2] if control else None
+            catalogue_name = resolved_workspace.catalogue_name
             # Either type: the catalogue is a Warehouse, and a wipe of the
-            # Warehouse holding it is exactly the case this skips.
+            # Warehouse holding it is the case this skips.
             whole_items = {target.physical_name for target in parsed}
-            if not dry_run and control and control_name not in whole_items:
-                # `unbind_from` names an item; the workspace field is typed.
-                # Both mean one Warehouse, so the field is written typed.
-                catalogue_workspace = replace(
-                    resolved_workspace,
-                    catalogue=control
-                    if "/" in str(control)
-                    else f"Warehouse/{control}",
-                )
+            if not dry_run and catalogue_name and catalogue_name not in whole_items:
                 with opened.step("Unbind catalogue claims"):
                     unbound = _unbind_physical_targets(
-                        catalogue_workspace, parsed, session=opened
+                        resolved_workspace, parsed, session=opened
                     )
 
             return WipeResult(

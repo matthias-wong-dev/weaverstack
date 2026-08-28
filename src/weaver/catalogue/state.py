@@ -325,7 +325,12 @@ class Catalogue:
         )
 
     def bound_to(self, target_name: str) -> set:
-        """The logical items the catalogue binds to one physical target."""
+        """The items this catalogue's rows bind to one physical target.
+
+        Bounded by whatever scope these rows were read under. A build's read is
+        scoped to the items it was pointed at, so this cannot answer whether some
+        other item occupies a target: see :func:`read_target_occupancy`.
+        """
 
         return {
             _item_of(row)
@@ -766,6 +771,27 @@ def _registered_documents(
                 raise BuildError(f"Registry contains conflicting rows for {identity}")
             registered[identity] = document
     return MappingProxyType(registered)
+
+
+def read_target_occupancy(catalogue: Any) -> dict[str, frozenset]:
+    """Which items each physical target is installed to, across the whole estate.
+
+    One unscoped read of ``_.Installation`` and nothing else. Every other
+    catalogue read a build makes is scoped to the items it was pointed at, which
+    is what keeps a build from touching another item's rows. Occupancy is the one
+    question that scope cannot answer: whether a target this build writes into
+    already belongs to an item outside it.
+
+    Keyed by target name, folded, because that is how the Warehouse compares one.
+    An absent table reads as no rows, as it does everywhere else.
+    """
+
+    occupied: dict[str, set] = {}
+    for row in read_table(catalogue, INSTALLATION):
+        target = str(row.get("target_name") or "").strip()
+        if target:
+            occupied.setdefault(target.casefold(), set()).add(_item_of(row))
+    return {target: frozenset(items) for target, items in occupied.items()}
 
 
 def read_catalogue_state(catalogue: Any, items) -> Catalogue:

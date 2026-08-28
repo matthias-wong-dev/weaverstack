@@ -634,9 +634,9 @@ weaver wipe \
     --yes
 ```
 
-Physical wipe is independent of catalogue cleanup. Add `--unbind-from Weaver`
-when stale claims should be removed immediately; otherwise the next build
-reconciles them against physical inventory.
+A wipe needs no catalogue. Where one resolves, from `--catalogue` or workspace
+configuration, it also removes that catalogue's claims for the wiped targets;
+otherwise the next build reconciles them against physical inventory.
 
 `wipe` does not modify the authored repository.
 
@@ -901,7 +901,6 @@ weaver wipe \
     Lakehouse/Curated \
     Warehouse/Reporting \
     --workspace-config workspace-dev.yml \
-    --unbind-from Weaver \
     --yes
 
 weaver build \

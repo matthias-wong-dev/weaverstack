@@ -543,8 +543,15 @@ weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql"
 ## Health
 
 `weaver health` reports the installed estate's operational state, in three
-sections over one installed graph. Naming no target reports on every target the
+sections over one installed graph. It names items, resolving each one's target
+through `_.Installation` as a load does. Naming none reports on every target the
 catalogue binds an item to:
+
+```bash
+weaver health
+weaver health --item Lakehouse/Sales
+```
+
 
 ```bash
 weaver health --workspace-config examples/weaver_example.yml
@@ -605,16 +612,24 @@ report.to_mapping()      # what --json prints
 
 ## Wipe
 
-Wipe clears everything in each selected typed target. Physical wipe does not
-require catalogue access; immediate catalogue cleanup is selected separately
-with `--unbind-from` (or the configured catalogue).
+Wipe clears everything in each named physical target. It needs no catalogue, and
+where one resolves it also removes that catalogue's claims for the wiped targets:
+
+```bash
+weaver wipe Lakehouse/Sales_Dev                       # physical only
+weaver wipe Lakehouse/Sales_Dev --catalogue Warehouse/Weaver
+weaver wipe Lakehouse/Sales_Dev --workspace-config dev.yml
+```
+
+The last two also remove the claims. Wiping the Warehouse the catalogue itself
+lives in skips that, because deleting rows from tables that are about to be
+removed is work nobody needs.
 
 ```bash
 weaver wipe \
   Lakehouse/Sales_Dev \
   Warehouse/Reporting_Dev \
   --workspace-config examples/weaver_example.yml \
-  --unbind-from Control \
   --dry-run
 ```
 

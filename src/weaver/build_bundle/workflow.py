@@ -204,6 +204,10 @@ def read_build_state(
     if workspace is None or not workspace.catalogue:
         raise BuildError("every build needs a Workspace with a Weaver catalogue")
 
+    # Before the inventories, because this is one small read and they are a
+    # round trip per target, and before anything asks for Spark.
+    with session.step("Check target occupancy"):
+        _refuse_occupied_targets(bindings, session=session, workspace=workspace)
     with session.step("Read target inventories"):
         inventories = read_target_inventories(
             bindings, session=session, workspace=workspace, sql_by_item=sql_by_item
@@ -223,7 +227,6 @@ def read_build_state(
                 resolver=session.resolver(workspace),
                 store=session.transport_store(workspace),
             )
-    _refuse_occupied_targets(bindings, catalogue)
     return BuildState(
         catalogue=catalogue,
         target_inventories=inventories,
@@ -231,12 +234,16 @@ def read_build_state(
     )
 
 
-def _refuse_occupied_targets(bindings: ItemBindings, catalogue) -> None:
-    """Refuse a target the catalogue already installs a different item to.
+def _refuse_occupied_targets(bindings: ItemBindings, *, session, workspace) -> None:
+    """Refuse a target already installed to by an item outside this build.
 
     :func:`weaver.build_bundle.physical.item_prune_stage` diffs one item's
     keep-set against the whole target inventory, so building into a target
     holding another item's objects would prune them.
+
+    Occupancy is read unscoped, because a build's own catalogue read is scoped to
+    the items it was pointed at and an occupying item is by definition outside
+    that scope.
 
     ``Warehouse/_weaver`` is exempt both ways. Its inventory is read as the ``_``
     schema and nothing else, and every other item's excludes ``_``, so the
@@ -245,14 +252,18 @@ def _refuse_occupied_targets(bindings: ItemBindings, catalogue) -> None:
     """
 
     from ..catalogue.builtin import BUILTIN_ITEM
+    from ..catalogue.connection import catalogue_connection
+    from ..catalogue.state import read_target_occupancy
 
-    for binding in bindings.entries:
-        if binding.item == BUILTIN_ITEM:
-            continue
+    ordinary = [binding for binding in bindings.entries if binding.item != BUILTIN_ITEM]
+    if not ordinary:
+        return
+    occupancy = read_target_occupancy(catalogue_connection(session, workspace))
+    for binding in ordinary:
         target = binding.target.item.name
         others = sorted(
             str(item)
-            for item in catalogue.bound_to(target)
+            for item in occupancy.get(target.casefold(), ())
             if item != binding.item and item != BUILTIN_ITEM
         )
         if others:

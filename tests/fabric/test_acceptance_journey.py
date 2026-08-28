@@ -475,7 +475,6 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
         "wipe",
         lambda: weaver.wipe(
             acceptance.targets,
-            unbind_from=acceptance.workspace.catalogue,
             session=acceptance.session,
         ),
     )
@@ -1582,7 +1581,6 @@ def test_wipe_removes_the_managed_estate_and_not_the_foreign_one(acceptance):
             "final-wipe",
             lambda: weaver.wipe(
                 acceptance.targets,
-                unbind_from=acceptance.workspace.catalogue,
                 session=acceptance.session,
             ),
         )

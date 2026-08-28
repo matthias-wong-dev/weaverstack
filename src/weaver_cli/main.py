@@ -120,16 +120,16 @@ def _requires_health(args) -> frozenset[str]:
     """What a health report will want.
 
     TDS always, because the catalogue is a Warehouse. OneLake where a Lakehouse
-    was named or where no target was, since discovering the estate may find one.
+    item was named or where none was, since discovering the estate may find one.
     Never Livy: health runs no authored code and reads a Lakehouse over storage.
     """
 
     from weaver.sessions.requirements import AUTH, ONELAKE, RESOLVER, TDS, requirements
 
-    targets = getattr(args, "targets", ()) or ()
+    items = getattr(args, "items", ()) or ()
     wanted = {AUTH, RESOLVER, TDS}
-    if not targets or any(
-        _kind_and_name(value)[0].startswith("lakehouse") for value in targets
+    if not items or any(
+        _kind_and_name(value)[0].startswith("lakehouse") for value in items
     ):
         wanted.add(ONELAKE)
     return requirements(*wanted)
@@ -403,10 +403,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report the installed estate's load, test and build health.",
     )
     report.add_argument(
-        "targets",
-        nargs="*",
-        metavar="TARGET",
-        help="Lakehouse/Name or Warehouse/Name. Defaults to the whole estate.",
+        "--item",
+        dest="items",
+        action="append",
+        metavar="ITEM",
+        help=(
+            "Weaver item to report on, as Lakehouse/Name or Warehouse/Name. "
+            "Repeat to select more than one. Naming none reports on the whole "
+            "installed estate."
+        ),
     )
     report.add_argument(
         "--as-of",
@@ -423,14 +428,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report.add_argument("--json", action="store_true", help="emit the report as JSON")
     _add_workspace_args(report, include_environment=False)
-    report.set_defaults(
-        handler=handle_health,
-        requires=_requires_health,
-        lakehouses=_physical_target_lakehouses,
-    )
+    # No Lakehouse offer: health names items, and it reads a Lakehouse over
+    # storage rather than through Spark.
+    report.set_defaults(handler=handle_health, requires=_requires_health)
 
     wipe = subcommands.add_parser(
-        "wipe", help="Clear a physical Lakehouse or Warehouse."
+        "wipe",
+        help=(
+            "Clear a physical Lakehouse or Warehouse, and remove a resolved "
+            "catalogue's claims for it."
+        ),
     )
     wipe.add_argument(
         "targets",
@@ -439,11 +446,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lakehouse/Name[/Files|/Tables] or Warehouse/Name",
     )
     _add_workspace_args(wipe)
-    wipe.add_argument(
-        "--unbind-from",
-        metavar="LAKEHOUSE",
-        help="Remove claims for wiped targets from this Weaver catalogue.",
-    )
     wipe.add_argument(
         "--dry-run", action="store_true", help="Show what would be removed."
     )
@@ -1264,7 +1266,7 @@ def handle_health(args: argparse.Namespace) -> int:
     workspace = _resolve_workspace(args)
     with _running_session(args, workspace) as opened:
         report = weaver.health(
-            list(args.targets),
+            args.items,
             as_of=args.as_of,
             inventories=not args.no_inventory,
             session=opened,
@@ -1392,7 +1394,6 @@ def handle_wipe(args: argparse.Namespace) -> int:
         with _running_session(args, workspace) as opened:
             planned = weaver.wipe(
                 args.targets,
-                unbind_from=args.unbind_from,
                 dry_run=True,
                 session=opened,
                 **_command_context(workspace),
@@ -1431,7 +1432,6 @@ def handle_wipe(args: argparse.Namespace) -> int:
     with _running_session(args, workspace) as opened:
         result = weaver.wipe(
             args.targets,
-            unbind_from=args.unbind_from,
             session=opened,
             **_command_context(workspace),
         )

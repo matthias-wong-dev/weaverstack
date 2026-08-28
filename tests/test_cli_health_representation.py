@@ -71,8 +71,8 @@ def captured(monkeypatch, desktop_credential):
 
     seen: dict = {}
 
-    def fake(targets=None, **kwargs):
-        seen["targets"] = targets
+    def fake(items=None, **kwargs):
+        seen["items"] = items
         seen.update(kwargs)
         return seen.get("report", _report())
 
@@ -97,17 +97,17 @@ def _run(*args, workspace="Demo"):
 
 
 @weaver_test()
-def test_no_target_means_the_whole_estate(captured):
+def test_no_item_means_the_whole_estate(captured):
     _run()
 
-    assert captured["targets"] == []
+    assert captured["items"] is None
 
 
 @weaver_test()
-def test_targets_are_passed_through_in_order(captured):
-    _run("Lakehouse/Sales_LH", "Warehouse/Reporting_WH")
+def test_items_are_passed_through_in_order(captured):
+    _run("--item", "Lakehouse/Sales", "--item", "Warehouse/Reporting")
 
-    assert captured["targets"] == ["Lakehouse/Sales_LH", "Warehouse/Reporting_WH"]
+    assert captured["items"] == ["Lakehouse/Sales", "Warehouse/Reporting"]
 
 
 @weaver_test()

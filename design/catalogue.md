@@ -284,10 +284,10 @@ build did not bind is never read, never compared against an inventory, and never
 healed — because its claims may be perfectly true about a Lakehouse this build
 cannot see, and deleting them would destroy the record of a real installation.
 
-A physical target can retain Registry rows for every logical item bound to it.
-For an intentional shared target, reset the catalogue with
-`weaver.wipe(..., unbind_from=...)` rather than unbinding individual residue;
-the next build bootstraps the catalogue from the built-in item.
+A physical target can retain Registry rows for every item ever bound to it. Reset
+the catalogue with `weaver.wipe(...)` against a resolved catalogue rather than
+unbinding individual residue; the next build bootstraps the catalogue from the
+built-in item.
 
 Load orchestration is where this becomes visible, because it reads the *whole*
 installed catalogue rather than one build's scope — so it is the first operation
