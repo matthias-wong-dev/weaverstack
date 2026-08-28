@@ -17,8 +17,15 @@ from pathlib import Path
 from typing import Sequence
 
 from ..catalogue.tables import (
+    BOOKMARK,
+    DEPENDENCY,
+    FOLDER_DICTIONARY,
+    INSTALLATION,
     LOAD_STATUS,
-    READABLE_TABLES,
+    REGISTRY,
+    SHORTCUT,
+    TABLE_DICTIONARY,
+    TEST_DICTIONARY,
     TEST_STATUS,
 )
 from ..errors import CommandError
@@ -26,11 +33,30 @@ from ..health import DEFAULT_AGE_HOURS, HealthReport, assess
 from ..targets import PhysicalTargetRef, parse_physical_target
 from .workspace import operation_workspace
 
-#: What health reads of the catalogue: what a run reads, plus the two current
-#: status tables, which a run writes and never asks about. The history tables
-#: are absent: they grow with the estate's age and are read as one bounded
-#: window instead.
-HEALTH_TABLES = READABLE_TABLES + (LOAD_STATUS, TEST_STATUS)
+#: What health reads of the catalogue, table by table. Each one is read over
+#: TDS, so a table nothing consults is a round trip nobody needed.
+#:
+#: The installed graph is built from the first seven. ``_.Bookmark`` says how far
+#: each object has been loaded, and the two status tables how its most recent
+#: load and validation ended. ``_.TableDictionary`` and ``_.FolderDictionary``
+#: serve both: the graph reads whether an object is Static, and Build health
+#: reads what is declared and not certified.
+#:
+#: The dictionaries describing an object's columns and keys are absent. Nothing
+#: health decides consults one. So are the history tables, which grow with the
+#: estate's age and are read as one bounded window instead.
+HEALTH_TABLES = (
+    INSTALLATION,
+    REGISTRY,
+    TABLE_DICTIONARY,
+    FOLDER_DICTIONARY,
+    TEST_DICTIONARY,
+    DEPENDENCY,
+    SHORTCUT,
+    BOOKMARK,
+    LOAD_STATUS,
+    TEST_STATUS,
+)
 
 
 def health(

@@ -1221,6 +1221,11 @@ def _health_section(area: str, section, report) -> list[str]:
     return lines
 
 
+#: The narrowest an object-id column gets, so short ids in one report still line
+#: up with a longer one in the next.
+_ID_WIDTH = 42
+
+
 def _health_activity(report) -> list[str]:
     """The slowest loads and the rows that moved, from the bounded window."""
 
@@ -1228,19 +1233,37 @@ def _health_activity(report) -> list[str]:
     slowest = report.slowest()
     if slowest:
         lines.append("Slowest loads")
-        for each in slowest:
-            lines.append(f"  {each.object_id:<40}{each.duration_ms / 1000:.1f}s")
+        lines.extend(
+            _health_row(each.object_id, f"{each.duration_ms / 1000:.1f}s", slowest)
+            for each in slowest
+        )
         lines.append("")
     moved = report.moved()
     if moved:
         lines.append("Recent activity")
-        for each in moved:
-            lines.append(
-                f"  {each.object_id:<40}read {each.rows_read:,}  "
+        lines.extend(
+            _health_row(
+                each.object_id,
+                f"read {each.rows_read:,}  "
                 f"+{each.rows_inserted} ~{each.rows_updated} "
-                f"-{each.rows_deleted} !{each.rows_rejected}"
+                f"-{each.rows_deleted} !{each.rows_rejected}",
+                moved,
             )
+            for each in moved
+        )
     return lines
+
+
+def _health_row(object_id: str, value: str, among) -> str:
+    """One activity line, with the id column wide enough for the block it is in.
+
+    Each block is measured on its own, and the separator is written rather than
+    left to the padding: an id longer than the column would otherwise run
+    straight into the value beside it.
+    """
+
+    width = max(_ID_WIDTH, *(len(str(each.object_id)) for each in among))
+    return f"  {object_id:<{width}}  {value}"
 
 
 def _titled(word: str) -> str:

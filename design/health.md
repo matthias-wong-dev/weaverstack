@@ -199,6 +199,18 @@ moved. JSON retains the whole window.
 
 ## Resources
 
+Each catalogue table is a round trip over TDS, so health materialises the ten it
+consults and no others:
+
+```text
+Installation  Registry  TableDictionary  FolderDictionary  TestDictionary
+Dependency    Shortcut  Bookmark         LoadStatus        TestStatus
+```
+
+The dictionaries describing an object's columns and keys are absent: nothing
+health decides consults one. So are the history tables, read as one window
+instead. See `weaver.operations.health.HEALTH_TABLES`.
+
 Health executes no authored load or test Python. It takes no Environment, and:
 
 ```text

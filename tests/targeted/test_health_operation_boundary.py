@@ -321,10 +321,41 @@ def _statistic(schema, name, *, workflow="workflow-1", read=0, duration=1200):
 
 
 @weaver_test()
-def test_health_reads_the_two_current_status_tables_a_run_never_asks_about():
-    from weaver.catalogue.tables import LOAD_STATUS, READABLE_TABLES, TEST_STATUS
+def test_health_materialises_the_tables_it_consults_and_no_others():
+    """Each table is a round trip, so one nothing consults is one nobody needed."""
 
-    assert set(HEALTH_TABLES) == set(READABLE_TABLES) | {LOAD_STATUS, TEST_STATUS}
+    assert [table.name for table in HEALTH_TABLES] == [
+        "Installation",
+        "Registry",
+        "TableDictionary",
+        "FolderDictionary",
+        "TestDictionary",
+        "Dependency",
+        "Shortcut",
+        "Bookmark",
+        "LoadStatus",
+        "TestStatus",
+    ]
+
+
+@weaver_test()
+def test_health_reads_no_dictionary_of_columns_or_keys():
+    """Nothing health decides asks what an object's columns or keys are."""
+
+    from weaver.catalogue.tables import (
+        COLUMN_DICTIONARY,
+        FOREIGN_KEY_DICTIONARY,
+        KEY_DICTIONARY,
+        SCHEMA_DICTIONARY,
+    )
+
+    unread = {
+        SCHEMA_DICTIONARY,
+        COLUMN_DICTIONARY,
+        KEY_DICTIONARY,
+        FOREIGN_KEY_DICTIONARY,
+    }
+    assert unread.isdisjoint(HEALTH_TABLES)
 
 
 @weaver_test()

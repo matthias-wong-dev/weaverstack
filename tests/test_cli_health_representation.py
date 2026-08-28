@@ -259,6 +259,65 @@ def test_the_slowest_loads_and_the_rows_that_moved_are_shown(captured, capsys):
 
 
 @weaver_test()
+def test_an_id_longer_than_the_column_still_has_a_gap_after_it(captured, capsys):
+    """A fixed column ran a long id straight into the value beside it."""
+
+    long_id = "Warehouse/Curated/ACQSC.ComplaintSubtypeReferenceTable"
+    captured["report"] = _report(
+        load_activity=(
+            LoadActivity(
+                object_id=long_id,
+                target="Warehouse/Curated_WH",
+                workflow_id="workflow-1",
+                duration_ms=23400,
+                rows_read=280,
+                rows_inserted=4,
+            ),
+            LoadActivity(
+                object_id="Warehouse/Curated/A.B",
+                target="Warehouse/Curated_WH",
+                workflow_id="workflow-1",
+                duration_ms=1200,
+                rows_read=9,
+            ),
+        )
+    )
+    _run()
+
+    lines = capsys.readouterr().out.splitlines()
+    activity = [line for line in lines if long_id in line]
+
+    assert len(activity) == 2
+    for line in activity:
+        assert line.split(long_id)[1].startswith("  ")
+
+    # Both blocks stay in one column, measured on the longest id they show.
+    widths = {line.index("23.4s") for line in lines if "23.4s" in line}
+    assert widths == {line.index("1.2s") for line in lines if "1.2s" in line}
+
+
+@weaver_test()
+def test_a_short_id_keeps_the_column_at_its_minimum(captured, capsys):
+    captured["report"] = _report(
+        load_activity=(
+            LoadActivity(
+                object_id="LH/A.B",
+                target="Lakehouse/Sales_LH",
+                workflow_id="workflow-1",
+                duration_ms=1200,
+            ),
+        )
+    )
+    _run()
+
+    slowest = next(
+        line for line in capsys.readouterr().out.splitlines() if "1.2s" in line
+    )
+
+    assert slowest == "  " + "LH/A.B".ljust(42) + "  1.2s"
+
+
+@weaver_test()
 def test_the_plain_output_carries_no_decoration(captured, capsys):
     """No colour is required for meaning, so redirected output reads the same."""
 
