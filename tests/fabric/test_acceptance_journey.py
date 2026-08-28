@@ -889,9 +889,184 @@ def _mutate_the_foreign_world(journey) -> None:
     )
 
 
-# --- Scenario F: the repository moves ---------------------------------------
+# --- Scenario F: what the estate says about itself ---------------------------
 
-#: What scenario F changes, and what each change is there to prove.
+#: What a health report crosses. No Livy: health runs no authored code, reads a
+#: Warehouse over TDS and a Lakehouse over its storage.
+REPORTING = {"onelake", "rest", "tds"}
+
+
+@weaver_test(integration=True, resources=REPORTING)
+def test_a_loaded_and_validated_estate_reports_green(acceptance):
+    """
+    Intent: The operational surface an operator reads agrees with the estate the
+    previous scenarios built, loaded and validated.
+
+    Proof: one health report over the whole estate, Green in every section, and
+    the installed graph it evaluated against holding the relationships the
+    repository declared.
+    """
+
+    acceptance.require("test-mutated")
+    report = acceptance.step(
+        "health",
+        lambda: weaver.health(session=acceptance.session),
+    ).result
+    acceptance.require("health")
+
+    assert report.load.status == "green", report.to_mapping()
+    assert report.tests.status == "green", report.to_mapping()
+    assert report.build.status == "green", report.to_mapping()
+    assert report.status == "green"
+
+    # The bounded window found the load that ran, and it moved rows.
+    assert report.latest_load is not None
+    assert report.load_activity
+    assert any(each.rows_read for each in report.load_activity)
+
+    # Every target the catalogue binds an item to was reported on.
+    assert set(report.targets) >= {
+        f"{name.split('/', 1)[0]}/{name.split('/', 1)[1]}"
+        for name in acceptance.targets
+    }
+
+
+@weaver_test(integration=True, resources={"tds"})
+def test_the_installed_graph_holds_the_relationships_the_repository_declared(
+    acceptance,
+):
+    """
+    Intent: `Catalogue.dag()` over a real installed estate is the composition
+    proof for the graph every operation reads.
+
+    Proof: the real catalogue, read over TDS, produces the cross-item chain the
+    repository declares and holds each validation as a terminal node.
+    """
+
+    acceptance.require("health")
+    dag = _installed_dag(acceptance)
+
+    landing = _dag_id(acceptance, "Lakehouse/Landing", "LAND.Customer")
+    curated = _dag_id(acceptance, "Lakehouse/Curated", "CUR.Customer")
+    serving = _dag_id(acceptance, "Warehouse/Serving", "SERVE.Customer")
+
+    # The chain crosses two item boundaries and two engines.
+    assert landing in {node.node_id for node in dag.ancestors(curated)}
+    assert curated in {node.node_id for node in dag.ancestors(serving)}
+    assert landing in {node.node_id for node in dag.ancestors(serving)}
+
+    # A validation reads what it validates, and nothing reads a validation.
+    validations = dag.validations()
+    assert validations
+    for validation in validations:
+        assert dag.children(validation.identity) == ()
+        assert validation.is_installed
+
+    # Every loadable names the primitive its dispatch runs.
+    for node in dag.loadables():
+        assert node.artefact_kind
+        assert node.artefact
+
+
+@weaver_test(integration=True, resources=RUNNING)
+def test_loading_an_upstream_after_a_test_passed_turns_health_amber(acceptance):
+    """
+    Intent: Freshness is decided against the same installed graph load planning
+    uses, so moving data upstream is what makes a downstream object and the
+    validation over it stale.
+
+    Proof: load one upstream table by name, which adds no ordering and moves
+    nothing else, then read health again.
+    """
+
+    acceptance.require("health")
+    acceptance.step(
+        "load-upstream",
+        lambda: weaver.load(
+            [acceptance.physical["Lakehouse/Landing"]],
+            names=["LAND.Customer"],
+            session=acceptance.session,
+        ),
+    )
+    acceptance.require("load-upstream")
+    assert acceptance["load-upstream"].result.succeeded
+
+    stale = acceptance.step(
+        "health-stale",
+        lambda: weaver.health(session=acceptance.session),
+    ).result
+    acceptance.require("health-stale")
+
+    assert stale.status == "amber", stale.to_mapping()
+    assert stale.build.status == "green", stale.to_mapping()
+    codes = {finding.code for finding in stale.findings}
+    assert "load_stale_ancestor" in codes, stale.to_mapping()
+    assert "test_stale_dependency" in codes, stale.to_mapping()
+
+    # The estate reloads and revalidates back to Green.
+    acceptance.step(
+        "reload-after-stale",
+        lambda: weaver.load(acceptance.targets, session=acceptance.session),
+    )
+    acceptance.require("reload-after-stale")
+    acceptance.step(
+        "retest-after-stale",
+        lambda: weaver.test(acceptance.targets, session=acceptance.session),
+    )
+    acceptance.require("retest-after-stale")
+
+    recovered = acceptance.step(
+        "health-recovered",
+        lambda: weaver.health(session=acceptance.session),
+    ).result
+    acceptance.require("health-recovered")
+    assert recovered.status == "green", recovered.to_mapping()
+
+
+@weaver_test(integration=True)
+def test_the_json_report_is_a_publishable_artefact(acceptance):
+    """
+    Intent: The JSON a scheduled check publishes is what the Python report says,
+    over a real installed catalogue.
+
+    Proof: the report the previous scenario already read, round-tripped through
+    JSON. It crosses nothing: the report is a value, and this is what a consumer
+    does with one.
+    """
+
+    import json
+
+    acceptance.require("health-recovered")
+    report = acceptance["health-recovered"].result
+
+    payload = json.loads(json.dumps(report.to_mapping()))
+
+    assert payload["format_version"] == 1
+    assert payload["status"] == "green"
+    assert set(payload["sections"]) == {"load", "tests", "build"}
+    assert payload["as_of"].endswith("+00:00")
+    assert payload["load_activity"]
+
+
+def _installed_dag(journey):
+    """The installed graph, read from the real catalogue over TDS."""
+
+    from weaver.catalogue.state import catalogue_for
+    from weaver.operations.health import HEALTH_TABLES
+
+    catalogue = catalogue_for(journey.session, journey.workspace, tables=HEALTH_TABLES)
+    return catalogue.dag()
+
+
+def _dag_id(journey, item: str, qualified: str) -> str:
+    """One node id, as the installed graph spells it."""
+
+    return f"{item}/{qualified}"
+
+
+# --- Scenario G: the repository moves ---------------------------------------
+
+#: What scenario G changes, and what each change is there to prove.
 REPOSITORY_EDITS = (
     # A description only. Nothing physical follows from it.
     (
@@ -1129,7 +1304,7 @@ def test_the_rebuilt_estate_still_loads_and_validates(acceptance):
     assert tested.totals()["invalid"] == 0, tested.to_mapping()
 
 
-# --- Scenario G: a failed build converges ------------------------------------
+# --- Scenario H: a failed build converges ------------------------------------
 
 #: One revision where earlier items need real physical work and a later one
 #: cannot install. The column and the description are legitimate; the Warehouse
@@ -1385,7 +1560,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     assert tested.totals()["invalid"] == 0, tested.to_mapping()
 
 
-# --- Scenario H: the ownership boundary -------------------------------------
+# --- Scenario I: the ownership boundary -------------------------------------
 
 
 @weaver_test(integration=True, resources=BUILDING)

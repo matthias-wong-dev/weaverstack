@@ -14,7 +14,7 @@ catalogued. That is a licence to remove an estate.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from .render import InstallationScope, InstallationScopes, Row
 from .tables import CatalogueTable
@@ -26,6 +26,9 @@ def read_table(
     table: CatalogueTable,
     *,
     scope: InstallationScope | InstallationScopes | None = None,
+    predicate: str | None = None,
+    order: Sequence[str] = (),
+    top: int | None = None,
 ) -> tuple[Row, ...]:
     """Every row of one catalogue table, projected through its expected schema.
 
@@ -35,6 +38,13 @@ def read_table(
     ``scope`` narrows the read to one installation, which is what a build needs:
     it compares and writes within one item and has no business seeing another's
     rows.
+
+    ``predicate``, ``order`` and ``top`` bound a read of a growing table. They
+    are rendered into the statement so the engine does the work: a history table
+    is read as a window, and materialising it to slice it in Python would grow
+    with the estate's age. ``order`` names internal columns and is required for
+    ``top``, because a prefix of an unordered result is a different prefix each
+    time.
 
     Returns plain dictionaries under the internal snake-case keys, with stored
     vocabularies mapped back, in the same shape the projection produces, so the
@@ -46,6 +56,11 @@ def read_table(
             f"reading {table.qualified} needs a connection to the Warehouse the "
             "Weaver catalogue lives in"
         )
+    if top is not None and not order:
+        raise ValueError(
+            f"reading the first {top} rows of {table.qualified} needs an order; "
+            "a prefix of an unordered result is a different prefix each time"
+        )
 
     present = catalogue.columns_of(table)
     if present is None:
@@ -56,8 +71,22 @@ def read_table(
     projected = ", ".join(
         _projected_column(table, column, present) for column in table.columns
     )
-    where = "" if scope is None else f" WHERE {scope.predicate}"
-    rows = catalogue.rows(f"SELECT {projected} FROM {qualified_name(table)}{where}")
+    conditions = [
+        condition
+        for condition in (None if scope is None else scope.predicate, predicate)
+        if condition
+    ]
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    limit = "" if top is None else f"TOP {int(top)} "
+    ordering = (
+        ""
+        if not order
+        else " ORDER BY "
+        + ", ".join(identifier(table.public_name_of(name)) for name in order)
+    )
+    rows = catalogue.rows(
+        f"SELECT {limit}{projected} FROM {qualified_name(table)}{where}{ordering}"
+    )
     return tuple(_internal(table, row) for row in rows)
 
 

@@ -57,13 +57,22 @@ Session         ConsoleSession   desktop → Fabric
 
 build           resolve request → read BuildState → Builder → Installer
 load / test     resolve request → read RunState   → Runner
+health          resolve request → read Catalogue  → HealthReport
 
 Fabric          Resolver, REST, OneLake, Livy, TDS
 ```
 
-There is one workspace type, one build, one place a workspace is resolved, and
-one conversion into the physical target vocabulary. Anything more complicated
-needs a concrete reason.
+There is one workspace type, one build, one place a workspace is resolved, one
+conversion into the physical target vocabulary, one implementation of graph
+mechanics, and one installed graph. Anything more complicated needs a concrete
+reason.
+
+`weaver.graph.Graph` is the topology. The authored repository graphs, the
+installed estate graph and the runtime graph each carry their own node metadata
+and hand ordering, layers, ancestry and subgraphs to it. `Catalogue.dag()`
+derives the installed managed graph from catalogue rows already in memory, and
+it is the one place a persisted `dependency_reference` is interpreted. Load
+planning, validation planning and health read it.
 
 ## The core abstraction
 
@@ -299,6 +308,9 @@ ROLE_ENTRY and entry artefacts     generate_load_entry / generate_test_entry
 planned_shortcuts                  _with_runtime_references
 per-part per-item declaration      generated_item_files
   indexes in RepositoryPart
+InstalledEstate                    InstalledObject / InstalledDependency
+_validation_dependencies           InstalledValidation.dependencies
+weaver.declaration.graph           a per-model topological sort
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the

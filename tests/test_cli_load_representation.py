@@ -578,7 +578,7 @@ def test_the_command_module_contains_no_orchestration_of_its_own():
         "resolve_load_plan",
         "execute_load_plan",
         "dispatch_load_node",
-        "InstalledEstate",
+        "InstalledDag",
         "final_status",
         "open_task_log",
         "read_installed_catalogue",

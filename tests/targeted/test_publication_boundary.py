@@ -16,13 +16,14 @@ from support.weaver_test import weaver_test
 
 from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-from weaver.load_plan import OneLakeReadiness, PhysicalTargetRef
+from weaver.load_plan import OneLakeReadiness
 from weaver.locations import Location
 from weaver.run.graph import RunNode
 from weaver.run.publication import await_publication, published_commits
 from weaver.run.resolution import ONELAKE_PUBLICATION
 from weaver.run.result import RunError
 from weaver.store import FilesystemStore
+from weaver.targets import PhysicalTargetRef
 
 
 def _commits(node, session):

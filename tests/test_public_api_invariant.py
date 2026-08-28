@@ -38,6 +38,12 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "LoadResult",
         "test",
         "ValidationRunReport",
+        # Health: the operation, and the structured report it returns.
+        "health",
+        "HealthReport",
+        "HealthSection",
+        "HealthFinding",
+        "LoadActivity",
         "ValidationNodeReport",
         "WeaverObject",
         # The authored shortcut declaration, imported by an item's shortcuts.py.
@@ -92,7 +98,7 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         # returns, never how it decided.
         "LoadDag",
         "LoadNode",
-        "InstalledEstate",
+        "InstalledDag",
         "LoadEnvironment",
         "load_dag",
         "resolve_load_plan",

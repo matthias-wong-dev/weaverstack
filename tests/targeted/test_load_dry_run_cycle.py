@@ -30,13 +30,14 @@ from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
 from weaver.fabric.resolution import FabricResolver
-from weaver.load_plan import ENDPOINT_REFRESH, PhysicalTargetRef
+from weaver.load_plan import ENDPOINT_REFRESH
 from weaver.load_report import (
     TASK_SUCCEEDED,
     VALIDATED,
 )
 from weaver.operations.load import run_load
 from weaver.run import RunState
+from weaver.targets import PhysicalTargetRef
 
 if TYPE_CHECKING:  # names used only in annotations
     from weaver.lakehouse import Lakehouse

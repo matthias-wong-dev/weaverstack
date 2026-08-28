@@ -19,15 +19,10 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from ..errors import BuildError
-from ..targets import ItemRef
+from ..targets import LAKEHOUSE_TARGET, WAREHOUSE_TARGET, ItemRef
 
 if TYPE_CHECKING:  # names used only in annotations
     from ..spark import FabricSparkTarget
-
-#: Target kinds a bound target may name. They mirror the Weaver document target kinds but
-#: live here because a bundle is read without importing the Weaver document vocabulary.
-LAKEHOUSE_TARGET = "lakehouse"
-WAREHOUSE_TARGET = "warehouse"
 
 
 @dataclass(frozen=True)

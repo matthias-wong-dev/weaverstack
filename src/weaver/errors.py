@@ -82,6 +82,16 @@ class GraphError(WeaverError):
     """Raised for cycles or an unorderable dependency graph."""
 
 
+class CatalogueStateError(WeaverError):
+    """Raised when catalogue state does not describe a managed installed estate.
+
+    A Registry row whose item has no Installation row, two rows claiming one
+    logical identity, a TestDictionary row naming a test type nothing runs.
+    Raised where the installed graph is built, so every operation reading that
+    graph fails the same way.
+    """
+
+
 class BuildError(WeaverError):
     """Raised when a build bundle cannot be planned, written or validated."""
 

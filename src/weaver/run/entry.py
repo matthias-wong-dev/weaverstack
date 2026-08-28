@@ -32,8 +32,8 @@ def run_python_primitive(
     """Run one deployed Python primitive in a named scope, and report rows."""
 
     from ..declaration.model import WeaverItemId, parse_installed_identity
-    from ..load_plan import LAKEHOUSE_TARGET, PhysicalTargetRef
     from ..runtime.session_scopes import scope_catalogue
+    from ..targets import LAKEHOUSE_TARGET, PhysicalTargetRef
     from .dispatch import python_primitive
 
     return python_primitive(

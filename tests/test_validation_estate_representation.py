@@ -17,10 +17,11 @@ from support.weaver_test import weaver_test
 
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import DEPENDENCY, INSTALLATION, REGISTRY, TEST_DICTIONARY
-from weaver.declaration.model import WeaverItemId
-from weaver.errors import ValidationError
+from weaver.declaration.metadata import ObjectId
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.errors import CatalogueStateError, ValidationError
 from weaver.etl import validation_artefact_id
-from weaver.load_plan import PhysicalTargetRef
+from weaver.targets import PhysicalTargetRef
 from weaver.test_plan import ValidationEstate, validation_order
 
 LAKEHOUSE = WeaverItemId.parse("Lakehouse/Sales")
@@ -63,13 +64,17 @@ def _dictionary(
 
 
 def _dependency(item, schema, name, dependency):
+    referenced_schema, _, referenced_object = dependency.partition(".")
     return {
         "item_type": item.item_type,
         "item_name": item.item_name,
-        "schema_name": schema,
-        "object_name": name,
-        "dependency_name": dependency,
-        "is_within_item": True,
+        "referencing_schema_name": schema,
+        "referencing_object_name": name,
+        "dependency_reference": dependency,
+        "referenced_item_type": item.item_type,
+        "referenced_item_name": item.item_name,
+        "referenced_schema_name": referenced_schema,
+        "referenced_object_name": referenced_object,
         "signature": f"signature-{name}",
     }
 
@@ -117,10 +122,19 @@ def catalogue():
                     ),
                     DEPENDENCY.name: (
                         _dependency(
-                            LAKEHOUSE, "Sales", "OrdersReconcile", "Sales__Order"
+                            LAKEHOUSE, "Sales", "OrdersReconcile", "Sales.Order"
                         ),
                     ),
-                    REGISTRY.name: (lake_row,),
+                    REGISTRY.name: (
+                        lake_row,
+                        _registry(
+                            WeaverDocumentId(
+                                LAKEHOUSE, ObjectId(schema="Sales", object="Order")
+                            ),
+                            "table",
+                            "data",
+                        ),
+                    ),
                 },
                 WAREHOUSE: {
                     INSTALLATION.name: (_installation(WAREHOUSE, "Reporting_WH"),),
@@ -211,16 +225,21 @@ def test_the_installed_primitive_supplies_the_object_type(catalogue):
 
 
 @weaver_test()
-def test_dependencies_are_associated_with_the_logical_validation(catalogue):
-    """Not through Registry: there is no Registry row to go through."""
+def test_a_validation_is_a_terminal_node_of_the_installed_graph(catalogue):
+    """Not through Registry: there is no Registry row to go through.
+
+    A Test reads what it validates, so its declared read is an edge into it, and
+    nothing reads a Test.
+    """
 
     rows, _lake, _house = catalogue
-    estate = ValidationEstate.from_catalogue(rows)
+    dag = rows.dag()
 
-    test = next(
-        validation for validation in estate.validations.values() if validation.is_test
-    )
-    assert test.dependencies == ("Sales__Order",)
+    test = dag.node("Lakehouse/Sales/Sales.OrdersReconcile")
+    assert [str(edge.upstream) for edge in dag.reads(test.identity)] == [
+        "Lakehouse/Sales/Sales.Order"
+    ]
+    assert dag.children(test.identity) == ()
 
 
 # --- a declared validation that was never installed ---------------------------
@@ -273,7 +292,7 @@ def test_a_validation_with_no_installation_row_is_refused(catalogue):
         }
     )
 
-    with pytest.raises(ValidationError, match="has no installation row"):
+    with pytest.raises(CatalogueStateError, match="has no installation row"):
         ValidationEstate.from_catalogue(unbound)
 
 
@@ -291,7 +310,7 @@ def test_an_unknown_test_type_is_refused_rather_than_guessed(catalogue):
         }
     )
 
-    with pytest.raises(ValidationError, match="unsupported test_type"):
+    with pytest.raises(CatalogueStateError, match="unsupported test_type"):
         ValidationEstate.from_catalogue(broken)
 
 

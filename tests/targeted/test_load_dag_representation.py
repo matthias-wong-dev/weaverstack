@@ -34,17 +34,14 @@ from support.weaver_test import weaver_test
 
 from weaver.catalogue.state import Catalogue
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-from weaver.errors import LoadError
-from weaver.load_plan import (
-    ENDPOINT_REFRESH,
+from weaver.errors import CatalogueStateError, GraphError, LoadError
+from weaver.installed import (
     PYTHON_FOLDER,
     PYTHON_TABLE,
     WAREHOUSE_PROCEDURE,
-    InstalledEstate,
-    LoadDag,
-    PhysicalTargetRef,
-    load_dag,
 )
+from weaver.load_plan import ENDPOINT_REFRESH, LoadDag, load_dag
+from weaver.targets import PhysicalTargetRef
 
 RAW = PhysicalTargetRef("lakehouse", LOAD_PRODUCER_TARGET)
 REPORTING = PhysicalTargetRef("warehouse", LOAD_CONSUMER_TARGET)
@@ -53,9 +50,7 @@ REPORTING = PhysicalTargetRef("warehouse", LOAD_CONSUMER_TARGET)
 @pytest.fixture
 def estate(tmp_path):
     repository = load_estate(tmp_path)
-    return InstalledEstate.from_catalogue(
-        installed_catalogue(repository, load_estate_bindings())
-    )
+    return installed_catalogue(repository, load_estate_bindings()).dag()
 
 
 def node_ids(dag) -> tuple[str, ...]:
@@ -71,10 +66,7 @@ def test_load_dag_maps_physical_targets_back_to_logical_items(estate):
         WeaverItemId.parse(LOAD_PRODUCER): RAW,
         WeaverItemId.parse(LOAD_CONSUMER): REPORTING,
     }
-    assert (
-        estate.objects[WeaverDocumentId.parse(f"{LOAD_PRODUCER}/Sales.Order")].target
-        == RAW
-    )
+    assert estate.node(f"{LOAD_PRODUCER}/Sales.Order").target == RAW
 
 
 @weaver_test()
@@ -235,8 +227,8 @@ class Sales__Customer(Table):
     )
 
     # The stored reference really is the import, not a two-part object name.
-    estate = InstalledEstate.from_catalogue(catalogue)
-    assert [edge.reference for edge in estate.dependencies] == ["Files.Sales__Drop"]
+    estate = catalogue.dag()
+    assert [edge.reference for edge in estate.edges] == ["Files.Sales__Drop"]
 
     dag = load_dag(estate, targets=(RAW,))
     assert dag.edges == (
@@ -422,7 +414,7 @@ def _colliding_catalogue(target: str = "Shared_LH"):
 def test_load_dag_rejects_ambiguous_physical_bindings():
     """Two logical objects cannot resolve to one physical object."""
 
-    estate = InstalledEstate.from_catalogue(_colliding_catalogue())
+    estate = _colliding_catalogue().dag()
 
     with pytest.raises(LoadError, match="two logical objects at one physical address"):
         load_dag(estate, targets=(PhysicalTargetRef("lakehouse", "Shared_LH"),))
@@ -437,7 +429,7 @@ def test_ambiguity_elsewhere_in_the_estate_does_not_stop_an_unrelated_load(estat
     every load in the workspace because of it would name the wrong thing.
     """
 
-    colliding = InstalledEstate.from_catalogue(_colliding_catalogue("Elsewhere_LH"))
+    colliding = _colliding_catalogue("Elsewhere_LH").dag()
     assert colliding.ambiguous
 
     # The canonical estate is untouched by a collision it does not contain.
@@ -490,7 +482,7 @@ def test_two_items_may_share_a_target_when_their_objects_do_not_collide():
         }
     )
     dag = load_dag(
-        InstalledEstate.from_catalogue(catalogue),
+        catalogue.dag(),
         targets=(PhysicalTargetRef("lakehouse", "Shared_LH"),),
     )
 
@@ -514,8 +506,8 @@ def test_load_dag_rejects_missing_bindings():
         }
     )
 
-    with pytest.raises(LoadError, match="has no installation row"):
-        InstalledEstate.from_catalogue(catalogue)
+    with pytest.raises(CatalogueStateError, match="has no installation row"):
+        catalogue.dag()
 
 
 @weaver_test()
@@ -540,7 +532,7 @@ def test_load_dag_rejects_unresolved_dependencies():
             )
         }
     )
-    estate = InstalledEstate.from_catalogue(catalogue)
+    estate = catalogue.dag()
 
     with pytest.raises(LoadError, match="resolves to neither an installed object"):
         load_dag(estate, targets=(RAW,))
@@ -577,10 +569,8 @@ def test_load_dag_rejects_cycles():
             )
         }
     )
-    estate = InstalledEstate.from_catalogue(catalogue)
-
-    with pytest.raises(LoadError, match="contains a cycle"):
-        load_dag(estate, targets=(RAW,))
+    with pytest.raises(GraphError, match="dependency cycle"):
+        catalogue.dag()
 
 
 @weaver_test()
@@ -613,7 +603,7 @@ def test_load_dag_ignores_a_fully_qualified_physical_read():
             )
         }
     )
-    dag = load_dag(InstalledEstate.from_catalogue(catalogue), targets=(RAW,))
+    dag = load_dag(catalogue.dag(), targets=(RAW,))
 
     assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Sales.Order",)
     assert [message.code for message in dag.messages] == ["dependency_external"]
@@ -677,7 +667,7 @@ def _resolved_producers(tmp_path):
     item = _shortcut_estate(root)
     repository = parse_item_repository(Location(str(root)))
     bindings = item_bindings((item, "Curated_LH"))
-    estate = InstalledEstate.from_catalogue(installed_catalogue(repository, bindings))
+    estate = installed_catalogue(repository, bindings).dag()
 
     consumer = WeaverDocumentId.parse(f"{item}/Sales.Report")
     dag = load_dag(estate, targets=(PhysicalTargetRef("lakehouse", "Curated_LH"),))
@@ -694,13 +684,8 @@ def test_a_folder_shortcut_import_resolves_beneath_files(tmp_path):
 
     estate, _consumer, _dag = _resolved_producers(tmp_path)
 
-    assert (
-        WeaverDocumentId.parse("Lakehouse/Curated/Files/Sales.Incoming")
-        in estate.objects
-    )
-    assert (
-        WeaverDocumentId.parse("Lakehouse/Curated/Sales.Incoming") not in estate.objects
-    )
+    assert WeaverDocumentId.parse("Lakehouse/Curated/Files/Sales.Incoming") in estate
+    assert WeaverDocumentId.parse("Lakehouse/Curated/Sales.Incoming") not in estate
 
 
 @weaver_test()
@@ -711,7 +696,10 @@ def test_a_schema_shortcut_import_resolves_to_the_namespace_it_presents(tmp_path
     load refused a dependency the author had written correctly.
     """
 
-    from weaver.load_plan import _is_python_module_reference, _python_module_identity
+    from weaver.installed import (
+        _is_python_module_reference,
+        _python_module_identity,
+    )
 
     item = WeaverItemId.parse("Lakehouse/Curated")
 
@@ -768,7 +756,7 @@ def test_a_python_shortcut_import_orders_a_warehouse_before_its_lakehouse_consum
         ),
     )
     dag = load_dag(
-        InstalledEstate.from_catalogue(catalogue),
+        catalogue.dag(),
         targets=(
             PhysicalTargetRef("warehouse", "Serving_WH"),
             PhysicalTargetRef("lakehouse", "Published_LH"),

@@ -15,6 +15,7 @@ migration; this repository does not build a documentation site yet.
 | [how-does-build-work.md](how-does-build-work.md) | Lifecycle | Update | Retained the operational sequence and replaced its repeated principles with a link to the contract. |
 | [catalogue.md](catalogue.md) | Architecture | Update | Kept catalogue ownership and addressing; removed the obsolete CLI-plan reference and simplified the repeated planning explanation. |
 | [validation.md](validation.md) | Architecture | Retain | Current validation contract with a coherent scope. CLI invocation details remain in CLI usage. |
+| [health.md](health.md) | Architecture | Retain | The health model: sections, severities, freshness and bounded history. Command and output remain in CLI usage. |
 | [weaver-repository.md](weaver-repository.md) | Contract | Retain | Current repository-layout and ownership contract; distinct from build execution. |
 | [sql-execution.md](sql-execution.md) | Contract | Retain | Narrow desktop and in-Fabric SQL boundary with no competing command guide. |
 | [cli-usage.md](cli-usage.md) | How-to | Update | Command reference. Removed architecture arguments and linked to the code architecture where needed. |

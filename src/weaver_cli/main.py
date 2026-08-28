@@ -99,6 +99,25 @@ def _requires_build(args) -> frozenset[str]:
     return requirements(AUTH, RESOLVER, TDS, *_target_requirements(targets))
 
 
+def _requires_health(args) -> frozenset[str]:
+    """What a health report will want.
+
+    TDS always, because the catalogue is a Warehouse. OneLake where a Lakehouse
+    was named or where no target was, since discovering the estate may find one.
+    Never Livy: health runs no authored code and reads a Lakehouse over storage.
+    """
+
+    from weaver.sessions.requirements import AUTH, ONELAKE, RESOLVER, TDS, requirements
+
+    targets = getattr(args, "targets", ()) or ()
+    wanted = {AUTH, RESOLVER, TDS}
+    if not targets or any(
+        _target_kind_and_name(value)[0].startswith("lakehouse") for value in targets
+    ):
+        wanted.add(ONELAKE)
+    return requirements(*wanted)
+
+
 def _requires_rest(args) -> frozenset[str]:
     """Fabric control-plane work: a credential and the resolver, nothing more."""
 
@@ -302,6 +321,33 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--json", action="store_true", help="emit the report as JSON")
     _add_workspace_args(validate)
     validate.set_defaults(handler=handle_test, requires=_requires_targets)
+
+    report = subcommands.add_parser(
+        "health",
+        help="Report the installed estate's load, test and build health.",
+    )
+    report.add_argument(
+        "targets",
+        nargs="*",
+        metavar="TARGET",
+        help="Lakehouse/Name or Warehouse/Name. Defaults to the whole estate.",
+    )
+    report.add_argument(
+        "--as-of",
+        metavar="DATETIME",
+        help=(
+            "ISO-8601 instant with a zone. A load settled before it reads as "
+            "stale. Defaults to 24 hours ago."
+        ),
+    )
+    report.add_argument(
+        "--no-inventory",
+        action="store_true",
+        help="Skip the physical read that proves certified objects are there.",
+    )
+    report.add_argument("--json", action="store_true", help="emit the report as JSON")
+    _add_workspace_args(report, include_environment=False)
+    report.set_defaults(handler=handle_health, requires=_requires_health)
 
     wipe = subcommands.add_parser(
         "wipe", help="Clear a physical Lakehouse or Warehouse."
@@ -713,7 +759,7 @@ def _with_command_overrides(workspace, args: argparse.Namespace):
     return replace(workspace, **overrides) if overrides else workspace
 
 
-def _command_context(workspace) -> dict:
+def _command_context(workspace, *, environment: bool = True) -> dict:
     """What this command line settled on, for the operation to apply, as names.
 
     Operations take names and a Session, and a borrowed Session resolves its own
@@ -721,12 +767,17 @@ def _command_context(workspace) -> dict:
     ``--environment`` reach the operation, applied to the Session's workspace
     there and changing nothing about the Session. Where this command opened the
     Session, they are already what it carries.
+
+    ``environment`` is false for an operation that takes none. Health runs no
+    authored code, so it has no Environment argument to pass one to.
     """
 
-    return {
-        "catalogue": workspace.catalogue or None,
-        "environment": str(workspace.environment) if workspace.environment else None,
-    }
+    context = {"catalogue": workspace.catalogue or None}
+    if environment:
+        context["environment"] = (
+            str(workspace.environment) if workspace.environment else None
+        )
+    return context
 
 
 def _session(args: argparse.Namespace):
@@ -1099,6 +1150,134 @@ def _print_test(report) -> None:
         print(f"\n  {node.logical_id}:")
         for row in node.diagnostics:
             print(f"    {row}")
+
+
+def handle_health(args: argparse.Namespace) -> int:
+    """Adapt command-line values to :func:`weaver.health` and render the report.
+
+    Exit 0 for Green and 1 for anything worse, so a scheduled check is a
+    pipeline step. Configuration and transport failures take the ordinary
+    command error path.
+    """
+
+    import json
+
+    workspace = _resolve_workspace(args)
+    with _running_session(args, workspace) as opened:
+        report = weaver.health(
+            list(args.targets),
+            as_of=args.as_of,
+            inventories=not args.no_inventory,
+            session=opened,
+            **_command_context(workspace, environment=False),
+        )
+    if args.json:
+        print(json.dumps(report.to_mapping(), indent=2))
+    else:
+        print(render_health(report))
+    return 0 if report.is_healthy else 1
+
+
+def render_health(report) -> str:
+    """One health report as plain text.
+
+    The status words carry the meaning, so the output reads the same redirected
+    to a file as it does on a terminal.
+    """
+
+    from weaver.health import AREAS
+
+    lines = [f"Weaver Health  {_titled(report.status)}", ""]
+    for area, section in zip(AREAS, report.sections):
+        lines.append(f"{area.title():<8}{_titled(section.status)}")
+        lines.extend(_health_section(area, section, report))
+        lines.append("")
+    lines.extend(_health_activity(report))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _health_section(area: str, section, report) -> list[str]:
+    """One section's counts, then the objects behind them."""
+
+    from weaver.health import BUILD, LOAD
+
+    lines = []
+    if area == LOAD and report.latest_load is not None:
+        latest = report.latest_load
+        lines.append(
+            f"  Last load activity   {_ago(latest.completed_at, report.generated_at)}"
+        )
+    counts = " · ".join(
+        f"{count} {word}" for word, count in sorted(section.counts.items())
+    )
+    if counts:
+        lines.append(f"  {counts}")
+    if area == BUILD and not section.findings:
+        lines.append(f"  Installed estate consistent ({section.subjects} objects)")
+    for finding in section.findings:
+        where = finding.object_id or finding.target or ""
+        lines.append(f"  {_titled(finding.severity):<7}{where}")
+        lines.append(f"          {finding.message}")
+    return lines
+
+
+#: The narrowest an object-id column gets, so short ids in one report still line
+#: up with a longer one in the next.
+_ID_WIDTH = 42
+
+
+def _health_activity(report) -> list[str]:
+    """The slowest loads and the rows that moved, from the bounded window."""
+
+    lines = []
+    slowest = report.slowest()
+    if slowest:
+        lines.append("Slowest loads")
+        lines.extend(
+            _health_row(each.object_id, f"{each.duration_ms / 1000:.1f}s", slowest)
+            for each in slowest
+        )
+        lines.append("")
+    moved = report.moved()
+    if moved:
+        lines.append("Recent activity")
+        lines.extend(
+            _health_row(
+                each.object_id,
+                f"read {each.rows_read:,}  "
+                f"+{each.rows_inserted} ~{each.rows_updated} "
+                f"-{each.rows_deleted} !{each.rows_rejected}",
+                moved,
+            )
+            for each in moved
+        )
+    return lines
+
+
+def _health_row(object_id: str, value: str, among) -> str:
+    """One activity line, with the id column wide enough for the block it is in.
+
+    Each block is measured on its own, and the separator is written rather than
+    left to the padding: an id longer than the column would otherwise run
+    straight into the value beside it.
+    """
+
+    width = max(_ID_WIDTH, *(len(str(each.object_id)) for each in among))
+    return f"  {object_id:<{width}}  {value}"
+
+
+def _titled(word: str) -> str:
+    return str(word).title()
+
+
+def _ago(at, now) -> str:
+    """How long ago an instant was, in hours and minutes."""
+
+    if at is None:
+        return "never"
+    seconds = max(int((now - at).total_seconds()), 0)
+    hours, remainder = divmod(seconds, 3600)
+    return f"{hours}h {remainder // 60}m ago"
 
 
 def handle_wipe(args: argparse.Namespace) -> int:

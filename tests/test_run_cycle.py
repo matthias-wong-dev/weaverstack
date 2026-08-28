@@ -73,7 +73,7 @@ def node(node_id: str, **kwargs) -> RunNode:
     check that never fired.
     """
 
-    from weaver.load_plan import PhysicalObjectRef
+    from weaver.targets import PhysicalObjectRef
 
     return RunNode(
         node_id=node_id,
