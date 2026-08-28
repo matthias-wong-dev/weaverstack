@@ -13,8 +13,8 @@ from typing import Any, Sequence
 from .declaration.metadata import ASSUMPTION, PYTHON, SPARK_SQL
 from .declaration.model import LAKEHOUSE, WAREHOUSE
 from .errors import CommandError, ValidationError
-from .load_plan import LAKEHOUSE_TARGET, PhysicalTargetRef
 from .runtime.validation_result import AssumptionResult, TestResult
+from .targets import LAKEHOUSE_TARGET, PhysicalTargetRef
 from .test_execution import PYTHON_VALIDATION, WAREHOUSE_PROCEDURE
 from .test_report import (
     FAILED,

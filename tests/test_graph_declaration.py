@@ -5,8 +5,8 @@ from __future__ import annotations
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.declaration import Graph
 from weaver.errors import GraphError
+from weaver.graph import Graph
 
 
 def chain() -> Graph:

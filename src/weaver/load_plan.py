@@ -25,7 +25,12 @@ from .declaration.model import (
 from .errors import LoadError
 from .etl import LOAD_ROOT, load_procedure_id
 from .load_report import DEPENDENCY_EXTERNAL, LoadMessage, info
-from .targets import LAKEHOUSE_KIND, WAREHOUSE_KIND
+from .targets import (
+    LAKEHOUSE_TARGET,
+    WAREHOUSE_TARGET,
+    PhysicalObjectRef,
+    PhysicalTargetRef,
+)
 
 # --- the primitive kinds ------------------------------------------------------
 #
@@ -52,47 +57,10 @@ PRIMITIVE_KINDS = (
     ONELAKE_PUBLICATION,
 )
 
-#: What the catalogue calls each physical target kind. The same two words the
-#: build's :mod:`weaver.build_bundle.targets` uses, because a load plan and a
-#: build bundle describe the same estate.
-LAKEHOUSE_TARGET = "lakehouse"
-WAREHOUSE_TARGET = "warehouse"
-
+#: Which physical target kind an item type installs into. Two words, and the
+#: catalogue's own: an ``Installation`` row names the target, and the item type
+#: says what kind of target that is.
 _TARGET_KIND_FOR_ITEM = {LAKEHOUSE: LAKEHOUSE_TARGET, WAREHOUSE: WAREHOUSE_TARGET}
-_GRAMMAR_KIND = {LAKEHOUSE_TARGET: LAKEHOUSE_KIND, WAREHOUSE_TARGET: WAREHOUSE_KIND}
-
-
-@dataclass(frozen=True)
-class PhysicalTargetRef:
-    """One physical item, as the public grammar names it."""
-
-    kind: str
-    name: str
-
-    @classmethod
-    def of(cls, target) -> "PhysicalTargetRef":
-        """The reference one typed physical target makes.
-
-        The single conversion from the typed vocabulary, ``DeltaTarget`` and
-        ``WarehouseTarget``, into the two words a plan and a catalogue row carry.
-        Every operation that names a target goes through it.
-        """
-
-        from .targets import DeltaTarget, physical_item
-
-        return cls(
-            kind=LAKEHOUSE_TARGET
-            if isinstance(target, DeltaTarget)
-            else WAREHOUSE_TARGET,
-            name=physical_item(target).name,
-        )
-
-    def __str__(self) -> str:
-        return f"{_GRAMMAR_KIND[self.kind]}/{self.name}"
-
-    @property
-    def is_lakehouse(self) -> bool:
-        return self.kind == LAKEHOUSE_TARGET
 
 
 @dataclass(frozen=True)
@@ -102,38 +70,6 @@ class OneLakeReadiness:
     target: PhysicalTargetRef
     schema: str
     object: str
-
-
-def lakehouse_names(targets) -> tuple[str, ...]:
-    """The Lakehouse names among some :class:`PhysicalTargetRef`, in order given.
-
-    What a Livy session needs a Lakehouse for is somewhere to attach, so which
-    of them is picked does not matter: every generated statement names its own
-    target in full.
-    """
-
-    return tuple(target.name for target in targets if target.is_lakehouse)
-
-
-@dataclass(frozen=True)
-class PhysicalObjectRef:
-    """One installed object, addressed as its physical target holds it.
-
-    ``schema`` is the catalogue's ``schema_name`` unchanged: for a folder that
-    carries its ``Files/`` prefix, and for a deployed file it is the path
-    beneath ``Files``. Keeping the stored spelling lets a reference go straight
-    to :meth:`weaver.build_bundle.prune.TargetInventory.has_object`.
-    """
-
-    target_id: str
-    target_kind: str
-    schema: str
-    object: str
-    object_type: str
-    shape: str | None = None
-
-    def __str__(self) -> str:
-        return f"{self.schema}.{self.object}"
 
 
 @dataclass(frozen=True)
@@ -1093,17 +1029,12 @@ __all__ = [
     "InstalledDependency",
     "InstalledEstate",
     "InstalledObject",
-    "LAKEHOUSE_TARGET",
     "LoadDag",
     "LoadNode",
     "PRIMITIVE_KINDS",
     "PYTHON_FOLDER",
     "PYTHON_TABLE",
-    "PhysicalObjectRef",
-    "PhysicalTargetRef",
     "WAREHOUSE_PROCEDURE",
-    "WAREHOUSE_TARGET",
-    "lakehouse_names",
     "load_dag",
     "primitive_candidates",
 ]

@@ -41,7 +41,6 @@ from support.workspaces import InventoryClient, given_workspace
 from weaver.catalogue.tables import RESULT_VOCABULARY
 from weaver.errors import LoadError
 from weaver.fabric.resolution import FabricResolver
-from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import (
     BLOCKED,
     FAILED,
@@ -56,6 +55,7 @@ from weaver.load_report import (
 from weaver.operations.load import run_load
 from weaver.run import RunState
 from weaver.store import FilesystemStore
+from weaver.targets import PhysicalTargetRef
 
 if TYPE_CHECKING:  # names used only in annotations
     from weaver.lakehouse import Lakehouse

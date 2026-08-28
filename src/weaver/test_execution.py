@@ -12,12 +12,12 @@ from typing import Any
 from .declaration.metadata import ASSUMPTION
 from .errors import ValidationError
 from .etl import LOAD_ROOT
-from .load_plan import LAKEHOUSE_TARGET
 from .runtime.validation_result import (
     AssumptionResult,
     TestResult,
     result_from_rows,
 )
+from .targets import LAKEHOUSE_TARGET
 from .test_plan import InstalledValidation
 
 #: Runtime primitives for installed validations.

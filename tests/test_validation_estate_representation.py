@@ -20,7 +20,7 @@ from weaver.catalogue.tables import DEPENDENCY, INSTALLATION, REGISTRY, TEST_DIC
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import ValidationError
 from weaver.etl import validation_artefact_id
-from weaver.load_plan import PhysicalTargetRef
+from weaver.targets import PhysicalTargetRef
 from weaver.test_plan import ValidationEstate, validation_order
 
 LAKEHOUSE = WeaverItemId.parse("Lakehouse/Sales")

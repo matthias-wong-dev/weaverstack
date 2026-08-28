@@ -19,11 +19,11 @@ from support.workspaces import InventoryClient, given_workspace
 
 from weaver.errors import CommandError
 from weaver.fabric.resolution import FabricResolver
-from weaver.load_plan import PhysicalTargetRef
 from weaver.load_report import TASK_SUCCEEDED
 from weaver.operations.load import run_load
 from weaver.run import RunState
 from weaver.store import FilesystemStore
+from weaver.targets import PhysicalTargetRef
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 MISTYPED = PhysicalTargetRef("lakehouse", "Rwa_LH")

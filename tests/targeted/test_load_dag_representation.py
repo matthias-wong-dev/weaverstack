@@ -42,9 +42,9 @@ from weaver.load_plan import (
     WAREHOUSE_PROCEDURE,
     InstalledEstate,
     LoadDag,
-    PhysicalTargetRef,
     load_dag,
 )
+from weaver.targets import PhysicalTargetRef
 
 RAW = PhysicalTargetRef("lakehouse", LOAD_PRODUCER_TARGET)
 REPORTING = PhysicalTargetRef("warehouse", LOAD_CONSUMER_TARGET)

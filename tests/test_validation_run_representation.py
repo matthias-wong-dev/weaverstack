@@ -19,8 +19,8 @@ from support.weaver_test import weaver_test
 
 from weaver.declaration.metadata import ObjectId
 from weaver.declaration.model import WeaverItemId
-from weaver.load_plan import PhysicalTargetRef
 from weaver.runtime.validation_result import AssumptionResult, TestResult
+from weaver.targets import PhysicalTargetRef
 from weaver.test_execution import (
     PYTHON_VALIDATION,
     WAREHOUSE_PROCEDURE,

@@ -20,10 +20,10 @@ from types import SimpleNamespace
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.load_plan import PhysicalTargetRef
 from weaver.run.dispatch import dispatch_primitive
 from weaver.run.resolution import WAREHOUSE_PROCEDURE
 from weaver.runtime.load_result import LoadResult
+from weaver.targets import PhysicalTargetRef
 
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
 
@@ -115,11 +115,12 @@ def _publication_estate(tmp_path, row):
 
     from weaver.declaration.metadata import ObjectId
     from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-    from weaver.load_plan import OneLakeReadiness, PhysicalObjectRef
+    from weaver.load_plan import OneLakeReadiness
     from weaver.locations import Location
     from weaver.run.graph import RunNode
     from weaver.run.resolution import ONELAKE_PUBLICATION
     from weaver.store import FilesystemStore
+    from weaver.targets import PhysicalObjectRef
 
     root = Location(str(tmp_path / "warehouse"))
     log = root.join("Tables", "Sales", "Customer", "_delta_log")

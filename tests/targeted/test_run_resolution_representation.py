@@ -6,8 +6,8 @@ import pytest
 from factories import installed_catalogue, load_estate, load_estate_bindings
 from support.weaver_test import weaver_test
 
-from weaver.load_plan import PhysicalTargetRef
 from weaver.run import Runner, RunRequest, RunState
+from weaver.targets import PhysicalTargetRef
 
 RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")

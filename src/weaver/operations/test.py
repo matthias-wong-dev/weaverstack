@@ -12,8 +12,7 @@ from pathlib import Path
 from typing import Sequence
 
 from ..errors import CommandError, ValidationError
-from ..load_plan import PhysicalTargetRef, lakehouse_names
-from ..targets import parse_physical_target
+from ..targets import PhysicalTargetRef, lakehouse_names, parse_physical_target
 from ..test_report import (
     FAILED,
     INVALID,

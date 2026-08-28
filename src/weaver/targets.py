@@ -243,3 +243,78 @@ def physical_target_text(target) -> str:
     """One typed physical target, spelled back in the grammar it was parsed from."""
 
     return f"{physical_kind(target)}/{physical_item(target).name}"
+
+
+# --- the two words a catalogue row and a plan carry ---------------------------
+#
+# What the catalogue calls each physical target kind. One spelling, used by the
+# build's bound targets, by a load plan, and by every catalogue row that names a
+# target kind.
+
+LAKEHOUSE_TARGET = "lakehouse"
+WAREHOUSE_TARGET = "warehouse"
+
+_GRAMMAR_KIND = {LAKEHOUSE_TARGET: LAKEHOUSE_KIND, WAREHOUSE_TARGET: WAREHOUSE_KIND}
+
+
+@dataclass(frozen=True)
+class PhysicalTargetRef:
+    """One physical item, as the public grammar names it."""
+
+    kind: str
+    name: str
+
+    @classmethod
+    def of(cls, target) -> "PhysicalTargetRef":
+        """The reference one typed physical target makes.
+
+        The single conversion from the typed vocabulary, ``DeltaTarget`` and
+        ``WarehouseTarget``, into the two words a plan and a catalogue row carry.
+        Every operation that names a target goes through it.
+        """
+
+        return cls(
+            kind=LAKEHOUSE_TARGET
+            if isinstance(target, DeltaTarget)
+            else WAREHOUSE_TARGET,
+            name=physical_item(target).name,
+        )
+
+    def __str__(self) -> str:
+        return f"{_GRAMMAR_KIND[self.kind]}/{self.name}"
+
+    @property
+    def is_lakehouse(self) -> bool:
+        return self.kind == LAKEHOUSE_TARGET
+
+
+@dataclass(frozen=True)
+class PhysicalObjectRef:
+    """One installed object, addressed as its physical target holds it.
+
+    ``schema`` is the catalogue's ``schema_name`` unchanged: for a folder that
+    carries its ``Files/`` prefix, and for a deployed file it is the path
+    beneath ``Files``. Keeping the stored spelling lets a reference go straight
+    to :meth:`weaver.build_bundle.prune.TargetInventory.has_object`.
+    """
+
+    target_id: str
+    target_kind: str
+    schema: str
+    object: str
+    object_type: str
+    shape: str | None = None
+
+    def __str__(self) -> str:
+        return f"{self.schema}.{self.object}"
+
+
+def lakehouse_names(targets) -> tuple[str, ...]:
+    """The Lakehouse names among some :class:`PhysicalTargetRef`, in order given.
+
+    What a Livy session needs a Lakehouse for is somewhere to attach, so which
+    of them is picked does not matter: every generated statement names its own
+    target in full.
+    """
+
+    return tuple(target.name for target in targets if target.is_lakehouse)

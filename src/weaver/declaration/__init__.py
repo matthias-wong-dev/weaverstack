@@ -13,7 +13,6 @@ from .dependencies import (
     extract_python_references,
     extract_sql_references,
 )
-from .graph import Edge, Graph
 from .item_dependencies import project_bound_documents, resolve_item_dependencies
 from .metadata import (
     ASSUMPTION,
@@ -113,10 +112,8 @@ __all__ = [
     "ITEM_TYPES",
     "FILES",
     "parse_item_repository",
-    "Graph",
     "resolve_item_dependencies",
     "project_bound_documents",
-    "Edge",
     "build_internal_graph",
     "effective_dependencies",
     "unresolved_references",

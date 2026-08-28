@@ -207,8 +207,8 @@ def _node():
 
     from weaver.declaration.metadata import ObjectId
     from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-    from weaver.load_plan import LAKEHOUSE_TARGET, PhysicalObjectRef, PhysicalTargetRef
     from weaver.run.graph import RunNode
+    from weaver.targets import LAKEHOUSE_TARGET, PhysicalObjectRef, PhysicalTargetRef
 
     return RunNode(
         node_id="load:Lakehouse/Sales/Sales.Customer",
@@ -234,7 +234,7 @@ def _validation():
     from weaver.declaration.metadata import ObjectId
     from weaver.declaration.model import WeaverDocumentId, WeaverItemId
     from weaver.etl import validation_artefact_id
-    from weaver.load_plan import LAKEHOUSE_TARGET, PhysicalTargetRef
+    from weaver.targets import LAKEHOUSE_TARGET, PhysicalTargetRef
     from weaver.test_plan import InstalledValidation
 
     item = WeaverItemId("Lakehouse", "Sales")
@@ -453,9 +453,9 @@ def test_a_warehouse_only_run_never_opens_a_runtime_scope():
 
     from weaver.declaration.metadata import ObjectId
     from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-    from weaver.load_plan import WAREHOUSE_TARGET, PhysicalTargetRef
     from weaver.run.dispatch import dispatch_primitive
     from weaver.run.graph import RunNode
+    from weaver.targets import WAREHOUSE_TARGET, PhysicalTargetRef
 
     opened = []
 
@@ -502,9 +502,9 @@ def test_a_warehouse_validation_opens_no_scope_either():
         WeaverDocumentId,
         WeaverItemId,
     )
-    from weaver.load_plan import WAREHOUSE_TARGET, PhysicalTargetRef
     from weaver.run.dispatch import dispatch_primitive
     from weaver.run.graph import RunNode
+    from weaver.targets import WAREHOUSE_TARGET, PhysicalTargetRef
     from weaver.test_plan import InstalledValidation
 
     opened = []

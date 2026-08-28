@@ -11,13 +11,7 @@ from pathlib import Path
 from typing import Sequence
 
 from ..errors import CommandError, LoadError
-from ..load_plan import (
-    ENDPOINT_REFRESH,
-    ONELAKE_PUBLICATION,
-    InstalledEstate,
-    PhysicalTargetRef,
-    lakehouse_names,
-)
+from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION, InstalledEstate
 from ..load_report import (
     BLOCKED,
     FAILED,
@@ -28,6 +22,8 @@ from ..load_report import (
     LoadRunReport,
 )
 from ..targets import (
+    PhysicalTargetRef,
+    lakehouse_names,
     parse_physical_target,
 )
 

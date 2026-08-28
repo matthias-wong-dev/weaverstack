@@ -17,10 +17,10 @@ from dataclasses import dataclass, field, replace
 from typing import Iterable, Mapping, TypeVar
 
 from ..errors import DiscoveryError
+from ..graph import Graph
 from ..locations import Location
 from ..store import FilesystemStore, Store
 from .dependencies import PythonImport
-from .graph import Graph
 from .item_dependencies import resolve_item_dependencies
 from .metadata import (
     ALIAS_KEYS,

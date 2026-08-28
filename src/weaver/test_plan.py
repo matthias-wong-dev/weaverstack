@@ -27,7 +27,8 @@ from .declaration.metadata import ASSUMPTION, TEST, ObjectId
 from .declaration.model import WeaverDocumentId, WeaverItemId
 from .errors import ValidationError
 from .etl import validation_artefact_id
-from .load_plan import PhysicalTargetRef, _installations
+from .load_plan import _installations
+from .targets import PhysicalTargetRef
 
 #: How ``TestDictionary.test_type`` spells each kind, and back. The catalogue's
 #: vocabulary is lower case and a declaration's kind is title case, so the

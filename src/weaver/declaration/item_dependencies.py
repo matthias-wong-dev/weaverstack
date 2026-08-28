@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import Iterable, Mapping
 
 from ..errors import BuildError, DiscoveryError, GraphError
-from .graph import Graph
+from ..graph import Graph
 from .metadata import ObjectId
 from .model import (
     FILES,

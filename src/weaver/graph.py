@@ -1,6 +1,8 @@
 """Deterministic directed-acyclic-graph primitives.
 
-Build and load use the same graph operations with different node and edge sets.
+The one topology implementation. The authored repository graphs, the installed
+estate graph and the runtime graph each carry their own node metadata and hand
+the ordering, the layers and the traversal here.
 """
 
 from __future__ import annotations
@@ -9,7 +11,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable, Mapping
 
-from ..errors import GraphError
+from .errors import GraphError
 
 
 @dataclass(frozen=True)
