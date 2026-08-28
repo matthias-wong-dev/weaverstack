@@ -32,6 +32,7 @@ from typing import Mapping
 
 from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
+from ..catalogue.tables import ROLE_SHORTCUT
 from ..declaration.model import WeaverItemId, WeaverRepository
 from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
@@ -442,10 +443,11 @@ def plan_item_build(
     stages.extend(
         item_drop_stages(
             repository,
-            selected_for_drop - selected_shortcuts,
+            selected_for_drop - _retained_pointers(selected_shortcuts, registered),
             item=item,
             target=target,
             inventory=inventory,
+            registered=registered,
         )
     )
     schemas = item_schema_stage(
@@ -492,6 +494,32 @@ def plan_item_build(
         uncertified=frozenset(shortcuts.omitted_destinations)
         & frozenset(selected_for_build),
     )
+
+
+def _retained_pointers(selected_shortcuts, registered: Mapping) -> set:
+    """Shortcut destinations a drop leaves alone, being pointers already.
+
+    Materialising a shortcut replaces the pointer that is there, so a destination
+    installed as a pointer is not dropped first. A destination installed as
+    something else is: the catalogue records the role it was certified under, and
+    a native folder or table standing where a shortcut is now declared occupies
+    the name Fabric would create the shortcut at.
+
+    That is the general desired-state rule rather than a shortcut rule. An
+    identity is reconciled to the form now declared for it, by the same managed
+    drop a table-to-view change goes through.
+
+    An identity with no Registry row is left alone. Nothing certified it, so what
+    stands there is not Weaver's to remove, and shortcut creation reports the
+    occupied name.
+    """
+
+    retained = set()
+    for identity in selected_shortcuts:
+        document = registered.get(identity)
+        if document is None or document.object_role == ROLE_SHORTCUT:
+            retained.add(identity)
+    return retained
 
 
 def _catalogue_target(binding: WarehouseBinding, targets):

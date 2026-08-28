@@ -81,9 +81,11 @@ class _Managed:
     #: Object names a document declares, whatever kind it declares them as. A
     #: document installed under the other kind is a kind change, removed by the
     #: item's managed drop, which reads the installed type from inventory, so
-    #: prune spares the name. Shortcut destinations are held out: nothing drops one,
-    #: so a shortcut whose name is installed as the other kind is still prune's to
-    #: remove.
+    #: prune spares the name. Shortcut destinations are held out, so a shortcut
+    #: whose name is installed as the other kind is prune's to remove. Where the
+    #: installed type matches and only the role differs, a native folder standing
+    #: under a declared folder shortcut, the managed drop covers it. See
+    #: :func:`weaver.build_bundle.planner._retained_pointers`.
     declared_objects: frozenset[str]
 
 

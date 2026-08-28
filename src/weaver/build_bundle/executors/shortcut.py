@@ -9,7 +9,10 @@ was generated, because it is not a target of this build and nothing here would
 know where to look.
 
 The pointer is a OneLake shortcut in the destination Lakehouse, created through
-the workspace's own API.
+the workspace's own API. A payload naming ``remove`` instead unpicks the pointers
+it lists, through the same API and for the same reason: a shortcut is a
+read-write window into the item it points at, so removing the name over storage
+or over Spark would reach that item's data.
 
 Which shortcut, over what, is settled in the manifest; how a name is made to
 point somewhere is the transport's business. A shortcut holds no data, so an
@@ -58,7 +61,10 @@ class ShortcutExecutor:
     ) -> dict[str, Any] | None:
         if payload is None:
             raise InstallError(f"shortcut action {action.id!r} has no payload")
-        frozen = json.loads(payload.decode("utf-8"))["shortcuts"]
+        manifest = json.loads(payload.decode("utf-8"))
+        if "remove" in manifest:
+            return self._remove(action, manifest["remove"], context)
+        frozen = manifest["shortcuts"]
         if not frozen:
             return {"shortcuts": []}
 
@@ -78,6 +84,26 @@ class ShortcutExecutor:
         if waited is not None:
             details["addressable_after_seconds"] = waited
         return details
+
+    def _remove(
+        self, action: InstallAction, frozen: list, context: InstallationContext
+    ) -> dict[str, Any]:
+        """Unpick the pointers this action names, and nothing they point at.
+
+        Through the workspace's shortcut API. A shortcut is a read-write window
+        into the item it points at, so removing the name over storage or over
+        Spark would reach that item's data.
+        """
+
+        remove = getattr(context.resolver, "remove_onelake_shortcut", None)
+        if remove is None:
+            raise InstallError(
+                f"shortcut action {action.id!r} cannot be run here: this "
+                "environment offers no way to remove a OneLake shortcut"
+            )
+        for each in frozen:
+            remove(context.target.lakehouse, path=each["path"], name=each["name"])
+        return {"removed": [each["shortcut"] for each in frozen]}
 
     def _shortcut(self, shortcut, frozen: dict, context) -> dict:
         """One shortcut, from whichever kind of source the plan froze."""

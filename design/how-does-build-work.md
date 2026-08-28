@@ -120,8 +120,8 @@ correct build today. The parsed repository retains the resulting layers so every
 later stage consumes one authoritative ordering rather than reconstructing one.
 
 Cross-item dependencies are represented in both graphs, and impact crosses them.
-The document graph carries shortcut destinations as nodes, so the path from a
-producer to another item's consumer is an ordinary one:
+The document graph carries logical shortcut destinations as nodes, so the path
+from a producer to another item's consumer is an ordinary one:
 
 ```text
 source document -> shortcut destination -> consumer document
@@ -148,6 +148,15 @@ A changed object therefore expands to its descendants wherever they are, and the
 planner needs no cross-item special case. Items *not* in the build are still
 deferred, but by construction rather than by rule: they are not selected, so
 nothing reaches them.
+
+**A physical shortcut destination is not a node.** It names a Fabric item this
+repository does not manage, which may have no producer here at all, so importing
+one records a physical dependency and no graph edge. There is nothing in the
+repository to order it against. The same is true of a schema shortcut, which
+presents a namespace whose contents belong to the item it points at, and of a
+runtime artefact, whose signature is its own content. All three are selected,
+signed and registered, so more is selectable than the graph holds and the graph
+is the only thing that can say which. See [§8](#8-impact-determination).
 
 **The graph is not a projection of the published dependency rows.** `_.Dependency`
 records what the author wrote and where it resolved to, so a shortcut edge names the
@@ -226,7 +235,9 @@ build selected. They are desired state in the consuming item exactly as a declar
 document is, merely produced elsewhere, so a build must not prune the shortcut or
 view it is about to create, nor the one it just decided to keep. A shortcut holds
 no data, so materialisation replaces rather than colliding: a build has to be able
-to run twice.
+to run twice. Prune is the repository-against-inventory diff and a declared
+destination is never on the wrong side of it; what stands at a destination in the
+wrong form is the managed drop's, below.
 
 **A shortcut is an ordinary registered object, built incrementally.** It gets a
 `_.Registry` row like any other, typed as what it physically is: a `folder` under
@@ -253,6 +264,37 @@ signature — see [§7a](#7a-cross-item-freshness).
 It is materialised by the shortcut executor, never by the generic drop-and-build
 pipeline: it holds no data, so it is replaced in place rather than dropped and
 recreated, and there is no source document for a build stage to render.
+
+### The declared form is what an identity is reconciled to
+
+Replacing a pointer is the shortcut action's own business, so a destination
+already installed as a pointer is never dropped first. What the pointer replaces
+is decided from the role the `_.Registry` row carries, because a build is
+reconciling one identity to the form now declared for it:
+
+| Installed role | Now declared | What the build does first |
+|---|---|---|
+| `shortcut` | a shortcut | nothing; materialisation replaces the pointer |
+| `data` | a shortcut | the managed drop removes the installed object |
+| `shortcut` | a document | the managed drop unpicks the pointer |
+| no row | a shortcut | nothing; the create reports the occupied name |
+
+This is the general desired-state rule and not a shortcut rule. It is the same
+managed drop a table-to-view change goes through, reading the installed role and
+the inventory's installed type, and it runs in the drop phase, ahead of both the
+shortcut phase and the build phase. A shortcut create over a name an ordinary
+folder or table occupies returns a conflict from Fabric, so a native
+`Files/ACQSC/HarmSurveyXlsx` left standing by an earlier build blocks the folder
+shortcut now declared there.
+
+An identity with no Registry row is left where it stands. Nothing certified it,
+so what occupies the name is not this build's to remove.
+
+Unpicking a pointer goes through the shortcut API, as `drop_shortcut`, and never
+through a Spark `DROP TABLE` or a directory removal: a OneLake shortcut is a
+read-write window into the item it points at, so both of those would reach that
+item's data. A Warehouse pointer is a view over the source's three-part name, and
+`drop view` removes the local object and nothing else.
 
 **One action materialises all of an item's shortcuts.** The cost of a shortcut is not
 the create — that is about a second — but the wait after it, so N actions running
@@ -420,6 +462,15 @@ creation but no managed drop.
 Only descendants are added. Upstream dependencies are not rebuilt merely
 because one of their consumers changed. Deterministic graph ordering is applied
 after filtering to the selected subset.
+
+**A changed identity carries impact only where the graph holds that identity.**
+Impact propagates through the current repository graph, so graph membership is
+what decides whether a changed root starts a walk. Membership is asked of the
+graph rather than derived from a list of the kinds that are not nodes: a physical
+shortcut destination, a schema shortcut and a runtime artefact are each
+selectable without being one, and each ends a walk rather than starting one. The
+same rule layers the managed drops, which order by whatever edges the graph holds
+among the selection and stand the rest of it isolated.
 
 ## 9. Prohibit Rebuild
 

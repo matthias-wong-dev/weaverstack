@@ -654,8 +654,13 @@ def test_an_shortcut_destination_installed_as_a_table_is_pruned(tmp_path):
     """The keep-set needs this name, and prune removes it anyway.
 
     A Warehouse shortcut is remade by `create or alter view`, which cannot replace
-    a table, and no managed drop covers a shortcut destination. So a table
-    standing at the shortcut's name has to go before the shortcut stage runs.
+    a table. The keep-set holds the destination as a view, so a table standing at
+    the shortcut's name is on prune's side of the diff and goes before the
+    shortcut stage runs.
+
+    Prune answers the case where the installed type differs from the declared
+    one. Where it matches and only the role differs, a native folder under a
+    declared folder shortcut, the managed drop answers it instead.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
@@ -700,6 +705,11 @@ def test_a_shortcut_is_never_dropped_by_the_document_pipeline(tmp_path):
     It holds no data, so it is remade in place; routing it through the generic
     drop would emit a ``drop view`` for a shortcut and ask the build pipeline for
     a source document that does not exist.
+
+    The destination here is registered as a shortcut, which is what makes it a
+    retained pointer. A destination the catalogue records under another role is
+    dropped first. See
+    ``tests/targeted/test_shortcut_identity_transition_install.py``.
     """
 
     root = _dependency_estate(tmp_path)

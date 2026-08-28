@@ -22,14 +22,21 @@ from __future__ import annotations
 from typing import Iterable
 
 from ..declaration.model import WeaverItemId
-from .models import CREATE_SHORTCUT, REFRESH_SQL_ENDPOINT, BuildBatch, InstallAction
+from .models import (
+    CREATE_SHORTCUT,
+    DROP_SHORTCUT,
+    REFRESH_SQL_ENDPOINT,
+    BuildBatch,
+    InstallAction,
+)
 from .physical import DELTA_MUTATING_KINDS
 from .stages import REFRESH, PlannedStage
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Everything that leaves a Lakehouse's endpoint metadata stale. Shortcut creation
-#: is here because a OneLake shortcut is a new table in the destination.
-_MUTATING = DELTA_MUTATING_KINDS | {CREATE_SHORTCUT}
+#: and removal are here because a OneLake shortcut appears in the destination as a
+#: table.
+_MUTATING = DELTA_MUTATING_KINDS | {CREATE_SHORTCUT, DROP_SHORTCUT}
 
 
 def item_refresh_stage(
