@@ -37,6 +37,11 @@ BUILD_PROCEDURE = "build_procedure"
 DROP_FOLDER = "drop_folder"
 DROP_TABLE = "drop_table"
 DROP_VIEW = "drop_view"
+#: The drop for an identity the previous build installed as a Lakehouse pointer.
+#: A OneLake shortcut is a read-write window into the item it points at, so it
+#: comes off through the shortcut API; a ``DROP TABLE`` or a directory removal
+#: would reach that item's data.
+DROP_SHORTCUT = "drop_shortcut"
 
 #: Removals of runtime artefacts whose source has stopped claiming them.
 #: Distinct from prune because they come from the catalogue rather than from a

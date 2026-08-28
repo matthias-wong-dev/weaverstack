@@ -10,10 +10,12 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Mapping
 
+from ..catalogue.tables import ROLE_SHORTCUT
 from ..declaration.metadata import DELTA_TARGET, FOLDER, SQL_TARGET, TABLE, VIEW
 from ..declaration.model import WeaverItemId
 from ..errors import BuildError
 from ..etl import FILE_TYPE, PROCEDURE_TYPE, item_runtime_artefacts
+from ..graph import Graph
 from .changes import (
     FILE as FILE_KIND,
 )
@@ -47,6 +49,7 @@ from .models import (
     DELETE_FILE,
     DROP_FOLDER,
     DROP_PROCEDURE,
+    DROP_SHORTCUT,
     DROP_TABLE,
     DROP_VIEW,
     WRITE_FILE,
@@ -205,13 +208,21 @@ def item_drop_stages(
     item: WeaverItemId,
     target,
     inventory,
+    registered: Mapping | None = None,
 ) -> tuple[PlannedStage, ...]:
-    """One item's managed drops, dependants before dependencies."""
+    """One item's managed drops, dependants before dependencies.
+
+    ``registered`` supplies the role each identity was last installed under, which
+    is what decides how it comes off: a pointer is unpicked through the shortcut
+    API, and the object it points at is another item's. Absent, every drop is the
+    ordinary one for the installed type.
+    """
 
     selected = {identity for identity in selected_for_drop if identity.item == item}
     if not selected:
         return ()
-    graph = repository.dependency_graph.subgraph({str(value) for value in selected})
+    registered = dict(registered or {})
+    graph = _drop_layers(repository, selected)
     identities = {str(identity): identity for identity in selected}
     stages = []
     for index, layer in enumerate(reversed(graph.layers())):
@@ -225,7 +236,16 @@ def item_drop_stages(
                 raise BuildError(
                     f"selected managed drop {identity} is absent from target inventory"
                 )
-            actions.append(_drop_action(identity, installed, target, payloads))
+            role = registered.get(identity)
+            actions.append(
+                _drop_action(
+                    identity,
+                    installed,
+                    target,
+                    payloads,
+                    installed_role=None if role is None else role.object_role,
+                )
+            )
             changes.append(
                 change_removed(
                     _CHANGE_KIND_FOR_TYPE[installed],
@@ -254,10 +274,44 @@ def item_drop_stages(
     return tuple(stages)
 
 
-def _drop_action(identity, installed_type, target, payloads) -> InstallAction:
+def _drop_layers(repository, selected) -> Graph:
+    """The selected identities, layered by whatever the repository graph orders.
+
+    Graph traversal is only valid for a graph node, and more is selectable than
+    the graph carries: a physical shortcut destination is one such identity. So
+    the edges among the selection are taken and the rest of it stands isolated,
+    which is what it is. An isolated identity has no dependants to remove first.
+    """
+
+    chosen = {str(identity) for identity in selected}
+    return Graph(
+        chosen,
+        [
+            (edge.upstream, edge.downstream)
+            for edge in repository.dependency_graph.edges
+            if edge.upstream in chosen and edge.downstream in chosen
+        ],
+    )
+
+
+def _drop_action(
+    identity, installed_type, target, payloads, *, installed_role=None
+) -> InstallAction:
+    """One frozen removal of what is installed under ``identity``.
+
+    The installed type decides the statement and the installed role decides the
+    mechanism. A Lakehouse pointer comes off through the shortcut API: a OneLake
+    shortcut is a read-write window into the item it points at, so a Spark
+    ``DROP TABLE`` or a directory removal would reach that item's data. A
+    Warehouse pointer is a view over the source's three-part name, and dropping
+    a view removes the local object and nothing else.
+    """
+
     _refuse_protected(
         identity.object_id.schema, identity.object_id.object, str(identity)
     )
+    if installed_role == ROLE_SHORTCUT and target.kind != WAREHOUSE_TARGET:
+        return _drop_shortcut_action(identity, target, payloads)
     try:
         installed_kind = _DECLARATION_KIND[installed_type]
     except KeyError as exc:
@@ -294,6 +348,31 @@ def _drop_action(identity, installed_type, target, payloads) -> InstallAction:
         kind=kind,
         resource_node_id=str(identity),
         executor=executor,
+        payload=filename,
+        payload_sha256=sha256_hex(content),
+    )
+
+
+def _drop_shortcut_action(identity, target, payloads) -> InstallAction:
+    """Unpick one Lakehouse pointer, addressed as Fabric addresses a shortcut.
+
+    The path and the name are frozen here, from the same two parts
+    :func:`weaver.build_bundle.shortcuts.plan_item_shortcuts` freezes when it
+    creates one, so the removal and the creation cannot spell one destination two
+    ways.
+    """
+
+    from .shortcuts import shortcut_removal_payload
+
+    action_slug = _slug(identity)
+    content = shortcut_removal_payload(identity)
+    filename = f"drop-shortcut-{action_slug}.shortcut.json"
+    payloads[filename] = content
+    return InstallAction(
+        id=f"managed-drop-{action_slug}",
+        kind=DROP_SHORTCUT,
+        resource_node_id=str(identity),
+        executor="shortcut",
         payload=filename,
         payload_sha256=sha256_hex(content),
     )

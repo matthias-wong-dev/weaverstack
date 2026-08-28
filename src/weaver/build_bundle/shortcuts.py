@@ -484,6 +484,35 @@ def shortcut_payload(supported, *, sources, logical_sources=None) -> bytes:
     ).encode("utf-8")
 
 
+def shortcut_removal_payload(destination) -> bytes:
+    """One pointer to unpick, as the two parts Fabric addresses a shortcut by.
+
+    The counterpart of :func:`shortcut_payload`, and it names the destination the
+    same way: the area from whether the identity sits under ``Files``, then the
+    schema, then the object. A removal has no source, because what a shortcut
+    pointed at is not this build's to touch.
+    """
+
+    area = FILES_AREA if destination.is_files else TABLES_AREA
+    return (
+        json.dumps(
+            {
+                "remove": [
+                    {
+                        "shortcut": str(destination),
+                        "path": f"{area}/{destination.object_id.schema}",
+                        "name": destination.object_id.object,
+                    }
+                ]
+            },
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
 def _destination_path(declaration) -> str:
     """Where the shortcut is created, as Fabric addresses it.
 

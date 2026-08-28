@@ -53,6 +53,11 @@ AWAITING_FABRIC = {
     "drop_folder": "as above",
     "drop_table": "the rebuild drop needs a real Delta table to clear",
     "drop_view": "as above",
+    "drop_shortcut": (
+        "unpicking a pointer needs a real OneLake shortcut, and the claim worth "
+        "making about it is that the source survives, which belongs beside the "
+        "rest of tests/fabric/test_shortcut_safety_primitive.py"
+    ),
 }
 
 #: Kinds that change a target, and the test that executes each. A kind appearing
