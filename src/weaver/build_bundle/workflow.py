@@ -232,17 +232,28 @@ def read_build_state(
 
 
 def _refuse_occupied_targets(bindings: ItemBindings, catalogue) -> None:
-    """Refuse a target the catalogue already binds to a different logical item.
+    """Refuse a target the catalogue already installs a different item to.
 
     :func:`weaver.build_bundle.physical.item_prune_stage` diffs one item's
     keep-set against the whole target inventory, so building into a target
     holding another item's objects would prune them.
+
+    ``Warehouse/_weaver`` is exempt both ways. Its inventory is read as the ``_``
+    schema and nothing else, and every other item's excludes ``_``, so the
+    catalogue shares a host with proven isolation. See
+    :func:`weaver.build_bundle.prune.read_warehouse_inventory`.
     """
 
+    from ..catalogue.builtin import BUILTIN_ITEM
+
     for binding in bindings.entries:
+        if binding.item == BUILTIN_ITEM:
+            continue
         target = binding.target.item.name
         others = sorted(
-            str(item) for item in catalogue.bound_to(target) if item != binding.item
+            str(item)
+            for item in catalogue.bound_to(target)
+            if item != binding.item and item != BUILTIN_ITEM
         )
         if others:
             raise BuildError(

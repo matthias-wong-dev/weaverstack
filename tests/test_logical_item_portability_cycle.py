@@ -215,6 +215,55 @@ def test_a_build_refuses_a_target_another_item_is_already_installed_to(tmp_path,
         _refuse_occupied_targets(other, installed)
 
 
+@weaver_test()
+def test_the_catalogue_item_shares_a_host_with_proven_isolation(tmp_path, root):
+    """``Warehouse/_weaver`` is exempt both ways, and has to be.
+
+    Weaver owns ``_`` in a Warehouse and nothing else, so the catalogue may live
+    in one already holding a user's schemas. The inventory reads enforce that:
+    the catalogue item sees only ``_`` and every other item excludes it. The
+    Fabric harness builds exactly this arrangement.
+    """
+
+    from weaver.build_bundle.targets import ItemBindings, parse_build_item
+    from weaver.build_bundle.workflow import _refuse_occupied_targets
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+    from weaver.catalogue.state import Catalogue
+
+    # Only the catalogue is installed here, so the exemption is what is tested.
+    installed = _also_installing(Catalogue({}), BUILTIN_ITEM, "Shared")
+
+    # An ordinary item builds into the Warehouse the catalogue lives in.
+    ordinary = ItemBindings((parse_build_item("Lakehouse/Other=Lakehouse/Shared"),))
+    _refuse_occupied_targets(ordinary, installed)
+
+    # And the catalogue item builds into a Warehouse ordinary items are in.
+    builtin = ItemBindings((parse_build_item(f"{BUILTIN_ITEM}=Warehouse/Shared"),))
+    _refuse_occupied_targets(builtin, installed)
+
+
+def _also_installing(catalogue, item, target: str):
+    """The same catalogue, with one more ``_.Installation`` row."""
+
+    from dataclasses import replace
+
+    from weaver.catalogue.tables import INSTALLATION
+
+    rows = {key: dict(tables) for key, tables in catalogue.rows.items()}
+    existing = rows.setdefault(item, {}).get(INSTALLATION.name, ())
+    rows[item][INSTALLATION.name] = (
+        *existing,
+        {
+            "item_type": item.item_type,
+            "item_name": item.item_name,
+            "target_name": target,
+            "weaver_version": "0.0.0",
+            "signature": "installation",
+        },
+    )
+    return replace(catalogue, rows=rows)
+
+
 # --- load and test follow the catalogue ---------------------------------------
 
 
