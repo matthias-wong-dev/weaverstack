@@ -525,9 +525,7 @@ class LivySession:
                 # the capacity slot. The Lakehouse collection is the authority
                 # for that second transition.
                 try:
-                    collection = _call(
-                        "GET", self.base, self.token, expected=(200,)
-                    )
+                    collection = _call("GET", self.base, self.token, expected=(200,))
                 except LivyError:
                     time.sleep(self.poll_interval)
                     continue
@@ -535,8 +533,7 @@ class LivySession:
                     (
                         LivySessionInfo.from_mapping(item)
                         for item in collection.get("items", ())
-                        if str(item.get("id") or item.get("livyId") or "")
-                        == session_id
+                        if str(item.get("id") or item.get("livyId") or "") == session_id
                     ),
                     None,
                 )

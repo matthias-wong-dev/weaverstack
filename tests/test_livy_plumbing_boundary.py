@@ -203,7 +203,9 @@ def test_close_waits_for_fabric_scheduler_after_livy_is_dead(monkeypatch):
 
     _closing_session(api, monkeypatch).close()
 
-    assert [url.endswith("/sessions") for method, url in api.calls if method == "GET"] == [
+    assert [
+        url.endswith("/sessions") for method, url in api.calls if method == "GET"
+    ] == [
         False,
         True,
         False,
