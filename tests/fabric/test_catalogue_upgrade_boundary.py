@@ -118,6 +118,7 @@ def catalogue_of_its_own(fabric_workspace, clean_disposable_warehouse):
     _forget_the_catalogue_schema(warehouse.executor)
 
 
+@pytest.mark.slow
 @weaver_test(remote=True, resources={"rest", "tds"})
 def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     fabric_workspace, catalogue_of_its_own, tmp_path_factory
@@ -173,6 +174,7 @@ def test_a_build_introduces_a_catalogue_table_the_installation_lacks(
     assert third.status == "succeeded", _failures(third)
 
 
+@pytest.mark.slow
 @weaver_test(remote=True, resources={"rest", "tds"})
 def test_a_build_recovers_catalogue_certification_without_recreating_tables(
     fabric_workspace, catalogue_of_its_own, tmp_path_factory

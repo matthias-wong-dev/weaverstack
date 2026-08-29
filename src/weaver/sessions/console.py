@@ -366,12 +366,15 @@ class ConsoleSession(Session):
         # A program is Python that imports Weaver where Spark is, so this is the
         # one crossing that waits on Environment publication. Spark SQL and TDS reach
         # the same workspace without it.
-        scope.ensure_weaver()
-        scope.check_published_version(self.warn)
+        scope._check_weaver_available()
+        livy = self._foreground_livy(scope)
+        scope.ensure_weaver(livy=livy)
+        scope.check_published_version(self.warn, livy=livy)
         return scope.livy_run(
             program.source,
             name=program.name,
             timeout=timeout if timeout is not None else program.timeout,
+            livy=livy,
         )
 
     def execute_spark_sql_batch(
@@ -413,7 +416,18 @@ class ConsoleSession(Session):
             "        spark.conf.set(_key, _previous)\n"
             "emit(_rows)\n"
         )
-        return scope.livy_run(source, name="spark_sql", timeout=timeout)
+        livy = self._foreground_livy(scope)
+        return scope.livy_run(source, name="spark_sql", timeout=timeout, livy=livy)
+
+    def _foreground_livy(self, scope: "ConsoleScope"):
+        """The shared Livy session, reporting only a caller's blocking wait."""
+
+        if scope.livy is None:
+            raise CommandError("this workspace has no Livy session")
+        if scope.livy.ready:
+            return scope.livy.get()
+        with self.substep("Wait for Spark session"):
+            return scope.livy.get()
 
     def execute_tsql(
         self,
@@ -647,8 +661,8 @@ class ConsoleScope(WorkspaceScope):
         session.start()
         return session
 
-    def ensure_weaver(self) -> None:
-        """Assert the Livy session can import the published Weaver."""
+    def _check_weaver_available(self) -> None:
+        """Validate what a remote program needs before Spark is acquired."""
 
         if self.livy is None:
             raise CommandError("this workspace has no Livy session")
@@ -658,10 +672,17 @@ class ConsoleScope(WorkspaceScope):
             from ..fabric.livy import missing_environment
 
             raise CommandError(missing_environment(self.workspace))
-        with self.telemetry.external("livy", "ensure_weaver"):
-            self.livy.get().ensure_weaver()
 
-    def check_published_version(self, warn) -> None:
+    def ensure_weaver(self, *, livy=None) -> None:
+        """Assert the Livy session can import the published Weaver."""
+
+        self._check_weaver_available()
+        if livy is None:
+            livy = self.livy.get()
+        with self.telemetry.external("livy", "ensure_weaver"):
+            livy.ensure_weaver()
+
+    def check_published_version(self, warn, *, livy=None) -> None:
         """Compare this checkout's Weaver with the one published in the workspace.
 
         The two are independently versioned halves of one deployment and can
@@ -681,7 +702,9 @@ class ConsoleScope(WorkspaceScope):
 
         try:
             published = self.livy_run(
-                "import weaver\nemit(weaver.__version__)\n", name="version"
+                "import weaver\nemit(weaver.__version__)\n",
+                name="version",
+                livy=livy,
             )
         except Exception:  # noqa: BLE001 - a version check must never fail work
             return
@@ -693,7 +716,14 @@ class ConsoleScope(WorkspaceScope):
                 "matters"
             )
 
-    def livy_run(self, source: str, *, name: str, timeout: float | None = None):
+    def livy_run(
+        self,
+        source: str,
+        *,
+        name: str,
+        timeout: float | None = None,
+        livy=None,
+    ):
         """Submit one statement to this scope's Livy session and return its payload.
 
         A statement that fails is the caller's failure, not the session's: the
@@ -706,11 +736,12 @@ class ConsoleScope(WorkspaceScope):
 
         if self.livy is None:
             raise CommandError("this workspace has no Livy session")
-        session = self.livy.get()
+        if livy is None:
+            livy = self.livy.get()
         with self.telemetry.external("livy", name):
             kwargs = {} if timeout is None else {"timeout": timeout}
             try:
-                result = session.run(source, **kwargs)
+                result = livy.run(source, **kwargs)
             except LivyStatementError as exc:
                 raise self._statement_failure(exc, name) from exc
             except LivyError:

@@ -43,6 +43,10 @@ The scopes are:
 Integration stands alone. It does not require an additional remote or hosted
 declaration.
 
+`slow` is independent of remote, hosted, and full-integration scope. Normal
+runs skip slow tests. Pass `--runslow` when explicitly exercising exceptional,
+expensive Fabric or platform scenarios.
+
 ## Resource declarations
 
 Where a test runs and which resources it needs are independent dimensions. The

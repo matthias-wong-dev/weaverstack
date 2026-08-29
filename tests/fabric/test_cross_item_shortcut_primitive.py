@@ -46,6 +46,8 @@ from support.weaver_test import weaver_test
 
 from weaver.targets import ItemRef
 
+pytestmark = pytest.mark.slow
+
 #: Logical names owned by this module alone. The catalogue is keyed by logical
 #: item, never by physical target, so two estates sharing a name share Registry
 #: rows, which is how an unrelated build could make this one's shortcut correctly
