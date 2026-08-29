@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
 from support.weaver_test import weaver_test
 
 
+@pytest.mark.slow
 @weaver_test(remote=True)
 def test_a_qualified_environment_runs_weaver_in_the_consumer_workspace(
     fabric_workspace,
