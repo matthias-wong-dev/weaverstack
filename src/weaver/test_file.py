@@ -28,19 +28,19 @@ from .test_report import (
 def source_file_node(
     session: Any,
     *,
-    requested: Sequence[PhysicalTargetRef],
+    targets: Sequence[PhysicalTargetRef],
     path: Path,
     started: datetime,
     dry_run: bool = False,
 ) -> ValidationNodeReport:
-    """Compile one source file and run it against the requested target."""
+    """Compile one source file and run it against one physical target."""
 
-    if len(requested) != 1:
+    if len(targets) != 1:
         raise CommandError(
-            "test file= runs one validation against one target, and "
-            f"{len(requested)} were requested"
+            "test file= runs one validation against one item, and "
+            f"{len(targets)} were named"
         )
-    target = requested[0]
+    target = targets[0]
     if not path.exists():
         raise CommandError(f"no validation source at {path}")
 

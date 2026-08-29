@@ -118,10 +118,10 @@ def every_command(monkeypatch):
 @pytest.mark.parametrize(
     "line",
     [
-        "weaver build . --bind Lakehouse/Sales=Sales",
-        "weaver load Lakehouse/Sales Warehouse/Reporting",
-        "weaver test Warehouse/Reporting",
-        "weaver wipe Lakehouse/Sales --yes",
+        "weaver build . --item Lakehouse/Sales=Lakehouse/Sales_LH",
+        "weaver load --item Lakehouse/Sales --item Warehouse/Curated",
+        "weaver test --item Warehouse/Curated",
+        "weaver wipe Lakehouse/Sales_LH --yes",
     ],
 )
 @weaver_test()
@@ -260,8 +260,8 @@ def test_secondary_commands_remain_accepted_in_a_session():
 COMPOSITION = """\
 compose:
   dev:
-    - weaver build ./repository --bind Lakehouse/Sales=Sales
-    - weaver load Warehouse/Reporting
+    - weaver build ./repository --item Lakehouse/Sales=Lakehouse/Sales_LH
+    - weaver load --item Warehouse/Curated
 """
 
 
@@ -478,11 +478,12 @@ def _prepared(session, *words) -> None:
 
 
 @weaver_test()
-def test_a_lakehouse_command_offers_the_lakehouse_it_was_bound_to(recorded):
+def test_a_build_target_naming_its_lakehouse_offers_it(recorded):
     """Fabric attaches a Spark session to a Lakehouse, and the command has one.
 
-    The physical half of a binding, not workspace configuration: this workspace
-    configures no Lakehouses at all and the build still has somewhere to attach.
+    The physical half of a build target, not workspace configuration: this
+    workspace configures no Lakehouses at all and the build still has somewhere
+    to attach.
     """
 
     from weaver.sessions.requirements import LIVY
@@ -492,13 +493,39 @@ def test_a_lakehouse_command_offers_the_lakehouse_it_was_bound_to(recorded):
         session,
         "build",
         ".",
-        "--bind",
-        "Lakehouse/Sales=Sales",
+        "--item",
+        "Lakehouse/Sales=Lakehouse/Sales_LH",
         "--workspace",
         "A_Workspace",
     )
 
-    assert session.offered == ("Sales",)
+    assert session.offered == ("Sales_LH",)
+    assert LIVY in session.required
+
+
+@weaver_test()
+def test_a_logical_load_offers_nothing_to_the_prompt(recorded):
+    """The prompt resolves no logical item, so it offers no Lakehouse.
+
+    ``load --item Lakehouse/Sales`` names an item that may be installed in
+    ``Sales_Dev``. Which one is the catalogue's answer, and the operation reads
+    it and offers it. Livy is still declared, because a Lakehouse item usually
+    holds Python primitives, and declaring is not acquiring.
+    """
+
+    from weaver.sessions.requirements import LIVY
+
+    session = _Preparing()
+    _prepared(
+        session,
+        "load",
+        "--item",
+        "Lakehouse/Sales",
+        "--workspace",
+        "A_Workspace",
+    )
+
+    assert session.offered == ()
     assert LIVY in session.required
 
 
@@ -513,8 +540,8 @@ def test_a_warehouse_only_command_offers_no_lakehouse_and_wants_no_spark(recorde
         session,
         "build",
         ".",
-        "--bind",
-        "Warehouse/Reporting=Analysis",
+        "--item",
+        "Warehouse/Curated=Warehouse/Analysis",
         "--workspace",
         "A_Workspace",
     )
@@ -544,8 +571,8 @@ def test_a_command_wanting_spark_is_told_why_livy_is_not_starting(recorded, caps
         session,
         "build",
         ".",
-        "--bind",
-        "Lakehouse/Sales=Sales",
+        "--item",
+        "Lakehouse/Sales=Lakehouse/Sales_LH",
         "--workspace",
         "A_Workspace",
     )

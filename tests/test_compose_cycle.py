@@ -37,17 +37,17 @@ def _write(tmp_path, text: str):
 DEV = """\
 compose:
   dev:
-    - weaver wipe Lakehouse/Sales Warehouse/Reporting
-    - weaver build ./repository --bind Lakehouse/Sales=Sales
-    - weaver load Warehouse/Reporting
-    - weaver test Warehouse/Reporting
+    - weaver wipe Lakehouse/Sales_LH Warehouse/Curated_WH
+    - weaver build ./repository --item Lakehouse/Sales=Lakehouse/Sales_LH
+    - weaver load --item Warehouse/Curated
+    - weaver test --item Warehouse/Curated
 """
 
 RUNS = """\
 compose:
   verify:
-    - weaver load Warehouse/Reporting
-    - weaver test Warehouse/Reporting
+    - weaver load --item Warehouse/Curated
+    - weaver test --item Warehouse/Curated
 """
 
 
@@ -97,7 +97,7 @@ def test_a_composition_resolves_to_the_commands_it_lists(tmp_path):
     entries, found = load_composition("dev", file=str(path))
 
     assert found == path
-    assert entries[0] == "weaver wipe Lakehouse/Sales Warehouse/Reporting"
+    assert entries[0] == "weaver wipe Lakehouse/Sales_LH Warehouse/Curated_WH"
     assert len(entries) == 4
 
 
@@ -132,8 +132,9 @@ def test_an_empty_composition_is_refused(tmp_path):
 
 @weaver_test()
 def test_an_entry_is_a_weaver_command_line():
-    assert composition_words("weaver load Lakehouse/Sales") == [
+    assert composition_words("weaver load --item Lakehouse/Sales") == [
         "load",
+        "--item",
         "Lakehouse/Sales",
     ]
 
@@ -146,7 +147,11 @@ def test_the_weaver_prefix_is_optional():
     line written for the file need not.
     """
 
-    assert composition_words("load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
+    assert composition_words("load --item Lakehouse/Sales") == [
+        "load",
+        "--item",
+        "Lakehouse/Sales",
+    ]
 
 
 @weaver_test()
@@ -161,11 +166,11 @@ def test_quoted_arguments_survive_exactly():
 @pytest.mark.parametrize(
     "entry",
     [
-        "weaver load Lakehouse/Sales | tee log",
-        "weaver load Lakehouse/Sales && weaver test Lakehouse/Sales",
-        "weaver load Lakehouse/Sales > out.txt",
-        "weaver load $TARGET",
-        "weaver load `echo Lakehouse/Sales`",
+        "weaver load --item Lakehouse/Sales | tee log",
+        "weaver load --item Lakehouse/Sales && weaver test --item Lakehouse/Sales",
+        "weaver load --item Lakehouse/Sales > out.txt",
+        "weaver load --item $TARGET",
+        "weaver load --item `echo Lakehouse/Sales`",
     ],
 )
 @weaver_test()
@@ -288,7 +293,8 @@ def test_a_bad_entry_is_found_before_the_first_command_runs(tmp_path, recorded):
     calls, parser_factory, _ = recorded
     path = _write(
         tmp_path,
-        "compose:\n  dev:\n    - weaver load Lakehouse/Sales\n    - weaver frobnicate\n",
+        "compose:\n  dev:\n    - weaver load --item Lakehouse/Sales\n"
+        "    - weaver frobnicate\n",
     )
 
     with pytest.raises(CommandError):
@@ -324,11 +330,11 @@ def test_every_command_runs_in_order_with_its_arguments(
 
     assert status == 0
     assert len(calls) == 4
-    assert calls[0].targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
+    assert calls[0].targets == ["Lakehouse/Sales_LH", "Warehouse/Curated_WH"]
     assert calls[1].repository == "./repository"
-    assert calls[1].item_bindings == ["Lakehouse/Sales=Sales"]
-    assert calls[2].targets == ["Warehouse/Reporting"]
-    assert calls[3].targets == ["Warehouse/Reporting"]
+    assert calls[1].items == ["Lakehouse/Sales=Lakehouse/Sales_LH"]
+    assert calls[2].items == ["Warehouse/Curated"]
+    assert calls[3].items == ["Warehouse/Curated"]
 
 
 @weaver_test()
@@ -370,8 +376,8 @@ def test_commands_can_supply_the_composition_workspace(
         tmp_path,
         "compose:\n"
         "  dev:\n"
-        f'    - wipe Lakehouse/Sales --workspace-config "{config}"\n'
-        f'    - load Lakehouse/Sales --workspace-config "{config}"\n',
+        f'    - wipe Lakehouse/Sales_LH --workspace-config "{config}"\n'
+        f'    - load --item Lakehouse/Sales --workspace-config "{config}"\n',
     )
     opened = []
 
@@ -531,8 +537,11 @@ def test_a_composition_warms_the_union_before_the_first_command(
     assert required == {AUTH, RESOLVER, ONELAKE, LIVY, TDS}
 
     # And the Lakehouse Spark can attach to, gathered across the whole sequence
-    # rather than left to whichever command needs Spark first.
-    assert offered == [("Sales",)]
+    # rather than left to whichever command needs Spark first. The wipe names it
+    # physically and the build's target says it outright; the logical load and
+    # test contribute nothing, because where their items are installed is the
+    # catalogue's answer and each operation offers it once it has read one.
+    assert offered == [("Sales_LH",)]
 
 
 @weaver_test()

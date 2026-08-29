@@ -6,11 +6,13 @@ import pytest
 from factories import installed_catalogue, load_estate, load_estate_bindings
 from support.weaver_test import weaver_test
 
+from weaver.declaration.model import WeaverItemId
 from weaver.run import Runner, RunRequest, RunState
-from weaver.targets import PhysicalTargetRef
 
-RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
-REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
+#: What a request names. The node ids below stay physical: that is where the
+#: work runs.
+RAW = WeaverItemId.parse("Lakehouse/Raw")
+REPORTING = WeaverItemId.parse("Warehouse/Reporting")
 
 ORDER = "load:Lakehouse/Raw_LH/Sales.Order"
 DAILY = "load:Lakehouse/Raw_LH/Sales.Daily"

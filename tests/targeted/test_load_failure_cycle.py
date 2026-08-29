@@ -39,6 +39,7 @@ from support.weaver_test import weaver_test
 from support.workspaces import InventoryClient, given_workspace
 
 from weaver.catalogue.tables import RESULT_VOCABULARY
+from weaver.declaration.model import WeaverItemId
 from weaver.errors import LoadError
 from weaver.fabric.resolution import FabricResolver
 from weaver.load_report import (
@@ -55,13 +56,14 @@ from weaver.load_report import (
 from weaver.operations.load import run_load
 from weaver.run import RunState
 from weaver.store import FilesystemStore
-from weaver.targets import PhysicalTargetRef
 
 if TYPE_CHECKING:  # names used only in annotations
     from weaver.lakehouse import Lakehouse
 
-RAW = PhysicalTargetRef("lakehouse", "Raw_LH")
-REPORTING = PhysicalTargetRef("warehouse", "Reporting_WH")
+#: What a request names. The node ids below stay physical: that is where the
+#: work runs.
+RAW = WeaverItemId.parse("Lakehouse/Raw")
+REPORTING = WeaverItemId.parse("Warehouse/Reporting")
 
 ORDER = "load:Lakehouse/Raw_LH/Sales.Order"
 DAILY = "load:Lakehouse/Raw_LH/Sales.Daily"
@@ -151,7 +153,7 @@ def _run(session, *, fault_tolerant=False, targets=(RAW, REPORTING)):
         session.session,
         workspace=session.workspace,
         state=RunState(catalogue=session.catalogue),
-        requested=targets,
+        items=targets,
         fault_tolerant=fault_tolerant,
         dry_run=False,
     )

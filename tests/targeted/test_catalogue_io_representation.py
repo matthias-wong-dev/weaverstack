@@ -180,7 +180,11 @@ def test_a_physical_name_resolves_through_installation_and_registry():
     catalogue = loaded("DWG.Customer")
 
     resolved = catalogue.installed_object(
-        target_name="Sales_LH", schema="DWG", object="Customer", is_files=False
+        target_kind="Lakehouse",
+        target_name="Sales_LH",
+        schema="DWG",
+        object="Customer",
+        is_files=False,
     )
 
     assert resolved == identity("DWG.Customer")
@@ -193,7 +197,11 @@ def test_a_folder_resolves_under_its_files_identity():
     catalogue = never("Raw.CustomerCsv", files=True)
 
     resolved = catalogue.installed_object(
-        target_name="Sales_LH", schema="Raw", object="CustomerCsv", is_files=True
+        target_kind="Lakehouse",
+        target_name="Sales_LH",
+        schema="Raw",
+        object="CustomerCsv",
+        is_files=True,
     )
 
     assert resolved == identity("Raw.CustomerCsv", files=True)
@@ -203,12 +211,55 @@ def test_a_folder_resolves_under_its_files_identity():
 def test_an_object_the_catalogue_does_not_record_is_refused():
     with pytest.raises(ConfigError) as raised:
         never("DWG.Customer").installed_object(
-            target_name="Sales_LH", schema="DWG", object="Absent", is_files=False
+            target_kind="Lakehouse",
+            target_name="Sales_LH",
+            schema="DWG",
+            object="Absent",
+            is_files=False,
         )
 
     assert "not an object the Weaver catalogue records as installed" in str(
         raised.value
     )
+
+
+@weaver_test()
+def test_a_target_is_a_kind_and_a_name():
+    """``Lakehouse/Shared`` and ``Warehouse/Shared`` are two Fabric items.
+
+    A row's kind is its item's, because a Lakehouse item deploys to a Lakehouse.
+    """
+
+    from types import MappingProxyType
+
+    from weaver.declaration.model import WeaverItemId
+
+    def rows(kind):
+        owner = WeaverItemId(kind, kind)
+        return owner, MappingProxyType(
+            {
+                "Installation": (
+                    {
+                        "item_type": kind,
+                        "item_name": kind,
+                        "target_name": "Shared",
+                        "weaver_version": "0.1",
+                        "signature": "s",
+                    },
+                )
+            }
+        )
+
+    catalogue = Catalogue(
+        MappingProxyType(dict([rows("Lakehouse"), rows("Warehouse")]))
+    )
+
+    assert catalogue.bound_to(kind="Lakehouse", name="Shared") == {
+        WeaverItemId("Lakehouse", "Lakehouse")
+    }
+    assert catalogue.bound_to(kind="Warehouse", name="Shared") == {
+        WeaverItemId("Warehouse", "Warehouse")
+    }
 
 
 @weaver_test()
@@ -251,7 +302,11 @@ def test_a_name_two_bound_items_both_claim_is_refused():
 
     with pytest.raises(ConfigError) as raised:
         catalogue.installed_object(
-            target_name="Sales_LH", schema="DWG", object="Customer", is_files=False
+            target_kind="Lakehouse",
+            target_name="Sales_LH",
+            schema="DWG",
+            object="Customer",
+            is_files=False,
         )
 
     assert "more than one installed object" in str(raised.value)
@@ -300,7 +355,11 @@ def test_a_runtime_artefact_is_not_the_object_it_loads():
 
     with pytest.raises(ConfigError):
         catalogue.installed_object(
-            target_name="Sales_LH", schema="DWG", object="Customer", is_files=False
+            target_kind="Lakehouse",
+            target_name="Sales_LH",
+            schema="DWG",
+            object="Customer",
+            is_files=False,
         )
 
 
@@ -475,5 +534,9 @@ def test_a_catalogue_survives_the_crossing_that_carries_it():
 
     assert crossed.bookmark(identity("DWG.Customer")) == LOADED_AT
     assert crossed.installed_object(
-        target_name="Sales_LH", schema="DWG", object="Customer", is_files=False
+        target_kind="Lakehouse",
+        target_name="Sales_LH",
+        schema="DWG",
+        object="Customer",
+        is_files=False,
     ) == identity("DWG.Customer")

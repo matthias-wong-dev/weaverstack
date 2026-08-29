@@ -31,43 +31,68 @@ def test_version_reports_the_distribution(capsys):
 
 
 # --- one target grammar ------------------------------------------------------
+#
+# The three lifecycle verbs name logical Weaver items with a repeated
+# `--target`. `wipe` keeps physical positionals: it empties a physical resource
+# whether or not an installation exists, so it has no logical item to name.
 
 
-TARGET_COMMANDS = ("wipe", "load", "test")
+LOGICAL_TARGET_COMMANDS = ("build", "load", "test")
 
 
-@pytest.mark.parametrize("command", TARGET_COMMANDS)
+@pytest.mark.parametrize("command", LOGICAL_TARGET_COMMANDS)
 @weaver_test()
-def test_a_target_oriented_command_takes_its_targets_positionally(command):
-    """The three commands that operate on named targets spell them one way.
+def test_a_lifecycle_command_repeats_one_target_option(command):
+    """Build, load and test spell their targets one way.
 
-    ``load`` used to want ``--targets`` while its two neighbours took
-    positionals, so the same three names had to be typed two ways depending on
-    the verb. There is nothing behind the difference to remember, which is
-    what made it worth removing rather than documenting.
+    An option rather than positionals, because a build target may carry an ``=``
+    and one repeated flag reads the same on all three verbs.
     """
 
     from weaver_cli.main import build_parser
 
     parsed = build_parser().parse_args(
-        [command, "Lakehouse/Sales", "Warehouse/Reporting"]
+        [command, "--item", "Lakehouse/Landing", "--item", "Warehouse/Curated"]
     )
 
-    assert parsed.targets == ["Lakehouse/Sales", "Warehouse/Reporting"]
+    assert parsed.items == ["Lakehouse/Landing", "Warehouse/Curated"]
 
 
-@pytest.mark.parametrize("command", TARGET_COMMANDS)
 @weaver_test()
-def test_a_target_oriented_command_needs_at_least_one_target(command):
+def test_wipe_still_names_physical_targets_positionally():
+    """A wipe addresses a physical resource, so it names one."""
+
+    from weaver_cli.main import build_parser
+
+    parsed = build_parser().parse_args(["wipe", "Lakehouse/Sales_LH"])
+
+    assert parsed.targets == ["Lakehouse/Sales_LH"]
+
+
+@weaver_test()
+def test_the_retired_target_option_says_what_replaced_it():
+    """``--target`` named a physical item on build, load and test."""
+
+    from weaver.errors import CommandError
+    from weaver_cli.main import build_parser, handle_load
+
+    parsed = build_parser().parse_args(["load", "--target", "Lakehouse/Landing"])
+
+    with pytest.raises(CommandError, match="--target is replaced by --item"):
+        handle_load(parsed)
+
+
+@weaver_test()
+def test_wipe_needs_at_least_one_target():
     from weaver_cli.main import build_parser
 
     with pytest.raises(SystemExit):
-        build_parser().parse_args([command])
+        build_parser().parse_args(["wipe"])
 
 
 @weaver_test()
-def test_no_target_oriented_command_still_offers_the_old_spelling(capsys):
-    """Pre-alpha, so the inconsistent spelling is gone rather than shortcut.
+def test_no_lifecycle_command_still_offers_the_old_spellings(capsys):
+    """Pre-alpha, so the retired spellings are gone rather than shortcut.
 
     Asserted because a silently accepted ``--targets`` would be worse than a
     removed one: the sequence would keep working for whoever already typed it
@@ -76,7 +101,28 @@ def test_no_target_oriented_command_still_offers_the_old_spelling(capsys):
 
     from weaver_cli.main import build_parser
 
-    for command in TARGET_COMMANDS:
+    for command in LOGICAL_TARGET_COMMANDS:
         with pytest.raises(SystemExit):
-            build_parser().parse_args([command, "--targets", "Lakehouse/Sales"])
+            build_parser().parse_args([command, "--targets", "Lakehouse/Landing"])
         assert "--targets" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_the_retired_bind_grammar_says_what_replaced_it():
+    """``--bind`` parsed the two halves the other way round.
+
+    Recognised so the migration is one message rather than an unknown-option
+    error, and refused at the CLI boundary so no old binding reaches core.
+    """
+
+    from weaver.errors import CommandError
+    from weaver_cli.main import build_parser, handle_build
+
+    parsed = build_parser().parse_args(
+        ["build", ".", "--bind", "Lakehouse/Landing_Dev=Landing"]
+    )
+
+    with pytest.raises(CommandError, match="--bind is replaced by --item") as raised:
+        handle_build(parsed)
+
+    assert "--item Lakehouse/Landing=Lakehouse/Landing_Dev" in str(raised.value)

@@ -92,7 +92,7 @@ class BuildResult:
 def build(
     source=None,
     *,
-    bind: str | Sequence[str] | None = None,
+    items: str | Sequence[str] | None = None,
     workspace: str | None = None,
     catalogue: str | None = None,
     environment: str | None = None,
@@ -103,7 +103,11 @@ def build(
 ) -> BuildResult:
     """Build an authored repository.
 
-    Every value is a name: ``workspace``, ``catalogue`` and ``environment``
+    ``items`` are the Weaver items to build, each written
+    ``Lakehouse/Landing`` or ``Lakehouse/Landing=Lakehouse/Landing_Dev``. Naming
+    none builds every item the workspace configuration declares.
+
+    Every other value is a name: ``workspace``, ``catalogue`` and ``environment``
     are strings, resolved the same way each operation resolves them: an explicit
     argument, then workspace configuration, then the Session's own
     context, then, inside a Fabric notebook, what the notebook is attached to.
@@ -130,7 +134,7 @@ def build(
         session=session,
     )
 
-    selected = _item_bindings(bind, resolved_workspace)
+    selected = _item_bindings(items, resolved_workspace)
     from ..build_bundle.targets import WarehouseBinding, effective_item_bindings
 
     workspace_name = getattr(resolved_workspace, "workspace", None)
@@ -223,22 +227,28 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
     return location, FilesystemStore()
 
 
-def _item_bindings(bind, workspace: Workspace):
-    from ..build_bundle.targets import ItemBindings, parse_item_binding
+def _item_bindings(items, workspace: Workspace):
+    """Each requested item bound to the physical target it builds into.
 
-    if bind is None:
-        values = [f"Lakehouse/{name}" for name in workspace.lakehouses]
-        values += [f"Warehouse/{name}" for name in workspace.warehouses]
-    elif isinstance(bind, str):
-        values = [bind]
+    The one build-side resolution. An explicit ``=PHYSICAL`` wins; otherwise the
+    workspace configuration answers.
+    """
+
+    from ..build_bundle.targets import ItemBindings, parse_build_item
+
+    if items is None:
+        values = [str(item) for item in workspace.configured_items]
+    elif isinstance(items, str):
+        values = [items]
     else:
-        values = list(bind)
+        values = list(items)
     if not values:
         raise BuildError(
-            "build needs bind values or configured Lakehouse/Warehouse targets"
+            "build needs at least one item, or a targets: mapping in workspace "
+            "configuration"
         )
     return ItemBindings(
-        tuple(parse_item_binding(value, workspace=workspace) for value in values)
+        tuple(parse_build_item(value, workspace=workspace) for value in values)
     )
 
 
@@ -352,7 +362,3 @@ def _bundle_output(path: str | Path | None) -> Location:
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise BuildError(f"bundle path must not exist or must be empty: {output}")
     return Location(str(output))
-
-
-def _binding_text(binding) -> str:
-    return f"{binding.target.physical_kind}/{binding.target.item.name}={binding.item}"

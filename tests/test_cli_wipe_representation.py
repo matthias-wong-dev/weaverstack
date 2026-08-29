@@ -38,12 +38,9 @@ def test_parser_uses_the_shared_typed_target_grammar():
             "Warehouse/Shared",
             "--workspace",
             "Analytics",
-            "--unbind-from",
-            "Weaver",
         ]
     )
     assert args.targets == ["Lakehouse/Shared", "Warehouse/Shared"]
-    assert args.unbind_from == "Weaver"
 
 
 @weaver_test()
@@ -58,13 +55,28 @@ def test_removed_target_switches_are_rejected():
 def test_unbinding_is_reached_through_wipe_and_not_a_command_of_its_own():
     """Removing catalogue claims is part of clearing a target, not a verb.
 
-    `unbind_catalogue_claims` is still the operation, and `--unbind-from`
+    `unbind_catalogue_claims` is still the operation, and a resolved catalogue
     selects it. What is gone is a separate command that removed claims for a
     target it never looked at.
     """
 
     with pytest.raises(SystemExit):
         build_parser().parse_args(["unbind", "Lakehouse/Sales"])
+
+
+@weaver_test()
+def test_the_catalogue_to_unbind_from_is_the_one_the_command_resolved():
+    """``--unbind-from`` named a second catalogue for one command to reach.
+
+    ``--catalogue`` and workspace configuration already say which catalogue a
+    command means, and a wipe removing claims from a different one than it
+    resolved was two answers to one question.
+    """
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            ["wipe", "Lakehouse/Sales", "--unbind-from", "Weaver"]
+        )
 
 
 @weaver_test()
@@ -93,7 +105,6 @@ def test_dry_run_invokes_public_operation_once(monkeypatch, capsys):
     # CLI resolved for its own inheritance and override rules.
     ((targets, passed),) = calls
     assert targets == ("Lakehouse/Sales",)
-    assert passed["unbind_from"] is None
     assert passed["dry_run"] is True
     assert passed["session"].workspace is workspace
     assert "workspace" not in passed
@@ -126,8 +137,6 @@ def test_an_authorised_wipe_does_not_pay_for_a_preview_nobody_reads(monkeypatch)
                 "Lakehouse/Sales/Tables",
                 "--workspace",
                 "/tmp/local",
-                "--unbind-from",
-                "Control",
                 "--yes",
             ]
         )
@@ -135,8 +144,10 @@ def test_an_authorised_wipe_does_not_pay_for_a_preview_nobody_reads(monkeypatch)
     )
     ((targets, passed),) = calls
     assert targets == ("Lakehouse/Sales/Tables",)
-    assert passed["unbind_from"] == "Control"
+    # The catalogue travels on the Session's workspace, so the wipe removes its
+    # claims without a second argument naming one.
     assert passed["session"].workspace is workspace
+    assert workspace.catalogue == "Warehouse/Control"
     assert "workspace" not in passed
 
 

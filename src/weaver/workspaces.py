@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Mapping
 
-from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
+from .declaration.model import LAKEHOUSE, WeaverItemId
 from .errors import ConfigError
 from .targets import validate_name
 
@@ -92,7 +92,7 @@ def _catalogue_value(value: object) -> str:
 
 @dataclass(frozen=True)
 class ExecutionSettings:
-    """Technical parallelism settings for a Workspace or one physical item."""
+    """Technical parallelism settings for a Workspace or one Weaver item."""
 
     parallel_workers: int | None = None
 
@@ -106,26 +106,45 @@ class ExecutionSettings:
 
 @dataclass(frozen=True)
 class TargetDeclaration:
-    """A configured physical target and its default logical Weaver item."""
+    """Where one Weaver item deploys in this environment.
 
-    item: WeaverItemId
+    The item is the mapping key in :attr:`Workspace.targets`, and its type
+    decides the physical kind, so this carries one display name.
+    """
+
+    #: The environment-specific Fabric item display name.
+    physical: str
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "physical", validate_name(self.physical, what="physical target")
+        )
+
+    def target_for(self, item: WeaverItemId):
+        """The typed physical target this declaration names for ``item``."""
+
+        from .targets import DeltaTarget, ItemRef, WarehouseTarget
+
+        ref = ItemRef(self.physical)
+        return DeltaTarget(ref) if item.item_type == LAKEHOUSE else WarehouseTarget(ref)
 
 
 def _target_declarations(
-    declarations: Mapping[str, TargetDeclaration], *, item_type: str, field_name: str
-) -> Mapping[str, TargetDeclaration]:
-    resolved: dict[str, TargetDeclaration] = {}
-    for physical_name, declaration in dict(declarations).items():
-        name = validate_name(physical_name, what=f"{field_name} key")
+    declarations: Mapping[WeaverItemId, TargetDeclaration],
+) -> Mapping[WeaverItemId, TargetDeclaration]:
+    """Validate one item-keyed target mapping.
+
+    Two items naming one physical target is accepted here. A build into a target
+    another item is installed to is refused there.
+    """
+
+    resolved: dict[WeaverItemId, TargetDeclaration] = {}
+    for key, declaration in dict(declarations).items():
+        item = key if isinstance(key, WeaverItemId) else WeaverItemId.parse(str(key))
         if not isinstance(declaration, TargetDeclaration):
-            raise ConfigError(f"{field_name}[{name!r}] must be a TargetDeclaration")
-        if declaration.item.item_type != item_type:
-            raise ConfigError(
-                f"{field_name}[{name!r}] must name a {item_type} item, "
-                f"got {declaration.item}"
-            )
-        resolved[name] = declaration
+            raise ConfigError(f"targets[{str(item)!r}] must be a TargetDeclaration")
+        resolved[item] = declaration
     return MappingProxyType(resolved)
 
 
@@ -144,8 +163,8 @@ class Workspace:
     #: name to imply it.
     catalogue: str | None = None
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
-    lakehouses: Mapping[str, TargetDeclaration] = field(default_factory=dict)
-    warehouses: Mapping[str, TargetDeclaration] = field(default_factory=dict)
+    #: Where each Weaver item is deployed in this environment, keyed by the item.
+    targets: Mapping[WeaverItemId, TargetDeclaration] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -161,20 +180,7 @@ class Workspace:
             object.__setattr__(self, "catalogue", _catalogue_value(self.catalogue))
         if not isinstance(self.execution, ExecutionSettings):
             raise ConfigError("execution must be ExecutionSettings")
-        object.__setattr__(
-            self,
-            "lakehouses",
-            _target_declarations(
-                self.lakehouses, item_type=LAKEHOUSE, field_name="lakehouses"
-            ),
-        )
-        object.__setattr__(
-            self,
-            "warehouses",
-            _target_declarations(
-                self.warehouses, item_type=WAREHOUSE, field_name="warehouses"
-            ),
-        )
+        object.__setattr__(self, "targets", _target_declarations(self.targets))
 
     @property
     def catalogue_item(self) -> "ItemRef":
@@ -193,16 +199,53 @@ class Workspace:
             )
         return ItemRef(self.catalogue.split("/", 1)[1])
 
-    def declaration_for(self, item_type: str, physical_name: str) -> TargetDeclaration:
-        declarations = self.lakehouses if item_type == LAKEHOUSE else self.warehouses
-        try:
-            return declarations[physical_name]
-        except KeyError as exc:
-            plural = "Lakehouses" if item_type == LAKEHOUSE else "Warehouses"
-            raise ConfigError(
-                f"physical target {plural}/{physical_name} is not configured"
-            ) from exc
+    def target_for(self, item: WeaverItemId):
+        """Where this configuration deploys one item, typed. A build's answer."""
 
-    def settings_for_warehouse(self, name: str) -> ExecutionSettings:
-        declaration = self.warehouses.get(name)
-        return declaration.execution if declaration else self.execution
+        return self._declaration(item).target_for(item)
+
+    def _declaration(self, item: WeaverItemId) -> TargetDeclaration:
+        declaration = self.targets.get(item)
+        if declaration is None:
+            raise ConfigError(
+                f"{item} has no physical target in this Workspace configuration. "
+                f"Add a targets: entry for {item}, or name the target as "
+                f"{item}={item.item_type}/<physical name>."
+            )
+        return declaration
+
+    @property
+    def configured_items(self) -> tuple[WeaverItemId, ...]:
+        """Every item this configuration deploys, in identity order."""
+
+        return tuple(sorted(self.targets, key=str))
+
+    @property
+    def configured_lakehouses(self) -> tuple[str, ...]:
+        """The Lakehouses this configuration deploys into, sorted.
+
+        What a Livy session falls back to when no operation offered it one.
+        """
+
+        return tuple(
+            sorted(
+                {
+                    declaration.physical
+                    for item, declaration in self.targets.items()
+                    if item.item_type == LAKEHOUSE
+                }
+            )
+        )
+
+    def settings_for(self, item: WeaverItemId) -> ExecutionSettings:
+        """Parallelism for one Weaver item, or the workspace's own.
+
+        Keyed by the item an operation selected. A physical Warehouse two items
+        may deploy to carries no settings of its own, so what one item declares
+        reaches only that item's own work.
+        """
+
+        declaration = self.targets.get(item)
+        if declaration is None or declaration.execution.parallel_workers is None:
+            return self.execution
+        return declaration.execution

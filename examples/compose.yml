@@ -7,6 +7,10 @@
 # name their repository and workspace. Entries name a Weaver command; the
 # `weaver` in front of it is optional, so a line copied from a terminal works
 # unchanged.
+#
+# Build, load and test name Weaver items; `wipe` names physical targets.
+# Pointing the sequence at another environment is a different
+# `--workspace-config` and nothing else.
 
 compose:
   # Everything from empty: clear the estate, build it, load it, test it.
@@ -17,23 +21,23 @@ compose:
     # is work nobody needs. Leaving it out cost about eighty seconds per cycle
     # to tidy a catalogue the very next command rebuilds.
     - wipe Lakehouse/Sales Warehouse/Reporting Warehouse/Weaver --workspace-config "examples/weaver_example.yml"
-    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Sales --bind Warehouse/Reporting=Reporting --workspace-config "examples/weaver_example.yml"
-    - load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
-    - test Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - load --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - test --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
 
   # The inner loop: an authored change, rebuilt and re-run without wiping.
   rebuild:
-    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Sales --bind Warehouse/Reporting=Reporting --workspace-config "examples/weaver_example.yml"
-    - load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
-    - test Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - load --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - test --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
 
 
   no-op:
     - wipe Lakehouse/Sales Warehouse/Reporting Warehouse/Weaver --workspace-config "examples/weaver_example.yml"
-    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Sales --bind Warehouse/Reporting=Reporting --workspace-config "examples/weaver_example.yml"
-    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Sales --bind Warehouse/Reporting=Reporting --workspace-config "examples/weaver_example.yml"
-    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Sales --bind Warehouse/Reporting=Reporting --workspace-config "examples/weaver_example.yml"
-    - load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
-    - load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
-    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --bind Lakehouse/Sales=Sales --bind Warehouse/Reporting=Reporting 
-    - load Lakehouse/Sales Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - load --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - load --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"
+    - build "examples/workspaces/Weaver Example/Sales-Estate.Notebook/Resources/builtin/repository" --item Lakehouse/Sales --item Warehouse/Reporting 
+    - load --item Lakehouse/Sales --item Warehouse/Reporting --workspace-config "examples/weaver_example.yml"

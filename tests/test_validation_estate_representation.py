@@ -17,7 +17,7 @@ from support.weaver_test import weaver_test
 
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import DEPENDENCY, INSTALLATION, REGISTRY, TEST_DICTIONARY
-from weaver.declaration.metadata import ObjectId
+from weaver.declaration.metadata import TEST, ObjectId
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.errors import CatalogueStateError, ValidationError
 from weaver.etl import validation_artefact_id
@@ -318,11 +318,11 @@ def test_an_unknown_test_type_is_refused_rather_than_guessed(catalogue):
 
 
 @weaver_test()
-def test_a_request_names_a_target_and_means_everything_installed_there(catalogue):
+def test_a_request_names_an_item_and_means_every_validation_it_owns(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
 
-    selected = estate.for_targets([LAKEHOUSE_TARGET])
+    selected = estate.for_items([LAKEHOUSE])
 
     assert [validation.qualified for validation in selected] == [
         "Sales.OrdersReconcile"
@@ -330,11 +330,11 @@ def test_a_request_names_a_target_and_means_everything_installed_there(catalogue
 
 
 @weaver_test()
-def test_both_targets_select_both(catalogue):
+def test_both_items_select_both(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
 
-    selected = estate.for_targets([LAKEHOUSE_TARGET, WAREHOUSE_TARGET])
+    selected = estate.for_items([LAKEHOUSE, WAREHOUSE])
 
     assert len(selected) == 2
 
@@ -344,7 +344,7 @@ def test_naming_one_selects_only_it(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
 
-    found = estate.named("Sales.OrdersReconcile", [LAKEHOUSE_TARGET])
+    found = estate.named("Sales.OrdersReconcile", [LAKEHOUSE])
 
     assert found.qualified == "Sales.OrdersReconcile"
 
@@ -357,7 +357,7 @@ def test_naming_one_that_is_not_installed_is_an_error(catalogue):
     estate = ValidationEstate.from_catalogue(rows)
 
     with pytest.raises(ValidationError, match="no validation named 'Sales.Absent'"):
-        estate.named("Sales.Absent", [LAKEHOUSE_TARGET])
+        estate.named("Sales.Absent", [LAKEHOUSE])
 
 
 @weaver_test()
@@ -366,7 +366,7 @@ def test_the_error_lists_what_is_installed(catalogue):
     estate = ValidationEstate.from_catalogue(rows)
 
     with pytest.raises(ValidationError, match="Sales.OrdersReconcile"):
-        estate.named("Sales.Absent", [LAKEHOUSE_TARGET])
+        estate.named("Sales.Absent", [LAKEHOUSE])
 
 
 @weaver_test()
@@ -374,9 +374,62 @@ def test_the_order_is_stable(catalogue):
     rows, _lake, _house = catalogue
     estate = ValidationEstate.from_catalogue(rows)
 
-    ordered = validation_order(estate.for_targets([WAREHOUSE_TARGET, LAKEHOUSE_TARGET]))
+    ordered = validation_order(estate.for_items([WAREHOUSE, LAKEHOUSE]))
 
     assert [str(validation.logical) for validation in ordered] == [
         "Lakehouse/Sales/Sales.OrdersReconcile",
         "Warehouse/Reporting/Sales.OrdersHaveCustomers",
     ]
+
+
+@weaver_test()
+def test_two_items_sharing_one_target_do_not_select_each_others_validations():
+    """The selection boundary is the logical item, not the physical container.
+
+    Both items are installed in ``Shared_WH``. Naming one runs its own check, and
+    the named lookup is scoped the same way, so a name the other item owns is
+    reported as not installed rather than run.
+    """
+
+    other = WeaverItemId.parse("Warehouse/Inventory")
+    rows = Catalogue(
+        {
+            WAREHOUSE: {
+                INSTALLATION.name: (_installation(WAREHOUSE, "Shared_WH"),),
+                TEST_DICTIONARY.name: (
+                    _dictionary(WAREHOUSE, "Sales", "OrdersHaveCustomers"),
+                ),
+                REGISTRY.name: (
+                    _artefact_row(
+                        WAREHOUSE,
+                        TEST,
+                        "Sales",
+                        "OrdersHaveCustomers",
+                        "stored_procedure",
+                    )[1],
+                ),
+            },
+            other: {
+                INSTALLATION.name: (_installation(other, "Shared_WH"),),
+                TEST_DICTIONARY.name: (_dictionary(other, "Stock", "LevelsAgree"),),
+                REGISTRY.name: (
+                    _artefact_row(
+                        other, TEST, "Stock", "LevelsAgree", "stored_procedure"
+                    )[1],
+                ),
+            },
+        }
+    )
+    estate = ValidationEstate.from_catalogue(rows)
+
+    assert [validation.qualified for validation in estate.for_items([WAREHOUSE])] == [
+        "Sales.OrdersHaveCustomers"
+    ]
+
+    with pytest.raises(
+        ValidationError, match="no validation named 'Stock.LevelsAgree'"
+    ):
+        estate.named("Stock.LevelsAgree", [WAREHOUSE])
+
+    # Both installed in one Warehouse, and each request answers for its own item.
+    assert len(estate.for_items([WAREHOUSE, other])) == 2

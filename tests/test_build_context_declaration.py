@@ -88,7 +88,9 @@ def repository(tmp_path):
 
 
 def _build(repository, **kwargs):
-    return weaver.build(str(repository), bind="Lakehouse/Sales_LH=Sales", **kwargs)
+    return weaver.build(
+        str(repository), items="Lakehouse/Sales=Lakehouse/Sales_LH", **kwargs
+    )
 
 
 @weaver_test()
@@ -160,7 +162,7 @@ def public_shortcut_build(tmp_path, monkeypatch):
             session.sql_executor = lambda *_args, **_kwargs: EmptySql()
             result = weaver.build(
                 str(root),
-                bind="Lakehouse/Play_LH=Play",
+                items="Lakehouse/Play=Lakehouse/Play_LH",
                 session=session,
                 bundle_only=True,
                 bundle_path=output,
@@ -334,8 +336,8 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused_by_the_session
 
 
 @weaver_test()
-def test_a_build_offers_the_lakehouse_it_was_bound_to(repository, captured):
-    """No configured Lakehouses, and the build still says where Spark could live."""
+def test_a_build_offers_the_lakehouse_its_target_named(repository, captured):
+    """No configured targets, and the build still says where Spark could live."""
 
     from weaver.sessions.testing import TestSession
 
@@ -345,7 +347,7 @@ def test_a_build_offers_the_lakehouse_it_was_bound_to(repository, captured):
     with pytest.raises(Halt):
         _build(repository, session=session)
 
-    assert not workspace.lakehouses
+    assert not workspace.targets
     assert session.scope(workspace).spark_home == "Sales_LH"
 
 
@@ -365,7 +367,7 @@ def test_a_warehouse_only_build_offers_none(captured, tmp_path):
     with pytest.raises(Halt):
         weaver.build(
             str(root),
-            bind="Warehouse/Reporting_WH=Reporting",
+            items="Warehouse/Reporting=Warehouse/Reporting_WH",
             session=session,
         )
 
@@ -448,7 +450,7 @@ def test_a_repository_error_is_reported_before_any_fabric_call(tmp_path, monkeyp
     with pytest.raises(BuildError):
         weaver.build(
             str(empty),
-            bind="Lakehouse/Sales_LH=Sales",
+            items="Lakehouse/Sales=Lakehouse/Sales_LH",
             workspace="Analytics",
             catalogue="Warehouse/Weaver",
             environment="WeaverEnv",

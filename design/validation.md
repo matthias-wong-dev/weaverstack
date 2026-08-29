@@ -364,9 +364,9 @@ Four modes, and they mean the same thing:
 
 | | what it runs | evidence |
 |---|---|---|
-| `weaver.test(target)` | every installed validation in the target | counts |
-| `weaver.test(target, name=…)` | one installed validation | counts **and** rows |
-| `weaver.test(target, file=…)` | a source file, installing nothing | counts and rows |
+| `weaver.test(item)` | every installed validation the item owns | counts |
+| `weaver.test(item, name=…)` | one installed validation | counts **and** rows |
+| `weaver.test(item, file=…)` | a source file, installing nothing | counts and rows |
 | `Sales__X(spark).read()` | one authored class, directly | rows |
 
 The first three read the **installed catalogue** and never reopen the

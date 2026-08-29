@@ -69,6 +69,8 @@ def arguments(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     options = arguments(argv)
+    # The items this estate authors. The same names in every environment.
+    items = ["Lakehouse/Sales", "Warehouse/Reporting"]
     lakehouse = f"Lakehouse/{options.lakehouse}"
     warehouse = f"Warehouse/{options.warehouse}"
 
@@ -90,9 +92,9 @@ def main(argv: list[str] | None = None) -> int:
 
         built = weaver.build(
             str(ESTATE),
-            # The physical side is typed and supplies the type for both, so
-            # the logical item is named alone.
-            bind=[f"{lakehouse}=Sales", f"{warehouse}=Reporting"],
+            # Both halves: this run has no workspace configuration to read
+            # the target from.
+            items=[f"Lakehouse/Sales={lakehouse}", f"Warehouse/Reporting={warehouse}"],
             session=session,
         )
         print(f"build {built.status}: bundle {built.bundle_id}")
@@ -101,10 +103,10 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  {failure.action_id}: {failure.message}")
             return 1
 
-        loaded = weaver.load([lakehouse, warehouse], session=session)
+        loaded = weaver.load(items, session=session)
         print(f"load {'succeeded' if loaded.succeeded else 'failed'}")
 
-        tested = weaver.test([lakehouse, warehouse], session=session)
+        tested = weaver.test(items, session=session)
         totals = tested.totals()
         print(
             f"test {tested.status}: {totals['passed']} passed, "

@@ -46,6 +46,10 @@ from weaver.targets import PhysicalTargetRef
 RAW = PhysicalTargetRef("lakehouse", LOAD_PRODUCER_TARGET)
 REPORTING = PhysicalTargetRef("warehouse", LOAD_CONSUMER_TARGET)
 
+#: What a request names: the logical items, not the targets they are installed in.
+PRODUCER = WeaverItemId.parse(LOAD_PRODUCER)
+CONSUMER = WeaverItemId.parse(LOAD_CONSUMER)
+
 
 @pytest.fixture
 def estate(tmp_path):
@@ -61,7 +65,7 @@ def node_ids(dag) -> tuple[str, ...]:
 
 
 @weaver_test()
-def test_load_dag_maps_physical_targets_back_to_logical_items(estate):
+def test_the_installed_graph_maps_logical_items_to_physical_targets(estate):
     assert estate.installations == {
         WeaverItemId.parse(LOAD_PRODUCER): RAW,
         WeaverItemId.parse(LOAD_CONSUMER): REPORTING,
@@ -70,8 +74,52 @@ def test_load_dag_maps_physical_targets_back_to_logical_items(estate):
 
 
 @weaver_test()
+def test_the_installed_graph_answers_where_one_logical_item_lives(estate):
+    """The runtime authority a load and a test both read.
+
+    One reading of ``_.Installation``, in one place. Nothing else interprets it.
+    """
+
+    assert estate.target_for(PRODUCER) == RAW
+    assert estate.target_for(CONSUMER) == REPORTING
+
+    with pytest.raises(CatalogueStateError, match="has no installation row"):
+        estate.target_for(WeaverItemId.parse("Lakehouse/Absent"))
+
+
+@weaver_test()
+def test_two_logical_items_may_share_one_physical_target():
+    """The estate this whole selection boundary exists for.
+
+    Both items are installed in ``Shared_LH``, and the graph says so for each of
+    them. What each item owns is a separate question, which the selection tests
+    below answer.
+    """
+
+    catalogue = _catalogue(
+        **{
+            "Lakehouse/Raw": _rows(
+                Installation=[_installation("Lakehouse/Raw", "Shared_LH")],
+                Registry=[_registry("Lakehouse/Raw", "Sales", "Order")],
+            ),
+            "Lakehouse/Staging": _rows(
+                Installation=[_installation("Lakehouse/Staging", "Shared_LH")],
+                Registry=[_registry("Lakehouse/Staging", "Sales", "Customer")],
+            ),
+        }
+    )
+    estate = catalogue.dag()
+    shared = PhysicalTargetRef("lakehouse", "Shared_LH")
+
+    assert estate.target_for(WeaverItemId.parse("Lakehouse/Raw")) == shared
+    assert estate.target_for(WeaverItemId.parse("Lakehouse/Staging")) == shared
+    # One target, named once, whichever items are bound to it.
+    assert estate.targets == (shared,)
+
+
+@weaver_test()
 def test_load_dag_finds_the_installed_primitive_for_each_dispatch_kind(estate):
-    dag = load_dag(estate, targets=(RAW, REPORTING))
+    dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
     assert {node.node_id: node.primitive_kind for node in dag.nodes} == {
         "load:Lakehouse/Raw_LH/Sales.Export": PYTHON_FOLDER,
@@ -88,7 +136,7 @@ def test_load_dag_finds_the_installed_primitive_for_each_dispatch_kind(estate):
 
 @weaver_test()
 def test_load_dag_loads_every_object_in_the_requested_targets(estate):
-    dag = load_dag(estate, targets=(RAW,))
+    dag = load_dag(estate, items=(PRODUCER,))
 
     assert node_ids(dag) == (
         "load:Lakehouse/Raw_LH/Sales.Export",
@@ -101,7 +149,7 @@ def test_load_dag_loads_every_object_in_the_requested_targets(estate):
 def test_load_dag_excludes_objects_that_own_no_load_primitive(estate):
     """A view and the generated runtime folder are installed and not loadable."""
 
-    dag = load_dag(estate, targets=(RAW, REPORTING))
+    dag = load_dag(estate, items=(PRODUCER, CONSUMER))
     logical = {str(node.logical_id) for node in dag.nodes if node.logical_id}
 
     assert f"{LOAD_CONSUMER}/Sales.Live" not in logical
@@ -110,7 +158,7 @@ def test_load_dag_excludes_objects_that_own_no_load_primitive(estate):
 
 @weaver_test()
 def test_load_dag_keeps_a_single_target_as_a_hard_boundary(estate):
-    dag = load_dag(estate, targets=(REPORTING,))
+    dag = load_dag(estate, items=(CONSUMER,))
 
     assert node_ids(dag) == ("load:Warehouse/Reporting_WH/Sales.Summary",)
     assert dag.edges == ()
@@ -118,14 +166,14 @@ def test_load_dag_keeps_a_single_target_as_a_hard_boundary(estate):
 
 @weaver_test()
 def test_load_dag_excludes_unrelated_downstream_objects(estate):
-    dag = load_dag(estate, targets=(RAW,))
+    dag = load_dag(estate, items=(PRODUCER,))
 
     assert "load:Warehouse/Reporting_WH/Sales.Summary" not in dag.by_id
 
 
 @weaver_test()
 def test_load_dag_crosses_targets_only_when_both_are_requested(estate):
-    dag = load_dag(estate, targets=(RAW, REPORTING))
+    dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
     assert "load:Lakehouse/Raw_LH/Sales.Order" in dag.by_id
     assert "refresh:Lakehouse/Raw_LH" in dag.by_id
@@ -136,7 +184,7 @@ def test_load_dag_crosses_targets_only_when_both_are_requested(estate):
 def test_names_select_exact_nodes_without_dependencies_or_edges(estate):
     dag = load_dag(
         estate,
-        targets=(RAW,),
+        items=(PRODUCER,),
         names=("Sales.Order", "Sales.Daily"),
     )
 
@@ -149,7 +197,7 @@ def test_names_select_exact_nodes_without_dependencies_or_edges(estate):
 
 @weaver_test()
 def test_a_name_is_resolved_case_insensitively_within_the_requested_targets(estate):
-    dag = load_dag(estate, targets=(RAW,), names=("sales.order",))
+    dag = load_dag(estate, items=(PRODUCER,), names=("sales.order",))
 
     assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Sales.Order",)
 
@@ -157,7 +205,7 @@ def test_a_name_is_resolved_case_insensitively_within_the_requested_targets(esta
 @weaver_test()
 def test_an_unknown_load_name_lists_the_installed_loadables(estate):
     with pytest.raises(LoadError, match="no loadable object named 'Sales.Missing'"):
-        load_dag(estate, targets=(RAW,), names=("Sales.Missing",))
+        load_dag(estate, items=(PRODUCER,), names=("Sales.Missing",))
 
 
 # --- ordering -----------------------------------------------------------------
@@ -165,7 +213,7 @@ def test_an_unknown_load_name_lists_the_installed_loadables(estate):
 
 @weaver_test()
 def test_load_dag_orders_direct_dependencies(estate):
-    dag = load_dag(estate, targets=(RAW,))
+    dag = load_dag(estate, items=(PRODUCER,))
 
     assert (
         "load:Lakehouse/Raw_LH/Sales.Order",
@@ -230,7 +278,7 @@ class Sales__Customer(Table):
     estate = catalogue.dag()
     assert [edge.reference for edge in estate.edges] == ["Files.Sales__Drop"]
 
-    dag = load_dag(estate, targets=(RAW,))
+    dag = load_dag(estate, items=(PRODUCER,))
     assert dag.edges == (
         ("load:Lakehouse/Raw_LH/Sales.Drop", "load:Lakehouse/Raw_LH/Sales.Customer"),
     )
@@ -240,7 +288,7 @@ class Sales__Customer(Table):
 def test_load_dag_crosses_items_through_shortcutes(estate):
     """The Warehouse consumer's upstream is the Lakehouse table, not the shortcut."""
 
-    dag = load_dag(estate, targets=(RAW, REPORTING))
+    dag = load_dag(estate, items=(PRODUCER, CONSUMER))
     consumer = "load:Warehouse/Reporting_WH/Sales.Summary"
 
     assert "load:Lakehouse/Raw_LH/Sales.Order" in dag.by_id
@@ -251,7 +299,7 @@ def test_load_dag_crosses_items_through_shortcutes(estate):
 
 @weaver_test()
 def test_load_dag_inserts_endpoint_refresh_before_shortcut_consumers(estate):
-    dag = load_dag(estate, targets=(RAW, REPORTING))
+    dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
     assert (
         "load:Lakehouse/Raw_LH/Sales.Order",
@@ -267,7 +315,7 @@ def test_load_dag_inserts_endpoint_refresh_before_shortcut_consumers(estate):
 def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse(
     estate,
 ):
-    dag = load_dag(estate, targets=(RAW, REPORTING))
+    dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
     assert dag.upstream("refresh:Lakehouse/Raw_LH") == {
         "load:Lakehouse/Raw_LH/Sales.Order",
@@ -314,7 +362,7 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
     repository = parse_item_repository(Location(str(tmp_path)))
     dag = LoadDag.from_catalogue(
         installed_catalogue(repository, load_estate_bindings()),
-        targets=(RAW, REPORTING),
+        items=(PRODUCER, CONSUMER),
     )
 
     refreshes = [node for node in dag.nodes if node.primitive_kind == ENDPOINT_REFRESH]
@@ -327,8 +375,8 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
 
 @weaver_test()
 def test_load_dag_is_deterministic(estate):
-    once = load_dag(estate, targets=(RAW, REPORTING))
-    again = load_dag(estate, targets=(REPORTING, RAW))
+    once = load_dag(estate, items=(PRODUCER, CONSUMER))
+    again = load_dag(estate, items=(CONSUMER, PRODUCER))
 
     assert node_ids(once) == node_ids(again)
     assert once.edges == again.edges
@@ -412,12 +460,17 @@ def _colliding_catalogue(target: str = "Shared_LH"):
 
 @weaver_test()
 def test_load_dag_rejects_ambiguous_physical_bindings():
-    """Two logical objects cannot resolve to one physical object."""
+    """Two logical objects cannot resolve to one physical object.
+
+    Refused for the target, not for the item: the collision is physical, so a
+    dispatch into ``Shared_LH`` is ambiguous even though only one of the two
+    items claiming that address was requested.
+    """
 
     estate = _colliding_catalogue().dag()
 
     with pytest.raises(LoadError, match="two logical objects at one physical address"):
-        load_dag(estate, targets=(PhysicalTargetRef("lakehouse", "Shared_LH"),))
+        load_dag(estate, items=(WeaverItemId.parse("Lakehouse/Raw"),))
 
 
 @weaver_test()
@@ -433,7 +486,7 @@ def test_ambiguity_elsewhere_in_the_estate_does_not_stop_an_unrelated_load(estat
     assert colliding.ambiguous
 
     # The canonical estate is untouched by a collision it does not contain.
-    dag = load_dag(estate, targets=(RAW,))
+    dag = load_dag(estate, items=(PRODUCER,))
 
     assert node_ids(dag) == (
         "load:Lakehouse/Raw_LH/Sales.Export",
@@ -443,12 +496,12 @@ def test_ambiguity_elsewhere_in_the_estate_does_not_stop_an_unrelated_load(estat
 
 
 @weaver_test()
-def test_two_items_may_share_a_target_when_their_objects_do_not_collide():
-    """A request names a target and means everything installed there.
+def test_a_request_for_one_of_two_items_sharing_a_target_loads_that_item_alone():
+    """The execution boundary is the logical item, not the physical container.
 
-    An estate accumulates an Installation row for every item ever bound to a
-    target, so refusing the item overlap would stop a load of a target whose
-    objects are perfectly unambiguous.
+    Two items are installed in ``Shared_LH`` and their objects do not collide.
+    Naming one of them loads its object. The other's is in the same Lakehouse and
+    is no part of what was asked for.
     """
 
     catalogue = _catalogue(
@@ -481,14 +534,23 @@ def test_two_items_may_share_a_target_when_their_objects_do_not_collide():
             ),
         }
     )
-    dag = load_dag(
+    dag = load_dag(catalogue.dag(), items=(WeaverItemId.parse("Lakehouse/Raw"),))
+
+    # Raw's object, dispatched at the Lakehouse the two items share. Staging's
+    # is installed there too and was not requested.
+    assert node_ids(dag) == ("load:Lakehouse/Shared_LH/Sales.Order",)
+
+    both = load_dag(
         catalogue.dag(),
-        targets=(PhysicalTargetRef("lakehouse", "Shared_LH"),),
+        items=(
+            WeaverItemId.parse("Lakehouse/Raw"),
+            WeaverItemId.parse("Lakehouse/Staging"),
+        ),
     )
 
     # Ordered by logical identity, so the two items' objects interleave by
     # item name rather than by the physical name they share.
-    assert node_ids(dag) == (
+    assert node_ids(both) == (
         "load:Lakehouse/Shared_LH/Sales.Order",
         "load:Lakehouse/Shared_LH/Sales.Customer",
     )
@@ -535,7 +597,7 @@ def test_load_dag_rejects_unresolved_dependencies():
     estate = catalogue.dag()
 
     with pytest.raises(LoadError, match="resolves to neither an installed object"):
-        load_dag(estate, targets=(RAW,))
+        load_dag(estate, items=(PRODUCER,))
 
 
 @weaver_test()
@@ -603,7 +665,7 @@ def test_load_dag_ignores_a_fully_qualified_physical_read():
             )
         }
     )
-    dag = load_dag(catalogue.dag(), targets=(RAW,))
+    dag = load_dag(catalogue.dag(), items=(PRODUCER,))
 
     assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Sales.Order",)
     assert [message.code for message in dag.messages] == ["dependency_external"]
@@ -670,7 +732,7 @@ def _resolved_producers(tmp_path):
     estate = installed_catalogue(repository, bindings).dag()
 
     consumer = WeaverDocumentId.parse(f"{item}/Sales.Report")
-    dag = load_dag(estate, targets=(PhysicalTargetRef("lakehouse", "Curated_LH"),))
+    dag = load_dag(estate, items=(WeaverItemId.parse(item),))
     return estate, consumer, dag
 
 
@@ -757,10 +819,7 @@ def test_a_python_shortcut_import_orders_a_warehouse_before_its_lakehouse_consum
     )
     dag = load_dag(
         catalogue.dag(),
-        targets=(
-            PhysicalTargetRef("warehouse", "Serving_WH"),
-            PhysicalTargetRef("lakehouse", "Published_LH"),
-        ),
+        items=(WeaverItemId.parse(producer), WeaverItemId.parse(consumer)),
     )
 
     from weaver.load_plan import ONELAKE_PUBLICATION, OneLakeReadiness

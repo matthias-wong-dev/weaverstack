@@ -1,7 +1,7 @@
 """Public ``weaver.load(...)`` entry point and orchestration.
 
-Loads read installed state from the catalogue, construct and resolve a physical
-DAG, then dispatch primitives and record what each one did.
+Read the catalogue, resolve the requested items, construct and resolve a physical
+DAG, dispatch primitives, record what each one did.
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from ..declaration.model import WeaverItemId
 from ..errors import CommandError, LoadError
 from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 from ..load_report import (
@@ -21,11 +22,8 @@ from ..load_report import (
     LoadNodeReport,
     LoadRunReport,
 )
-from ..targets import (
-    PhysicalTargetRef,
-    lakehouse_names,
-    parse_physical_target,
-)
+from ..targets import lakehouse_names
+from .items import installed_targets, requested_items
 
 #: The task type this operation records under. Restated rather than imported,
 #: because this module reaches ``weaver.run`` inside the function that needs it;
@@ -35,7 +33,7 @@ TASK_TYPE = "load"
 
 
 def load(
-    targets: str | Sequence[str],
+    items: str | Sequence[str],
     *,
     names: str | Sequence[str] | None = None,
     workspace: str | None = None,
@@ -46,15 +44,14 @@ def load(
     dry_run: bool = False,
     session=None,
 ) -> LoadRunReport:
-    """Load installed objects within the requested physical targets.
+    """Load the installed objects the named items own.
 
-    ``targets`` are typed physical items such as ``Lakehouse/Curated`` and
-    ``Warehouse/Reporting``, and they are a hard execution boundary. With no
-    name filter, every loadable object hosted there runs in dependency order;
-    dependencies never add an unrequested target.
+    ``items`` are installed Weaver items, and they are a hard execution boundary:
+    with no name filter every loadable object they own runs in dependency order,
+    and a dependency never adds an unnamed item.
 
     ``names`` selects exact installed ``Schema.Object`` loadables inside those
-    targets. It is an operator override: only those nodes run, without dependency
+    items. It is an operator override: only those nodes run, without dependency
     expansion or dependency ordering.
 
     ``workspace``, ``catalogue`` and ``environment`` are names, resolved as
@@ -70,13 +67,7 @@ def load(
                 → a configuration error naming what is missing
     """
 
-    values = (targets,) if isinstance(targets, str) else tuple(targets)
-    if not values:
-        raise CommandError("load needs at least one target")
-    requested = tuple(
-        parse_physical_target(value, what="load target", error=CommandError)
-        for value in values
-    )
+    requested = requested_items(items, what="load")
     selected_names = _load_names(names)
 
     from .workspace import operation_workspace
@@ -92,19 +83,14 @@ def load(
 
     from ..sessions.host import use_or_create_session
 
-    refs = tuple(PhysicalTargetRef.of(target) for target in requested)
-
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
-        # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
-        # needs one of the Lakehouses this load is actually for.
-        opened.offer_spark_home(lakehouse_names(refs))
         with opened.task(
             "Load (dry run)" if dry_run else "Load", ", ".join(map(str, requested))
         ):
             return run_load(
                 opened,
                 workspace=resolved_workspace,
-                requested=refs,
+                items=requested,
                 names=selected_names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
@@ -115,13 +101,18 @@ def run_load(
     session,
     *,
     workspace,
-    requested: Sequence[PhysicalTargetRef],
+    items: Sequence[WeaverItemId],
     names: Sequence[str] = (),
     state=None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
 ) -> LoadRunReport:
-    """Run the catalogue graph through a Session."""
+    """Run the catalogue graph through a Session.
+
+    Ordered so the catalogue read comes before the Spark home is offered: the
+    physical Lakehouse to attach to is recorded there, and a missing installation
+    is therefore refused before Livy starts.
+    """
 
     from ..run import (
         Runner,
@@ -143,7 +134,13 @@ def run_load(
             if state is not None
             else read_installed_catalogue(session=session, workspace=workspace)
         )
-        _refuse_uninstalled_targets(catalogue.dag(), requested)
+        installed = installed_targets(
+            catalogue.dag(), items, catalogue=workspace.catalogue
+        )
+
+    # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
+    # needs one of the Lakehouses this load is for.
+    session.offer_spark_home(lakehouse_names(installed.values()))
 
     with session.step("Build run graph"):
         if state is None:
@@ -151,7 +148,7 @@ def run_load(
         runner = Runner(
             state,
             RunRequest.load(
-                requested,
+                items,
                 names=names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
@@ -262,21 +259,6 @@ def _raise_for_failure(report: LoadRunReport) -> None:
         result=first.result,
         report=report,
         workflow_id=report.workflow_id,
-    )
-
-
-def _refuse_uninstalled_targets(dag, requested) -> None:
-    """Refuse a requested target the installed estate has never heard of."""
-
-    installed = set(dag.targets)
-    unknown = [target for target in requested if target not in installed]
-    if not unknown:
-        return
-    known = ", ".join(str(target) for target in dag.targets) or "none"
-    raise CommandError(
-        "no installed estate in "
-        + ", ".join(str(target) for target in unknown)
-        + f". The catalogue binds no logical item to it. Installed: {known}"
     )
 
 

@@ -3,9 +3,8 @@
 Selection from the installed managed graph, whose validation nodes come from
 ``_.TestDictionary`` and whose runnable artefacts come from ``_.Registry``.
 
-A validation dispatches a compiled procedure or module that reports counts. It
-is selected by name and by target, and it is never ordered against another
-validation.
+A validation dispatches a compiled procedure or module that reports counts. It is
+selected by name and by item, and it is never ordered against another validation.
 """
 
 from __future__ import annotations
@@ -128,9 +127,15 @@ class InstalledValidation:
 
 @dataclass(frozen=True)
 class ValidationEstate:
-    """What the catalogue says is validatable, reversed for orchestration."""
+    """What the catalogue says is validatable, keyed by logical identity.
 
-    installations: Mapping[WeaverItemId, PhysicalTargetRef]
+    Each validation carries the physical target its item is installed in, which
+    is where it runs. Selection reads the logical item off the identity, so the
+    estate holds no installation mapping of its own:
+    :attr:`weaver.installed.InstalledDag.installations` is the one reading of
+    ``_.Installation``.
+    """
+
     validations: Mapping[WeaverDocumentId, InstalledValidation] = field(
         default_factory=dict
     )
@@ -144,7 +149,6 @@ class ValidationEstate:
         """The validation nodes of one installed graph, keyed by logical identity."""
 
         return cls(
-            installations=MappingProxyType(dict(dag.installations)),
             validations=MappingProxyType(
                 {
                     node.identity: InstalledValidation.of(node)
@@ -153,53 +157,45 @@ class ValidationEstate:
             ),
         )
 
-    def for_targets(
-        self, targets: Sequence[PhysicalTargetRef]
+    def for_items(
+        self, items: Sequence[WeaverItemId]
     ) -> tuple[InstalledValidation, ...]:
-        """Everything installed in the requested physical targets, in ID order.
+        """Every validation the named items own, in ID order."""
 
-        By target rather than by item, because a request names a target and
-        several logical items may be bound to one. The same grammar a load
-        request uses, and the same meaning.
-        """
-
-        wanted = set(targets)
+        wanted = set(items)
         return tuple(
             validation
             for _identity, validation in sorted(
                 self.validations.items(), key=lambda pair: str(pair[0])
             )
-            if validation.target in wanted
+            if validation.logical.item in wanted
         )
 
-    def named(
-        self, name: str, targets: Sequence[PhysicalTargetRef]
-    ) -> InstalledValidation:
-        """One validation by its logical ``Schema.Object``, within the request.
+    def named(self, name: str, items: Sequence[WeaverItemId]) -> InstalledValidation:
+        """One validation by its ``Schema.Object``, within the named items.
 
-        A miss is an error rather than an empty run: someone who named a
-        validation is asking about that validation, and reporting nothing would
-        answer a question they did not ask.
+        A miss is an error rather than an empty run: reporting nothing would
+        answer a question nobody asked.
         """
 
         candidates = [
             validation
-            for validation in self.for_targets(targets)
+            for validation in self.for_items(items)
             if validation.qualified.casefold() == name.casefold()
         ]
         if not candidates:
             known = ", ".join(
-                sorted(validation.qualified for validation in self.for_targets(targets))
+                sorted(validation.qualified for validation in self.for_items(items))
             )
             raise ValidationError(
                 f"no validation named {name!r} is installed in the requested "
-                f"target(s). Installed: {known or 'none'}"
+                f"item(s). Installed: {known or 'none'}"
             )
         if len(candidates) > 1:
             found = ", ".join(str(validation.logical) for validation in candidates)
             raise ValidationError(
                 f"{name!r} names more than one installed validation ({found}). "
-                "qualify the request with a single target"
+                "qualify the request with a single item"
             )
         return candidates[0]
 

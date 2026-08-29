@@ -701,11 +701,11 @@ result = build_uploaded_item_repository(
             </details>
             <details>
               <summary>Can I use Weaver from my desktop?</summary>
-              <div class="answer"><p>Yes. Publish Weaver to a Fabric Environment, then use the CLI to validate and build repositories for selected physical targets. An ordinary build creates and maintains Weaver's own catalogue.</p><pre>weaver fabric environment publish weaver --workspace-config workspace.yml
+              <div class="answer"><p>Yes. Publish Weaver to a Fabric Environment, then use the CLI to validate and build repositories for selected Weaver items. An ordinary build creates and maintains Weaver's own catalogue.</p><pre>weaver fabric environment publish weaver --workspace-config workspace.yml
 weaver push ./estate --workspace-config workspace.yml
 weaver build --workspace-config workspace.yml \
-  --bind Lakehouses/Sales_Dev \
-  --bind Warehouses/Reporting_Dev</pre></div>
+  --item Lakehouse/Sales \
+  --item Warehouse/Reporting</pre></div>
             </details>
             <details>
               <summary>Is Weaver desktop software or a cloud service?</summary>

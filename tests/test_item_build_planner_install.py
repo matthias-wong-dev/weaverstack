@@ -168,16 +168,29 @@ def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
 
 
 @weaver_test()
-def test_same_physical_item_cannot_be_bound_twice(tmp_path):
-    with pytest.raises(
-        BuildError, match="physical Lakehouse target is bound more than once"
-    ):
+def test_one_build_cannot_write_two_items_into_one_physical_target(tmp_path):
+    """A build diffs one item's keep-set against the whole target inventory.
+
+    See `render_inventory_prune`. Two items in one target would each prune the
+    other's objects, so the binding set refuses the pairing outright.
+    """
+
+    with pytest.raises(BuildError, match="cannot hold two items"):
         ItemBindings(
             (
                 _binding("Lakehouse/Raw", "Shared"),
                 _binding("Lakehouse/Curated", "Shared"),
             )
         )
+
+    # A target is a kind and a display name, so one name in two kinds is two
+    # Fabric items and one build may write both.
+    ItemBindings(
+        (
+            _binding("Lakehouse/Raw", "Shared"),
+            _binding("Warehouse/Curated", "Shared"),
+        )
+    )
 
 
 @weaver_test()

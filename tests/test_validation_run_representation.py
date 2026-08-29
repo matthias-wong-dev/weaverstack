@@ -129,7 +129,7 @@ def _graph_of(validation):
                 installed=validation,
             ),
         ),
-        requested=(validation.target,),
+        items=(validation.target,),
     )
 
 
@@ -175,15 +175,37 @@ def _ran(validation, executor=None, *, collect=False):
 
 
 @weaver_test()
-def test_a_lakehouse_run_requires_an_environment_before_reading_the_catalogue():
-    """A desktop run cannot dispatch Lakehouse code without an Environment."""
+def test_a_lakehouse_run_requires_an_environment_before_it_dispatches(tmp_path):
+    """A desktop run cannot dispatch Lakehouse code without an Environment.
+
+    Refused after the catalogue read, because a logical request does not say
+    which physical target it is for until the catalogue has answered, and named
+    by that physical target because that is where the code would have run.
+    """
+
+    from factories import (
+        ITEM,
+        installed_catalogue,
+        item_bindings,
+        lakehouse_table,
+        single_document_repository,
+    )
 
     from weaver.errors import CommandError
     from weaver.operations.test import run_test
+    from weaver.run import RunState
     from weaver.sessions.testing import TestSession
     from weaver.workspaces import Workspace
 
-    workspace = Workspace(workspace="Analytics")
+    repository = single_document_repository(
+        tmp_path / "estate",
+        documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
+    )
+    state = RunState(
+        catalogue=installed_catalogue(repository, item_bindings((ITEM, "Sales_LH")))
+    )
+    workspace = Workspace(workspace="Analytics", catalogue="Warehouse/Weaver")
+
     with TestSession(workspace=workspace) as session:
         with pytest.raises(
             CommandError,
@@ -192,7 +214,8 @@ def test_a_lakehouse_run_requires_an_environment_before_reading_the_catalogue():
             run_test(
                 session,
                 workspace=workspace,
-                requested=(LAKEHOUSE_TARGET,),
+                state=state,
+                items=(WeaverItemId.parse(ITEM),),
             )
 
         assert session.calls == []
@@ -688,7 +711,7 @@ def _file_node(tmp_path, executor, **kwargs):
 
     return source_file_node(
         _FileSession(executor),
-        requested=[WAREHOUSE_TARGET],
+        targets=[WAREHOUSE_TARGET],
         path=_source(tmp_path, "Sales.OrdersReconcile.sql", FILE_TEST),
         started=datetime.now(timezone.utc),
         **kwargs,

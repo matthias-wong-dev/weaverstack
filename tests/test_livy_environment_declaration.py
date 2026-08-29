@@ -32,9 +32,7 @@ def _spark_workspace(**changes) -> Workspace:
     return Workspace(
         workspace="WS",
         catalogue="Warehouse/Weaver",
-        lakehouses={
-            "Sales_LH": TargetDeclaration(item=WeaverItemId.parse("Lakehouse/Sales"))
-        },
+        targets={WeaverItemId.parse("Lakehouse/Sales"): TargetDeclaration("Sales_LH")},
         **changes,
     )
 

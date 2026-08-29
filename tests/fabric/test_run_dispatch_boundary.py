@@ -92,7 +92,7 @@ def _report(thin, *, fault_tolerant=False):
     return run_load(
         thin.session,
         workspace=thin.workspace,
-        requested=[thin.target],
+        items=[thin.item],
         state=thin.state,
         fault_tolerant=fault_tolerant,
     )

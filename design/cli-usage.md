@@ -30,21 +30,31 @@ file:
 weaver build ./estate \
   --workspace Analytics \
   --catalogue Warehouse/Weaver \
-  --bind Lakehouse/Sales=Sales
+  --item Lakehouse/Sales=Lakehouse/Sales_Dev
 ```
 
-A configuration is shorthand for the same values. Physical target names are
-the keys and their default logical bindings are the values:
+A configuration is shorthand for the same values. Items are the keys and the
+Fabric item each one is deployed to is the value:
 
 ```yaml
 workspace: Analytics
 environment: Runtime
 catalogue: Warehouse/Control
 
-lakehouses:
-  Sales_Dev: Lakehouse/Sales
-warehouses:
-  Reporting_Dev: Warehouse/Reporting
+targets:
+  Lakehouse/Sales: Sales_Dev
+  Warehouse/Reporting: Reporting_Dev
+```
+
+The key's type says whether the value names a Lakehouse or a Warehouse, so one
+mapping serves both. Per-item execution settings hang off the key:
+
+```yaml
+targets:
+  Warehouse/Reporting:
+    name: Reporting_Dev
+    execution:
+      parallel_workers: 4
 ```
 
 An unqualified Environment belongs to `Analytics` in this example. A shared
@@ -52,7 +62,7 @@ Environment is written as `environment: Platform/Runtime`. CLI overrides use
 the same grammar.
 
 See [`examples/weaver_example.yml`](../examples/weaver_example.yml) for the
-expanded form, including per-target execution settings.
+expanded form, including per-item execution settings.
 
 ## Session
 
@@ -71,10 +81,10 @@ Starting: Fabric credential
 Available: build, compose, load, test, wipe.
 Commands are written as they are in a terminal; the leading `weaver` is optional. `help` for options, `exit` to leave.
 
-weaver> wipe Lakehouse/Sales Warehouse/Reporting --yes
-weaver> build . --bind Lakehouse/Sales=Sales
-weaver> weaver load Lakehouse/Sales Warehouse/Reporting
-weaver> weaver test Lakehouse/Sales
+weaver> wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev --yes
+weaver> build . --item Lakehouse/Sales
+weaver> weaver load --item Lakehouse/Sales --item Warehouse/Reporting
+weaver> weaver test --item Lakehouse/Sales
 weaver> compose all
 weaver> exit
 ```
@@ -103,9 +113,9 @@ refused, because a Weaver command line is not run by a shell.
 **Several complete commands can be pasted at once**, one per line:
 
 ```text
-weaver build ./repository --bind Lakehouse/Sales=Sales
-weaver load Lakehouse/Sales Warehouse/Reporting
-weaver test Lakehouse/Sales
+weaver build ./repository --item Lakehouse/Sales
+weaver load --item Lakehouse/Sales --item Warehouse/Reporting
+weaver test --item Lakehouse/Sales
 ```
 
 They run in order in the one session. Blank lines and lines beginning with `#`
@@ -121,12 +131,12 @@ resources per workspace it is asked about.
 **A workspace given at startup is the session's**, and stays the session's.
 Commands that name none inherit it, which is why the example above repeats no
 `--workspace`. A command is still an ordinary Weaver command line and gives its
-own configuration within that workspace, so `--catalogue`, `--environment`,
-targets and bindings are the command's:
+own configuration within that workspace, so `--catalogue`, `--environment` and
+targets are the command's:
 
 ```text
 weaver session --workspace "Weaver Example" --environment weaver
-weaver> weaver load Lakehouse/Sales Warehouse/Reporting --catalogue Warehouse/Curated
+weaver> weaver load --item Lakehouse/Sales --item Warehouse/Reporting --catalogue Warehouse/Curated
 ```
 
 That load reads `Warehouse/Curated`, in `Weaver Example`, with the Environment
@@ -232,11 +242,11 @@ arguments — `auth`, `resolver`, `onelake`, `tds`, `livy` — and the Session
 starts exactly those, in the background, before the command wants them:
 
 ```text
-weaver load Warehouse/Reporting   → auth, resolver, tds
-weaver load Lakehouse/Sales       → auth, resolver, onelake, livy
+weaver load --item Warehouse/Reporting   → auth, resolver, tds
+weaver load --item Lakehouse/Sales       → auth, resolver, tds, onelake, livy
 weaver build ./repository         → auth, resolver, onelake, livy, tds
-weaver health                     → auth, resolver, tds, onelake
-weaver health Warehouse/Reporting → auth, resolver, tds
+weaver health                            → auth, resolver, tds, onelake
+weaver health --item Warehouse/Reporting → auth, resolver, tds
 ```
 
 A Warehouse load therefore never waits on a Spark session, which on a capacity
@@ -290,15 +300,15 @@ estate that carries on.
 ## Compose
 
 The development loop is the same four commands every time, each carrying the
-bindings and targets the last one had. `compose.yml` writes the sequence down:
+items the last one had. `compose.yml` writes the sequence down:
 
 ```yaml
 compose:
   dev:
-    - wipe Lakehouse/Sales Warehouse/Reporting
-    - build ./repository --bind Lakehouse/Sales=Sales
-    - load Warehouse/Reporting
-    - test Warehouse/Reporting
+    - wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev
+    - build ./repository --item Lakehouse/Sales --item Warehouse/Reporting
+    - load --item Lakehouse/Sales --item Warehouse/Reporting
+    - test --item Lakehouse/Sales --item Warehouse/Reporting
 ```
 
 ```bash
@@ -312,10 +322,10 @@ The sequence is displayed and confirmed before anything runs:
 ```text
 Compose: dev  (compose.yml)
 
-1. wipe Lakehouse/Sales Warehouse/Reporting
-2. build ./repository --bind Lakehouse/Sales=Sales
-3. load Warehouse/Reporting
-4. test Warehouse/Reporting
+1. wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev
+2. build ./repository --item Lakehouse/Sales --item Warehouse/Reporting
+3. load --item Lakehouse/Sales --item Warehouse/Reporting
+4. test --item Lakehouse/Sales --item Warehouse/Reporting
 
 Execute this sequence? [y/N]
 ```
@@ -382,21 +392,64 @@ desktop build proves it, every bound Lakehouse and Warehouse, and a locally
 owned Environment from one workspace listing before it starts a Livy session.
 A qualified Environment is resolved in its owning workspace.
 
+## Items and targets
+
+An item is a Weaver identity such as `Lakehouse/Sales`. A target is the Fabric
+item it deploys to, named by kind and display name, so `Lakehouse/Shared` and
+`Warehouse/Shared` are two targets. Which one a command names, and where the
+physical half comes from:
+
+| Operation | Caller names | Physical source |
+|---|---|---|
+| build | item, `--item` | an explicit `ITEM=TARGET`, or `targets:` in workspace configuration |
+| load | item, `--item` | the catalogue's `_.Installation` |
+| test | item, `--item` | the catalogue's `_.Installation` |
+| health | item, `--item`, or the whole estate | the catalogue's `_.Installation` |
+| wipe | target, positional | the caller |
+| unbind | target, positional | the caller |
+| catalogue | Warehouse target | `--catalogue`, or workspace configuration |
+
+A build establishes the installation, so it is the one operation that names both
+halves. Once an item is built the catalogue is authoritative: a load, test or
+health item carrying `=` is refused, and workspace configuration is not consulted
+for it either.
+
+`wipe` and `unbind` address a Fabric item whether or not an installation exists,
+so they name a target and have no item to resolve.
+
+Configuration may map two items to one target, which a constrained environment
+does. Only one of them is installed there at a time: a build into a target
+another item is installed to is refused, and `wipe` then `unbind` releases it.
+
+So one repository, one set of logical names and one command sequence run against
+development and production, and the only thing that changes is the workspace
+configuration:
+
+```bash
+weaver build ./estate --item Lakehouse/Sales --item Warehouse/Reporting \
+  --workspace-config dev.yml
+weaver load  --item Lakehouse/Sales --item Warehouse/Reporting \
+  --workspace-config dev.yml
+weaver test  --item Lakehouse/Sales --item Warehouse/Reporting \
+  --workspace-config dev.yml
+```
+
 ## Build
 
-Bindings are physical-first:
+A build target is `LOGICAL` or `LOGICAL=PHYSICAL`:
 
 ```bash
 weaver build \
   ./estate \
   --workspace-config examples/weaver_example.yml \
-  --bind Lakehouse/Sales_Dev \
-  --bind Warehouse/Reporting_Dev=Alternative
+  --item Lakehouse/Sales \
+  --item Warehouse/Reporting=Warehouse/Reporting_Alternative
 ```
 
-Without `=`, the physical target uses its configured logical default. With `=`,
-the right side is an invocation-only logical override. Lakehouse and Warehouse
-types must match.
+Without `=`, the target comes from the configuration's `targets:` mapping.
+With `=`, it is supplied here and no configuration is consulted for that item.
+Both sides are typed and the two types must agree. Naming no `--item` at all
+builds every logical item the configuration declares.
 
 Every build adds the implicit binding from `Warehouse/_weaver` to the configured
 catalogue Warehouse. Catalogue publication is mandatory and registry certification
@@ -419,8 +472,8 @@ in.
 A build needs no `--environment`. What it submits to Spark is SQL that imports
 nothing, so it runs on the workspace's default runtime; `load`, `test` and the
 other commands that run Weaver inside Fabric name the Environment
-`weaver fabric environment publish` published to. A build binding only Warehouses starts no Spark
-session at all.
+`weaver fabric environment publish` published to. A build of Warehouse items
+only starts no Spark session at all.
 
 An ordinary build does not retain an artifact. For controlled handoff, use the
 advanced split workflow:
@@ -436,17 +489,17 @@ for `weaver build`, which always checks source itself.
 
 ## Test
 
-Run the installed Tests and Assumptions in one or more physical targets:
+Run the installed Tests and Assumptions the named items own:
 
 ```bash
-weaver test Lakehouse/Sales --workspace-config examples/weaver_example.yml
+weaver test --item Lakehouse/Sales --workspace-config examples/weaver_example.yml
 ```
 
 The exit code is the verdict — non-zero when anything failed or could not be
 evaluated — and the output is the evidence, which is what makes the command
 usable in a pipeline. `--json` emits the whole report.
 
-A whole-target run reports **counts only**. Diagnostic rows may be large and may
+A whole-item run reports **counts only**. Diagnostic rows may be large and may
 carry sensitive business data, so they are never transferred and never logged;
 Warehouse procedures are called with `@suppress_result_set = 1` and Spark
 validations are counted without collecting.
@@ -454,7 +507,7 @@ validations are counted without collecting.
 Name one to see the rows:
 
 ```bash
-weaver test Lakehouse/Sales --name Sales.OrderSummaryReconciliation
+weaver test --item Lakehouse/Sales --name Sales.OrderSummaryReconciliation
 ```
 
 The counts and the rows come from **one** execution. A Test run twice would
@@ -464,8 +517,10 @@ over.
 Run a validation that has not been built:
 
 ```bash
-weaver test Lakehouse/Sales --file tests/Sales.OrderSummaryReconciliation.sql
+weaver test --item Lakehouse/Sales --file tests/Sales.OrderSummaryReconciliation.sql
 ```
+
+The item names the installed environment the source validation runs against.
 
 `--file` compiles the source with the same compiler a build uses and executes
 the result without installing it — no Registry row, no `TestDictionary` row, no
@@ -494,7 +549,15 @@ weaver.test("Lakehouse/Sales", file="tests/Sales.OrderSummaryReconciliation.sql"
 ## Health
 
 `weaver health` reports the installed estate's operational state, in three
-sections over one installed graph:
+sections over one installed graph. It names items, resolving each one's target
+through `_.Installation` as a load does. Naming none reports on every target the
+catalogue binds an item to:
+
+```bash
+weaver health
+weaver health --item Lakehouse/Sales
+```
+
 
 ```bash
 weaver health --workspace-config examples/weaver_example.yml
@@ -555,16 +618,24 @@ report.to_mapping()      # what --json prints
 
 ## Wipe
 
-Wipe clears everything in each selected typed target. Physical wipe does not
-require catalogue access; immediate catalogue cleanup is selected separately
-with `--unbind-from` (or the configured catalogue).
+Wipe clears everything in each named physical target. It needs no catalogue, and
+where one resolves it also removes that catalogue's claims for the wiped targets:
+
+```bash
+weaver wipe Lakehouse/Sales_Dev                       # physical only
+weaver wipe Lakehouse/Sales_Dev --catalogue Warehouse/Weaver
+weaver wipe Lakehouse/Sales_Dev --workspace-config dev.yml
+```
+
+The last two also remove the claims. Wiping the Warehouse the catalogue itself
+lives in skips that, because deleting rows from tables that are about to be
+removed is work nobody needs.
 
 ```bash
 weaver wipe \
   Lakehouse/Sales_Dev \
   Warehouse/Reporting_Dev \
   --workspace-config examples/weaver_example.yml \
-  --unbind-from Control \
   --dry-run
 ```
 

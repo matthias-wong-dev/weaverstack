@@ -18,39 +18,94 @@ def test_a_workspace_is_named_and_nothing_else_is_required():
 
 
 @weaver_test()
-def test_typical_configuration_parses_physical_defaults():
+def test_typical_configuration_maps_logical_items_to_physical_ones():
     workspace = parse_workspace(
         {
             "workspace": "Analytics",
             "environment": "WeaverRuntime",
             "catalogue": "Warehouse/Weaver",
             "execution": {"parallel_workers": 8},
-            "lakehouses": {"Dev_Data": "Lakehouse/Sales"},
-            "warehouses": {
-                "Dev_Reporting": {
-                    "item": "Warehouse/Reporting",
+            "targets": {
+                "Lakehouse/Sales": "Dev_Data",
+                "Warehouse/Reporting": {
+                    "name": "Dev_Reporting",
                     "execution": {"parallel_workers": 4},
-                }
+                },
             },
         }
     )
     assert workspace.environment == EnvironmentRef(None, "WeaverRuntime")
     assert workspace.execution.parallel_workers == 8
-    assert str(workspace.lakehouses["Dev_Data"].item) == "Lakehouse/Sales"
-    assert workspace.warehouses["Dev_Reporting"].execution.parallel_workers == 4
+    assert str(workspace.target_for(_item("Lakehouse/Sales"))) == "Dev_Data"
+    assert workspace.settings_for(_item("Warehouse/Reporting")).parallel_workers == 4
 
 
 @weaver_test()
-def test_physical_names_can_overlap_across_types():
+def test_the_logical_key_decides_which_kind_of_item_the_value_names():
+    """One mapping serves both, because `Lakehouse/` and `Warehouse/` say which."""
+
+    from weaver.targets import DeltaTarget, WarehouseTarget
+
     workspace = parse_workspace(
         {
             "workspace": "Analytics",
-            "lakehouses": {"Data": "Lakehouse/Sales"},
-            "warehouses": {"Data": "Warehouse/Reporting"},
+            "targets": {
+                "Lakehouse/Sales": "Shared",
+                "Warehouse/Reporting": "Shared",
+            },
         }
     )
-    assert "Data" in workspace.lakehouses
-    assert "Data" in workspace.warehouses
+
+    assert workspace.target_for(_item("Lakehouse/Sales")) == DeltaTarget.parse("Shared")
+    assert workspace.target_for(_item("Warehouse/Reporting")) == WarehouseTarget.parse(
+        "Shared"
+    )
+
+
+@pytest.mark.parametrize("kind", ["Lakehouse", "Warehouse"])
+@weaver_test()
+def test_two_logical_items_may_share_one_physical_item(kind):
+    """Valid configuration, which a constrained environment writes.
+
+    Configuration says where each item deploys. Only one is installed there at a
+    time: a build into a target another item is installed to is refused.
+    """
+
+    workspace = parse_workspace(
+        {
+            "workspace": "Analytics",
+            "targets": {f"{kind}/A": "Shared", f"{kind}/B": "Shared"},
+        }
+    )
+
+    assert workspace.target_for(_item(f"{kind}/A")) == workspace.target_for(
+        _item(f"{kind}/B")
+    )
+
+
+@weaver_test()
+def test_a_logical_item_with_no_entry_says_what_to_add():
+    workspace = parse_workspace(
+        {"workspace": "Analytics", "targets": {"Lakehouse/Sales": "Dev_Data"}}
+    )
+
+    with pytest.raises(ConfigError, match="no physical target"):
+        workspace.target_for(_item("Lakehouse/Inventory"))
+
+
+@pytest.mark.parametrize("retired", ["lakehouses", "warehouses"])
+@weaver_test()
+def test_the_retired_physical_keyed_sections_are_refused(retired):
+    with pytest.raises(ConfigError, match="item-keyed targets: mapping"):
+        parse_workspace(
+            {"workspace": "Analytics", retired: {"Data": "Lakehouse/Sales"}}
+        )
+
+
+def _item(text: str):
+    from weaver.declaration.model import WeaverItemId
+
+    return WeaverItemId.parse(text)
 
 
 @weaver_test()
@@ -74,14 +129,9 @@ def test_cli_environment_override_replaces_the_configured_reference(tmp_path):
 
 
 @weaver_test()
-def test_target_type_mismatch_is_rejected():
-    with pytest.raises(ConfigError, match="must name a Lakehouse"):
-        parse_workspace(
-            {
-                "workspace": "Analytics",
-                "lakehouses": {"Data": "Warehouse/Reporting"},
-            }
-        )
+def test_an_untyped_target_key_is_rejected():
+    with pytest.raises(ConfigError, match="item identity"):
+        parse_workspace({"workspace": "Analytics", "targets": {"Data": "Dev_Data"}})
 
 
 @weaver_test()

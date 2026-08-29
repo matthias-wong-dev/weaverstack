@@ -211,6 +211,9 @@ class ThinEstate:
     session: Any
     workspace: Any
     state: Any
+    #: What a run names: the logical item.
+    item: Any
+    #: Where it is installed, which the node ids below are spelled with.
     target: PhysicalTargetRef
     root: Path
     #: Node id by outcome, so a test names the outcome rather than spelling ids.
@@ -332,6 +335,7 @@ def thin_estate(
         state=RunState(
             catalogue=installed_catalogue(repository, bindings, session=opened)
         ),
+        item=item_id("Lakehouse/Sales"),
         target=target,
         root=root,
         nodes={

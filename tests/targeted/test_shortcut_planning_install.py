@@ -605,6 +605,7 @@ def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_p
 
     from weaver.build_bundle.targets import ItemBinding, ItemBindings, LakehouseBinding
     from weaver.build_bundle.workflow import read_build_state
+    from weaver.catalogue.state import Catalogue
     from weaver.declaration import parse_item_repository
     from weaver.locations import Location
     from weaver.targets import ItemRef
@@ -633,8 +634,8 @@ def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_p
     workspace = Workspace(
         workspace="Demo",
         catalogue="Warehouse/Weaver",
-        lakehouses={
-            "Curated_LH": TargetDeclaration(item=item_id(CONSUMER)),
+        targets={
+            item_id(CONSUMER): TargetDeclaration("Curated_LH"),
         },
     )
     bindings = ItemBindings(
@@ -655,7 +656,12 @@ def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_p
     with (
         given_session(workspace=workspace, lakehouses=("Curated_LH",)) as session,
         patch("weaver.build_bundle.workflow.read_target_inventories", return_value={}),
-        patch("weaver.build_bundle.workflow._read_catalogue", return_value=None),
+        # An empty catalogue rather than None: a build reads a Catalogue, and
+        # nothing is installed anywhere in this one.
+        patch(
+            "weaver.build_bundle.workflow._read_catalogue",
+            return_value=Catalogue({}),
+        ),
         patch(
             "weaver.build_bundle.workflow.read_shortcut_sources", side_effect=_refuse
         ),

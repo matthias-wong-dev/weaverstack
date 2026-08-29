@@ -38,14 +38,20 @@ One Workspace configuration can abbreviate the full desktop lifecycle:
 
 ```bash
 weaver fabric environment publish weaver --workspace-config workspace.yml
-weaver build ./estate --workspace-config workspace.yml --bind Lakehouse/Sales_Dev
+weaver build ./estate --workspace-config workspace.yml --item Lakehouse/Sales
 ```
 
 The Fabric Environment must already exist. Publication preserves its package
 definition and unrelated custom libraries.
 
-See [CLI usage](design/cli-usage.md) for repository sources, physical-first
-bindings, wipe and unbind.
+A Weaver **item** is logical, `Lakehouse/Sales`. A **target** is the Fabric item
+it is deployed to, `Sales_Dev`. Build, load, test and health name items: a build
+reads the target from workspace configuration, the rest read it from the Weaver
+catalogue. So one sequence runs against development and production, and only
+`--workspace-config` changes.
+
+See [CLI usage](design/cli-usage.md) for the full syntax, repository sources,
+wipe and unbind.
 
 ## Documentation
 

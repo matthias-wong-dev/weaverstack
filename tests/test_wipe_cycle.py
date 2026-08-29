@@ -306,3 +306,8 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     public_wipe("Lakehouse/Sales", workspace="Demo", catalogue="Warehouse/Control")
     public_wipe("Warehouse/Control", workspace="Demo", catalogue="Warehouse/Control")
     assert calls == [("Warehouse/Control", ("Lakehouse/Sales",))]
+
+    # A Lakehouse of the catalogue's name is a different Fabric item, so its
+    # wipe leaves the catalogue standing and its claims are removed as usual.
+    public_wipe("Lakehouse/Control", workspace="Demo", catalogue="Warehouse/Control")
+    assert calls[-1] == ("Warehouse/Control", ("Lakehouse/Control",))

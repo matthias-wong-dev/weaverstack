@@ -517,9 +517,14 @@ A Workspace is one Microsoft Fabric workspace, and identifies:
 - the workspace, by name
 - the Warehouse holding the catalogue
 - the Fabric Environment carrying the published Weaver, where one is named
+- where each Weaver item is deployed, as `targets:`
 
 It says where the resources are. Where Weaver's own code runs is a Session
 question, not a property of the Workspace.
+
+`targets:` is deployment configuration, so it is a build's input. A load and a
+test read where an item is installed from the catalogue instead. See
+[CLI usage](cli-usage.md) for the syntax.
 
 For example:
 
@@ -527,7 +532,7 @@ For example:
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouse/Raw
+    --item Lakehouse/Raw
 ```
 
 or
@@ -537,7 +542,7 @@ weaver build \
     ./estate \
     --workspace MyWorkspace \
     --catalogue Warehouse/Weaver \
-    --bind Lakehouse/Raw
+    --item Lakehouse/Raw=Lakehouse/Raw_DEV
 ```
 
 The repository does not contain deployment-specific information. The Workspace
@@ -629,9 +634,9 @@ weaver wipe \
     --yes
 ```
 
-Physical wipe is independent of catalogue cleanup. Add `--unbind-from Weaver`
-when stale claims should be removed immediately; otherwise the next build
-reconciles them against physical inventory.
+A wipe needs no catalogue. Where one resolves, from `--catalogue` or workspace
+configuration, it also removes that catalogue's claims for the wiped targets;
+otherwise the next build reconciles them against physical inventory.
 
 `wipe` does not modify the authored repository.
 
@@ -641,26 +646,30 @@ reconciles them against physical inventory.
 
 `build` reconciles the declared workspace with the physical workspace.
 
-Each target is supplied using one or more bindings.
+Each `--item` names one logical Weaver item.
 
 ```bash
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouse/Raw \
-    --bind Lakehouse/Curated \
-    --bind Warehouse/Reporting
+    --item Lakehouse/Raw \
+    --item Lakehouse/Curated \
+    --item Warehouse/Reporting
 ```
 
-Where the logical and physical names differ, an explicit mapping may be supplied.
+Where an item is deployed comes from workspace configuration, or from the item's
+own `=TARGET`.
 
 ```bash
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouse/Raw_DEV=Raw \
-    --bind Warehouse/Reporting_DEV=Reporting
+    --item Lakehouse/Raw=Lakehouse/Raw_DEV \
+    --item Warehouse/Reporting=Warehouse/Reporting_DEV
 ```
+
+`load` and `test` name items only, and read where each one runs from
+`_.Installation`.
 
 The build process performs the following steps.
 
@@ -716,7 +725,7 @@ The developer therefore uses a single command.
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouse/Raw
+    --item Lakehouse/Raw
 ```
 
 ---
@@ -729,7 +738,7 @@ A Build Bundle may be explicitly retained for a split build/deploy workflow.
 weaver build \
     ./estate \
     --workspace-config workspace.yml \
-    --bind Lakehouse/Raw \
+    --item Lakehouse/Raw \
     --bundle-only \
     --bundle-path ./dist/raw-bundle
 ```
@@ -785,27 +794,21 @@ run records centrally, and `_.Load`, `_.Test`, `Table.load()` and
 `Validation.run()` record synchronously for a developer running one by hand. See
 [the central catalogue](catalogue.md).
 
-A target-scoped load names the physical Lakehouses and Warehouses it may touch:
+A load names the items it may touch:
 
 ```bash
-weaver load Lakehouse/Raw Warehouse/Curated \
+weaver load --item Lakehouse/Raw --item Warehouse/Curated \
     --workspace-config workspace.yml
 ```
 
-Dependencies order loadables only within that explicit target set. Naming one
-target is therefore a hard boundary: a dependency does not implicitly add
-another Lakehouse or Warehouse. Naming multiple targets permits dependency
-edges, including endpoint-refresh barriers, between exactly those targets.
+The named set is a hard boundary. Dependencies order the loadables inside it and
+never add another item, and the boundary is the item rather than its target, so
+two items installed in one Lakehouse do not select each other's work. Crossing
+between named items inserts the endpoint-refresh and OneLake-publication barriers
+their targets require.
 
-An exact operator-selected load repeats ``--name`` for each installed
-``Schema.Object``:
-
-```bash
-weaver load Warehouse/Curated \
-    --workspace-config workspace.yml \
-    --name DWG.Customer \
-    --name DWG.Order
-```
+`--name` narrows a load to exact installed `Schema.Object` loadables, running
+only those and ordering nothing.
 
 Name selection runs only those objects. It does not expand or order them through
 declared dependencies.
@@ -898,15 +901,14 @@ weaver wipe \
     Lakehouse/Curated \
     Warehouse/Reporting \
     --workspace-config workspace-dev.yml \
-    --unbind-from Weaver \
     --yes
 
 weaver build \
     ./estate \
     --workspace-config workspace-dev.yml \
-    --bind Lakehouse/Raw \
-    --bind Lakehouse/Curated \
-    --bind Warehouse/Reporting
+    --item Lakehouse/Raw \
+    --item Lakehouse/Curated \
+    --item Warehouse/Reporting
 
 weaver load \
     --workspace-config workspace-dev.yml
@@ -920,9 +922,9 @@ The normal workflow is:
 weaver build \
     ./estate \
     --workspace-config workspace-dev.yml \
-    --bind Lakehouse/Raw \
-    --bind Lakehouse/Curated \
-    --bind Warehouse/Reporting
+    --item Lakehouse/Raw \
+    --item Lakehouse/Curated \
+    --item Warehouse/Reporting
 
 weaver load \
     --workspace-config workspace-dev.yml

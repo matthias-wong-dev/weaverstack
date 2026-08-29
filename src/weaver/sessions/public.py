@@ -12,9 +12,9 @@ Session out, and each operation given it rather than opening its own.
         catalogue="Warehouse/Weaver",
         environment="weaver",
     ) as session:
-        weaver.build(".", bind="Lakehouse/SalesDev=Sales", session=session)
-        weaver.load("Lakehouse/SalesDev", session=session)
-        weaver.test("Lakehouse/SalesDev", session=session)
+        weaver.build(".", items="Lakehouse/Sales=Lakehouse/SalesDev", session=session)
+        weaver.load("Lakehouse/Sales", session=session)
+        weaver.test("Lakehouse/Sales", session=session)
 
 What the Session holds is what is expensive: the credential, the resolved items
 and their cache, the REST client, the OneLake transport, the Livy session and one

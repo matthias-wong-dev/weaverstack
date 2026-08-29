@@ -1,7 +1,7 @@
 """Public ``weaver.test(...)`` entry point and orchestration.
 
-Target and named runs use installed catalogue state. File runs compile a source
-validation without installing or publishing it. Reports distinguish failed
+Item and named runs select from installed catalogue state. A file run compiles a
+source validation without installing or publishing it. Reports distinguish failed
 validations from validations that could not be evaluated.
 """
 
@@ -11,8 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from ..declaration.model import WeaverItemId
 from ..errors import CommandError, ValidationError
-from ..targets import PhysicalTargetRef, lakehouse_names, parse_physical_target
+from ..targets import lakehouse_names
 from ..test_report import (
     FAILED,
     INVALID,
@@ -20,6 +21,7 @@ from ..test_report import (
     ValidationRunReport,
     run_status,
 )
+from .items import installed_targets, requested_items
 from .workspace import operation_workspace
 
 #: The task type this operation records under. Restated rather than imported, as
@@ -29,7 +31,7 @@ TASK_TYPE = "test"
 
 
 def test(
-    targets: str | Sequence[str],
+    items: str | Sequence[str],
     *,
     name: str | None = None,
     file: str | Path | None = None,
@@ -41,12 +43,13 @@ def test(
     strict: bool = False,
     session=None,
 ) -> ValidationRunReport:
-    """Run the installed validation in the requested physical targets.
+    """Run the installed validations the named items own.
 
     ``name`` runs one installed validation and returns its diagnostic rows
     alongside its counts; ``file`` compiles and runs a source file without
     installing it. Mutually exclusive: one names something the estate has, the
-    other something it may not.
+    other something it may not. A file run takes exactly one item, which is the
+    installed environment its source validation runs against.
     """
 
     if name is not None and file is not None:
@@ -55,7 +58,7 @@ def test(
             "and the other runs a source file that may not be"
         )
 
-    requested = _requested(targets)
+    requested = requested_items(items, what="test")
     resolved = operation_workspace(
         "test",
         workspace=workspace,
@@ -64,21 +67,17 @@ def test(
         workspace_config=workspace_config,
         session=session,
     )
-    refs = tuple(PhysicalTargetRef.of(target) for target in requested)
 
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved) as opened:
-        # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
-        # needs one of the Lakehouses this run is actually for.
-        opened.offer_spark_home(lakehouse_names(refs))
         with opened.task(
-            "Test (dry run)" if dry_run else "Test", ", ".join(map(str, refs))
+            "Test (dry run)" if dry_run else "Test", ", ".join(map(str, requested))
         ):
             return run_test(
                 opened,
                 workspace=resolved,
-                requested=refs,
+                items=requested,
                 name=name,
                 file=file,
                 dry_run=dry_run,
@@ -90,7 +89,7 @@ def run_test(
     session,
     *,
     workspace,
-    requested: Sequence[PhysicalTargetRef],
+    items: Sequence[WeaverItemId],
     name: str | None = None,
     file: str | Path | None = None,
     state=None,
@@ -104,32 +103,10 @@ def run_test(
     them changes the orchestration.
 
     ``state`` lets a caller provide an already-read catalogue snapshot.
+
+    Ordered as :func:`weaver.operations.load.run_load` is. A file run reads the
+    catalogue for the same reason: the physical target is recorded there.
     """
-
-    _require_lakehouse_environment(
-        session, workspace=workspace, requested=requested, dry_run=dry_run
-    )
-    started = datetime.now(timezone.utc)
-
-    if file is not None:
-        from ..test_file import source_file_node
-
-        node = source_file_node(
-            session,
-            requested=requested,
-            path=Path(file),
-            started=started,
-            dry_run=dry_run,
-        )
-        # Source-file runs use the same report but publish no estate evidence.
-        return _reported(
-            nodes=(node,),
-            requested=requested,
-            started=started,
-            strict=strict,
-            selection=str(file),
-            workflow_id=None,
-        )
 
     from ..run import Runner, RunRequest, RunState
     from ..run.state import read_installed_catalogue
@@ -139,11 +116,43 @@ def run_test(
             state = RunState(
                 catalogue=read_installed_catalogue(session=session, workspace=workspace)
             )
+        installed = installed_targets(
+            state.catalogue.dag(), items, catalogue=workspace.catalogue
+        )
+    targets = tuple(installed[item] for item in items)
+
+    _require_lakehouse_environment(
+        session, workspace=workspace, targets=targets, dry_run=dry_run
+    )
+    # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
+    # needs one of the Lakehouses this run is for.
+    session.offer_spark_home(lakehouse_names(targets))
+    started = datetime.now(timezone.utc)
+
+    if file is not None:
+        from ..test_file import source_file_node
+
+        node = source_file_node(
+            session,
+            targets=targets,
+            path=Path(file),
+            started=started,
+            dry_run=dry_run,
+        )
+        # Source-file runs use the same report but publish no estate evidence.
+        return _reported(
+            nodes=(node,),
+            started=started,
+            strict=strict,
+            selection=str(file),
+            workflow_id=None,
+        )
+
     with session.step("Build run graph"):
         runner = Runner(
             state,
             RunRequest.test(
-                requested,
+                items,
                 name=name,
                 dry_run=dry_run,
                 # Validations are independent: each reads the estate and
@@ -180,7 +189,6 @@ def run_test(
 
     return _reported(
         nodes=tuple(_as_validation_node(node) for node in result.nodes),
-        requested=requested,
         started=started,
         strict=strict,
         selection=name,
@@ -199,16 +207,16 @@ def _dispatch_collecting(*, collect: bool):
     return dispatch
 
 
-def _require_lakehouse_environment(session, *, workspace, requested, dry_run: bool):
+def _require_lakehouse_environment(session, *, workspace, targets, dry_run: bool):
     """Fail before planning when a desktop Lakehouse run cannot start."""
 
     from ..sessions.base import ACROSS_BOUNDARY
 
-    if dry_run or workspace.environment or not lakehouse_names(requested):
+    if dry_run or workspace.environment or not lakehouse_names(targets):
         return
     if session.position(workspace) != ACROSS_BOUNDARY:
         return
-    target = next(target for target in requested if target.is_lakehouse)
+    target = next(target for target in targets if target.is_lakehouse)
     raise CommandError(
         f"{target} requires a Fabric Environment with Weaver installed. Pass "
         "--environment <Environment | Workspace/Environment>, or set environment "
@@ -285,7 +293,6 @@ def _failed_validation_result(node, result):
 def _reported(
     *,
     nodes: Sequence[ValidationNodeReport],
-    requested: Sequence[PhysicalTargetRef],
     started: datetime,
     strict: bool,
     selection: str | None,
@@ -321,16 +328,6 @@ def _failure_message(report: ValidationRunReport) -> str:
         )
         parts.append(f"{node.logical_id} found {found}")
     return "; ".join(parts)
-
-
-def _requested(targets: str | Sequence[str]):
-    values = (targets,) if isinstance(targets, str) else tuple(targets)
-    if not values:
-        raise CommandError("test needs at least one target")
-    return tuple(
-        parse_physical_target(value, what="test target", error=CommandError)
-        for value in values
-    )
 
 
 __all__ = ["TASK_TYPE", "run_test", "test"]

@@ -62,12 +62,18 @@ def resolved_identity(object: Any, catalogue: Any):
     and its identity is in ``_.TestDictionary``.
     """
 
+    from ..targets import LAKEHOUSE_KIND
+
     schema, name = object.identity
     if getattr(object, "_validation_kind", ""):
         return catalogue.installed_validation(
-            target_name=object.lakehouse.name, schema=schema, object=name
+            target_kind=LAKEHOUSE_KIND,
+            target_name=object.lakehouse.name,
+            schema=schema,
+            object=name,
         )
     return catalogue.installed_object(
+        target_kind=LAKEHOUSE_KIND,
         target_name=object.lakehouse.name,
         schema=schema,
         object=name,
