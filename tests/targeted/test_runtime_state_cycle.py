@@ -47,7 +47,6 @@ from weaver.catalogue.tables import (
     TEST_STATUS,
 )
 from weaver.declaration import parse_item_repository
-from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
@@ -158,15 +157,14 @@ def _operational(repository) -> Catalogue:
 def _inventories(repository):
     bound = {b.item: b.to_bound_target() for b in estate_bindings().entries}
     made = {}
-    for item, target_kind, kind in (
-        (ITEM, DELTA_TARGET, "lakehouse"),
-        (OTHER_ITEM, SQL_TARGET, "warehouse"),
+    for item, kind in (
+        (ITEM, "lakehouse"),
+        (OTHER_ITEM, "warehouse"),
     ):
         identity = item_id(item)
         made[identity] = _FixtureInventory.from_repository(
             repository,
             item=item,
-            target_kind=target_kind,
             target_id=bound[identity].id,
             kind=kind,
             target_name=bound[identity].name,

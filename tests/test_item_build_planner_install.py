@@ -32,7 +32,6 @@ from weaver.build_bundle.prune import (
 from weaver.catalogue.state import Catalogue, for_targets
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration import parse_item_repository
-from weaver.declaration.metadata import DELTA_TARGET
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import BuildError
 from weaver.locations import Location
@@ -171,7 +170,7 @@ def test_one_bundle_coordinates_multiple_typed_items(tmp_path):
 def test_one_build_cannot_write_two_items_into_one_physical_target(tmp_path):
     """A build diffs one item's keep-set against the whole target inventory.
 
-    See `render_inventory_prune`. Two items in one target would each prune the
+    See the inventory prune renderers. Two items in one target would each prune the
     other's objects, so the binding set refuses the pairing outright.
     """
 
@@ -913,7 +912,6 @@ def test_a_lakehouse_without_delta_mutations_gets_no_refresh(tmp_path):
             curated_binding.item: FixtureInventory.from_repository(
                 repository,
                 item=str(curated_binding.item),
-                target_kind=DELTA_TARGET,
                 target_id=curated.id,
                 kind="lakehouse",
                 target_name=curated.name,

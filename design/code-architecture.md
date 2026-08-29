@@ -117,6 +117,13 @@ Give it the same inputs twice and you get the same bundle twice.
 That purity is why most build behaviour can be tested in milliseconds with no
 tenant, no credentials and no JVM.
 
+Build planning dispatches from the authored `WeaverItemId`. A Lakehouse item
+calls Lakehouse prune, drop, schema, shortcut, document and endpoint planners. A
+Warehouse item calls the corresponding Warehouse planners and has no endpoint
+refresh step. Folder, Table and View describe object kind within an item.
+Python, Spark SQL and T-SQL describe authored or executable language. They are
+not build target categories.
+
 ### Installer
 
 ```text

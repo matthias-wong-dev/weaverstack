@@ -16,7 +16,6 @@ from support.workspaces import WORKSPACE
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
 from weaver.catalogue.state import Catalogue
 from weaver.declaration import parse_item_repository
-from weaver.declaration.metadata import SQL_TARGET
 from weaver.declaration.model import ObjectId, WeaverDocumentId, WeaverItemId
 from weaver.errors import DiscoveryError
 from weaver.locations import Location
@@ -76,7 +75,6 @@ def _plan(repository, tmp_path, *, catalogue):
     inventory = FixtureInventory.from_repository(
         repository,
         item=WAREHOUSE_ITEM,
-        target_kind=SQL_TARGET,
         target_id=target.id,
         kind="warehouse",
         target_name=target.name,

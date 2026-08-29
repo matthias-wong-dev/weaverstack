@@ -75,7 +75,6 @@ from weaver.build_bundle import (
 from weaver.build_bundle.planner import certifiable_identities
 from weaver.catalogue.state import Catalogue, for_targets
 from weaver.declaration import parse_item_repository
-from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
 from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
@@ -153,7 +152,6 @@ def build(repository, tmp_path):
             item_id(ITEM): FixtureInventory.from_repository(
                 repository,
                 item=ITEM,
-                target_kind=DELTA_TARGET,
                 target_id=bound[item_id(ITEM)].id,
                 kind="lakehouse",
                 target_name=LAKEHOUSE_TARGET_NAME,
@@ -161,7 +159,6 @@ def build(repository, tmp_path):
             item_id(WAREHOUSE_ITEM): FixtureInventory.from_repository(
                 repository,
                 item=WAREHOUSE_ITEM,
-                target_kind=SQL_TARGET,
                 target_id=bound[item_id(WAREHOUSE_ITEM)].id,
                 kind="warehouse",
                 target_name=WAREHOUSE_TARGET_NAME,

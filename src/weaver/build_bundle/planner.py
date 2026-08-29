@@ -33,7 +33,7 @@ from typing import Mapping
 from ..catalogue.claims import without_claims
 from ..catalogue.state import Catalogue
 from ..catalogue.tables import ROLE_SHORTCUT
-from ..declaration.model import WeaverItemId, WeaverRepository
+from ..declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId, WeaverRepository
 from ..errors import BuildError
 from ..etl import item_runtime_artefacts, load_schemas, runtime_artefacts
 from ..locations import Location
@@ -49,25 +49,21 @@ from .catalogue_actions import (
     render_catalogue_after_build,
     render_catalogue_before_build,
 )
-from .endpoints import item_refresh_stage
+from .documents import lakehouse_build_stages, warehouse_build_stages
+from .drops import lakehouse_drop_stages, warehouse_drop_stages
+from .endpoints import lakehouse_endpoint_refresh_stage
 from .incremental import select_build, stale_shortcut_destinations
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
-from .physical import (
-    item_build_stages,
-    item_drop_stages,
-    item_prune_stage,
-    item_runtime_removals,
-    item_runtime_stages,
-    item_schema_stage,
-)
-from .prune import TargetInventory
+from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
+from .runtime import item_runtime_removals, item_runtime_stages
 from .runtime_tables import (
     render_runtime_state_reconciliation,
     runtime_state_invalidation,
 )
-from .shortcuts import plan_item_shortcuts
+from .schemas import lakehouse_schema_stage, warehouse_schema_stage
+from .shortcuts import plan_lakehouse_shortcuts, plan_warehouse_shortcuts
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
-from .targets import WAREHOUSE_TARGET, ItemBindings, WarehouseBinding
+from .targets import ItemBindings, WarehouseBinding
 
 
 def generate_item_build_bundle(
@@ -407,7 +403,87 @@ def plan_item_build(
     without generating a bundle.
     """
 
-    shortcuts = plan_item_shortcuts(
+    arguments = dict(
+        repository=repository,
+        item=item,
+        target=target,
+        inventory=inventory,
+        target_by_item=target_by_item,
+        selected_documents=selected_documents,
+        selected_shortcuts=selected_shortcuts,
+        selected_for_drop=selected_for_drop,
+        selected_for_build=selected_for_build,
+        registered=registered,
+        catalogue_target=catalogue_target,
+        selected_loads=selected_loads,
+        removed=removed,
+        shortcut_sources=shortcut_sources,
+    )
+    if item.item_type == LAKEHOUSE:
+        return _plan_lakehouse_item(**arguments)
+    if item.item_type == WAREHOUSE:
+        return _plan_warehouse_item(**arguments)
+    raise BuildError(f"unsupported Weaver item type {item.item_type!r}")
+
+
+def _plan_lakehouse_item(**arguments) -> PlannedItem:
+    """Plan one Lakehouse through Lakehouse-specific concern functions."""
+
+    target = arguments["target"]
+    return _plan_item(
+        **arguments,
+        shortcut_planner=plan_lakehouse_shortcuts,
+        prune_planner=lakehouse_prune_stage,
+        drop_planner=lakehouse_drop_stages,
+        schema_planner=lakehouse_schema_stage,
+        build_planner=lakehouse_build_stages,
+        runtime_destination=target.spark_target,
+        endpoint_planner=lakehouse_endpoint_refresh_stage,
+    )
+
+
+def _plan_warehouse_item(**arguments) -> PlannedItem:
+    """Plan one Warehouse through Warehouse-specific concern functions."""
+
+    return _plan_item(
+        **arguments,
+        shortcut_planner=plan_warehouse_shortcuts,
+        prune_planner=warehouse_prune_stage,
+        drop_planner=warehouse_drop_stages,
+        schema_planner=warehouse_schema_stage,
+        build_planner=warehouse_build_stages,
+        runtime_destination=None,
+        endpoint_planner=None,
+    )
+
+
+def _plan_item(
+    repository,
+    *,
+    item,
+    target,
+    inventory,
+    target_by_item,
+    selected_documents,
+    selected_shortcuts,
+    selected_for_drop,
+    selected_for_build,
+    registered,
+    catalogue_target,
+    selected_loads,
+    removed,
+    shortcut_sources,
+    shortcut_planner,
+    prune_planner,
+    drop_planner,
+    schema_planner,
+    build_planner,
+    runtime_destination,
+    endpoint_planner,
+) -> PlannedItem:
+    """Arrange one item using operations selected at item dispatch."""
+
+    shortcuts = shortcut_planner(
         repository,
         item=item,
         target=target,
@@ -419,10 +495,7 @@ def plan_item_build(
     artefacts = item_runtime_artefacts(
         repository,
         item=item,
-        # The runtime layer installs these, so their bodies are rendered here
-        # against the target this item is bound to. A Warehouse names its
-        # objects over TDS and has no Spark destination.
-        destination=None if target.kind == WAREHOUSE_TARGET else target.spark_target,
+        destination=runtime_destination,
     )
     stages: list[PlannedStage] = []
 
@@ -431,7 +504,7 @@ def plan_item_build(
     # a prune that could not see it would delete the thing incremental
     # selection just chose to keep. Load artefacts are treated the same way, and
     # the stage derives them itself.
-    prune = item_prune_stage(
+    prune = prune_planner(
         repository,
         selected_documents,
         item=item,
@@ -441,7 +514,7 @@ def plan_item_build(
     if prune is not None:
         stages.append(prune)
     stages.extend(
-        item_drop_stages(
+        drop_planner(
             repository,
             selected_for_drop - _retained_pointers(selected_shortcuts, registered),
             item=item,
@@ -450,7 +523,7 @@ def plan_item_build(
             registered=registered,
         )
     )
-    schemas = item_schema_stage(
+    schemas = schema_planner(
         selected_documents,
         item=item,
         target=target,
@@ -466,7 +539,7 @@ def plan_item_build(
     if shortcuts.stage is not None:
         stages.append(shortcuts.stage)
     stages.extend(
-        item_build_stages(
+        build_planner(
             repository,
             selected_for_build - selected_shortcuts,
             item=item,
@@ -474,9 +547,10 @@ def plan_item_build(
         )
     )
 
-    refresh = item_refresh_stage(stages, item=item, target=target)
-    if refresh is not None:
-        stages.append(refresh)
+    if endpoint_planner is not None:
+        refresh = endpoint_planner(stages, item=item, target=target)
+        if refresh is not None:
+            stages.append(refresh)
 
     # The runtime layer closes the item, after its structure is built and its
     # endpoint has caught up. Removals ride in it too: they come from the

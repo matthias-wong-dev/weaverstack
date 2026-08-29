@@ -33,9 +33,7 @@ from .metadata import (
     SesDocument,
     extract_python_metadata,
     extract_sql_metadata_and_body,
-    namespace_for_target,
     parse_document,
-    target_kind_for,
 )
 from .model import LAKEHOUSE, WeaverDocumentId
 
@@ -186,6 +184,8 @@ class SourceDocument:
     text: str
     source_hash: str
     document: SesDocument
+    #: Owning item type supplied by the source reader for isolated parsing.
+    item_type: str
     #: The signature build compares with the installed Registry row.  For a
     #: Python document this also covers every in-item ``lib/`` module reachable
     #: through static imports; for every other document it is ``source_hash``.
@@ -222,18 +222,6 @@ class SourceDocument:
         return self.document.is_validation
 
     @property
-    def target_kind(self) -> str:
-        """Which physical destination this object materialises into.
-
-        A validation materialises nothing and this still answers, because what
-        it gives is the namespace: a Test in a Warehouse binds its references
-        there, one in a Lakehouse in the Lakehouse. Nothing routes a validation
-        to DDL on the strength of it.
-        """
-
-        return target_kind_for(self.language, self.document.kind)
-
-    @property
     def effective_signature(self) -> str:
         """The exact authored implementation this physical object represents."""
 
@@ -260,21 +248,22 @@ class SourceDocument:
 
     @property
     def node_id(self) -> str:
-        """Identity within the repository: target and ID together.
+        """Identity within the repository: owning item and ID together.
 
-        The ID alone is not unique. The same Schema.Object may exist as a folder,
-        a Delta table and a Warehouse table at once.
+        The ID alone is not unique across authored items.
         """
 
         if self.logical_id is not None:
             return str(self.logical_id)
-        return f"{self.target_kind}:{self.qualified}"
+        return f"{self.item_type}:{self.qualified}"
 
     @property
     def namespace(self) -> str:
         """The execution namespace this object's references bind in."""
 
-        return namespace_for_target(self.target_kind)
+        if self.logical_id is not None:
+            return self.logical_id.item.item_type
+        return self.item_type
 
     @property
     def warehouse_alias(self) -> ObjectId | None:
@@ -406,8 +395,17 @@ def read_source_document(
     filename_id = object_id_for_filename(relative_path, language)
 
     if language == PYTHON:
-        return _read_python(relative_path, text, source_hash, filename_id)
-    return _read_sql(relative_path, text, source_hash, filename_id, language)
+        return _read_python(
+            relative_path, text, source_hash, filename_id, item_type=item_type
+        )
+    return _read_sql(
+        relative_path,
+        text,
+        source_hash,
+        filename_id,
+        language,
+        item_type=item_type,
+    )
 
 
 def _check_declared_id(
@@ -422,7 +420,12 @@ def _check_declared_id(
 
 
 def _read_python(
-    relative_path: str, text: str, source_hash: str, filename_id: ObjectId
+    relative_path: str,
+    text: str,
+    source_hash: str,
+    filename_id: ObjectId,
+    *,
+    item_type: str,
 ) -> SourceDocument:
     document = parse_document(extract_python_metadata(text), language=PYTHON)
     _check_declared_id(relative_path, document, filename_id)
@@ -477,6 +480,7 @@ def _read_python(
         text=text,
         source_hash=source_hash,
         document=document,
+        item_type=item_type,
         class_name=declared.name,
         imported_modules=imports,
         python_imports=python_imports,
@@ -612,6 +616,8 @@ def _read_sql(
     source_hash: str,
     filename_id: ObjectId,
     language: str,
+    *,
+    item_type: str,
 ) -> SourceDocument:
     metadata_text, body = extract_sql_metadata_and_body(text)
     document = parse_document(metadata_text, language=language)
@@ -633,6 +639,7 @@ def _read_sql(
             text=text,
             source_hash=source_hash,
             document=document,
+            item_type=item_type,
             sql_body=body,
             sql_analysis=analysis,
             discovered_references=extract_sql_references(body),
@@ -664,6 +671,7 @@ def _read_sql(
         text=text,
         source_hash=source_hash,
         document=document,
+        item_type=item_type,
         sql_body=body,
         sql_analysis=analysis,
         discovered_references=extract_sql_references(body),

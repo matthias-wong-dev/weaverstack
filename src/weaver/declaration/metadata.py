@@ -42,43 +42,6 @@ LANGUAGES = frozenset({PYTHON, SQL, SPARK_SQL})
 #: They declare their shape up front and use the underscored audit spelling.
 DELTA_LANGUAGES = frozenset({PYTHON, SPARK_SQL})
 
-# The three physical destinations. An object ID is unique within one of these,
-# not across them: Sales.Order may exist as a folder, as a Delta table and as a
-# Warehouse table at the same time, because those are three different places.
-FOLDER_TARGET = "folder"
-DELTA_TARGET = "delta"
-SQL_TARGET = "sql"
-TARGET_KINDS = (FOLDER_TARGET, DELTA_TARGET, SQL_TARGET)
-
-# The two execution namespaces a two-part reference may bind in. A Lakehouse
-# object (Folder or Delta) resolves its references inside the Lakehouse; a
-# Warehouse object (SQL) inside the Warehouse. The two are bridged only by an
-# explicit shortcut, never by inference.
-LAKEHOUSE_NAMESPACE = "lakehouse"
-WAREHOUSE_NAMESPACE = "warehouse"
-NAMESPACES = (LAKEHOUSE_NAMESPACE, WAREHOUSE_NAMESPACE)
-
-
-def namespace_for_target(target_kind: str) -> str:
-    """The namespace a native object of this target binds its references in."""
-
-    return WAREHOUSE_NAMESPACE if target_kind == SQL_TARGET else LAKEHOUSE_NAMESPACE
-
-
-def target_kind_for(language: str, kind: str) -> str:
-    """Where an object materialises, from its language and kind.
-
-    Routing is inferred, not configured, which is what removed the old paired
-    source-and-target build command.
-    """
-
-    if kind == FOLDER:
-        return FOLDER_TARGET
-    if language in DELTA_LANGUAGES:
-        return DELTA_TARGET
-    return SQL_TARGET
-
-
 _ID_KEYS = {
     "Folder ID": FOLDER,
     "Table ID": TABLE,
@@ -1094,27 +1057,28 @@ def _parse_aliases(
     through the same two-part model.
     """
 
-    target = target_kind_for(language, kind)
+    lakehouse_object = kind != FOLDER and language in DELTA_LANGUAGES
+    warehouse_object = kind != FOLDER and not lakehouse_object
     warehouse_alias = _parse_shortcut(raw.get(WAREHOUSE_ALIAS), WAREHOUSE_ALIAS)
     lakehouse_alias = _parse_shortcut(raw.get(LAKEHOUSE_ALIAS), LAKEHOUSE_ALIAS)
 
-    if warehouse_alias is not None and target != DELTA_TARGET:
+    if warehouse_alias is not None and not lakehouse_object:
         raise MetadataError(
             f"{WAREHOUSE_ALIAS} publishes a Lakehouse object into the Warehouse, so it "
             f"belongs on a Delta table or Spark view, not on {object_id.qualified} "
             + (
                 "(a Warehouse object uses Lakehouse shortcut)"
-                if target == SQL_TARGET
+                if warehouse_object
                 else "(a Folder is not published across engines)"
             )
         )
-    if lakehouse_alias is not None and target != SQL_TARGET:
+    if lakehouse_alias is not None and not warehouse_object:
         raise MetadataError(
             f"{LAKEHOUSE_ALIAS} publishes a Warehouse object into the Lakehouse, so it "
             f"belongs on a SQL table or view, not on {object_id.qualified} "
             + (
                 "(a Lakehouse object uses Warehouse shortcut)"
-                if target == DELTA_TARGET
+                if lakehouse_object
                 else "(a Folder is not published across engines)"
             )
         )

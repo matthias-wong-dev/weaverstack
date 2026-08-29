@@ -21,7 +21,11 @@ from support.weaver_test import weaver_test
 #: What `managed_sets` produces: the keep-set, folded for comparison. Built by
 #: hand here so the diff is tested against a stated desired state rather than
 #: against whatever a repository happened to declare.
-from weaver.build_bundle.prune import _Managed, render_inventory_prune
+from weaver.build_bundle.prune import (
+    _Managed,
+    render_lakehouse_inventory_prune,
+    render_warehouse_inventory_prune,
+)
 
 
 def keep(
@@ -53,10 +57,14 @@ def keep(
 
 
 def prune(inventory, managed, *, target=None):
+    target = target or bound_target()
     payloads: dict[str, bytes] = {}
-    actions, _changes = render_inventory_prune(
-        target or bound_target(), inventory, managed, payloads
+    renderer = (
+        render_warehouse_inventory_prune
+        if target.kind == "warehouse"
+        else render_lakehouse_inventory_prune
     )
+    actions, _changes = renderer(target, inventory, managed, payloads)
     return actions, payloads
 
 

@@ -25,11 +25,12 @@ from .item_dependencies import resolve_item_dependencies
 from .metadata import (
     ALIAS_KEYS,
     ASSUMPTION,
-    DELTA_TARGET,
-    FOLDER_TARGET,
+    FOLDER,
     PYTHON,
-    SQL_TARGET,
+    SQL,
+    TABLE,
     TEST,
+    VIEW,
     ObjectId,
 )
 from .model import (
@@ -603,11 +604,9 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
                 f"replaced by shortcuts. Declare them in {LAKEHOUSE_FILE} for a "
                 f"Lakehouse item, or {WAREHOUSE_FILE} for a Warehouse one."
             )
-        if item.item_type == LAKEHOUSE:
-            expected = FOLDER_TARGET if is_files else DELTA_TARGET
-        else:
-            expected = SQL_TARGET
-        if source.target_kind != expected:
+        if not _valid_object_placement(
+            item.item_type, is_files=is_files, source=source
+        ):
             location = "Files/" if is_files else f"{item.item_type} item root"
             raise DiscoveryError(
                 f"{relative}: {source.document.kind} in {source.language} does not "
@@ -618,7 +617,6 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         _insert_exact_case(
             source_documents, identity, source, relative, what="document"
         )
-
     from ..etl import ETL_SCHEMA
 
     reserved = sorted(
@@ -678,6 +676,16 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         },
         store_files=tuple(files),
     )
+
+
+def _valid_object_placement(item_type: str, *, is_files: bool, source) -> bool:
+    """Whether an object document occupies a valid location in its owning item."""
+
+    if item_type == WAREHOUSE:
+        return not is_files and source.language == SQL and source.kind in (TABLE, VIEW)
+    if is_files:
+        return source.kind == FOLDER
+    return source.kind in (TABLE, VIEW)
 
 
 def _generated_content(authored: RepositoryPart) -> RepositoryPart:
@@ -1177,7 +1185,7 @@ def _resolve(
     own_target = [
         candidate
         for candidate in candidates
-        if candidate.target_kind == referrer.target_kind
+        if _source_item_type(candidate) == _source_item_type(referrer)
         and candidate.node_id != referrer.node_id
     ]
     if len(own_target) == 1:
@@ -1186,6 +1194,14 @@ def _resolve(
         candidate for candidate in candidates if candidate.node_id != referrer.node_id
     ]
     return elsewhere[0] if len(elsewhere) == 1 else None
+
+
+def _source_item_type(source: SourceDocument) -> str:
+    """Return item context from the repository identity or isolated source read."""
+
+    if source.logical_id is not None:
+        return source.logical_id.item.item_type
+    return source.item_type
 
 
 def _by_id(documents: Iterable[SourceDocument]) -> Mapping[str, list[SourceDocument]]:

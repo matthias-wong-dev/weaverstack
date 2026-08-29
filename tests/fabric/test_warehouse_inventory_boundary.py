@@ -5,9 +5,7 @@ from __future__ import annotations
 from factories import FixtureInventory, item_id
 from support.weaver_test import weaver_test
 
-from weaver.build_bundle.physical import item_prune_stage
-from weaver.build_bundle.prune import read_warehouse_inventory
-from weaver.declaration.metadata import SQL_TARGET
+from weaver.build_bundle.prune import read_warehouse_inventory, warehouse_prune_stage
 
 
 def _folded(names):
@@ -25,7 +23,6 @@ def test_a_built_warehouse_reads_back_as_the_fixture_predicts(
     predicted = FixtureInventory.from_repository(
         warehouse_primitive_estate.repository,
         item="Warehouse/Reporting",
-        target_kind=SQL_TARGET,
         target_id="target-1",
         kind="warehouse",
     )
@@ -48,7 +45,7 @@ def test_an_unmanaged_object_is_seen_and_would_be_pruned(
         )
         assert "dwg.oldtable" in _folded(actual.tables)
 
-        stage = item_prune_stage(
+        stage = warehouse_prune_stage(
             warehouse_primitive_estate.repository,
             set(warehouse_primitive_estate.repository.source_documents),
             item=item_id("Warehouse/Reporting"),
@@ -69,7 +66,7 @@ def test_an_unmanaged_object_is_seen_and_would_be_pruned(
 def test_prune_against_a_freshly_built_warehouse_finds_nothing(
     warehouse_primitive_estate,
 ):
-    stage = item_prune_stage(
+    stage = warehouse_prune_stage(
         warehouse_primitive_estate.repository,
         set(warehouse_primitive_estate.repository.source_documents),
         item=item_id("Warehouse/Reporting"),

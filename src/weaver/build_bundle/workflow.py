@@ -237,7 +237,7 @@ def read_build_state(
 def _refuse_occupied_targets(bindings: ItemBindings, *, session, workspace) -> None:
     """Refuse a target already installed to by an item outside this build.
 
-    :func:`weaver.build_bundle.physical.item_prune_stage` diffs one item's
+    item-specific prune planner diffs one item's
     keep-set against the whole target inventory, so building into a target
     holding another item's objects would prune them.
 

@@ -23,39 +23,47 @@ from typing import Iterable
 
 from ..declaration.model import WeaverItemId
 from .models import (
+    BUILD_TABLE,
+    BUILD_VIEW,
     CREATE_SHORTCUT,
     DROP_SHORTCUT,
+    DROP_TABLE,
+    DROP_VIEW,
     REFRESH_SQL_ENDPOINT,
     BuildBatch,
     InstallAction,
 )
-from .physical import DELTA_MUTATING_KINDS
 from .stages import REFRESH, PlannedStage
-from .targets import WAREHOUSE_TARGET, BoundTarget
+from .targets import BoundTarget
 
 #: Everything that leaves a Lakehouse's endpoint metadata stale. Shortcut creation
 #: and removal are here because a OneLake shortcut appears in the destination as a
 #: table.
-_MUTATING = DELTA_MUTATING_KINDS | {CREATE_SHORTCUT, DROP_SHORTCUT}
+_ENDPOINT_MUTATING_KINDS = frozenset(
+    {
+        BUILD_TABLE,
+        BUILD_VIEW,
+        DROP_TABLE,
+        DROP_VIEW,
+        "prune_table",
+        "prune_view",
+        "prune_schema",
+        CREATE_SHORTCUT,
+        DROP_SHORTCUT,
+    }
+)
 
 
-def item_refresh_stage(
+def lakehouse_endpoint_refresh_stage(
     stages: Iterable[PlannedStage],
     *,
     item: WeaverItemId,
     target: BoundTarget,
 ) -> PlannedStage | None:
-    """One refresh for this item, when its planned work mutated Delta.
+    """Plan one refresh when this Lakehouse item's work mutated Delta."""
 
-    A Warehouse item has no endpoint of its own to refresh. It is reached over
-    SQL, and an item whose only work was a folder or a schema has changed
-    nothing the endpoint describes.
-    """
-
-    if target.kind == WAREHOUSE_TARGET:
-        return None
     if not any(
-        action.kind in _MUTATING
+        action.kind in _ENDPOINT_MUTATING_KINDS
         for stage in stages
         for batch in stage.batches
         for action in batch.actions

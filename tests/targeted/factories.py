@@ -45,13 +45,8 @@ from weaver.catalogue.tables import (
     STANDARD_SURFACE_TABLES,
 )
 from weaver.declaration import parse_item_repository
-from weaver.declaration.metadata import (
-    DELTA_TARGET,
-    FOLDER_TARGET,
-    SQL_TARGET,
-    ObjectId,
-)
-from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.declaration.metadata import ObjectId
+from weaver.declaration.model import WAREHOUSE, WeaverDocumentId, WeaverItemId
 from weaver.etl import (
     FILE_TYPE,
     PROCEDURE_TYPE,
@@ -598,7 +593,6 @@ class FixtureInventory(TargetInventory):
         repository,
         *,
         item: str | WeaverItemId = ITEM,
-        target_kind: str = DELTA_TARGET,
         target_id: str = "target-1",
         kind: str = "lakehouse",
         target_name: str = "Sales_LH",
@@ -619,6 +613,7 @@ class FixtureInventory(TargetInventory):
 
         if isinstance(item, str):
             item = item_id(item)
+        warehouse = item.item_type == WAREHOUSE
         documents = [
             document
             for identity, document in repository.source_documents.items()
@@ -630,14 +625,8 @@ class FixtureInventory(TargetInventory):
                 sorted(
                     document.qualified
                     for document in documents
-                    if (document.target_kind == FOLDER_TARGET) is files
-                    and (
-                        files
-                        or (
-                            document.target_kind == target_kind
-                            and str(document.kind) == of_kind
-                        )
-                    )
+                    if (document.kind == "Folder") is files
+                    and (files or str(document.kind) == of_kind)
                 )
             )
 
@@ -648,7 +637,7 @@ class FixtureInventory(TargetInventory):
         views = qualified(of_kind="View", files=False)
         folders = qualified(of_kind="Folder", files=True)
         artefacts = item_runtime_artefacts(repository, item=item)
-        if target_kind == SQL_TARGET and str(item) != str(BUILTIN_ITEM):
+        if warehouse and str(item) != str(BUILTIN_ITEM):
             # A built Warehouse holds the standard Weaver catalogue surface
             # under its own names, so a generated procedure can read its own
             # bookmark and record what it did.
@@ -668,7 +657,7 @@ class FixtureInventory(TargetInventory):
             schemas=tuple(
                 sorted(
                     set(schemas_of(tables + views))
-                    | set(load_schemas(artefacts) if target_kind == SQL_TARGET else ())
+                    | set(load_schemas(artefacts) if warehouse else ())
                 )
             ),
             folder_schemas=schemas_of(folders),
@@ -691,7 +680,7 @@ class FixtureInventory(TargetInventory):
             ),
             runtime_references=(
                 ()
-                if target_kind == SQL_TARGET or str(item) == str(BUILTIN_ITEM)
+                if warehouse or str(item) == str(BUILTIN_ITEM)
                 else tuple(sorted(table.name for table in STANDARD_SURFACE_TABLES))
             ),
         )
@@ -1105,9 +1094,9 @@ def estate_inventories(repository, *, empty: bool = False):
 
     bound = {b.item: b.to_bound_target() for b in estate_bindings().entries}
     made = {}
-    for item, target_kind, kind in (
-        (ITEM, DELTA_TARGET, "lakehouse"),
-        (WAREHOUSE_ITEM, SQL_TARGET, "warehouse"),
+    for item, kind in (
+        (ITEM, "lakehouse"),
+        (WAREHOUSE_ITEM, "warehouse"),
     ):
         identity = item_id(item)
         arguments = dict(
@@ -1116,9 +1105,7 @@ def estate_inventories(repository, *, empty: bool = False):
         made[identity] = (
             target_inventory(**arguments)
             if empty
-            else FixtureInventory.from_repository(
-                repository, item=item, target_kind=target_kind, **arguments
-            )
+            else FixtureInventory.from_repository(repository, item=item, **arguments)
         )
     return made
 
