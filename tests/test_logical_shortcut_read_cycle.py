@@ -332,17 +332,17 @@ def test_a_source_no_clean_load_has_run_for_reads_as_the_sentinel(tmp_path):
     assert shortcut.bookmark() == BOOKMARK_SENTINEL
 
 
-# --- what a physical shortcut refuses ----------------------------------------
+# --- what a physical shortcut answers ----------------------------------------
 
 
 @weaver_test()
-def test_a_physical_folder_shortcut_reads_files_and_refuses_weaver_semantics(estate):
+def test_a_physical_folder_shortcut_reads_files_and_fails_weaver_semantics(estate):
     """
     Intent: A physical shortcut names a Fabric location, so it stays a physical
     reader and says so when asked a Weaver question.
 
     Proof: both locations still answer, and each of the four Weaver-semantic
-    methods refuses naming the target type.
+    methods fails naming the target type.
     """
 
     shortcut = estate.shortcut(source=None)
@@ -406,7 +406,7 @@ def test_a_logical_table_shortcut_reads_locally_and_bookmarks_from_the_source(
 
 
 @weaver_test()
-def test_a_physical_table_shortcut_reads_locally_and_refuses_a_bookmark(table_owner):
+def test_a_physical_table_shortcut_reads_locally_and_fails_a_bookmark(table_owner):
     shortcut = TableShortcut(schema=LOCAL_SCHEMA, object=LOCAL_OBJECT)(table_owner)
 
     assert shortcut.dataframe().path

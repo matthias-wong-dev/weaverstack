@@ -70,9 +70,8 @@ class _Bound:
     """One shortcut, addressed in the item that declares it.
 
     ``source`` is the Weaver document a logical shortcut named, and None for a
-    physical one. Physical access never uses it: it answers what the local
-    shortcut cannot, which is what Weaver records about the object on the far
-    side.
+    physical one. It answers what Weaver records about the object on the far
+    side. Reading data uses the local destination and never this.
     """
 
     def __init__(self, owner: Any, source: str | None = None) -> None:
@@ -108,9 +107,10 @@ class _Bound:
     def bookmark(self):
         """The source object's bookmark, read through the owner's catalogue.
 
-        The instant immediately before the source's last clean load began. It is
-        the source's own, not this item's: a consumer catching up measures from
-        its own :meth:`weaver.objects.WeaverObject.bookmark`.
+        The instant immediately before the source's last clean load began. A
+        consumer catching up measures from its own
+        :meth:`weaver.objects.WeaverObject.bookmark` instead, because the
+        boundary there is its own last clean load.
         """
 
         identity = self._logical_source()
