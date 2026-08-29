@@ -379,6 +379,12 @@ def _change_kind(declaration) -> str:
 def _change_name(declaration) -> str:
     if declaration.is_schema:
         return declaration.name
+    if declaration.destination_identity is not None and not declaration.is_view:
+        # A target inventory reports runtime references by table name beneath
+        # a Lakehouse's ``Tables/_``. The schema is fixed by the collection
+        # itself. A Warehouse reports its corresponding views as qualified
+        # relation names through the ordinary view collection.
+        return declaration.destination.object_id.object
     return declaration.destination.object_id.qualified
 
 

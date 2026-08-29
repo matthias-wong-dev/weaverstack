@@ -666,11 +666,26 @@ def managed_lakehouse_sets(
 ) -> _Managed:
     """Build the keep-set for one Lakehouse item."""
 
-    return _managed_sets(
-        documents,
-        shortcut_destinations=shortcut_destinations,
+    tables = {d.qualified for d in documents.values() if d.kind == TABLE}
+    views = {d.qualified for d in documents.values() if d.kind == VIEW}
+    folders = {d.qualified for d in documents.values() if d.kind == FOLDER}
+    declared_objects = tables | views
+    shortcut_schemas = set()
+    for destination in shortcut_destinations:
+        identity = getattr(destination, "object_id", None)
+        if identity is None:
+            shortcut_schemas.add(destination.schema.lower())
+        elif destination.is_files:
+            folders.add(identity.qualified)
+        else:
+            tables.add(identity.qualified)
+    return _finalise_managed_sets(
+        tables=tables,
+        views=views,
+        folders=folders,
+        declared_objects=declared_objects,
+        shortcut_schemas=shortcut_schemas,
         load_identities=load_identities,
-        warehouse=False,
     )
 
 
@@ -682,28 +697,30 @@ def managed_warehouse_sets(
 ) -> _Managed:
     """Build the keep-set for one Warehouse item."""
 
-    return _managed_sets(
-        documents,
-        shortcut_destinations=shortcut_destinations,
+    tables = {d.qualified for d in documents.values() if d.kind == TABLE}
+    views = {d.qualified for d in documents.values() if d.kind == VIEW}
+    declared_objects = tables | views
+    shortcut_schemas = set()
+    for destination in shortcut_destinations:
+        identity = getattr(destination, "object_id", None)
+        if identity is None:
+            shortcut_schemas.add(destination.schema.lower())
+        else:
+            views.add(identity.qualified)
+    return _finalise_managed_sets(
+        tables=tables,
+        views=views,
+        folders=set(),
+        declared_objects=declared_objects,
+        shortcut_schemas=shortcut_schemas,
         load_identities=load_identities,
-        warehouse=True,
     )
 
 
-def _managed_sets(
-    documents,
-    *,
-    shortcut_destinations,
-    load_identities,
-    warehouse: bool,
+def _finalise_managed_sets(
+    *, tables, views, folders, declared_objects, shortcut_schemas, load_identities
 ) -> _Managed:
-    """Build the item-specific keep-set used by inventory pruning.
-
-    ``shortcut_destinations`` belong in the keep-set: they are desired state in
-    this item as a declared document is, produced elsewhere, and a build
-    that pruned the shortcut it was about to create would be destructive and
-    pointless. Which set one joins follows its physical form: a folder under Files,
-    a view in a Warehouse, a table directory in a Lakehouse.
+    """Fold classified names into the inventory comparison form.
 
     ``load_identities`` contribute the ``_`` schema a Warehouse's generated load
     procedures live in, which nothing declares: without it every build would
@@ -711,37 +728,8 @@ def _managed_sets(
     added unconditionally, so the schema goes when the last procedure does. The
     Lakehouse runtime tree needs nothing here, being a declared folder.
 
-    Package-owned runtime references join ``shortcut_destinations`` during
-    repository preparation, so they have the same keep-set lifecycle as any
-    other logical relation.
     """
 
-    tables = {d.qualified for d in documents.values() if d.kind == TABLE}
-    views = {d.qualified for d in documents.values() if d.kind == VIEW}
-    folders = {
-        d.qualified for d in documents.values() if not warehouse and d.kind == FOLDER
-    }
-    # Taken before the shortcuts and the build's own views join, because these
-    # are the names a managed drop can remove by their registered type. See
-    # :class:`_Managed`.
-    declared_objects = tables | views
-    #: The namespaces a schema shortcut presents. Kept, and never looked inside:
-    #: what is in one belongs to the item it points at, and OneLake makes a
-    #: shortcut a read-write window, so enumerating it to decide what to remove
-    #: would be deciding about another item's objects.
-    shortcut_schemas = set()
-    for destination in shortcut_destinations:
-        identity = getattr(destination, "object_id", None)
-        if identity is None:
-            shortcut_schemas.add(destination.schema.lower())
-            continue
-        qualified = identity.qualified
-        if destination.is_files:
-            folders.add(qualified)
-        elif warehouse:
-            views.add(qualified)
-        else:
-            tables.add(qualified)
     schemas = {name.split(".", 1)[0].lower() for name in tables | views}
     schemas.update(shortcut_schemas)
     schemas.update(

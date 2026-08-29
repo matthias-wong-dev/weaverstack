@@ -118,8 +118,7 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
     graph_edges: set[tuple[str, str]] = set()
 
     for consumer, source in native.items():
-        # One rule for every kind. See
-        # :func:`weaver.declaration.repository.effective_dependencies`.
+        # A declaration replaces discovery, including an explicit empty list.
         if source.document.declares_dependencies:
             references = _declared_references(source, consumer)
         else:

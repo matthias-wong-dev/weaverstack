@@ -266,18 +266,6 @@ class SourceDocument:
         return self.item_type
 
     @property
-    def warehouse_alias(self) -> ObjectId | None:
-        """This Lakehouse object's Warehouse-facing name, if it publishes one."""
-
-        return self.document.warehouse_alias
-
-    @property
-    def lakehouse_alias(self) -> ObjectId | None:
-        """This Warehouse object's Lakehouse-facing name, if it publishes one."""
-
-        return self.document.lakehouse_alias
-
-    @property
     def referenced_object_ids(self) -> tuple[ObjectId, ...]:
         """Two-part references, being candidates for objects in this repository.
 

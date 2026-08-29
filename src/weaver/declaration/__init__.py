@@ -68,12 +68,7 @@ from .references import (
     resolve_text,
     validate_repository_metadata,
 )
-from .repository import (
-    build_internal_graph,
-    effective_dependencies,
-    parse_item_repository,
-    unresolved_references,
-)
+from .repository import parse_item_repository
 from .schemas import (
     SCHEMAS_DIRECTORY,
     SchemaSes,
@@ -110,9 +105,6 @@ __all__ = [
     "parse_item_repository",
     "resolve_item_dependencies",
     "project_bound_documents",
-    "build_internal_graph",
-    "effective_dependencies",
-    "unresolved_references",
     "SchemaSes",
     "SCHEMAS_DIRECTORY",
     "is_schema_file",
