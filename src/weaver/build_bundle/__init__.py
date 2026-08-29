@@ -21,6 +21,7 @@ from .bundle import (
     plan_to_yaml,
     write_bundle,
 )
+from .documents import RenderedAction, render_document_build_action
 from .incremental import BuildSelection, Impact, determine_impact
 from .installer import Installer, execute_install_action
 from .models import (
@@ -30,7 +31,6 @@ from .models import (
     InstallAction,
     OmittedNode,
 )
-from .physical import RenderedAction, render_document_build_action
 from .planner import PlannedItem, generate_item_build_bundle, plan_item_build
 from .report import InstallationReport
 from .targets import (

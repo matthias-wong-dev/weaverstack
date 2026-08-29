@@ -14,16 +14,20 @@ from __future__ import annotations
 from factories import bound_target, document_id, item_id, target_inventory
 from support.weaver_test import weaver_test
 
-from weaver.build_bundle.physical import item_schema_stage
+from weaver.build_bundle.schemas import lakehouse_schema_stage, warehouse_schema_stage
 
 CUSTOMER = "DWG.Customer"
 
 
 def stage(*names, inventory=None, target=None, extra_schemas=()):
-    return item_schema_stage(
+    target = target or bound_target()
+    planner = (
+        warehouse_schema_stage if target.kind == "warehouse" else lakehouse_schema_stage
+    )
+    return planner(
         {document_id(name) for name in names},
         item=item_id(),
-        target=target or bound_target(),
+        target=target,
         inventory=inventory if inventory is not None else target_inventory(),
         extra_schemas=extra_schemas,
     )

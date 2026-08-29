@@ -142,13 +142,62 @@ def _references_the_catalogue(declaration, logical_sources) -> bool:
     return source is not None and source.item == BUILTIN_ITEM
 
 
-def plan_item_shortcuts(
+def plan_lakehouse_shortcuts(
     repository,
     *,
     item: WeaverItemId,
     target: BoundTarget,
     target_by_item: Mapping[WeaverItemId, BoundTarget],
     selected: Iterable[WeaverDocumentId],
+    sources: Mapping[str, ResolvedShortcutSource] | None = None,
+    catalogue_target: BoundTarget | None = None,
+) -> ItemShortcutPlan:
+    """Plan OneLake shortcuts selected for one Lakehouse item."""
+
+    return _plan_item_shortcuts(
+        repository,
+        item=item,
+        target=target,
+        target_by_item=target_by_item,
+        selected=selected,
+        sources=sources,
+        catalogue_target=catalogue_target,
+        action_renderer=_lakehouse_shortcut_action,
+    )
+
+
+def plan_warehouse_shortcuts(
+    repository,
+    *,
+    item: WeaverItemId,
+    target: BoundTarget,
+    target_by_item: Mapping[WeaverItemId, BoundTarget],
+    selected: Iterable[WeaverDocumentId],
+    sources: Mapping[str, ResolvedShortcutSource] | None = None,
+    catalogue_target: BoundTarget | None = None,
+) -> ItemShortcutPlan:
+    """Plan T-SQL shortcut views selected for one Warehouse item."""
+
+    return _plan_item_shortcuts(
+        repository,
+        item=item,
+        target=target,
+        target_by_item=target_by_item,
+        selected=selected,
+        sources=sources,
+        catalogue_target=catalogue_target,
+        action_renderer=_warehouse_shortcut_action,
+    )
+
+
+def _plan_item_shortcuts(
+    repository,
+    *,
+    item: WeaverItemId,
+    target: BoundTarget,
+    target_by_item: Mapping[WeaverItemId, BoundTarget],
+    selected: Iterable[WeaverDocumentId],
+    action_renderer,
     sources: Mapping[str, ResolvedShortcutSource] | None = None,
     catalogue_target: BoundTarget | None = None,
 ) -> ItemShortcutPlan:
@@ -209,7 +258,6 @@ def plan_item_shortcuts(
             )
         reason = _unsupported(
             declaration,
-            target=target,
             source_target=source_target,
             sources=sources,
         )
@@ -229,10 +277,9 @@ def plan_item_shortcuts(
     if supported:
         item_slug = _slug(item)
         payloads: dict[str, bytes] = {}
-        action = _shortcut_action(
+        action = action_renderer(
             supported,
             item=item,
-            target=target,
             payloads=payloads,
             sources=sources,
             logical_sources=logical_sources,
@@ -249,7 +296,7 @@ def plan_item_shortcuts(
             changes={
                 target.id: tuple(
                     added(
-                        _change_kind(declaration, target),
+                        _change_kind(declaration),
                         _change_name(declaration),
                         action.id,
                     )
@@ -281,7 +328,6 @@ def declaration_key(declaration) -> str:
 def _unsupported(
     declaration,
     *,
-    target: BoundTarget,
     source_target: BoundTarget | None,
     sources: Mapping[str, ResolvedShortcutSource],
 ) -> str | None:
@@ -315,12 +361,10 @@ def _unsupported(
     return None
 
 
-def _change_kind(declaration, target) -> str:
+def _change_kind(declaration) -> str:
     """What a destination will look like to an inventory.
 
-    The same rule :func:`weaver.build_bundle.prune.managed_sets` applies for the
-    keep-set, and for the same reason: a destination is a schema, a folder, a
-    view or a table according to what was declared and what it was bound to.
+    The destination declaration supplies schema, folder and object shape.
     """
 
     if declaration.is_view:
@@ -335,52 +379,42 @@ def _change_kind(declaration, target) -> str:
 def _change_name(declaration) -> str:
     if declaration.is_schema:
         return declaration.name
+    if declaration.destination_identity is not None and not declaration.is_view:
+        # A target inventory reports runtime references by table name beneath
+        # a Lakehouse's ``Tables/_``. The schema is fixed by the collection
+        # itself. A Warehouse reports its corresponding views as qualified
+        # relation names through the ordinary view collection.
+        return declaration.destination.object_id.object
     return declaration.destination.object_id.qualified
 
 
-def _shortcut_action(
+def _warehouse_shortcut_action(
     supported,
     *,
     item: WeaverItemId,
-    target: BoundTarget,
     payloads: dict[str, bytes],
     sources: Mapping[str, ResolvedShortcutSource],
     logical_sources: Mapping,
 ) -> InstallAction:
-    """One action for all of this item's declarations.
+    """Render one T-SQL batch action for a Warehouse item's shortcuts.
 
-    One rather than one-per-declaration, because materialising a shortcut is not
-    instantaneous and the cost is per wait, not per create. A Lakehouse
-    shortcut becomes usable some seconds after it exists (measured at 6-31s), so
-    N actions run serially pay N waits while one action that creates everything
-    and then waits pays roughly one. A Warehouse view is a script, and the
-    executor already runs a multi-statement script as one unit.
-
-    The action reports each one it made in its details, so the manifest loses no
-    traceability by grouping them.
+    The T-SQL batch executor submits the view statements as one action. The
+    stage changes retain one entry for each destination.
     """
 
     item_slug = _slug(item)
-    if target.kind == WAREHOUSE_TARGET:
-        content = (
-            json.dumps(
-                [
-                    view_statement(declaration, source_target, logical_sources)
-                    for declaration, source_target in supported
-                ],
-                indent=2,
-                ensure_ascii=False,
-            )
-            + "\n"
-        ).encode("utf-8")
-        filename = f"shortcuts-{item_slug}.tsql-batch.json"
-        executor = "tsql_batch"
-    else:
-        content = shortcut_payload(
-            supported, sources=sources, logical_sources=logical_sources
+    content = (
+        json.dumps(
+            [
+                view_statement(declaration, source_target, logical_sources)
+                for declaration, source_target in supported
+            ],
+            indent=2,
+            ensure_ascii=False,
         )
-        filename = f"shortcuts-{item_slug}.shortcut.json"
-        executor = "shortcut"
+        + "\n"
+    ).encode("utf-8")
+    filename = f"shortcuts-{item_slug}.tsql-batch.json"
     payloads[filename] = content
     return InstallAction(
         id=f"shortcuts-{item_slug}",
@@ -388,7 +422,33 @@ def _shortcut_action(
         # No single resource: this action stands for every declaration the item
         # consumes, and the payload names them.
         resource_node_id=None,
-        executor=executor,
+        executor="tsql_batch",
+        payload=filename,
+        payload_sha256=sha256_hex(content),
+    )
+
+
+def _lakehouse_shortcut_action(
+    supported,
+    *,
+    item: WeaverItemId,
+    payloads: dict[str, bytes],
+    sources: Mapping[str, ResolvedShortcutSource],
+    logical_sources: Mapping,
+) -> InstallAction:
+    """Render one OneLake action for a Lakehouse item's shortcuts."""
+
+    item_slug = _slug(item)
+    content = shortcut_payload(
+        supported, sources=sources, logical_sources=logical_sources
+    )
+    filename = f"shortcuts-{item_slug}.shortcut.json"
+    payloads[filename] = content
+    return InstallAction(
+        id=f"shortcuts-{item_slug}",
+        kind=CREATE_SHORTCUT,
+        resource_node_id=None,
+        executor="shortcut",
         payload=filename,
         payload_sha256=sha256_hex(content),
     )

@@ -6,7 +6,7 @@ schemas and file areas managed by the bound item.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, Mapping
 
 from ..catalogue.tables import (
@@ -14,16 +14,17 @@ from ..catalogue.tables import (
     STANDARD_SURFACE_TABLES,
     is_protected,
 )
-from ..declaration.metadata import DELTA_TARGET, FOLDER_TARGET, SQL_TARGET, TABLE, VIEW
+from ..declaration.metadata import FOLDER, TABLE, VIEW
 from ..declaration.model import (
     FILE_SHAPE,
     PROCEDURE_SHAPE,
     WeaverDocumentId,
+    WeaverItemId,
     WeaverSchemaId,
 )
 from ..declaration.source import SourceDocument
 from ..errors import BuildError
-from ..etl import LOAD_ROOT
+from ..etl import LOAD_ROOT, item_runtime_artefacts
 from ..resolution import TABLES_AREA
 from ..store import Store
 from ..targets import ItemRef
@@ -52,9 +53,12 @@ from .models import (
     PRUNE_SCHEMA,
     PRUNE_TABLE,
     PRUNE_VIEW,
+    BuildBatch,
     InstallAction,
 )
 from .payloads import sha256_hex
+from .sql_templates import render_sql_statement, tsql_ident
+from .stages import PRUNE, PlannedStage
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
 #: Weaver-owned Files areas excluded from prune.
@@ -464,23 +468,13 @@ def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
     )
 
 
-def render_inventory_prune(
+def render_warehouse_inventory_prune(
     target: BoundTarget,
     inventory: TargetInventory,
     managed: _Managed,
     payloads: dict[str, bytes],
 ) -> tuple[tuple[InstallAction, ...], tuple[TargetChange, ...]]:
-    """Purely render prune actions from one already-read inventory.
-
-    ``payloads`` is filled with the frozen drops, keyed by bare filename: the
-    caller owns which sequence these actions land in and therefore which payload
-    directory they live under.
-
-    The changes come back alongside, and here they are load-bearing: a prune
-    action carries no ``resource_node_id``, because the object it removes has no
-    node in the repository, so what it destroys is otherwise recorded nowhere
-    reachable without parsing SQL.
-    """
+    """Render Warehouse prune actions from one already-read inventory."""
 
     actions: list[InstallAction] = []
     changes: list[TargetChange] = []
@@ -506,137 +500,227 @@ def render_inventory_prune(
         schema, _, name = qualified.partition(".")
         return is_protected(schema, name)
 
-    if target.kind == "warehouse":
-        for qualified in inventory.views:
-            if not spared(qualified, managed.views):
-                schema, name = qualified.split(".", 1)
-                actions.append(
-                    _drop_action(
-                        target,
-                        PRUNE_VIEW,
-                        "view",
-                        qualified,
-                        f"drop view if exists {_tsql_ident(schema)}.{_tsql_ident(name)};",
-                        payloads,
-                        executor="tsql",
-                        extension=".sql",
-                    )
-                )
-                changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
-        for qualified in inventory.tables:
-            if not spared(qualified, managed.tables) and not protected(qualified):
-                schema, name = qualified.split(".", 1)
-                actions.append(
-                    _drop_action(
-                        target,
-                        PRUNE_TABLE,
-                        "table",
-                        qualified,
-                        f"drop table if exists {_tsql_ident(schema)}.{_tsql_ident(name)};",
-                        payloads,
-                        executor="tsql",
-                        extension=".sql",
-                    )
-                )
-                changes.append(removed(TABLE_KIND, qualified, actions[-1].id))
-        for schema in inventory.schemas:
-            if schema.casefold() not in managed.schemas:
-                actions.append(
-                    _drop_action(
-                        target,
-                        PRUNE_SCHEMA,
-                        "schema",
-                        schema,
-                        f"drop schema if exists {_tsql_ident(schema)};",
-                        payloads,
-                        executor="tsql",
-                        extension=".sql",
-                    )
-                )
-                changes.append(removed(SCHEMA_KIND, schema, actions[-1].id))
-    else:
-        orphan_schemas = {
-            schema.casefold()
-            for schema in inventory.schemas
-            if schema.casefold() not in managed.schemas
-        }
-        for qualified in inventory.views:
+    for qualified in inventory.views:
+        if not spared(qualified, managed.views):
             schema, name = qualified.split(".", 1)
-            if schema.casefold() not in orphan_schemas and not spared(
-                qualified, managed.views
-            ):
-                actions.append(
-                    _drop_action(
-                        target,
-                        PRUNE_VIEW,
-                        "view",
-                        qualified,
-                        f"DROP VIEW IF EXISTS {target.spark_target.qualify(schema, name)}",
-                        payloads,
-                    )
+            actions.append(
+                _drop_action(
+                    target,
+                    PRUNE_VIEW,
+                    "view",
+                    qualified,
+                    render_sql_statement(
+                        "tsql",
+                        "drop_view_if_exists",
+                        relation=f"{tsql_ident(schema)}.{tsql_ident(name)}",
+                    ),
+                    payloads,
+                    executor="tsql",
+                    extension=".sql",
                 )
-                changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
-        for qualified in inventory.tables:
+            )
+            changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
+    for qualified in inventory.tables:
+        if not spared(qualified, managed.tables) and not protected(qualified):
             schema, name = qualified.split(".", 1)
-            if (
-                schema.casefold() not in orphan_schemas
-                and not spared(qualified, managed.tables)
-                and not protected(qualified)
-            ):
-                actions.append(
-                    _drop_action(
-                        target,
-                        PRUNE_TABLE,
-                        "table",
-                        qualified,
-                        f"DROP TABLE IF EXISTS {target.spark_target.qualify(schema, name)}",
-                        payloads,
-                    )
+            actions.append(
+                _drop_action(
+                    target,
+                    PRUNE_TABLE,
+                    "table",
+                    qualified,
+                    render_sql_statement(
+                        "tsql",
+                        "drop_table_if_exists",
+                        relation=f"{tsql_ident(schema)}.{tsql_ident(name)}",
+                    ),
+                    payloads,
+                    executor="tsql",
+                    extension=".sql",
                 )
-                changes.append(removed(TABLE_KIND, qualified, actions[-1].id))
-        for schema in inventory.folder_schemas:
-            if schema.casefold() not in managed.folder_schemas:
-                actions.append(_prune_folder_action(target, f"folder:{schema}"))
-                changes.append(removed(FOLDER_SCHEMA_KIND, schema, actions[-1].id))
-        for qualified in inventory.folders:
-            schema, _name = qualified.split(".", 1)
-            if (
-                schema.casefold() in managed.folder_schemas
-                and qualified.casefold() not in managed.folders
-            ):
-                actions.append(_prune_folder_action(target, f"folder:{qualified}"))
-                changes.append(removed(FOLDER_KIND, qualified, actions[-1].id))
-        for schema in inventory.schemas:
-            if schema.casefold() in orphan_schemas:
-                actions.append(
-                    _drop_action(
-                        target,
-                        PRUNE_SCHEMA,
-                        "schema",
-                        schema,
-                        f"DROP SCHEMA IF EXISTS "
-                        f"{target.spark_target.qualified_schema(schema)} CASCADE",
-                        payloads,
-                    )
+            )
+            changes.append(removed(TABLE_KIND, qualified, actions[-1].id))
+    for schema in inventory.schemas:
+        if schema.casefold() not in managed.schemas:
+            actions.append(
+                _drop_action(
+                    target,
+                    PRUNE_SCHEMA,
+                    "schema",
+                    schema,
+                    render_sql_statement(
+                        "tsql", "drop_schema", schema=tsql_ident(schema)
+                    ),
+                    payloads,
+                    executor="tsql",
+                    extension=".sql",
                 )
-                changes.append(removed(SCHEMA_KIND, schema, actions[-1].id))
+            )
+            changes.append(removed(SCHEMA_KIND, schema, actions[-1].id))
     return tuple(actions), tuple(changes)
 
 
-def managed_sets(
+def render_lakehouse_inventory_prune(
+    target: BoundTarget,
+    inventory: TargetInventory,
+    managed: _Managed,
+    payloads: dict[str, bytes],
+) -> tuple[tuple[InstallAction, ...], tuple[TargetChange, ...]]:
+    """Render Lakehouse prune actions from one already-read inventory."""
+
+    actions: list[InstallAction] = []
+    changes: list[TargetChange] = []
+
+    def spared(qualified: str, same_kind) -> bool:
+        folded = qualified.casefold()
+        return folded in same_kind or folded in managed.declared_objects
+
+    def protected(qualified: str) -> bool:
+        schema, _, name = qualified.partition(".")
+        return is_protected(schema, name)
+
+    orphan_schemas = {
+        schema.casefold()
+        for schema in inventory.schemas
+        if schema.casefold() not in managed.schemas
+    }
+    for qualified in inventory.views:
+        schema, name = qualified.split(".", 1)
+        if schema.casefold() not in orphan_schemas and not spared(
+            qualified, managed.views
+        ):
+            actions.append(
+                _drop_action(
+                    target,
+                    PRUNE_VIEW,
+                    "view",
+                    qualified,
+                    render_sql_statement(
+                        "spark_sql",
+                        "drop_view_if_exists",
+                        relation=target.spark_target.qualify(schema, name),
+                    ),
+                    payloads,
+                )
+            )
+            changes.append(removed(VIEW_KIND, qualified, actions[-1].id))
+    for qualified in inventory.tables:
+        schema, name = qualified.split(".", 1)
+        if (
+            schema.casefold() not in orphan_schemas
+            and not spared(qualified, managed.tables)
+            and not protected(qualified)
+        ):
+            actions.append(
+                _drop_action(
+                    target,
+                    PRUNE_TABLE,
+                    "table",
+                    qualified,
+                    render_sql_statement(
+                        "spark_sql",
+                        "drop_table_if_exists",
+                        relation=target.spark_target.qualify(schema, name),
+                    ),
+                    payloads,
+                )
+            )
+            changes.append(removed(TABLE_KIND, qualified, actions[-1].id))
+    for schema in inventory.folder_schemas:
+        if schema.casefold() not in managed.folder_schemas:
+            actions.append(_prune_folder_action(target, f"folder:{schema}"))
+            changes.append(removed(FOLDER_SCHEMA_KIND, schema, actions[-1].id))
+    for qualified in inventory.folders:
+        schema, _name = qualified.split(".", 1)
+        if (
+            schema.casefold() in managed.folder_schemas
+            and qualified.casefold() not in managed.folders
+        ):
+            actions.append(_prune_folder_action(target, f"folder:{qualified}"))
+            changes.append(removed(FOLDER_KIND, qualified, actions[-1].id))
+    for schema in inventory.schemas:
+        if schema.casefold() in orphan_schemas:
+            actions.append(
+                _drop_action(
+                    target,
+                    PRUNE_SCHEMA,
+                    "schema",
+                    schema,
+                    render_sql_statement(
+                        "spark_sql",
+                        "drop_schema",
+                        schema=target.spark_target.qualified_schema(schema),
+                    ),
+                    payloads,
+                )
+            )
+            changes.append(removed(SCHEMA_KIND, schema, actions[-1].id))
+    return tuple(actions), tuple(changes)
+
+
+def managed_lakehouse_sets(
     documents: Mapping[str, SourceDocument],
-    object_target_kind: str = DELTA_TARGET,
     *,
     shortcut_destinations: Iterable[WeaverDocumentId] = (),
     load_identities: Iterable[WeaverDocumentId] = (),
 ) -> _Managed:
-    """The keep-set for one physical side: Delta objects, or Warehouse ones.
+    """Build the keep-set for one Lakehouse item."""
 
-    ``shortcut_destinations`` belong in the keep-set: they are desired state in
-    this item as a declared document is, produced elsewhere, and a build
-    that pruned the shortcut it was about to create would be destructive and
-    pointless. Which set one joins follows its physical form: a folder under Files,
-    a view in a Warehouse, a table directory in a Lakehouse.
+    tables = {d.qualified for d in documents.values() if d.kind == TABLE}
+    views = {d.qualified for d in documents.values() if d.kind == VIEW}
+    folders = {d.qualified for d in documents.values() if d.kind == FOLDER}
+    declared_objects = tables | views
+    shortcut_schemas = set()
+    for destination in shortcut_destinations:
+        identity = getattr(destination, "object_id", None)
+        if identity is None:
+            shortcut_schemas.add(destination.schema.lower())
+        elif destination.is_files:
+            folders.add(identity.qualified)
+        else:
+            tables.add(identity.qualified)
+    return _finalise_managed_sets(
+        tables=tables,
+        views=views,
+        folders=folders,
+        declared_objects=declared_objects,
+        shortcut_schemas=shortcut_schemas,
+        load_identities=load_identities,
+    )
+
+
+def managed_warehouse_sets(
+    documents: Mapping[str, SourceDocument],
+    *,
+    shortcut_destinations: Iterable[WeaverDocumentId] = (),
+    load_identities: Iterable[WeaverDocumentId] = (),
+) -> _Managed:
+    """Build the keep-set for one Warehouse item."""
+
+    tables = {d.qualified for d in documents.values() if d.kind == TABLE}
+    views = {d.qualified for d in documents.values() if d.kind == VIEW}
+    declared_objects = tables | views
+    shortcut_schemas = set()
+    for destination in shortcut_destinations:
+        identity = getattr(destination, "object_id", None)
+        if identity is None:
+            shortcut_schemas.add(destination.schema.lower())
+        else:
+            views.add(identity.qualified)
+    return _finalise_managed_sets(
+        tables=tables,
+        views=views,
+        folders=set(),
+        declared_objects=declared_objects,
+        shortcut_schemas=shortcut_schemas,
+        load_identities=load_identities,
+    )
+
+
+def _finalise_managed_sets(
+    *, tables, views, folders, declared_objects, shortcut_schemas, load_identities
+) -> _Managed:
+    """Fold classified names into the inventory comparison form.
 
     ``load_identities`` contribute the ``_`` schema a Warehouse's generated load
     procedures live in, which nothing declares: without it every build would
@@ -644,45 +728,8 @@ def managed_sets(
     added unconditionally, so the schema goes when the last procedure does. The
     Lakehouse runtime tree needs nothing here, being a declared folder.
 
-    Package-owned runtime references join ``shortcut_destinations`` during
-    repository preparation, so they have the same keep-set lifecycle as any
-    other logical relation.
     """
 
-    tables = {
-        d.qualified
-        for d in documents.values()
-        if d.target_kind == object_target_kind and d.kind == TABLE
-    }
-    views = {
-        d.qualified
-        for d in documents.values()
-        if d.target_kind == object_target_kind and d.kind == VIEW
-    }
-    folders = {
-        d.qualified for d in documents.values() if d.target_kind == FOLDER_TARGET
-    }
-    # Taken before the shortcuts and the build's own views join, because these
-    # are the names a managed drop can remove by their registered type. See
-    # :class:`_Managed`.
-    declared_objects = tables | views
-    #: The namespaces a schema shortcut presents. Kept, and never looked inside:
-    #: what is in one belongs to the item it points at, and OneLake makes a
-    #: shortcut a read-write window, so enumerating it to decide what to remove
-    #: would be deciding about another item's objects.
-    shortcut_schemas = set()
-    for destination in shortcut_destinations:
-        identity = getattr(destination, "object_id", None)
-        if identity is None:
-            shortcut_schemas.add(destination.schema.lower())
-            continue
-        qualified = identity.qualified
-        if destination.is_files:
-            folders.add(qualified)
-        elif object_target_kind == SQL_TARGET:
-            views.add(qualified)
-        else:
-            tables.add(qualified)
     schemas = {name.split(".", 1)[0].lower() for name in tables | views}
     schemas.update(shortcut_schemas)
     schemas.update(
@@ -700,6 +747,119 @@ def managed_sets(
     )
 
 
+def lakehouse_prune_stage(
+    repository,
+    selected_ids,
+    *,
+    item: WeaverItemId,
+    target,
+    inventory,
+) -> PlannedStage | None:
+    """Plan the authoritative inventory diff for one Lakehouse item."""
+
+    return _item_prune_stage(
+        repository,
+        selected_ids,
+        item=item,
+        target=target,
+        inventory=inventory,
+        managed_builder=managed_lakehouse_sets,
+        renderer=render_lakehouse_inventory_prune,
+    )
+
+
+def warehouse_prune_stage(
+    repository,
+    selected_ids,
+    *,
+    item: WeaverItemId,
+    target,
+    inventory,
+) -> PlannedStage | None:
+    """Plan the authoritative inventory diff for one Warehouse item."""
+
+    return _item_prune_stage(
+        repository,
+        selected_ids,
+        item=item,
+        target=target,
+        inventory=inventory,
+        managed_builder=managed_warehouse_sets,
+        renderer=render_warehouse_inventory_prune,
+    )
+
+
+def _item_prune_stage(
+    repository,
+    selected_ids,
+    *,
+    item,
+    target,
+    inventory,
+    managed_builder,
+    renderer,
+) -> PlannedStage | None:
+    documents = {
+        str(identity): repository.source_documents[identity]
+        for identity in selected_ids
+        if identity.item == item
+    }
+    managed = managed_builder(
+        documents,
+        shortcut_destinations={
+            declaration.destination
+            for declaration in repository.shortcuts
+            if declaration.destination.item == item
+        }
+        | {
+            reference.destination
+            for reference in repository.logical_shortcuts
+            if reference.destination.item == item
+        },
+        load_identities=[
+            artefact.identity
+            for artefact in item_runtime_artefacts(repository, item=item)
+        ],
+    )
+    payloads: dict[str, bytes] = {}
+    actions, changes = renderer(target, inventory, managed, payloads)
+    if not actions:
+        return None
+
+    item_slug = _slug(item)
+    return PlannedStage(
+        phase=PRUNE,
+        slug="item-prune",
+        description="prune unmanaged objects by logical item",
+        payloads={f"{item_slug}-{name}": data for name, data in payloads.items()},
+        changes={
+            target.id: tuple(
+                replace(change, action_id=f"{item_slug}-{change.action_id}")
+                for change in changes
+            )
+        },
+        batches=(
+            BuildBatch(
+                id=f"item-prune-{item_slug}",
+                target_id=target.id,
+                actions=tuple(_prefixed(action, item_slug) for action in actions),
+            ),
+        ),
+    )
+
+
+def _slug(value) -> str:
+    return str(value).replace("/", "--").replace(" ", "-").replace(":", "-")
+
+
+def _prefixed(action: InstallAction, item_slug: str) -> InstallAction:
+    return replace(
+        action,
+        id=f"{item_slug}-{action.id}",
+        payload=None if action.payload is None else f"{item_slug}-{action.payload}",
+    )
+
+
 def _drop_action(
     target,
     kind,
@@ -711,7 +871,7 @@ def _drop_action(
     executor: str = "spark_sql",
     extension: str = ".spark.sql",
 ) -> InstallAction:
-    content = (statement + "\n").encode("utf-8")
+    content = statement.encode("utf-8")
     filename = f"{slug}-{name}{extension}"
     payloads[filename] = content
     return InstallAction(
@@ -742,9 +902,3 @@ def _child_dirs(store: Store, root) -> list:
         (entry for entry in store.list(root) if entry.is_directory),
         key=lambda e: e.name,
     )
-
-
-def _tsql_ident(name: str) -> str:
-    """A bracket-quoted T-SQL identifier."""
-
-    return "[" + name.replace("]", "]]") + "]"

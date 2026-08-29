@@ -986,7 +986,6 @@ def test_a_validation_description_may_reference_another_object():
         "Unique keys:\n  - Order id",
         "Foreign keys:\n  - Customer id: Sales.Customer[Customer id]",
         "Delete percentage threshold: 10",
-        "Warehouse alias: Sales.OrdersReconcile",
         "Schema:\n  Order id: string",
         'File key: "*.csv"',
     ],
@@ -995,6 +994,21 @@ def test_a_validation_description_may_reference_another_object():
 def test_data_object_metadata_is_refused_on_a_test(key):
     with pytest.raises(MetadataError, match="unknown metadata key"):
         parse(TEST_YAML + "\n" + key)
+
+
+@pytest.mark.parametrize(
+    "key",
+    [
+        "Warehouse alias: Sales.OrderAlias",
+        "Lakehouse alias: Sales.OrderAlias",
+    ],
+)
+@weaver_test()
+def test_document_local_alias_metadata_is_retired(key):
+    """Alias headers reach no kind, language, or item eligibility dispatch."""
+
+    with pytest.raises(MetadataError, match="has been replaced by shortcuts"):
+        parse(TABLE_YAML + "\n" + key)
 
 
 @pytest.mark.parametrize(

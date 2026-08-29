@@ -32,7 +32,9 @@ from weaver.build_bundle import render_document_build_action
 def _render(repository, identity: str):
     document = document_id(identity)
     return render_document_build_action(
-        document, repository.source_documents[document], target=bound_target()
+        document,
+        repository.source_documents[document],
+        destination=bound_target().spark_target,
     )
 
 
@@ -134,7 +136,7 @@ def test_a_warehouse_table_renders_a_tsql_action(tmp_path):
     rendered = render_document_build_action(
         document_id("Warehouse/Reporting/DWG.Customer"),
         repository.source_documents[document_id("Warehouse/Reporting/DWG.Customer")],
-        target=bound_target(kind="warehouse", item_id="Reporting_WH"),
+        destination=None,
     )
 
     assert rendered.action.kind == "build_table"
@@ -177,7 +179,7 @@ def test_a_warehouse_view_renders_a_tsql_build_view_action(tmp_path):
     identity = document_id("Warehouse/Reporting/DWG.ActiveCustomer")
 
     rendered = render_document_build_action(
-        identity, repository.source_documents[identity], target=bound_target()
+        identity, repository.source_documents[identity], destination=None
     )
 
     assert rendered.action.kind == "build_view"
@@ -201,7 +203,9 @@ def test_a_folder_renders_an_action_with_no_payload_at_all(tmp_path):
     identity = document_id("Lakehouse/Sales/Files/Raw.CustomerCsv")
 
     rendered = render_document_build_action(
-        identity, repository.source_documents[identity], target=bound_target()
+        identity,
+        repository.source_documents[identity],
+        destination=bound_target().spark_target,
     )
 
     assert rendered.action.kind == "build_folder"

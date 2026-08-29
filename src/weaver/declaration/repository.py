@@ -17,20 +17,18 @@ from dataclasses import dataclass, field, replace
 from typing import Iterable, Mapping, TypeVar
 
 from ..errors import DiscoveryError
-from ..graph import Graph
 from ..locations import Location
 from ..store import FilesystemStore, Store
 from .dependencies import PythonImport
 from .item_dependencies import resolve_item_dependencies
 from .metadata import (
-    ALIAS_KEYS,
     ASSUMPTION,
-    DELTA_TARGET,
-    FOLDER_TARGET,
+    FOLDER,
     PYTHON,
-    SQL_TARGET,
+    SQL,
+    TABLE,
     TEST,
-    ObjectId,
+    VIEW,
 )
 from .model import (
     FILES,
@@ -596,18 +594,9 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             store.read(root.join(*relative.split("/"))),
             item.item_type,
         )
-        if source.warehouse_alias is not None or source.lakehouse_alias is not None:
-            retired = " and ".join(sorted(ALIAS_KEYS))
-            raise DiscoveryError(
-                f"{relative}: the document-local {retired} headers have been "
-                f"replaced by shortcuts. Declare them in {LAKEHOUSE_FILE} for a "
-                f"Lakehouse item, or {WAREHOUSE_FILE} for a Warehouse one."
-            )
-        if item.item_type == LAKEHOUSE:
-            expected = FOLDER_TARGET if is_files else DELTA_TARGET
-        else:
-            expected = SQL_TARGET
-        if source.target_kind != expected:
+        if not _valid_object_placement(
+            item.item_type, is_files=is_files, source=source
+        ):
             location = "Files/" if is_files else f"{item.item_type} item root"
             raise DiscoveryError(
                 f"{relative}: {source.document.kind} in {source.language} does not "
@@ -618,7 +607,6 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         _insert_exact_case(
             source_documents, identity, source, relative, what="document"
         )
-
     from ..etl import ETL_SCHEMA
 
     reserved = sorted(
@@ -678,6 +666,16 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         },
         store_files=tuple(files),
     )
+
+
+def _valid_object_placement(item_type: str, *, is_files: bool, source) -> bool:
+    """Whether an object document occupies a valid location in its owning item."""
+
+    if item_type == WAREHOUSE:
+        return not is_files and source.language == SQL and source.kind in (TABLE, VIEW)
+    if is_files:
+        return source.kind == FOLDER
+    return source.kind in (TABLE, VIEW)
 
 
 def _generated_content(authored: RepositoryPart) -> RepositoryPart:
@@ -1108,143 +1106,3 @@ def importable_module_name(relative_path: str) -> str | None:
     if stem.endswith("/__init__"):
         stem = stem[: -len("/__init__")]
     return stem.replace("/", ".")
-
-
-# --- schema, namespace and shortcut resolution ---------------------------------
-
-
-# --- the internal dependency graph -------------------------------------------
-
-
-def _canonical(qualified: str) -> str:
-    """Object identities are compared without regard to case.
-
-    A developer may write `sales__order` where the house style is
-    `Sales__Order`, and SQL is case-insensitive by nature. Two objects whose
-    IDs differ only by case are refused, so the folding is unambiguous.
-    """
-
-    return qualified.lower()
-
-
-def effective_dependencies(document: SourceDocument) -> tuple[ObjectId, ...]:
-    """What this document depends on: declared if declared, else discovered.
-
-    A declaration replaces discovery rather than adding to it, so an author can
-    remove an edge as well as add one, because the phantom dependency an unused
-    import creates has no other cure. ``Dependencies: []`` is such a declaration,
-    so an
-    explicit none suppresses discovery rather than falling back to it.
-
-    One rule for every kind, validation included. What differs is only whether a
-    kind is required to declare: a Spark SQL object is, because its query may
-    read by path and a load ordered by a half-known graph builds things in the
-    wrong order. A validation is not, because it reads objects that its own
-    installation has already put in place. Validation runs after the load
-    artefacts, and a validation never depends on another validation, so an edge
-    inference missed costs an ordering nicety rather than a wrong estate.
-    """
-
-    if document.document.declares_dependencies:
-        return document.declared_dependencies
-    return document.referenced_object_ids
-
-
-def _resolve(
-    dependency: ObjectId,
-    by_id: Mapping[str, list[SourceDocument]],
-    referrer: SourceDocument,
-) -> SourceDocument | None:
-    """The object a two-part reference names, when that is unambiguous.
-
-    A two-part name resolves in the namespace of whoever wrote it: T-SQL
-    resolves inside the Warehouse, Spark SQL inside the Lakehouse. So the
-    referrer's own target wins when it has a candidate, `join Sales.Customer`
-    in a Warehouse query means the Warehouse's Sales.Customer, because that is
-    what the SQL would actually bind to.
-
-    Failing that, a single candidate anywhere is the answer, and it may cross a
-    boundary: a Warehouse query reading a Delta table is the ordinary case, and
-    the one the SQL endpoint and the shortcuts exist to bridge.
-
-    Two candidates in neither of those positions is ambiguous and is
-    left for the build, which has the targets and the shortcut bindings.
-    """
-
-    candidates = by_id.get(_canonical(dependency.qualified), [])
-    if not candidates:
-        return None
-    own_target = [
-        candidate
-        for candidate in candidates
-        if candidate.target_kind == referrer.target_kind
-        and candidate.node_id != referrer.node_id
-    ]
-    if len(own_target) == 1:
-        return own_target[0]
-    elsewhere = [
-        candidate for candidate in candidates if candidate.node_id != referrer.node_id
-    ]
-    return elsewhere[0] if len(elsewhere) == 1 else None
-
-
-def _by_id(documents: Iterable[SourceDocument]) -> Mapping[str, list[SourceDocument]]:
-    grouped: dict[str, list[SourceDocument]] = {}
-    for document in documents:
-        grouped.setdefault(_canonical(document.qualified), []).append(document)
-    return grouped
-
-
-def build_internal_graph(
-    documents: Iterable[SourceDocument], *, external_names: Iterable[str] = ()
-) -> Graph:
-    """The graph over references that resolve within this repository.
-
-    Nodes are ``target:Schema.Object``, because an ID alone is not unique.
-    References resolving to nothing here, or to more than one thing, are left
-    out entirely. They may be shortcuts, objects of another repository, or
-    mistakes, and telling those apart needs the external-dependency
-    configuration supplied at build.
-    """
-
-    documents = list(documents)
-    by_id = _by_id(documents)
-    known_external = {_canonical(name) for name in external_names}
-
-    edges: list[tuple[str, str]] = []
-    for document in documents:
-        for dependency in effective_dependencies(document):
-            if _canonical(dependency.qualified) in known_external:
-                # Provided from outside, a boundary, not an edge within this graph.
-                continue
-            upstream = _resolve(dependency, by_id, document)
-            if upstream is not None and upstream.node_id != document.node_id:
-                edges.append((upstream.node_id, document.node_id))
-
-    return Graph((document.node_id for document in documents), edges)
-
-
-def unresolved_references(
-    documents: Iterable[SourceDocument], *, external_names: Iterable[str] = ()
-) -> dict[str, tuple[str, ...]]:
-    """Per object, the references naming nothing in this repository.
-
-    Recorded rather than refused: resolution needs the external-dependency
-    configuration, and that is a build concern.
-    """
-
-    documents = list(documents)
-    by_id = _by_id(documents)
-    known_external = {_canonical(name) for name in external_names}
-    unresolved: dict[str, tuple[str, ...]] = {}
-    for document in documents:
-        outside = tuple(
-            dependency.qualified
-            for dependency in effective_dependencies(document)
-            if _canonical(dependency.qualified) not in known_external
-            and _resolve(dependency, by_id, document) is None
-        )
-        physical = tuple(str(reference) for reference in document.qualified_references)
-        if outside or physical:
-            unresolved[document.node_id] = outside + physical
-    return unresolved

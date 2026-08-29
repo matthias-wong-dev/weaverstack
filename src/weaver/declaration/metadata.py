@@ -42,43 +42,6 @@ LANGUAGES = frozenset({PYTHON, SQL, SPARK_SQL})
 #: They declare their shape up front and use the underscored audit spelling.
 DELTA_LANGUAGES = frozenset({PYTHON, SPARK_SQL})
 
-# The three physical destinations. An object ID is unique within one of these,
-# not across them: Sales.Order may exist as a folder, as a Delta table and as a
-# Warehouse table at the same time, because those are three different places.
-FOLDER_TARGET = "folder"
-DELTA_TARGET = "delta"
-SQL_TARGET = "sql"
-TARGET_KINDS = (FOLDER_TARGET, DELTA_TARGET, SQL_TARGET)
-
-# The two execution namespaces a two-part reference may bind in. A Lakehouse
-# object (Folder or Delta) resolves its references inside the Lakehouse; a
-# Warehouse object (SQL) inside the Warehouse. The two are bridged only by an
-# explicit shortcut, never by inference.
-LAKEHOUSE_NAMESPACE = "lakehouse"
-WAREHOUSE_NAMESPACE = "warehouse"
-NAMESPACES = (LAKEHOUSE_NAMESPACE, WAREHOUSE_NAMESPACE)
-
-
-def namespace_for_target(target_kind: str) -> str:
-    """The namespace a native object of this target binds its references in."""
-
-    return WAREHOUSE_NAMESPACE if target_kind == SQL_TARGET else LAKEHOUSE_NAMESPACE
-
-
-def target_kind_for(language: str, kind: str) -> str:
-    """Where an object materialises, from its language and kind.
-
-    Routing is inferred, not configured, which is what removed the old paired
-    source-and-target build command.
-    """
-
-    if kind == FOLDER:
-        return FOLDER_TARGET
-    if language in DELTA_LANGUAGES:
-        return DELTA_TARGET
-    return SQL_TARGET
-
-
 _ID_KEYS = {
     "Folder ID": FOLDER,
     "Table ID": TABLE,
@@ -88,11 +51,9 @@ _ID_KEYS = {
 }
 _PLACEHOLDERS = {"not declared", "n/a", "tbd", "todo"}
 
-# The retired document-local headers, kept by their exact authored spelling so a
-# repository still carrying one is told what replaced it.
+# Retired document-local header spellings.
 WAREHOUSE_ALIAS = "Warehouse alias"
 LAKEHOUSE_ALIAS = "Lakehouse alias"
-_ALIAS_KEYS = {WAREHOUSE_ALIAS, LAKEHOUSE_ALIAS}
 
 #: Stability thresholds compare changed rows with the target before the load.
 #: The row threshold excludes small targets where a single row can dominate the
@@ -141,16 +102,9 @@ DATA_LINEAGE_KEYS = frozenset({"Lineage"})
 #: How a materialised object is built and rebuilt.
 BUILD_BEHAVIOUR_KEYS = frozenset({"Static", "Prohibit rebuild"})
 
-#: The cross-engine publication names. Only something materialised has one.
-ALIAS_KEYS = frozenset(_ALIAS_KEYS)
-
 #: What every materialised data object shares.
 _DATA_OBJECT_KEYS = (
-    DOCUMENT_KEYS
-    | DEPENDENCY_KEYS
-    | DATA_LINEAGE_KEYS
-    | BUILD_BEHAVIOUR_KEYS
-    | ALIAS_KEYS
+    DOCUMENT_KEYS | DEPENDENCY_KEYS | DATA_LINEAGE_KEYS | BUILD_BEHAVIOUR_KEYS
 )
 
 #: What both validation kinds share. Notably absent: everything describing
@@ -199,6 +153,14 @@ _RETIRED_KEYS = {
     "Load mode": (
         "Load mode is no longer supported. Behaviour follows from Incremental and "
         "Primary key."
+    ),
+    WAREHOUSE_ALIAS: (
+        f"{WAREHOUSE_ALIAS} has been replaced by shortcuts. Declare the shortcut "
+        "in the owning item's shortcut file."
+    ),
+    LAKEHOUSE_ALIAS: (
+        f"{LAKEHOUSE_ALIAS} has been replaced by shortcuts. Declare the shortcut "
+        "in the owning item's shortcut file."
     ),
 }
 
@@ -506,8 +468,6 @@ class WeaverDocument:
     has_load_procedure: bool = True
     prohibit_rebuild: bool = False
     static: bool = False
-    warehouse_alias: ObjectId | None = None
-    lakehouse_alias: ObjectId | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -816,8 +776,6 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         declared_columns, column_notes, primary_key, declared_not_null
     )
 
-    warehouse_alias, lakehouse_alias = _parse_aliases(loaded, language, kind, object_id)
-
     return SesDocument(
         kind=kind,
         language=language,
@@ -844,8 +802,6 @@ def parse_document(text: str, *, language: str) -> SesDocument:
         has_load_procedure=has_load_procedure,
         prohibit_rebuild=prohibit_rebuild,
         static=static,
-        warehouse_alias=warehouse_alias,
-        lakehouse_alias=lakehouse_alias,
         raw=dict(loaded),
     )
 
@@ -874,7 +830,7 @@ def _parse_validation(
     # inferred, and `Dependencies: []` means none. Only the obligation differs,
     # in that a Spark SQL object may read by path, while a validation installs
     # last and nothing depends on it. See
-    # :func:`weaver.declaration.repository.effective_dependencies`.
+    # Item dependency resolution reads this distinction directly.
     declares_dependencies = "Dependencies" in raw
     dependencies = _parse_dependencies(raw.get("Dependencies"), object_id)
 
@@ -1080,58 +1036,6 @@ def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]
             raise MetadataError(f"Dependencies repeats {dependency.qualified}")
         seen.append(dependency)
     return tuple(seen)
-
-
-def _parse_aliases(
-    raw: dict[str, Any], language: str, kind: str, object_id: ObjectId
-) -> tuple[ObjectId | None, ObjectId | None]:
-    """The cross-engine shortcuts this object publishes, checked for eligibility.
-
-    A Lakehouse object may publish a ``Warehouse shortcut`` and a Warehouse object
-    a ``Lakehouse shortcut``; neither belongs on a Folder or on the opposite
-    engine. The shortcut may name a different ``Schema.Object`` from the native
-    one, so that a Staging table can surface as Sales.Customer, and it is parsed
-    through the same two-part model.
-    """
-
-    target = target_kind_for(language, kind)
-    warehouse_alias = _parse_shortcut(raw.get(WAREHOUSE_ALIAS), WAREHOUSE_ALIAS)
-    lakehouse_alias = _parse_shortcut(raw.get(LAKEHOUSE_ALIAS), LAKEHOUSE_ALIAS)
-
-    if warehouse_alias is not None and target != DELTA_TARGET:
-        raise MetadataError(
-            f"{WAREHOUSE_ALIAS} publishes a Lakehouse object into the Warehouse, so it "
-            f"belongs on a Delta table or Spark view, not on {object_id.qualified} "
-            + (
-                "(a Warehouse object uses Lakehouse shortcut)"
-                if target == SQL_TARGET
-                else "(a Folder is not published across engines)"
-            )
-        )
-    if lakehouse_alias is not None and target != SQL_TARGET:
-        raise MetadataError(
-            f"{LAKEHOUSE_ALIAS} publishes a Warehouse object into the Lakehouse, so it "
-            f"belongs on a SQL table or view, not on {object_id.qualified} "
-            + (
-                "(a Lakehouse object uses Warehouse shortcut)"
-                if target == DELTA_TARGET
-                else "(a Folder is not published across engines)"
-            )
-        )
-    return warehouse_alias, lakehouse_alias
-
-
-def _parse_shortcut(value: Any, key: str) -> ObjectId | None:
-    if value is None:
-        return None
-    if not isinstance(value, str) or not value.strip():
-        raise MetadataError(f"{key} must be a non-empty Schema.Object name")
-    parts = [part.strip() for part in value.strip().split(".")]
-    if len(parts) != 2 or not all(parts):
-        raise MetadataError(
-            f"{key} must be a two-part Schema.Object name, got {value!r}"
-        )
-    return ObjectId(schema=parts[0], object=parts[1])
 
 
 def _parse_notes(value: Any) -> str | None:

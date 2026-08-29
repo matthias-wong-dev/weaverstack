@@ -538,7 +538,7 @@ def test_a_catalogue_table_cannot_be_dropped_by_a_managed_drop():
     would have to read it back out of SQL.
     """
 
-    from weaver.build_bundle.physical import _refuse_protected
+    from weaver.build_bundle.drops import _refuse_protected
     from weaver.errors import BuildError
 
     for name in ("Bookmark", "Log", "Registry"):
@@ -682,7 +682,7 @@ def _plan_runtime_references(repository, *, catalogue_target):
 
     from factories import bound_target
 
-    from weaver.build_bundle.shortcuts import plan_item_shortcuts
+    from weaver.build_bundle.shortcuts import plan_warehouse_shortcuts
     from weaver.catalogue.builtin import BUILTIN_ITEM
 
     item = item_id(WAREHOUSE_ITEM)
@@ -698,7 +698,7 @@ def _plan_runtime_references(repository, *, catalogue_target):
         WeaverDocumentId.parse(f"{WAREHOUSE_ITEM}/_.{table.name}")
         for table in STANDARD_SURFACE_TABLES
     }
-    return plan_item_shortcuts(
+    return plan_warehouse_shortcuts(
         repository,
         item=item,
         target=warehouse,

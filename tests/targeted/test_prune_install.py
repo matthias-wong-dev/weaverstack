@@ -9,7 +9,7 @@ meant a prune defect and a build defect failed the same test.
 Three seams, tested separately because they fail for different reasons:
 
 ``managed_sets``            what the item needs to exist
-``render_inventory_prune``  desired plus actual, into removal actions
+explicit inventory renderer desired plus actual, into removal actions
 ``item_prune_stage``        item scoping, target binding, action packaging
 
 Prune is the destructive direction, so most of what is asserted here is what it
@@ -32,9 +32,12 @@ from factories import (
 )
 from support.weaver_test import weaver_test
 
-from weaver.build_bundle.physical import item_prune_stage
-from weaver.build_bundle.prune import managed_sets
-from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
+from weaver.build_bundle.prune import (
+    lakehouse_prune_stage,
+    managed_lakehouse_sets,
+    managed_warehouse_sets,
+    warehouse_prune_stage,
+)
 
 
 @pytest.fixture
@@ -89,7 +92,7 @@ def prune_targets(stage) -> set[str]:
 def test_the_keep_set_is_what_the_item_declares(estate):
     """Each declaration lands in the set matching its physical form."""
 
-    managed = managed_sets(documents_of(estate), DELTA_TARGET)
+    managed = managed_lakehouse_sets(documents_of(estate))
 
     # Folded, because this set exists to be compared against whatever case the
     # target reports, Fabric lowercases a managed table's directory, the local
@@ -104,20 +107,14 @@ def test_the_keep_set_is_what_the_item_declares(estate):
 
 
 @weaver_test()
-def test_the_keep_set_is_per_physical_side(estate):
-    """Asking for the Warehouse side of a Lakehouse item keeps no objects.
+def test_the_warehouse_keep_set_uses_warehouse_object_kinds(warehouse_estate):
+    from factories import WAREHOUSE_ITEM
 
-    One item is diffed against one target, and a document belongs to one
-    physical side. Were this to leak, a Warehouse build would spare Lakehouse
-    names and a prune would silently do nothing.
-    """
+    managed = managed_warehouse_sets(documents_of(warehouse_estate, WAREHOUSE_ITEM))
 
-    managed = managed_sets(documents_of(estate), SQL_TARGET)
-
-    assert managed.tables == frozenset()
+    assert managed.tables == frozenset({"sales.customer"})
     assert managed.views == frozenset()
-    # A folder lives under Files whichever object side is being asked about.
-    assert managed.folders == frozenset({"raw.customercsv", "_.load"})
+    assert managed.folders == frozenset()
 
 
 @weaver_test()
@@ -129,7 +126,7 @@ def test_the_keep_set_and_an_inventory_are_the_same_shape(estate):
     and it is the property the whole prune design rests on.
     """
 
-    managed = managed_sets(documents_of(estate), DELTA_TARGET)
+    managed = managed_lakehouse_sets(documents_of(estate))
     installed = FixtureInventory.from_repository(estate)
 
     # Compared case-insensitively: the inventory keeps the names a target would
@@ -144,7 +141,12 @@ def test_the_keep_set_and_an_inventory_are_the_same_shape(estate):
 
 def stage_for(repository, inventory, *, item=ITEM):
     identity = item_id(item) if isinstance(item, str) else item
-    return item_prune_stage(
+    planner = (
+        warehouse_prune_stage
+        if identity.item_type == "Warehouse"
+        else lakehouse_prune_stage
+    )
+    return planner(
         repository,
         {key for key in repository.source_documents if key.item == identity},
         item=identity,
@@ -237,7 +239,7 @@ def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
         documents={"DWG__Neighbour.py": lakehouse_table("DWG.Neighbour")},
     )
 
-    stage = item_prune_stage(
+    stage = lakehouse_prune_stage(
         other,
         {
             key
@@ -310,7 +312,7 @@ def test_a_freshly_built_warehouse_is_pruned_of_nothing(warehouse_estate):
         logical_item_type="Warehouse",
     )
 
-    stage = item_prune_stage(
+    stage = warehouse_prune_stage(
         warehouse_estate,
         set(warehouse_estate.source_documents),
         item=item,
@@ -318,7 +320,6 @@ def test_a_freshly_built_warehouse_is_pruned_of_nothing(warehouse_estate):
         inventory=FixtureInventory.from_repository(
             warehouse_estate,
             item=WAREHOUSE_ITEM,
-            target_kind=SQL_TARGET,
             kind="warehouse",
             target_name="Reporting_WH",
         ),
@@ -340,9 +341,8 @@ def test_the_procedure_schema_is_in_the_keep_set(warehouse_estate):
         for identity, document in warehouse_estate.source_documents.items()
         if identity.item == item_id(WAREHOUSE_ITEM)
     }
-    managed = managed_sets(
+    managed = managed_warehouse_sets(
         documents,
-        SQL_TARGET,
         load_identities=[
             artefact.identity
             for artefact in item_load_artefacts(

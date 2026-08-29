@@ -47,7 +47,6 @@ from weaver.build_bundle.planner import certifiable_identities
 from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import PROJECTED_TABLES, STANDARD_SURFACE_TABLES
-from weaver.declaration.metadata import DELTA_TARGET, SQL_TARGET
 from weaver.locations import Location
 from weaver.spark import FabricSparkTarget
 from weaver.store import FilesystemStore
@@ -78,7 +77,6 @@ def _inventories(repository, bound):
         item_id(ITEM): FixtureInventory.from_repository(
             repository,
             item=ITEM,
-            target_kind=DELTA_TARGET,
             target_id=bound[item_id(ITEM)].id,
             kind="lakehouse",
             target_name=LAKEHOUSE_TARGET_NAME,
@@ -86,7 +84,6 @@ def _inventories(repository, bound):
         item_id(WAREHOUSE_ITEM): FixtureInventory.from_repository(
             repository,
             item=WAREHOUSE_ITEM,
-            target_kind=SQL_TARGET,
             target_id=bound[item_id(WAREHOUSE_ITEM)].id,
             kind="warehouse",
             target_name=WAREHOUSE_TARGET_NAME,

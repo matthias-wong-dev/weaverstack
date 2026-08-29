@@ -196,8 +196,6 @@ def test_an_explicit_none_suppresses_discovery(tmp_path):
     this, `Dependencies: []` would silently mean "discover them for me".
     """
 
-    from weaver.declaration import effective_dependencies
-
     consumer = _python_object(
         "Sales.Ignored",
         extra="Dependencies: []\n",
@@ -211,14 +209,11 @@ def test_an_explicit_none_suppresses_discovery(tmp_path):
     )
     document = repo["Sales.Ignored"]
     assert document.referenced_object_ids  # discovery did see the import
-    assert effective_dependencies(document) == ()
     assert repo.dependency_graph.upstream_of(f"{ITEM}/Sales.Ignored") == ()
 
 
 @weaver_test()
 def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):
-    from weaver.declaration import effective_dependencies
-
     consumer = _python_object(
         "Sales.Derived", imports="from Sales__Order import Sales__Order\n"
     )
@@ -228,9 +223,9 @@ def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):
         {"Sales__Derived.py": consumer, "Sales__Order.py": parent},
         schemas=("Sales",),
     )
-    assert [
-        str(dependency) for dependency in effective_dependencies(repo["Sales.Derived"])
-    ] == ["Sales.Order"]
+    assert repo.dependency_graph.upstream_of(f"{ITEM}/Sales.Derived") == (
+        f"{ITEM}/Sales.Order",
+    )
 
 
 @weaver_test()

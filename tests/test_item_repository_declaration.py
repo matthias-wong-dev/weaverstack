@@ -14,7 +14,7 @@ from weaver.catalogue.tables import (
 )
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
-from weaver.errors import DiscoveryError
+from weaver.errors import DiscoveryError, MetadataError
 from weaver.locations import Location
 
 
@@ -627,5 +627,5 @@ def test_document_local_shortcut_headers_are_rejected(tmp_path):
         "Lineage: A source system.\nWarehouse alias: Sales.CustomerAlias",
     )
     _write(root, "Lakehouse/Raw/Sales__Customer.py", source)
-    with pytest.raises(DiscoveryError, match="have been replaced"):
+    with pytest.raises(MetadataError, match="has been replaced"):
         parse_item_repository(Location(str(root)))

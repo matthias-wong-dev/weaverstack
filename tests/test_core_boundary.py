@@ -132,3 +132,22 @@ def test_the_two_role_vocabularies_are_one():
     assert programmable.ROLE_PROGRAMMABLE == tables.ROLE_PROGRAMMABLE
     assert set(etl.VALIDATION_ROLE.values()) == set(tables.VALIDATION_ROLES)
     assert set(etl.VALIDATION_ROLES) == set(tables.VALIDATION_ROLES)
+
+
+@weaver_test()
+def test_build_planning_has_no_generic_physical_module():
+    assert not (CORE / "build_bundle" / "physical.py").exists()
+
+
+@weaver_test()
+def test_build_and_declaration_do_not_restore_object_target_categories():
+    roots = (CORE / "build_bundle", CORE / "declaration")
+    retired = ("FOLDER_TARGET", "DELTA_TARGET", "SQL_TARGET", "target_kind_for")
+    offenders = {
+        str(module.relative_to(CORE)): name
+        for root in roots
+        for module in root.rglob("*.py")
+        for name in retired
+        if name in module.read_text(encoding="utf-8")
+    }
+    assert not offenders, f"retired object target categories found: {offenders}"

@@ -36,7 +36,7 @@ from weaver.build_bundle.incremental import (
     select_build,
     stale_shortcut_destinations,
 )
-from weaver.build_bundle.shortcuts import plan_item_shortcuts
+from weaver.build_bundle.shortcuts import plan_lakehouse_shortcuts
 
 PRODUCER = "Lakehouse/Raw"
 CONSUMER = "Lakehouse/Curated"
@@ -71,7 +71,7 @@ def inventories():
 
 def plan_shortcuts(repository, *, selected=(SHORTCUT,)):
     by_item = targets()
-    return plan_item_shortcuts(
+    return plan_lakehouse_shortcuts(
         repository,
         item=item_id(CONSUMER),
         target=by_item[item_id(CONSUMER)],
@@ -128,7 +128,7 @@ def test_a_shortcut_whose_target_item_is_unbound_is_omitted(estate):
     would claim an installation that never happened.
     """
 
-    planned = plan_item_shortcuts(
+    planned = plan_lakehouse_shortcuts(
         estate,
         item=item_id(CONSUMER),
         target=bound_target(id="curated", item_id="Curated_LH"),
@@ -385,7 +385,7 @@ def _direct(tmp_path, body: str):
 
 def _plan_direct(repository, sources, *, selected):
     by_item = targets()
-    return plan_item_shortcuts(
+    return plan_lakehouse_shortcuts(
         repository,
         item=item_id(CONSUMER),
         target=by_item[item_id(CONSUMER)],
@@ -577,7 +577,7 @@ def test_a_lakehouse_table_shortcut_can_read_a_bound_warehouse(tmp_path):
         item_id(consumer): bound_target(id="published", item_id="Published_LH"),
     }
 
-    planned = plan_item_shortcuts(
+    planned = plan_lakehouse_shortcuts(
         repository,
         item=item_id(consumer),
         target=by_item[item_id(consumer)],
