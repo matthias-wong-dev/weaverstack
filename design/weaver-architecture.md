@@ -399,10 +399,18 @@ that wrote several files reports all of them and a later deletion-only change
 does not become the latest delivery.
 
 These methods report the lifecycle Weaver observed, and there is no filesystem
-timestamp fallback. A Folder with no `_changes` history and no file matching its
-`File key` returns an empty result. One that holds managed files without a
-history raises, because Weaver never saw those files arrive and cannot say when
-they changed.
+timestamp fallback. `_changes` is the whole of managed history: a file no
+document records is one Weaver never saw arrive, so it takes no part in an
+incremental read even when the `File key` claims it. A Folder with no `_changes`
+history returns an empty result.
+
+The `File key` stays a load concern. It decides which staged files may be
+published, which files a delete claim may name, and which files a
+non-incremental replacement owns. The three history methods do not consult it.
+
+A logical Folder shortcut answers all three, over the source Folder's history
+read through the consuming item's own shortcut path. See
+[shortcuts](weaver-repository.md#what-a-program-reads-through-a-shortcut).
 
 ---
 

@@ -140,6 +140,46 @@ Attribute access is the ordinary form and `table(name)` stays for names that are
 not Python identifiers. If you want a table named at build time, declare a table
 shortcut.
 
+### What a program reads through a shortcut
+
+Data comes through the shortcut in the declaring item, whatever the target type.
+A logical declaration also carries the Weaver document it named, so the same
+object answers what Weaver records about the source:
+
+| method | table | folder | needs a logical target |
+|---|---|---|---|
+| `dataframe()` | yes | | no |
+| `empty_dataframe()` | yes | | no |
+| `path()` | | yes | no |
+| `spark_path()` | | yes | no |
+| `bookmark()` | yes | yes | yes |
+| `files_since(bookmark)` | | yes | yes |
+| `latest_files()` | | yes | yes |
+| `deleted_since(bookmark)` | | yes | yes |
+
+`bookmark()` is the source object's, so a consumer can ask how far the producer
+got. The window an incremental read measures from is its own `self.bookmark()`,
+because the boundary is the consumer's last clean load:
+
+```python
+class Cur__Event(Table):
+    def read(self):
+        return shaped(Src__Events(self).files_since(self.bookmark()))
+```
+
+The Folder history comes from the source's `_changes` directory, read through
+the consuming item's own shortcut path, so the paths returned are ones this item
+can open. Only what `_changes` records takes part; see
+[Folder loads and changes](weaver-architecture.md#folder-loads-and-changes).
+
+A physical shortcut names a Fabric location. Weaver records nothing about what
+is on the far side, so the four methods that need a Weaver document fail and say
+which target type answers them.
+
+A shortcut reads. It exposes no `load()`, no `staging_folder()` and no authored
+`read()`, and OneLake permitting a write beneath one does not make it a place to
+write.
+
 ### Warehouse: `shortcuts.yml`
 
 ```yaml

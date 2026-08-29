@@ -379,22 +379,12 @@ def _write_change_document(
     _safe_write_text(target, json.dumps(payload, indent=2) + "\n")
 
 
-def files_since(
-    destination: str | Path,
-    bookmark: datetime,
-    *,
-    file_keys,
-    qualified: str,
-) -> dict[Path, datetime]:
+def files_since(destination: str | Path, bookmark: datetime) -> dict[Path, datetime]:
     """Current files changed strictly after an aware ``bookmark``, and when."""
 
     boundary = _change_boundary(bookmark)
     root = Path(destination).absolute()
-    latest = _collapse_change_events(
-        _change_documents_since(
-            destination, boundary, file_keys=file_keys, qualified=qualified
-        )
-    )
+    latest = _collapse_change_events(_change_documents_since(destination, boundary))
     return {
         root / relative: changed_at
         for relative, (operation, changed_at) in sorted(latest.items())
@@ -402,13 +392,7 @@ def files_since(
     }
 
 
-def deleted_since(
-    destination: str | Path,
-    bookmark: datetime,
-    *,
-    file_keys,
-    qualified: str,
-) -> dict[Path, datetime]:
+def deleted_since(destination: str | Path, bookmark: datetime) -> dict[Path, datetime]:
     """Files deleted strictly after an aware ``bookmark``, and when.
 
     A returned path is the file the deletion retired, so it normally does not
@@ -417,11 +401,7 @@ def deleted_since(
 
     boundary = _change_boundary(bookmark)
     root = Path(destination).absolute()
-    latest = _collapse_change_events(
-        _change_documents_since(
-            destination, boundary, file_keys=file_keys, qualified=qualified
-        )
-    )
+    latest = _collapse_change_events(_change_documents_since(destination, boundary))
     return {
         root / relative: changed_at
         for relative, (operation, changed_at) in sorted(latest.items())
@@ -429,19 +409,14 @@ def deleted_since(
     }
 
 
-def latest_files(
-    destination: str | Path,
-    *,
-    file_keys,
-    qualified: str,
-) -> dict[Path, datetime]:
+def latest_files(destination: str | Path) -> dict[Path, datetime]:
     """The current files from the newest change that left files in place.
 
     A file a newer change deleted is not reported.
     """
 
     root = Path(destination).absolute()
-    documents = _available_change_documents(destination, file_keys, qualified=qualified)
+    documents = _available_change_documents(destination)
     tombstones: set[str] = set()
     for changed_at, path in reversed(documents):
         document = _read_change_document(path)
@@ -482,41 +457,28 @@ def _change_documents(destination: str | Path) -> list[tuple[datetime, Path]]:
 
 def _available_change_documents(
     destination: str | Path,
-    file_keys,
-    *,
-    qualified: str,
 ) -> list[tuple[datetime, Path]]:
     """The Folder's change history, empty when Weaver has never written it.
 
-    Raises when the Folder holds files matching its File key, because their
-    lifecycle datetimes are then unknown rather than absent.
+    ``_changes`` is the whole of managed history. A file the Folder holds that
+    no document records is one Weaver never saw arrive, so it takes no part in
+    an incremental read.
     """
 
     try:
         return _change_documents(destination)
     except FileNotFoundError:
-        if not managed_relative_files(Path(destination), file_keys):
-            return []
-        raise LoadError(
-            f"{qualified}: Folder change metadata is unavailable because the "
-            f"Folder contains managed files but has no {CHANGES_DIRECTORY} history"
-        ) from None
+        return []
 
 
 def _change_documents_since(
-    destination: str | Path,
-    boundary: datetime,
-    *,
-    file_keys,
-    qualified: str,
+    destination: str | Path, boundary: datetime
 ) -> list[tuple[datetime, Path]]:
     """The change documents strictly newer than ``boundary``, oldest first."""
 
     return [
         entry
-        for entry in _available_change_documents(
-            destination, file_keys, qualified=qualified
-        )
+        for entry in _available_change_documents(destination)
         if entry[0] > boundary
     ]
 

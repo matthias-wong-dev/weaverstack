@@ -360,7 +360,6 @@ from pathlib import Path
 
 from weaver import Folder, lakehouse_for
 from weaver.declaration.metadata import PYTHON, parse_document
-from weaver.errors import LoadError
 from weaver.runtime.folder_load import _with_retry
 
 destination = lakehouse_for(resolver, target)
@@ -413,13 +412,9 @@ try:
     (folder.path() / "updated.csv").write_text("old", encoding="utf-8")
     (folder.path() / "deleted.csv").write_text("delete me", encoding="utf-8")
 
-    # The seeded state is a managed Folder Weaver has never written, so its
-    # lifecycle datetimes are unavailable rather than empty.
-    unobserved = None
-    try:
-        Raw__ChangeFeedProbe(folder).latest_files()
-    except LoadError as exc:
-        unobserved = str(exc)
+    # The seeded state is files Weaver never saw arrive, so managed history is
+    # empty even though the Folder holds files its File key claims.
+    unrecorded = Raw__ChangeFeedProbe(folder).latest_files()
 
     bookmark = datetime.now(timezone.utc)
     Raw__ChangeFeedProbe.files = {
@@ -442,7 +437,7 @@ try:
 
     emit({
         "result": result.as_row(),
-        "unobserved": unobserved,
+        "unrecorded": [str(path) for path in unrecorded],
         "changed": {str(path): at.isoformat() for path, at in changed.items()},
         "latest": {str(path): at.isoformat() for path, at in latest.items()},
         "deleted": {str(path): at.isoformat() for path, at in deleted.items()},
@@ -620,7 +615,7 @@ def test_authored_code_consumes_folder_changes_through_the_fabric_mount(
     )
 
     assert seen["result"]["succeeded"] is True
-    assert "change metadata is unavailable" in seen["unobserved"]
+    assert seen["unrecorded"] == []
     assert seen["keys_are_full_paths"] is True
     assert seen["values_are_utc"] is True
     assert sorted(Path(path).name for path in seen["changed"]) == [
