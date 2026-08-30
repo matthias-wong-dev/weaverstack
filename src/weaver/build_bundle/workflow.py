@@ -601,10 +601,10 @@ def read_reconciled_catalogue(
     The read covers the bound items and, when a ``repository`` is given, the
     items that produce what those items shortcut. Those producers are not being
     built and nothing about them will be written. Their Registry rows carry the
-    build that published them, and comparing that against the shortcut's own row
-    is the only way to learn that a producer moved on while this consumer was not
-    looking (see
-    :func:`~weaver.build_bundle.incremental.stale_shortcut_destinations`).
+    build that published them, and comparing that against the rows of the objects
+    reading through the shortcut is the only way to learn that a producer moved on
+    while this consumer was not looking (see
+    :func:`~weaver.build_bundle.incremental.stale_shortcut_consumers`).
 
     They are read without an inventory, so nothing about them is reconciled away:
     a build has no business proving claims about a target it was not pointed at.

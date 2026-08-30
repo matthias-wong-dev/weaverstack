@@ -103,8 +103,10 @@ RETIRED = (
     "InstalledDependency",
     "ValidationDependencies",
     "_validation_dependencies",
-    # Fabric repoints a shortcut in one request, so nothing waits for a deleted
-    # shortcut's name to come free.
+    # Freshness names what reads through a shortcut, and Fabric repoints a
+    # shortcut in one request. Neither the destination-as-stale-root nor the
+    # delete-and-wait replacement it forced comes back.
+    "stale_shortcut_destinations",
     "REPLACE_TIMEOUT",
     "REPLACE_POLL_INTERVAL",
 )

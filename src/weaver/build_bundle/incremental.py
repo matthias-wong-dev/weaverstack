@@ -117,13 +117,13 @@ def _as_instant(value) -> datetime | None:
     return None
 
 
-def stale_shortcut_destinations(
+def stale_shortcut_consumers(
     repository: WeaverRepository,
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
     *,
     bound_items: Iterable[WeaverItemId],
 ) -> tuple[WeaverDocumentId, ...]:
-    """Shortcuts whose target was rebuilt since the shortcut was last published.
+    """Objects reading through a logical shortcut whose source outran them.
 
     The half of cross-item freshness the graph cannot answer. A descendant walk
     carries impact only from a producer whose declaration changed; a producer
@@ -131,33 +131,54 @@ def stale_shortcut_destinations(
     surviving evidence is in the catalogue.
 
     So the Registry rows are compared: each carries the build that published it,
-    and a producer published later than the shortcut over it means the shortcut's
-    consumers were built against something that has moved on. Naming it here
-    joins it to the ordinary changed roots.
+    and a source published after an object that reads it through a shortcut means
+    that object was built against something that has moved on. Naming the object
+    here joins it to the ordinary impacted set, and rebuilding it is what dates
+    its row after the source.
 
-    ``bound_items`` scopes it to shortcuts this build could act on; a consumer item
-    that is not being built keeps its stale shortcut.
+    The shortcut is not named. Its signature is the pair it declares, a source
+    rebuilt behind it leaves that pair as it was, and the pointer still stands at
+    the same address (see
+    :attr:`~weaver.declaration.model.RepositoryShortcut.signature`).
 
-    Silent when either row is absent: that is a missing installation, which
-    signature classification already calls new.
+    ``bound_items`` scopes it to what this build could act on; a consumer item
+    that is not being built stays behind its source until it is.
+
+    Silent where a row is absent: that is a missing installation, which signature
+    classification already calls new.
     """
 
+    graph = repository.dependency_graph
+    if graph is None:
+        return ()
     bound = set(bound_items)
-    stale = []
+    by_text = {str(identity): identity for identity in registered}
+    behind = []
     for shortcut in repository.logical_shortcuts:
         if shortcut.destination.item not in bound:
             continue
-        destination = registered.get(shortcut.destination)
         source = registered.get(shortcut.source)
-        if destination is None or source is None:
+        if source is None:
             continue
         source_datetime = _as_instant(source.build_datetime)
-        if source_datetime is None:
+        if source_datetime is None or str(shortcut.destination) not in graph:
             continue
-        destination_datetime = _as_instant(destination.build_datetime)
-        if destination_datetime is None or source_datetime > destination_datetime:
-            stale.append(shortcut.destination)
-    return _ordered(stale)
+        for node in graph.descendants(str(shortcut.destination)):
+            consumer = by_text.get(node)
+            if consumer is None or consumer.item not in bound:
+                continue
+            consumer_datetime = _as_instant(registered[consumer].build_datetime)
+            if consumer_datetime is None or source_datetime > consumer_datetime:
+                behind.append(consumer)
+    return _ordered(behind)
+
+
+def shortcut_destinations(repository: WeaverRepository) -> set[WeaverDocumentId]:
+    """Every destination this repository declares a pointer at, logical or not."""
+
+    return {declaration.destination for declaration in repository.shortcuts} | {
+        shortcut.destination for shortcut in repository.logical_shortcuts
+    }
 
 
 def declared_signatures(
@@ -234,7 +255,7 @@ def determine_impact(
     *,
     selected: Iterable[WeaverDocumentId],
     physical_types: Mapping[WeaverDocumentId, str],
-    stale_shortcuts: Iterable[WeaverDocumentId] = (),
+    stale_consumers: Iterable[WeaverDocumentId] = (),
 ) -> Impact:
     """Classify bound nodes and expand changed roots across the whole graph.
 
@@ -247,10 +268,10 @@ def determine_impact(
     selectable than the graph holds, and the graph is the only thing that can
     say which.
 
-    ``stale_shortcuts`` are destinations the catalogue already proved out of date,
-    their source rebuilt by an earlier build (see
-    :func:`weaver.build_bundle.workflow.stale_shortcut_destinations`). They join the
-    changed roots and their consumers are picked up by the same walk.
+    ``stale_consumers`` are objects the catalogue already proved out of date,
+    built before the source they read through a shortcut (see
+    :func:`stale_shortcut_consumers`). Their declarations are what they were, so
+    they are impacted, and the same walk carries impact on from them.
     """
 
     selected_set = set(selected)
@@ -281,14 +302,19 @@ def determine_impact(
             new.add(identity)
         elif signature != wanted:
             changed.add(identity)
-    changed |= {identity for identity in stale_shortcuts if identity in physical_types}
+    stale = {
+        identity
+        for identity in stale_consumers
+        if identity in physical_types and identity in selected_set
+    }
 
     existing = set(physical_types)
-    impacted = set(changed)
+    roots = changed | stale
+    impacted = set(roots)
     graph = repository.dependency_graph
     if graph is not None:
         by_text = {str(identity): identity for identity in selected_set}
-        for root in changed:
+        for root in roots:
             # Impact propagates through the graph, so a changed identity carries
             # it only where the graph holds that identity. Membership is asked of
             # the graph rather than derived from a list of exceptions: several
@@ -320,7 +346,7 @@ def select_build(
     *,
     selected: Iterable[WeaverDocumentId],
     inventories: Mapping[WeaverItemId, object],
-    stale_shortcuts: Iterable[WeaverDocumentId] = (),
+    stale_consumers: Iterable[WeaverDocumentId] = (),
 ) -> BuildSelection:
     selected = set(selected)
     physical_types = _physical_types(
@@ -330,7 +356,7 @@ def select_build(
         repository,
         registered,
         selected=selected,
-        stale_shortcuts=stale_shortcuts,
+        stale_consumers=stale_consumers,
         physical_types=physical_types,
     )
     # A shortcut destination has no source document and therefore no
@@ -342,7 +368,14 @@ def select_build(
         if identity in repository.source_documents
         and repository.source_documents[identity].document.prohibit_rebuild
     }
-    selected_for_drop = set(impact.impacted) - prohibited
+    # A pointer's physical life follows its own signature, which is the pair it
+    # declares. Impact reaches a consumer through the pointer and leaves the
+    # pointer where it is: a source rebuilt behind an unchanged pair stands at
+    # the same address, and remaking one costs the wait for Fabric to discover it
+    # again. A pointer that is new or whose pair changed is not here: those are
+    # classified, not propagated.
+    untouched = set(impact.impacted_descendants) & shortcut_destinations(repository)
+    selected_for_drop = set(impact.impacted) - prohibited - untouched
     return BuildSelection(
         impact=impact,
         prohibited=_ordered(prohibited),

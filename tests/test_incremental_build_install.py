@@ -20,7 +20,7 @@ from weaver.build_bundle import (
     determine_impact,
     generate_item_build_bundle,
 )
-from weaver.build_bundle.incremental import select_build, stale_shortcut_destinations
+from weaver.build_bundle.incremental import select_build, stale_shortcut_consumers
 from weaver.build_bundle.models import (
     BUILD_FOLDER,
     BUILD_TABLE,
@@ -771,7 +771,7 @@ def _consumer_only_selection(repository, rows):
                 if shortcut.destination.item == consumer
             }
         ),
-        stale_shortcuts=stale_shortcut_destinations(
+        stale_consumers=stale_shortcut_consumers(
             repository, registered, bound_items={consumer}
         ),
         inventories=_shortcut_inventories(repository),
@@ -779,33 +779,17 @@ def _consumer_only_selection(repository, rows):
 
 
 @weaver_test()
-def test_an_shortcut_is_stale_when_its_unbound_source_was_published_later(tmp_path):
+def test_a_consumer_is_stale_when_its_unbound_source_was_published_later(tmp_path):
     """The case the graph cannot answer.
 
     The producer is not in this build, so there is no walk from it. It was
     rebuilt at some earlier time by some earlier build, and the only surviving
-    evidence is that its Registry row is dated after the shortcut's.
+    evidence is that its Registry row is dated after the consumer's.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
     rows = _shortcut_catalogue(repository)
-    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
-    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
-
-    selection = _consumer_only_selection(repository, rows)
-    destination = WeaverDocumentId.parse(SHORTCUT_DESTINATION)
-
-    assert destination in selection.impact.changed
-    assert destination in selection.selected_for_build
-
-
-@weaver_test()
-def test_a_stale_shortcut_carries_its_consumers_with_it(tmp_path):
-    """It joins the ordinary changed roots, so the ordinary walk does the rest,
-    there is no separate cross-item descendant handling."""
-
-    repository = _repository(_dependency_estate(tmp_path))
-    rows = _shortcut_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", EARLIER)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
@@ -817,11 +801,33 @@ def test_a_stale_shortcut_carries_its_consumers_with_it(tmp_path):
 
 
 @weaver_test()
-def test_a_shortcut_published_after_its_target_is_left_alone(tmp_path):
+def test_a_source_rebuilt_earlier_leaves_the_pointer_where_it_is(tmp_path):
+    """The pointer declares the same pair over the same address.
+
+    Freshness rebuilds what reads through a shortcut. The pointer stands at the
+    same address, and remaking one costs the wait for Fabric to discover it.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    rows = _shortcut_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", EARLIER)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+
+    selection = _consumer_only_selection(repository, rows)
+    destination = WeaverDocumentId.parse(SHORTCUT_DESTINATION)
+
+    assert destination not in selection.selected_for_build
+    assert destination not in selection.selected_for_drop
+
+
+@weaver_test()
+def test_a_consumer_published_after_its_source_is_left_alone(tmp_path):
     """The ordinary case, and the one that has to stay cheap."""
 
     repository = _repository(_dependency_estate(tmp_path))
     rows = _shortcut_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", LATER)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", LATER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", EARLIER)
 
@@ -840,7 +846,7 @@ def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
 
     assert all(document.build_datetime is None for document in registered.values())
     assert (
-        stale_shortcut_destinations(
+        stale_shortcut_consumers(
             repository,
             registered,
             bound_items={WeaverItemId.parse("Warehouse/Reporting")},
@@ -855,12 +861,13 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
 
     Binding it changes nothing: its signature matches the repository, so the
     descendant walk never starts from it, and only the build datetimes record that it
-    moved after the shortcut was made. Were the comparison skipped whenever the
+    moved after its consumer was built. Were the comparison skipped whenever the
     producer happened to be bound, that estate would stay stale forever.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
     rows = _shortcut_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", EARLIER)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
     both = {
@@ -868,23 +875,24 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
         WeaverItemId.parse("Lakehouse/Curated"),
     }
 
-    assert stale_shortcut_destinations(
+    assert stale_shortcut_consumers(
         repository, Catalogue(rows).registered, bound_items=both
-    ) == (WeaverDocumentId.parse(SHORTCUT_DESTINATION),)
+    ) == (WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer"),)
 
 
 @weaver_test()
-def test_an_unbuilt_consumer_keeps_its_stale_shortcut(tmp_path):
+def test_an_unbuilt_consumer_stays_behind_its_source(tmp_path):
     """Deferral: only the producer is bound, so nothing about the consumer is
-    touched and its shortcut stays stale until the consumer is next built."""
+    touched and it stays behind until it is next built."""
 
     repository = _repository(_dependency_estate(tmp_path))
     rows = _shortcut_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", EARLIER)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
     assert (
-        stale_shortcut_destinations(
+        stale_shortcut_consumers(
             repository,
             Catalogue(rows).registered,
             bound_items={WeaverItemId.parse("Lakehouse/Curated")},
@@ -894,18 +902,21 @@ def test_an_unbuilt_consumer_keeps_its_stale_shortcut(tmp_path):
 
 
 @weaver_test()
-def test_a_stale_shortcut_is_replaced_by_the_shortcut_executor(tmp_path):
+def test_a_source_rebuilt_earlier_plans_no_shortcut_action(tmp_path):
     """End to end through the planner: the freshness comparison reaches the
-    physical action, and reaches it as a shortcut action rather than a drop."""
+    consumer and no pointer is touched on the way."""
 
     repository = _repository(_dependency_estate(tmp_path))
     rows = _shortcut_catalogue(repository)
+    rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", EARLIER)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
     bundle = _shortcut_bundle(tmp_path, repository, rows=rows)
+    consumer = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
 
-    assert len(_shortcut_actions(bundle)) == 1
+    assert _shortcut_actions(bundle) == []
+    assert consumer in bundle.plan.selection.selected_for_build
 
 
 @weaver_test()

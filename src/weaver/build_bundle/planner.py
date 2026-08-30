@@ -52,7 +52,7 @@ from .catalogue_actions import (
 from .documents import lakehouse_build_stages, warehouse_build_stages
 from .drops import lakehouse_drop_stages, warehouse_drop_stages
 from .endpoints import lakehouse_endpoint_refresh_stage
-from .incremental import select_build, stale_shortcut_destinations
+from .incremental import select_build, stale_shortcut_consumers
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
@@ -132,7 +132,7 @@ def generate_item_build_bundle(
 
     # Freshness is read before ``registered`` is narrowed, because the whole
     # point is to compare against an item this build does not include.
-    stale_shortcuts = stale_shortcut_destinations(
+    stale_consumers = stale_shortcut_consumers(
         repository, catalogue.registered, bound_items=by_item
     )
     registered = {
@@ -144,7 +144,7 @@ def generate_item_build_bundle(
         repository,
         registered,
         selected=selected_ids,
-        stale_shortcuts=stale_shortcuts,
+        stale_consumers=stale_consumers,
         inventories=inventories,
     )
     selected_for_drop = set(selection.selected_for_drop)
