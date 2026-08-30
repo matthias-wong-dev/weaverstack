@@ -437,14 +437,14 @@ class Folder(WeaverObject):
 
         from .runtime.folder_load import files_since
 
-        return files_since(self.path(), bookmark, **self._change_scope())
+        return files_since(self.path(), bookmark)
 
     def latest_files(self) -> dict[Path, datetime]:
         """The current files from the newest change that left files in place."""
 
         from .runtime.folder_load import latest_files
 
-        return latest_files(self.path(), **self._change_scope())
+        return latest_files(self.path())
 
     def deleted_since(self, bookmark: datetime) -> dict[Path, datetime]:
         """Files deleted strictly after an aware ``bookmark``, and when.
@@ -455,15 +455,7 @@ class Folder(WeaverObject):
 
         from .runtime.folder_load import deleted_since
 
-        return deleted_since(self.path(), bookmark, **self._change_scope())
-
-    def _change_scope(self) -> dict:
-        """The File key and identity the change helpers report against."""
-
-        from .runtime.load_contract import FolderLoadContract
-
-        contract = FolderLoadContract.from_document(self._document())
-        return {"file_keys": contract.file_keys, "qualified": contract.qualified}
+        return deleted_since(self.path(), bookmark)
 
     def staging_folder(self) -> "StagingFolder":
         """The staging directory available to this ``read()``.

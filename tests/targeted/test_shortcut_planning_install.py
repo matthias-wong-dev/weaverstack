@@ -34,7 +34,7 @@ from weaver.build_bundle import plan_item_build
 from weaver.build_bundle.incremental import (
     declared_signatures,
     select_build,
-    stale_shortcut_destinations,
+    stale_shortcut_consumers,
 )
 from weaver.build_bundle.shortcuts import plan_lakehouse_shortcuts
 
@@ -248,35 +248,38 @@ def certified(repository, *names, build_datetime=None):
 
 
 @weaver_test()
-def test_a_shortcut_is_stale_when_its_target_was_published_later(estate):
+def test_a_consumer_is_stale_when_the_source_it_reads_was_published_later(estate):
     """The half of cross-item freshness the dependency graph cannot answer.
 
     A producer rebuilt by some earlier build is, to this one, entirely
     unchanged. Nothing in the repository records that it moved. The only
-    surviving evidence is that its Registry row carries a later build_datetime than the
-    shortcut over it.
+    surviving evidence is that its Registry row carries a later build datetime
+    than the row of the object reading it through the shortcut.
+
+    What comes back is that object. The pointer between them declares the same
+    pair it always did and stands at the same address.
     """
 
     registered = {
         **certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00"),
-        **certified(estate, SHORTCUT, build_datetime="2026-01-01T00:00:00"),
+        **certified(estate, SHORTCUT, VIEW, build_datetime="2026-01-01T00:00:00"),
     }
 
-    stale = stale_shortcut_destinations(
+    stale = stale_shortcut_consumers(
         estate, registered, bound_items={item_id(CONSUMER)}
     )
 
-    assert document_id(SHORTCUT) in stale
+    assert stale == (document_id(VIEW),)
 
 
 @weaver_test()
-def test_a_shortcut_published_after_its_target_is_current(estate):
+def test_a_consumer_published_after_the_source_it_reads_is_current(estate):
     registered = {
         **certified(estate, SOURCE, build_datetime="2026-01-01T00:00:00"),
-        **certified(estate, SHORTCUT, build_datetime="2026-01-02T00:00:00"),
+        **certified(estate, SHORTCUT, VIEW, build_datetime="2026-01-02T00:00:00"),
     }
 
-    stale = stale_shortcut_destinations(
+    stale = stale_shortcut_consumers(
         estate, registered, bound_items={item_id(CONSUMER)}
     )
 
@@ -293,7 +296,7 @@ def test_a_missing_registry_row_is_not_staleness(estate):
 
     registered = certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00")
 
-    stale = stale_shortcut_destinations(
+    stale = stale_shortcut_consumers(
         estate, registered, bound_items={item_id(CONSUMER)}
     )
 
@@ -301,22 +304,82 @@ def test_a_missing_registry_row_is_not_staleness(estate):
 
 
 @weaver_test()
-def test_an_unbound_consumer_keeps_its_stale_shortcut(estate):
+def test_an_unbound_consumer_stays_behind_its_source(estate):
     """That is the deferral: a build acts only on items it was pointed at."""
 
     registered = {
         **certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00"),
-        **certified(estate, SHORTCUT, build_datetime="2026-01-01T00:00:00"),
+        **certified(estate, SHORTCUT, VIEW, build_datetime="2026-01-01T00:00:00"),
     }
 
-    stale = stale_shortcut_destinations(
+    stale = stale_shortcut_consumers(
         estate, registered, bound_items={item_id(PRODUCER)}
     )
 
     assert stale == ()
 
 
-# --- the incremental claim the Fabric suite used to buy with a whole build -----
+# --- a pointer's physical life follows its own signature ----------------------
+#
+# Four selections over one estate: the producer moved in an earlier build, the
+# pair changed, nothing changed, and the producer changed in this build. The
+# pointer is created when it is new, replaced when its pair changes, and left
+# alone otherwise, whatever is happening to what it points at.
+
+
+def _selection(estate, registered, *, bound=None):
+    """The whole estate selected, with freshness read as the planner reads it."""
+
+    everything = {document_id(SOURCE), document_id(VIEW), document_id(SHORTCUT)}
+    bound = set(targets()) if bound is None else bound
+    return select_build(
+        estate,
+        registered,
+        selected=everything,
+        stale_consumers=stale_shortcut_consumers(estate, registered, bound_items=bound),
+        inventories=inventories(),
+    )
+
+
+@weaver_test()
+def test_a_source_rebuilt_earlier_rebuilds_the_consumer_and_not_the_pointer(estate):
+    """The cross-build case, and the whole reason freshness is read at all.
+
+    The producer was rebuilt by an earlier build, which left nothing in the
+    repository. What reads it through the shortcut is behind and is built again.
+    The shortcut declares
+    the same pair over the same address, so it is neither replaced nor dropped:
+    Fabric holds a deleted shortcut's name for up to half a minute, and that is
+    paid for nothing here.
+    """
+
+    registered = {
+        **certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00"),
+        **certified(estate, VIEW, SHORTCUT, build_datetime="2026-01-01T00:00:00"),
+    }
+
+    selection = _selection(estate, registered)
+
+    assert document_id(VIEW) in selection.selected_for_build
+    assert document_id(SHORTCUT) not in selection.selected_for_build
+    assert document_id(SHORTCUT) not in selection.selected_for_drop
+
+
+@weaver_test()
+def test_a_changed_pair_replaces_the_pointer(estate):
+    """The signature is the pair, so a repointed shortcut is a changed one."""
+
+    registered = {
+        **certified(
+            estate, SOURCE, VIEW, SHORTCUT, build_datetime="2026-01-01T00:00:00"
+        ),
+        document_id(SHORTCUT): registered_document(SHORTCUT, signature="an-old-pair"),
+    }
+
+    selection = _selection(estate, registered)
+
+    assert document_id(SHORTCUT) in selection.impact.changed
+    assert document_id(SHORTCUT) in selection.selected_for_build
 
 
 @weaver_test()
@@ -329,26 +392,24 @@ def test_a_second_build_over_an_unchanged_estate_plans_no_shortcut_action(estate
     that the shortcut object itself was not disturbed.
     """
 
-    everything = {document_id(SOURCE), document_id(VIEW), document_id(SHORTCUT)}
     registered = certified(
         estate, SOURCE, VIEW, SHORTCUT, build_datetime="2026-01-01T00:00:00"
     )
-    stale = stale_shortcut_destinations(estate, registered, bound_items=set(targets()))
 
-    selection = select_build(
-        estate,
-        registered,
-        selected=everything,
-        stale_shortcuts=stale,
-        inventories=inventories(),
-    )
+    selection = _selection(estate, registered)
 
     assert selection.selected_for_build == ()
 
 
 @weaver_test()
-def test_a_changed_target_reaches_the_shortcut_and_its_consumer(estate):
-    """The graph carries a producer's change across the shortcut in one walk."""
+def test_a_target_changed_in_this_build_reaches_the_consumer_through_the_pointer(
+    estate,
+):
+    """The graph carries a producer's change across the shortcut in one walk.
+
+    It carries it to the consumer. The pointer is on the path and is not the
+    subject of it.
+    """
 
     everything = {document_id(SOURCE), document_id(VIEW), document_id(SHORTCUT)}
     registered = {
@@ -363,6 +424,8 @@ def test_a_changed_target_reaches_the_shortcut_and_its_consumer(estate):
 
     assert document_id(SOURCE) in selection.selected_for_build
     assert document_id(VIEW) in selection.selected_for_build
+    assert document_id(SHORTCUT) not in selection.selected_for_build
+    assert document_id(SHORTCUT) not in selection.selected_for_drop
 
 
 # --- direct shortcuts, and the addresses frozen for them ----------------------

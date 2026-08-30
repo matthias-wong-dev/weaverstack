@@ -560,14 +560,45 @@ def test_change_metadata_is_empty_when_no_file_matches_the_file_key(landing):
 
 
 @weaver_test()
-def test_change_metadata_is_refused_for_managed_files_with_no_history(landing):
-    _place(landing, "manual.csv")
-    expected = "Sales.Landing: Folder change metadata is unavailable"
+def test_managed_files_with_no_history_are_empty_rather_than_a_refusal(landing):
+    """``_changes`` is the whole of managed history, and there is none here.
 
-    for call in (
-        lambda: landing.files_since(BOOKMARK),
-        lambda: landing.deleted_since(BOOKMARK),
-        landing.latest_files,
-    ):
-        with pytest.raises(LoadError, match=expected):
-            call()
+    A file matching the File key is a file the load may publish and retire. It
+    is not evidence that Weaver observed this one arrive, so an incremental read
+    passes over it.
+    """
+
+    _place(landing, "manual.csv")
+
+    assert landing.files_since(BOOKMARK) == {}
+    assert landing.deleted_since(BOOKMARK) == {}
+    assert landing.latest_files() == {}
+
+
+@weaver_test()
+def test_history_reports_only_what_a_change_document_records(landing):
+    """A file beside a recorded one, placed by hand, takes no part in history."""
+
+    _write_document(landing, _at(1), inserts=["recorded.csv"])
+    _place(landing, "recorded.csv", "unrecorded.csv")
+
+    assert landing.files_since(BOOKMARK) == {landing.path() / "recorded.csv": _at(1)}
+    assert landing.latest_files() == {landing.path() / "recorded.csv": _at(1)}
+    assert landing.deleted_since(BOOKMARK) == {}
+
+
+@weaver_test()
+def test_the_file_key_still_decides_what_a_load_publishes_and_retires(landing):
+    """Read-side history dropped the File key. Load-side validation did not."""
+
+    landing.incremental = False
+    landing.files = {"managed.csv": "managed"}
+    landing.load()
+    _place(landing, "manual.txt")
+
+    landing.files = {}
+    result = landing.load()
+
+    assert result.rows_deleted == 1
+    assert not (landing.path() / "managed.csv").exists()
+    assert (landing.path() / "manual.txt").exists()

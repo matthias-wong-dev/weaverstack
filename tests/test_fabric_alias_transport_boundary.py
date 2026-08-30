@@ -47,7 +47,14 @@ class _Client:
 
 
 @weaver_test()
-def test_a_shortcut_is_replaced_rather_than_created_strictly():
+def test_a_shortcut_is_overwritten_rather_than_created_strictly():
+    """One request, whether or not a shortcut of that name is already there.
+
+    ``CreateOrOverwrite`` is what makes a build re-runnable over its own
+    pointers. Fabric holds a deleted shortcut's name for up to thirty-five
+    seconds afterwards, and an overwrite never meets it.
+    """
+
     client = _Client()
 
     details = create_shortcut(
@@ -60,9 +67,11 @@ def test_a_shortcut_is_replaced_rather_than_created_strictly():
     )
 
     methods = [method for method, _path, _payload in client.calls]
-    assert methods == ["DELETE", "POST"]
-    _method, path, payload = client.calls[1]
-    assert path == "workspaces/ws1/items/dest1/shortcuts"
+    assert methods == ["POST"]
+    _method, path, payload = client.calls[0]
+    assert path == (
+        "workspaces/ws1/items/dest1/shortcuts?shortcutConflictPolicy=CreateOrOverwrite"
+    )
     assert payload == {
         "path": "Tables/Sales",
         "name": "Landed",
@@ -96,7 +105,6 @@ def test_a_source_published_a_moment_later_is_waited_for(monkeypatch):
     monkeypatch.setattr(shortcuts.time, "sleep", slept.append)
     client = _Client(
         responses=[
-            _Response(200),  # the delete
             FabricError("400: RequestBodyValidationFailed: Target path doesn't exist"),
             _Response(201),
         ]
@@ -125,7 +133,6 @@ def test_a_source_that_never_appears_still_fails(monkeypatch):
     monkeypatch.setattr(shortcuts.time, "sleep", lambda _seconds: None)
     client = _Client(
         responses=[
-            _Response(200),
             FabricError("400: RequestBodyValidationFailed: Target path doesn't exist"),
         ]
     )

@@ -257,13 +257,13 @@ signing it with the source's hash would replace every downstream shortcut whenev
 a table was rebuilt.
 
 A shortcut is therefore rebuilt only when it is new, when its declaration changed,
-when its destination is missing from the target, or when its source has been
-rebuilt since the shortcut was last published. That last one cannot come from a
-signature — see [§7a](#7a-cross-item-freshness).
+or when its destination is missing from the target. A source rebuilt under it is a
+reason to rebuild what reads through it and no reason to touch the pointer, which
+stands at the same address either way. See [§7a](#7a-cross-item-freshness).
 
 It is materialised by the shortcut executor, never by the generic drop-and-build
-pipeline: it holds no data, so it is replaced in place rather than dropped and
-recreated, and there is no source document for a build stage to render.
+pipeline: it holds no data, so it is replaced in place, and there is no source
+document for a build stage to render.
 
 ### The declared form is what an identity is reconciled to
 
@@ -311,6 +311,18 @@ plan puts around the shortcut means nothing, and the failure surfaces in the nex
 item's DDL instead — which is where it did surface, in Fabric, before the wait
 existed. Measured against a real workspace, the shortcut exists in about a second
 and becomes readable 6–31 seconds later.
+
+**A shortcut is repointed, not deleted and remade.** The create carries
+`shortcutConflictPolicy=CreateOrOverwrite`, so one request makes a shortcut where
+there is none and repoints one that is there. Under the default `Abort` policy a
+create over a live name is a 409, and the name a delete released stays held for
+up to thirty-five seconds afterwards, which is time a build would spend waiting
+for Fabric to let go of a name it was about to reuse. Measured against a Fabric
+tenant: an overwrite answers 200 in under a second.
+
+**Which shortcuts an installation touches is settled before it runs.** A pointer
+is created when it is new and repointed when the pair it declares changes. See
+[§4a](#4a-shortcuts) and [§7a](#7a-cross-item-freshness).
 
 ## 5. Target inventory
 
@@ -389,18 +401,23 @@ publication is Weaver's completion boundary — a row is written last, after
 everything the object needed succeeded — so "when was this published" is "when was
 this last built", and two rows can be ordered against each other.
 
-A shortcut whose source is dated *later* than the shortcut itself is stale: its
-consumers were built against something that has since moved on. It joins the
-ordinary changed roots, and its consumers are picked up by the ordinary descendant
-walk.
+An object dated earlier than the source it reads through a shortcut is behind:
+it was built against something that has since moved on. It joins the impacted set,
+and what reads it is picked up by the ordinary descendant walk.
+
+The comparison is against the consumer's row, not the pointer's. A pointer is not
+rebuilt for freshness, so its own build datetime never advances, and rebuilding
+the consumer is what settles the question the next build asks. What
+`stale_shortcut_consumers` returns is therefore the consumers, found by walking
+the graph down from the shortcut destination.
 
 This applies whether or not the producer is in the build. The descendant walk only
 starts from a node whose declaration changed, and a producer rebuilt by some
 earlier build is, to this one, entirely unchanged.
 
 **Deferral falls out of it.** Build only the producer and nothing about the
-consumer is touched: its shortcut keeps its old build_datetime and stays stale until the
-consumer is next built, when the comparison selects it.
+consumer is touched: it keeps its old build_datetime and stays behind until it is
+next built, when the comparison selects it.
 
 The build_datetime is set on **insert and never on update**. Every rebuild reaches the
 merge as an insert, because a rebuilt object has its Registry claim deleted before
@@ -425,7 +442,7 @@ flowchart TD
     R["Incoming documents and shortcut destinations"]
     C["Reconciled Registry"]
     T["Prepared target inventory"]
-    E["Stale shortcuts, by build build_datetime"]
+    E["Consumers behind a shortcut's source, by build build_datetime"]
 
     R --> I["determine_impact"]
     C --> I
@@ -435,7 +452,9 @@ flowchart TD
 
     I --> N["New"]
     I --> H["Changed"]
+    I --> B["Behind their source"]
     H --> D["Add transitive descendants, across items"]
+    B --> D
     D --> A["Impacted existing nodes"]
 
     A --> P{"Prohibit Rebuild?"}

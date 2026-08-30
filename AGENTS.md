@@ -311,6 +311,7 @@ per-part per-item declaration      generated_item_files
 InstalledEstate                    InstalledObject / InstalledDependency
 _validation_dependencies           InstalledValidation.dependencies
 weaver.declaration.graph           a per-model topological sort
+stale_shortcut_destinations        delete-then-create shortcut replacement
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the

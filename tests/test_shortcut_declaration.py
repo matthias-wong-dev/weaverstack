@@ -453,9 +453,25 @@ def test_importing_a_name_no_shortcut_declares_says_what_is_declared(tmp_path):
 # --- what a load can import ---------------------------------------------------
 
 
+def _deployed(root: Path) -> str:
+    """The generated ``shortcuts.py`` the Curated item deploys."""
+
+    artefact = next(
+        artefact
+        for artefact in item_load_artefacts(_parse(root), item=CURATED)
+        if artefact.identity.object_id.object == "shortcuts.py"
+    )
+    return artefact.payload.decode("utf-8")
+
+
 @weaver_test()
-def test_the_deployed_module_names_the_destination_rather_than_the_source(tmp_path):
-    """A program reads this item's own object. The source was settled at build."""
+def test_the_deployed_module_reads_the_destination_and_names_the_source(tmp_path):
+    """Data comes from this item's own object; Weaver metadata from the source.
+
+    A logical declaration deploys both: the destination it reads through and the
+    Weaver document it points at. Which workspace and which Fabric item that
+    document was bound to was settled at build.
+    """
 
     root = _estate(tmp_path)
     _shortcuts(
@@ -464,24 +480,51 @@ def test_the_deployed_module_names_the_destination_rather_than_the_source(tmp_pa
         "Sales__Landed = Shortcut(\n"
         + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
         + ")\n\n"
+        "Sales__Incoming = Shortcut(\n"
+        + _declaration("folder", "logical", "Lakehouse/Raw/Files/Sales.Customer")
+        + ")\n\n"
         "Reference = Shortcut(\n"
         + _declaration(
             "schema", "physical", "Lakehouse/Reference/Sales", workspace="Shared Data"
         )
         + ")\n",
     )
-    repository = _parse(root)
 
-    artefact = next(
-        artefact
-        for artefact in item_load_artefacts(repository, item=CURATED)
-        if artefact.identity.object_id.object == "shortcuts.py"
+    deployed = _deployed(root)
+
+    assert (
+        "Sales__Landed = TableShortcut(schema='Sales', object='Landed', "
+        "source='Lakehouse/Raw/Sales.Customer')" in deployed
     )
-    deployed = artefact.payload.decode("utf-8")
+    assert (
+        "Sales__Incoming = FolderShortcut(schema='Sales', object='Incoming', "
+        "source='Lakehouse/Raw/Files/Sales.Customer')" in deployed
+    )
+    assert "Reference = SchemaShortcut(schema='Reference')" in deployed
+
+
+@weaver_test()
+def test_a_physical_declaration_deploys_no_weaver_source(tmp_path):
+    """It names a Fabric location, so there is no Weaver document to carry."""
+
+    root = _estate(tmp_path)
+    _shortcuts(
+        root,
+        "Lakehouse/Curated",
+        "Sales__Landed = Shortcut(\n"
+        + _declaration(
+            "table",
+            "physical",
+            "Lakehouse/Reference/Sales.Customer",
+            workspace="Shared",
+        )
+        + ")\n",
+    )
+
+    deployed = _deployed(root)
 
     assert "Sales__Landed = TableShortcut(schema='Sales', object='Landed')" in deployed
-    assert "Reference = SchemaShortcut(schema='Reference')" in deployed
-    assert "Lakehouse/Raw" not in deployed
+    assert "source=" not in deployed
 
 
 @weaver_test()

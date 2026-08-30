@@ -355,10 +355,11 @@ class RepositoryShortcut:
         treating it as a change would replace every downstream shortcut whenever
         a table was reloaded.
 
-        A source that was rebuilt is still a reason to remake the shortcut, but
-        that is freshness, answered by comparing build datetimes in the Registry
-        rather than by this signature. Keeping the two apart is what lets an
-        unchanged shortcut over an unchanged source be left alone.
+        A source that was rebuilt is a reason to rebuild what reads through the
+        shortcut, and no reason to remake the pointer: it stands at the same
+        address either way. That is freshness, answered by comparing build
+        datetimes in the Registry (see
+        :func:`~weaver.build_bundle.incremental.stale_shortcut_consumers`).
         """
 
         declaration = f"{self.destination}\0{self.source}".encode("utf-8")

@@ -157,7 +157,9 @@ def _estate_evidence(journey) -> dict:
             "order by CustomerId"
         ),
         "cur_product": f"select ProductId from {curated}.`CUR`.`Product`",
-        "cur_event": f"select EventId, Source, Kind from {curated}.`CUR`.`Event`",
+        "cur_event": (
+            f"select EventId, Source, Kind, SourceFile from {curated}.`CUR`.`Event`"
+        ),
         "cur_retired": f"select CustomerId from {curated}.`CUR`.`RetiredCustomer`",
         "cur_summary": (
             "select CustomerId, TransactionCount, TotalAmount "
@@ -775,8 +777,9 @@ def test_foreign_source_movement_propagates_through_the_whole_chain(acceptance):
     Intent: Real source movement propagates through shortcuts and incremental
     processing, including a retirement, while unchanged branches stay unchanged.
 
-    Proof: one insert, one update, one delete and one retirement event in the
-    foreign workspace, then a load, then exact rows at every layer.
+    Proof: one insert, one update, one delete, one retirement event and one
+    withdrawn event file in the foreign workspace, then a load, then exact rows
+    at every layer.
     """
 
     acceptance.require("reload")
@@ -810,6 +813,14 @@ def test_foreign_source_movement_propagates_through_the_whole_chain(acceptance):
     # The retirement event reached the feed the Warehouse reads.
     assert _ids(after, "cur_retired", "CustomerId") == [3]
 
+    # Both halves of the Folder change feed crossed the logical shortcut. The
+    # new file became a row, and the withdrawn one took its row with it.
+    events = {row["EventId"]: row["SourceFile"] for row in after["cur_event"]}
+    assert events[3] == "source/event-003.json"
+    assert "source/event-001.json" not in events.values()
+    assert 1 not in events
+    assert {row["EventId"] for row in before["cur_event"]} - set(events) == {1}
+
     # Nothing touched the stable branches.
     assert _ids(after, "land_region", "RegionId") == _ids(
         before, "land_region", "RegionId"
@@ -835,14 +846,17 @@ def test_foreign_source_movement_propagates_through_the_whole_chain(acceptance):
 
 
 def _mutate_the_foreign_world(journey) -> None:
-    """One insert, one update, one delete, and one retirement event.
+    """One insert, one update, one delete, and both halves of the event drop.
+
+    The event drop gains a retirement event and loses its first file, so Landing
+    records an insert and a delete in one change document and the Curated table
+    has something to retire as well as something to add.
 
     The stable ``Reference`` schema is left alone, so the load has branches that
     must not move as well as branches that must.
     """
 
-    from weaver.fabric.onelake import abfss_root, onelake_url
-    from weaver.locations import Location
+    from weaver.fabric.onelake import abfss_root
 
     item = journey.external_lakehouse
     root = abfss_root(item.workspace_id, item.id)
@@ -876,18 +890,26 @@ def _mutate_the_foreign_world(journey) -> None:
         )
     )
 
-    # A retirement event for the customer the foreign source dropped.
+    # A retirement event for the customer the foreign source dropped, and the
+    # withdrawal of the drop's first file.
     from weaver.fabric import OneLakeDfsClient
 
-    OneLakeDfsClient().write(
-        Location(
-            onelake_url(
-                item.workspace_id,
-                item.id,
-                external_estate.events_path("event-003.json"),
-            )
-        ),
+    store = OneLakeDfsClient()
+    store.write(
+        _event_location(item, "event-003.json"),
         b'{"EventId": 3, "CustomerId": 3, "Kind": "retired"}\n',
+    )
+    store.delete(_event_location(item, "event-001.json"))
+
+
+def _event_location(item, name: str):
+    """One file in the foreign event drop."""
+
+    from weaver.fabric.onelake import onelake_url
+    from weaver.locations import Location
+
+    return Location(
+        onelake_url(item.workspace_id, item.id, external_estate.events_path(name))
     )
 
 
@@ -1650,8 +1672,7 @@ def _restore_the_foreign_baseline(journey) -> None:
     """Put the foreign estate back, so the next run starts where this one did."""
 
     from weaver.fabric import OneLakeDfsClient
-    from weaver.fabric.onelake import abfss_root, onelake_url
-    from weaver.locations import Location
+    from weaver.fabric.onelake import abfss_root
 
     item = journey.external_lakehouse
     journey.session.execute_python(
@@ -1664,13 +1685,7 @@ def _restore_the_foreign_baseline(journey) -> None:
         )
     )
     store = OneLakeDfsClient()
-    store.delete(
-        Location(
-            onelake_url(
-                item.workspace_id,
-                item.id,
-                external_estate.events_path("event-003.json"),
-            )
-        )
-    )
+    for name, content in external_estate.EVENT_FILES.items():
+        store.write(_event_location(item, name), content)
+    store.delete(_event_location(item, "event-003.json"))
     _foreign_warehouse(journey).execute_script(external_seed.warehouse_baseline())
