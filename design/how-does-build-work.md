@@ -312,6 +312,14 @@ item's DDL instead — which is where it did surface, in Fabric, before the wait
 existed. Measured against a real workspace, the shortcut exists in about a second
 and becomes readable 6–31 seconds later.
 
+**A shortcut is repointed, not deleted and remade.** The create carries
+`shortcutConflictPolicy=CreateOrOverwrite`, so one request makes a shortcut where
+there is none and repoints one that is there. Under the default `Abort` policy a
+create over a live name is a 409, and the name a delete released stays held for
+up to thirty-five seconds afterwards, which is time a build would spend waiting
+for Fabric to let go of a name it was about to reuse. Measured against a Fabric
+tenant: an overwrite answers 200 in under a second.
+
 ## 5. Target inventory
 
 Before planning, Weaver freezes one inventory for every bound target. A

@@ -103,6 +103,10 @@ RETIRED = (
     "InstalledDependency",
     "ValidationDependencies",
     "_validation_dependencies",
+    # Fabric repoints a shortcut in one request, so nothing waits for a deleted
+    # shortcut's name to come free.
+    "REPLACE_TIMEOUT",
+    "REPLACE_POLL_INTERVAL",
 )
 
 

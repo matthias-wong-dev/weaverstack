@@ -1,6 +1,9 @@
 """Fabric OneLake shortcut operations for shortcuts.
 
-Shortcuts are recreated during installation because they contain no data.
+A shortcut is made where one is declared and none stands, and repointed where
+the pair it declares changed. What a build leaves alone it does not touch: which
+shortcuts an installation acts on is settled in
+:mod:`weaver.build_bundle.incremental`.
 """
 
 from __future__ import annotations
@@ -13,12 +16,13 @@ from ..errors import CommandError
 from .client import FabricClient, FabricError
 from .resources import Item
 
-#: How long a removed shortcut may take to stop conflicting with a new one of
-#: the same name, and how often to retry. Fabric accepts the delete immediately
-#: and settles it shortly afterwards, so a create issued in between is refused.
-#: Measured at under a second; the bound is for a slow tenant.
-REPLACE_TIMEOUT = 30.0
-REPLACE_POLL_INTERVAL = 2.0
+#: What tells Fabric to point an existing shortcut somewhere else. The default
+#: policy is ``Abort``, under which a create over a live name is a 409 and the
+#: name a delete released stays held for up to thirty-five seconds afterwards.
+#: Measured against a Fabric tenant: an overwrite of a live name answers 200 in
+#: under a second, an overwrite issued moments after a delete answers 201, and
+#: neither waits.
+OVERWRITE_POLICY = "CreateOrOverwrite"
 
 #: How long to wait for a source Fabric has accepted but not yet published to
 #: OneLake. A Warehouse creates a table in its own catalogue first and publishes
@@ -28,11 +32,9 @@ REPLACE_POLL_INTERVAL = 2.0
 SOURCE_TIMEOUT = 120.0
 SOURCE_POLL_INTERVAL = 5.0
 
-#: How Fabric distinguishes the two conflicts a create can meet, both of which
-#: are a 409. The first is the shortcut being replaced, still settling. The
-#: second is something else already occupying the path, which waiting will not
-#: change. ``Shorcuts`` is Fabric's spelling.
-_STILL_SETTLING = "ShorcutsOperationNotAllowed"
+#: The two failures a create reports as something other than success. The source
+#: is not in OneLake yet, which waiting answers; or something that is not a
+#: shortcut occupies the path, which it does not.
 _SOURCE_MISSING = "Target path doesn't exist"
 _PATH_OCCUPIED = "NameConflictError"
 
@@ -88,18 +90,15 @@ def create_shortcut(
 ) -> dict:
     """Point ``destination``'s ``path/name`` at ``source``'s ``source_path``.
 
-    An existing shortcut of the same name is replaced rather than treated as a
-    collision: a shortcut holds no data, and a build has to be able to run twice.
-    Fabric settles a deletion a moment after accepting it, so the create is
-    retried while it reports the old name as still there.
+    One request, under ``CreateOrOverwrite``: a shortcut holds no data, so an
+    existing name is repointed, and a build has to be able to run twice.
 
-    Retried for a second reason, and on a longer deadline: Fabric validates the
-    target and a source created earlier in this same build may not be published to
-    OneLake yet. Waiting is what lets one build create a thing and point at it;
-    the deadline is what makes a source that will never appear still fail.
+    Retried for one condition: Fabric validates the target, and a source created
+    earlier in this same build may not be published to OneLake yet. Waiting is
+    what lets one build create a thing and point at it; the deadline is what
+    makes a source that will never appear still fail.
     """
 
-    delete_shortcut(destination, path=path, name=name, client=client)
     payload = {
         "path": path,
         "name": name,
@@ -111,9 +110,11 @@ def create_shortcut(
             }
         },
     }
-    endpoint = f"workspaces/{destination.workspace_id}/items/{destination.id}/shortcuts"
-    settling_deadline = time.monotonic() + REPLACE_TIMEOUT
-    source_deadline = time.monotonic() + SOURCE_TIMEOUT
+    endpoint = (
+        f"workspaces/{destination.workspace_id}/items/{destination.id}/shortcuts"
+        f"?shortcutConflictPolicy={OVERWRITE_POLICY}"
+    )
+    source_deadline: float | None = None
     while True:
         try:
             response = client.request("POST", endpoint, payload=payload)
@@ -127,6 +128,8 @@ def create_shortcut(
                     "the shortcut at another name."
                 ) from exc
             if _SOURCE_MISSING in message:
+                if source_deadline is None:
+                    source_deadline = time.monotonic() + SOURCE_TIMEOUT
                 if time.monotonic() >= source_deadline:
                     raise CommandError(
                         f"could not create the shortcut {path}/{name} in "
@@ -137,22 +140,21 @@ def create_shortcut(
                     ) from exc
                 time.sleep(SOURCE_POLL_INTERVAL)
                 continue
-            if _STILL_SETTLING not in message or time.monotonic() >= settling_deadline:
-                raise CommandError(
-                    f"could not create the shortcut {path}/{name} in "
-                    f"{destination.name}: {exc}"
-                ) from exc
-            time.sleep(REPLACE_POLL_INTERVAL)
+            raise CommandError(
+                f"could not create the shortcut {path}/{name} in "
+                f"{destination.name}: {exc}"
+            ) from exc
     return {
         "path": f"{path}/{name}",
         "in": destination.name,
         "target": f"{source.name}/{source_path}",
         # Reported because it says which contract Fabric honoured. Creating one
-        # shortcut is documented as synchronous, a 201, while bulk creation is
-        # not; so a 202 here would mean the shortcut itself is still being made,
-        # which is a different thing from the destination Lakehouse not yet having
-        # registered it as a table. Only the second is what the readability wait
-        # in `weaver.build_bundle.executors.shortcut` exists for.
+        # shortcut is documented as synchronous, a 201 for a new name and a 200
+        # for one overwritten, while bulk creation is not; so a 202 here would
+        # mean the shortcut itself is still being made, which is a different
+        # thing from the destination Lakehouse not yet having registered it as a
+        # table. Only the second is what the readability wait in
+        # `weaver.build_bundle.executors.shortcut` exists for.
         "status": response.status_code,
     }
 
