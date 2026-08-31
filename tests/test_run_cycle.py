@@ -707,11 +707,22 @@ def test_a_node_is_named_by_what_it_does_to_which_object():
         role="Assumption",
     )
 
+    folder = RunNode(
+        node_id="load:Lakehouse/Sales/Files/Sales.Customer",
+        physical_target="Lakehouse/Sales",
+        primitive_kind="python_folder",
+        logical_id=_Logical("Sales.Customer", is_files=True),
+        role="load",
+    )
+
     assert node_label(load) == "Load Lakehouse/Sales/Sales.Customer"
     assert node_label(refresh) == "Refresh Lakehouse/Sales SQL endpoint"
     assert (
         node_label(check) == "Test Warehouse/Reporting/Reporting.CustomerRevenuePresent"
     )
+    # A Folder and a table of one name are two lines, not one repeated.
+    assert node_label(folder) == "Load Lakehouse/Sales/Files/Sales.Customer"
+    assert node_label(folder) != node_label(load)
 
 
 @weaver_test()
@@ -749,13 +760,15 @@ def test_run_evidence_uses_the_nodes_structured_identity():
 
 
 class _Logical:
-    def __init__(self, qualified):
+    def __init__(self, qualified, is_files=False):
         schema, object_name = qualified.split(".", 1)
         self.object_id = type(
             "ObjectId",
             (),
             {"qualified": qualified, "schema": schema, "object": object_name},
         )()
+        #: A Folder is stored beneath ``Files/``, and its label says so.
+        self.is_files = is_files
 
     def __str__(self):
         return self.object_id.qualified

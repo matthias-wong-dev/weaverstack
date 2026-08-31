@@ -43,10 +43,26 @@ def node_label(node) -> str:
     if what is None:
         # Barriers and directly constructed nodes have no logical label.
         return node.node_id
-    name = getattr(getattr(what, "object_id", None), "qualified", None) or str(what)
+    name = _display_name(what)
     # Validations use their Test or Assumption kind in the display label.
     verb = "Load" if node.role == LOAD else "Test"
     return f"{verb} {target}/{name}" if target is not None else f"{verb} {name}"
+
+
+def _display_name(identity) -> str:
+    """One object, spelled as the catalogue stores it.
+
+    The area comes with it, so a Folder and a table of one ``Schema.Object``
+    read apart on the line somebody watches go past, as they do in the plan and
+    in the graph.
+    """
+
+    from ..catalogue.claims import catalogue_columns
+
+    if getattr(identity, "object_id", None) is None:
+        return str(identity)
+    schema, name = catalogue_columns(identity)
+    return f"{schema}.{name}"
 
 
 @contextmanager
