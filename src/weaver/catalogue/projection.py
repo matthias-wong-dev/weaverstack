@@ -333,7 +333,15 @@ def project_item_catalogue(
                 # The declaration as written, which is also the key, and the
                 # same schema/object pair Registry names an object by.
                 "shortcut_id": declaration.shortcut_id,
-                "schema_name": declaration.schema,
+                # The destination identity as Registry stores it, so a Folder
+                # keeps its ``Files/`` prefix and stays apart from a table of
+                # the same Schema.Object. A schema shortcut names a namespace,
+                # which has no area to prefix.
+                "schema_name": (
+                    declaration.schema
+                    if declaration.is_schema
+                    else _catalogue_schema(declaration.destination)
+                ),
                 # A schema shortcut presents a namespace, so it names no object.
                 "object_name": (
                     None
@@ -344,9 +352,19 @@ def project_item_catalogue(
                 "target_type": declaration.target_type,
                 "target_item_type": declaration.target_item.item_type,
                 "target_item_name": declaration.target_item.item_name,
-                "target_schema_name": declaration.target_schema,
+                # A logical target is a Weaver document, so its identity is
+                # stored whole and the same way Registry stores one. A Folder
+                # source keeps its ``Files/`` prefix, which is what separates it
+                # from a table of the same Schema.Object.
+                "target_schema_name": (
+                    _catalogue_schema(declaration.logical_source)
+                    if declaration.is_logical
+                    else declaration.target_schema
+                ),
                 "target_object_name": (
-                    target_object.object if target_object is not None else None
+                    declaration.logical_source.object_id.object
+                    if declaration.is_logical
+                    else (target_object.object if target_object is not None else None)
                 ),
                 "target_workspace_name": declaration.workspace,
                 "signature": declaration.signature,

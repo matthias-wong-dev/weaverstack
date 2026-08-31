@@ -41,7 +41,9 @@ from .declaration.metadata import ASSUMPTION, TEST, ObjectId
 from .declaration.model import (
     FILE_SHAPE,
     LAKEHOUSE,
+    LOGICAL_TARGET,
     OBJECT_SHAPE,
+    SCHEMA_SHORTCUT,
     WAREHOUSE,
     WeaverDocumentId,
     WeaverItemId,
@@ -224,14 +226,39 @@ class InstalledEdge:
 
 @dataclass(frozen=True)
 class InstalledShortcut:
-    """One logical shortcut a consuming item installed, as the catalogue kept it.
+    """One shortcut a consuming item installed, as the catalogue kept it.
 
-    Only the logical ones. A physical shortcut points at an item Weaver does not
-    manage, so it has no producer in this graph.
+    Both target types, because the declaration is what an import of
+    ``shortcuts`` names. A logical shortcut carries the managed ``source`` it
+    points at. A physical one points at an item Weaver does not manage, so its
+    source is ``None`` and it produces no edge.
+
+    ``shortcut_type`` is the destination's shape, being ``table``, ``view``,
+    ``folder`` or ``schema``. It is what separates a Folder destination from a
+    table of the same ``Schema.Object``.
     """
 
-    destination: WeaverDocumentId
-    source: WeaverDocumentId
+    destination: WeaverDocumentId | WeaverSchemaId
+    source: WeaverDocumentId | None = None
+    shortcut_type: str = ""
+    target_type: str = ""
+
+    @property
+    def is_logical(self) -> bool:
+        return self.target_type == LOGICAL_TARGET
+
+    @property
+    def symbol(self) -> str:
+        """The name a program imports this shortcut under.
+
+        ``Sales__Customer`` for a table, view or folder, and ``Reference`` for a
+        schema, which presents a namespace and names no object.
+        """
+
+        if isinstance(self.destination, WeaverSchemaId):
+            return self.destination.schema
+        object_id = self.destination.object_id
+        return f"{object_id.schema}{_PYTHON_ID_SEPARATOR}{object_id.object}"
 
 
 # --- the graph ----------------------------------------------------------------
@@ -735,34 +762,47 @@ def _validation_kind(row: Mapping[str, object], logical: WeaverDocumentId) -> st
 
 
 def installed_shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
-    """The logical shortcuts the catalogue holds, as producer pairs.
+    """Every shortcut declaration the catalogue holds, by the item that made it.
 
-    A physical shortcut is skipped: it names an item outside the estate, so
-    there is no producer for the graph to order against.
+    Both target types. A logical shortcut carries the managed source it points
+    at. A physical one names an item outside the estate, so it carries no
+    source, and an import of it is an external read.
     """
 
     found = []
     for item, tables in catalogue.rows.items():
         for row in tables.get(SHORTCUT.name, ()):
-            if str(row.get("target_type") or "").casefold() != "logical":
-                continue
+            shortcut_type = str(row.get("shortcut_type") or "").casefold()
+            target_type = str(row.get("target_type") or "").casefold()
+            schema_name = str(row.get("schema_name") or "")
             object_name = str(row.get("object_name") or "")
-            target_object = str(row.get("target_object_name") or "")
-            if not object_name or not target_object:
+            if shortcut_type == SCHEMA_SHORTCUT:
+                destination = WeaverSchemaId(item, schema_name)
+            elif object_name:
+                destination = stored_identity(item, schema_name, object_name)
+            else:
                 continue
-            destination = stored_identity(
-                item, str(row.get("schema_name") or ""), object_name
+            source = None
+            if target_type == LOGICAL_TARGET:
+                target_object = str(row.get("target_object_name") or "")
+                if not target_object:
+                    continue
+                source = stored_identity(
+                    WeaverItemId(
+                        str(row.get("target_item_type") or ""),
+                        str(row.get("target_item_name") or ""),
+                    ),
+                    str(row.get("target_schema_name") or ""),
+                    target_object,
+                )
+            found.append(
+                InstalledShortcut(
+                    destination=destination,
+                    source=source,
+                    shortcut_type=shortcut_type,
+                    target_type=target_type,
+                )
             )
-            target_item = WeaverItemId(
-                str(row.get("target_item_type") or ""),
-                str(row.get("target_item_name") or ""),
-            )
-            source = stored_identity(
-                target_item,
-                str(row.get("target_schema_name") or ""),
-                target_object,
-            )
-            found.append(InstalledShortcut(destination=destination, source=source))
     return tuple(sorted(found, key=lambda each: str(each.destination)))
 
 
@@ -782,7 +822,9 @@ def _shortcut_edges(shortcuts, nodes) -> tuple[InstalledEdge, ...]:
 
     A shortcut destination is materialised after the object it points at, so it
     is ordered behind it whether or not anything reads it yet. A destination
-    Registry does not certify is not a node, and contributes no edge.
+    Registry does not certify is not a node, and contributes no edge. A physical
+    shortcut points outside the estate, so there is nothing here to order it
+    against.
     """
 
     return tuple(
@@ -792,7 +834,9 @@ def _shortcut_edges(shortcuts, nodes) -> tuple[InstalledEdge, ...]:
             is_shortcut=True,
         )
         for shortcut in shortcuts
-        if str(shortcut.source) in nodes and str(shortcut.destination) in nodes
+        if shortcut.is_logical
+        and str(shortcut.source) in nodes
+        and str(shortcut.destination) in nodes
     )
 
 
@@ -844,7 +888,16 @@ class _References:
 
     def __init__(self, *, objects, shortcuts) -> None:
         self._objects = objects
-        self._shortcut_by_destination = {each.destination: each for each in shortcuts}
+        self._shortcut_by_destination = {
+            each.destination: each for each in shortcuts if each.is_logical
+        }
+        #: Every shortcut by the item that declared it and the symbol a program
+        #: imports it under. An import of ``shortcuts`` names the declaration,
+        #: so it is resolved from this and never from what the destination
+        #: spelling happens to match among installed objects.
+        self._shortcut_by_symbol = {
+            (each.destination.item, each.symbol): each for each in shortcuts
+        }
         #: Reads that name a physical object directly, by declaring node.
         self.external: dict[WeaverDocumentId, list[str]] = {}
         #: Reads that name nothing installed, by declaring node.
@@ -894,33 +947,40 @@ class _References:
         return self._relation(consumer, reference)
 
     def _python(self, consumer: WeaverDocumentId, reference: str):
-        producer = _python_module_identity(consumer.item, reference)
+        symbol = _shortcut_symbol(reference)
+        if symbol is not None:
+            return self._shortcut(consumer, reference, symbol)
+        producer = _python_module_identity(consumer, reference)
         if producer is None:
             # A `lib/` helper, or an import that names no object at all. It is
             # real source and it is not a Weaver object, so it orders nothing.
             return None
         if producer not in self._objects:
-            # A shortcut import says nothing about which area its destination is
-            # in, so a folder shortcut resolves to the table spelling first. The
-            # estate is what answers.
-            beneath_files = replace(producer, is_files=True)
-            if beneath_files in self._objects:
-                producer = beneath_files
-        shortcut = self._shortcut_by_destination.get(producer)
-        if shortcut is not None:
-            return self._through(consumer, reference, shortcut)
-        if producer not in self._objects:
-            # A schema shortcut is keyed by the namespace it presents, so a
-            # two-part spelling of it finds nothing. It orders nothing either:
-            # what appears inside belongs to the item it points at.
-            namespace = WeaverSchemaId(producer.item, producer.object_id.schema)
-            if namespace in self._objects:
-                return namespace, None
             raise CatalogueStateError(
                 f"{consumer} imports {reference!r}, which resolves to "
                 f"{producer}, which is not an installed object"
             )
         return producer, None
+
+    def _shortcut(self, consumer: WeaverDocumentId, reference: str, symbol: str):
+        """What importing one shortcut symbol makes this node depend on.
+
+        The declaration answers, so a Folder shortcut and a table of one
+        ``Schema.Object`` stay apart. A logical shortcut orders the consumer
+        behind the managed object it points at. A physical one names something
+        outside the estate and is recorded as an external read.
+        """
+
+        shortcut = self._shortcut_by_symbol.get((consumer.item, symbol))
+        if shortcut is None:
+            raise CatalogueStateError(
+                f"{consumer} imports {reference!r}, and {consumer.item} declares "
+                "no shortcut of that name"
+            )
+        if not shortcut.is_logical:
+            self.external.setdefault(consumer, []).append(reference)
+            return None
+        return self._through(consumer, reference, shortcut)
 
     def _relation(self, consumer: WeaverDocumentId, reference: str):
         parts = reference.split(".")
@@ -981,32 +1041,50 @@ def _is_python_module_reference(reference: str) -> bool:
     return _PYTHON_ID_SEPARATOR in reference.rsplit(".", 1)[-1]
 
 
+def _shortcut_symbol(reference: str) -> str | None:
+    """The shortcut a written import names, or ``None`` where it names none."""
+
+    from .declaration.item_dependencies import SHORTCUTS_MODULE
+
+    prefix = f"{SHORTCUTS_MODULE}."
+    if not reference.startswith(prefix):
+        return None
+    return reference[len(prefix) :]
+
+
 def _python_module_identity(
-    item: WeaverItemId, reference: str
+    consumer: WeaverDocumentId, reference: str
 ) -> WeaverDocumentId | None:
     """The object one written import names, or ``None`` if it names none.
 
     The mirror of
     :func:`weaver.declaration.item_dependencies._python_references`: the two
     share one rule for the ``__`` split, including a schema that is itself
-    underscores.
+    underscores, and one rule for where a relative import starts. A document
+    beneath ``Files`` is a package deeper than one at the item root, so
+    ``.Sales__Seed`` written there names a Folder and written at the root names
+    a table.
     """
 
-    from .declaration.item_dependencies import SHORTCUTS_MODULE
     from .declaration.source import python_id_parts
 
-    components = [part for part in reference.split(".") if part]
+    level = len(reference) - len(reference.lstrip("."))
+    components = tuple(part for part in reference.split(".") if part)
+    if level:
+        base = (_FILES,) if consumer.is_files else ()
+        parents = level - 1
+        if parents > len(base):
+            # An import that leaves the item, which repository parsing
+            # rejects. It names no Weaver object.
+            return None
+        components = base[: len(base) - parents] + components
     if not components or components[0] == _LIB:
         return None
-    if components[0] == SHORTCUTS_MODULE and _PYTHON_ID_SEPARATOR not in components[-1]:
-        # A schema shortcut presents a namespace, so it is registered under the
-        # schema it establishes and names no object of its own.
-        return WeaverDocumentId(item, ObjectId(components[-1], components[-1]))
     parts = python_id_parts(components[-1])
     if len(parts) != 2 or not all(part.strip() for part in parts):
         return None
     return WeaverDocumentId(
-        item,
+        consumer.item,
         ObjectId(parts[0].strip(), parts[1].strip()),
         is_files=components[0] == _FILES,
     )

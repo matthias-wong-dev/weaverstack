@@ -751,24 +751,22 @@ def test_a_folder_shortcut_import_resolves_beneath_files(tmp_path):
 
 
 @weaver_test()
-def test_a_schema_shortcut_import_resolves_to_the_namespace_it_presents(tmp_path):
-    """``shortcuts.Reference`` carries no ``Schema__Object`` separator.
+def test_a_physical_shortcut_import_is_an_external_read(tmp_path):
+    """Each of the three points outside the estate, so none of them orders.
 
-    Without being recognised as an import at all it resolved to nothing, and the
-    load refused a dependency the author had written correctly.
+    ``shortcuts.Reference`` carries no ``Schema__Object`` separator, and a
+    schema shortcut is always physical: what appears inside the namespace
+    belongs to the item it points at.
     """
 
-    from weaver.installed import (
-        _is_python_module_reference,
-        _python_module_identity,
-    )
+    estate, consumer, _dag = _resolved_producers(tmp_path)
 
-    item = WeaverItemId.parse("Lakehouse/Curated")
-
-    assert _is_python_module_reference("shortcuts.Reference")
-    assert _python_module_identity(item, "shortcuts.Reference") == (
-        WeaverDocumentId.parse("Lakehouse/Curated/Reference.Reference")
-    )
+    assert set(estate.external_references[consumer]) == {
+        "shortcuts.Reference",
+        "shortcuts.Sales__External",
+        "shortcuts.Sales__Incoming",
+    }
+    assert not [edge for edge in estate.edges if edge.downstream == consumer]
 
 
 @weaver_test()
@@ -778,6 +776,109 @@ def test_a_program_importing_shortcuts_still_loads(tmp_path):
     _estate, consumer, dag = _resolved_producers(tmp_path)
 
     assert any(node.logical_id == consumer for node in dag.nodes)
+
+
+# --- one Schema.Object in two areas --------------------------------------------
+#
+# A Lakehouse holds `Files/Sales.Customer` as a physical folder shortcut and
+# `Sales.Customer` as the Delta table built from what it points at. Two Weaver
+# identities, both legitimate, and the table imports the shortcut. The
+# declaration is what says which of the two `shortcuts.Sales__Customer` names.
+# Derived from the symbol's spelling, it found the table and reported the table
+# as reading itself.
+
+
+def _same_name_estate(root):
+    """A Folder shortcut and an owned table sharing one ``Schema.Object``."""
+
+    from factories import _write, schema_document
+
+    item = "Lakehouse/Curated"
+    _write(root, f"{item}/schemas/Sales.yml", schema_document("Sales"))
+    _write(
+        root,
+        f"{item}/shortcuts.py",
+        "from weaver import Shortcut\n\n"
+        "Sales__Customer = Shortcut(\n"
+        '    shortcut_type="folder",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/Landing/Files/Sales/Customer",\n'
+        '    workspace="Shared Data",\n)\n',
+    )
+    # The import is aliased because the module already binds the name to its
+    # own class. The Weaver identities are what collide; the Python names are
+    # incidental.
+    _write(
+        root,
+        f"{item}/Sales__Customer.py",
+        '''\
+"""
+Table ID: Sales.Customer
+Description: The table built from the folder shortcut of the same name.
+Lineage: A source system.
+Primary key: CustomerId
+Schema:
+  CustomerId: string
+"""
+from shortcuts import Sales__Customer as SourceFolder
+
+from weaver import Table
+
+class Sales__Customer(Table):
+    def read(self):
+        return SourceFolder(self).path()
+''',
+    )
+    return item
+
+
+def _same_name_estate_dag(tmp_path):
+    """The whole round trip: repository, published catalogue, installed graph."""
+
+    from factories import installed_catalogue, item_bindings
+
+    from weaver.declaration import parse_item_repository
+    from weaver.locations import Location
+
+    root = tmp_path / "same-name-estate"
+    item = _same_name_estate(root)
+    repository = parse_item_repository(Location(str(root)))
+    catalogue = installed_catalogue(repository, item_bindings((item, "Curated_LH")))
+    return item, catalogue.dag()
+
+
+@weaver_test()
+def test_a_folder_shortcut_and_a_table_of_one_name_are_two_installed_nodes(tmp_path):
+    """The catalogue round trip keeps the two identities apart."""
+
+    item, estate = _same_name_estate_dag(tmp_path)
+
+    assert WeaverDocumentId.parse(f"{item}/Files/Sales.Customer") in estate
+    assert WeaverDocumentId.parse(f"{item}/Sales.Customer") in estate
+
+
+@weaver_test()
+def test_a_table_importing_the_folder_shortcut_it_shares_a_name_with_is_external(
+    tmp_path,
+):
+    """The declaration answers, so the import is the physical read it is."""
+
+    item, estate = _same_name_estate_dag(tmp_path)
+    table = WeaverDocumentId.parse(f"{item}/Sales.Customer")
+
+    assert estate.external_references[table] == ("shortcuts.Sales__Customer",)
+    assert not estate.unresolved
+    assert not [edge for edge in estate.edges if edge.downstream == table]
+
+
+@weaver_test()
+def test_a_table_importing_the_folder_shortcut_it_shares_a_name_with_loads(tmp_path):
+    """The composition: the item has a load DAG, and the table is in it."""
+
+    item, estate = _same_name_estate_dag(tmp_path)
+    dag = load_dag(estate, items=(WeaverItemId.parse(item),))
+
+    assert node_ids(dag) == ("load:Lakehouse/Curated_LH/Sales.Customer",)
 
 
 @weaver_test()

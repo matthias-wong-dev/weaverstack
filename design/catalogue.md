@@ -115,23 +115,32 @@ join without anything having to split an id.
 | | Shortcut ID | Schema | Object |
 |---|---|---|---|
 | table | `Sales.Customer` | `Sales` | `Customer` |
-| folder | `Sales.Incoming` | `Sales` | `Incoming` |
+| folder | `Sales.Incoming` | `Files/Sales` | `Incoming` |
 | schema | `Reference` | `Reference` | NULL |
+
+A folder carries the `Files/` prefix `_.Registry` stores it with, so
+`Files/Sales.Customer` and `Sales.Customer` are two rows and two identities. A
+Lakehouse may hold both: a folder shortcut into a source estate, and the Delta
+table built from what it points at.
 
 **What it points at.** `Target type` is `Logical` or `Physical`. For a logical
 target the four target columns give the producer's identity whole:
 
-| Target type | Target item type | Target item name | Target schema | Target object |
-|---|---|---|---|---|
-| Logical | Lakehouse | Sales | Sales | Customer |
+| | Target type | Target item type | Target item name | Target schema | Target object |
+|---|---|---|---|---|---|
+| table | Logical | Lakehouse | Sales | Sales | Customer |
+| folder | Logical | Lakehouse | Sales | Files/Sales | Customer |
 
 so a reader rebuilds `Lakehouse/Sales/Sales.Customer` from the row alone, with no
 join to Installation, no parsing, and no knowledge of a Fabric workspace or item
-id. That is what lets the estate DAG be reconstructed from the catalogue.
+id. That is what lets the estate DAG be reconstructed from the catalogue. The
+`Files/` prefix applies on this side too, because a logical folder shortcut
+points at a Folder document.
 
 A physical target names the Fabric item itself, and `Target workspace` is set
 when it is in another workspace. It has no logical producer, so nothing in the
-row pretends otherwise.
+row pretends otherwise. A program that imports one records an external read, and
+the installed graph carries no edge for it.
 
 ### Why some tables look sparse
 
