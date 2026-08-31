@@ -765,9 +765,17 @@ def analyse_sql(body: str) -> SqlAnalysis:
 
     Calibrated to abstain rather than guess: a wrong rejection blocks a
     legitimate object, while a missed one fails at build as it does today.
+
+    Authored repository SQL is trusted input. ``sqlparse`` 0.6 applies a
+    process-wide 10,000-token grouping ceiling intended for untrusted input;
+    disable that ceiling before parsing so the size of a valid statement does
+    not decide whether Weaver can build it.
     """
 
     import sqlparse
+    from sqlparse.engine import grouping
+
+    grouping.MAX_GROUPING_TOKENS = None
 
     statements = [
         statement

@@ -20,7 +20,13 @@ from pathlib import Path
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.declaration import PYTHON, SPARK_SQL, SQL, parse_item_repository
+from weaver.declaration import (
+    PYTHON,
+    SPARK_SQL,
+    SQL,
+    analyse_sql,
+    parse_item_repository,
+)
 from weaver.locations import Location
 
 FIXTURE = Location(str(Path(__file__).parent / "fixtures" / "estate-item"))
@@ -185,6 +191,20 @@ def test_the_warehouse_table_stages_through_a_temp_table(authored):
 @weaver_test()
 def test_the_view_is_a_single_statement(authored):
     analysis = authored["Warehouse/Reporting/Reporting.OrderView"].sql_analysis
+    assert analysis.statement_count == 1
+    assert analysis.result_set_count == 1
+
+
+@weaver_test()
+def test_trusted_repository_sql_has_no_grouping_token_ceiling():
+    """A large authored query is ordinary source, not untrusted parser input."""
+
+    body = "select\n" + ",\n".join(
+        f"{index} as [Column {index}]" for index in range(2_000)
+    )
+
+    analysis = analyse_sql(body)
+
     assert analysis.statement_count == 1
     assert analysis.result_set_count == 1
 
