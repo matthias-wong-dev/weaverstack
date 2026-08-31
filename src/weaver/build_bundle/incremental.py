@@ -124,25 +124,26 @@ def stale_through_shortcuts(
     *,
     bound_items: Iterable[WeaverItemId],
 ) -> tuple[WeaverDocumentId, ...]:
-    """Everything a logical shortcut's source outran: the pointer and its readers.
+    """Objects reading through a logical shortcut whose source outran them.
 
     The half of cross-item freshness the graph cannot answer. A descendant walk
     carries impact only from a producer whose declaration changed; a producer
     rebuilt by an earlier build looks unchanged to this one, and the only
     surviving evidence is in the catalogue.
 
-    So the Registry rows are compared: each carries the build that published it.
-    The freshness invariant along one chain is
+    So the Registry rows are compared: each carries the build that published it,
+    and a source published after an object that reads it through a shortcut means
+    that object was built against something that has moved on. Naming the object
+    here joins it to the ordinary impacted set, and rebuilding it is what dates
+    its row after the source.
 
-    .. code-block:: text
-
-        producer <= shortcut <= consumer
-
-    and a row published before the source it stands on is named here, which joins
-    it to the ordinary impacted set. Rebuilding it is what dates its row after
-    the source. The pointer is named as well as its readers, so a chain settles
-    in one build: the shortcut is materialised over itself and the consumer
-    follows it.
+    The pointer between them is not named, and cannot usefully be. Its signature
+    is the pair it declares and it holds no dictionary rows, so nothing a build
+    does to it changes its Registry row and its instant never advances. Named
+    here it would be behind its source on every build for ever, and the walk
+    would carry that to its readers every time. The pointer is refreshed instead
+    by the build that moves its source, which reaches it through the graph; see
+    :func:`select_build`.
 
     ``bound_items`` scopes it to what this build could act on; a consumer item
     that is not being built stays behind its source until it is.
@@ -167,12 +168,6 @@ def stale_through_shortcuts(
         source_datetime = _as_instant(source.build_datetime)
         if source_datetime is None or str(destination) not in graph:
             continue
-        # The pointer itself, when the source it stands on has moved past it.
-        pointer = registered.get(destination)
-        if pointer is not None:
-            pointer_datetime = _as_instant(pointer.build_datetime)
-            if pointer_datetime is None or source_datetime > pointer_datetime:
-                behind.append(destination)
         for node in graph.descendants(str(destination)):
             consumer = by_text.get(node)
             if consumer is None or consumer.item not in bound:
@@ -397,24 +392,19 @@ def select_build(
     # declares, so impact reaching a consumer through the pointer leaves the
     # pointer where it is. A pointer that is new or whose pair changed is not
     # here: those are classified, not propagated.
-    # A pointer whose source has moved is selected like anything else that has to
-    # be built again, and both halves of "has moved" reach it. A source changing
-    # in this build arrives through the graph as an impacted descendant. A source
-    # some earlier build moved leaves nothing in the repository, and the
-    # catalogue instants are the only evidence.
-    #
-    # Selecting it here is also what levels the chain. A pointer's signature is
-    # the pair it declares and rebuilding never changes it, so its Registry row
-    # would never re-date and `producer <= shortcut` could never come true; the
-    # claim deletion that selection carries is what republishes the row. The
-    # physical drop is a separate question, and `_retained_pointers` answers it:
-    # a pointer is materialised over the address already there, by
-    # `CreateOrOverwrite` or `create or alter view`, and never removed first.
+    # A pointer's physical life follows its own signature, so it is never dropped
+    # to be refreshed: `CreateOrOverwrite` for a Lakehouse shortcut and `create
+    # or alter view` for a Warehouse one both stand on the address already there,
+    # and Fabric holds a deleted shortcut's name for tens of seconds.
     pointers = shortcut_destinations(repository)
-    behind_their_source = set(stale_consumers) & pointers
-    untouched = (set(impact.impacted_descendants) & pointers) - behind_their_source
+    untouched = set(impact.impacted_descendants) & pointers
     selected_for_drop = set(impact.impacted) - prohibited - untouched
-    refreshed = (set(impact.impacted) | behind_their_source) & pointers - prohibited
+    # It is still built. A source rebuilt in this build may have been dropped and
+    # recreated under it, so the pointer is materialised again over the same
+    # address, and the consumer behind it follows. The graph is what reaches it,
+    # so this happens in the build that moves the source and not afterwards:
+    # nothing here reads an instant, and there is no lag to chase.
+    refreshed = (set(impact.impacted) & pointers) - prohibited
     return BuildSelection(
         impact=impact,
         prohibited=_ordered(prohibited),

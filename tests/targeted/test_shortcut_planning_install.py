@@ -248,16 +248,16 @@ def certified(repository, *names, build_datetime=None):
 
 
 @weaver_test()
-def test_a_source_published_later_leaves_the_pointer_and_its_reader_behind(estate):
+def test_a_consumer_is_stale_when_the_source_it_reads_was_published_later(estate):
     """The half of cross-item freshness the dependency graph cannot answer.
 
     A producer rebuilt by some earlier build is, to this one, entirely
     unchanged. Nothing in the repository records that it moved. The only
     surviving evidence is that its Registry row carries a later build datetime
-    than the rows standing on it.
+    than the row of the object reading it through the shortcut.
 
-    Both of those come back: the pointer and the object reading through it. The
-    chain settles as ``producer <= shortcut <= consumer`` in one build.
+    What comes back is that object. The pointer between them declares the same
+    pair it always did and stands at the same address.
     """
 
     registered = {
@@ -267,7 +267,7 @@ def test_a_source_published_later_leaves_the_pointer_and_its_reader_behind(estat
 
     stale = stale_through_shortcuts(estate, registered, bound_items={item_id(CONSUMER)})
 
-    assert set(stale) == {document_id(SHORTCUT), document_id(VIEW)}
+    assert stale == (document_id(VIEW),)
 
 
 @weaver_test()
@@ -334,17 +334,15 @@ def _selection(estate, registered, *, bound=None):
 
 
 @weaver_test()
-def test_a_source_rebuilt_earlier_rebuilds_the_pointer_then_the_consumer(estate):
+def test_a_source_rebuilt_earlier_rebuilds_the_consumer_and_not_the_pointer(estate):
     """The cross-build case, and the whole reason freshness is read at all.
 
     The producer was rebuilt by an earlier build, which left nothing in the
-    repository. The pointer and what reads through it are both behind, so both
-    are built again.
-
-    Selection carries the pointer, which is what republishes its Registry row: a
-    pointer's signature is the pair it declares, so nothing else would ever
-    re-date it and the chain could never level. Whether it is physically removed
-    is a separate question, and `_retained_pointers` answers it.
+    repository. What reads it through the shortcut is behind and is built again.
+    The shortcut declares
+    the same pair over the same address, so it is neither replaced nor dropped:
+    Fabric holds a deleted shortcut's name for up to half a minute, and that is
+    paid for nothing here.
     """
 
     registered = {
@@ -355,32 +353,8 @@ def test_a_source_rebuilt_earlier_rebuilds_the_pointer_then_the_consumer(estate)
     selection = _selection(estate, registered)
 
     assert document_id(VIEW) in selection.selected_for_build
-    assert document_id(SHORTCUT) in selection.selected_for_build
-    assert document_id(SHORTCUT) in selection.selected_for_drop
-
-
-@weaver_test()
-def test_a_levelled_chain_selects_nothing(estate):
-    """The freshness rule converges, which is the whole of it being usable.
-
-    Selection republishes the pointer's row, so the build that levels the chain
-    dates it with the source it stands on. Read again, nothing is behind.
-
-    Worth its own claim because a pointer cannot re-date itself: its signature is
-    the pair it declares, so a rule that rebuilt it without republishing it would
-    find the same lag on every build and rebuild the pointer and everything
-    behind it forever.
-    """
-
-    registered = certified(
-        estate, SOURCE, VIEW, SHORTCUT, build_datetime="2026-01-02T00:00:00"
-    )
-
-    selection = _selection(estate, registered)
-
-    assert stale_through_shortcuts(estate, registered, bound_items=set(targets())) == ()
-    assert selection.selected_for_build == ()
-    assert selection.selected_for_drop == ()
+    assert document_id(SHORTCUT) not in selection.selected_for_build
+    assert document_id(SHORTCUT) not in selection.selected_for_drop
 
 
 @weaver_test()
@@ -425,12 +399,11 @@ def test_a_target_changed_in_this_build_refreshes_the_pointer_and_the_consumer(
 ):
     """The graph carries a producer's change across the shortcut in one walk.
 
-    Everything on the path is built: the pointer over its own address and the
-    consumer behind it. Refreshing the pointer in the same build is what leaves
-    ``producer <= shortcut <= consumer`` true afterwards, so the next build has
-    nothing to level and the estate settles once.
-
-    The pointer is still never dropped to do it.
+    Everything on the path is built: the pointer over its own address, and the
+    consumer behind it. Refreshing the pointer in the build that moves its source
+    is what keeps this out of the catalogue instants, which cannot answer it: a
+    pointer's row never re-dates, so a rule reading them would find the same lag
+    for ever.
     """
 
     everything = {document_id(SOURCE), document_id(VIEW), document_id(SHORTCUT)}
@@ -446,6 +419,8 @@ def test_a_target_changed_in_this_build_refreshes_the_pointer_and_the_consumer(
 
     assert document_id(SOURCE) in selection.selected_for_build
     assert document_id(VIEW) in selection.selected_for_build
+    # The pointer is refreshed over its own address, because a source rebuilt
+    # under it may have been dropped and recreated. It is never dropped to do it.
     assert document_id(SHORTCUT) in selection.selected_for_build
     assert document_id(SHORTCUT) not in selection.selected_for_drop
 

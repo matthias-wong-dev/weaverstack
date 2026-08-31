@@ -801,13 +801,11 @@ def test_a_consumer_is_stale_when_its_unbound_source_was_published_later(tmp_pat
 
 
 @weaver_test()
-def test_a_source_rebuilt_earlier_rebuilds_the_pointer_over_itself(tmp_path):
-    """The freshness invariant along the chain is producer <= shortcut <= consumer.
+def test_a_source_rebuilt_earlier_leaves_the_pointer_where_it_is(tmp_path):
+    """The pointer declares the same pair over the same address.
 
-    The pointer is behind the source it stands on, so it is selected. Selection
-    republishes its Registry row, which nothing else would: a pointer's signature
-    is the pair it declares and rebuilding never changes it. The physical drop is
-    a separate question, asserted through the planned actions below.
+    Freshness rebuilds what reads through a shortcut. The pointer stands at the
+    same address, and remaking one costs the wait for Fabric to discover it.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
@@ -819,8 +817,8 @@ def test_a_source_rebuilt_earlier_rebuilds_the_pointer_over_itself(tmp_path):
     selection = _consumer_only_selection(repository, rows)
     destination = WeaverDocumentId.parse(SHORTCUT_DESTINATION)
 
-    assert destination in selection.selected_for_build
-    assert destination in selection.selected_for_drop
+    assert destination not in selection.selected_for_build
+    assert destination not in selection.selected_for_drop
 
 
 @weaver_test()
@@ -877,14 +875,9 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
         WeaverItemId.parse("Lakehouse/Curated"),
     }
 
-    assert set(
-        stale_through_shortcuts(
-            repository, Catalogue(rows).registered, bound_items=both
-        )
-    ) == {
-        WeaverDocumentId.parse(SHORTCUT_DESTINATION),
-        WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer"),
-    }
+    assert stale_through_shortcuts(
+        repository, Catalogue(rows).registered, bound_items=both
+    ) == (WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer"),)
 
 
 @weaver_test()
@@ -909,13 +902,9 @@ def test_an_unbuilt_consumer_stays_behind_its_source(tmp_path):
 
 
 @weaver_test()
-def test_a_source_rebuilt_earlier_replaces_the_pointer_and_the_consumer(tmp_path):
-    """End to end through the planner: the pointer is remade over itself.
-
-    One shortcut action and no drop, so the chain settles as
-    ``producer <= shortcut <= consumer`` without waiting for Fabric to release
-    the pointer's name.
-    """
+def test_a_source_rebuilt_earlier_plans_no_shortcut_action(tmp_path):
+    """End to end through the planner: the freshness comparison reaches the
+    consumer and no pointer is touched on the way."""
 
     repository = _repository(_dependency_estate(tmp_path))
     rows = _shortcut_catalogue(repository)
@@ -925,16 +914,8 @@ def test_a_source_rebuilt_earlier_replaces_the_pointer_and_the_consumer(tmp_path
 
     bundle = _shortcut_bundle(tmp_path, repository, rows=rows)
     consumer = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
-    destination = WeaverDocumentId.parse(SHORTCUT_DESTINATION)
 
-    # One shortcut action, and the only drop is the consumer view being rebuilt.
-    assert len(_shortcut_actions(bundle)) == 1
-    assert [
-        action.resource_node_id
-        for _sequence, _batch, action in bundle.plan.actions()
-        if action.kind.startswith("drop_")
-    ] == ["Warehouse/Reporting/Sales.Customer"]
-    assert destination in bundle.plan.selection.selected_for_build
+    assert _shortcut_actions(bundle) == []
     assert consumer in bundle.plan.selection.selected_for_build
 
 
