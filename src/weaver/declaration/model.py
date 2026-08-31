@@ -359,7 +359,7 @@ class RepositoryShortcut:
         shortcut, and no reason to remake the pointer: it stands at the same
         address either way. That is freshness, answered by comparing build
         datetimes in the Registry (see
-        :func:`~weaver.build_bundle.incremental.stale_shortcut_consumers`).
+        :func:`~weaver.build_bundle.incremental.stale_through_shortcuts`).
         """
 
         declaration = f"{self.destination}\0{self.source}".encode("utf-8")

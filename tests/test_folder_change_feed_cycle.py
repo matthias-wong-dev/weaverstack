@@ -602,3 +602,134 @@ def test_the_file_key_still_decides_what_a_load_publishes_and_retires(landing):
     assert result.rows_deleted == 1
     assert not (landing.path() / "managed.csv").exists()
     assert (landing.path() / "manual.txt").exists()
+
+
+# --- adopting what was already there -------------------------------------------
+#
+# A managed Folder can hold files that arrived before the Folder was declared:
+# a migration copies a retained estate into place. `_changes` is the whole of
+# managed history, so without an initial entry those files take no part in any
+# incremental read. Adoption records them as this installation's first insert,
+# before the authored read runs.
+
+
+def _seed(folder: Folder, **files: str) -> None:
+    """Put files into the managed Folder without going through a load."""
+
+    root = folder.path()
+    for name, content in files.items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+@weaver_test()
+def test_a_first_load_adopts_files_that_were_already_there(landing):
+    """The files exist, so from the Folder's side they were inserted."""
+
+    _seed(landing, **{"retained.csv": "a\n", "nested/deeper.csv": "b\n"})
+    Sales__Landing.files = {}
+
+    landing.load()
+
+    assert _document(landing)["inserts"] == ["nested/deeper.csv", "retained.csv"]
+
+
+@weaver_test()
+def test_adoption_takes_every_file_whatever_the_file_key_claims(landing):
+    """The File key decides what Weaver manages, not what physically arrived.
+
+    A row adopted into a table was inserted whether or not it satisfies a
+    declared key. A file is no different: history records physical reality, and
+    whether the declaration accounts for it is decided elsewhere.
+    """
+
+    _seed(landing, **{"claimed.csv": "a\n", "unclaimed.txt": "b\n"})
+    Sales__Landing.files = {}
+
+    landing.load()
+
+    # The File key is "**/*.csv", and the .txt is adopted all the same.
+    assert _document(landing)["inserts"] == ["claimed.csv", "unclaimed.txt"]
+
+
+@weaver_test()
+def test_adoption_excludes_weaver_change_metadata(landing):
+    """``_changes`` is history, never content, so it is never adopted as content."""
+
+    _seed(landing, **{"retained.csv": "a\n", "nested/deeper.csv": "b\n"})
+    Sales__Landing.files = {}
+
+    landing.load()
+
+    inserts = _document(landing)["inserts"]
+    assert inserts == ["nested/deeper.csv", "retained.csv"]
+    assert not any(name.startswith(f"{CHANGES_DIRECTORY}/") for name in inserts)
+    # The document adoption wrote is history and is not itself content.
+    assert _documents(landing)
+
+
+@weaver_test()
+def test_a_folder_whose_history_holds_something_weaver_did_not_write(landing):
+    """Adoption asks whether anything is recorded, and answers conservatively.
+
+    Reading history parses every document, because the instants carry incremental
+    semantics. The adoption trigger asks only whether anything is recorded, so a
+    file from another writer stays as it is.
+    """
+
+    _seed(landing, **{"retained.csv": "a\n"})
+    metadata = landing.path() / CHANGES_DIRECTORY
+    metadata.mkdir(parents=True, exist_ok=True)
+    (metadata / "keep.json").write_text("metadata", encoding="utf-8")
+    Sales__Landing.files = {}
+
+    landing.load()
+
+    assert (metadata / "keep.json").read_text(encoding="utf-8") == "metadata"
+
+
+@weaver_test()
+def test_a_second_load_adopts_nothing_more(landing):
+    """The adoption document is itself history, so the trigger is spent."""
+
+    _seed(landing, **{"retained.csv": "a\n"})
+    Sales__Landing.files = {}
+    landing.load()
+    after_first = _documents(landing)
+
+    landing.load()
+
+    assert _documents(landing) == after_first
+
+
+@weaver_test()
+def test_a_static_folder_adopts_nothing(landing):
+    """Static means load this once, and its files are what was loaded."""
+
+    Sales__Landing.static = True
+    _seed(landing, **{"retained.csv": "a\n"})
+    Sales__Landing.files = {}
+
+    landing.load()
+
+    assert _documents(landing) == []
+
+
+@weaver_test()
+def test_adopted_files_are_visible_through_the_ordinary_history(landing):
+    """What adoption writes is an ordinary change document, read the ordinary way.
+
+    This is the point of doing it before the authored read: an incremental
+    source asking what has arrived since a bookmark sees the retained estate.
+    """
+
+    _seed(landing, **{"retained.csv": "a\n"})
+    Sales__Landing.files = {}
+    before = datetime.now(timezone.utc) - timedelta(days=1)
+
+    landing.load()
+
+    seen = landing.files_since(before)
+    assert sorted(path.name for path in seen) == ["retained.csv"]
+    assert managed_relative_files(landing.path(), ("**/*.csv",)) == ["retained.csv"]

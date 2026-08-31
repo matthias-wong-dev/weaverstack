@@ -118,29 +118,31 @@ def _as_instant(value) -> datetime | None:
     return None
 
 
-def stale_shortcut_consumers(
+def stale_through_shortcuts(
     repository: WeaverRepository,
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
     *,
     bound_items: Iterable[WeaverItemId],
 ) -> tuple[WeaverDocumentId, ...]:
-    """Objects reading through a logical shortcut whose source outran them.
+    """Everything a logical shortcut's source outran: the pointer and its readers.
 
     The half of cross-item freshness the graph cannot answer. A descendant walk
     carries impact only from a producer whose declaration changed; a producer
     rebuilt by an earlier build looks unchanged to this one, and the only
     surviving evidence is in the catalogue.
 
-    So the Registry rows are compared: each carries the build that published it,
-    and a source published after an object that reads it through a shortcut means
-    that object was built against something that has moved on. Naming the object
-    here joins it to the ordinary impacted set, and rebuilding it is what dates
-    its row after the source.
+    So the Registry rows are compared: each carries the build that published it.
+    The freshness invariant along one chain is
 
-    The shortcut is not named. Its signature is the pair it declares, a source
-    rebuilt behind it leaves that pair as it was, and the pointer still stands at
-    the same address (see
-    :attr:`~weaver.declaration.model.RepositoryShortcut.signature`).
+    .. code-block:: text
+
+        producer <= shortcut <= consumer
+
+    and a row published before the source it stands on is named here, which joins
+    it to the ordinary impacted set. Rebuilding it is what dates its row after
+    the source. The pointer is named as well as its readers, so a chain settles
+    in one build: the shortcut is materialised over itself and the consumer
+    follows it.
 
     ``bound_items`` scopes it to what this build could act on; a consumer item
     that is not being built stays behind its source until it is.
@@ -156,15 +158,22 @@ def stale_shortcut_consumers(
     by_text = {str(identity): identity for identity in registered}
     behind = []
     for shortcut in repository.logical_shortcuts:
-        if shortcut.destination.item not in bound:
+        destination = shortcut.destination
+        if destination.item not in bound:
             continue
         source = registered.get(shortcut.source)
         if source is None:
             continue
         source_datetime = _as_instant(source.build_datetime)
-        if source_datetime is None or str(shortcut.destination) not in graph:
+        if source_datetime is None or str(destination) not in graph:
             continue
-        for node in graph.descendants(str(shortcut.destination)):
+        # The pointer itself, when the source it stands on has moved past it.
+        pointer = registered.get(destination)
+        if pointer is not None:
+            pointer_datetime = _as_instant(pointer.build_datetime)
+            if pointer_datetime is None or source_datetime > pointer_datetime:
+                behind.append(destination)
+        for node in graph.descendants(str(destination)):
             consumer = by_text.get(node)
             if consumer is None or consumer.item not in bound:
                 continue
@@ -270,8 +279,8 @@ def determine_impact(
     say which.
 
     ``stale_consumers`` are objects the catalogue already proved out of date,
-    built before the source they read through a shortcut (see
-    :func:`stale_shortcut_consumers`). Their declarations are what they were, so
+    built before the source they stand on (see
+    :func:`stale_through_shortcuts`). Their declarations are what they were, so
     they are impacted, and the same walk carries impact on from them.
     """
 
@@ -361,6 +370,7 @@ def select_build(
     stale_consumers: Iterable[WeaverDocumentId] = (),
 ) -> BuildSelection:
     selected = set(selected)
+    stale_consumers = set(stale_consumers)
     physical_types = _physical_types(
         repository, selected=selected, inventories=inventories
     )
@@ -384,18 +394,25 @@ def select_build(
         and not _installed_as_shortcut(registered, identity)
     }
     # A pointer's physical life follows its own signature, which is the pair it
-    # declares. Impact reaches a consumer through the pointer and leaves the
-    # pointer where it is: a source rebuilt behind an unchanged pair stands at
-    # the same address, and remaking one costs the wait for Fabric to discover it
-    # again. A pointer that is new or whose pair changed is not here: those are
-    # classified, not propagated.
-    untouched = set(impact.impacted_descendants) & shortcut_destinations(repository)
+    # declares, so impact reaching a consumer through the pointer leaves the
+    # pointer where it is. A pointer that is new or whose pair changed is not
+    # here: those are classified, not propagated.
+    pointers = shortcut_destinations(repository)
+    untouched = set(impact.impacted_descendants) & pointers
     selected_for_drop = set(impact.impacted) - prohibited - untouched
+    # A pointer its own source outran is built and not dropped. It is
+    # materialised over itself, which is `CreateOrOverwrite` for a Lakehouse
+    # shortcut and `create or alter view` for a Warehouse one, so the chain
+    # settles as `producer <= shortcut <= consumer` in one build without paying
+    # for Fabric to release and rediscover the name.
+    behind_their_source = set(stale_consumers) & pointers & set(impact.impacted)
     return BuildSelection(
         impact=impact,
         prohibited=_ordered(prohibited),
         selected_for_drop=_ordered(selected_for_drop),
-        selected_for_build=_ordered(set(impact.new) | selected_for_drop),
+        selected_for_build=_ordered(
+            set(impact.new) | selected_for_drop | behind_their_source
+        ),
     )
 
 

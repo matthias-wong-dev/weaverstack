@@ -411,6 +411,115 @@ def test_a_pointer_standing_where_a_document_is_declared_is_unpicked(tmp_path):
     assert b'"name": "Portable"' in payload
 
 
+# --- the name a removed pointer keeps reserved ---------------------------------
+#
+# Fabric stops listing a deleted shortcut before OneLake releases its namespace.
+# An owned object created at that name in the same build finds it occupied, which
+# is what happened during the ILG migration:
+#
+#     DELETE shortcut X            Fabric stops listing X
+#     create owned X               refused, the namespace is still reserved
+#     create owned X, later        succeeds
+#
+# So that one drop waits for the release. Nothing else does.
+
+
+def _reused(selected_for_drop, selected_for_build, selected_shortcuts, registered):
+    from weaver.build_bundle.planner import pointers_whose_name_is_reused
+
+    return pointers_whose_name_is_reused(
+        selected_for_drop, selected_for_build, selected_shortcuts, registered
+    )
+
+
+@weaver_test()
+def test_a_pointer_whose_name_an_owned_object_takes_waits_for_release(estate):
+    """The one transition that waits, named by all three of its conditions."""
+
+    identity = document_id(FOLDER)
+    registered = as_a_shortcut(estate)
+
+    assert _reused({identity}, {identity}, set(), registered) == {identity}
+
+
+@weaver_test()
+def test_a_pointer_replaced_by_another_pointer_does_not_wait(estate):
+    """It is materialised over itself, so the name is never released."""
+
+    identity = document_id(FOLDER)
+    registered = as_a_shortcut(estate)
+
+    assert _reused({identity}, {identity}, {identity}, registered) == set()
+
+
+@weaver_test()
+def test_a_name_nothing_reuses_does_not_wait(estate):
+    """A removal on its own has nothing to wait for."""
+
+    identity = document_id(FOLDER)
+    registered = as_a_shortcut(estate)
+
+    assert _reused({identity}, set(), set(), registered) == set()
+
+
+@weaver_test()
+def test_an_owned_object_replacing_an_owned_object_does_not_wait(estate):
+    """Only a pointer reserves a name after it is gone."""
+
+    identity = document_id(FOLDER)
+
+    assert _reused({identity}, {identity}, set(), as_a_native_folder(estate)) == set()
+
+
+@weaver_test()
+def test_the_wait_is_carried_on_the_drop_the_plan_names(tmp_path):
+    """End to end: the flag reaches exactly one action, and it is the removal.
+
+    Carried on the drop rather than the create, because the removal is what
+    reserves the name and the shortcut executor is what owns both the deletion
+    and the path, whichever area the identity sits in.
+    """
+
+    estate = _protected_folder_repository(tmp_path)
+    identity = document_id(FOLDER)
+    target = bound_target(id="landing", item_id="Landing_LH")
+    plan = plan_item_build(
+        estate,
+        item=item_id(ITEM),
+        target=target,
+        inventory=target_inventory(
+            target_id="landing",
+            target_name="Landing_LH",
+            folder_schemas=("ACQSC",),
+            folders=("ACQSC.HarmSurveyXlsx",),
+        ),
+        target_by_item={item_id(ITEM): target},
+        selected_documents={identity},
+        selected_shortcuts=set(),
+        selected_for_drop={identity},
+        selected_for_build={identity},
+        registered={
+            identity: registered_document(
+                FOLDER,
+                object_type="folder",
+                object_role="shortcut",
+                signature="what the pointer was signed by",
+            )
+        },
+        catalogue_target=catalogue_target(),
+    )
+
+    waiting = [
+        action
+        for stage in plan.stages
+        for batch in stage.batches
+        for action in batch.actions
+        if action.awaits_name_release
+    ]
+
+    assert [action.kind for action in waiting] == ["drop_shortcut"]
+
+
 # --- what prohibit_rebuild protects -------------------------------------------
 #
 # A Folder holding retained source data declares `Prohibit rebuild: true` so a

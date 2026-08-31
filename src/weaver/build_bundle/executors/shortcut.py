@@ -49,6 +49,14 @@ FILES_AREA = "Files"
 ADDRESSABLE_TIMEOUT = 300.0
 ADDRESSABLE_POLL_INTERVAL = 5.0
 
+#: How long to wait for OneLake to release the namespace a removed shortcut held,
+#: and only where this plan gives that name to an owned object. Fabric stops
+#: listing the shortcut first, and release has been observed to take tens of
+#: seconds. Bounded, and a spent wait falls through to the create, which reports
+#: the occupied name itself.
+NAME_RELEASE_TIMEOUT = 300.0
+NAME_RELEASE_POLL_INTERVAL = 3.0
+
 
 class ShortcutExecutor:
     name = "shortcut"
@@ -103,7 +111,42 @@ class ShortcutExecutor:
             )
         for each in frozen:
             remove(context.target.lakehouse, path=each["path"], name=each["name"])
-        return {"removed": [each["shortcut"] for each in frozen]}
+        details: dict[str, Any] = {"removed": [each["shortcut"] for each in frozen]}
+        if action.awaits_name_release:
+            waited = self._await_name_release(context, frozen)
+            if waited is not None:
+                details["released_after_seconds"] = waited
+        return details
+
+    def _await_name_release(
+        self, context: InstallationContext, frozen: list
+    ) -> float | None:
+        """Wait until the names these pointers held can be used again.
+
+        Fabric has already stopped listing the shortcut when this runs, so what
+        remains is OneLake's namespace and the reliable question is whether the
+        path still answers. Only reached where the plan goes on to create an
+        owned object at the same name, and every name is waited on together, so
+        several removals cost one release window.
+
+        A spent wait returns rather than raising. The create that follows reports
+        the occupied name, which says more about what is wrong than a timeout
+        here would.
+        """
+
+        store = getattr(context, "store", None)
+        if store is None:
+            return None
+        locations = [
+            _location(context.target, each, context, source=False) for each in frozen
+        ]
+        started = time.monotonic()
+        deadline = started + NAME_RELEASE_TIMEOUT
+        while time.monotonic() < deadline:
+            if not any(store.exists(location) for location in locations):
+                break
+            time.sleep(NAME_RELEASE_POLL_INTERVAL)
+        return round(time.monotonic() - started, 1)
 
     def _shortcut(self, shortcut, frozen: dict, context) -> dict:
         """One shortcut, from whichever kind of source the plan froze."""

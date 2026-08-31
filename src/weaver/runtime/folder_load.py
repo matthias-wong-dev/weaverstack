@@ -379,6 +379,54 @@ def _write_change_document(
     _safe_write_text(target, json.dumps(payload, indent=2) + "\n")
 
 
+def _has_change_history(root: Path) -> bool:
+    """Whether anything is recorded beneath ``_changes``.
+
+    Tolerant where reading history is strict. Reading it parses every document,
+    because incremental semantics rest on the instants they carry; the question
+    here is only whether Weaver has written any, and a directory may hold a file
+    Weaver did not write. An empty directory is no history, so a Folder whose
+    directory exists and records nothing is still adopted.
+    """
+
+    changes = root / CHANGES_DIRECTORY
+    if not changes.is_dir():
+        return False
+    return any(entry.is_file() for entry in changes.iterdir())
+
+
+def adopt_existing_files(destination: str | Path) -> tuple[str, ...]:
+    """Record what a Folder already holds as this installation's first insert.
+
+    A managed Folder may hold files that arrived before the Folder was declared:
+    a migration copies a retained estate into place, and the directory then holds
+    state no change document records. ``_changes`` is the whole of
+    managed history, so without this a Folder with files and no history has
+    nothing for an incremental read to start from.
+
+    Every file is adopted, whatever the File key claims. From the Folder's side
+    these files are physically there and were therefore inserted, exactly as a
+    row adopted into a table was inserted whether or not it satisfies a declared
+    key. History records physical reality; logical constraints are decided
+    elsewhere.
+
+    Returns what was adopted, and nothing when history already exists or the
+    Folder holds no files. The written document is itself history, so a second
+    load adopts nothing.
+    """
+
+    root = Path(destination)
+    if not root.is_dir():
+        return ()
+    if _has_change_history(root):
+        return ()
+    existing = tuple(_relative_files(root, excluded_roots={CHANGES_DIRECTORY}))
+    if not existing:
+        return ()
+    _write_change_document(root, inserted=existing, updated=(), deleted=())
+    return existing
+
+
 def files_since(destination: str | Path, bookmark: datetime) -> dict[Path, datetime]:
     """Current files changed strictly after an aware ``bookmark``, and when."""
 
@@ -654,6 +702,7 @@ def _safe_write_text(target: Path, content: str) -> None:
 
 __all__ = [
     "CHANGES_DIRECTORY",
+    "adopt_existing_files",
     "CHANGE_DATETIME_FORMAT",
     "INTOLERANT_MESSAGE",
     "REJECT_SUFFIX",
