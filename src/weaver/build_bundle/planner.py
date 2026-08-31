@@ -178,18 +178,23 @@ def generate_item_build_bundle(
     stages: list[PlannedStage] = []
     omitted: list[OmittedNode] = []
 
+    # Everything this build rebuilds, not only what it drops. Certification is
+    # per object and returns after the object builds, so a pointer refreshed
+    # over its own address is decertified here like any other rebuilt object.
+    # That is also what re-dates its Registry row: ``build_datetime`` is
+    # supplied on insert, so a row that is never deleted keeps the datetime of
+    # the build that last inserted it.
+    decertified = removed | selected_for_build
     # Collected once and used twice. These rows are deleted before any physical
     # work, so publication compares against the catalogue without them. An object
     # dropped and rebuilt whose projection did not change would otherwise
     # compare equal, produce no merge, and stay deleted.
-    deleted_claims = collect_claims(
-        catalogue, removed | selected_for_drop, stale_claims=stale_claims
-    )
+    deleted_claims = collect_claims(catalogue, decertified, stale_claims=stale_claims)
     catalogue_after_deletions = without_claims(catalogue, deleted_claims)
 
     catalogue_before = render_catalogue_before_build(
         catalogue,
-        removed | selected_for_drop,
+        decertified,
         catalogue_target=catalogue_target,
         stale_claims=stale_claims,
     )
@@ -653,16 +658,9 @@ def installed_shortcut_sources(
 ) -> dict[WeaverItemId, BoundTarget]:
     """Where a logical shortcut's source already lives, for items outside this build.
 
-    Two different questions share one shape and are kept apart here. Build
-    bindings say which items this build may modify. ``_.Installation`` says where
-    items already are. A downstream item reading an installed producer needs the
-    second, and requiring the first would mean every build had to include every
-    item upstream of it.
-
-    Only the items a selected logical shortcut actually names are resolved, so a
-    plan declares the targets it reaches and no others. The physical item is
-    named rather than carrying a Fabric id, exactly as a binding with no resolved
-    id is, and the installer resolves it through its own environment.
+    A build binding wins; otherwise ``_.Installation`` says where the item is.
+    An installed-only target is referenceable and is not a writable build
+    target. Only the items a selected logical shortcut names are resolved.
     """
 
     from ..installed import installed_targets

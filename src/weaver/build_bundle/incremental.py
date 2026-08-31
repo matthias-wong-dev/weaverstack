@@ -124,32 +124,21 @@ def stale_through_shortcuts(
     *,
     bound_items: Iterable[WeaverItemId],
 ) -> tuple[WeaverDocumentId, ...]:
-    """Objects reading through a logical shortcut whose source outran them.
+    """Nodes on a logical shortcut's chain that something above them outran.
 
     The half of cross-item freshness the graph cannot answer. A descendant walk
     carries impact only from a producer whose declaration changed; a producer
     rebuilt by an earlier build looks unchanged to this one, and the only
-    surviving evidence is in the catalogue.
+    surviving evidence is its Registry row's build datetime.
 
-    So the Registry rows are compared: each carries the build that published it,
-    and a source published after an object that reads it through a shortcut means
-    that object was built against something that has moved on. Naming the object
-    here joins it to the ordinary impacted set, and rebuilding it is what dates
-    its row after the source.
+    The chain is ``source <= pointer <= reader``. A pointer dated before its
+    source is named, and the descendant walk carries the rebuild on to what
+    reads it. A reader dated before a pointer that is current is named
+    directly, which is the estate a build that refreshed the pointer and then
+    stopped leaves behind.
 
-    The pointer between them is not named, and cannot usefully be. Its signature
-    is the pair it declares and it holds no dictionary rows, so nothing a build
-    does to it changes its Registry row and its instant never advances. Named
-    here it would be behind its source on every build for ever, and the walk
-    would carry that to its readers every time. The pointer is refreshed instead
-    by the build that moves its source, which reaches it through the graph; see
-    :func:`select_build`.
-
-    ``bound_items`` scopes it to what this build could act on; a consumer item
-    that is not being built stays behind its source until it is.
-
-    Silent where a row is absent: that is a missing installation, which signature
-    classification already calls new.
+    ``bound_items`` scopes it to what this build could act on. An absent row is
+    a missing installation, which signature classification calls new.
     """
 
     graph = repository.dependency_graph
@@ -160,21 +149,26 @@ def stale_through_shortcuts(
     behind = []
     for shortcut in repository.logical_shortcuts:
         destination = shortcut.destination
-        if destination.item not in bound:
+        if destination.item not in bound or str(destination) not in graph:
             continue
         source = registered.get(shortcut.source)
-        if source is None:
+        pointer = registered.get(destination)
+        if source is None or pointer is None:
             continue
         source_datetime = _as_instant(source.build_datetime)
-        if source_datetime is None or str(destination) not in graph:
+        if source_datetime is None:
+            continue
+        pointer_datetime = _as_instant(pointer.build_datetime)
+        if pointer_datetime is None or source_datetime > pointer_datetime:
+            behind.append(destination)
             continue
         for node in graph.descendants(str(destination)):
-            consumer = by_text.get(node)
-            if consumer is None or consumer.item not in bound:
+            reader = by_text.get(node)
+            if reader is None or reader.item not in bound:
                 continue
-            consumer_datetime = _as_instant(registered[consumer].build_datetime)
-            if consumer_datetime is None or source_datetime > consumer_datetime:
-                behind.append(consumer)
+            reader_datetime = _as_instant(registered[reader].build_datetime)
+            if reader_datetime is None or pointer_datetime > reader_datetime:
+                behind.append(reader)
     return _ordered(behind)
 
 
@@ -388,22 +382,15 @@ def select_build(
         and repository.source_documents[identity].document.prohibit_rebuild
         and not _installed_as_shortcut(registered, identity)
     }
-    # A pointer's physical life follows its own signature, which is the pair it
-    # declares, so impact reaching a consumer through the pointer leaves the
-    # pointer where it is. A pointer that is new or whose pair changed is not
-    # here: those are classified, not propagated.
-    # A pointer's physical life follows its own signature, so it is never dropped
-    # to be refreshed: `CreateOrOverwrite` for a Lakehouse shortcut and `create
-    # or alter view` for a Warehouse one both stand on the address already there,
-    # and Fabric holds a deleted shortcut's name for tens of seconds.
+    # A pointer impacted through the graph is refreshed over its own address and
+    # never dropped to do it: `CreateOrOverwrite` for a Lakehouse shortcut and
+    # `create or alter view` for a Warehouse one both stand on the address
+    # already there, and Fabric holds a deleted shortcut's name for tens of
+    # seconds. A pointer whose declared pair changed is classified, not
+    # propagated, and is replaced like any other changed node.
     pointers = shortcut_destinations(repository)
     untouched = set(impact.impacted_descendants) & pointers
     selected_for_drop = set(impact.impacted) - prohibited - untouched
-    # It is still built. A source rebuilt in this build may have been dropped and
-    # recreated under it, so the pointer is materialised again over the same
-    # address, and the consumer behind it follows. The graph is what reaches it,
-    # so this happens in the build that moves the source and not afterwards:
-    # nothing here reads an instant, and there is no lag to chase.
     refreshed = (set(impact.impacted) & pointers) - prohibited
     return BuildSelection(
         impact=impact,

@@ -248,21 +248,41 @@ def certified(repository, *names, build_datetime=None):
 
 
 @weaver_test()
-def test_a_consumer_is_stale_when_the_source_it_reads_was_published_later(estate):
+def test_a_pointer_is_stale_when_the_source_it_names_was_published_later(estate):
     """The half of cross-item freshness the dependency graph cannot answer.
 
     A producer rebuilt by some earlier build is, to this one, entirely
     unchanged. Nothing in the repository records that it moved. The only
     surviving evidence is that its Registry row carries a later build datetime
-    than the row of the object reading it through the shortcut.
+    than the pointer standing on it.
 
-    What comes back is that object. The pointer between them declares the same
-    pair it always did and stands at the same address.
+    What comes back is the pointer. Refreshing it re-dates its row, and the
+    descendant walk carries the rebuild on to what reads it.
     """
 
     registered = {
         **certified(estate, SOURCE, build_datetime="2026-01-02T00:00:00"),
         **certified(estate, SHORTCUT, VIEW, build_datetime="2026-01-01T00:00:00"),
+    }
+
+    stale = stale_through_shortcuts(estate, registered, bound_items={item_id(CONSUMER)})
+
+    assert stale == (document_id(SHORTCUT),)
+
+
+@weaver_test()
+def test_a_reader_behind_a_current_pointer_is_stale_on_its_own(estate):
+    """The estate a build that refreshed the pointer and then stopped leaves.
+
+    The pointer is dated after its source and needs nothing. The reader behind
+    it is dated before the pointer, so it is named directly rather than through
+    a walk from anything above it.
+    """
+
+    registered = {
+        **certified(estate, SOURCE, build_datetime="2026-01-01T00:00:00"),
+        **certified(estate, SHORTCUT, build_datetime="2026-01-02T00:00:00"),
+        **certified(estate, VIEW, build_datetime="2026-01-01T00:00:00"),
     }
 
     stale = stale_through_shortcuts(estate, registered, bound_items={item_id(CONSUMER)})
@@ -311,12 +331,12 @@ def test_an_unbound_consumer_stays_behind_its_source(estate):
     assert stale == ()
 
 
-# --- a pointer's physical life follows its own signature ----------------------
+# --- when a pointer is refreshed, and when it is replaced ---------------------
 #
 # Four selections over one estate: the producer moved in an earlier build, the
-# pair changed, nothing changed, and the producer changed in this build. The
-# pointer is created when it is new, replaced when its pair changes, and left
-# alone otherwise, whatever is happening to what it points at.
+# pair changed, nothing changed, and the producer changed in this build. A
+# pointer is replaced when the pair it declares changes, refreshed over its own
+# address when a source moves under it, and left alone otherwise.
 
 
 def _selection(estate, registered, *, bound=None):
@@ -334,15 +354,14 @@ def _selection(estate, registered, *, bound=None):
 
 
 @weaver_test()
-def test_a_source_rebuilt_earlier_rebuilds_the_consumer_and_not_the_pointer(estate):
+def test_a_source_rebuilt_earlier_refreshes_the_pointer_and_the_reader(estate):
     """The cross-build case, and the whole reason freshness is read at all.
 
     The producer was rebuilt by an earlier build, which left nothing in the
-    repository. What reads it through the shortcut is behind and is built again.
-    The shortcut declares
-    the same pair over the same address, so it is neither replaced nor dropped:
-    Fabric holds a deleted shortcut's name for up to half a minute, and that is
-    paid for nothing here.
+    repository. The reader behind the shortcut is dated before it, so the reader
+    is built again and the pointer it stands behind is materialised over its own
+    address. The pointer is not dropped to do it: Fabric holds a deleted
+    shortcut's name for tens of seconds.
     """
 
     registered = {
@@ -353,7 +372,7 @@ def test_a_source_rebuilt_earlier_rebuilds_the_consumer_and_not_the_pointer(esta
     selection = _selection(estate, registered)
 
     assert document_id(VIEW) in selection.selected_for_build
-    assert document_id(SHORTCUT) not in selection.selected_for_build
+    assert document_id(SHORTCUT) in selection.selected_for_build
     assert document_id(SHORTCUT) not in selection.selected_for_drop
 
 
