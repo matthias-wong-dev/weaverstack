@@ -397,21 +397,24 @@ def select_build(
     # declares, so impact reaching a consumer through the pointer leaves the
     # pointer where it is. A pointer that is new or whose pair changed is not
     # here: those are classified, not propagated.
-    pointers = shortcut_destinations(repository)
-    untouched = set(impact.impacted_descendants) & pointers
-    selected_for_drop = set(impact.impacted) - prohibited - untouched
-    # A pointer is materialised over itself whenever what it stands on has moved,
-    # and it is never dropped to do it: `CreateOrOverwrite` for a Lakehouse
-    # shortcut and `create or alter view` for a Warehouse one both stand on the
-    # address already there, so nothing waits for Fabric to release and
-    # rediscover the name.
-    #
-    # Both halves of "has moved" are here, and both are needed for the chain to
-    # settle as `producer <= shortcut <= consumer` in one build. A source
-    # changing in this build reaches the pointer as an impacted descendant. A
-    # source some earlier build moved leaves no trace in the repository, and the
+    # A pointer whose source has moved is selected like anything else that has to
+    # be built again, and both halves of "has moved" reach it. A source changing
+    # in this build arrives through the graph as an impacted descendant. A source
+    # some earlier build moved leaves nothing in the repository, and the
     # catalogue instants are the only evidence.
-    refreshed = (set(impact.impacted) | set(stale_consumers)) & pointers - prohibited
+    #
+    # Selecting it here is also what levels the chain. A pointer's signature is
+    # the pair it declares and rebuilding never changes it, so its Registry row
+    # would never re-date and `producer <= shortcut` could never come true; the
+    # claim deletion that selection carries is what republishes the row. The
+    # physical drop is a separate question, and `_retained_pointers` answers it:
+    # a pointer is materialised over the address already there, by
+    # `CreateOrOverwrite` or `create or alter view`, and never removed first.
+    pointers = shortcut_destinations(repository)
+    behind_their_source = set(stale_consumers) & pointers
+    untouched = (set(impact.impacted_descendants) & pointers) - behind_their_source
+    selected_for_drop = set(impact.impacted) - prohibited - untouched
+    refreshed = (set(impact.impacted) | behind_their_source) & pointers - prohibited
     return BuildSelection(
         impact=impact,
         prohibited=_ordered(prohibited),

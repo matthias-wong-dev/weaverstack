@@ -413,7 +413,9 @@ try:
     (folder.path() / "deleted.csv").write_text("delete me", encoding="utf-8")
 
     # The seeded state is files Weaver never saw arrive, so managed history is
-    # empty even though the Folder holds files its File key claims.
+    # empty even though the Folder holds files its File key claims. The load
+    # below adopts them first, which is what gives the Folder a history to read
+    # incrementally from.
     unrecorded = Raw__ChangeFeedProbe(folder).latest_files()
 
     bookmark = datetime.now(timezone.utc)
@@ -631,7 +633,9 @@ def test_authored_code_consumes_folder_changes_through_the_fabric_mount(
     assert [Path(path).name for path in seen["deleted"]] == ["deleted.csv"]
     assert set(seen["deleted"].values()) == {seen["committed_at"]}
     assert seen["deleted_exists"] == [False]
-    assert len(seen["change_documents"]) == 1
+    # Two: the adoption of the files that were already there, then the one
+    # commit this transition made.
+    assert len(seen["change_documents"]) == 2
     assert seen["strict_changed"] == []
     assert seen["strict_deleted"] == []
 

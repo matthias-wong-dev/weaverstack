@@ -804,9 +804,10 @@ def test_a_consumer_is_stale_when_its_unbound_source_was_published_later(tmp_pat
 def test_a_source_rebuilt_earlier_rebuilds_the_pointer_over_itself(tmp_path):
     """The freshness invariant along the chain is producer <= shortcut <= consumer.
 
-    The pointer is behind the source it stands on, so it is built. It is
-    materialised over the address already there and never dropped, because
-    Fabric holds a deleted shortcut's name and that wait buys nothing.
+    The pointer is behind the source it stands on, so it is selected. Selection
+    republishes its Registry row, which nothing else would: a pointer's signature
+    is the pair it declares and rebuilding never changes it. The physical drop is
+    a separate question, asserted through the planned actions below.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
@@ -819,7 +820,7 @@ def test_a_source_rebuilt_earlier_rebuilds_the_pointer_over_itself(tmp_path):
     destination = WeaverDocumentId.parse(SHORTCUT_DESTINATION)
 
     assert destination in selection.selected_for_build
-    assert destination not in selection.selected_for_drop
+    assert destination in selection.selected_for_drop
 
 
 @weaver_test()

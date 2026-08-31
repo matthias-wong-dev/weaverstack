@@ -339,10 +339,12 @@ def test_a_source_rebuilt_earlier_rebuilds_the_pointer_then_the_consumer(estate)
 
     The producer was rebuilt by an earlier build, which left nothing in the
     repository. The pointer and what reads through it are both behind, so both
-    are built. The pointer is materialised over itself rather than dropped:
-    Fabric holds a deleted shortcut's name for up to half a minute, and
-    `CreateOrOverwrite` and `create or alter view` both stand on the address
-    already there.
+    are built again.
+
+    Selection carries the pointer, which is what republishes its Registry row: a
+    pointer's signature is the pair it declares, so nothing else would ever
+    re-date it and the chain could never level. Whether it is physically removed
+    is a separate question, and `_retained_pointers` answers it.
     """
 
     registered = {
@@ -354,7 +356,31 @@ def test_a_source_rebuilt_earlier_rebuilds_the_pointer_then_the_consumer(estate)
 
     assert document_id(VIEW) in selection.selected_for_build
     assert document_id(SHORTCUT) in selection.selected_for_build
-    assert document_id(SHORTCUT) not in selection.selected_for_drop
+    assert document_id(SHORTCUT) in selection.selected_for_drop
+
+
+@weaver_test()
+def test_a_levelled_chain_selects_nothing(estate):
+    """The freshness rule converges, which is the whole of it being usable.
+
+    Selection republishes the pointer's row, so the build that levels the chain
+    dates it with the source it stands on. Read again, nothing is behind.
+
+    Worth its own claim because a pointer cannot re-date itself: its signature is
+    the pair it declares, so a rule that rebuilt it without republishing it would
+    find the same lag on every build and rebuild the pointer and everything
+    behind it forever.
+    """
+
+    registered = certified(
+        estate, SOURCE, VIEW, SHORTCUT, build_datetime="2026-01-02T00:00:00"
+    )
+
+    selection = _selection(estate, registered)
+
+    assert stale_through_shortcuts(estate, registered, bound_items=set(targets())) == ()
+    assert selection.selected_for_build == ()
+    assert selection.selected_for_drop == ()
 
 
 @weaver_test()
