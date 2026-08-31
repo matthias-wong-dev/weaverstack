@@ -473,7 +473,7 @@ def test_an_owned_object_replacing_an_owned_object_does_not_wait(estate):
 
 @weaver_test()
 def test_the_wait_is_carried_on_the_drop_the_plan_names(tmp_path):
-    """End to end: the flag reaches exactly one action, and it is the removal.
+    """End to end: the flag reaches one action, and it is the removal.
 
     Carried on the drop rather than the create, because the removal is what
     reserves the name and the shortcut executor is what owns both the deletion

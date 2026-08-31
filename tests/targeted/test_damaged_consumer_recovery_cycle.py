@@ -106,8 +106,8 @@ def _shortcut_statements(bundle) -> list[str]:
 def test_the_catalogue_still_certifies_what_the_target_no_longer_holds(settled):
     """The premise: an intact catalogue over an empty target.
 
-    Both halves matter. The Registry row is what makes this a repair rather than
-    a first build, and the empty inventory is what makes the object missing.
+    The Registry row certifies the object as built. The inventory places it
+    outside the target. A repair starts from both.
     """
 
     _repository, catalogue = settled
@@ -215,7 +215,7 @@ def test_no_node_is_omitted_as_unbound(tmp_path, settled):
     )
 
 
-# --- what a genuinely unbound source still does --------------------------------
+# --- an unbound source ---------------------------------------------------------
 
 
 @weaver_test()
@@ -223,7 +223,7 @@ def test_a_producer_neither_selected_nor_installed_is_still_unbound(tmp_path, se
     """The protection this must not weaken.
 
     With no build binding and no installation row, nothing says where the source
-    is, and a shortcut pointing at nowhere is reported rather than invented.
+    is. The build raises, and no address is supplied for it.
     """
 
     repository, catalogue = settled
