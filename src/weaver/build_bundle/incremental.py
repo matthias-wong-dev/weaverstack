@@ -400,19 +400,23 @@ def select_build(
     pointers = shortcut_destinations(repository)
     untouched = set(impact.impacted_descendants) & pointers
     selected_for_drop = set(impact.impacted) - prohibited - untouched
-    # A pointer its own source outran is built and not dropped. It is
-    # materialised over itself, which is `CreateOrOverwrite` for a Lakehouse
-    # shortcut and `create or alter view` for a Warehouse one, so the chain
-    # settles as `producer <= shortcut <= consumer` in one build without paying
-    # for Fabric to release and rediscover the name.
-    behind_their_source = set(stale_consumers) & pointers & set(impact.impacted)
+    # A pointer is materialised over itself whenever what it stands on has moved,
+    # and it is never dropped to do it: `CreateOrOverwrite` for a Lakehouse
+    # shortcut and `create or alter view` for a Warehouse one both stand on the
+    # address already there, so nothing waits for Fabric to release and
+    # rediscover the name.
+    #
+    # Both halves of "has moved" are here, and both are needed for the chain to
+    # settle as `producer <= shortcut <= consumer` in one build. A source
+    # changing in this build reaches the pointer as an impacted descendant. A
+    # source some earlier build moved leaves no trace in the repository, and the
+    # catalogue instants are the only evidence.
+    refreshed = (set(impact.impacted) | set(stale_consumers)) & pointers - prohibited
     return BuildSelection(
         impact=impact,
         prohibited=_ordered(prohibited),
         selected_for_drop=_ordered(selected_for_drop),
-        selected_for_build=_ordered(
-            set(impact.new) | selected_for_drop | behind_their_source
-        ),
+        selected_for_build=_ordered(set(impact.new) | selected_for_drop | refreshed),
     )
 
 

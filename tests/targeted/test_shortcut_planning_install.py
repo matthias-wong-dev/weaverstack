@@ -394,13 +394,17 @@ def test_a_second_build_over_an_unchanged_estate_plans_no_shortcut_action(estate
 
 
 @weaver_test()
-def test_a_target_changed_in_this_build_reaches_the_consumer_through_the_pointer(
+def test_a_target_changed_in_this_build_refreshes_the_pointer_and_the_consumer(
     estate,
 ):
     """The graph carries a producer's change across the shortcut in one walk.
 
-    It carries it to the consumer. The pointer is on the path and is not the
-    subject of it.
+    Everything on the path is built: the pointer over its own address and the
+    consumer behind it. Refreshing the pointer in the same build is what leaves
+    ``producer <= shortcut <= consumer`` true afterwards, so the next build has
+    nothing to level and the estate settles once.
+
+    The pointer is still never dropped to do it.
     """
 
     everything = {document_id(SOURCE), document_id(VIEW), document_id(SHORTCUT)}
@@ -416,7 +420,7 @@ def test_a_target_changed_in_this_build_reaches_the_consumer_through_the_pointer
 
     assert document_id(SOURCE) in selection.selected_for_build
     assert document_id(VIEW) in selection.selected_for_build
-    assert document_id(SHORTCUT) not in selection.selected_for_build
+    assert document_id(SHORTCUT) in selection.selected_for_build
     assert document_id(SHORTCUT) not in selection.selected_for_drop
 
 
