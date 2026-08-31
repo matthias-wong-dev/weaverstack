@@ -194,8 +194,9 @@ semantic decision. A shortcut carries one frozen decision, this destination and
 that source, resolved at install time the same way a schema's `LOCATION` is.
 
 `target_type` decides where the source address comes from. A **logical** declaration names
-a Weaver document, so the planner freezes the target's id and the installer
-resolves it through its own environment, exactly as it resolves the destination. A
+a Weaver-managed object—an authored document or a declared shortcut destination—
+so the planner freezes the target's id and the installer resolves it through its
+own environment, exactly as it resolves the destination. A
 **physical** declaration names the Fabric item itself, possibly in another
 workspace, which is not a target of this build. Its workspace id, item id and
 case-exact source path are resolved while the estate is readable, before the

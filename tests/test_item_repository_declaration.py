@@ -530,6 +530,46 @@ def test_a_logical_shortcut_may_not_name_its_own_item(tmp_path):
 
 
 @weaver_test()
+def test_a_logical_shortcut_may_target_a_physical_shortcut_destination(tmp_path):
+    """A cross-workspace physical boundary can be projected logically onward."""
+
+    root = _estate(tmp_path)
+    (root / "Lakehouse/Raw/Sales__Customer.py").unlink()
+    _write(
+        root,
+        "Lakehouse/Raw/shortcuts.py",
+        'from weaver import Shortcut\n\nSales__Customer = Shortcut(\n'
+        '    shortcut_type="table",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/External/Sales.Customer",\n'
+        '    workspace="Source Workspace",\n'
+        ')\n',
+    )
+    _write(
+        root,
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.CustomerRaw: "
+        "Lakehouse/Raw/Sales.Customer\n",
+    )
+
+    repository = parse_item_repository(Location(str(root)))
+
+    shortcut = next(
+        shortcut
+        for shortcut in repository.logical_shortcuts
+        if str(shortcut.destination)
+        == "Warehouse/Reporting/Sales.CustomerRaw"
+    )
+    assert str(shortcut.source) == "Lakehouse/Raw/Sales.Customer"
+    assert any(
+        edge.upstream == "Lakehouse/Raw/Sales.Customer"
+        and edge.downstream == "Warehouse/Reporting/Sales.CustomerRaw"
+        for edge in repository.dependency_graph.edges
+    )
+
+
+@weaver_test()
 def test_an_external_target_must_resolve_with_exact_case(tmp_path):
     root = _estate(tmp_path)
     _write(

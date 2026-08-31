@@ -208,6 +208,11 @@ def _document_graph(
         edges.add((str(source), str(destination)))
     nodes = [str(identity) for identity in native]
     nodes.extend(str(destination) for destination in logical_pairs)
+    # A logical shortcut may read a physical shortcut declared by another item.
+    # Its destination is a managed, registered object even though no source
+    # document declares it, so it must be present for the source → destination
+    # edge to participate in ordering and impact propagation.
+    nodes.extend(str(source) for source in logical_pairs.values())
     return Graph(nodes, sorted(edges))
 
 

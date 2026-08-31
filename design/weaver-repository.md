@@ -110,9 +110,12 @@ under `Files/<schema>`.
 `workspace` names a Fabric workspace, and omitting it means the current one.
 
 `target_type` decides what the item half of `target` means, and is exactly
-`logical` or `physical`. A logical target is a Weaver item, and Weaver follows
-its current binding before creating the shortcut; it must be in this repository,
-it orders the two items, and it cannot also name a workspace. A physical target
+`logical` or `physical`. A logical target is a Weaver-managed object—an authored
+document or another declared shortcut destination—and Weaver follows its current
+binding before creating the shortcut; it must be in this repository, it orders
+the two items, and it cannot also name a workspace. This permits a physical
+cross-workspace shortcut to be projected onward through a same-workspace logical
+shortcut. A physical target
 is the Fabric item itself, and may name a workspace. A schema shortcut is
 physical only: a schema's contents belong to the item it points at, and Weaver
 binds objects rather than namespaces.
@@ -192,8 +195,10 @@ physical:
 
 Two sections, named for how the target is read, each mapping a destination to
 what it points at. The destination is the item's own four-part identity. A
-Warehouse shortcut is always same-workspace and always materialised as a local
-view, so it carries neither a workspace nor a shortcut type.
+logical target may be an authored document or another item's declared shortcut
+destination. A Warehouse shortcut is always same-workspace and always
+materialised as a local view, so it carries neither a workspace nor a shortcut
+type.
 
 ### What a declaration may not do
 

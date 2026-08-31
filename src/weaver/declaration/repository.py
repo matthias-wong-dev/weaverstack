@@ -1037,14 +1037,20 @@ def _logical_pairs(
 ) -> tuple[RepositoryShortcut, ...]:
     """The logical pairs the ``logical`` shortcuts stand for.
 
-    A logical shortcut names a Weaver document, so it resolves, orders and
-    reports exactly as a logical reference always has. A physical one names a
-    Fabric item and has no logical source, so it contributes nothing here and is
-    planned from its declaration instead.
+    A logical shortcut names a Weaver-managed object: either a document or the
+    destination of another declared shortcut. It therefore resolves, orders and
+    reports exactly as a logical reference always has. A physical declaration
+    still names a Fabric item and is planned from its declaration, but its local
+    destination is managed and may be the source another item reads logically.
     """
 
-    native_folded = {
-        str(identity).casefold(): identity for identity in source_documents
+    managed_sources = set(source_documents) | {
+        declaration.destination
+        for declaration in shortcuts
+        if isinstance(declaration.destination, WeaverDocumentId)
+    }
+    managed_folded = {
+        str(identity).casefold(): identity for identity in managed_sources
     }
     pairs: list[RepositoryShortcut] = []
     for declaration in shortcuts:
@@ -1053,11 +1059,11 @@ def _logical_pairs(
         destination = declaration.destination
         item = declaration.owner
         source = declaration.logical_source
-        if source not in source_documents:
-            case_match = native_folded.get(str(source).casefold())
+        if source not in managed_sources:
+            case_match = managed_folded.get(str(source).casefold())
             detail = f"; declared spelling is {case_match}" if case_match else ""
             raise DiscoveryError(
-                f"{item}: logical target {source} is not a document in this "
+                f"{item}: logical target {source} is not a managed object in this "
                 f"repository{detail}"
             )
         declared_schemas = {schema.schema for schema in schemas_by_item[item]}
