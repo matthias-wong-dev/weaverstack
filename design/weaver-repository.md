@@ -44,15 +44,21 @@ repository/
 │       ├── programmables/
 │       │   └── dbo.RefreshSummary.sql  a stored procedure this item manages
 │       └── Sales.Customer.sql          T-SQL — it is in a Warehouse
+├── Notebooks/                          unrelated project content is ignored
+├── README.md
 └── _ignore/
-    └── unfinished.py
+    └── unfinished.py                   explicitly excluded content
 ```
 
 Each schema and source document belongs to exactly one item. `Files/` contains
 Folder documents owned by a Lakehouse; it is not a separate deployment target.
-`lib/` contains Python helpers for that Lakehouse item. `_ignore/` is the only
-directory absent from discovery and the repository signature. Authors do not add
-`__init__.py`; Weaver supplies package loading.
+`lib/` contains Python helpers for that Lakehouse item. Discovery selects the
+`Lakehouse/` and `Warehouse/` trees and the recognised surfaces inside each
+item. Unrelated siblings and unrelated item content are absent from discovery
+and the repository signature. `_ignore/` explicitly excludes content that would
+otherwise be recognised. A misplaced Weaver declaration and a malformed
+recognised surface are refused. Authors do not add `__init__.py`; Weaver supplies
+package loading.
 
 ## The item chooses the SQL dialect
 
@@ -110,9 +116,12 @@ under `Files/<schema>`.
 `workspace` names a Fabric workspace, and omitting it means the current one.
 
 `target_type` decides what the item half of `target` means, and is exactly
-`logical` or `physical`. A logical target is a Weaver item, and Weaver follows
-its current binding before creating the shortcut; it must be in this repository,
-it orders the two items, and it cannot also name a workspace. A physical target
+`logical` or `physical`. A logical target is a Weaver-managed object—an authored
+document or another declared shortcut destination—and Weaver follows its current
+binding before creating the shortcut; it must be in this repository, it orders
+the two items, and it cannot also name a workspace. This permits a physical
+cross-workspace shortcut to be projected onward through a same-workspace logical
+shortcut. A physical target
 is the Fabric item itself, and may name a workspace. A schema shortcut is
 physical only: a schema's contents belong to the item it points at, and Weaver
 binds objects rather than namespaces.
@@ -192,8 +201,10 @@ physical:
 
 Two sections, named for how the target is read, each mapping a destination to
 what it points at. The destination is the item's own four-part identity. A
-Warehouse shortcut is always same-workspace and always materialised as a local
-view, so it carries neither a workspace nor a shortcut type.
+logical target may be an authored document or another item's declared shortcut
+destination. A Warehouse shortcut is always same-workspace and always
+materialised as a local view, so it carries neither a workspace nor a shortcut
+type.
 
 ### What a declaration may not do
 

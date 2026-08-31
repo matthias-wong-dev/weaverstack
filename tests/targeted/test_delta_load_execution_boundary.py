@@ -131,14 +131,20 @@ class _Spark:
     unpersisted: list = field(default_factory=list)
     views: list = field(default_factory=list)
     dropped_views: list = field(default_factory=list)
+    identifier_case: list = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.catalog = _Catalog(self)
+        self.conf = _Conf()
 
     def table(self, name: str):
         return _Table(TARGET_COLUMNS)
 
     def sql(self, text: str) -> _Frame:
+        if text.startswith(("CREATE TABLE", "DROP TABLE")):
+            self.identifier_case.append(
+                (text.split("`", 6)[5], self.conf.get("spark.sql.caseSensitive"))
+            )
         if self.fail_on is not None and self.fail_on in text:
             raise _Boom(f"the engine failed on: {text.splitlines()[0]}")
         if text.startswith("CREATE TABLE"):
@@ -208,6 +214,17 @@ class _Catalog:
 
     def dropTempView(self, name: str) -> None:  # noqa: N802 - Spark's name
         self._spark.dropped_views.append(name)
+
+
+class _Conf:
+    def __init__(self) -> None:
+        self.values = {"spark.sql.caseSensitive": "false"}
+
+    def get(self, key: str):
+        return self.values[key]
+
+    def set(self, key: str, value) -> None:
+        self.values[key] = value
 
 
 class _Table:
@@ -664,6 +681,27 @@ def test_a_tolerated_refusal_leaves_staging_the_rejects_and_the_deletes():
     assert result.rows_rejected == 2
     assert result.rows_inserted == 1
     assert spark.created == ["Customer_Staging", "Customer_Reject", "Customer_Delete"]
+
+
+@weaver_test()
+def test_mixed_case_runtime_tables_are_created_in_an_exact_case_scope():
+    """Each physical create preserves its name, then restores the session."""
+
+    spark, _result = _load(
+        dict(BUSY, reject=2, clean=1),
+        contract=_contract(object_id=ObjectId("DWG", "CustomerOrder")),
+        fault_tolerant=True,
+    )
+
+    assert spark.identifier_case == [
+        ("CustomerOrder_Reject", "false"),
+        ("CustomerOrder_Delete", "false"),
+        ("CustomerOrder_Staging", "false"),
+        ("CustomerOrder_Staging", "true"),
+        ("CustomerOrder_Reject", "true"),
+        ("CustomerOrder_Delete", "true"),
+    ]
+    assert spark.conf.get("spark.sql.caseSensitive") == "false"
 
 
 @weaver_test()

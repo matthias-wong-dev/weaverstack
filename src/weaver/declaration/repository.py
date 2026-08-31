@@ -374,6 +374,46 @@ def _standard_parts(authored: RepositoryPart) -> tuple[RepositoryPart, ...]:
     return tuple(parts)
 
 
+def _looks_like_weaver_declaration(root: Location, store: Store, relative: str) -> bool:
+    """Whether a misplaced source file carries Weaver declaration metadata."""
+
+    if not relative.endswith((".py", ".sql")):
+        return False
+    data = store.read(root.join(*relative.split("/")))
+    return any(
+        marker in data
+        for marker in (
+            b"Table ID:",
+            b"View ID:",
+            b"Folder ID:",
+            b"Test ID:",
+            b"Assumption ID:",
+        )
+    )
+
+
+def _has_misplaced_weaver_structure(
+    root: Location, store: Store, relative: str
+) -> bool:
+    """Whether a non-item root contains an unmistakable Weaver surface."""
+
+    parts = relative.split("/")
+    if len(parts) < 3:
+        return False
+    filename = parts[-1]
+    if not (
+        (parts[-2] == "schemas" and filename.endswith(".yml"))
+        or filename in SHORTCUT_FILES
+    ):
+        return False
+    data = store.read(root.join(*parts))
+    if parts[-2] == "schemas":
+        return b"Schema ID:" in data
+    return b"from weaver import Shortcut" in data or any(
+        key in data for key in (b"logical:", b"physical:")
+    )
+
+
 def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     """Read one repository tree as its authored declarations.
 
@@ -383,7 +423,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     """
 
     prefix = root.value.rstrip("/") + "/"
-    entries: list[tuple[str, bool]] = []
+    discovered: list[tuple[str, bool]] = []
     for entry in store.list(root, recursive=True):
         relative = entry.location.value[len(prefix) :]
         parts = relative.split("/")
@@ -394,12 +434,12 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             or parts[-1].endswith(IGNORED_SUFFIXES)
         ):
             continue
-        entries.append((relative, entry.is_directory))
+        discovered.append((relative, entry.is_directory))
 
     builtin_prefix = str(_builtin_item())
     authored_builtin = sorted(
         relative
-        for relative, _is_directory in entries
+        for relative, _is_directory in discovered
         if relative == builtin_prefix or relative.startswith(builtin_prefix + "/")
     )
     if authored_builtin:
@@ -408,15 +448,8 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             "not be authored"
         )
 
-    for relative, is_directory in entries:
-        if not is_directory and relative.rsplit("/", 1)[-1] == "__init__.py":
-            raise DiscoveryError(
-                f"{relative}: user-authored __init__.py is not allowed; "
-                "Weaver supplies package loading"
-            )
-
     for surface in SHORTCUT_FILES:
-        if any(relative == surface for relative, _ in entries):
+        if any(relative == surface for relative, _ in discovered):
             raise DiscoveryError(
                 f"{surface} belongs to the item that declares it. Put it in "
                 f"<ItemType>/<ItemName>/{surface}."
@@ -424,66 +457,95 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     # Named by their exact retired spelling, so a repository still carrying one
     # is told what it has rather than what it should have had.
     for retired in ("alias.yml", "external.yml"):
-        if any(relative.rsplit("/", 1)[-1] == retired for relative, _ in entries):
+        if any(
+            relative.rsplit("/", 1)[-1] == retired
+            and ("/" not in relative or relative.split("/", 1)[0] in ITEM_TYPES)
+            for relative, _ in discovered
+        ):
             raise DiscoveryError(
                 f"{retired} has been replaced by shortcuts. A Lakehouse declares "
                 f"them in {LAKEHOUSE_FILE}, and a Warehouse in {WAREHOUSE_FILE}."
             )
 
-    invalid_roots = sorted(
-        {
-            relative.split("/", 1)[0]
-            for relative, _ in entries
-            if relative.split("/", 1)[0] not in ITEM_TYPES
-        }
+    misplaced_roots = sorted(
+        relative
+        for relative, is_directory in discovered
+        if not is_directory
+        and "/" not in relative
+        and _looks_like_weaver_declaration(root, store, relative)
     )
-    if invalid_roots:
+    if misplaced_roots:
         raise DiscoveryError(
-            f"{invalid_roots[0]}: first directory must be exactly one of "
+            f"{misplaced_roots[0]}: a Weaver object declaration belongs inside "
+            "<ItemType>/<ItemName>/"
+        )
+
+    misplaced_structures = sorted(
+        relative
+        for relative, _is_directory in discovered
+        if relative.split("/", 1)[0] not in ITEM_TYPES
+        and not _is_directory
+        and _has_misplaced_weaver_structure(root, store, relative)
+    )
+    if misplaced_structures:
+        invalid_root = misplaced_structures[0].split("/", 1)[0]
+        raise DiscoveryError(
+            f"{invalid_root}: first directory must be exactly one of "
             + ", ".join(sorted(ITEM_TYPES))
         )
+
+    # Weaver owns the item-type trees. Everything beside them belongs to the
+    # surrounding project and does not participate in discovery or signatures.
+    entries = [entry for entry in discovered if entry[0].split("/", 1)[0] in ITEM_TYPES]
+
+    item_ids = {
+        WeaverItemId(*relative.split("/"))
+        for relative, is_directory in entries
+        if is_directory and len(relative.split("/")) == 2
+    }
 
     for relative, is_directory in entries:
         if not is_directory:
             continue
         parts = relative.split("/")
-        if len(parts) <= 2:
+        if len(parts) <= 2 or WeaverItemId(parts[0], parts[1]) not in item_ids:
             continue
         item = WeaverItemId(parts[0], parts[1])
         within = parts[2:]
-        if within == ["schemas"]:
+        if within[0] == "schemas" and within == ["schemas"]:
             continue
-        if within == [FILES] and item.item_type == LAKEHOUSE:
+        if within[0] == FILES and within == [FILES] and item.item_type == LAKEHOUSE:
             continue
         if within[0] == "lib" and item.item_type == LAKEHOUSE:
             continue
-        if within == [PROGRAMMABLES_DIRECTORY] and item.item_type == WAREHOUSE:
+        if (
+            within[0] == PROGRAMMABLES_DIRECTORY
+            and within == [PROGRAMMABLES_DIRECTORY]
+            and item.item_type == WAREHOUSE
+        ):
             continue
         if within[0] in VALIDATION_DIRECTORIES and len(within) == 1:
             continue
-        raise DiscoveryError(f"{relative}: {_AUTHORED_SUBDIRECTORIES}")
+        if within[0] in {
+            "schemas",
+            FILES,
+            "lib",
+            PROGRAMMABLES_DIRECTORY,
+            *VALIDATION_DIRECTORIES,
+        }:
+            raise DiscoveryError(f"{relative}: {_AUTHORED_SUBDIRECTORIES}")
 
-    item_ids: set[WeaverItemId] = set()
     files: list[str] = []
     for relative, is_directory in entries:
         parts = relative.split("/")
         if len(parts) == 1:
-            if is_directory and parts[0] in ITEM_TYPES:
-                continue
-            raise DiscoveryError(
-                f"{relative}: the declaration root may contain only item type "
-                "directories and _ignore/"
-            )
-        if parts[0] not in ITEM_TYPES:
-            raise DiscoveryError(
-                f"{relative}: first directory must be exactly one of "
-                + ", ".join(sorted(ITEM_TYPES))
-            )
+            continue
+        if len(parts) == 2 and not is_directory:
+            continue
         item = WeaverItemId(parts[0], parts[1])
-        item_ids.add(item)
+        if item not in item_ids:
+            continue
         if len(parts) == 2:
-            if not is_directory:
-                raise DiscoveryError(f"{relative}: an item must be a directory")
             continue
         if not is_directory:
             files.append(relative)
@@ -502,6 +564,12 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         parts = relative.split("/")
         item = WeaverItemId(parts[0], parts[1])
         within = parts[2:]
+
+        if within[-1] == "__init__.py" and (len(within) == 1 or within[0] == "lib"):
+            raise DiscoveryError(
+                f"{relative}: user-authored __init__.py is not allowed; "
+                "Weaver supplies package loading"
+            )
 
         if within == [LAKEHOUSE_FILE]:
             # Declarations, not a Weaver document: read for what they say and
@@ -584,11 +652,16 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
                     f"{relative}: Folder documents live directly under Files/"
                 )
         elif len(within) != 1:
-            raise DiscoveryError(f"{relative}: {_AUTHORED_SUBDIRECTORIES}")
+            if _looks_like_weaver_declaration(root, store, relative):
+                raise DiscoveryError(
+                    f"{relative}: a Weaver object declaration belongs at the "
+                    "item root or directly under Files/"
+                )
+            continue
 
         filename = within[-1]
         if language_for_filename(filename, item.item_type) is None:
-            raise DiscoveryError(f"{relative}: not a Weaver object file")
+            continue
         source = read_source_document(
             relative,
             store.read(root.join(*relative.split("/"))),
@@ -1037,14 +1110,20 @@ def _logical_pairs(
 ) -> tuple[RepositoryShortcut, ...]:
     """The logical pairs the ``logical`` shortcuts stand for.
 
-    A logical shortcut names a Weaver document, so it resolves, orders and
-    reports exactly as a logical reference always has. A physical one names a
-    Fabric item and has no logical source, so it contributes nothing here and is
-    planned from its declaration instead.
+    A logical shortcut names a Weaver-managed object: either a document or the
+    destination of another declared shortcut. It therefore resolves, orders and
+    reports exactly as a logical reference always has. A physical declaration
+    still names a Fabric item and is planned from its declaration, but its local
+    destination is managed and may be the source another item reads logically.
     """
 
-    native_folded = {
-        str(identity).casefold(): identity for identity in source_documents
+    managed_sources = set(source_documents) | {
+        declaration.destination
+        for declaration in shortcuts
+        if isinstance(declaration.destination, WeaverDocumentId)
+    }
+    managed_folded = {
+        str(identity).casefold(): identity for identity in managed_sources
     }
     pairs: list[RepositoryShortcut] = []
     for declaration in shortcuts:
@@ -1053,11 +1132,11 @@ def _logical_pairs(
         destination = declaration.destination
         item = declaration.owner
         source = declaration.logical_source
-        if source not in source_documents:
-            case_match = native_folded.get(str(source).casefold())
+        if source not in managed_sources:
+            case_match = managed_folded.get(str(source).casefold())
             detail = f"; declared spelling is {case_match}" if case_match else ""
             raise DiscoveryError(
-                f"{item}: logical target {source} is not a document in this "
+                f"{item}: logical target {source} is not a managed object in this "
                 f"repository{detail}"
             )
         declared_schemas = {schema.schema for schema in schemas_by_item[item]}

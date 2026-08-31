@@ -5,10 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from shutil import copytree
 
-import pytest
 from support.weaver_test import weaver_test
 
-from weaver.errors import DiscoveryError
 from weaver.operations.check import check
 from weaver_cli.main import build_parser, command_requirements, handle_check
 
@@ -36,12 +34,11 @@ def test_check_parses_a_valid_repository_without_running_authored_python(tmp_pat
 
 
 @weaver_test()
-def test_check_raises_existing_parser_errors(tmp_path):
+def test_check_accepts_unrelated_item_content(tmp_path):
     root = _repository(tmp_path / "repository")
     (root / "Lakehouse" / "Raw" / "unexpected.txt").write_text("x", encoding="utf-8")
 
-    with pytest.raises(DiscoveryError):
-        check(root)
+    assert check(root).source == root.as_posix()
 
 
 @weaver_test()
@@ -59,7 +56,9 @@ def test_check_command_declares_no_fabric_resources_and_renders_success(
 @weaver_test()
 def test_check_command_adapts_parser_error_to_retry_status(tmp_path, capsys):
     root = _repository(tmp_path / "repository")
-    (root / "Lakehouse" / "Raw" / "unexpected.txt").write_text("x", encoding="utf-8")
+    (root / "Sales.Customer.sql").write_text(
+        "/* Table ID: Sales.Customer */\nselect 1;\n", encoding="utf-8"
+    )
     args = build_parser().parse_args(["check", str(root)])
 
     assert handle_check(args) == 1

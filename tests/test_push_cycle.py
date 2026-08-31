@@ -36,7 +36,11 @@ def test_push_replaces_destination_without_an_extra_source_root(tmp_path):
 @weaver_test()
 def test_invalid_source_fails_before_existing_destination_is_touched(tmp_path):
     source = _estate(tmp_path)
-    _write(source, "invalid.txt", "not an item")
+    _write(
+        source,
+        "Sales.Customer.sql",
+        "/* Table ID: Sales.Customer */\nselect 1;\n",
+    )
     destination = tmp_path / "remote"
     destination.mkdir()
     sentinel = destination / "keep.txt"

@@ -212,8 +212,10 @@ nodes depend on one another.
 memory. It reads `_.Registry`, `_.Installation`, `_.Dependency`, `_.Shortcut`
 and `_.TestDictionary`, and it is the one place a persisted
 `dependency_reference` is interpreted: a Python import or a `Schema.Object`,
-resolved against the consuming item's shortcuts. Load planning, validation
-planning and health read the resolved graph and never a raw row.
+resolved against the consuming item's shortcuts. An import of `shortcuts`
+resolves through the declaration of that name, so a folder shortcut and a table
+sharing one `Schema.Object` stay apart. Load planning, validation planning and
+health read the resolved graph and never a raw row.
 
 A Test and an Assumption are ordinary terminal nodes. Nothing reads one, and
 Weaver has no test-on-test ordering.

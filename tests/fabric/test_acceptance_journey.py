@@ -104,8 +104,21 @@ def acceptance(
     #: What a build names: both halves, so this journey needs no configured
     #: `targets:` mapping to bind its fixed items to this tenant's own.
     journey.build_items = [f"{item}={name}" for item, name in physical.items()]
+
+    # This module reuses a foreign estate that Scenario E mutates, so the run
+    # establishes its own starting state. Trusting the previous run's teardown
+    # made the next invocation depend on the last one finishing: an interrupt,
+    # an earlier failure or a subset selection left Scenario E's state standing,
+    # and Scenario C then read [1, 2, 4].
+    _restore_the_foreign_baseline(journey)
+    _require_the_foreign_baseline(journey)
     _seed_the_neighbour(journey)
-    return journey
+    try:
+        yield journey
+    finally:
+        # Desirable, so a person looking at the estate afterwards sees the
+        # baseline. Correctness of the next run rests on the setup above.
+        _restore_the_foreign_baseline(journey)
 
 
 # --- addressing the estate ---------------------------------------------------
@@ -1598,48 +1611,45 @@ def test_wipe_removes_the_managed_estate_and_not_the_foreign_one(acceptance):
     """
 
     acceptance.require("build")
-    try:
-        acceptance.step(
-            "final-wipe",
-            lambda: weaver.wipe(
-                acceptance.targets,
-                session=acceptance.session,
+    acceptance.step(
+        "final-wipe",
+        lambda: weaver.wipe(
+            acceptance.targets,
+            session=acceptance.session,
+        ),
+    )
+    acceptance.require("final-wipe")
+
+    # The stable foreign tables are exactly as provisioning left them.
+    item = acceptance.external_lakehouse
+    foreign = _observe(
+        acceptance,
+        {
+            "reference_customer": (
+                "select CustomerId, CustomerName from delta.`"
+                f"{_abfss(item, external_estate.table_path('Customer'))}`"
             ),
-        )
-        acceptance.require("final-wipe")
+            "reference_product": (
+                "select ProductId from delta.`"
+                f"{_abfss(item, external_estate.table_path('Product'))}`"
+            ),
+            "source_customer": (
+                "select CustomerId from delta.`"
+                f"{_abfss(item, external_estate.mutable_table_path('Customer'))}`"
+            ),
+        },
+    )
+    assert _ids(foreign, "reference_customer", "CustomerId") == [1, 2]
+    assert _ids(foreign, "reference_product", "ProductId") == [10, 20]
+    # The mutation this journey made is still there: wipe touched the managed
+    # estate and nothing else.
+    assert _ids(foreign, "source_customer", "CustomerId") == [1, 2, 4]
 
-        # The stable foreign tables are exactly as provisioning left them.
-        item = acceptance.external_lakehouse
-        foreign = _observe(
-            acceptance,
-            {
-                "reference_customer": (
-                    "select CustomerId, CustomerName from delta.`"
-                    f"{_abfss(item, external_estate.table_path('Customer'))}`"
-                ),
-                "reference_product": (
-                    "select ProductId from delta.`"
-                    f"{_abfss(item, external_estate.table_path('Product'))}`"
-                ),
-                "source_customer": (
-                    "select CustomerId from delta.`"
-                    f"{_abfss(item, external_estate.mutable_table_path('Customer'))}`"
-                ),
-            },
-        )
-        assert _ids(foreign, "reference_customer", "CustomerId") == [1, 2]
-        assert _ids(foreign, "reference_product", "ProductId") == [10, 20]
-        # The mutation this journey made is still there: wipe touched the managed
-        # estate and nothing else.
-        assert _ids(foreign, "source_customer", "CustomerId") == [1, 2, 4]
-
-        region = _foreign_warehouse_rows(
-            acceptance,
-            "select RegionId from [Reference].[Region] order by RegionId",
-        )
-        assert [row["RegionId"] for row in region] == [1, 2]
-    finally:
-        _restore_the_foreign_baseline(acceptance)
+    region = _foreign_warehouse_rows(
+        acceptance,
+        "select RegionId from [Reference].[Region] order by RegionId",
+    )
+    assert [row["RegionId"] for row in region] == [1, 2]
 
 
 def _abfss(item, relative: str) -> str:
@@ -1666,6 +1676,52 @@ def _foreign_warehouse(journey):
 
 def _foreign_warehouse_rows(journey, statement: str) -> list:
     return [dict(row) for row in _foreign_warehouse(journey).query(statement)]
+
+
+def _require_the_foreign_baseline(journey) -> None:
+    """Prove the restoration landed, before fifteen minutes rest on it.
+
+    A partial restore is the failure worth catching here: the Delta re-seed and
+    the event files are separate crossings, and a run that started from half a
+    baseline reported its first wrong answer several scenarios later, as a
+    difference in customer ids.
+    """
+
+    from weaver.fabric import OneLakeDfsClient
+
+    item = journey.external_lakehouse
+    seen = _observe(
+        journey,
+        {
+            "source_customer": (
+                "select CustomerId from delta.`"
+                f"{_abfss(item, external_estate.mutable_table_path('Customer'))}`"
+            ),
+        },
+    )
+    customers = _ids(seen, "source_customer", "CustomerId")
+    assert customers == [1, 2, 3], (
+        f"the foreign baseline was not restored: Source.Customer holds "
+        f"{customers}, and the acceptance journey starts from [1, 2, 3]"
+    )
+
+    store = OneLakeDfsClient()
+    for name in external_estate.EVENT_FILES:
+        assert store.exists(_event_location(item, name)), (
+            f"the foreign baseline was not restored: {name} is absent"
+        )
+    withdrawn = "event-003.json"
+    assert not store.exists(_event_location(item, withdrawn)), (
+        f"the foreign baseline was not restored: {withdrawn} is still there, so "
+        "a previous run's insertion is standing"
+    )
+
+    region = _foreign_warehouse_rows(
+        journey, "select RegionId from [Reference].[Region] order by RegionId"
+    )
+    assert [row["RegionId"] for row in region] == [1, 2], (
+        "the foreign Warehouse baseline was not restored"
+    )
 
 
 def _restore_the_foreign_baseline(journey) -> None:

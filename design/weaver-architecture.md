@@ -58,7 +58,7 @@ repository/
 │       │   └── Sales.yml
 │       ├── shortcuts.yml
 │       └── Sales.Customer.sql
-│
+├── README.md
 └── _ignore/
     └── unfinished.py
 ```
@@ -107,7 +107,10 @@ Directories such as `lib/` contain ordinary Python modules shared by authored do
 
 They are helper code rather than Weaver Documents.
 
-Directories under `_ignore/` are excluded from Weaver.
+Weaver discovers the `Lakehouse/` and `Warehouse/` trees and the recognised
+surfaces inside their items. Unrelated project content is ignored. Directories
+under `_ignore/` are explicitly excluded, including content that would otherwise
+be recognised. Malformed or misplaced Weaver declarations are refused.
 
 Every recognised Weaver Document has a defined contract understood by the framework.
 

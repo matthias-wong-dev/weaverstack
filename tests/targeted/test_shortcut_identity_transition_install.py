@@ -411,6 +411,92 @@ def test_a_pointer_standing_where_a_document_is_declared_is_unpicked(tmp_path):
     assert b'"name": "Portable"' in payload
 
 
+# --- what prohibit_rebuild protects -------------------------------------------
+#
+# A Folder holding retained source data declares `Prohibit rebuild: true` so a
+# repository rebuild cannot destroy what has landed. A pointer holds none of
+# Weaver's data, so the flag has nothing to protect while a shortcut is still
+# what stands at the identity, and the shortcut-to-owned transition needs the
+# pointer replaced.
+
+
+def _protected_folder_repository(tmp_path):
+    """One item declaring a Folder that forbids its own rebuild."""
+
+    root = tmp_path / "repo"
+    _write(root, f"{ITEM}/schemas/ACQSC.yml", schema_document("ACQSC"))
+    _write(
+        root,
+        f"{ITEM}/Files/ACQSC__HarmSurveyXlsx.py",
+        '"""\n'
+        "Folder ID: ACQSC.HarmSurveyXlsx\n"
+        "Description: Retained source workbooks.\n"
+        "Lineage: A source system.\n"
+        'File key: "*.xlsx"\n'
+        "Incremental: true\n"
+        "Prohibit rebuild: true\n"
+        '"""\n'
+        "from weaver import Folder\n\n\n"
+        "class ACQSC__HarmSurveyXlsx(Folder):\n"
+        "    def read(self):\n"
+        "        return None\n",
+    )
+    return parse_item_repository(Location(str(root)))
+
+
+def _selection(estate, *, installed_role):
+    from weaver.build_bundle.incremental import select_build
+
+    identity = document_id(FOLDER)
+    return select_build(
+        estate,
+        {
+            identity: registered_document(
+                FOLDER,
+                object_type="folder",
+                object_role=installed_role,
+                signature="what stood here before",
+            )
+        },
+        selected={identity},
+        inventories={
+            identity.item: target_inventory(
+                folder_schemas=("ACQSC",), folders=("ACQSC.HarmSurveyXlsx",)
+            )
+        },
+    )
+
+
+@weaver_test()
+def test_a_protected_folder_installed_as_itself_is_not_rebuilt(tmp_path):
+    """The flag does what it is for: landed data is never dropped."""
+
+    estate = _protected_folder_repository(tmp_path)
+    selection = _selection(estate, installed_role="data")
+
+    assert document_id(FOLDER) in selection.prohibited
+    assert document_id(FOLDER) not in selection.selected_for_drop
+
+
+@weaver_test()
+def test_a_protected_folder_installed_as_a_pointer_is_still_replaced(tmp_path):
+    """
+    Intent: A migration declares the owned Folder while the temporary shortcut
+    is still installed, and the build has to unpick the pointer.
+
+    Proof: the flag protects landed data, and a pointer holds none of Weaver's.
+    Read from the declaration alone the identity was prohibited, so the pointer
+    stayed and the catalogue certified an owned Folder that was never built.
+    """
+
+    estate = _protected_folder_repository(tmp_path)
+    selection = _selection(estate, installed_role="shortcut")
+
+    assert document_id(FOLDER) not in selection.prohibited
+    assert document_id(FOLDER) in selection.selected_for_drop
+    assert document_id(FOLDER) in selection.selected_for_build
+
+
 # --- what the correction must not have moved -----------------------------------
 
 

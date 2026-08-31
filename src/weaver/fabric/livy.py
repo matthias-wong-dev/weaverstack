@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from ..errors import WeaverError
 from .auth import FABRIC_SCOPE, token_source
@@ -446,7 +446,10 @@ class LivySession:
             if current == wanted:
                 return state
             if current in {"error", "dead", "killed", "shutting_down"}:
-                raise LivyError(f"Livy session entered state {current!r}")
+                raise LivyError(
+                    f"Livy session entered state {current!r}"
+                    + _session_state_detail(state)
+                )
             time.sleep(self.poll_interval)
         raise LivyError(f"Livy session did not reach {wanted!r} within {int(timeout)}s")
 
@@ -569,6 +572,19 @@ def _payload(text: str) -> Any:
             except json.JSONDecodeError:
                 return None
     return None
+
+
+def _session_state_detail(state: Mapping[str, Any]) -> str:
+    """What Fabric said about a session that did not start, as one clause.
+
+    A capacity refusal and a bad Environment both end as ``dead``. The session
+    record carries the reason, so it is read here and an operator is told which
+    one happened.
+    """
+
+    info = state.get("fabricSessionStateInfo") or {}
+    message = str(info.get("errorMessage") or "").strip()
+    return f": {message}" if message else ""
 
 
 def emit_source() -> str:

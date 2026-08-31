@@ -279,18 +279,41 @@ def test_user_authored_init_is_rejected_outside_ignore(tmp_path):
 
 
 @weaver_test()
-def test_other_underscore_directory_is_not_ignored(tmp_path):
+def test_unrelated_root_and_item_content_is_ignored(tmp_path):
     root = _estate(tmp_path)
+    _write(root, "README.md", "A project beside its Weaver declarations.\n")
+    _write(root, "compose.yml", "services: {}\n")
+    _write(root, "bootstrap.sql", "select 1;\n")
+    _write(root, ".github/workflows/check.yml", "name: check\n")
+    _write(root, "SemanticModels/model.json", "{}\n")
+    _write(root, "SemanticModels/schemas/model.yml", "entities: []\n")
+    _write(root, "Notebooks/Explore.ipynb", "{}\n")
     _write(root, "Lakehouse/Raw/_draft/note.txt", "parked in the wrong place")
-    with pytest.raises(DiscoveryError, match="only schemas/.*lib/.*Files/"):
-        parse_item_repository(Location(str(root)))
+    _write(root, "Lakehouse/Raw/README.md", "Notes for this item.\n")
+
+    repository = parse_item_repository(Location(str(root)))
+
+    assert (
+        WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+        in repository.source_documents
+    )
+    assert "Lakehouse/Raw/README.md" not in repository.support_files
 
 
 @weaver_test()
-def test_empty_other_underscore_directory_is_still_discovered(tmp_path):
+def test_empty_unrelated_item_directory_is_ignored(tmp_path):
     root = _estate(tmp_path)
     (root / "Lakehouse/Raw/_draft").mkdir(parents=True)
-    with pytest.raises(DiscoveryError, match="only schemas/.*lib/.*Files/"):
+
+    assert parse_item_repository(Location(str(root)))["Lakehouse/Raw"]
+
+
+@weaver_test()
+def test_an_obvious_root_declaration_is_rejected(tmp_path):
+    root = _estate(tmp_path)
+    _write(root, "Sales.Customer.sql", _warehouse_table("Sales.Customer"))
+
+    with pytest.raises(DiscoveryError, match="declaration belongs inside"):
         parse_item_repository(Location(str(root)))
 
 
@@ -527,6 +550,45 @@ def test_a_logical_shortcut_may_not_name_its_own_item(tmp_path):
     )
     with pytest.raises(DiscoveryError, match="which is the item declaring it"):
         parse_item_repository(Location(str(root)))
+
+
+@weaver_test()
+def test_a_logical_shortcut_may_target_a_physical_shortcut_destination(tmp_path):
+    """A cross-workspace physical boundary can be projected logically onward."""
+
+    root = _estate(tmp_path)
+    (root / "Lakehouse/Raw/Sales__Customer.py").unlink()
+    _write(
+        root,
+        "Lakehouse/Raw/shortcuts.py",
+        "from weaver import Shortcut\n\nSales__Customer = Shortcut(\n"
+        '    shortcut_type="table",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/External/Sales.Customer",\n'
+        '    workspace="Source Workspace",\n'
+        ")\n",
+    )
+    _write(
+        root,
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.CustomerRaw: "
+        "Lakehouse/Raw/Sales.Customer\n",
+    )
+
+    repository = parse_item_repository(Location(str(root)))
+
+    shortcut = next(
+        shortcut
+        for shortcut in repository.logical_shortcuts
+        if str(shortcut.destination) == "Warehouse/Reporting/Sales.CustomerRaw"
+    )
+    assert str(shortcut.source) == "Lakehouse/Raw/Sales.Customer"
+    assert any(
+        edge.upstream == "Lakehouse/Raw/Sales.Customer"
+        and edge.downstream == "Warehouse/Reporting/Sales.CustomerRaw"
+        for edge in repository.dependency_graph.edges
+    )
 
 
 @weaver_test()

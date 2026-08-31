@@ -29,6 +29,7 @@ from weaver.build_bundle.prune import (
     read_lakehouse_inventory,
     read_warehouse_inventory,
 )
+from weaver.build_bundle.shortcuts import ResolvedShortcutSource
 from weaver.catalogue.state import Catalogue, for_targets
 from weaver.catalogue.tables import CATALOGUE_TABLES
 from weaver.declaration import parse_item_repository
@@ -333,6 +334,74 @@ def test_a_shortcut_is_materialised_before_the_documents_that_use_it(tmp_path):
         < at["refresh-sql-endpoint-Lakehouse--Curated"]
         < at["shortcuts-Warehouse--Reporting"]
         < at["object-Warehouse--Reporting--Sales.Customer"]
+    )
+
+
+@weaver_test()
+def test_a_physical_shortcut_can_feed_a_logical_warehouse_shortcut(tmp_path):
+    root = _estate(tmp_path)
+    (root / "Lakehouse/Raw/Sales__Customer.py").unlink()
+    _write(
+        root,
+        "Lakehouse/Raw/shortcuts.py",
+        "from weaver import Shortcut\n\nSales__Customer = Shortcut(\n"
+        '    shortcut_type="table",\n'
+        '    target_type="physical",\n'
+        '    target="Lakehouse/External/Sales.Customer",\n'
+        '    workspace="Source Workspace",\n'
+        ")\n",
+    )
+    _write(
+        root,
+        "Warehouse/Reporting/shortcuts.yml",
+        "logical:\n"
+        "  Warehouse/Reporting/Sales.CustomerRaw: "
+        "Lakehouse/Raw/Sales.Customer\n",
+    )
+    repository = _repository(root)
+    store = FilesystemStore()
+    bundle = generate_item_build_bundle(
+        repository,
+        bindings=ItemBindings(
+            (
+                _binding("Lakehouse/Raw", "Raw_Dev"),
+                _binding("Warehouse/Reporting", "Reporting_Dev"),
+            )
+        ),
+        output=Location(str(tmp_path / "bundle")),
+        store=store,
+        shortcut_sources={
+            "Lakehouse/Raw/Sales__Customer": ResolvedShortcutSource(
+                workspace_id="source-workspace-id",
+                item_id="external-lakehouse-id",
+                item_name="External",
+                path="Tables/Sales/Customer",
+            )
+        },
+    )
+
+    warehouse_shortcuts = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.id == "shortcuts-Warehouse--Reporting"
+    )
+    statements = json.loads(
+        store.read(
+            bundle.location.join(*warehouse_shortcuts.payload.split("/"))
+        ).decode()
+    )
+    assert (
+        "create or alter view [Sales].[CustomerRaw] as select * from "
+        "[Raw_Dev].[Sales].[Customer];"
+    ) in statements
+
+    at = {
+        action.id: sequence.number for sequence, _batch, action in bundle.plan.actions()
+    }
+    assert (
+        at["shortcuts-Lakehouse--Raw"]
+        < at["refresh-sql-endpoint-Lakehouse--Raw"]
+        < at["shortcuts-Warehouse--Reporting"]
     )
 
 
