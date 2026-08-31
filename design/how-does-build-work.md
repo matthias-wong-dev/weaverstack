@@ -220,11 +220,26 @@ that declares something there is refused during discovery, and a wipe removes
 shortcuts through the workspace before it sweeps storage. Removing the shortcut
 root is safe, and it is the only thing Weaver does to one.
 
-A selected declaration whose logical target item is not bound, whose destination
-and target disagree about the `Files`/table namespace, or whose direct target did
-not resolve has no physical form under the current bindings. Bundle generation
-fails before installation and names the unsupported shortcut. A selected object
-owned by a bound item may never be omitted while the build reports success.
+**Bound is two questions, and a shortcut source asks the second.**
+
+```text
+build binding      this build may modify the item
+_.Installation     the item is already installed, and may be referenced
+```
+
+A logical shortcut's source is resolved in that order: the current build's
+binding, then the item's `_.Installation` row, then nothing. An installed source
+outside the build is read-only. It is declared among the plan's targets, because
+the installer resolves a frozen source by target id, and it joins no build, drop
+or prune scope. That is what lets a downstream item be rebuilt on its own without
+naming every item upstream of it.
+
+A selected declaration whose logical target item is resolved by neither, whose
+destination and target disagree about the `Files`/table namespace, or whose direct
+target did not resolve has no physical form under the current bindings. Bundle
+generation fails before installation and names the unsupported shortcut. A
+selected object owned by a bound item may never be omitted while the build reports
+success.
 
 An unchanged shortcut is not selected for materialisation. It is left installed
 and certified even when its source item is outside the current build's bindings.
@@ -257,10 +272,13 @@ about the source's content. A reloaded source does not redefine a shortcut, and
 signing it with the source's hash would replace every downstream shortcut whenever
 a table was rebuilt.
 
-A shortcut is therefore rebuilt only when it is new, when its declaration changed,
-or when its destination is missing from the target. A source rebuilt under it is a
-reason to rebuild what reads through it and no reason to touch the pointer, which
-stands at the same address either way. See [§7a](#7a-cross-item-freshness).
+A shortcut is therefore rebuilt when it is new, when its declaration changed, when
+its destination is missing from the target, or when the source under it was built
+after it. That last one is a refresh: the pointer is materialised over the address
+already there, never dropped and remade, because Fabric holds a deleted shortcut's
+name for tens of seconds. A Lakehouse pointer goes through `CreateOrOverwrite` and
+a Warehouse pointer through `create or alter view`. See
+[§7a](#7a-cross-item-freshness).
 
 It is materialised by the shortcut executor, never by the generic drop-and-build
 pipeline: it holds no data, so it is replaced in place, and there is no source
@@ -290,6 +308,36 @@ shortcut now declared there.
 
 An identity with no Registry row is left where it stands. Nothing certified it,
 so what occupies the name is not this build's to remove.
+
+#### One transition waits for OneLake
+
+Removing a shortcut and creating an owned Folder or Table at the **same physical
+identity** is the one case a build waits between two of its own actions:
+
+```text
+installed shortcut X
+    remove the shortcut
+    wait for OneLake to release the name
+    create the native object at X
+```
+
+Fabric stops listing the shortcut promptly, and OneLake holds the namespace for
+tens of seconds after that, so an immediate native create at the same path fails
+and the same create succeeds later. The plan marks the one drop whose name it
+reuses with `awaits_name_release`, and the shortcut executor polls the path until
+it stops answering. Every name removed by that action is waited on together, so
+several removals cost one release window. A spent wait returns rather than
+raising: the create that follows reports the occupied name, which says more than a
+timeout would.
+
+Nothing else waits:
+
+| Transition | Wait |
+|---|---|
+| shortcut -> owned object at the same identity | yes |
+| shortcut -> shortcut | no; `CreateOrOverwrite` stands on the address |
+| a shortcut removed and the name not reused | no |
+| owned object -> owned object | no |
 
 Unpicking a pointer goes through the shortcut API, as `drop_shortcut`, and never
 through a Spark `DROP TABLE` or a directory removal: a OneLake shortcut is a
@@ -402,15 +450,36 @@ publication is Weaver's completion boundary — a row is written last, after
 everything the object needed succeeded — so "when was this published" is "when was
 this last built", and two rows can be ordered against each other.
 
-An object dated earlier than the source it reads through a shortcut is behind:
-it was built against something that has since moved on. It joins the impacted set,
-and what reads it is picked up by the ordinary descendant walk.
+The chain a logical shortcut forms is compared link by link:
 
-The comparison is against the consumer's row, not the pointer's. A pointer is not
-rebuilt for freshness, so its own build datetime never advances, and rebuilding
-the consumer is what settles the question the next build asks. What
-`stale_shortcut_consumers` returns is therefore the consumers, found by walking
-the graph down from the shortcut destination.
+```text
+source  <=  pointer  <=  consumer
+```
+
+A pointer dated before its source is behind, and so is a consumer dated before
+the pointer it stands on. Either one joins the impacted set, and the ordinary
+descendant walk carries the rebuild on from there. `stale_through_shortcuts`
+returns whichever of the two is behind.
+
+Naming the pointer is what makes one build enough. A pointer refreshed over its
+own address is decertified and republished like any other rebuilt object, so its
+row is re-dated, and the walk down from it reaches its consumers in the same
+pass. The build after that finds `source <= pointer <= consumer` and plans
+nothing.
+
+The second link carries its own case. A build that refreshed the pointer and then
+stopped leaves a consumer behind a pointer that is now current, and the
+consumer's own comparison against the pointer is what picks it up.
+
+Same-build and cross-build reach the same place by different routes:
+
+```text
+source rebuilt in this build     the graph carries the change to the pointer
+                                 and on to its consumers
+
+source rebuilt by an earlier     the epochs identify the pointer, which is
+build                            refreshed, and the walk from it carries on
+```
 
 This applies whether or not the producer is in the build. The descendant walk only
 starts from a node whose declaration changed, and a producer rebuilt by some
@@ -421,9 +490,14 @@ consumer is touched: it keeps its old build_datetime and stays behind until it i
 next built, when the comparison selects it.
 
 The build_datetime is set on **insert and never on update**. Every rebuild reaches the
-merge as an insert, because a rebuilt object has its Registry claim deleted before
-any physical work — so an update can only be a row whose projection moved while
-the object stood still, and dating it would claim a rebuild that never happened.
+merge as an insert, because everything in `selected_for_build` has its Registry
+claim deleted before any physical work. An update is therefore a row whose
+projection moved while the object stood still, and dating it would claim a
+rebuild that never happened.
+
+The set that stops being certified is what the build **rebuilds**, not what it
+drops. A pointer is refreshed over its own address without being dropped, and it
+is decertified with everything else, which is what re-dates its row.
 
 It is written as an `{{build_datetime}}` token resolved once per installation, not a
 literal frozen at generation time and not `current_timestamp()`. A literal would
@@ -443,7 +517,7 @@ flowchart TD
     R["Incoming documents and shortcut destinations"]
     C["Reconciled Registry"]
     T["Prepared target inventory"]
-    E["Consumers behind a shortcut's source, by build build_datetime"]
+    E["Pointers and consumers behind a shortcut's chain, by build build_datetime"]
 
     R --> I["determine_impact"]
     C --> I

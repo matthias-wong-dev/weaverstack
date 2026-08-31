@@ -407,6 +407,28 @@ document records is one Weaver never saw arrive, so it takes no part in an
 incremental read even when the `File key` claims it. A Folder with no `_changes`
 history returns an empty result.
 
+#### Adopting the files already there
+
+A non-static Folder that holds files and no history is adopted on its first load:
+
+```text
+non-static Folder
++ physical files already present
++ no _changes history
+-> one initial change document recording every file as an Insert
+```
+
+Everything under the Folder root is recorded except `_changes/` itself. Nothing
+filters it: not the `File key`, not a filename pattern, not what the current
+declaration expects, not whether the file is logically valid. History records
+what is physically there, and the logical constraints judge that state
+separately, which keeps the two from having to agree before either can run.
+
+The trigger is the absence of history, not the absence of a directory, so a
+Folder Weaver already wrote is never adopted a second time. A Static Folder is
+left alone: loading it once is the whole contract, and its files are what that
+load put there.
+
 The `File key` stays a load concern. It decides which staged files may be
 published, which files a delete claim may name, and which files a
 non-incremental replacement owns. The three history methods do not consult it.

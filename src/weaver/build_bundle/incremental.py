@@ -131,11 +131,10 @@ def stale_through_shortcuts(
     rebuilt by an earlier build looks unchanged to this one, and the only
     surviving evidence is its Registry row's build datetime.
 
-    The chain is ``source <= pointer <= reader``. A pointer dated before its
+    The chain is ``source <= pointer <= consumer``. A pointer dated before its
     source is named, and the descendant walk carries the rebuild on to what
-    reads it. A reader dated before a pointer that is current is named
-    directly, which is the estate a build that refreshed the pointer and then
-    stopped leaves behind.
+    reads it. A consumer dated before a current pointer is named directly, which
+    is the estate a build that refreshed the pointer and then stopped leaves.
 
     ``bound_items`` scopes it to what this build could act on. An absent row is
     a missing installation, which signature classification calls new.
@@ -163,12 +162,12 @@ def stale_through_shortcuts(
             behind.append(destination)
             continue
         for node in graph.descendants(str(destination)):
-            reader = by_text.get(node)
-            if reader is None or reader.item not in bound:
+            consumer = by_text.get(node)
+            if consumer is None or consumer.item not in bound:
                 continue
-            reader_datetime = _as_instant(registered[reader].build_datetime)
-            if reader_datetime is None or pointer_datetime > reader_datetime:
-                behind.append(reader)
+            consumer_datetime = _as_instant(registered[consumer].build_datetime)
+            if consumer_datetime is None or pointer_datetime > consumer_datetime:
+                behind.append(consumer)
     return _ordered(behind)
 
 
