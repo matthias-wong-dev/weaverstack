@@ -28,6 +28,7 @@ from factories import (
     load_estate_bindings,
     logical_shortcuts,
     schema_document,
+    shortcut_row,
     warehouse_table,
 )
 from support.weaver_test import weaver_test
@@ -122,7 +123,7 @@ def test_load_dag_finds_the_installed_primitive_for_each_dispatch_kind(estate):
     dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
     assert {node.node_id: node.primitive_kind for node in dag.nodes} == {
-        "load:Lakehouse/Raw_LH/Sales.Export": PYTHON_FOLDER,
+        "load:Lakehouse/Raw_LH/Files/Sales.Export": PYTHON_FOLDER,
         "load:Lakehouse/Raw_LH/Sales.Order": PYTHON_TABLE,
         # A Spark-SQL-authored table dispatches as what it installs as.
         "load:Lakehouse/Raw_LH/Sales.Daily": PYTHON_TABLE,
@@ -139,7 +140,7 @@ def test_load_dag_loads_every_object_in_the_requested_targets(estate):
     dag = load_dag(estate, items=(PRODUCER,))
 
     assert node_ids(dag) == (
-        "load:Lakehouse/Raw_LH/Sales.Export",
+        "load:Lakehouse/Raw_LH/Files/Sales.Export",
         "load:Lakehouse/Raw_LH/Sales.Order",
         "load:Lakehouse/Raw_LH/Sales.Daily",
     )
@@ -280,7 +281,10 @@ class Sales__Customer(Table):
 
     dag = load_dag(estate, items=(PRODUCER,))
     assert dag.edges == (
-        ("load:Lakehouse/Raw_LH/Sales.Drop", "load:Lakehouse/Raw_LH/Sales.Customer"),
+        (
+            "load:Lakehouse/Raw_LH/Files/Sales.Drop",
+            "load:Lakehouse/Raw_LH/Sales.Customer",
+        ),
     )
 
 
@@ -320,7 +324,7 @@ def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse
     assert dag.upstream("refresh:Lakehouse/Raw_LH") == {
         "load:Lakehouse/Raw_LH/Sales.Order",
         "load:Lakehouse/Raw_LH/Sales.Daily",
-        "load:Lakehouse/Raw_LH/Sales.Export",
+        "load:Lakehouse/Raw_LH/Files/Sales.Export",
     }
 
 
@@ -489,7 +493,7 @@ def test_ambiguity_elsewhere_in_the_estate_does_not_stop_an_unrelated_load(estat
     dag = load_dag(estate, items=(PRODUCER,))
 
     assert node_ids(dag) == (
-        "load:Lakehouse/Raw_LH/Sales.Export",
+        "load:Lakehouse/Raw_LH/Files/Sales.Export",
         "load:Lakehouse/Raw_LH/Sales.Order",
         "load:Lakehouse/Raw_LH/Sales.Daily",
     )
@@ -948,3 +952,346 @@ def test_a_python_shortcut_import_orders_a_warehouse_before_its_lakehouse_consum
             object="Reporting",
         ),
     )
+
+
+# --- one Schema.Object in two physical forms -----------------------------------
+#
+# A Lakehouse may legitimately own both `Files/Sales.Thing` and `Sales.Thing`,
+# and the table may read the folder. These are two installed identities, and the
+# load graph has to keep them apart: a node keyed on `Schema.Object` alone gave
+# both the same id, so the dependency between them became a self-edge and the
+# graph reported a cycle.
+#
+# The matrix, with the same `Schema.Object` throughout:
+#
+#     Files/Sales.Thing     Sales.Thing
+#     -----------------     ---------------
+#     real Folder           real Table
+#     folder shortcut       real Table
+#     real Folder           table shortcut
+
+SAME_NAME = "Sales.Thing"
+SOURCE_ITEM = "Lakehouse/Source"
+SOURCE_TARGET = "Source_LH"
+CURATED_ITEM = "Warehouse/Curated"
+CURATED_TARGET = "Curated_WH"
+
+
+def _folder(item: str, schema: str, name: str, *, role="data"):
+    """Registry rows for one Folder and its deployed load module."""
+
+    return [
+        _registry(item, f"Files/{schema}", name, object_type="folder", role=role),
+        _registry(
+            item,
+            "_/Load/Files",
+            f"{schema}__{name}.py",
+            object_type="file",
+            role="load",
+        ),
+    ]
+
+
+def _delta_table(item: str, schema: str, name: str, *, role="data"):
+    """Registry rows for one Lakehouse table and its deployed load module."""
+
+    return [
+        _registry(item, schema, name, object_type="table", role=role),
+        _registry(
+            item, "_/Load", f"{schema}__{name}.py", object_type="file", role="load"
+        ),
+    ]
+
+
+def _warehouse_table(item: str, schema: str, name: str):
+    """Registry rows for one Warehouse table and its generated procedure."""
+
+    return [
+        _registry(item, schema, name, object_type="table"),
+        _registry(
+            item,
+            "_",
+            f"Load {schema}.{name}",
+            object_type="stored_procedure",
+            role="load",
+        ),
+    ]
+
+
+def _folder_import(item: str, schema: str, name: str):
+    """The dependency row a table reading its same-name Folder leaves.
+
+    The spelling is the authored import, which is what ``_.Dependency`` keeps:
+    ``from Files.Sales__Thing import Sales__Thing``.
+    """
+
+    row = _dependency(item, schema, name, f"Files.{schema}__{name}")
+    row["referenced_schema_name"] = f"Files/{schema}"
+    return row
+
+
+def _shortcut_import(item: str, schema: str, name: str):
+    """The dependency row a table reading a declared shortcut leaves.
+
+    A shortcut is imported from the ``shortcuts`` module, which is a different
+    authored shape from an owned Folder's ``from Files.Sales__Thing import``.
+    """
+
+    row = _dependency(item, schema, name, f"shortcuts.{schema}__{name}")
+    for column in (
+        "referenced_item_type",
+        "referenced_item_name",
+        "referenced_schema_name",
+        "referenced_object_name",
+    ):
+        row[column] = None
+    return row
+
+
+@weaver_test()
+def test_a_real_folder_and_a_real_table_of_one_name_are_two_load_nodes(tmp_path):
+    """
+    Intent: Case 1. A Lakehouse owns the Folder and the Delta table at one
+    ``Schema.Object``, the table reads the folder, and a Warehouse table reads
+    the Delta table.
+
+    Proof: keyed on ``Schema.Object`` alone the Folder and the table shared one
+    load node, so the edge between them closed on itself and LoadDag refused the
+    graph as cyclic.
+    """
+
+    catalogue = _catalogue(
+        **{
+            SOURCE_ITEM: _rows(
+                Installation=[_installation(SOURCE_ITEM, SOURCE_TARGET)],
+                Registry=[
+                    *_folder(SOURCE_ITEM, "Sales", "Thing"),
+                    *_delta_table(SOURCE_ITEM, "Sales", "Thing"),
+                ],
+                Dependency=[_folder_import(SOURCE_ITEM, "Sales", "Thing")],
+            ),
+            # A Warehouse crosses into the Lakehouse through a view shortcut, as
+            # a Weaver repository does. Its own table keeps the business name.
+            CURATED_ITEM: _rows(
+                Installation=[_installation(CURATED_ITEM, CURATED_TARGET)],
+                Registry=[
+                    *_warehouse_table(CURATED_ITEM, "Sales", "Thing"),
+                    _registry(CURATED_ITEM, "Sales", "ThingRaw", object_type="view"),
+                ],
+                Shortcut=[
+                    shortcut_row(
+                        f"{CURATED_ITEM}/Sales.ThingRaw",
+                        f"{SOURCE_ITEM}/{SAME_NAME}",
+                        shortcut_type="view",
+                    )
+                ],
+                Dependency=[
+                    _dependency(CURATED_ITEM, "Sales", "Thing", "Sales.ThingRaw")
+                ],
+            ),
+        }
+    )
+    estate = catalogue.dag()
+
+    # The installed graph keeps them apart, which is what the planner must carry.
+    assert estate.node(f"{SOURCE_ITEM}/Files/{SAME_NAME}").object_type == "folder"
+    assert estate.node(f"{SOURCE_ITEM}/{SAME_NAME}").object_type == "table"
+
+    dag = load_dag(
+        estate,
+        items=(WeaverItemId.parse(SOURCE_ITEM), WeaverItemId.parse(CURATED_ITEM)),
+    )
+
+    folder_node = f"load:Lakehouse/{SOURCE_TARGET}/Files/{SAME_NAME}"
+    table_node = f"load:Lakehouse/{SOURCE_TARGET}/{SAME_NAME}"
+
+    # Two nodes, not one.
+    assert folder_node in dag.by_id
+    assert table_node in dag.by_id
+    assert folder_node != table_node
+    assert dag.by_id[folder_node].primitive_kind == PYTHON_FOLDER
+    assert dag.by_id[table_node].primitive_kind == PYTHON_TABLE
+
+    # No node depends on itself.
+    assert not [(a, b) for a, b in dag.edges if a == b]
+
+    # The folder orders before the table, and the table before the Warehouse
+    # consumer, which reaches it over TDS and so waits on the endpoint barrier.
+    barrier = f"refresh:Lakehouse/{SOURCE_TARGET}"
+    warehouse_node = f"load:Warehouse/{CURATED_TARGET}/{SAME_NAME}"
+    assert (folder_node, table_node) in dag.edges
+    assert (table_node, barrier) in dag.edges
+    assert (barrier, warehouse_node) in dag.edges
+    assert dag.by_id[barrier].primitive_kind == ENDPOINT_REFRESH
+
+    # And the whole chain orders one way, at one business name throughout.
+    order = node_ids(dag)
+    assert order.index(folder_node) < order.index(table_node)
+    assert order.index(table_node) < order.index(warehouse_node)
+
+
+@weaver_test()
+def test_a_folder_shortcut_and_a_real_table_of_one_name_stay_apart(tmp_path):
+    """
+    Intent: Case 2. ``Files/Sales.Thing`` is a physical folder shortcut and
+    ``Sales.Thing`` is the owned Delta table that reads it.
+
+    Proof: the import resolves through the shortcut declaration, so it names the
+    Folder form and is an external read. Resolved by spelling it found the table
+    and reported the table as reading itself.
+    """
+
+    catalogue = _catalogue(
+        **{
+            SOURCE_ITEM: _rows(
+                Installation=[_installation(SOURCE_ITEM, SOURCE_TARGET)],
+                Registry=[
+                    _registry(
+                        SOURCE_ITEM,
+                        "Files/Sales",
+                        "Thing",
+                        object_type="folder",
+                        role="shortcut",
+                    ),
+                    *_delta_table(SOURCE_ITEM, "Sales", "Thing"),
+                ],
+                Shortcut=[
+                    shortcut_row(
+                        f"{SOURCE_ITEM}/Files/{SAME_NAME}",
+                        "Lakehouse/Landing/Files/Sales.Thing",
+                        shortcut_type="folder",
+                        target_type="physical",
+                    )
+                ],
+                Dependency=[_shortcut_import(SOURCE_ITEM, "Sales", "Thing")],
+            )
+        }
+    )
+    estate = catalogue.dag()
+    table = WeaverDocumentId.parse(f"{SOURCE_ITEM}/{SAME_NAME}")
+
+    # The shortcut is what the import names, so the read is external and the
+    # table is not made to depend on itself.
+    assert estate.external_references[table] == ("shortcuts.Sales__Thing",)
+    assert not estate.unresolved
+
+    dag = load_dag(estate, items=(WeaverItemId.parse(SOURCE_ITEM),))
+    table_node = f"load:Lakehouse/{SOURCE_TARGET}/{SAME_NAME}"
+
+    # The pointer holds no load primitive, so the table is the only loadable.
+    assert node_ids(dag) == (table_node,)
+    assert not [(a, b) for a, b in dag.edges if a == b]
+    assert dag.by_id[table_node].primitive_kind == PYTHON_TABLE
+
+
+@weaver_test()
+def test_a_logical_folder_shortcut_keeps_its_managed_producer(tmp_path):
+    """Case 2, logical form: the crossing survives the shared spelling.
+
+    The same ``Files/Sales.Thing`` pointer, now bound to a managed Folder in
+    another item, so the consuming table orders behind that Folder's load.
+    """
+
+    upstream = "Lakehouse/Landing"
+    catalogue = _catalogue(
+        **{
+            upstream: _rows(
+                Installation=[_installation(upstream, "Landing_LH")],
+                Registry=[*_folder(upstream, "Sales", "Thing")],
+            ),
+            SOURCE_ITEM: _rows(
+                Installation=[_installation(SOURCE_ITEM, SOURCE_TARGET)],
+                Registry=[
+                    _registry(
+                        SOURCE_ITEM,
+                        "Files/Sales",
+                        "Thing",
+                        object_type="folder",
+                        role="shortcut",
+                    ),
+                    *_delta_table(SOURCE_ITEM, "Sales", "Thing"),
+                ],
+                Shortcut=[
+                    shortcut_row(
+                        f"{SOURCE_ITEM}/Files/{SAME_NAME}",
+                        f"{upstream}/Files/{SAME_NAME}",
+                        shortcut_type="folder",
+                    )
+                ],
+                Dependency=[_shortcut_import(SOURCE_ITEM, "Sales", "Thing")],
+            ),
+        }
+    )
+    dag = load_dag(
+        catalogue.dag(),
+        items=(WeaverItemId.parse(upstream), WeaverItemId.parse(SOURCE_ITEM)),
+    )
+
+    producer = f"load:Lakehouse/Landing_LH/Files/{SAME_NAME}"
+    consumer = f"load:Lakehouse/{SOURCE_TARGET}/{SAME_NAME}"
+
+    assert producer in dag.by_id
+    assert consumer in dag.by_id
+    assert (producer, consumer) in dag.edges
+    assert not [(a, b) for a, b in dag.edges if a == b]
+
+
+@weaver_test()
+def test_a_real_folder_and_a_table_shortcut_of_one_name_stay_apart(tmp_path):
+    """
+    Intent: Case 3, the forms reversed. ``Files/Sales.Thing`` is the owned
+    Folder and ``Sales.Thing`` is a table shortcut onto another item.
+
+    Proof: a downstream table reads ``Sales.Thing``, so the graph has to resolve
+    that spelling through the shortcut. Collapsed identities would order it
+    behind the Folder, or behind itself.
+    """
+
+    upstream = "Lakehouse/Landing"
+    catalogue = _catalogue(
+        **{
+            upstream: _rows(
+                Installation=[_installation(upstream, "Landing_LH")],
+                Registry=[*_delta_table(upstream, "Sales", "Thing")],
+            ),
+            SOURCE_ITEM: _rows(
+                Installation=[_installation(SOURCE_ITEM, SOURCE_TARGET)],
+                Registry=[
+                    *_folder(SOURCE_ITEM, "Sales", "Thing"),
+                    _registry(SOURCE_ITEM, "Sales", "Thing", role="shortcut"),
+                    *_delta_table(SOURCE_ITEM, "Sales", "Report"),
+                ],
+                Shortcut=[
+                    shortcut_row(
+                        f"{SOURCE_ITEM}/{SAME_NAME}",
+                        f"{upstream}/{SAME_NAME}",
+                    )
+                ],
+                Dependency=[_dependency(SOURCE_ITEM, "Sales", "Report", SAME_NAME)],
+            ),
+        }
+    )
+    estate = catalogue.dag()
+
+    # Three installed identities at two spellings, all distinct.
+    assert estate.node(f"{SOURCE_ITEM}/Files/{SAME_NAME}").role == "data"
+    assert estate.node(f"{SOURCE_ITEM}/{SAME_NAME}").role == "shortcut"
+
+    dag = load_dag(
+        estate,
+        items=(WeaverItemId.parse(upstream), WeaverItemId.parse(SOURCE_ITEM)),
+    )
+
+    folder_node = f"load:Lakehouse/{SOURCE_TARGET}/Files/{SAME_NAME}"
+    report_node = f"load:Lakehouse/{SOURCE_TARGET}/Sales.Report"
+    producer_node = f"load:Lakehouse/Landing_LH/{SAME_NAME}"
+
+    # The Folder is its own loadable and did not collapse into the pointer.
+    assert folder_node in dag.by_id
+    assert dag.by_id[folder_node].primitive_kind == PYTHON_FOLDER
+
+    # The read resolved through the shortcut to its managed producer. The Folder
+    # shares the spelling and is a different identity.
+    assert (producer_node, report_node) in dag.edges
+    assert (folder_node, report_node) not in dag.edges
+    assert not [(a, b) for a, b in dag.edges if a == b]

@@ -326,7 +326,7 @@ class _Planner:
             )
 
     def _load_node(self, installed: InstalledNode) -> LoadNode:
-        node_id = f"load:{installed.target}/{installed.load_name}"
+        node_id = f"load:{installed.target}/{installed.load_key}"
         node = self.nodes.get(node_id)
         if node is None:
             node = LoadNode(

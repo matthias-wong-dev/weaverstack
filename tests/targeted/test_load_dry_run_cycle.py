@@ -49,7 +49,9 @@ REPORTING = WeaverItemId.parse("Warehouse/Reporting")
 
 ORDER = "load:Lakehouse/Raw_LH/Sales.Order"
 DAILY = "load:Lakehouse/Raw_LH/Sales.Daily"
-EXPORT = "load:Lakehouse/Raw_LH/Sales.Export"
+# A Folder's graph id carries its ``Files/`` area, which is what keeps it
+# apart from a table of the same ``Schema.Object``.
+EXPORT = "load:Lakehouse/Raw_LH/Files/Sales.Export"
 REFRESH = "refresh:Lakehouse/Raw_LH"
 SUMMARY = "load:Warehouse/Reporting_WH/Sales.Summary"
 
@@ -132,9 +134,10 @@ def test_load_dry_run_resolves_the_complete_physical_dag(session):
     report = dry_run(session)
 
     assert report.order == (EXPORT, ORDER, DAILY, REFRESH, SUMMARY)
+    # Sorted, and a Folder's ``Files/`` area sorts ahead of a bare schema.
     assert report.edges == (
-        (DAILY, REFRESH),
         (EXPORT, REFRESH),
+        (DAILY, REFRESH),
         (ORDER, DAILY),
         (ORDER, REFRESH),
         (REFRESH, SUMMARY),

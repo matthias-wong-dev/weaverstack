@@ -170,10 +170,28 @@ class InstalledNode:
 
     @property
     def load_name(self) -> str | None:
-        """``Schema.Object``, as a request selecting one node spells it."""
+        """``Schema.Object``, as a request selecting one node spells it.
+
+        Two installed objects may share it: a Folder and a table of one
+        ``Schema.Object`` are distinct identities in one Lakehouse. Graph
+        keying uses :attr:`load_key`, which keeps them apart.
+        """
 
         object_id = getattr(self.identity, "object_id", None)
         return None if object_id is None else object_id.qualified
+
+    @property
+    def load_key(self) -> str:
+        """This node's identity within its physical target.
+
+        The catalogue's own spelling, so a Folder carries its ``Files/`` area
+        and a table does not. That is what separates ``Files/Sales.Thing`` from
+        ``Sales.Thing`` where a Lakehouse owns both and the table reads the
+        Folder.
+        """
+
+        schema, name = catalogue_columns(self.identity)
+        return f"{schema}.{name}"
 
     @property
     def physical(self) -> PhysicalObjectRef:
