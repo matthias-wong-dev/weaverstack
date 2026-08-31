@@ -344,12 +344,12 @@ def test_a_physical_shortcut_can_feed_a_logical_warehouse_shortcut(tmp_path):
     _write(
         root,
         "Lakehouse/Raw/shortcuts.py",
-        'from weaver import Shortcut\n\nSales__Customer = Shortcut(\n'
+        "from weaver import Shortcut\n\nSales__Customer = Shortcut(\n"
         '    shortcut_type="table",\n'
         '    target_type="physical",\n'
         '    target="Lakehouse/External/Sales.Customer",\n'
         '    workspace="Source Workspace",\n'
-        ')\n',
+        ")\n",
     )
     _write(
         root,
