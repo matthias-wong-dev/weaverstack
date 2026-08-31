@@ -44,6 +44,8 @@ run returns before any target mutation.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 from ..errors import LoadError
 from .delta_sql import (
     COLUMN_MAPPING,
@@ -75,6 +77,24 @@ from .load_result import LoadResult
 STAGING_SUFFIX = "_Staging"
 REJECT_SUFFIX = "_Reject"
 DELETE_SUFFIX = "_Delete"
+
+_CASE_SENSITIVE = "spark.sql.caseSensitive"
+
+
+@contextmanager
+def _exact_case(spark):
+    """Make one physical create honour its Weaver identifier spelling."""
+
+    previous = spark.conf.get(_CASE_SENSITIVE)
+    restore = str(previous).lower() != "true"
+    if restore:
+        spark.conf.set(_CASE_SENSITIVE, "true")
+    try:
+        yield
+    finally:
+        if restore:
+            spark.conf.set(_CASE_SENSITIVE, previous)
+
 
 #: Columns a working relation carries. Weaver's, and named so: they sit beside
 #: the author's own columns wherever one is written out as evidence.
@@ -866,10 +886,11 @@ def _full_replace(spark, names, staging_view, columns, rows_read: int) -> LoadRe
     audit = delta_audit_names()
     named = qualified("", columns)
     audit_columns = qualified("", audit)
-    spark.sql(
-        f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS "
-        f"SELECT {named} FROM {staging_view}"
-    )
+    with _exact_case(spark):
+        spark.sql(
+            f"CREATE TABLE {names['staging']} USING delta {COLUMN_MAPPING} AS "
+            f"SELECT {named} FROM {staging_view}"
+        )
     rows_deleted = _count(spark, names["target"])
     spark.sql(f"DELETE FROM {names['target']}")
     spark.sql(
@@ -1011,10 +1032,11 @@ def _keep_evidence(spark, names, kept: set, **relations) -> None:
     for role, view in relations.items():
         if view is None or role in kept:
             continue
-        spark.sql(
-            f"CREATE TABLE {names[role]} USING delta {COLUMN_MAPPING} AS "
-            f"SELECT * FROM {view}"
-        )
+        with _exact_case(spark):
+            spark.sql(
+                f"CREATE TABLE {names[role]} USING delta {COLUMN_MAPPING} AS "
+                f"SELECT * FROM {view}"
+            )
         # Recorded after the write, so being in ``kept`` means the table is
         # there. A write that failed leaves the role to be attempted again.
         kept.add(role)

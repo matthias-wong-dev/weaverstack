@@ -310,7 +310,9 @@ def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
     exit_code = main(_command("--fault-tolerant"))
 
     assert exit_code == 1
-    assert "failed" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "✗ failed" in output
+    assert "load:Lakehouse/Sales/Sales.Customer" in output
 
 
 @weaver_test()

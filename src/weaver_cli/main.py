@@ -1123,6 +1123,7 @@ def _print_load(report) -> None:
     mode = "plan" if report.dry_run else "load"
     print(f"{mode} {report.status}: {', '.join(report.requested)}\n")
     for node in report.nodes:
+        mark = "✗" if node.status in ("failed", "blocked", "invalid") else "✓"
         counts = ""
         # A node that failed before it moved any rows carries a failure rather
         # than a count, and asking one for rows read is how a rendered report
@@ -1135,7 +1136,7 @@ def _print_load(report) -> None:
                 f"-{node.result.rows_deleted} "
                 f"!{node.result.rows_rejected})"
             )
-        print(f"  {node.status:<24} {node.node_id}{counts}")
+        print(f"  {mark} {node.status:<24} {node.node_id}{counts}")
         for message in node.messages:
             if message.severity != "info":
                 print(f"      {message.severity}: {message.message}")

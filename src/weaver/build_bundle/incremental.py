@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Iterable, Mapping
 
 from ..catalogue.state import RegisteredDocument
+from ..catalogue.tables import ROLE_SHORTCUT
 from ..declaration.model import (
     WeaverDocumentId,
     WeaverItemId,
@@ -340,6 +341,17 @@ def determine_impact(
     )
 
 
+def _installed_as_shortcut(registered, identity) -> bool:
+    """Whether what is installed at this identity is a pointer.
+
+    Read from the Registry row's role, because a shortcut destination and an
+    owned object share one identity and only the role separates them.
+    """
+
+    document = registered.get(identity)
+    return document is not None and document.object_role == ROLE_SHORTCUT
+
+
 def select_build(
     repository: WeaverRepository,
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
@@ -359,14 +371,17 @@ def select_build(
         stale_consumers=stale_consumers,
         physical_types=physical_types,
     )
-    # A shortcut destination has no source document and therefore no
-    # ``prohibit_rebuild``: nothing an author writes can forbid replacing a
-    # pointer, because replacing one destroys nothing.
+    # ``prohibit_rebuild`` protects landed data, so the installed role is what
+    # it answers for. A pointer holds none of Weaver's data and replacing one
+    # destroys nothing, so an identity installed as a shortcut stays
+    # replaceable. That is the shortcut-to-owned transition: the declaration
+    # arrives first, and the pointer is still what stands at the identity.
     prohibited = {
         identity
         for identity in impact.impacted
         if identity in repository.source_documents
         and repository.source_documents[identity].document.prohibit_rebuild
+        and not _installed_as_shortcut(registered, identity)
     }
     # A pointer's physical life follows its own signature, which is the pair it
     # declares. Impact reaches a consumer through the pointer and leaves the

@@ -44,15 +44,21 @@ repository/
 │       ├── programmables/
 │       │   └── dbo.RefreshSummary.sql  a stored procedure this item manages
 │       └── Sales.Customer.sql          T-SQL — it is in a Warehouse
+├── Notebooks/                          unrelated project content is ignored
+├── README.md
 └── _ignore/
-    └── unfinished.py
+    └── unfinished.py                   explicitly excluded content
 ```
 
 Each schema and source document belongs to exactly one item. `Files/` contains
 Folder documents owned by a Lakehouse; it is not a separate deployment target.
-`lib/` contains Python helpers for that Lakehouse item. `_ignore/` is the only
-directory absent from discovery and the repository signature. Authors do not add
-`__init__.py`; Weaver supplies package loading.
+`lib/` contains Python helpers for that Lakehouse item. Discovery selects the
+`Lakehouse/` and `Warehouse/` trees and the recognised surfaces inside each
+item. Unrelated siblings and unrelated item content are absent from discovery
+and the repository signature. `_ignore/` explicitly excludes content that would
+otherwise be recognised. A misplaced Weaver declaration and a malformed
+recognised surface are refused. Authors do not add `__init__.py`; Weaver supplies
+package loading.
 
 ## The item chooses the SQL dialect
 
