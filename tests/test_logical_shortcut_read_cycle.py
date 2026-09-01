@@ -161,10 +161,26 @@ def estate(tmp_path):
 
     # The OneLake shortcut: a window in Curated onto the directory Landing owns,
     # reached by a path of the consumer's own.
-    window = curated.folder_path(LOCAL_SCHEMA, LOCAL_OBJECT)
-    window.parent.mkdir(parents=True, exist_ok=True)
-    window.symlink_to(source.path(), target_is_directory=True)
+    _open_window(curated.folder_path(LOCAL_SCHEMA, LOCAL_OBJECT), source.path())
     return _Estate(source, consumer)
+
+
+def _open_window(window: Path, source: Path) -> None:
+    """Open one path onto another directory, as the OneLake shortcut does.
+
+    A symbolic link. Creating one on Windows needs
+    SeCreateSymbolicLinkPrivilege, and WinError 1314 is what a process without
+    it gets. The emulation these tests read through is that link, so a host
+    without the privilege skips them.
+    """
+
+    window.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        window.symlink_to(source, target_is_directory=True)
+    except OSError as refused:
+        if getattr(refused, "winerror", None) != 1314:
+            raise
+        pytest.skip("creating a symlink needs a privilege this process does not hold")
 
 
 def _relative(paths, root: Path) -> set[str]:
