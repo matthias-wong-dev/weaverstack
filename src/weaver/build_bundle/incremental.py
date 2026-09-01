@@ -101,10 +101,10 @@ class BuildSelection:
 
 
 def _as_instant(value) -> datetime | None:
-    """One build build_datetime as something comparable, whatever the reader returned.
+    """One build datetime as something comparable, whatever the reader returned.
 
     Spark hands back a ``datetime``; a hand-built catalogue or a JSON round trip
-    hands back the string that was written. Anything else reads as no build_datetime
+    hands back the string that was written. Anything else reads as no build datetime
     rather than being guessed at.
     """
 

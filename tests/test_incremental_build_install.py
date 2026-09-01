@@ -735,7 +735,7 @@ def test_a_shortcut_is_never_dropped_by_the_document_pipeline(tmp_path):
 
 
 def _dated(rows, item_text, schema, name, build_datetime):
-    """Stamp one Registry row with a build build_datetime, as a publication would."""
+    """Stamp one Registry row with a build datetime, as a publication would."""
 
     item = WeaverItemId.parse(item_text)
     tables = dict(rows[item])
@@ -908,14 +908,16 @@ def test_a_source_rebuilt_earlier_refreshes_the_pointer_and_then_settles(tmp_pat
 
 
 @weaver_test()
-def test_a_refreshed_pointer_is_decertified_so_its_row_is_re_dated(tmp_path):
-    """What makes the chain converge, and the reason it is asserted here.
+def test_a_refreshed_pointers_claim_is_deleted_and_republished(tmp_path):
+    """The two halves of re-dating a pointer, as the plan states them.
 
     ``build_datetime`` is supplied on insert and is in neither the merge's
     comparison nor its UPDATE, so a row that is never deleted keeps the datetime
-    of the build that last inserted it. A pointer is refreshed without being
-    dropped, so decertification is what re-dates it, and a pointer that stayed
-    dated before its source would be named stale by every build for ever.
+    of the build that last inserted it. A refreshed pointer is not dropped, so
+    what re-dates it is the claim deletion this plan emits before any physical
+    work followed by the publication that inserts the row again carrying this
+    build's token. The row the installer leaves is read back by
+    ``tests/fabric/test_acceptance_journey.py``.
     """
 
     repository = _repository(_dependency_estate(tmp_path))
@@ -942,6 +944,20 @@ def test_a_refreshed_pointer_is_decertified_so_its_row_is_re_dated(tmp_path):
     )
     assert "[_].[Registry]" in payload
     assert "'PortableCustomer'" in payload
+
+    # And published again in the same installation, carrying this build's token.
+    registry = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_registry"
+    )
+    republished = (
+        FilesystemStore()
+        .read(bundle.location.join(*registry.payload.split("/")))
+        .decode()
+    )
+    assert "'PortableCustomer'" in republished
+    assert "{{build_datetime}}" in republished
 
 
 @weaver_test()

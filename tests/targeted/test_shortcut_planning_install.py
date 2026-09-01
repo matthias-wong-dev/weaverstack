@@ -419,10 +419,10 @@ def test_a_target_changed_in_this_build_refreshes_the_pointer_and_the_consumer(
     """The graph carries a producer's change across the shortcut in one walk.
 
     Everything on the path is built: the pointer over its own address, and the
-    consumer behind it. Refreshing the pointer in the build that moves its source
-    is what keeps this out of the catalogue instants, which cannot answer it: a
-    pointer's row never re-dates, so a rule reading them would find the same lag
-    for ever.
+    consumer behind it. The producer's declaration changed in this build, so the
+    descendant walk is what reaches them. The catalogue instants answer the other
+    half, where a producer moved in an earlier build and the repository records
+    nothing about it.
     """
 
     everything = {document_id(SOURCE), document_id(VIEW), document_id(SHORTCUT)}

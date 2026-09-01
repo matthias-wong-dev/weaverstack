@@ -355,11 +355,14 @@ class RepositoryShortcut:
         treating it as a change would replace every downstream shortcut whenever
         a table was reloaded.
 
-        A source that was rebuilt is a reason to rebuild what reads through the
-        shortcut, and no reason to remake the pointer: it stands at the same
-        address either way. That is freshness, answered by comparing build
-        datetimes in the Registry (see
-        :func:`~weaver.build_bundle.incremental.stale_through_shortcuts`).
+        A source that moved leaves the pair as it was, so the signature decides
+        only whether a pointer is replaced. Whether it is refreshed is a separate
+        question, answered by the chain ``source <= pointer <= consumer`` over
+        build datetimes in the Registry (see
+        :func:`~weaver.build_bundle.incremental.stale_through_shortcuts`). A
+        refreshed pointer is materialised again over its own address and is never
+        dropped to do it, and it is decertified and republished like any other
+        rebuilt object, which re-dates its Registry row.
         """
 
         declaration = f"{self.destination}\0{self.source}".encode("utf-8")
