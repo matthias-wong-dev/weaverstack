@@ -30,29 +30,82 @@ def test_version_reports_the_distribution(capsys):
     assert "weaverstack" in capsys.readouterr().out
 
 
-# --- one target grammar ------------------------------------------------------
+# --- one item grammar --------------------------------------------------------
 #
-# The three lifecycle verbs name logical Weaver items with a repeated
-# `--target`. `wipe` keeps physical positionals: it empties a physical resource
-# whether or not an installation exists, so it has no logical item to name.
+# The three lifecycle verbs name logical Weaver items. `load` and `test` name
+# them positionally, and `build` with a repeated `--item`, because a build's
+# positional is the repository source and a build item may carry an `=`.
+# `wipe` keeps physical positionals: it empties a physical resource whether or
+# not an installation exists, so it has no logical item to name.
 
 
-LOGICAL_TARGET_COMMANDS = ("build", "load", "test")
+LOGICAL_ITEM_COMMANDS = ("build", "load", "test")
+
+RUN_COMMANDS = ("load", "test")
 
 
-@pytest.mark.parametrize("command", LOGICAL_TARGET_COMMANDS)
+@pytest.mark.parametrize("command", RUN_COMMANDS)
 @weaver_test()
-def test_a_lifecycle_command_repeats_one_target_option(command):
-    """Build, load and test spell their targets one way.
+def test_a_run_names_its_items_positionally(command):
+    """The documented spelling. A run item is one bare ``Kind/Name`` token."""
 
-    An option rather than positionals, because a build target may carry an ``=``
-    and one repeated flag reads the same on all three verbs.
-    """
+    from weaver_cli.main import build_parser, run_items
+
+    parsed = build_parser().parse_args(
+        [command, "Lakehouse/Landing", "Warehouse/Curated"]
+    )
+
+    assert run_items(parsed) == ("Lakehouse/Landing", "Warehouse/Curated")
+
+
+@pytest.mark.parametrize("command", RUN_COMMANDS)
+@weaver_test()
+def test_a_run_names_no_item_at_all(command):
+    """Every installed item. The Weaver catalogue is what answers which."""
+
+    from weaver_cli.main import build_parser, run_items
+
+    assert run_items(build_parser().parse_args([command])) == ()
+
+
+@pytest.mark.parametrize("command", RUN_COMMANDS)
+@weaver_test()
+def test_a_run_still_accepts_the_option_spelling(command):
+    from weaver_cli.main import build_parser, run_items
+
+    parsed = build_parser().parse_args(
+        [command, "--item", "Lakehouse/Landing", "--item", "Warehouse/Curated"]
+    )
+
+    assert run_items(parsed) == ("Lakehouse/Landing", "Warehouse/Curated")
+
+
+@pytest.mark.parametrize("command", RUN_COMMANDS)
+@weaver_test()
+def test_both_run_item_spellings_are_one_selection(command):
+    """Positional first, then ``--item``: one order, whatever was typed."""
+
+    from weaver_cli.main import build_parser, run_items
+
+    written = build_parser().parse_args(
+        [command, "Lakehouse/Landing", "--item", "Warehouse/Curated"]
+    )
+    reversed_order = build_parser().parse_args(
+        [command, "--item", "Warehouse/Curated", "Lakehouse/Landing"]
+    )
+
+    assert run_items(written) == ("Lakehouse/Landing", "Warehouse/Curated")
+    assert run_items(reversed_order) == run_items(written)
+
+
+@weaver_test()
+def test_a_build_repeats_one_item_option():
+    """A build's positional is the repository, so its items stay an option."""
 
     from weaver_cli.main import build_parser
 
     parsed = build_parser().parse_args(
-        [command, "--item", "Lakehouse/Landing", "--item", "Warehouse/Curated"]
+        ["build", "--item", "Lakehouse/Landing", "--item", "Warehouse/Curated"]
     )
 
     assert parsed.items == ["Lakehouse/Landing", "Warehouse/Curated"]
@@ -101,7 +154,7 @@ def test_no_lifecycle_command_still_offers_the_old_spellings(capsys):
 
     from weaver_cli.main import build_parser
 
-    for command in LOGICAL_TARGET_COMMANDS:
+    for command in LOGICAL_ITEM_COMMANDS:
         with pytest.raises(SystemExit):
             build_parser().parse_args([command, "--targets", "Lakehouse/Landing"])
         assert "--targets" in capsys.readouterr().err

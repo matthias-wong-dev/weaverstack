@@ -281,14 +281,18 @@ def _history_path():
 
 
 def _default_workspace(args: argparse.Namespace):
-    """Return the default workspace when the invocation defines one."""
+    """Return the default workspace when the invocation defines one.
 
-    from .main import _resolve_workspace
+    An invocation that named none has none, and that is a state. An invocation
+    that named a configuration file raises the ``ConfigError`` that file
+    carries, naming the field that is wrong.
+    """
 
-    try:
-        return _resolve_workspace(args)
-    except WeaverError:
+    from .main import _resolve_workspace, workspace_supplied
+
+    if not workspace_supplied(args):
         return None
+    return _resolve_workspace(args)
 
 
 def _available(parser) -> str:

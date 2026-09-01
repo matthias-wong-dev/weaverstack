@@ -93,8 +93,11 @@ def run_composition(
     parser = parser_factory()
 
     entries, path = load_composition(args.name, file=args.file)
-    # Parse every entry before displaying a sequence for confirmation.
+    # Parse every entry, and resolve the one Workspace, before displaying a
+    # sequence for confirmation. A malformed workspace configuration is a fact
+    # about the invocation, and it is reported here.
     parsed_commands = [_parse(parser, entry) for entry in entries]
+    workspace = _composition_workspace(args, parsed_commands)
 
     _show(args.name, path, entries)
     if not getattr(args, "yes", False):
@@ -109,7 +112,6 @@ def run_composition(
             print("Composition cancelled.")
             return 0
 
-    workspace = _composition_workspace(args, parsed_commands)
     with use_or_create_session(
         getattr(args, "session", None), workspace=workspace
     ) as session:
@@ -129,7 +131,7 @@ def run_composition(
 def _composition_workspace(args, parsed_commands):
     """The one Workspace named by the composition or its commands."""
 
-    from .main import _resolve_workspace
+    from .main import _resolve_workspace, workspace_supplied
     from .shell import _default_workspace
 
     workspaces = []
@@ -137,10 +139,11 @@ def _composition_workspace(args, parsed_commands):
     if outer is not None:
         workspaces.append(outer)
     for parsed in parsed_commands:
-        try:
-            workspace = _resolve_workspace(parsed)
-        except WeaverError:
+        # An entry naming no workspace takes the composition's. One that names
+        # a configuration file raises the error that file carries.
+        if not workspace_supplied(parsed):
             continue
+        workspace = _resolve_workspace(parsed)
         if workspace not in workspaces:
             workspaces.append(workspace)
     if not workspaces:

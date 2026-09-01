@@ -13,16 +13,18 @@ from ..errors import CommandError, IdentityError
 
 
 def requested_items(
-    items: str | Sequence[str], *, what: str
+    items: str | Sequence[str] | None, *, what: str
 ) -> tuple[WeaverItemId, ...]:
     """The items one run was asked for, in the order given, deduplicated.
 
-    ``what`` is the operation's own noun, so a refusal reads in its vocabulary.
+    Naming none returns none, which a run reads as every installed item once it
+    has read the catalogue. ``what`` is the operation's own noun, so a refusal
+    reads in its vocabulary.
     """
 
-    values = (items,) if isinstance(items, str) else tuple(items or ())
-    if not values:
-        raise CommandError(f"{what} needs at least one item")
+    if items is None:
+        return ()
+    values = (items,) if isinstance(items, str) else tuple(items)
     return tuple(dict.fromkeys(parse_run_item(value, what=what) for value in values))
 
 
@@ -50,6 +52,36 @@ def parse_run_item(text: object, *, what: str) -> WeaverItemId:
         ) from None
 
 
+def run_scope(dag, items, *, what: str, catalogue: str | None = None):
+    """The items this run covers, and the physical target each one runs in.
+
+    An empty ``items`` is every installed item, resolved here because the
+    catalogue that answers it has just been read. Above this the scope is a
+    concrete tuple of item identities.
+    """
+
+    selected = tuple(items) or installed_items(dag, what=what, catalogue=catalogue)
+    return selected, installed_targets(dag, selected, catalogue=catalogue)
+
+
+def installed_items(
+    dag, *, what: str, catalogue: str | None = None
+) -> tuple[WeaverItemId, ...]:
+    """Every item the catalogue records an installation for, in identity order.
+
+    The scope comes from ``_.Installation``, so an item a workspace
+    configuration declares and no build has installed is not one of them.
+    """
+
+    items = tuple(sorted(dag.installations, key=str))
+    if not items:
+        where = f" in catalogue {catalogue}" if catalogue else ""
+        raise CommandError(
+            f"{what} found no installed items{where}. Build an item first."
+        )
+    return items
+
+
 def installed_targets(dag, items, *, catalogue: str | None = None):
     """The physical target each item is installed in, or a refusal naming the gaps.
 
@@ -75,4 +107,10 @@ def installed_targets(dag, items, *, catalogue: str | None = None):
     return installed
 
 
-__all__ = ["installed_targets", "parse_run_item", "requested_items"]
+__all__ = [
+    "installed_items",
+    "installed_targets",
+    "parse_run_item",
+    "requested_items",
+    "run_scope",
+]

@@ -21,7 +21,7 @@ from ..test_report import (
     ValidationRunReport,
     run_status,
 )
-from .items import installed_targets, requested_items
+from .items import requested_items, run_scope
 from .workspace import operation_workspace
 
 #: The task type this operation records under. Restated rather than imported, as
@@ -31,7 +31,7 @@ TASK_TYPE = "test"
 
 
 def test(
-    items: str | Sequence[str],
+    items: str | Sequence[str] | None = None,
     *,
     name: str | None = None,
     file: str | Path | None = None,
@@ -44,6 +44,9 @@ def test(
     session=None,
 ) -> ValidationRunReport:
     """Run the installed validations the named items own.
+
+    Naming no item runs every item the Weaver catalogue records an installation
+    for.
 
     ``name`` runs one installed validation and returns its diagnostic rows
     alongside its counts; ``file`` compiles and runs a source file without
@@ -59,6 +62,11 @@ def test(
         )
 
     requested = requested_items(items, what="test")
+    if file is not None and not requested:
+        raise CommandError(
+            "test file= runs one source validation against one installed item. "
+            "Name the item it runs in, as Lakehouse/Name or Warehouse/Name"
+        )
     resolved = operation_workspace(
         "test",
         workspace=workspace,
@@ -72,7 +80,8 @@ def test(
 
     with use_or_create_session(session, workspace=resolved) as opened:
         with opened.task(
-            "Test (dry run)" if dry_run else "Test", ", ".join(map(str, requested))
+            "Test (dry run)" if dry_run else "Test",
+            ", ".join(map(str, requested)) or "every installed item",
         ):
             return run_test(
                 opened,
@@ -116,8 +125,11 @@ def run_test(
             state = RunState(
                 catalogue=read_installed_catalogue(session=session, workspace=workspace)
             )
-        installed = installed_targets(
-            state.catalogue.dag(), items, catalogue=workspace.catalogue
+        # An empty scope is every installed item, resolved here as
+        # :func:`weaver.operations.load.run_load` resolves it: against the
+        # catalogue this step has just read.
+        items, installed = run_scope(
+            state.catalogue.dag(), items, what="test", catalogue=workspace.catalogue
         )
     targets = tuple(installed[item] for item in items)
 

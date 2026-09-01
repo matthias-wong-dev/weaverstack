@@ -115,15 +115,51 @@ def session(tmp_path):
 
 
 def dry_run(session, *targets, names=(), fault_tolerant=False):
+    return _dry_run(
+        session,
+        items=targets or (RAW, REPORTING),
+        names=names,
+        fault_tolerant=fault_tolerant,
+    )
+
+
+def _dry_run(session, *, items, names=(), fault_tolerant=False):
     return run_load(
         session.session,
         workspace=session.workspace,
         state=RunState(catalogue=session.catalogue),
-        items=targets or (RAW, REPORTING),
+        items=items,
         names=names,
         fault_tolerant=fault_tolerant,
         dry_run=True,
     )
+
+
+# --- the scope a run with no item covers --------------------------------------
+
+
+@weaver_test()
+def test_naming_no_item_covers_every_installed_item(session):
+    """Where ``load()`` with no argument gets its scope from.
+
+    ``_.Installation`` is the source, and it is read before anything is planned,
+    so an unscoped run and one naming both items resolve to the same DAG.
+    """
+
+    unscoped = _dry_run(session, items=())
+
+    assert unscoped.requested == ("Lakehouse/Raw", "Warehouse/Reporting")
+    assert unscoped.order == dry_run(session, RAW, REPORTING).order
+
+
+@weaver_test()
+def test_naming_an_item_leaves_the_rest_of_the_estate_alone(session):
+    """The scope is a boundary, so it is not the whole catalogue by accident."""
+
+    scoped = dry_run(session, REPORTING)
+
+    assert scoped.requested == ("Warehouse/Reporting",)
+    assert scoped.order == (SUMMARY,)
 
 
 # --- the complete physical DAG, resolved --------------------------------------

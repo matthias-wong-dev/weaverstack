@@ -830,7 +830,7 @@ run records centrally, and `_.Load`, `_.Test`, `Table.load()` and
 A load names the items it may touch:
 
 ```bash
-weaver load --item Lakehouse/Raw --item Warehouse/Curated \
+weaver load Lakehouse/Raw Warehouse/Curated \
     --workspace-config workspace.yml
 ```
 

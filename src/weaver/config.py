@@ -58,17 +58,20 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
     if "workspace" not in payload:
         raise ConfigError("Workspace configuration must define 'workspace'")
 
-    common = {
-        "workspace": payload["workspace"],
-        "environment": payload.get("environment"),
-        "catalogue": payload.get("catalogue"),
-        "execution": _execution(payload.get("execution"), where="execution"),
-        "targets": _targets(payload.get("targets")),
-    }
     try:
-        return Workspace(**common)
+        return Workspace(
+            workspace=_text(payload["workspace"], where="workspace"),
+            environment=payload.get("environment"),
+            catalogue=payload.get("catalogue"),
+            execution=_execution(payload.get("execution"), where="execution"),
+            targets=_targets(payload.get("targets")),
+        )
     except TypeError as exc:
         raise ConfigError(f"Workspace configuration is incomplete: {exc}") from exc
+    except IdentityError as exc:
+        # A name the identity rules reject, surfaced in the vocabulary of the
+        # file it was written in.
+        raise ConfigError(f"Workspace configuration is invalid: {exc}") from exc
 
 
 def resolve_workspace(
@@ -105,6 +108,18 @@ def resolve_workspace(
         "targets": configured.targets if configured is not None else {},
     }
     return Workspace(**common)
+
+
+def _text(value: Any, *, where: str) -> str:
+    """One configured scalar name, or a ConfigError naming the field.
+
+    The identity rules answer what a name may contain. This answers whether a
+    name was written at all, so the message says which key is wrong.
+    """
+
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"{where} must be a non-empty string, got {value!r}")
+    return value
 
 
 def _execution(raw: Any, *, where: str) -> ExecutionSettings:
@@ -145,7 +160,7 @@ def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
                 f"{where} is not an item identity such as Lakehouse/Landing"
             ) from exc
         if isinstance(value, str):
-            physical = value
+            physical = _text(value, where=where)
             execution = ExecutionSettings()
         elif isinstance(value, dict):
             unknown = set(value) - {"name", "execution"}
@@ -155,7 +170,7 @@ def _targets(raw: Any) -> dict[WeaverItemId, TargetDeclaration]:
                 )
             if "name" not in value:
                 raise ConfigError(f"{where} must define 'name'")
-            physical = value["name"]
+            physical = _text(value["name"], where=f"{where}.name")
             execution = _execution(value.get("execution"), where=f"{where}.execution")
         else:
             raise ConfigError(f"{where} must be a physical item name or mapping")

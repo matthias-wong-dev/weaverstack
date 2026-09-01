@@ -221,6 +221,76 @@ def test_a_lakehouse_run_requires_an_environment_before_it_dispatches(tmp_path):
         assert session.calls == []
 
 
+@weaver_test()
+def test_a_run_with_no_item_covers_every_installed_item(tmp_path):
+    """``weaver.test()`` and ``weaver test`` with no item.
+
+    The scope comes from ``_.Installation``, read before anything is planned, so
+    it is the catalogue that answers what "every item" means. A dry run, because
+    the claim is which items were selected.
+    """
+
+    from factories import (
+        ITEM,
+        installed_catalogue,
+        item_bindings,
+        lakehouse_table,
+        single_document_repository,
+    )
+
+    from weaver.operations.test import run_test
+    from weaver.run import RunState
+    from weaver.sessions.testing import TestSession
+    from weaver.workspaces import Workspace
+
+    repository = single_document_repository(
+        tmp_path / "estate",
+        documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
+    )
+    state = RunState(
+        catalogue=installed_catalogue(repository, item_bindings((ITEM, "Sales_LH")))
+    )
+    workspace = Workspace(workspace="Analytics", catalogue="Warehouse/Weaver")
+
+    with TestSession(workspace=workspace) as session:
+        unscoped = run_test(
+            session, workspace=workspace, state=state, items=(), dry_run=True
+        )
+        scoped = run_test(
+            session,
+            workspace=workspace,
+            state=state,
+            items=(WeaverItemId.parse(ITEM),),
+            dry_run=True,
+        )
+
+    assert [node.logical_id for node in unscoped.nodes] == [
+        node.logical_id for node in scoped.nodes
+    ]
+
+
+@weaver_test()
+def test_a_run_with_no_item_and_an_empty_catalogue_says_to_build_first(tmp_path):
+    from weaver.catalogue.state import Catalogue
+    from weaver.errors import CommandError
+    from weaver.operations.test import run_test
+    from weaver.run import RunState
+    from weaver.sessions.testing import TestSession
+    from weaver.workspaces import Workspace
+
+    workspace = Workspace(workspace="Analytics", catalogue="Warehouse/Weaver")
+
+    with TestSession(workspace=workspace) as session:
+        with pytest.raises(CommandError, match="found no installed items"):
+            run_test(
+                session,
+                workspace=workspace,
+                state=RunState(catalogue=Catalogue(rows={})),
+                items=(),
+                dry_run=True,
+            )
+
+
 @pytest.mark.parametrize(
     ("kind", "result_type"),
     [("Test", TestResult), ("Assumption", AssumptionResult)],

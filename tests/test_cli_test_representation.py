@@ -82,14 +82,37 @@ def _run(*args, workspace="Demo"):
 
 @weaver_test()
 def test_items_are_passed_through(captured, capsys):
+    _run("Lakehouse/Sales", "Warehouse/Reporting")
+
+    assert captured["items"] == ("Lakehouse/Sales", "Warehouse/Reporting")
+
+
+@weaver_test()
+def test_the_option_spelling_is_still_accepted(captured, capsys):
     _run("--item", "Lakehouse/Sales", "--item", "Warehouse/Reporting")
 
-    assert captured["items"] == ["Lakehouse/Sales", "Warehouse/Reporting"]
+    assert captured["items"] == ("Lakehouse/Sales", "Warehouse/Reporting")
+
+
+@weaver_test()
+def test_both_item_spellings_are_one_selection(captured, capsys):
+    _run("Lakehouse/Sales", "--item", "Warehouse/Reporting")
+
+    assert captured["items"] == ("Lakehouse/Sales", "Warehouse/Reporting")
+
+
+@weaver_test()
+def test_naming_no_item_reaches_the_api_as_no_selection(captured, capsys):
+    """Every installed item, which the Weaver catalogue answers."""
+
+    _run()
+
+    assert captured["items"] is None
 
 
 @weaver_test()
 def test_name_selects_one_installed_validation(captured, capsys):
-    _run("--item", "Lakehouse/Sales", "--name", "Sales.OrdersReconcile")
+    _run("Lakehouse/Sales", "--name", "Sales.OrdersReconcile")
 
     assert captured["name"] == "Sales.OrdersReconcile"
     assert captured["file"] is None
@@ -97,7 +120,7 @@ def test_name_selects_one_installed_validation(captured, capsys):
 
 @weaver_test()
 def test_file_runs_a_source_file(captured, capsys):
-    _run("--item", "Lakehouse/Sales", "--file", "tests/Sales.X.sql")
+    _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql")
 
     assert captured["file"] == "tests/Sales.X.sql"
     assert captured["name"] is None
@@ -108,7 +131,7 @@ def test_name_and_file_are_mutually_exclusive(capsys):
     """argparse refuses it, so no request that meant both can reach the API."""
 
     with pytest.raises(SystemExit) as exit_info:
-        _run("--item", "Lakehouse/Sales", "--name", "Sales.X", "--file", "x.sql")
+        _run("Lakehouse/Sales", "--name", "Sales.X", "--file", "x.sql")
 
     assert exit_info.value.code == 2
     assert "not allowed with" in capsys.readouterr().err
@@ -116,7 +139,7 @@ def test_name_and_file_are_mutually_exclusive(capsys):
 
 @weaver_test()
 def test_dry_run_is_passed_through(captured, capsys):
-    _run("--item", "Lakehouse/Sales", "--dry-run")
+    _run("Lakehouse/Sales", "--dry-run")
 
     assert captured["dry_run"] is True
 
@@ -126,7 +149,7 @@ def test_dry_run_is_passed_through(captured, capsys):
 
 @weaver_test()
 def test_a_passing_run_exits_zero(captured, capsys):
-    assert _run("--item", "Lakehouse/Sales") == 0
+    assert _run("Lakehouse/Sales") == 0
 
 
 @weaver_test()
@@ -143,7 +166,7 @@ def test_a_failing_run_exits_non_zero(captured, capsys):
         ),
     )
 
-    assert _run("--item", "Lakehouse/Sales") == 1
+    assert _run("Lakehouse/Sales") == 1
 
 
 @weaver_test()
@@ -160,7 +183,7 @@ def test_a_run_that_could_not_answer_exits_non_zero(captured, capsys):
         ),
     )
 
-    assert _run("--item", "Lakehouse/Sales") == 1
+    assert _run("Lakehouse/Sales") == 1
 
 
 # --- what it prints -----------------------------------------------------------
@@ -185,7 +208,7 @@ def test_the_counts_are_rendered_per_validation(captured, capsys):
             ),
         ),
     )
-    _run("--item", "Lakehouse/Sales")
+    _run("Lakehouse/Sales")
 
     printed = capsys.readouterr().out
     assert "2 missing, 1 unexpected" in printed
@@ -208,7 +231,7 @@ def test_an_invalid_validation_prints_its_error_without_counts(captured, capsys)
         ),
     )
 
-    assert _run("--item", "Lakehouse/Sales") == 1
+    assert _run("Lakehouse/Sales") == 1
 
     printed = capsys.readouterr().out
     assert "not installed" in printed
@@ -232,7 +255,7 @@ def test_a_generic_dispatch_failure_does_not_break_test_rendering(captured, caps
         ),
     )
 
-    assert _run("--item", "Lakehouse/Sales") == 1
+    assert _run("Lakehouse/Sales") == 1
 
     printed = capsys.readouterr().out
     assert "LivyError: session unavailable" in printed
@@ -253,7 +276,7 @@ def test_a_targeted_run_prints_its_evidence(captured, capsys):
             ),
         ),
     )
-    _run("--item", "Lakehouse/Sales", "--name", "Sales.OrdersReconcile")
+    _run("Lakehouse/Sales", "--name", "Sales.OrdersReconcile")
 
     printed = capsys.readouterr().out
     assert "_weaver_side" in printed
@@ -264,7 +287,7 @@ def test_a_targeted_run_prints_its_evidence(captured, capsys):
 def test_a_whole_target_run_prints_no_rows(captured, capsys):
     """There are none to print, the run never asked for them."""
 
-    _run("--item", "Lakehouse/Sales")
+    _run("Lakehouse/Sales")
 
     assert "_weaver_side" not in capsys.readouterr().out
 
@@ -282,7 +305,7 @@ def test_json_emits_the_whole_report(captured, capsys):
             ),
         ),
     )
-    _run("--item", "Lakehouse/Sales", "--json")
+    _run("Lakehouse/Sales", "--json")
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == FAILED
@@ -304,7 +327,7 @@ def test_json_carries_no_diagnostic_rows(captured, capsys):
             ),
         ),
     )
-    _run("--item", "Lakehouse/Sales", "--json")
+    _run("Lakehouse/Sales", "--json")
 
     assert "_weaver_sk" not in capsys.readouterr().out
 
@@ -322,7 +345,7 @@ def test_the_workflow_is_pointed_at(captured, capsys):
         nodes=(_node("Sales.OrdersReconcile", "Test", PASSED, TestResult()),),
         workflow_id="0f8b2c1d",
     )
-    _run("--item", "Lakehouse/Sales")
+    _run("Lakehouse/Sales")
 
     assert "Workflow: 0f8b2c1d" in capsys.readouterr().out
 
@@ -334,7 +357,7 @@ def test_the_workflow_is_pointed_at(captured, capsys):
 def test_dry_run_is_passed_through_with_file(captured, capsys):
     """`--file --dry-run` must mean what `--dry-run` means everywhere else."""
 
-    _run("--item", "Lakehouse/Sales", "--file", "tests/Sales.X.sql", "--dry-run")
+    _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql", "--dry-run")
 
     assert captured["dry_run"] is True
     assert captured["file"] == "tests/Sales.X.sql"
@@ -347,10 +370,7 @@ def test_a_planned_file_run_exits_zero(captured, capsys):
         nodes=(_node("Sales.OrdersReconcile", "Test", PLANNED),),
     )
 
-    assert (
-        _run("--item", "Lakehouse/Sales", "--file", "tests/Sales.X.sql", "--dry-run")
-        == 0
-    )
+    assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql", "--dry-run") == 0
 
 
 @weaver_test()
@@ -367,7 +387,7 @@ def test_a_failing_file_run_exits_non_zero(captured, capsys):
         ),
     )
 
-    assert _run("--item", "Lakehouse/Sales", "--file", "tests/Sales.X.sql") == 1
+    assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql") == 1
 
 
 @weaver_test()
@@ -382,7 +402,7 @@ def test_a_planned_installed_run_also_exits_zero(captured, capsys):
         ),
     )
 
-    assert _run("--item", "Lakehouse/Sales", "--dry-run") == 0
+    assert _run("Lakehouse/Sales", "--dry-run") == 0
 
 
 # --- evidence crossing the desktop-to-Fabric boundary --------------------------

@@ -23,7 +23,7 @@ from ..load_report import (
     LoadRunReport,
 )
 from ..targets import lakehouse_names
-from .items import installed_targets, requested_items
+from .items import requested_items, run_scope
 
 #: The task type this operation records under. Restated rather than imported,
 #: because this module reaches ``weaver.run`` inside the function that needs it;
@@ -33,7 +33,7 @@ TASK_TYPE = "load"
 
 
 def load(
-    items: str | Sequence[str],
+    items: str | Sequence[str] | None = None,
     *,
     names: str | Sequence[str] | None = None,
     workspace: str | None = None,
@@ -48,7 +48,8 @@ def load(
 
     ``items`` are installed Weaver items, and they are a hard execution boundary:
     with no name filter every loadable object they own runs in dependency order,
-    and a dependency never adds an unnamed item.
+    and a dependency never adds an unnamed item. Naming none loads every item the
+    Weaver catalogue records an installation for.
 
     ``names`` selects exact installed ``Schema.Object`` loadables inside those
     items. It is an operator override: only those nodes run, without dependency
@@ -85,7 +86,8 @@ def load(
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
         with opened.task(
-            "Load (dry run)" if dry_run else "Load", ", ".join(map(str, requested))
+            "Load (dry run)" if dry_run else "Load",
+            ", ".join(map(str, requested)) or "every installed item",
         ):
             return run_load(
                 opened,
@@ -134,8 +136,11 @@ def run_load(
             if state is not None
             else read_installed_catalogue(session=session, workspace=workspace)
         )
-        installed = installed_targets(
-            catalogue.dag(), items, catalogue=workspace.catalogue
+        # An empty scope is every installed item, and it is resolved here: the
+        # catalogue that answers it has just been read, and everything below
+        # takes a concrete tuple of item identities.
+        items, installed = run_scope(
+            catalogue.dag(), items, what="load", catalogue=workspace.catalogue
         )
 
     # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
