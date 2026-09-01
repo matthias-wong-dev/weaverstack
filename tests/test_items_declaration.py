@@ -199,13 +199,18 @@ def test_a_malformed_run_item_is_refused(text):
         parse_run_item(text, what="load")
 
 
+@pytest.mark.parametrize("written", [None, [], ()])
 @weaver_test()
-def test_a_run_needs_at_least_one_item():
-    from weaver.errors import CommandError
+def test_a_run_that_names_no_item_selects_none_here(written):
+    """The whole installed catalogue, and the catalogue is what answers it.
+
+    Nothing is expanded at this layer: the scope stays empty until a run has
+    read ``_.Installation``.
+    """
+
     from weaver.operations.items import requested_items
 
-    with pytest.raises(CommandError, match="load needs at least one item"):
-        requested_items([], what="load")
+    assert requested_items(written, what="load") == ()
 
 
 @weaver_test()
@@ -215,3 +220,110 @@ def test_a_repeated_run_item_is_named_once():
     assert requested_items(
         ["Lakehouse/Landing", "Lakehouse/Landing"], what="load"
     ) == requested_items(["Lakehouse/Landing"], what="load")
+
+
+# --- what an empty scope means once the catalogue has answered -----------------
+
+
+@weaver_test()
+def test_an_empty_scope_covers_every_installed_item():
+    from weaver.operations.items import run_scope
+
+    dag = _installed({"Lakehouse/Landing": "Landing_Dev", "Warehouse/Curated": "Cur"})
+
+    items, installed = run_scope(dag, (), what="load")
+
+    assert [str(item) for item in items] == ["Lakehouse/Landing", "Warehouse/Curated"]
+    assert set(installed) == set(items)
+
+
+@weaver_test()
+def test_an_explicit_scope_restricts_to_what_was_named():
+    from weaver.operations.items import requested_items, run_scope
+
+    dag = _installed({"Lakehouse/Landing": "Landing_Dev", "Warehouse/Curated": "Cur"})
+
+    items, installed = run_scope(
+        dag, requested_items("Warehouse/Curated", what="load"), what="load"
+    )
+
+    assert [str(item) for item in items] == ["Warehouse/Curated"]
+    assert [str(target) for target in installed.values()] == ["Warehouse/Cur"]
+
+
+@weaver_test()
+def test_an_empty_catalogue_says_to_build_first():
+    from weaver.errors import CommandError
+    from weaver.operations.items import run_scope
+
+    with pytest.raises(CommandError, match="found no installed items"):
+        run_scope(_installed({}), (), what="load", catalogue="Warehouse/Weaver")
+
+
+def _installed(installations: dict):
+    """An installed graph carrying nothing but its ``_.Installation`` rows."""
+
+    from types import SimpleNamespace
+
+    from weaver.declaration.model import LAKEHOUSE, WeaverItemId
+    from weaver.targets import (
+        LAKEHOUSE_TARGET,
+        WAREHOUSE_TARGET,
+        PhysicalTargetRef,
+    )
+
+    def ref(item, name):
+        kind = LAKEHOUSE_TARGET if item.item_type == LAKEHOUSE else WAREHOUSE_TARGET
+        return PhysicalTargetRef(kind=kind, name=name)
+
+    parsed = {WeaverItemId.parse(item): name for item, name in installations.items()}
+    return SimpleNamespace(
+        installations={item: ref(item, name) for item, name in parsed.items()}
+    )
+
+
+# --- what the notebook API accepts --------------------------------------------
+#
+# One item, several, or none. The same three spellings the command line has, so a
+# notebook and a terminal select the same way.
+
+
+@pytest.mark.parametrize(
+    ("written", "selected"),
+    [
+        (None, ()),
+        ("Lakehouse/Landing", ("Lakehouse/Landing",)),
+        (
+            ["Lakehouse/Landing", "Warehouse/Curated"],
+            ("Lakehouse/Landing", "Warehouse/Curated"),
+        ),
+    ],
+)
+@pytest.mark.parametrize("operation", ["load", "test"])
+@weaver_test()
+def test_the_api_takes_one_item_a_sequence_or_none(
+    operation, written, selected, monkeypatch
+):
+    """Every spelling reaches the run as a tuple of item identities.
+
+    Recorded at the orchestration seam, because what is under test is the
+    selection contract. Where an empty selection expands to is proved against a
+    catalogue in ``tests/targeted/test_load_dry_run_cycle.py``.
+    """
+
+    import importlib
+
+    from support.sessions import given_session
+    from support.workspaces import given_workspace
+
+    module = importlib.import_module(f"weaver.operations.{operation}")
+    seen = []
+    monkeypatch.setattr(
+        module, f"run_{operation}", lambda session, **asked: seen.append(asked["items"])
+    )
+
+    workspace = given_workspace()
+    with given_session(workspace=workspace) as session:
+        getattr(module, operation)(written, session=session)
+
+    assert [tuple(str(item) for item in items) for items in seen] == [selected]

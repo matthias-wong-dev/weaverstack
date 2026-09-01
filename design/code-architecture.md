@@ -80,8 +80,9 @@ Commands say up front what they will need, coarsely, and the Session starts thos
 in the background:
 
 ```text
-weaver load --item Warehouse/Reporting   → auth, resolver, tds
-weaver load --item Lakehouse/Sales       → auth, resolver, tds, onelake, livy
+weaver load Warehouse/Reporting   → auth, resolver, tds
+weaver load Lakehouse/Sales       → auth, resolver, tds, onelake, livy
+weaver load                       → auth, resolver, tds, onelake, livy
 ```
 
 Commands declare the capabilities they may need. Preparation starts them in the

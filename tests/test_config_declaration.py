@@ -164,3 +164,135 @@ def test_parallel_workers_must_be_positive():
 def test_missing_file_is_reported(tmp_path: Path):
     with pytest.raises(ConfigError, match="not found"):
         load_workspace(tmp_path / "absent.yml")
+
+
+# --- what a configuration file must and need not say --------------------------
+#
+# One required key, and every optional structure validated where it is written.
+# The parser is the schema, and a malformed file is refused with a ConfigError
+# naming the field it was written under.
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"workspace": "Analytics"},
+        {"workspace": "Analytics", "catalogue": "Warehouse/Weaver"},
+        {"workspace": "Analytics", "targets": {}},
+        {"workspace": "Analytics", "catalogue": "Warehouse/Weaver", "targets": {}},
+    ],
+    ids=["workspace only", "with catalogue", "empty targets", "both"],
+)
+@weaver_test()
+def test_targets_are_optional(payload):
+    """A workspace that installs into items of its own name needs no mapping."""
+
+    workspace = parse_workspace(payload)
+
+    assert workspace.workspace == "Analytics"
+    assert workspace.targets == {}
+
+
+@weaver_test()
+def test_an_absent_targets_key_and_an_empty_one_are_the_same_configuration():
+    assert (
+        parse_workspace({"workspace": "Analytics"}).targets
+        == parse_workspace({"workspace": "Analytics", "targets": {}}).targets
+    )
+
+
+@pytest.mark.parametrize(
+    ("payload", "named"),
+    [
+        ({"workspace": "Analytics", "targtes": {}}, "targtes"),
+        (
+            {"workspace": "Analytics", "execution": {"paralell_workers": 2}},
+            "paralell_workers",
+        ),
+        (
+            {
+                "workspace": "Analytics",
+                "targets": {"Lakehouse/Landing": {"name": "L", "exec": {}}},
+            },
+            "exec",
+        ),
+        (
+            {
+                "workspace": "Analytics",
+                "targets": {
+                    "Lakehouse/Landing": {
+                        "name": "L",
+                        "execution": {"workers": 2},
+                    }
+                },
+            },
+            "workers",
+        ),
+    ],
+    ids=["top level", "execution", "target declaration", "target execution"],
+)
+@weaver_test()
+def test_an_unknown_key_is_refused_by_name(payload, named):
+    with pytest.raises(ConfigError, match=named):
+        parse_workspace(payload)
+
+
+@pytest.mark.parametrize(
+    ("payload", "named"),
+    [
+        (["workspace: Analytics"], "must be a mapping"),
+        ({"workspace": {"name": "Analytics"}}, "workspace"),
+        ({"workspace": ""}, "workspace"),
+        ({"workspace": "Analytics", "execution": 4}, "execution"),
+        (
+            {"workspace": "Analytics", "execution": {"parallel_workers": "many"}},
+            "parallel_workers",
+        ),
+        ({"workspace": "Analytics", "targets": ["Lakehouse/Landing"]}, "targets"),
+        ({"workspace": "Analytics", "targets": {"Lakehouse/Landing": None}}, "targets"),
+        ({"workspace": "Analytics", "targets": {"Lakehouse/Landing": 7}}, "targets"),
+        ({"workspace": "Analytics", "targets": {"Lakehouse/Landing": {}}}, "name"),
+        (
+            {"workspace": "Analytics", "targets": {"Lakehouse/Landing": {"name": 7}}},
+            "name",
+        ),
+        ({"workspace": "Analytics", "environment": 7}, "environment"),
+        ({"workspace": "Analytics", "environment": "A/B/C"}, "environment"),
+        ({"workspace": "Analytics", "catalogue": "Weaver"}, "catalogue"),
+        ({"workspace": "Analytics", "catalogue": "Lakehouse/Weaver"}, "catalogue"),
+    ],
+    ids=[
+        "top level is a list",
+        "workspace is a mapping",
+        "workspace is empty",
+        "execution is a scalar",
+        "parallel_workers is text",
+        "targets is a list",
+        "target value is empty",
+        "target value is a number",
+        "target mapping names nothing",
+        "target name is a number",
+        "environment is a number",
+        "environment is three parts",
+        "catalogue carries no kind",
+        "catalogue names a Lakehouse",
+    ],
+)
+@weaver_test()
+def test_a_malformed_value_is_refused_saying_which_field(payload, named):
+    with pytest.raises(ConfigError, match=named):
+        parse_workspace(payload)
+
+
+@weaver_test()
+def test_an_illegal_physical_name_is_a_configuration_error():
+    """The identity rules answer what a name may contain.
+
+    Reported as a configuration error, because a configuration file is what the
+    reader has to change.
+    """
+
+    with pytest.raises(ConfigError, match="Landing/Dev"):
+        parse_workspace(
+            {"workspace": "Analytics", "targets": {"Lakehouse/Landing": "Landing/Dev"}}
+        )

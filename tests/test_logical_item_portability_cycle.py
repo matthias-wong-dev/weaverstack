@@ -47,9 +47,19 @@ targets:
 #: The sequence a developer types, identical apart from the config it selects.
 SEQUENCE = (
     "build ./repository --item {item} --workspace-config {config}",
-    "load --item {item} --workspace-config {config}",
-    "test --item {item} --workspace-config {config}",
+    "load {item} --workspace-config {config}",
+    "test {item} --workspace-config {config}",
 )
+
+
+def _scope(parsed) -> tuple[str, ...]:
+    """The logical items one parsed command line names, whichever verb it is."""
+
+    from weaver_cli.main import run_items
+
+    if parsed.command == "build":
+        return tuple(parsed.items or ())
+    return run_items(parsed)
 
 
 class Halt(Exception):
@@ -482,8 +492,10 @@ def test_one_composition_serves_both_environments(tmp_path):
         ]
 
     for dev, prod in zip(parsed["dev"], parsed["prod"], strict=True):
-        # The same logical scope, verb by verb.
-        assert dev.items == prod.items == [ITEM]
+        # The same logical scope, verb by verb. A build names its items with an
+        # option, because its positional is the repository source; a run names
+        # them positionally.
+        assert _scope(dev) == _scope(prod) == (ITEM,)
         # And the only difference between the two lines.
         assert dev.workspace_config != prod.workspace_config
 

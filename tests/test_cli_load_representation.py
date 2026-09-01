@@ -93,7 +93,7 @@ def _report(
 
 
 def _command(*args: str) -> list[str]:
-    return ["load", "--item", "Lakehouse/Sales", "--workspace", "Demo", *args]
+    return ["load", "Lakehouse/Sales", "--workspace", "Demo", *args]
 
 
 # --- the options the contract names -------------------------------------------
@@ -105,7 +105,6 @@ def test_the_command_exposes_every_option_the_contract_names():
     load = parser.parse_args(
         [
             "load",
-            "--item",
             "Lakehouse/Sales",
             "--workspace",
             "My Workspace",
@@ -132,41 +131,25 @@ def test_the_command_exposes_every_option_the_contract_names():
 
 
 @weaver_test()
-def test_more_than_one_target_is_one_request():
+def test_more_than_one_item_is_one_request():
     parser = build_parser()
 
-    load = parser.parse_args(
-        ["load", "--item", "Lakehouse/Sales", "--item", "Warehouse/Reporting"]
-    )
+    load = parser.parse_args(["load", "Lakehouse/Sales", "Warehouse/Reporting"])
 
     assert load.items == ["Lakehouse/Sales", "Warehouse/Reporting"]
 
 
 @weaver_test()
-def test_items_are_required():
-    """Core's claim, so a notebook call refuses the way a command line does."""
+def test_naming_no_item_reaches_the_api_as_no_selection(recorded):
+    """Every installed item, and the catalogue is what says which those are.
 
-    from weaver.errors import CommandError
-    from weaver.operations.load import load as load_operation
-
-    with pytest.raises(CommandError, match="load needs at least one item"):
-        load_operation([], workspace="Demo")
-
-
-@pytest.mark.parametrize("command", ["load", "test"])
-@weaver_test()
-def test_naming_no_item_is_a_weaver_sentence(command, capsys):
-    """argparse gives ``None`` for a repeated option nobody wrote.
-
-    Building a list from it in the CLI turned that into a TypeError traceback.
+    The CLI passes no scope, so ``None means all`` is read in one place, after
+    the catalogue has been read.
     """
 
-    exit_code = main(
-        [command, "--workspace", "Demo", "--catalogue", "Warehouse/Weaver"]
-    )
+    main(["load", "--workspace", "Demo", "--catalogue", "Warehouse/Weaver"])
 
-    assert exit_code == 1
-    assert f"{command} needs at least one item" in capsys.readouterr().err
+    assert recorded[0]["items"] is None
 
 
 # --- what reaches the API -----------------------------------------------------
@@ -176,7 +159,23 @@ def test_naming_no_item_is_a_weaver_sentence(command, capsys):
 def test_the_items_reach_the_api_as_written(recorded):
     main(_command())
 
-    assert recorded[0]["items"] == ["Lakehouse/Sales"]
+    assert recorded[0]["items"] == ("Lakehouse/Sales",)
+
+
+@weaver_test()
+def test_both_item_spellings_reach_the_api_as_one_selection(recorded):
+    main(
+        [
+            "load",
+            "Lakehouse/Sales",
+            "--item",
+            "Warehouse/Reporting",
+            "--workspace",
+            "Demo",
+        ]
+    )
+
+    assert recorded[0]["items"] == ("Lakehouse/Sales", "Warehouse/Reporting")
 
 
 @weaver_test()
@@ -232,7 +231,7 @@ def test_workspace_configuration_is_still_supported(recorded, tmp_path):
         encoding="utf-8",
     )
 
-    main(["load", "--item", "Lakehouse/Sales", "--workspace-config", str(config)])
+    main(["load", "Lakehouse/Sales", "--workspace-config", str(config)])
 
     assert recorded[0]["session"].workspace.catalogue == "Warehouse/Configured"
 
@@ -248,7 +247,6 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
     main(
         [
             "load",
-            "--item",
             "Lakehouse/Sales",
             "--workspace-config",
             str(config),
@@ -262,7 +260,7 @@ def test_an_explicit_argument_overrides_the_configured_value(recorded, tmp_path)
 
 @weaver_test()
 def test_naming_no_workspace_at_all_fails_saying_which_value_is_missing(capsys):
-    exit_code = main(["load", "--item", "Lakehouse/Sales"])
+    exit_code = main(["load", "Lakehouse/Sales"])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -563,7 +561,6 @@ def livy(monkeypatch):
 def _fabric(*args: str) -> list[str]:
     return [
         "load",
-        "--item",
         "Lakehouse/Sales",
         "--workspace",
         "My Workspace",

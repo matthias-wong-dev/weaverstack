@@ -88,7 +88,7 @@ def health(
     """
 
     started = datetime.now(timezone.utc)
-    requested = () if items is None else requested_items(items, what="health")
+    requested = requested_items(items, what="health")
     resolved = operation_workspace(
         "health",
         workspace=workspace,

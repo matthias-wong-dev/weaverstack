@@ -64,17 +64,42 @@ def _kind_requirements(values) -> set[str]:
     return wanted
 
 
+def run_items(parsed) -> tuple[str, ...]:
+    """The items one ``load`` or ``test`` names, positional first then ``--item``.
+
+    Two spellings of one selection: the positional form is what a command line
+    and a composition entry are written in, and ``--item`` is the older one. Both
+    reach core, which parses and deduplicates them.
+    """
+
+    return tuple(getattr(parsed, "items", None) or ()) + tuple(
+        getattr(parsed, "extra_items", None) or ()
+    )
+
+
 def _requires_run(args) -> frozenset[str]:
     """What a load or test will want, from the items it names.
 
     TDS always, because a run reads the catalogue before any Spark work.
+
+    Naming no item is every installed item, and which kinds those are is the
+    catalogue's answer, read after this. So an unscoped run declares the
+    superset.
     """
 
-    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
-
-    return requirements(
-        AUTH, RESOLVER, TDS, *_kind_requirements(getattr(args, "items", ()))
+    from weaver.sessions.requirements import (
+        AUTH,
+        LIVY,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
     )
+
+    items = run_items(args)
+    if not items:
+        return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+    return requirements(AUTH, RESOLVER, TDS, *_kind_requirements(items))
 
 
 def _requires_build(args) -> frozenset[str]:
@@ -323,14 +348,20 @@ def build_parser() -> argparse.ArgumentParser:
         "load", help="Load the installed objects named items own."
     )
     load.add_argument(
-        "--item",
-        dest="items",
-        action="append",
+        "items",
+        nargs="*",
         metavar="ITEM",
         help=(
-            "Weaver item to load, as Lakehouse/Name or Warehouse/Name. "
-            "Repeat to select more than one."
+            "Weaver items to load, as Lakehouse/Name or Warehouse/Name. "
+            "Naming none loads every installed item."
         ),
+    )
+    load.add_argument(
+        "--item",
+        dest="extra_items",
+        action="append",
+        metavar="ITEM",
+        help="Weaver item to load. The older spelling of a positional item.",
     )
     load.add_argument(
         "--target",
@@ -363,14 +394,20 @@ def build_parser() -> argparse.ArgumentParser:
         "test", help="Run the installed Tests and Assumptions named items own."
     )
     validate.add_argument(
-        "--item",
-        dest="items",
-        action="append",
+        "items",
+        nargs="*",
         metavar="ITEM",
         help=(
-            "Weaver item to validate, as Lakehouse/Name or "
-            "Warehouse/Name. Repeat to select more than one."
+            "Weaver items to validate, as Lakehouse/Name or Warehouse/Name. "
+            "Naming none validates every installed item."
         ),
+    )
+    validate.add_argument(
+        "--item",
+        dest="extra_items",
+        action="append",
+        metavar="ITEM",
+        help="Weaver item to validate. The older spelling of a positional item.",
     )
     validate.add_argument(
         "--target",
@@ -764,6 +801,23 @@ def _desktop_store(workspace):
     return OneLakeDfsClient()
 
 
+def workspace_supplied(args: argparse.Namespace) -> bool:
+    """Whether this invocation names a workspace at all.
+
+    Absence and invalidity are separate answers. A command line that named
+    neither ``--workspace`` nor ``--workspace-config``, and inherited no
+    Session, has no workspace, and a caller that can proceed without one
+    proceeds. Asking this before resolving one is what keeps the two apart:
+    :func:`_resolve_workspace` raises a ``ConfigError`` for both.
+    """
+
+    return bool(
+        getattr(args, "workspace", None)
+        or getattr(args, "workspace_config", None)
+        or getattr(getattr(args, "session", None), "workspace", None)
+    )
+
+
 def _resolve_workspace(args: argparse.Namespace):
     """The workspace this command line means.
 
@@ -1070,7 +1124,7 @@ def _load_once(args: argparse.Namespace) -> int:
     try:
         report = _run_load(
             workspace,
-            items=args.items,
+            items=run_items(args) or None,
             names=args.names,
             fault_tolerant=args.fault_tolerant,
             dry_run=args.dry_run,
@@ -1168,7 +1222,7 @@ def _test_once(args: argparse.Namespace) -> int:
     try:
         report = _run_test(
             workspace,
-            items=args.items,
+            items=run_items(args) or None,
             name=args.name,
             file=args.file,
             dry_run=args.dry_run,

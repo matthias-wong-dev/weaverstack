@@ -64,6 +64,33 @@ the same grammar.
 See [`examples/weaver_example.yml`](../examples/weaver_example.yml) for the
 expanded form, including per-item execution settings.
 
+**`workspace:` is the one required key.** This is a complete configuration:
+
+```yaml
+workspace: Analytics
+catalogue: Warehouse/Weaver
+```
+
+`targets:` may be absent or empty, and a workspace whose items deploy to Fabric
+items of their own name needs none. `load` and `test` read `_.Installation`, so
+an installed estate runs without one.
+
+Every other key is validated where it is written. An unknown top-level key, an
+unknown key inside `execution:` or a target declaration, and a value of the wrong
+shape are each refused with a configuration error naming the field:
+
+```text
+Workspace configuration has unknown keys: targtes
+targets['Lakehouse/Sales'] has unknown keys: exec
+execution has unknown keys: paralell_workers
+targets['Lakehouse/Sales'].name must be a non-empty string, got 7
+```
+
+**A named configuration that cannot be read is an error, not an absent
+workspace.** `--workspace-config bad.yml` reports the key that is wrong. Naming
+no workspace at all is a state, and a command or composition that can proceed
+without one proceeds.
+
 ## Session
 
 A one-shot command pays for a credential, item resolution and, for anything
@@ -83,8 +110,8 @@ Commands are written as they are in a terminal; the leading `weaver` is optional
 
 weaver> wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev --yes
 weaver> build . --item Lakehouse/Sales
-weaver> weaver load --item Lakehouse/Sales --item Warehouse/Reporting
-weaver> weaver test --item Lakehouse/Sales
+weaver> weaver load Lakehouse/Sales Warehouse/Reporting
+weaver> weaver test Lakehouse/Sales
 weaver> compose all
 weaver> exit
 ```
@@ -114,8 +141,8 @@ refused, because a Weaver command line is not run by a shell.
 
 ```text
 weaver build ./repository --item Lakehouse/Sales
-weaver load --item Lakehouse/Sales --item Warehouse/Reporting
-weaver test --item Lakehouse/Sales
+weaver load Lakehouse/Sales Warehouse/Reporting
+weaver test Lakehouse/Sales
 ```
 
 They run in order in the one session. Blank lines and lines beginning with `#`
@@ -136,7 +163,7 @@ targets are the command's:
 
 ```text
 weaver session --workspace "Weaver Example" --environment weaver
-weaver> weaver load --item Lakehouse/Sales --item Warehouse/Reporting --catalogue Warehouse/Curated
+weaver> weaver load Lakehouse/Sales Warehouse/Reporting --catalogue Warehouse/Curated
 ```
 
 That load reads `Warehouse/Curated`, in `Weaver Example`, with the Environment
@@ -242,9 +269,10 @@ arguments — `auth`, `resolver`, `onelake`, `tds`, `livy` — and the Session
 starts exactly those, in the background, before the command wants them:
 
 ```text
-weaver load --item Warehouse/Reporting   → auth, resolver, tds
-weaver load --item Lakehouse/Sales       → auth, resolver, tds, onelake, livy
-weaver build ./repository         → auth, resolver, onelake, livy, tds
+weaver load Warehouse/Reporting          → auth, resolver, tds
+weaver load Lakehouse/Sales              → auth, resolver, tds, onelake, livy
+weaver load                              → auth, resolver, tds, onelake, livy
+weaver build ./repository                → auth, resolver, onelake, livy, tds
 weaver health                            → auth, resolver, tds, onelake
 weaver health --item Warehouse/Reporting → auth, resolver, tds
 ```
@@ -307,8 +335,8 @@ compose:
   dev:
     - wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev
     - build ./repository --item Lakehouse/Sales --item Warehouse/Reporting
-    - load --item Lakehouse/Sales --item Warehouse/Reporting
-    - test --item Lakehouse/Sales --item Warehouse/Reporting
+    - load Lakehouse/Sales Warehouse/Reporting
+    - test Lakehouse/Sales Warehouse/Reporting
 ```
 
 ```bash
@@ -324,8 +352,8 @@ Compose: dev  (compose.yml)
 
 1. wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev
 2. build ./repository --item Lakehouse/Sales --item Warehouse/Reporting
-3. load --item Lakehouse/Sales --item Warehouse/Reporting
-4. test --item Lakehouse/Sales --item Warehouse/Reporting
+3. load Lakehouse/Sales Warehouse/Reporting
+4. test Lakehouse/Sales Warehouse/Reporting
 
 Execute this sequence? [y/N]
 ```
@@ -402,8 +430,8 @@ physical half comes from:
 | Operation | Caller names | Physical source |
 |---|---|---|
 | build | item, `--item` | an explicit `ITEM=TARGET`, or `targets:` in workspace configuration |
-| load | item, `--item` | the catalogue's `_.Installation` |
-| test | item, `--item` | the catalogue's `_.Installation` |
+| load | item, positional, or every installed item | the catalogue's `_.Installation` |
+| test | item, positional, or every installed item | the catalogue's `_.Installation` |
 | health | item, `--item`, or the whole estate | the catalogue's `_.Installation` |
 | wipe | target, positional | the caller |
 | unbind | target, positional | the caller |
@@ -413,6 +441,28 @@ A build establishes the installation, so it is the one operation that names both
 halves. Once an item is built the catalogue is authoritative: a load, test or
 health item carrying `=` is refused, and workspace configuration is not consulted
 for it either.
+
+`load` and `test` name their items positionally, and `build` with a repeated
+`--item`, because a build's positional argument is the repository source and a
+build item may carry an `=`. `--item` still selects a run item, so a line written
+either way runs:
+
+```bash
+weaver load Warehouse/Reporting
+weaver load Lakehouse/Sales Warehouse/Reporting
+weaver load --item Warehouse/Reporting
+weaver load Lakehouse/Sales --item Warehouse/Reporting
+```
+
+**A run naming no item covers every installed item.** `weaver load` and
+`weaver test` on their own run the whole estate, and the scope comes from
+`_.Installation`. An item a workspace configuration declares and no build has
+installed is not in it. An estate with no installation at all says so and names
+the catalogue it read.
+
+Because the item kinds are the catalogue's answer and are read after the command
+line, an unscoped run declares the superset of resources it may want: `auth`,
+`resolver`, `tds`, `onelake` and `livy`.
 
 `wipe` and `unbind` address a Fabric item whether or not an installation exists,
 so they name a target and have no item to resolve.
@@ -428,9 +478,9 @@ configuration:
 ```bash
 weaver build ./estate --item Lakehouse/Sales --item Warehouse/Reporting \
   --workspace-config dev.yml
-weaver load  --item Lakehouse/Sales --item Warehouse/Reporting \
+weaver load Lakehouse/Sales Warehouse/Reporting \
   --workspace-config dev.yml
-weaver test  --item Lakehouse/Sales --item Warehouse/Reporting \
+weaver test Lakehouse/Sales Warehouse/Reporting \
   --workspace-config dev.yml
 ```
 
@@ -492,7 +542,7 @@ for `weaver build`, which always checks source itself.
 Run the installed Tests and Assumptions the named items own:
 
 ```bash
-weaver test --item Lakehouse/Sales --workspace-config examples/weaver_example.yml
+weaver test Lakehouse/Sales --workspace-config examples/weaver_example.yml
 ```
 
 The exit code is the verdict — non-zero when anything failed or could not be
@@ -507,7 +557,7 @@ validations are counted without collecting.
 Name one to see the rows:
 
 ```bash
-weaver test --item Lakehouse/Sales --name Sales.OrderSummaryReconciliation
+weaver test Lakehouse/Sales --name Sales.OrderSummaryReconciliation
 ```
 
 The counts and the rows come from **one** execution. A Test run twice would
@@ -517,7 +567,7 @@ over.
 Run a validation that has not been built:
 
 ```bash
-weaver test --item Lakehouse/Sales --file tests/Sales.OrderSummaryReconciliation.sql
+weaver test Lakehouse/Sales --file tests/Sales.OrderSummaryReconciliation.sql
 ```
 
 The item names the installed environment the source validation runs against.

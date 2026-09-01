@@ -18,7 +18,7 @@ from contextlib import contextmanager, nullcontext
 import pytest
 from support.weaver_test import weaver_test
 
-from weaver.errors import CommandError
+from weaver.errors import CommandError, ConfigError
 from weaver_cli.compose import (
     _parse,
     composition_words,
@@ -39,15 +39,15 @@ compose:
   dev:
     - weaver wipe Lakehouse/Sales_LH Warehouse/Curated_WH
     - weaver build ./repository --item Lakehouse/Sales=Lakehouse/Sales_LH
-    - weaver load --item Warehouse/Curated
-    - weaver test --item Warehouse/Curated
+    - weaver load Warehouse/Curated
+    - weaver test Warehouse/Curated
 """
 
 RUNS = """\
 compose:
   verify:
-    - weaver load --item Warehouse/Curated
-    - weaver test --item Warehouse/Curated
+    - weaver load Warehouse/Curated
+    - weaver test Warehouse/Curated
 """
 
 
@@ -132,9 +132,8 @@ def test_an_empty_composition_is_refused(tmp_path):
 
 @weaver_test()
 def test_an_entry_is_a_weaver_command_line():
-    assert composition_words("weaver load --item Lakehouse/Sales") == [
+    assert composition_words("weaver load Lakehouse/Sales") == [
         "load",
-        "--item",
         "Lakehouse/Sales",
     ]
 
@@ -147,9 +146,8 @@ def test_the_weaver_prefix_is_optional():
     line written for the file need not.
     """
 
-    assert composition_words("load --item Lakehouse/Sales") == [
+    assert composition_words("load Lakehouse/Sales") == [
         "load",
-        "--item",
         "Lakehouse/Sales",
     ]
 
@@ -284,6 +282,66 @@ def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):
     assert status == 0
     assert not calls
     assert "Composition cancelled." in capsys.readouterr().out
+
+
+# --- an invalid workspace configuration ---------------------------------------
+#
+# Absence is state and invalidity is an error. A composition that names no
+# workspace runs against whatever its commands name. One that names a
+# configuration file Weaver cannot read says which key is wrong, before it
+# displays a sequence and before any command runs.
+
+
+@weaver_test()
+def test_a_malformed_workspace_configuration_is_reported_as_written(
+    tmp_path, recorded, capsys
+):
+    """The bug this replaces: a swallowed ConfigError became "no workspace".
+
+    ``_composition_workspace`` caught every :class:`WeaverError` to find out
+    whether a command had named a workspace, so a misspelled key resolved to
+    nothing and the composition failed further in, saying a workspace was
+    required.
+    """
+
+    calls, parser_factory, _ = recorded
+    config = tmp_path / "workspace.yml"
+    config.write_text(
+        "workspace: Demo\ntargtes:\n  Warehouse/Curated: Curated\n",
+        encoding="utf-8",
+    )
+    path = _write(
+        tmp_path,
+        "compose:\n  full:\n"
+        f'    - load Warehouse/Curated --workspace-config "{config}"\n',
+    )
+
+    with pytest.raises(ConfigError) as raised:
+        run_composition(
+            _Args("full", file=str(path), yes=True), parser_factory=parser_factory
+        )
+
+    assert "targtes" in str(raised.value)
+    assert "A Workspace is required" not in str(raised.value)
+    assert not calls, "a command ran against a configuration nothing could read"
+    assert "Compose: full" not in capsys.readouterr().out
+
+
+@weaver_test()
+def test_a_composition_with_no_workspace_configuration_still_runs(
+    tmp_path, recorded, capsys
+):
+    """The other half. Naming no workspace leaves the composition without one."""
+
+    calls, parser_factory, _ = recorded
+    path = _write(tmp_path, RUNS)
+
+    status = run_composition(
+        _Args("verify", file=str(path), yes=True), parser_factory=parser_factory
+    )
+
+    assert status == 0
+    assert [parsed.command for parsed in calls] == ["load", "test"]
 
 
 @weaver_test()
