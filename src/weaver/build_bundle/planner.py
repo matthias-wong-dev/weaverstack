@@ -52,7 +52,7 @@ from .catalogue_actions import (
 from .documents import lakehouse_build_stages, warehouse_build_stages
 from .drops import lakehouse_drop_stages, warehouse_drop_stages
 from .endpoints import lakehouse_endpoint_refresh_stage
-from .incremental import select_build, stale_shortcut_consumers
+from .incremental import select_build, stale_through_shortcuts
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
@@ -63,7 +63,7 @@ from .runtime_tables import (
 from .schemas import lakehouse_schema_stage, warehouse_schema_stage
 from .shortcuts import plan_lakehouse_shortcuts, plan_warehouse_shortcuts
 from .stages import PlannedStage, enumerate_stages, merge_layer_stages
-from .targets import ItemBindings, WarehouseBinding
+from .targets import BoundTarget, ItemBindings, WarehouseBinding
 
 
 def generate_item_build_bundle(
@@ -132,7 +132,7 @@ def generate_item_build_bundle(
 
     # Freshness is read before ``registered`` is narrowed, because the whole
     # point is to compare against an item this build does not include.
-    stale_consumers = stale_shortcut_consumers(
+    stale_consumers = stale_through_shortcuts(
         repository, catalogue.registered, bound_items=by_item
     )
     registered = {
@@ -156,24 +156,45 @@ def generate_item_build_bundle(
         targets = targets + (catalogue_target,)
     from ..catalogue.builtin import BUILTIN_ITEM
 
-    shortcut_target_by_item = dict(target_by_item)
+    # A logical shortcut may name a producer this build does not include. Where
+    # it does, the producer's own `_.Installation` row says where it already is,
+    # so the build binding is layered over the installed one and a downstream
+    # item stays independently rebuildable.
+    installed_sources = installed_shortcut_sources(
+        repository,
+        catalogue,
+        build_bindings=by_item,
+        workspace_of=catalogue_target,
+    )
+    shortcut_target_by_item = {**installed_sources, **target_by_item}
     shortcut_target_by_item.setdefault(BUILTIN_ITEM, catalogue_target)
+    # Declared, because the installer resolves a shortcut's frozen source by the
+    # target id the plan names.
+    declared_ids = {target.id for target in targets}
+    targets = targets + tuple(
+        source for source in installed_sources.values() if source.id not in declared_ids
+    )
 
     stages: list[PlannedStage] = []
     omitted: list[OmittedNode] = []
 
+    # Everything this build rebuilds, not only what it drops. Certification is
+    # per object and returns after the object builds, so a pointer refreshed
+    # over its own address is decertified here like any other rebuilt object.
+    # That is also what re-dates its Registry row: ``build_datetime`` is
+    # supplied on insert, so a row that is never deleted keeps the datetime of
+    # the build that last inserted it.
+    decertified = removed | selected_for_build
     # Collected once and used twice. These rows are deleted before any physical
     # work, so publication compares against the catalogue without them. An object
     # dropped and rebuilt whose projection did not change would otherwise
     # compare equal, produce no merge, and stay deleted.
-    deleted_claims = collect_claims(
-        catalogue, removed | selected_for_drop, stale_claims=stale_claims
-    )
+    deleted_claims = collect_claims(catalogue, decertified, stale_claims=stale_claims)
     catalogue_after_deletions = without_claims(catalogue, deleted_claims)
 
     catalogue_before = render_catalogue_before_build(
         catalogue,
-        removed | selected_for_drop,
+        decertified,
         catalogue_target=catalogue_target,
         stale_claims=stale_claims,
     )
@@ -521,6 +542,12 @@ def _plan_item(
             target=target,
             inventory=inventory,
             registered=registered,
+            reused_names=pointers_whose_name_is_reused(
+                selected_for_drop,
+                selected_for_build,
+                selected_shortcuts,
+                registered,
+            ),
         )
     )
     schemas = schema_planner(
@@ -570,6 +597,32 @@ def _plan_item(
     )
 
 
+def pointers_whose_name_is_reused(
+    selected_for_drop, selected_for_build, selected_shortcuts, registered: Mapping
+):
+    """Pointers this plan removes and then gives to an owned object.
+
+    The narrow case Fabric needs time for. A shortcut comes off through the
+    shortcut API and Fabric stops listing it at once, while OneLake keeps its
+    namespace reserved for a while longer, so an owned object created at that
+    name finds it occupied.
+
+    Three conditions, and all of them are needed. The identity is installed as a
+    pointer, this plan drops it, and this plan builds something owned at the same
+    name. A pointer replaced by another pointer is not here: it is materialised
+    over itself and never released, so nothing waits for it.
+    """
+
+    return {
+        identity
+        for identity in selected_for_drop
+        if identity in selected_for_build
+        and identity not in selected_shortcuts
+        and (document := registered.get(identity)) is not None
+        and document.object_role == ROLE_SHORTCUT
+    }
+
+
 def _retained_pointers(selected_shortcuts, registered: Mapping) -> set:
     """Shortcut destinations a drop leaves alone, being pointers already.
 
@@ -594,6 +647,47 @@ def _retained_pointers(selected_shortcuts, registered: Mapping) -> set:
         if document is None or document.object_role == ROLE_SHORTCUT:
             retained.add(identity)
     return retained
+
+
+def installed_shortcut_sources(
+    repository: WeaverRepository,
+    catalogue: Catalogue,
+    *,
+    build_bindings: Mapping[WeaverItemId, object],
+    workspace_of: BoundTarget,
+) -> dict[WeaverItemId, BoundTarget]:
+    """Where a logical shortcut's source already lives, for items outside this build.
+
+    A build binding wins; otherwise ``_.Installation`` says where the item is.
+    An installed-only target is referenceable and is not a writable build
+    target. Only the items a selected logical shortcut names are resolved.
+    """
+
+    from ..installed import installed_targets
+
+    wanted = {
+        shortcut.source.item
+        for shortcut in repository.logical_shortcuts
+        if shortcut.destination.item in build_bindings
+        and shortcut.source.item not in build_bindings
+    }
+    if not wanted:
+        return {}
+    found = {}
+    for item, reference in installed_targets(catalogue).items():
+        if item not in wanted:
+            continue
+        found[item] = BoundTarget(
+            id=f"{reference.kind}-{reference.name}",
+            kind=reference.kind,
+            item_id=reference.name,
+            item_name=reference.name,
+            workspace_id=workspace_of.workspace_id,
+            workspace_name=workspace_of.workspace_name,
+            logical_item_type=item.item_type,
+            logical_item_name=item.item_name,
+        )
+    return found
 
 
 def _catalogue_target(binding: WarehouseBinding, targets):

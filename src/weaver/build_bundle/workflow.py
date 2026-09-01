@@ -604,7 +604,7 @@ def read_reconciled_catalogue(
     build that published them, and comparing that against the rows of the objects
     reading through the shortcut is the only way to learn that a producer moved on
     while this consumer was not looking (see
-    :func:`~weaver.build_bundle.incremental.stale_shortcut_consumers`).
+    :func:`~weaver.build_bundle.incremental.stale_through_shortcuts`).
 
     They are read without an inventory, so nothing about them is reconciled away:
     a build has no business proving claims about a target it was not pointed at.

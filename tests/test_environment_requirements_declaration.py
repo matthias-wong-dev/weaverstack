@@ -6,6 +6,18 @@ from weaver.fabric.environment import project_root, runtime_dependencies
 from weaver.fabric.environment_packages import DESKTOP_ONLY, runtime_requirements
 
 
+def _names() -> set[str]:
+    """The distribution each requirement names, whatever version it pins.
+
+    Parsed rather than split on a character: a requirement may carry a specifier,
+    and ``sqlparse>=0.6.0`` split on ``=`` names ``sqlparse>``.
+    """
+
+    from packaging.requirements import Requirement
+
+    return {Requirement(text).name.lower() for text in runtime_dependencies()}
+
+
 @weaver_test()
 def test_fabric_requirements_come_from_pyproject():
     assert tuple(runtime_dependencies()) == runtime_requirements(project_root())
@@ -13,18 +25,12 @@ def test_fabric_requirements_come_from_pyproject():
 
 @weaver_test()
 def test_fabric_requirements_include_hosted_runtime_packages():
-    names = {
-        requirement.split("=", 1)[0].lower() for requirement in runtime_dependencies()
-    }
-    assert {"pyyaml", "sqlparse", "mssql-python"} <= names
+    assert {"pyyaml", "sqlparse", "mssql-python"} <= _names()
 
 
 @weaver_test()
 def test_desktop_packages_are_excluded_from_fabric_requirements():
-    names = {
-        requirement.split("=", 1)[0].lower() for requirement in runtime_dependencies()
-    }
-    assert not names & DESKTOP_ONLY
+    assert not _names() & DESKTOP_ONLY
 
 
 @weaver_test()

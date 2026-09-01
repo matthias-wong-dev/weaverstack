@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Mapping
 
 from ..catalogue.tables import ROLE_SHORTCUT
@@ -55,6 +56,7 @@ def lakehouse_drop_stages(
     target,
     inventory,
     registered: Mapping | None = None,
+    reused_names=(),
 ) -> tuple[PlannedStage, ...]:
     """Plan one Lakehouse item's managed drops."""
 
@@ -66,6 +68,7 @@ def lakehouse_drop_stages(
         inventory=inventory,
         registered=registered,
         renderer=_lakehouse_drop_action,
+        reused_names=reused_names,
     )
 
 
@@ -77,6 +80,7 @@ def warehouse_drop_stages(
     target,
     inventory,
     registered: Mapping | None = None,
+    reused_names=(),
 ) -> tuple[PlannedStage, ...]:
     """Plan one Warehouse item's managed drops."""
 
@@ -88,6 +92,7 @@ def warehouse_drop_stages(
         inventory=inventory,
         registered=registered,
         renderer=_warehouse_drop_action,
+        reused_names=reused_names,
     )
 
 
@@ -100,6 +105,7 @@ def _item_drop_stages(
     inventory,
     registered,
     renderer,
+    reused_names=(),
 ) -> tuple[PlannedStage, ...]:
     selected = {identity for identity in selected_for_drop if identity.item == item}
     if not selected:
@@ -120,15 +126,18 @@ def _item_drop_stages(
                     f"selected managed drop {identity} is absent from target inventory"
                 )
             role = registered.get(identity)
-            actions.append(
-                renderer(
-                    identity,
-                    installed,
-                    target,
-                    payloads,
-                    installed_role=None if role is None else role.object_role,
-                )
+            action = renderer(
+                identity,
+                installed,
+                target,
+                payloads,
+                installed_role=None if role is None else role.object_role,
             )
+            if identity in reused_names and action.kind == DROP_SHORTCUT:
+                # This plan gives the name to an owned object, and OneLake
+                # releases it after Fabric stops listing the shortcut.
+                action = replace(action, awaits_name_release=True)
+            actions.append(action)
             changes.append(
                 removed(
                     _CHANGE_KIND[installed],

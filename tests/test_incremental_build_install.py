@@ -20,7 +20,7 @@ from weaver.build_bundle import (
     determine_impact,
     generate_item_build_bundle,
 )
-from weaver.build_bundle.incremental import select_build, stale_shortcut_consumers
+from weaver.build_bundle.incremental import select_build, stale_through_shortcuts
 from weaver.build_bundle.models import (
     BUILD_FOLDER,
     BUILD_TABLE,
@@ -494,10 +494,11 @@ def test_uncertified_physical_protected_loadable_keeps_its_runtime_state(tmp_pat
 
 SHORTCUT_DESTINATION = "Warehouse/Reporting/Sales.PortableCustomer"
 
-#: Two publication instants, in order. Datetimes because that is what Spark
+#: Three publication instants, in order. Datetimes because that is what Spark
 #: hands back for a timestamp column.
 EARLIER = datetime(2026, 7, 30, 9, 0, 0)
 LATER = datetime(2026, 7, 31, 9, 0, 0)
+LATEST = datetime(2026, 8, 1, 9, 0, 0)
 
 
 def _shortcut_bindings():
@@ -734,7 +735,7 @@ def test_a_shortcut_is_never_dropped_by_the_document_pipeline(tmp_path):
 
 
 def _dated(rows, item_text, schema, name, build_datetime):
-    """Stamp one Registry row with a build build_datetime, as a publication would."""
+    """Stamp one Registry row with a build datetime, as a publication would."""
 
     item = WeaverItemId.parse(item_text)
     tables = dict(rows[item])
@@ -771,54 +772,11 @@ def _consumer_only_selection(repository, rows):
                 if shortcut.destination.item == consumer
             }
         ),
-        stale_consumers=stale_shortcut_consumers(
+        stale_consumers=stale_through_shortcuts(
             repository, registered, bound_items={consumer}
         ),
         inventories=_shortcut_inventories(repository),
     )
-
-
-@weaver_test()
-def test_a_consumer_is_stale_when_its_unbound_source_was_published_later(tmp_path):
-    """The case the graph cannot answer.
-
-    The producer is not in this build, so there is no walk from it. It was
-    rebuilt at some earlier time by some earlier build, and the only surviving
-    evidence is that its Registry row is dated after the consumer's.
-    """
-
-    repository = _repository(_dependency_estate(tmp_path))
-    rows = _shortcut_catalogue(repository)
-    rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", EARLIER)
-    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
-    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
-
-    selection = _consumer_only_selection(repository, rows)
-    consumer = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
-
-    assert consumer in selection.impact.impacted_descendants
-    assert consumer in selection.selected_for_build
-
-
-@weaver_test()
-def test_a_source_rebuilt_earlier_leaves_the_pointer_where_it_is(tmp_path):
-    """The pointer declares the same pair over the same address.
-
-    Freshness rebuilds what reads through a shortcut. The pointer stands at the
-    same address, and remaking one costs the wait for Fabric to discover it.
-    """
-
-    repository = _repository(_dependency_estate(tmp_path))
-    rows = _shortcut_catalogue(repository)
-    rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", EARLIER)
-    rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
-    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
-
-    selection = _consumer_only_selection(repository, rows)
-    destination = WeaverDocumentId.parse(SHORTCUT_DESTINATION)
-
-    assert destination not in selection.selected_for_build
-    assert destination not in selection.selected_for_drop
 
 
 @weaver_test()
@@ -846,7 +804,7 @@ def test_a_catalogue_with_no_epochs_at_all_reports_nothing_stale(tmp_path):
 
     assert all(document.build_datetime is None for document in registered.values())
     assert (
-        stale_shortcut_consumers(
+        stale_through_shortcuts(
             repository,
             registered,
             bound_items={WeaverItemId.parse("Warehouse/Reporting")},
@@ -875,9 +833,9 @@ def test_a_source_inside_the_build_is_still_judged_by_its_epoch(tmp_path):
         WeaverItemId.parse("Lakehouse/Curated"),
     }
 
-    assert stale_shortcut_consumers(
+    assert stale_through_shortcuts(
         repository, Catalogue(rows).registered, bound_items=both
-    ) == (WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer"),)
+    ) == (WeaverDocumentId.parse(SHORTCUT_DESTINATION),)
 
 
 @weaver_test()
@@ -892,7 +850,7 @@ def test_an_unbuilt_consumer_stays_behind_its_source(tmp_path):
     rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
 
     assert (
-        stale_shortcut_consumers(
+        stale_through_shortcuts(
             repository,
             Catalogue(rows).registered,
             bound_items={WeaverItemId.parse("Lakehouse/Curated")},
@@ -902,21 +860,104 @@ def test_an_unbuilt_consumer_stays_behind_its_source(tmp_path):
 
 
 @weaver_test()
-def test_a_source_rebuilt_earlier_plans_no_shortcut_action(tmp_path):
-    """End to end through the planner: the freshness comparison reaches the
-    consumer and no pointer is touched on the way."""
+def test_a_source_rebuilt_earlier_refreshes_the_pointer_and_then_settles(tmp_path):
+    """The cross-build lifecycle, end to end through the planner.
+
+    A settled estate, then the producer alone is rebuilt, which dates its row
+    after the reader's. Nothing in the repository changed, so the epochs are the
+    only thing that identifies the reader, and the pointer it stands behind is
+    materialised over its own address. Rebuilding the reader dates it after the
+    source, and the build after that plans nothing.
+    """
+
+    repository = _repository(_dependency_estate(tmp_path))
+    consumer = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
+    destination = WeaverDocumentId.parse(SHORTCUT_DESTINATION)
+
+    def dated(source, reader):
+        rows = _shortcut_catalogue(repository)
+        rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", source)
+        rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", reader)
+        return _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", reader)
+
+    def touched(bundle):
+        selected = set(bundle.plan.selection.selected_for_build)
+        return {consumer, destination} & selected
+
+    settled = _shortcut_bundle(
+        tmp_path, repository, rows=dated(EARLIER, EARLIER), name="settled"
+    )
+    assert touched(settled) == set()
+    assert _shortcut_actions(settled) == []
+
+    stale = _shortcut_bundle(
+        tmp_path, repository, rows=dated(LATER, EARLIER), name="stale"
+    )
+    assert consumer in stale.plan.selection.selected_for_build
+    # Refreshed over the address already there, and never dropped to do it.
+    assert destination in stale.plan.selection.selected_for_build
+    assert destination not in stale.plan.selection.selected_for_drop
+    assert len(_shortcut_actions(stale)) == 1
+
+    # The state that rebuild leaves: the reader dated after its source.
+    again = _shortcut_bundle(
+        tmp_path, repository, rows=dated(LATER, LATEST), name="again"
+    )
+    assert touched(again) == set()
+    assert _shortcut_actions(again) == []
+
+
+@weaver_test()
+def test_a_refreshed_pointers_claim_is_deleted_and_republished(tmp_path):
+    """The two halves of re-dating a pointer, as the plan states them.
+
+    ``build_datetime`` is supplied on insert and is in neither the merge's
+    comparison nor its UPDATE, so a row that is never deleted keeps the datetime
+    of the build that last inserted it. A refreshed pointer is not dropped, so
+    what re-dates it is the claim deletion this plan emits before any physical
+    work followed by the publication that inserts the row again carrying this
+    build's token. The row the installer leaves is read back by
+    ``tests/fabric/test_acceptance_journey.py``.
+    """
 
     repository = _repository(_dependency_estate(tmp_path))
     rows = _shortcut_catalogue(repository)
+    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "Customer", EARLIER)
     rows = _dated(rows, "Warehouse/Reporting", "Sales", "PortableCustomer", EARLIER)
-    rows = _dated(rows, "Lakehouse/Curated", "Sales", "Customer", LATER)
+    destination = WeaverDocumentId.parse(SHORTCUT_DESTINATION)
 
-    bundle = _shortcut_bundle(tmp_path, repository, rows=rows)
-    consumer = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
+    bundle = _shortcut_bundle(tmp_path, repository, rows=rows, name="dated")
 
-    assert _shortcut_actions(bundle) == []
-    assert consumer in bundle.plan.selection.selected_for_build
+    assert destination in bundle.plan.selection.selected_for_build
+    # Refreshed over its own address, so it is not on the drop side of the plan.
+    assert destination not in bundle.plan.selection.selected_for_drop
+    delete_action = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == DELETE_CATALOGUE_CLAIMS
+    )
+    payload = (
+        FilesystemStore()
+        .read(bundle.location.join(*delete_action.payload.split("/")))
+        .decode()
+    )
+    assert "[_].[Registry]" in payload
+    assert "'PortableCustomer'" in payload
+
+    # And published again in the same installation, carrying this build's token.
+    registry = next(
+        action
+        for _sequence, _batch, action in bundle.plan.actions()
+        if action.kind == "publish_registry"
+    )
+    republished = (
+        FilesystemStore()
+        .read(bundle.location.join(*registry.payload.split("/")))
+        .decode()
+    )
+    assert "'PortableCustomer'" in republished
+    assert "{{build_datetime}}" in republished
 
 
 @weaver_test()

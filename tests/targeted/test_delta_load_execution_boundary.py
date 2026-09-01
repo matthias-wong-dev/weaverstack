@@ -77,7 +77,7 @@ class _Frame:
 
     def createOrReplaceTempView(self, name: str) -> None:  # noqa: N802 - Spark's name
         self.view = name
-        self.spark.views.append(name)
+        self.spark.register(name)
 
     @property
     def role(self) -> str | None:
@@ -100,6 +100,10 @@ class _Boom(RuntimeError):
 
 class _EvidenceRefused(RuntimeError):
     """The durable write a failure attempts, failing in its turn."""
+
+
+class _ViewNotFound(RuntimeError):
+    """Spark's ``TABLE_OR_VIEW_NOT_FOUND``, for a temporary view."""
 
 
 @dataclass
@@ -136,11 +140,34 @@ class _Spark:
     def __post_init__(self) -> None:
         self.catalog = _Catalog(self)
         self.conf = _Conf()
+        #: Temporary views that are registered right now, by the key Spark holds
+        #: each under. The one Spark rule this double models: a view is keyed by
+        #: ``spark.sql.caseSensitive``'s normalisation of its name, so a name
+        #: registered under one setting is looked up under the other.
+        self.temporary: dict = {}
+
+    def key(self, name: str) -> str:
+        """The key a temporary view is held under, given the conf in force."""
+
+        sensitive = str(self.conf.get("spark.sql.caseSensitive")).lower() == "true"
+        return name if sensitive else name.lower()
+
+    def register(self, name: str) -> None:
+        self.views.append(name)
+        self.temporary[self.key(name)] = name
+
+    def resolve(self, text: str) -> None:
+        """Refuse a statement naming a view that is not there to be found."""
+
+        for written in self.views:
+            if written in text and self.key(written) not in self.temporary:
+                raise _ViewNotFound(f"[TABLE_OR_VIEW_NOT_FOUND] {written}")
 
     def table(self, name: str):
         return _Table(TARGET_COLUMNS)
 
     def sql(self, text: str) -> _Frame:
+        self.resolve(text)
         if text.startswith(("CREATE TABLE", "DROP TABLE")):
             self.identifier_case.append(
                 (text.split("`", 6)[5], self.conf.get("spark.sql.caseSensitive"))
@@ -214,6 +241,7 @@ class _Catalog:
 
     def dropTempView(self, name: str) -> None:  # noqa: N802 - Spark's name
         self._spark.dropped_views.append(name)
+        self._spark.temporary.pop(self._spark.key(name), None)
 
 
 class _Conf:
@@ -702,6 +730,26 @@ def test_mixed_case_runtime_tables_are_created_in_an_exact_case_scope():
         ("CustomerOrder_Delete", "true"),
     ]
     assert spark.conf.get("spark.sql.caseSensitive") == "false"
+
+
+@weaver_test()
+def test_a_mixed_case_evidence_write_still_finds_the_relation_it_reads():
+    """The durable write is made inside the exact-case scope and reads a view.
+
+    Spark holds a temporary view under ``spark.sql.caseSensitive``'s
+    normalisation of its name, and this statement is the one place a load reads a
+    view under a setting other than the one that registered it. Weaver names its
+    working relations so the two settings make the same key.
+    """
+
+    spark = _refused(
+        dict(NO_OP, reject=2),
+        contract=_contract(object_id=ObjectId("DWG", "CustomerOrder")),
+        match="fault_tolerant = 0",
+    )
+
+    assert spark.created == ["CustomerOrder_Staging", "CustomerOrder_Reject"]
+    assert spark.views == [view.lower() for view in spark.views]
 
 
 @weaver_test()

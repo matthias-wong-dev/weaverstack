@@ -149,6 +149,13 @@ class InstallAction:
 
     An action with no authored source has None: a shortcut, an endpoint refresh, a
     prune, a catalogue publication.
+
+    ``awaits_name_release`` is set on the one drop whose name this same plan then
+    gives to an owned object. Fabric stops listing a deleted shortcut before
+    OneLake releases its namespace, so that removal waits for the name to become
+    reusable before the build that reuses it runs. No other action waits: an
+    ordinary deletion, a pointer replaced by another pointer, and a name nothing
+    reuses all proceed immediately.
     """
 
     id: str
@@ -158,6 +165,7 @@ class InstallAction:
     payload: str | None
     payload_sha256: str | None
     source_path: str | None = None
+    awaits_name_release: bool = False
 
     def to_mapping(self) -> dict[str, Any]:
         mapping: dict[str, Any] = {
@@ -174,6 +182,9 @@ class InstallAction:
             # every action would change the id of every bundle that has no
             # authored source to name.
             mapping["source_path"] = self.source_path
+        if self.awaits_name_release:
+            # Omitted when false, for the reason ``source_path`` is.
+            mapping["awaits_name_release"] = True
         return mapping
 
     @classmethod
@@ -186,6 +197,7 @@ class InstallAction:
             payload=mapping.get("payload"),
             payload_sha256=mapping.get("payload_sha256"),
             source_path=mapping.get("source_path"),
+            awaits_name_release=bool(mapping.get("awaits_name_release", False)),
         )
 
 

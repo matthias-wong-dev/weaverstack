@@ -25,7 +25,9 @@ classifiers = [
 # PySpark is absent because Fabric supplies it where authored runtime code runs.
 dependencies = [
     "pyyaml",
-    "sqlparse",
+    # 0.6 is where the grouping ceiling this parsing lifts was introduced, so
+    # the behaviour and the reasoning both rest on it.
+    "sqlparse>=0.6.0",
     "mssql-python",
     "azure-identity>=1.23",
     "requests>=2.31",

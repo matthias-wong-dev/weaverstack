@@ -538,6 +538,7 @@ class Folder(WeaverObject):
         self._anchor()
 
         from .runtime.folder_load import (
+            adopt_existing_files,
             load_folder,
             new_staging_folder,
             remove_staging,
@@ -554,6 +555,13 @@ class Folder(WeaverObject):
         # this once", and a bookmark is the record of whether that has happened.
         if contract.static and self.bookmark() > _sentinel():
             return LoadResult(succeeded=True, is_static_skip=True)
+
+        # Before read(), so what the authored code sees through files_since() and
+        # its bookmark is a history that accounts for the files already there. A
+        # Static folder is left alone: loading it once is the whole contract, and
+        # its files are the thing that was loaded.
+        if not contract.static:
+            adopt_existing_files(self.path())
 
         issued = new_staging_folder(self.path(), self._staging_path())
         self._issued_staging = issued

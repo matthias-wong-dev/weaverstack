@@ -12,7 +12,7 @@ from support.workspaces import given_resolver, given_workspace
 from weaver.build_bundle.executors import ShortcutExecutor
 from weaver.build_bundle.executors import shortcut as shortcut_module
 from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-from weaver.build_bundle.models import CREATE_SHORTCUT, InstallAction
+from weaver.build_bundle.models import CREATE_SHORTCUT, DROP_SHORTCUT, InstallAction
 from weaver.build_bundle.targets import BoundTarget
 from weaver.errors import InstallError
 from weaver.locations import LakehouseSparkLocation
@@ -545,3 +545,131 @@ def test_the_probe_carries_weavers_identifier_case(tmp_path):
     ShortcutExecutor().execute(_action(), _payload(), context)
 
     assert asked.exact_case and all(asked.exact_case)
+
+
+# --- releasing a name an owned object is about to take ------------------------
+
+
+def _removal(awaits: bool) -> InstallAction:
+    return InstallAction(
+        id="drop-shortcuts-Lakehouse--Curated",
+        kind=DROP_SHORTCUT,
+        resource_node_id=None,
+        executor="shortcut",
+        payload="drop-shortcuts-Lakehouse--Curated.shortcut.json",
+        payload_sha256="0" * 64,
+        awaits_name_release=awaits,
+    )
+
+
+def _removal_payload() -> bytes:
+    return json.dumps(
+        {
+            "remove": [
+                {
+                    "shortcut": "Lakehouse/Curated/Sales.Landed",
+                    "path": "Tables/Sales",
+                    "name": "Landed",
+                }
+            ]
+        }
+    ).encode("utf-8")
+
+
+class _Unpicks:
+    """A workspace that removes the pointer and records that it did."""
+
+    def __init__(self, inner=None):
+        self.inner = inner
+        self.removed = []
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def remove_onelake_shortcut(self, lakehouse, *, path, name):
+        self.removed.append((path, name))
+
+
+class _ReleasesAfter:
+    """A store whose path answers until the namespace lets the name go."""
+
+    def __init__(self, inner, occupied: int):
+        self._inner = inner
+        self.remaining = occupied
+        self.asked = 0
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def exists(self, location) -> bool:
+        self.asked += 1
+        if self.remaining <= 0:
+            return False
+        self.remaining -= 1
+        return True
+
+
+@pytest.fixture
+def instant_polling(monkeypatch):
+    """The wait's arithmetic without its elapsed time."""
+
+    monkeypatch.setattr(shortcut_module.time, "sleep", lambda _seconds: None)
+
+
+@weaver_test()
+def test_a_removal_waits_until_onelake_releases_the_name(tmp_path, instant_polling):
+    """The transition the flag exists for.
+
+    Fabric stops listing the shortcut before OneLake gives the name up, so the
+    path still answers for a while. The wait polls it and returns once it does
+    not, which is what lets the owned object be created at the same name.
+    """
+
+    resolver = _Unpicks()
+    store = _ReleasesAfter(FilesystemStore(), occupied=3)
+    context = _local_context(tmp_path, resolver=resolver, store=store)
+
+    details = ShortcutExecutor().execute(_removal(True), _removal_payload(), context)
+
+    assert resolver.removed == [("Tables/Sales", "Landed")]
+    assert details["removed"] == ["Lakehouse/Curated/Sales.Landed"]
+    # Asked until it answered, and then once more is not needed.
+    assert store.asked == 4
+    assert "released_after_seconds" in details
+
+
+@weaver_test()
+def test_a_removal_that_reuses_no_name_does_not_poll(tmp_path, instant_polling):
+    """The flag is what gates the wait, so an ordinary removal pays nothing."""
+
+    resolver = _Unpicks()
+    store = _ReleasesAfter(FilesystemStore(), occupied=3)
+    context = _local_context(tmp_path, resolver=resolver, store=store)
+
+    details = ShortcutExecutor().execute(_removal(False), _removal_payload(), context)
+
+    assert resolver.removed == [("Tables/Sales", "Landed")]
+    assert store.asked == 0
+    assert "released_after_seconds" not in details
+
+
+@weaver_test()
+def test_a_name_held_past_the_timeout_returns_to_the_create(tmp_path, monkeypatch):
+    """A spent wait is not the error. The create that follows reports the name.
+
+    Raising here would name a timeout where the useful report is which object
+    already stands at the address, so the wait ends and the build goes on.
+    """
+
+    monkeypatch.setattr(shortcut_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(shortcut_module, "NAME_RELEASE_TIMEOUT", 0.05)
+    monkeypatch.setattr(shortcut_module, "NAME_RELEASE_POLL_INTERVAL", 0.01)
+    resolver = _Unpicks()
+    store = _ReleasesAfter(FilesystemStore(), occupied=10**6)
+    context = _local_context(tmp_path, resolver=resolver, store=store)
+
+    details = ShortcutExecutor().execute(_removal(True), _removal_payload(), context)
+
+    assert resolver.removed == [("Tables/Sales", "Landed")]
+    assert store.asked > 0
+    assert "released_after_seconds" in details
