@@ -910,6 +910,19 @@ def _full_replace(spark, names, staging_view, columns, rows_read: int) -> LoadRe
 # --- what a load keeps, and what it gives back -------------------------------
 
 
+def _view_name(role: str, target: str) -> str:
+    """Name one working relation, in a spelling Spark's own normalisation keeps.
+
+    A temporary view is held under the key ``spark.sql.caseSensitive`` makes of
+    its name: lower case while the conf is off, as written while it is on. A load
+    turns the conf on so a durable artefact is created with the object's own
+    spelling (see :func:`_exact_case`), and that statement reads a view
+    registered while it was off. A lower-case name is the same key either way.
+    """
+
+    return ("weaver_" + role + "_" + _clean(target)).lower()
+
+
 def _hold(spark, held, sql: str, target: str, role: str):
     """Run one statement, keep its result in Spark, and name it for the next phase.
 
@@ -920,7 +933,7 @@ def _hold(spark, held, sql: str, target: str, role: str):
     """
 
     frame = spark.sql(sql).persist()
-    view = "weaver_" + role + "_" + _clean(target)
+    view = _view_name(role, target)
     frame.createOrReplaceTempView(view)
     held.append((frame, view))
     return frame, view
@@ -934,7 +947,7 @@ def _register(spark, held, frame, target: str, role: str) -> str:
     derived from it.
     """
 
-    view = "weaver_" + role + "_" + _clean(target)
+    view = _view_name(role, target)
     frame.createOrReplaceTempView(view)
     held.append((None, view))
     return view
@@ -948,7 +961,7 @@ def _name(spark, held, sql: str, target: str, role: str) -> str:
     computed here: whatever reads it computes it, from the phase underneath.
     """
 
-    view = "weaver_" + role + "_" + _clean(target)
+    view = _view_name(role, target)
     spark.sql(sql).createOrReplaceTempView(view)
     held.append((None, view))
     return view
