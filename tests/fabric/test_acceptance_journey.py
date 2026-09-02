@@ -454,7 +454,7 @@ def _assert_the_endpoint_barrier_is_in_the_graph(journey, report) -> None:
     ] == [refresh]
 
     edges = {tuple(edge) for edge in report.edges}
-    assert (f"load:{curated}/CUR.Customer", refresh) in edges
+    assert (f"load:{curated}/Tables/CUR.Customer", refresh) in edges
     assert (refresh, f"load:{serving}/SERVE.Customer") in edges
 
     # Each node names the primitive it reached. A Warehouse load is the
@@ -464,7 +464,7 @@ def _assert_the_endpoint_barrier_is_in_the_graph(journey, report) -> None:
     assert by_node[f"load:{serving}/SERVE.Customer"].dispatch_location == (
         f"{serving}/[_].[Load SERVE.Customer]"
     )
-    deployed = by_node[f"load:{curated}/CUR.Customer"].dispatch_location
+    deployed = by_node[f"load:{curated}/Tables/CUR.Customer"].dispatch_location
     assert deployed.startswith(f"{curated}/")
     # Under the area it was authored in, which is what the import namespace is.
     assert deployed.endswith("/_/Load/Tables/CUR__Customer.py")
@@ -1261,8 +1261,8 @@ def test_a_declaration_change_rebuilds_exactly_what_it_must(acceptance):
         for key, row in after.items()
         if key in before.result and row["signature"] == before.result[key]["signature"]
     }
-    assert ("Landing", "LAND", "Transaction") in unchanged
-    assert ("Curated", "CUR", "Product") in unchanged
+    assert ("Landing", "Tables/LAND", "Transaction") in unchanged
+    assert ("Curated", "Tables/CUR", "Product") in unchanged
 
     # This build reconciled the catalogue again, and the schema beside `_` is
     # still whole and still readable.
@@ -1398,12 +1398,12 @@ REPAIR_EDITS = (
 #: selected at all. That is what makes it the other half of this scenario: the
 #: incremental position of a protected object survives a build that fails around
 #: it.
-INCREMENTAL = ("Lakehouse", "Curated", "CUR", "Customer")
+INCREMENTAL = ("Lakehouse", "Curated", "Tables/CUR", "Customer")
 
 #: The object the failing revision replaces. A new column on an unprotected table
 #: means the physical table goes, so this is the one whose Registry claim the
 #: build deletes before it starts.
-REPLACED = ("Lakehouse", "Landing", "LAND", "Product")
+REPLACED = ("Lakehouse", "Landing", "Tables/LAND", "Product")
 
 #: What a bookmark reads before anything has loaded.
 SENTINEL = datetime(1900, 1, 1)
