@@ -10,8 +10,8 @@ The area is what keeps them apart, and it is stored on both sides. Storing it on
 the Folder alone was what made ``Sales.Thing`` in Registry mean the table while
 ``Sales.Thing`` in a logical identity meant a validation.
 
-Asserted end to end from one repository rather than from hand-written rows, so
-what is compared is what a build publishes and a run records.
+Asserted end to end from one repository, so what is compared is what a build
+publishes and what a run records.
 """
 
 from __future__ import annotations

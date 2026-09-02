@@ -827,9 +827,9 @@ def stored_identity(item: WeaverItemId, schema: str, name: str) -> WeaverDocumen
 
     An object identity, because that is what the tables keyed this way hold:
     Registry, Bookmark, LoadStatus and LoadStatistic record what an item
-    materialises. A validation is read by the reader that knows it is reading
-    validations, through :meth:`WeaverDocumentId.validation`. ``_.Dependency``
-    holds both, and resolves the two against the nodes it has.
+    materialises. ``_.TestStatus`` and ``_.TestDictionary`` hold validations, and
+    are read through :meth:`WeaverDocumentId.validation`. ``_.Dependency`` holds
+    both, and resolves the two against the nodes it has.
     """
 
     area, relational = stored_area(schema)
