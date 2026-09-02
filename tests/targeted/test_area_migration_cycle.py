@@ -265,8 +265,11 @@ def test_the_key_moving_costs_the_bookmark_and_says_so(estate, tmp_path):
     A bookmark is keyed as Registry keys the object, so a row written under the
     old spelling is not the row the new one reads. The table loads from the
     sentinel once, reading its source from the beginning. A Weaver table is
-    upserted by its declared key, so that pass rewrites the rows it holds. The
-    old row stays behind, orphaned, and nothing reads it.
+    upserted by its declared key, so that pass rewrites the rows it holds.
+
+    The old row does not linger. Reconciliation withdraws the claim it belonged
+    to, and the build invalidates its runtime state, so the row is deleted by
+    the same build that republishes the object under its area.
     """
 
     from weaver.catalogue.claims import bookmark_row
@@ -279,5 +282,15 @@ def test_the_key_moving_costs_the_bookmark_and_says_so(estate, tmp_path):
     rows[table.item]["Bookmark"] = (bookmark_row(table, loaded_at),)
     loaded = Catalogue(rows=rows, materialised=settled.materialised)
 
+    old = _before_the_key_moved(loaded)
+
     assert loaded.bookmark(table) == loaded_at
-    assert _before_the_key_moved(loaded).bookmark(table) == BOOKMARK_SENTINEL
+    assert old.bookmark(table) == BOOKMARK_SENTINEL
+
+    # And the build clears the row the old key held, rather than leaving it.
+    invalidated = {
+        (one.table, row["schema_name"], row["object_name"])
+        for one in build(estate, tmp_path, catalogue=old).plan.runtime_state
+        for row in one.rows
+    }
+    assert ("Bookmark", "DWG", "Customer") in invalidated
