@@ -23,7 +23,7 @@ from functools import cached_property
 from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence
 
-from .catalogue.claims import catalogue_columns
+from .catalogue.claims import catalogue_columns, stored_area
 from .catalogue.state import Catalogue
 from .catalogue.tables import (
     DEPENDENCY,
@@ -86,10 +86,6 @@ TEST_TYPE_FOR_KIND = {kind: name for name, kind in KIND_FOR_TEST_TYPE.items()}
 
 #: Which role a validation kind carries in the Registry.
 _ROLE_FOR_VALIDATION_KIND = {TEST: ROLE_TEST, ASSUMPTION: ROLE_ASSUMPTION}
-
-#: What a Folder's stored schema carries, so a table and a folder of the same
-#: name stay apart.
-_FILES_PREFIX = "Files/"
 
 #: What separates schema from object in a Python module name. A module name
 #: cannot carry a dot, so ``Sales.Seed`` is spelled ``Sales__Seed``.
@@ -184,10 +180,9 @@ class InstalledNode:
     def load_key(self) -> str:
         """This node's identity within its physical target.
 
-        The catalogue's own spelling, so a Folder carries its ``Files/`` area
-        and a table does not. That is what separates ``Files/Sales.Thing`` from
-        ``Sales.Thing`` where a Lakehouse owns both and the table reads the
-        Folder.
+        The catalogue's own spelling, so a Lakehouse object carries its area:
+        ``Tables/Sales.Thing`` and ``Files/Sales.Thing`` are the two a Lakehouse
+        owning both keeps apart, and a Warehouse relation names none.
         """
 
         schema, name = catalogue_columns(self.identity)
@@ -825,14 +820,16 @@ def installed_shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
 
 
 def stored_identity(item: WeaverItemId, schema: str, name: str) -> WeaverDocumentId:
-    """One stored ``schema_name``/``object_name`` pair back as an identity."""
+    """One stored ``schema_name``/``object_name`` pair back as an identity.
 
-    is_files = schema.startswith(_FILES_PREFIX)
-    return WeaverDocumentId(
-        item,
-        ObjectId(schema[len(_FILES_PREFIX) :] if is_files else schema, name),
-        is_files=is_files,
-    )
+    A Lakehouse data object names its area, so the stored value says which it
+    is. What names none is a Warehouse relation or, in a Lakehouse, a validation.
+    """
+
+    area, relational = stored_area(schema)
+    if area is None and item.item_type == LAKEHOUSE:
+        return WeaverDocumentId.validation(item, ObjectId(relational, name))
+    return WeaverDocumentId(item, ObjectId(relational, name), is_files=area == FILES)
 
 
 def _shortcut_edges(shortcuts, nodes) -> tuple[InstalledEdge, ...]:

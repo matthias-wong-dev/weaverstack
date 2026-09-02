@@ -33,13 +33,29 @@ The workspace declaration owns several exact logical items, and the same
 therefore keyed on `item_type` and `item_name` before anything else:
 
 ```text
-Lakehouse | Raw       | Sales       | Customer
-Lakehouse | Raw       | Files/Sales | Customer
-Warehouse | Reporting | Sales       | Customer
+Lakehouse | Raw       | Tables/Sales | Customer
+Lakehouse | Raw       | Files/Sales  | Customer
+Warehouse | Reporting | Sales        | Customer
 ```
 
-Those are three rows and all are real. The first two share one Lakehouse item but
-remain distinct because `Files/` is part of the Folder's schema.
+Those are three rows and all are real. The first two share one Lakehouse item and
+remain distinct because the area is part of the stored schema. A Lakehouse
+document names the area it sits in, `Tables` or `Files`, and everything else
+stores its schema alone: a Warehouse relation, which sits in no area, and a Test
+or an Assumption, which materialises nothing and so sits in neither.
+
+```text
+Logical identity                            stored schema_name
+
+Lakehouse/Raw/Tables/Sales.Customer         Tables/Sales
+Lakehouse/Raw/Files/Sales.Customer          Files/Sales
+Lakehouse/Raw/Sales.CustomerCount           Sales
+Warehouse/Reporting/Sales.Customer          Sales
+```
+
+`weaver.catalogue.claims.catalogue_schema` writes it and
+`weaver.catalogue.claims.stored_area` reads it back. They are one rule, and
+nothing else spells it.
 
 A runtime artefact — a deployed load module, a generated load procedure, or the
 procedure or module a validation compiles to — is keyed the same way, with the
@@ -114,28 +130,27 @@ join without anything having to split an id.
 
 | | Shortcut ID | Schema | Object |
 |---|---|---|---|
-| table | `Sales.Customer` | `Sales` | `Customer` |
+| table | `Sales.Customer` | `Tables/Sales` | `Customer` |
 | folder | `Sales.Incoming` | `Files/Sales` | `Incoming` |
 | schema | `Reference` | `Reference` | NULL |
 
-A folder carries the `Files/` prefix `_.Registry` stores it with, so
-`Files/Sales.Customer` and `Sales.Customer` are two rows and two identities. A
-Lakehouse may hold both: a folder shortcut into a source estate, and the Delta
-table built from what it points at.
+A Lakehouse object carries the area `_.Registry` stores it with, so
+`Tables/Sales.Customer` and `Files/Sales.Customer` are two rows and two
+identities. A Lakehouse may hold both: a folder shortcut into a source estate,
+and the Delta table built from what it points at.
 
 **What it points at.** `Target type` is `Logical` or `Physical`. For a logical
 target the four target columns give the producer's identity whole:
 
 | | Target type | Target item type | Target item name | Target schema | Target object |
 |---|---|---|---|---|---|
-| table | Logical | Lakehouse | Sales | Sales | Customer |
+| table | Logical | Lakehouse | Sales | Tables/Sales | Customer |
 | folder | Logical | Lakehouse | Sales | Files/Sales | Customer |
 
-so a reader rebuilds `Lakehouse/Sales/Tables/Sales.Customer` from the row alone, with no
+so `Lakehouse/Sales/Tables/Sales.Customer` is rebuilt from the row alone, with no
 join to Installation, no parsing, and no knowledge of a Fabric workspace or item
 id. That is what lets the estate DAG be reconstructed from the catalogue. The
-`Files/` prefix applies on this side too, because a logical folder shortcut
-points at a Folder document.
+area applies on this side too, because a logical target is a Weaver document.
 
 A physical target names the Fabric item itself, and `Target workspace` is set
 when it is in another workspace. It has no logical producer, so nothing in the
@@ -526,7 +541,8 @@ fields. Authored SQL can therefore declare natural variables such as
 ```text
 [Item type]              the Registry's identity, exactly
 [Item name]
-[Schema name]            `Files/<schema>` for a Folder, as Registry spells it
+[Schema name]            `Tables/<schema>` or `Files/<schema>` in a Lakehouse,
+                         as Registry spells it
 [Object name]
 [Bookmark datetime]      datetime2(6), UTC, never null
 ```

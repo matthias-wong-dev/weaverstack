@@ -494,7 +494,7 @@ def test_a_folder_refuses_reload_and_says_what_it_covers():
     """A folder's contents are files, and clearing them is not this branch."""
 
     folder = _folder()(
-        _Spark(), lakehouse=_lakehouse(), catalogue=never("Files/DWG.Export")
+        _Spark(), lakehouse=_lakehouse(), catalogue=never("DWG.Export", files=True)
     )
 
     with pytest.raises(LoadError, match="reload covers tables"):
@@ -505,7 +505,7 @@ def test_a_folder_refuses_reload_and_says_what_it_covers():
 def test_a_refused_folder_reload_records_nothing():
     """Refused before the record opens, so nothing says a load was attempted."""
 
-    catalogue = never("Files/DWG.Export")
+    catalogue = never("DWG.Export", files=True)
     folder = _folder()(_Spark(), lakehouse=_lakehouse(), catalogue=catalogue)
 
     with pytest.raises(LoadError):

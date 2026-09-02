@@ -281,7 +281,7 @@ def test_a_build_with_nothing_to_do_says_nothing_about_bookmarks(estate):
             estate,
             items=(item_id(ITEM),),
             selected_for_build=(),
-            catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
+            catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
         )
         == ()
     )
@@ -307,7 +307,7 @@ def test_a_build_of_objects_that_hold_no_bookmark_says_nothing_either(estate):
             estate,
             items=(item_id(ITEM),),
             selected_for_build={view},
-            catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
+            catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
         )
         == ()
     )
@@ -333,11 +333,13 @@ def test_a_rebuild_ends_the_incarnation_of_what_it_replaces(estate, tmp_path):
     """Every loadable object rebuilt, so every row it had goes."""
 
     bundle = _bundle(
-        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
+        estate,
+        tmp_path,
+        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
 
     assert _invalidated(bundle.plan.runtime_state) == {
-        ("Lakehouse", "Sales", "DWG", "Customer"),
+        ("Lakehouse", "Sales", "Tables/DWG", "Customer"),
         ("Lakehouse", "Sales", "Files/Raw", "CustomerCsv"),
     }
 
@@ -347,7 +349,9 @@ def test_only_current_state_is_invalidated(estate, tmp_path):
     """``_.Bookmark`` is current state. Nothing historical is named."""
 
     bundle = _bundle(
-        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
+        estate,
+        tmp_path,
+        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
 
     assert {one.table for one in bundle.plan.runtime_state} == {BOOKMARK.name}
@@ -361,7 +365,9 @@ def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_p
     """The safety property: an invalidation that failed to happen is silent."""
 
     bundle = _bundle(
-        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
+        estate,
+        tmp_path,
+        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
     physical = {
         "create_schema",
@@ -385,7 +391,9 @@ def test_invalidation_is_one_action(estate, tmp_path):
     """One lifecycle decision, so one action carrying the whole intent."""
 
     bundle = _bundle(
-        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
+        estate,
+        tmp_path,
+        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
     (_sequence, action), *rest = _bookmark_actions(bundle)
 
@@ -404,7 +412,9 @@ def test_the_action_carries_the_intent_the_plan_states(estate, tmp_path):
     from weaver.catalogue.runtime_state import read_invalidation
 
     bundle = _bundle(
-        estate, tmp_path, catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv")
+        estate,
+        tmp_path,
+        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
     (_sequence, action), *_rest = _bookmark_actions(bundle)
     carried = read_invalidation(bundle.store.read(bundle.location / action.payload))
@@ -437,8 +447,8 @@ def test_an_object_left_alone_keeps_its_row(estate):
         estate,
         items=(item_id(ITEM),),
         selected_for_build={document_id_of(estate, "DWG.Customer")},
-        catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
-    ) == {("Lakehouse", "Sales", "DWG", "Customer")}
+        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
+    ) == {("Lakehouse", "Sales", "Tables/DWG", "Customer")}
 
 
 @weaver_test()
@@ -455,7 +465,7 @@ def test_a_row_the_repository_no_longer_declares_goes(estate, tmp_path):
         smaller,
         items=(item_id(ITEM),),
         selected_for_build=(),
-        catalogue=_holding("DWG.Customer", "Files/Raw.CustomerCsv"),
+        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     ) == {("Lakehouse", "Sales", "Files/Raw", "CustomerCsv")}
 
 
@@ -472,7 +482,7 @@ def test_an_unrelated_item_is_outside_the_scope_that_prunes(estate):
         items=(item_id(ITEM),),
         selected_for_build={one for one in estate.source_documents},
         catalogue=_two_items(),
-    ) == {("Lakehouse", "Sales", "DWG", "Customer")}
+    ) == {("Lakehouse", "Sales", "Tables/DWG", "Customer")}
 
 
 @weaver_test()
@@ -488,7 +498,7 @@ def test_both_items_of_one_build_are_one_intent(estate):
     (one,) = invalidation
 
     assert _invalidated(invalidation) == {
-        ("Lakehouse", "Sales", "DWG", "Customer"),
+        ("Lakehouse", "Sales", "Tables/DWG", "Customer"),
         ("Warehouse", "Reporting", "Rpt", "Customer"),
     }
     assert one.table == BOOKMARK.name
@@ -504,7 +514,7 @@ def _two_items() -> Catalogue:
                     {
                         "item_type": "Lakehouse",
                         "item_name": "Sales",
-                        "schema_name": "DWG",
+                        "schema_name": "Tables/DWG",
                         "object_name": "Customer",
                         "bookmark_datetime": LOADED_AT,
                     },

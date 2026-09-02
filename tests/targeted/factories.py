@@ -136,16 +136,18 @@ def registry_row(
 ) -> dict:
     """One Registry row in its stored form, keyed as the catalogue writes it."""
 
+    from weaver.catalogue.claims import catalogue_columns
+
     if isinstance(identity, str):
         identity = document_id(identity)
-    schema = identity.object_id.schema
+    # Keyed through the production rule, so a fixture cannot describe a row the
+    # catalogue would never write.
+    schema_name, object_name = catalogue_columns(identity)
     return {
         "item_type": identity.item.item_type,
         "item_name": identity.item.item_name,
-        # Only a Folder carries the prefix. A load artefact's schema is already
-        # the real one, a path beneath Files, or a Warehouse schema.
-        "schema_name": f"Files/{schema}" if identity.is_files else schema,
-        "object_name": identity.object_id.object,
+        "schema_name": schema_name,
+        "object_name": object_name,
         "object_type": object_type,
         "object_role": object_role,
         "signature": signature,

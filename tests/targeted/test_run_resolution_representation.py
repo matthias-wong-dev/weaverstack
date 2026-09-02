@@ -14,8 +14,8 @@ from weaver.run import Runner, RunRequest, RunState
 RAW = WeaverItemId.parse("Lakehouse/Raw")
 REPORTING = WeaverItemId.parse("Warehouse/Reporting")
 
-ORDER = "load:Lakehouse/Raw_LH/Sales.Order"
-DAILY = "load:Lakehouse/Raw_LH/Sales.Daily"
+ORDER = "load:Lakehouse/Raw_LH/Tables/Sales.Order"
+DAILY = "load:Lakehouse/Raw_LH/Tables/Sales.Daily"
 # A Folder's graph id carries its ``Files/`` area, which is what keeps it
 # apart from a table of the same ``Schema.Object``.
 EXPORT = "load:Lakehouse/Raw_LH/Files/Sales.Export"

@@ -329,6 +329,9 @@ def test_a_catalogue_read_with_no_window_reports_no_activity():
 
 
 def _statistic(schema, name, *, workflow="workflow-1", read=0, duration=1200):
+    """One ``_.LoadStatistic`` row, keyed as a Lakehouse table is keyed."""
+
+    schema = f"Tables/{schema}"
     return {
         "load_statistic_sk": f"{schema}.{name}",
         "workflow_id": workflow,

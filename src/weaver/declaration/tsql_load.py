@@ -350,19 +350,22 @@ def _bookmark_table() -> str:
 
 
 def _bookmark_identity(document: SesDocument, item) -> dict:
-    """The four values that key this object's bookmark row."""
+    """The four values that key this object's bookmark row.
+
+    Built through the identity the catalogue writers use, so a procedure reads
+    the row a run wrote. A Warehouse relation names no Lakehouse area, and the
+    one rule is what says so.
+    """
+
+    from ..catalogue.claims import bookmark_row
+    from .model import WeaverDocumentId
 
     if item is None:
         raise DiscoveryError(
             f"{document.qualified}: a load procedure is keyed by the logical item "
             "that declares it, and none was supplied"
         )
-    return {
-        "item_type": item.item_type,
-        "item_name": item.item_name,
-        "schema_name": document.object_id.schema,
-        "object_name": document.object_id.object,
-    }
+    return bookmark_row(WeaverDocumentId(item, document.object_id))
 
 
 def _key_literal(value: str) -> str:

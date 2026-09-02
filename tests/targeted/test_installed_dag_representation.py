@@ -74,13 +74,20 @@ def _load_artefact(identity: WeaverDocumentId) -> dict:
 
 
 def _static_row(identity: WeaverDocumentId) -> dict:
-    """The one TableDictionary column the graph reads: is this loaded once."""
+    """The one TableDictionary column the graph reads: is this loaded once.
 
+    Keyed as Registry keys the object, so the dictionary row and the Registry
+    row are found by one pair.
+    """
+
+    from weaver.catalogue.claims import catalogue_columns
+
+    schema_name, object_name = catalogue_columns(identity)
     return {
         "item_type": identity.item.item_type,
         "item_name": identity.item.item_name,
-        "schema_name": identity.object_id.schema,
-        "object_name": identity.object_id.object,
+        "schema_name": schema_name,
+        "object_name": object_name,
         "object_type": "table",
         "is_static": True,
         "signature": "declaration",
@@ -744,7 +751,7 @@ def test_two_objects_at_one_physical_address_are_recorded_rather_than_refused():
     dag = catalogue.dag()
 
     shared = PhysicalTargetRef("lakehouse", "Shared_LH")
-    assert "both resolve to Sales.Order" in dag.ambiguous[shared][0]
+    assert "both resolve to Tables/Sales.Order" in dag.ambiguous[shared][0]
     assert len(dag.nodes) == 2
 
 

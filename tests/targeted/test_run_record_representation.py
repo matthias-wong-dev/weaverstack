@@ -122,7 +122,7 @@ def test_the_status_row_carries_the_objects_logical_identity_and_nothing_physica
 
     assert row["item_type"] == "Lakehouse"
     assert row["item_name"] == "Sales"
-    assert row["schema_name"] == "DWG"
+    assert row["schema_name"] == "Tables/DWG"
     assert row["object_name"] == "Customer"
     assert "target_name" not in row
     assert "target_type" not in row

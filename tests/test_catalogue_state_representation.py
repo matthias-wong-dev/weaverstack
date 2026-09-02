@@ -27,10 +27,12 @@ ITEM = WeaverItemId.parse("Lakehouse/Sales")
 
 
 def _row(name: str, *, object_type: str = "table"):
+    """One Registry row for a Lakehouse table, keyed with the area it sits in."""
+
     return {
         "item_type": "Lakehouse",
         "item_name": "Sales",
-        "schema_name": "Sales",
+        "schema_name": "Tables/Sales",
         "object_name": name,
         "object_type": object_type,
         "object_role": "data",
@@ -39,6 +41,8 @@ def _row(name: str, *, object_type: str = "table"):
 
 
 def _folder_row(name: str):
+    """The same, for the Folder of that name, which is the other area."""
+
     return {**_row(name, object_type="folder"), "schema_name": "Files/Sales"}
 
 
@@ -191,7 +195,51 @@ def test_claim_deletion_uses_the_rule_predicate_columns():
 
     statement = _claim_statements((CatalogueClaim(identity, rule),))[0]
 
-    assert "[Referencing schema name] = N'Sales'" in statement
+    assert "[Referencing schema name] = N'Tables/Sales'" in statement
     assert "[Referencing object name] = N'Customer'" in statement
     assert "[Schema name]" not in statement
     assert "[Object name]" not in statement
+
+
+# --- one Schema.Object in two areas --------------------------------------------
+
+
+@weaver_test()
+def test_the_two_areas_and_the_warehouse_key_symmetrically():
+    """The rule, stated once: a Lakehouse names its area and a Warehouse none."""
+
+    from weaver.catalogue.claims import catalogue_schema, stored_area
+    from weaver.declaration.model import WeaverDocumentId
+
+    table = WeaverDocumentId.parse("Lakehouse/Sales/Tables/Sales.Customer")
+    folder = WeaverDocumentId.parse("Lakehouse/Sales/Files/Sales.Customer")
+    relation = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
+    validation = WeaverDocumentId.parse("Lakehouse/Sales/Sales.CustomerCount")
+
+    assert catalogue_schema(table) == "Tables/Sales"
+    assert catalogue_schema(folder) == "Files/Sales"
+    assert catalogue_schema(relation) == "Sales"
+    # A validation materialises nothing, so it sits in neither area.
+    assert catalogue_schema(validation) == "Sales"
+
+    for one in (table, folder, relation, validation):
+        area, schema = stored_area(catalogue_schema(one))
+        assert (area, schema) == (one.area, one.object_id.schema)
+
+
+@weaver_test()
+def test_a_load_artefacts_stored_schema_is_its_own_path():
+    """A path beneath the runtime root is the real name, and gets no prefix."""
+
+    from weaver.catalogue.claims import catalogue_schema
+    from weaver.declaration.model import WeaverDocumentId
+
+    module = WeaverDocumentId.parse(
+        "Lakehouse/Sales/file:_/Load/Tables/Sales__Customer.py"
+    )
+    procedure = WeaverDocumentId.parse(
+        "Warehouse/Reporting/procedure:_/Load Sales.Customer"
+    )
+
+    assert catalogue_schema(module) == "_/Load/Tables"
+    assert catalogue_schema(procedure) == "_"

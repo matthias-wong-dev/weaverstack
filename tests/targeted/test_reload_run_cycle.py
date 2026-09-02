@@ -42,8 +42,8 @@ from weaver.runtime.load_result import LoadResult
 RAW = WeaverItemId.parse("Lakehouse/Raw")
 REPORTING = WeaverItemId.parse("Warehouse/Reporting")
 
-ORDER = "load:Lakehouse/Raw_LH/Sales.Order"
-DAILY = "load:Lakehouse/Raw_LH/Sales.Daily"
+ORDER = "load:Lakehouse/Raw_LH/Tables/Sales.Order"
+DAILY = "load:Lakehouse/Raw_LH/Tables/Sales.Daily"
 EXPORT = "load:Lakehouse/Raw_LH/Files/Sales.Export"
 REFRESH = "refresh:Lakehouse/Raw_LH"
 SUMMARY = "load:Warehouse/Reporting_WH/Sales.Summary"
@@ -109,7 +109,7 @@ def test_a_named_reload_ends_the_state_of_exactly_what_it_selected(catalogue):
 
     runner.run(dispatch=_succeeds, before_node=_reset_before(record))
 
-    assert _reset_objects(writer) == ["Sales.Order"]
+    assert _reset_objects(writer) == ["Tables/Sales.Order"]
 
 
 @weaver_test()
@@ -152,7 +152,12 @@ def test_only_the_loadable_tables_have_state_to_end(catalogue):
     )
 
     assert dispatched == [EXPORT, ORDER, DAILY, REFRESH, SUMMARY]
-    assert _reset_objects(writer) == ["Sales.Order", "Sales.Daily", "Sales.Summary"]
+    assert _reset_objects(writer) == [
+        # The two Lakehouse tables name their area; the Warehouse one has none.
+        "Tables/Sales.Order",
+        "Tables/Sales.Daily",
+        "Sales.Summary",
+    ]
 
 
 @weaver_test()
@@ -186,7 +191,7 @@ def test_a_node_the_run_never_reached_keeps_its_state(catalogue):
 
     runner.run(dispatch=failing, before_node=_reset_before(record))
 
-    assert _reset_objects(writer) == ["Sales.Order"]
+    assert _reset_objects(writer) == ["Tables/Sales.Order"]
 
 
 # --- what a reload refuses ----------------------------------------------------

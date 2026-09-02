@@ -87,7 +87,7 @@ def test_tables_and_files_with_same_name_are_distinct_registry_rows(tmp_path):
     rows = projection.for_table(REGISTRY)
 
     customer = [row for row in rows if row["object_name"] == "Customer"]
-    assert {row["schema_name"] for row in customer} == {"Sales", "Files/Sales"}
+    assert {row["schema_name"] for row in customer} == {"Tables/Sales", "Files/Sales"}
 
 
 @weaver_test()
@@ -96,11 +96,11 @@ def test_folder_schema_is_catalogued_as_files_slash_declared_schema(tmp_path):
     projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
 
     schemas = {row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)}
-    # `Files/_` is the runtime folder's schema, catalogued by the same rule as any
-    # other folder schema: nothing about the load layer gets a namespace
-    # convention of its own. `_` is the Spark schema the item's shortcuts to the
-    # Weaver catalogue land in.
-    assert schemas == {"Sales", "Files/Sales", "Files/_", "_"}
+    # One rule for both areas: `Files/_` is the runtime folder's schema and
+    # `Tables/_` is the Spark schema the item's shortcuts to the Weaver
+    # catalogue land in. Nothing about the load layer gets a convention of its
+    # own.
+    assert schemas == {"Tables/Sales", "Files/Sales", "Files/_", "Tables/_"}
 
 
 @weaver_test()
@@ -172,7 +172,8 @@ def test_shortcut_rows_reproduce_what_was_declared(tmp_path):
     assert row["target_type"] == "logical"
     assert row["target_item_type"] == "Lakehouse"
     assert row["target_item_name"] == "Curated"
-    assert row["target_schema_name"] == "Sales"
+    # The target is a Lakehouse table, stored as Registry stores it.
+    assert row["target_schema_name"] == "Tables/Sales"
     assert row["target_object_name"] == "Customer"
     # A logical target is bound, so where it lands is Installation's answer.
     assert row["target_workspace_name"] is None
@@ -577,9 +578,10 @@ def test_a_physical_shortcut_is_registered_like_any_other(tmp_path):
         for row in projection.for_table(REGISTRY)
     }
 
-    assert registered[("Sales", "External")]["object_type"] == "table"
-    assert registered[("Sales", "External")]["object_role"] == "shortcut"
-    # A folder is catalogued under Files/<schema>, as a declared one is.
+    # A shortcut destination is catalogued under the area it lands in, as a
+    # declared object of that area is.
+    assert registered[("Tables/Sales", "External")]["object_type"] == "table"
+    assert registered[("Tables/Sales", "External")]["object_role"] == "shortcut"
     assert registered[("Files/Sales", "Incoming")]["object_type"] == "folder"
     # A schema shortcut is registered as the schema it presents.
     assert registered[("Reference", "Reference")]["object_type"] == "schema"
@@ -598,7 +600,7 @@ def test_a_schema_shortcut_is_not_a_schema_the_item_owns(tmp_path):
     projection = _project(repository, "Lakehouse/Curated", "Curated_Dev")
     in_use = {row["schema_name"] for row in projection.for_table(SCHEMA_DICTIONARY)}
 
-    assert "Sales" in in_use
+    assert "Tables/Sales" in in_use
     assert "Reference" not in in_use
 
 
@@ -611,7 +613,7 @@ def test_a_shortcut_row_names_the_shortcut_the_way_registry_does(tmp_path):
 
     _repository, rows = _shortcut_rows(tmp_path)
 
-    assert rows["Sales.Landed"]["schema_name"] == "Sales"
+    assert rows["Sales.Landed"]["schema_name"] == "Tables/Sales"
     assert rows["Sales.Landed"]["object_name"] == "Landed"
     assert rows["Sales.Incoming"]["object_name"] == "Incoming"
     # A schema shortcut presents a namespace, so it names no object.

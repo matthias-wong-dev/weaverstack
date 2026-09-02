@@ -180,7 +180,9 @@ def test_impact_classifies_new_changed_and_unchanged_documents(tmp_path):
     assert set(empty.new) == raw
     assert empty.changed == empty.impacted == ()
 
-    installed = _catalogue(repository, "Lakehouse/Raw", old=(("Sales", "Customer"),))
+    installed = _catalogue(
+        repository, "Lakehouse/Raw", old=(("Tables/Sales", "Customer"),)
+    )
     impact = determine_impact(
         repository,
         installed.registered,
@@ -473,7 +475,7 @@ def test_uncertified_physical_protected_loadable_keeps_its_runtime_state(tmp_pat
     bookmark = {
         "item_type": item.item_type,
         "item_name": item.item_name,
-        "schema_name": "Sales",
+        "schema_name": "Tables/Sales",
         "object_name": "Customer",
         "bookmark_datetime": datetime(2026, 8, 24),
     }
@@ -737,9 +739,15 @@ def test_a_shortcut_is_never_dropped_by_the_document_pipeline(tmp_path):
 
 
 def _dated(rows, item_text, schema, name, build_datetime):
-    """Stamp one Registry row with a build datetime, as a publication would."""
+    """Stamp one Registry row with a build datetime, as a publication would.
+
+    ``schema`` is the relational one the caller declared; a Lakehouse relation is
+    stored under the area it sits in, and the row is found by the stored name.
+    """
 
     item = WeaverItemId.parse(item_text)
+    if item.item_type == "Lakehouse" and "/" not in schema:
+        schema = f"Tables/{schema}"
     tables = dict(rows[item])
     tables[REGISTRY.name] = tuple(
         {**row, "build_datetime": build_datetime}
@@ -1100,7 +1108,7 @@ def test_managed_drop_uses_the_installed_type_when_an_object_changes_type(tmp_pa
                         "object_type": "view",
                     }
                     if name == REGISTRY.name
-                    and row.get("schema_name") == "Sales"
+                    and row.get("schema_name") == "Tables/Sales"
                     and row.get("object_name") == "Customer"
                     else dict(row)
                     for row in rows

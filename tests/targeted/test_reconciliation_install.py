@@ -88,12 +88,12 @@ def test_a_schema_shortcut_is_compared_with_the_inventory_schema():
 @weaver_test()
 def test_a_missing_schema_shortcut_retires_only_its_registry_claim():
     # Stored with the schema in both columns and read back as the schema
-    # identity, which is what the declaration keys it by.
-    stored = document_id("Reference.Reference")
+    # identity, which is what the declaration keys it by. A namespace sits in no
+    # area, so the row carries none.
     identity = WeaverSchemaId(_item(), "Reference")
     result = reconcile(
         FixtureCatalogue.from_registry_rows(
-            registry_row(stored, object_type="schema", object_role="shortcut")
+            registry_row(identity, object_type="schema", object_role="shortcut")
         ),
         target_inventory(),
     )

@@ -606,10 +606,14 @@ def _foreign_keys(source, identity, scope, signature) -> list[dict]:
                 "foreign_column_set": column_set(key.columns),
                 "primary_item_type": primary_item.item_type,
                 "primary_item_name": primary_item.item_name,
-                "primary_schema_name": (
-                    f"Files/{reference.schema}"
-                    if reference.is_files
-                    else reference.schema
+                # Stored as Registry stores the object it names, area and all,
+                # so the two sides of a relationship are looked up one way.
+                "primary_schema_name": _catalogue_schema(
+                    WeaverDocumentId(
+                        primary_item,
+                        reference.object_id,
+                        is_files=reference.is_files,
+                    )
                 ),
                 "primary_object_name": reference.object,
                 "primary_column_set": column_set(key.reference_columns),

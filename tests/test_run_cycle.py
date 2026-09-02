@@ -703,7 +703,9 @@ def test_a_node_is_named_by_what_it_does_to_which_object():
         node_id="Warehouse/Reporting/Reporting.CustomerRevenuePresent",
         physical_target="Warehouse/Reporting",
         primitive_kind="warehouse_procedure",
-        logical_id=_Logical("Reporting.CustomerRevenuePresent"),
+        logical_id=_Logical(
+            "Reporting.CustomerRevenuePresent", item="Warehouse/Reporting"
+        ),
         role="Assumption",
     )
 
@@ -715,7 +717,7 @@ def test_a_node_is_named_by_what_it_does_to_which_object():
         role="load",
     )
 
-    assert node_label(load) == "Load Lakehouse/Sales/Sales.Customer"
+    assert node_label(load) == "Load Lakehouse/Sales/Tables/Sales.Customer"
     assert node_label(refresh) == "Refresh Lakehouse/Sales SQL endpoint"
     assert (
         node_label(check) == "Test Warehouse/Reporting/Reporting.CustomerRevenuePresent"
@@ -755,23 +757,24 @@ def test_run_evidence_uses_the_nodes_structured_identity():
 
     assert row["target_type"] == "Lakehouse"
     assert row["target_name"] == "Sales_LH"
-    assert row["schema_name"] == "Sales"
+    assert row["schema_name"] == "Tables/Sales"
     assert row["object_name"] == "Customer"
 
 
-class _Logical:
-    def __init__(self, qualified, is_files=False):
-        schema, object_name = qualified.split(".", 1)
-        self.object_id = type(
-            "ObjectId",
-            (),
-            {"qualified": qualified, "schema": schema, "object": object_name},
-        )()
-        #: A Folder is stored beneath ``Files/``, and its label says so.
-        self.is_files = is_files
+def _Logical(qualified, is_files=False, item="Lakehouse/Sales"):
+    """One real logical identity, which is what a node carries.
 
-    def __str__(self):
-        return self.object_id.qualified
+    What these tests assert is how a label and a log row are built from it, so
+    the identity has to be the production one.
+    """
+
+    from weaver.declaration.metadata import ObjectId
+    from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+
+    schema, object_name = qualified.split(".", 1)
+    return WeaverDocumentId(
+        WeaverItemId.parse(item), ObjectId(schema, object_name), is_files=is_files
+    )
 
 
 # --- what runs before a node is dispatched ------------------------------------

@@ -967,12 +967,14 @@ def _window(*statistics) -> LoadHistory:
 
 
 def _statistic(name: str, *, duration_ms=None, **counts) -> dict:
+    """One ``_.LoadStatistic`` row, keyed as a Lakehouse table is keyed."""
+
     return {
         "load_statistic_sk": name,
         "workflow_id": "workflow-1",
         "item_type": "Lakehouse",
         "item_name": "Raw",
-        "schema_name": name.split(".")[0],
+        "schema_name": f"Tables/{name.split('.')[0]}",
         "object_name": name.split(".")[1],
         "started_datetime": None,
         "completed_datetime": None,

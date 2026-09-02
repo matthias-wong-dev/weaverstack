@@ -1,15 +1,17 @@
 """Moving a Lakehouse source under ``Tables/`` moves its module, not its data.
 
-An estate built before the areas were explicit holds its load modules at the
-runtime root: ``_/Load/DWG__Customer.py``. Its Delta tables are unaffected by the
-move, because the catalogue never stored an area. ``schema_name`` is ``DWG`` and
-``object_name`` is ``Customer``, and the row an old build wrote reads back as
-``Lakehouse/Sales/Tables/DWG.Customer``, which is the same key the new
-declaration claims.
+An estate whose load modules sit at the runtime root, ``_/Load/DWG__Customer.py``,
+is one built before the areas were explicit. Moving the sources under ``Tables/``
+replaces one runtime file per Lakehouse document. The Delta table is not
+dropped, not rebuilt and not reloaded, because the authored path reaches neither
+the physical name nor the signature, and the build after that has nothing left
+to do.
 
-So the first build after the upgrade replaces one runtime file per Lakehouse
-document and touches nothing else. The table is not dropped, not rebuilt and not
-reloaded, and the build after that has nothing left to do.
+What the catalogue stores changed too, in a second step: a Lakehouse relation is
+keyed ``Tables/DWG`` now, where it was keyed ``DWG``. That is a breaking
+catalogue migration and is asserted separately, in
+:mod:`test_area_keyed_catalogue_cycle`. Here the catalogue is the current one
+throughout, so what this isolates is the file move.
 
 The estate is the one :mod:`test_build_fixed_point_cycle` reaches a fixed point
 over, and the harness is imported from it. What is asserted here is the
@@ -48,9 +50,9 @@ def estate(tmp_path):
 def _before_the_move(catalogue: Catalogue) -> Catalogue:
     """The same catalogue, with each Lakehouse load module where it used to sit.
 
-    Only the file rows move. A table's Registry row carries its relational
-    schema and its object name and no area at all, so there is nothing in it for
-    the move to change.
+    Only the file rows move. A table's Registry row names the area the table
+    sits in, not the path its module was deployed to, so the file move leaves it
+    alone.
     """
 
     rows = {
@@ -142,7 +144,7 @@ def test_the_move_replaces_the_load_module_and_nothing_else(estate, tmp_path):
 
 @weaver_test()
 def test_the_delta_table_is_neither_dropped_nor_rebuilt(estate, tmp_path):
-    """The catalogue key did not move, so the data has nothing to answer for."""
+    """The source moved and the object did not, so the data has nothing to answer for."""
 
     bundle = _migrating_build(estate, tmp_path)
     table = WeaverDocumentId.parse(TABLE)

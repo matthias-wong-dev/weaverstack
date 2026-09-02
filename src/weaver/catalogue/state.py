@@ -14,7 +14,9 @@ from typing import Any, Mapping, Sequence
 from ..declaration.metadata import ObjectId
 from ..declaration.model import (
     FILE_SHAPE,
+    FILES,
     PROCEDURE_SHAPE,
+    TABLES,
     WeaverDocumentId,
     WeaverItemId,
     WeaverSchemaId,
@@ -25,6 +27,7 @@ from .claims import (
     catalogue_columns,
     catalogue_schema,
     claim_rules_for_object_type,
+    stored_area,
 )
 from .reader import read_installations, read_table
 from .render import InstallationScope, InstallationScopes
@@ -48,10 +51,6 @@ from .tables import (
     TEST_STATUS,
     VALIDATION_ROLES,
 )
-
-#: What a Folder's stored schema carries, so a table and a folder of the same
-#: name stay apart. Only the object shape uses it. See :func:`catalogue_schema`.
-_FILES_PREFIX = "Files/"
 
 
 @dataclass(init=False)
@@ -280,7 +279,7 @@ class Catalogue:
         and anything that guessed would act on the wrong object.
         """
 
-        stored = f"{_FILES_PREFIX}{schema}" if is_files else schema
+        stored = f"{FILES}/{schema}" if is_files else f"{TABLES}/{schema}"
         bound = self.bound_to(kind=target_kind, name=target_name)
         found = [
             identity
@@ -1177,9 +1176,5 @@ def _row_identity(
         return WeaverDocumentId(item, ObjectId(schema, name), shape=FILE_SHAPE)
     if object_type == "stored_procedure":
         return WeaverDocumentId(item, ObjectId(schema, name), shape=PROCEDURE_SHAPE)
-    is_files = schema.startswith(_FILES_PREFIX)
-    return WeaverDocumentId(
-        item,
-        ObjectId(schema[len(_FILES_PREFIX) :] if is_files else schema, name),
-        is_files=is_files,
-    )
+    area, relational = stored_area(schema)
+    return WeaverDocumentId(item, ObjectId(relational, name), is_files=area == FILES)

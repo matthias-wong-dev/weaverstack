@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
-from ..declaration.model import WeaverDocumentId
+from ..declaration.model import AREAS, WeaverDocumentId
 from ..errors import BuildError
 from .tables import (
     COLUMN_DICTIONARY,
@@ -27,17 +27,38 @@ from .tables import (
 def catalogue_schema(identity: WeaverDocumentId) -> str:
     """The ``schema_name`` this identity is stored under.
 
-    The relational schema, and for a Folder the ``Files/`` prefix, because that
-    prefix is part of what distinguishes it from a table of the same name. A
-    Table's ``Tables`` area is absent: it is what a Lakehouse holds its tables
-    in, and ``Sales`` is the schema. A load artefact gets no prefix either. Its
-    schema is already the real thing, being the containing path for a file and
-    the Warehouse schema for a procedure, and prefixing it would store something
-    that is not the target's own name.
+    The area a Lakehouse document sits in, then its relational schema:
+    ``Tables/Sales`` for a Table or a View and ``Files/Sales`` for a Folder. The
+    area is what separates a Folder from a table of one ``Schema.Object``, and
+    storing it on one of them and not the other made two identities that read
+    back the same way look different and two that differ look alike.
+
+    Everything else stores its schema alone. A Warehouse has no areas. A
+    validation occupies neither, because it materialises nothing. A load
+    artefact's schema is already the real thing, being the containing path for a
+    file and the Warehouse schema for a procedure, and prefixing it would store
+    something that is not the target's own name.
+
+    :func:`stored_area` reads it back. The two are one rule.
     """
 
-    prefix = "Files/" if identity.is_files else ""
+    area = identity.area
+    prefix = f"{area}/" if area else ""
     return f"{prefix}{identity.object_id.schema}"
+
+
+def stored_area(stored: str) -> tuple[str | None, str]:
+    """One stored ``schema_name`` as the area it names and the schema it holds.
+
+    The inverse of :func:`catalogue_schema`. A stored value that names no area is
+    a Warehouse relation, a validation or a load artefact, and its schema is the
+    whole of it.
+    """
+
+    head, separator, tail = stored.partition("/")
+    if separator and head in AREAS:
+        return head, tail
+    return None, stored
 
 
 def catalogue_columns(identity) -> tuple[str, str]:
