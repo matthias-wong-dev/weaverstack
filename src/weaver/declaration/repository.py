@@ -381,8 +381,7 @@ def _standard_parts(authored: RepositoryPart) -> tuple[RepositoryPart, ...]:
 
 
 #: What a declaration's own key says it is, and the directory that holds it.
-#: Read from the bytes so a misplaced file is told where it belongs rather than
-#: given the whole list.
+#: Read from the bytes, so a misplaced file is told the one move it needs.
 _DECLARED_DIRECTORY = {
     b"Table ID:": TABLES,
     b"View ID:": TABLES,
