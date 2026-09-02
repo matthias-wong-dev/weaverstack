@@ -553,28 +553,39 @@ def _require_method(relative_path: str, declared: ast.ClassDef, name: str) -> No
 
 
 def _imported_modules(module: ast.Module) -> tuple[str, ...]:
-    """Top-level module names imported absolutely, in source order.
+    """Module names imported absolutely, in source order.
 
-    Relative imports are helper imports and are excluded. Which of the rest is
-    a dependency is decided by the repository, which knows every object's module
-    name.
+    The top-level package, except beneath a Lakehouse area: ``Tables`` and
+    ``Files`` are the two packages an item's own object modules sit in, so what
+    is recorded there is the module inside them. Relative imports are helper
+    imports and are excluded. Which of the rest is a dependency is decided by
+    the repository, which knows every object's module name.
     """
 
     names: list[str] = []
     for node in ast.walk(module):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                names.append(alias.name.split(".")[0])
+                names.append(_imported_name(alias.name))
         elif isinstance(node, ast.ImportFrom):
             if node.level:  # from . import x
                 continue
             if node.module:
-                names.append(node.module.split(".")[0])
+                names.append(_imported_name(node.module))
     seen: list[str] = []
     for name in names:
         if name not in seen:
             seen.append(name)
     return tuple(seen)
+
+
+def _imported_name(module: str) -> str:
+    from .model import AREAS
+
+    head, _, tail = module.partition(".")
+    if head in AREAS and tail:
+        return tail.split(".")[0]
+    return head
 
 
 def _python_imports(module: ast.Module) -> tuple[PythonImport, ...]:

@@ -52,7 +52,7 @@ def test_a_successful_action_reports_succeeded_against_its_target():
 
     assert result.status == "succeeded"
     assert result.action_id == action.id
-    assert result.resource_node_id == "Lakehouse/Sales/DWG.Customer"
+    assert result.resource_node_id == "Lakehouse/Sales/Tables/DWG.Customer"
     assert result.target_id == "target-1"
     assert result.executor == "spark_sql"
 

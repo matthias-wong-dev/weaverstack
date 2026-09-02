@@ -340,7 +340,7 @@ def test_a_schema_shortcuts_identity_survives_the_manifest():
     from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
 
     schema = WeaverSchemaId.parse("Lakehouse/Curated/Reference")
-    table = WeaverDocumentId.parse("Lakehouse/Curated/Sales.Landed")
+    table = WeaverDocumentId.parse("Lakehouse/Curated/Tables/Sales.Landed")
     folder = WeaverDocumentId.parse("Lakehouse/Curated/Files/Sales.Incoming")
     selection = BuildSelection(
         impact=Impact(new=(schema, table), changed=(folder,), impacted_descendants=()),

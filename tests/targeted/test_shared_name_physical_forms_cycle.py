@@ -55,7 +55,7 @@ select cast(1 as int) as CustomerId
 def _initial_repository(root):
     for relative, text in {
         f"{LAKEHOUSE}/schemas/Sales.yml": schema_document("Sales"),
-        f"{LAKEHOUSE}/Sales__Thing.py": lakehouse_table(QUALIFIED),
+        f"{LAKEHOUSE}/Tables/Sales__Thing.py": lakehouse_table(QUALIFIED),
         f"{LAKEHOUSE}/Files/Sales__Thing.py": folder_document(QUALIFIED),
         f"{WAREHOUSE}/schemas/Sales.yml": schema_document("Sales"),
         f"{WAREHOUSE}/Sales.Thing.sql": warehouse_table(QUALIFIED),
@@ -67,7 +67,7 @@ def _initial_repository(root):
 def _changed_repository(root):
     for relative, text in {
         f"{LAKEHOUSE}/schemas/Sales.yml": schema_document("Sales"),
-        f"{LAKEHOUSE}/Sales.Thing.sql": SPARK_TABLE.format(object_id=QUALIFIED),
+        f"{LAKEHOUSE}/Tables/Sales.Thing.sql": SPARK_TABLE.format(object_id=QUALIFIED),
         f"{WAREHOUSE}/schemas/Sales.yml": schema_document("Sales"),
         f"{WAREHOUSE}/Sales.Thing.sql": _warehouse_view(),
     }.items():
@@ -160,7 +160,7 @@ def test_shared_names_change_all_three_physical_forms_and_reach_a_fixed_point(
     bindings = _bindings()
     lakehouse = WeaverItemId.parse(LAKEHOUSE)
     warehouse = WeaverItemId.parse(WAREHOUSE)
-    table_id = WeaverDocumentId.parse(f"{LAKEHOUSE}/{QUALIFIED}")
+    table_id = WeaverDocumentId.parse(f"{LAKEHOUSE}/Tables/{QUALIFIED}")
     files_id = WeaverDocumentId.parse(f"{LAKEHOUSE}/Files/{QUALIFIED}")
     warehouse_id = WeaverDocumentId.parse(f"{WAREHOUSE}/{QUALIFIED}")
 

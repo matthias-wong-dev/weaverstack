@@ -90,7 +90,7 @@ def root(tmp_path):
 
     path = tmp_path / "repository"
     parsed = single_document_repository(
-        path, documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")}
+        path, documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")}
     )
     return SimpleNamespace(path=path, repository=parsed)
 

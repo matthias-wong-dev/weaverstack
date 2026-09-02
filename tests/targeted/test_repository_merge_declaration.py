@@ -91,14 +91,14 @@ def test_shortcuts_follow_the_same_rules():
         name="DWG__Customer",
         shortcut_type=TABLE_SHORTCUT,
         target_type=LOGICAL_TARGET,
-        target="Lakehouse/Curated/DWG.Customer",
+        target="Lakehouse/Curated/Tables/DWG.Customer",
     )
     other = ShortcutDeclaration(
         owner=SALES,
         name="DWG__Customer",
         shortcut_type=TABLE_SHORTCUT,
         target_type=LOGICAL_TARGET,
-        target="Lakehouse/Other/DWG.Customer",
+        target="Lakehouse/Other/Tables/DWG.Customer",
     )
 
     with pytest.raises(DiscoveryError, match="contributed twice"):

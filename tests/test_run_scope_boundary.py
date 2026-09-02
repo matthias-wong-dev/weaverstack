@@ -211,7 +211,7 @@ def _node():
     from weaver.targets import LAKEHOUSE_TARGET, PhysicalObjectRef, PhysicalTargetRef
 
     return RunNode(
-        node_id="load:Lakehouse/Sales/Sales.Customer",
+        node_id="load:Lakehouse/Sales/Tables/Sales.Customer",
         physical_target=PhysicalTargetRef(kind=LAKEHOUSE_TARGET, name="Sales"),
         primitive_kind="python_table",
         logical_id=WeaverDocumentId(
@@ -221,7 +221,7 @@ def _node():
         primitive_object=PhysicalObjectRef(
             target_id="Lakehouse/Sales",
             target_kind="lakehouse",
-            schema="_/Load",
+            schema="_/Load/Tables",
             object="Sales__Customer.py",
             object_type="file",
         ),

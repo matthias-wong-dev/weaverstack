@@ -65,7 +65,9 @@ def _load_artefact(identity: WeaverDocumentId) -> dict:
         )
     schema, name = identity.object_id.schema, identity.object_id.object
     return registry_row(
-        WeaverDocumentId.parse(f"{identity.item}/file:_/Load/{schema}__{name}.py"),
+        WeaverDocumentId.parse(
+            f"{identity.item}/file:_/Load/{identity.area}/{schema}__{name}.py"
+        ),
         object_type="file",
         object_role="load",
     )
@@ -192,11 +194,11 @@ def _chain() -> _Estate:
 
     return (
         _Estate()
-        .object(f"{RAW}/Sales.A")
-        .object(f"{RAW}/Sales.B")
-        .object(f"{RAW}/Sales.C")
-        .reads(f"{RAW}/Sales.B", "Sales.A")
-        .reads(f"{RAW}/Sales.C", "Sales.B")
+        .object(f"{RAW}/Tables/Sales.A")
+        .object(f"{RAW}/Tables/Sales.B")
+        .object(f"{RAW}/Tables/Sales.C")
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
+        .reads(f"{RAW}/Tables/Sales.C", "Sales.B")
     )
 
 
@@ -212,9 +214,9 @@ def test_a_chain_orders_upstream_before_downstream():
     dag = _chain().dag()
 
     assert ids(dag.order()) == (
-        f"{RAW}/Sales.A",
-        f"{RAW}/Sales.B",
-        f"{RAW}/Sales.C",
+        f"{RAW}/Tables/Sales.A",
+        f"{RAW}/Tables/Sales.B",
+        f"{RAW}/Tables/Sales.C",
     )
 
 
@@ -222,14 +224,14 @@ def test_a_chain_orders_upstream_before_downstream():
 def test_transitive_ancestry_reaches_through_the_middle():
     dag = _chain().dag()
 
-    assert ids(dag.ancestors(f"{RAW}/Sales.C")) == (
-        f"{RAW}/Sales.A",
-        f"{RAW}/Sales.B",
+    assert ids(dag.ancestors(f"{RAW}/Tables/Sales.C")) == (
+        f"{RAW}/Tables/Sales.A",
+        f"{RAW}/Tables/Sales.B",
     )
-    assert ids(dag.parents(f"{RAW}/Sales.C")) == (f"{RAW}/Sales.B",)
-    assert ids(dag.descendants(f"{RAW}/Sales.A")) == (
-        f"{RAW}/Sales.B",
-        f"{RAW}/Sales.C",
+    assert ids(dag.parents(f"{RAW}/Tables/Sales.C")) == (f"{RAW}/Tables/Sales.B",)
+    assert ids(dag.descendants(f"{RAW}/Tables/Sales.A")) == (
+        f"{RAW}/Tables/Sales.B",
+        f"{RAW}/Tables/Sales.C",
     )
 
 
@@ -237,17 +239,17 @@ def test_transitive_ancestry_reaches_through_the_middle():
 def test_one_producer_branches_to_two_consumers():
     dag = (
         _Estate()
-        .object(f"{RAW}/Sales.A")
-        .object(f"{RAW}/Sales.B")
-        .object(f"{RAW}/Sales.C")
-        .reads(f"{RAW}/Sales.B", "Sales.A")
-        .reads(f"{RAW}/Sales.C", "Sales.A")
+        .object(f"{RAW}/Tables/Sales.A")
+        .object(f"{RAW}/Tables/Sales.B")
+        .object(f"{RAW}/Tables/Sales.C")
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
+        .reads(f"{RAW}/Tables/Sales.C", "Sales.A")
         .dag()
     )
 
-    assert ids(dag.children(f"{RAW}/Sales.A")) == (
-        f"{RAW}/Sales.B",
-        f"{RAW}/Sales.C",
+    assert ids(dag.children(f"{RAW}/Tables/Sales.A")) == (
+        f"{RAW}/Tables/Sales.B",
+        f"{RAW}/Tables/Sales.C",
     )
 
 
@@ -255,17 +257,17 @@ def test_one_producer_branches_to_two_consumers():
 def test_two_producers_converge_on_one_consumer():
     dag = (
         _Estate()
-        .object(f"{RAW}/Sales.A")
-        .object(f"{RAW}/Sales.B")
-        .object(f"{RAW}/Sales.C")
-        .reads(f"{RAW}/Sales.C", "Sales.A")
-        .reads(f"{RAW}/Sales.C", "Sales.B")
+        .object(f"{RAW}/Tables/Sales.A")
+        .object(f"{RAW}/Tables/Sales.B")
+        .object(f"{RAW}/Tables/Sales.C")
+        .reads(f"{RAW}/Tables/Sales.C", "Sales.A")
+        .reads(f"{RAW}/Tables/Sales.C", "Sales.B")
         .dag()
     )
 
-    assert ids(dag.parents(f"{RAW}/Sales.C")) == (
-        f"{RAW}/Sales.A",
-        f"{RAW}/Sales.B",
+    assert ids(dag.parents(f"{RAW}/Tables/Sales.C")) == (
+        f"{RAW}/Tables/Sales.A",
+        f"{RAW}/Tables/Sales.B",
     )
 
 
@@ -275,18 +277,18 @@ def test_a_view_is_a_conduit_that_owns_no_load():
 
     dag = (
         _Estate()
-        .object(f"{RAW}/Sales.A")
-        .view(f"{RAW}/Sales.Live")
-        .object(f"{RAW}/Sales.C")
-        .reads(f"{RAW}/Sales.Live", "Sales.A")
-        .reads(f"{RAW}/Sales.C", "Sales.Live")
+        .object(f"{RAW}/Tables/Sales.A")
+        .view(f"{RAW}/Tables/Sales.Live")
+        .object(f"{RAW}/Tables/Sales.C")
+        .reads(f"{RAW}/Tables/Sales.Live", "Sales.A")
+        .reads(f"{RAW}/Tables/Sales.C", "Sales.Live")
         .dag()
     )
 
-    assert not dag.node(f"{RAW}/Sales.Live").is_loadable
-    assert ids(dag.ancestors(f"{RAW}/Sales.C")) == (
-        f"{RAW}/Sales.A",
-        f"{RAW}/Sales.Live",
+    assert not dag.node(f"{RAW}/Tables/Sales.Live").is_loadable
+    assert ids(dag.ancestors(f"{RAW}/Tables/Sales.C")) == (
+        f"{RAW}/Tables/Sales.A",
+        f"{RAW}/Tables/Sales.Live",
     )
 
 
@@ -297,11 +299,11 @@ def test_node_and_edge_order_is_the_estate_rather_than_iteration():
     forwards = _chain().dag()
     backwards = (
         _Estate()
-        .object(f"{RAW}/Sales.C")
-        .object(f"{RAW}/Sales.B")
-        .object(f"{RAW}/Sales.A")
-        .reads(f"{RAW}/Sales.C", "Sales.B")
-        .reads(f"{RAW}/Sales.B", "Sales.A")
+        .object(f"{RAW}/Tables/Sales.C")
+        .object(f"{RAW}/Tables/Sales.B")
+        .object(f"{RAW}/Tables/Sales.A")
+        .reads(f"{RAW}/Tables/Sales.C", "Sales.B")
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
         .dag()
     )
 
@@ -318,8 +320,8 @@ def _crossing() -> _Estate:
 
     return (
         _Estate()
-        .object(f"{RAW}/Sales.Order")
-        .shortcut(f"{REPORTING}/Sales.Order", f"{RAW}/Sales.Order")
+        .object(f"{RAW}/Tables/Sales.Order")
+        .shortcut(f"{REPORTING}/Sales.Order", f"{RAW}/Tables/Sales.Order")
         .object(f"{REPORTING}/Sales.Summary")
         .reads(f"{REPORTING}/Sales.Summary", "Sales.Order")
     )
@@ -329,7 +331,9 @@ def _crossing() -> _Estate:
 def test_a_logical_shortcut_connects_the_managed_source_to_the_consumer():
     dag = _crossing().dag()
 
-    assert ids(dag.parents(f"{REPORTING}/Sales.Summary")) == (f"{RAW}/Sales.Order",)
+    assert ids(dag.parents(f"{REPORTING}/Sales.Summary")) == (
+        f"{RAW}/Tables/Sales.Order",
+    )
     edge = dag.reads(f"{REPORTING}/Sales.Summary")[0]
     assert str(edge.through) == f"{REPORTING}/Sales.Order"
 
@@ -338,7 +342,9 @@ def test_a_logical_shortcut_connects_the_managed_source_to_the_consumer():
 def test_a_shortcut_destination_is_ordered_behind_its_source():
     dag = _crossing().dag()
 
-    assert ids(dag.parents(f"{REPORTING}/Sales.Order")) == (f"{RAW}/Sales.Order",)
+    assert ids(dag.parents(f"{REPORTING}/Sales.Order")) == (
+        f"{RAW}/Tables/Sales.Order",
+    )
     assert dag.reads(f"{REPORTING}/Sales.Order") == ()
 
 
@@ -352,21 +358,23 @@ def test_a_physical_shortcut_is_a_boundary_rather_than_a_producer():
 
     dag = (
         _Estate()
-        .object(f"{RAW}/Sales.Order")
+        .object(f"{RAW}/Tables/Sales.Order")
         .shortcut(
-            f"{CURATED}/Sales.External",
-            f"{RAW}/Sales.Order",
+            f"{CURATED}/Tables/Sales.External",
+            f"{RAW}/Tables/Sales.Order",
             target_type="physical",
         )
-        .object(f"{CURATED}/Sales.Report")
-        .reads(f"{CURATED}/Sales.Report", "Sales.External")
+        .object(f"{CURATED}/Tables/Sales.Report")
+        .reads(f"{CURATED}/Tables/Sales.Report", "Sales.External")
         .dag()
     )
 
-    assert ids(dag.parents(f"{CURATED}/Sales.Report")) == (f"{CURATED}/Sales.External",)
-    assert dag.parents(f"{CURATED}/Sales.External") == ()
-    assert dag.ancestors(f"{CURATED}/Sales.Report") == (
-        dag.node(f"{CURATED}/Sales.External"),
+    assert ids(dag.parents(f"{CURATED}/Tables/Sales.Report")) == (
+        f"{CURATED}/Tables/Sales.External",
+    )
+    assert dag.parents(f"{CURATED}/Tables/Sales.External") == ()
+    assert dag.ancestors(f"{CURATED}/Tables/Sales.Report") == (
+        dag.node(f"{CURATED}/Tables/Sales.External"),
     )
 
 
@@ -374,11 +382,11 @@ def test_a_physical_shortcut_is_a_boundary_rather_than_a_producer():
 def test_a_three_part_read_is_recorded_rather_than_ordered():
     """It names a physical object outside the managed estate."""
 
-    consumer = document_id(f"{RAW}/Sales.Order")
+    consumer = document_id(f"{RAW}/Tables/Sales.Order")
     dag = (
         _Estate()
-        .object(f"{RAW}/Sales.Order")
-        .reads(f"{RAW}/Sales.Order", "other_ws.other_lh.Sales.Source")
+        .object(f"{RAW}/Tables/Sales.Order")
+        .reads(f"{RAW}/Tables/Sales.Order", "other_ws.other_lh.Sales.Source")
         .dag()
     )
 
@@ -479,20 +487,20 @@ def test_a_validation_carries_its_declared_key_and_description():
 def test_a_loadable_names_the_primitive_its_dispatch_runs():
     dag = (
         _Estate()
-        .object(f"{RAW}/Sales.Order")
+        .object(f"{RAW}/Tables/Sales.Order")
         .object(f"{REPORTING}/Sales.Summary")
         .dag()
     )
 
-    assert dag.node(f"{RAW}/Sales.Order").artefact_kind == PYTHON_TABLE
+    assert dag.node(f"{RAW}/Tables/Sales.Order").artefact_kind == PYTHON_TABLE
     assert dag.node(f"{REPORTING}/Sales.Summary").artefact_kind == WAREHOUSE_PROCEDURE
 
 
 @weaver_test()
 def test_an_object_whose_load_primitive_is_absent_is_not_loadable():
-    dag = _Estate().object(f"{RAW}/Sales.Order", loadable=False).dag()
+    dag = _Estate().object(f"{RAW}/Tables/Sales.Order", loadable=False).dag()
 
-    node = dag.node(f"{RAW}/Sales.Order")
+    node = dag.node(f"{RAW}/Tables/Sales.Order")
     assert node.expects_artefact
     assert not node.is_installed
     assert not node.is_loadable
@@ -504,24 +512,24 @@ def test_a_node_carries_whether_its_declaration_said_it_loads_once():
 
     dag = (
         _Estate()
-        .object(f"{RAW}/Ref.Country", is_static=True)
-        .object(f"{RAW}/Sales.Order")
+        .object(f"{RAW}/Tables/Ref.Country", is_static=True)
+        .object(f"{RAW}/Tables/Sales.Order")
         .dag()
     )
 
-    assert dag.node(f"{RAW}/Ref.Country").is_static
-    assert not dag.node(f"{RAW}/Sales.Order").is_static
+    assert dag.node(f"{RAW}/Tables/Ref.Country").is_static
+    assert not dag.node(f"{RAW}/Tables/Sales.Order").is_static
 
 
 @weaver_test()
 def test_a_runtime_artefact_is_not_a_node_of_the_graph():
     """A Registry row for a deployed module describes what runs, not what is read."""
 
-    dag = _Estate().object(f"{RAW}/Sales.Order").dag()
+    dag = _Estate().object(f"{RAW}/Tables/Sales.Order").dag()
 
-    assert ids(dag.nodes) == (f"{RAW}/Sales.Order",)
-    assert str(dag.node(f"{RAW}/Sales.Order").artefact) == (
-        f"{RAW}/file:_/Load/Sales__Order.py"
+    assert ids(dag.nodes) == (f"{RAW}/Tables/Sales.Order",)
+    assert str(dag.node(f"{RAW}/Tables/Sales.Order").artefact) == (
+        f"{RAW}/file:_/Load/Tables/Sales__Order.py"
     )
 
 
@@ -533,8 +541,8 @@ def _mixed() -> _Estate:
 
     return (
         _Estate()
-        .object(f"{RAW}/Sales.Order")
-        .object(f"{CURATED}/Sales.Customer")
+        .object(f"{RAW}/Tables/Sales.Order")
+        .object(f"{CURATED}/Tables/Sales.Customer")
         .object(f"{REPORTING}/Sales.Summary")
         .view(f"{REPORTING}/Sales.Live")
         .validation(f"{REPORTING}/Sales.Integrity")
@@ -547,7 +555,7 @@ def test_selection_by_target_keeps_identity_order():
     dag = _mixed().dag()
 
     assert ids(dag.select(targets=(RAW_LH, REPORTING_WH))) == (
-        f"{RAW}/Sales.Order",
+        f"{RAW}/Tables/Sales.Order",
         f"{REPORTING}/Sales.Integrity",
         f"{REPORTING}/Sales.Live",
         f"{REPORTING}/Sales.Summary",
@@ -560,7 +568,7 @@ def test_selection_by_item():
 
     assert ids(dag.nodes_for_item(WeaverItemId.parse(CURATED))) == (
         f"{CURATED}/Sales.Coverage",
-        f"{CURATED}/Sales.Customer",
+        f"{CURATED}/Tables/Sales.Customer",
     )
 
 
@@ -576,8 +584,8 @@ def test_selection_of_loadables_and_of_validations():
     dag = _mixed().dag()
 
     assert ids(dag.loadables()) == (
-        f"{CURATED}/Sales.Customer",
-        f"{RAW}/Sales.Order",
+        f"{CURATED}/Tables/Sales.Customer",
+        f"{RAW}/Tables/Sales.Order",
         f"{REPORTING}/Sales.Summary",
     )
     assert ids(dag.validations()) == (
@@ -607,12 +615,12 @@ def test_filters_combine():
 def test_a_filtered_subgraph_keeps_the_edges_between_what_it_kept():
     dag = _chain().dag()
 
-    subgraph = dag.subgraph([f"{RAW}/Sales.C"], with_ancestors=True)
+    subgraph = dag.subgraph([f"{RAW}/Tables/Sales.C"], with_ancestors=True)
 
     assert subgraph.order() == (
-        f"{RAW}/Sales.A",
-        f"{RAW}/Sales.B",
-        f"{RAW}/Sales.C",
+        f"{RAW}/Tables/Sales.A",
+        f"{RAW}/Tables/Sales.B",
+        f"{RAW}/Tables/Sales.C",
     )
 
 
@@ -623,10 +631,10 @@ def test_a_filtered_subgraph_keeps_the_edges_between_what_it_kept():
 def test_a_managed_cycle_is_refused_when_the_graph_is_built():
     estate = (
         _Estate()
-        .object(f"{RAW}/Sales.A")
-        .object(f"{RAW}/Sales.B")
-        .reads(f"{RAW}/Sales.A", "Sales.B")
-        .reads(f"{RAW}/Sales.B", "Sales.A")
+        .object(f"{RAW}/Tables/Sales.A")
+        .object(f"{RAW}/Tables/Sales.B")
+        .reads(f"{RAW}/Tables/Sales.A", "Sales.B")
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
     )
 
     with pytest.raises(GraphError, match="dependency cycle"):
@@ -635,8 +643,13 @@ def test_a_managed_cycle_is_refused_when_the_graph_is_built():
 
 @weaver_test()
 def test_a_self_dependency_is_recorded_rather_than_ordered():
-    consumer = document_id(f"{RAW}/Sales.A")
-    dag = _Estate().object(f"{RAW}/Sales.A").reads(f"{RAW}/Sales.A", "Sales.A").dag()
+    consumer = document_id(f"{RAW}/Tables/Sales.A")
+    dag = (
+        _Estate()
+        .object(f"{RAW}/Tables/Sales.A")
+        .reads(f"{RAW}/Tables/Sales.A", "Sales.A")
+        .dag()
+    )
 
     assert dag.parents(consumer) == ()
     assert "resolves to itself" in dag.unresolved_for(consumer)[0]
@@ -646,16 +659,19 @@ def test_a_self_dependency_is_recorded_rather_than_ordered():
 def test_a_read_that_names_nothing_installed_is_recorded_rather_than_raised():
     """An unrelated item's dangling read must not stop the whole graph."""
 
-    consumer = document_id(f"{RAW}/Sales.A")
+    consumer = document_id(f"{RAW}/Tables/Sales.A")
     dag = (
         _Estate()
-        .object(f"{RAW}/Sales.A")
-        .object(f"{CURATED}/Sales.Customer")
-        .reads(f"{RAW}/Sales.A", "Sales.Nowhere")
+        .object(f"{RAW}/Tables/Sales.A")
+        .object(f"{CURATED}/Tables/Sales.Customer")
+        .reads(f"{RAW}/Tables/Sales.A", "Sales.Nowhere")
         .dag()
     )
 
-    assert ids(dag.nodes) == (f"{CURATED}/Sales.Customer", f"{RAW}/Sales.A")
+    assert ids(dag.nodes) == (
+        f"{CURATED}/Tables/Sales.Customer",
+        f"{RAW}/Tables/Sales.A",
+    )
     assert "resolves to neither an installed object" in dag.unresolved_for(consumer)[0]
 
 
@@ -678,7 +694,7 @@ def test_a_registered_object_whose_item_has_no_installation_is_refused():
     catalogue = Catalogue(
         rows={
             WeaverItemId.parse(RAW): {
-                REGISTRY.name: (registry_row(document_id(f"{RAW}/Sales.Order")),)
+                REGISTRY.name: (registry_row(document_id(f"{RAW}/Tables/Sales.Order")),)
             }
         }
     )
@@ -694,7 +710,7 @@ def test_an_unknown_test_type_is_refused_rather_than_guessed():
             WeaverItemId.parse(RAW): {
                 INSTALLATION.name: (installation_row(RAW, "Raw_LH"),),
                 TEST_DICTIONARY.name: (
-                    validation_row(f"{RAW}/Sales.Odd", test_type="probe"),
+                    validation_row(f"{RAW}/Tables/Sales.Odd", test_type="probe"),
                 ),
             }
         }
@@ -712,11 +728,15 @@ def test_two_objects_at_one_physical_address_are_recorded_rather_than_refused():
         rows={
             WeaverItemId.parse(RAW): {
                 INSTALLATION.name: (installation_row(RAW, "Shared_LH"),),
-                REGISTRY.name: (registry_row(document_id(f"{RAW}/Sales.Order")),),
+                REGISTRY.name: (
+                    registry_row(document_id(f"{RAW}/Tables/Sales.Order")),
+                ),
             },
             WeaverItemId.parse(CURATED): {
                 INSTALLATION.name: (installation_row(CURATED, "Shared_LH"),),
-                REGISTRY.name: (registry_row(document_id(f"{CURATED}/Sales.Order")),),
+                REGISTRY.name: (
+                    registry_row(document_id(f"{CURATED}/Tables/Sales.Order")),
+                ),
             },
         }
     )
@@ -733,4 +753,4 @@ def test_a_node_the_graph_does_not_hold_is_named_in_the_refusal():
     dag = _chain().dag()
 
     with pytest.raises(CatalogueStateError, match="is not a node of the installed"):
-        dag.node(f"{RAW}/Sales.Nowhere")
+        dag.node(f"{RAW}/Tables/Sales.Nowhere")

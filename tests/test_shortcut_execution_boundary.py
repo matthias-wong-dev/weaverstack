@@ -28,8 +28,8 @@ def _payload(**overrides) -> bytes:
     """One shortcut, in the batched shape the action carries."""
 
     mapping = {
-        "shortcut": "Lakehouse/Curated/Sales.Landed",
-        "source": "Lakehouse/Raw/Sales.Customer",
+        "shortcut": "Lakehouse/Curated/Tables/Sales.Landed",
+        "source": "Lakehouse/Raw/Tables/Sales.Customer",
         "source_target_id": SOURCE_TARGET_ID,
         "type": "table",
         "path": "Tables/Sales",
@@ -158,7 +158,7 @@ def test_a_shortcut_becomes_one_onelake_shortcut(tmp_path):
         ("Curated_Dev", "Tables/Sales", "Landed", "Raw_Dev", "Tables/Sales/Customer")
     ]
     assert details["shortcuts"][0]["path"] == "Tables/Sales/Landed"
-    assert details["shortcuts"][0]["source"] == "Lakehouse/Raw/Sales.Customer"
+    assert details["shortcuts"][0]["source"] == "Lakehouse/Raw/Tables/Sales.Customer"
 
 
 class _FoldedSourceStore(FilesystemStore):
@@ -440,7 +440,9 @@ def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
 
 def _two_shortcuts() -> bytes:
     first = json.loads(_payload().decode())["shortcuts"][0]
-    second = dict(first, shortcut="Lakehouse/Curated/Sales.Second", name="Second")
+    second = dict(
+        first, shortcut="Lakehouse/Curated/Tables/Sales.Second", name="Second"
+    )
     return json.dumps({"shortcuts": [first, second]}).encode("utf-8")
 
 
@@ -461,8 +463,8 @@ def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
     details = ShortcutExecutor().execute(_action(), _two_shortcuts(), context)
 
     assert [detail["shortcut"] for detail in details["shortcuts"]] == [
-        "Lakehouse/Curated/Sales.Landed",
-        "Lakehouse/Curated/Sales.Second",
+        "Lakehouse/Curated/Tables/Sales.Landed",
+        "Lakehouse/Curated/Tables/Sales.Second",
     ]
     # Every create precedes every read: two shortcuts, one discovery window.
     creates = [index for index, event in enumerate(events) if event == "create"]
@@ -567,7 +569,7 @@ def _removal_payload() -> bytes:
         {
             "remove": [
                 {
-                    "shortcut": "Lakehouse/Curated/Sales.Landed",
+                    "shortcut": "Lakehouse/Curated/Tables/Sales.Landed",
                     "path": "Tables/Sales",
                     "name": "Landed",
                 }
@@ -632,7 +634,7 @@ def test_a_removal_waits_until_onelake_releases_the_name(tmp_path, instant_polli
     details = ShortcutExecutor().execute(_removal(True), _removal_payload(), context)
 
     assert resolver.removed == [("Tables/Sales", "Landed")]
-    assert details["removed"] == ["Lakehouse/Curated/Sales.Landed"]
+    assert details["removed"] == ["Lakehouse/Curated/Tables/Sales.Landed"]
     # Asked until it answered, and then once more is not needed.
     assert store.asked == 4
     assert "released_after_seconds" in details

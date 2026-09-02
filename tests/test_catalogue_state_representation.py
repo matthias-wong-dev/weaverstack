@@ -84,7 +84,7 @@ def test_valid_rows_remain_and_stale_object_metadata_is_removed():
     assert [
         row["object_name"] for row in result.catalogue.rows[ITEM][TABLE_DICTIONARY.name]
     ] == ["Current"]
-    assert result.stale_objects == ("Lakehouse/Sales/Sales.Missing",)
+    assert result.stale_objects == ("Lakehouse/Sales/Tables/Sales.Missing",)
     assert {claim.rule.table.name for claim in result.stale_claims} >= {
         "TableDictionary",
         "Registry",
@@ -106,7 +106,7 @@ def test_same_named_folder_and_table_keep_the_four_part_catalogue_identity():
         row["object_type"]
         for row in result.catalogue.rows[ITEM][FOLDER_DICTIONARY.name]
     ] == ["folder"]
-    assert result.stale_objects == ("Lakehouse/Sales/Sales.Customer",)
+    assert result.stale_objects == ("Lakehouse/Sales/Tables/Sales.Customer",)
     assert result.stale_claims
     assert all(not claim.identity.is_files for claim in result.stale_claims)
 
@@ -183,7 +183,7 @@ def test_claim_deletion_uses_the_rule_predicate_columns():
 
     from weaver.catalogue.tables import DEPENDENCY
 
-    identity = WeaverDocumentId.parse("Lakehouse/Sales/Sales.Customer")
+    identity = WeaverDocumentId.parse("Lakehouse/Sales/Tables/Sales.Customer")
     rule = CatalogueClaimRule(
         DEPENDENCY,
         predicate_columns=("referencing_schema_name", "referencing_object_name"),

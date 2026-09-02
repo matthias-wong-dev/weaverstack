@@ -223,8 +223,8 @@ def test_load_dry_run_names_the_primitive_every_node_would_reach(session):
 
     assert {node.node_id: node.dispatch_location for node in report.nodes} == {
         EXPORT: "Lakehouse/Raw_LH/_/Load/Files/Sales__Export.py",
-        ORDER: "Lakehouse/Raw_LH/_/Load/Sales__Order.py",
-        DAILY: "Lakehouse/Raw_LH/_/Load/Sales__Daily.py",
+        ORDER: "Lakehouse/Raw_LH/_/Load/Tables/Sales__Order.py",
+        DAILY: "Lakehouse/Raw_LH/_/Load/Tables/Sales__Daily.py",
         REFRESH: "Lakehouse/Raw_LH/sql_endpoint",
         SUMMARY: "Warehouse/Reporting_WH/[_].[Load Sales.Summary]",
     }

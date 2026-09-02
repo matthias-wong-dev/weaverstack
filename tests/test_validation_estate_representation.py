@@ -237,7 +237,7 @@ def test_a_validation_is_a_terminal_node_of_the_installed_graph(catalogue):
 
     test = dag.node("Lakehouse/Sales/Sales.OrdersReconcile")
     assert [str(edge.upstream) for edge in dag.reads(test.identity)] == [
-        "Lakehouse/Sales/Sales.Order"
+        "Lakehouse/Sales/Tables/Sales.Order"
     ]
     assert dag.children(test.identity) == ()
 

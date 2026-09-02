@@ -40,8 +40,9 @@ class _Documents:
         self.item = item
 
     def __getitem__(self, qualified: str):
+        area = "Tables/" if self.item.startswith("Lakehouse/") else ""
         return self.repository.source_documents[
-            WeaverDocumentId.parse(f"{self.item}/{qualified}")
+            WeaverDocumentId.parse(f"{self.item}/{area}{qualified}")
         ]
 
     @property
@@ -53,8 +54,9 @@ def _repo(tmp_path, files: dict[str, str], schemas=("Sales",), item=ITEM):
     root = tmp_path / "repo"
     for schema in schemas:
         _write(root, f"{item}/schemas/{schema}.yml", f"Schema ID: {schema}\n")
+    area = "Tables/" if item.startswith("Lakehouse/") else ""
     for name, text in files.items():
-        _write(root, f"{item}/{name}", text)
+        _write(root, f"{item}/{area}{name}", text)
     return _Documents(
         parse_item_repository(Location(value=str(root)), store=FilesystemStore()), item
     )
@@ -201,9 +203,9 @@ def test_a_reference_may_name_the_same_id_in_another_item(tmp_path):
     root = tmp_path / "repo"
     _write(root, "Lakehouse/Raw/schemas/Sales.yml", "Schema ID: Sales\n")
     _write(root, "Warehouse/Reporting/schemas/Sales.yml", "Schema ID: Sales\n")
-    _write(root, "Lakehouse/Raw/Sales.Order.sql", PARENT)
+    _write(root, "Lakehouse/Raw/Tables/Sales.Order.sql", PARENT)
     warehouse_source = PARENT.replace(
-        "Lineage: The sales system.", "Lineage: $Lakehouse/Raw/Sales.Order"
+        "Lineage: The sales system.", "Lineage: $Lakehouse/Raw/Tables/Sales.Order"
     ).replace("Dependencies: []\n\n", "")
     _write(root, "Warehouse/Reporting/Sales.Order.sql", warehouse_source)
 
@@ -214,14 +216,14 @@ def test_a_reference_may_name_the_same_id_in_another_item(tmp_path):
         WeaverDocumentId.parse("Warehouse/Reporting/Sales.Order")
     ]
     lakehouse = repository.source_documents[
-        WeaverDocumentId.parse("Lakehouse/Raw/Sales.Order")
+        WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Order")
     ]
     resolved = resolve_text(
         warehouse.document.lineage,
         owner=warehouse,
         documents=tuple(repository.source_documents.values()),
     )
-    assert resolved.reference == "$Lakehouse/Raw/Sales.Order"
+    assert resolved.reference == "$Lakehouse/Raw/Tables/Sales.Order"
     assert resolved.literal == lakehouse.document.description.literal
 
 

@@ -40,9 +40,9 @@ from weaver.build_bundle.shortcuts import plan_lakehouse_shortcuts
 
 PRODUCER = "Lakehouse/Raw"
 CONSUMER = "Lakehouse/Curated"
-SHORTCUT = "Lakehouse/Curated/DWG.PortableCustomer"
-SOURCE = "Lakehouse/Raw/DWG.Customer"
-VIEW = "Lakehouse/Curated/DWG.CustomerName"
+SHORTCUT = "Lakehouse/Curated/Tables/DWG.PortableCustomer"
+SOURCE = "Lakehouse/Raw/Tables/DWG.Customer"
+VIEW = "Lakehouse/Curated/Tables/DWG.CustomerName"
 
 
 @pytest.fixture
@@ -457,7 +457,7 @@ def _direct(tmp_path, body: str):
 
     root = tmp_path / "direct"
     _write(root, f"{CONSUMER}/schemas/DWG.yml", schema_document("DWG"))
-    _write(root, f"{CONSUMER}/DWG__Report.py", lakehouse_table("DWG.Report"))
+    _write(root, f"{CONSUMER}/Tables/DWG__Report.py", lakehouse_table("DWG.Report"))
     _write(root, f"{CONSUMER}/shortcuts.py", "from weaver import Shortcut\n\n" + body)
     return parse_item_repository(Location(str(root)))
 
@@ -494,7 +494,7 @@ def test_a_direct_table_shortcut_freezes_the_resolved_physical_source(tmp_path):
         "DWG__External = Shortcut(\n"
         '    shortcut_type="table",\n'
         '    target_type="physical",\n'
-        '    target="Lakehouse/Reference/DWG.Customer",\n'
+        '    target="Lakehouse/Reference/Tables/DWG.Customer",\n'
         '    workspace="Shared Data",\n)\n',
     )
     declaration = repository.shortcuts[0]
@@ -513,11 +513,11 @@ def test_a_direct_table_shortcut_freezes_the_resolved_physical_source(tmp_path):
 
     assert _frozen(planned) == [
         {
-            "shortcut": "Lakehouse/Curated/DWG.External",
+            "shortcut": "Lakehouse/Curated/Tables/DWG.External",
             "type": "table",
             "path": "Tables/DWG",
             "name": "External",
-            "source": "Lakehouse/Reference/DWG.Customer",
+            "source": "Lakehouse/Reference/Tables/DWG.Customer",
             "source_workspace_id": "ws-external",
             "source_item_id": "item-reference",
             "source_item_name": "Reference",
@@ -602,7 +602,7 @@ def test_a_direct_shortcut_with_no_resolved_source_is_omitted(tmp_path):
         "DWG__External = Shortcut(\n"
         '    shortcut_type="table",\n'
         '    target_type="physical",\n'
-        '    target="Lakehouse/Reference/DWG.Customer",\n'
+        '    target="Lakehouse/Reference/Tables/DWG.Customer",\n'
         '    workspace="Shared Data",\n)\n',
     )
     declaration = repository.shortcuts[0]
@@ -633,7 +633,7 @@ def test_a_lakehouse_table_shortcut_can_read_a_bound_warehouse(tmp_path):
     )
     _write(root, f"{consumer}/schemas/PUB.yml", schema_document("PUB"))
     _write(root, f"{consumer}/schemas/WH.yml", schema_document("WH"))
-    _write(root, f"{consumer}/PUB__Copy.py", lakehouse_table("PUB.Copy"))
+    _write(root, f"{consumer}/Tables/PUB__Copy.py", lakehouse_table("PUB.Copy"))
     _write(
         root,
         f"{consumer}/shortcuts.py",
@@ -694,7 +694,9 @@ def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_p
     for item, schema in ((CONSUMER, "DWG"), (PRODUCER, "DWG")):
         _write(root, f"{item}/schemas/{schema}.yml", schema_document(schema))
         _write(
-            root, f"{item}/{schema}__Customer.py", lakehouse_table(f"{schema}.Customer")
+            root,
+            f"{item}/Tables/{schema}__Customer.py",
+            lakehouse_table(f"{schema}.Customer"),
         )
     # Declared by the item this build does not bind, and pointing at something
     # that would not resolve.
@@ -705,7 +707,7 @@ def test_an_unreachable_physical_target_in_an_unbound_item_is_not_resolved(tmp_p
         "DWG__Absent = Shortcut(\n"
         '    shortcut_type="table",\n'
         '    target_type="physical",\n'
-        '    target="Lakehouse/NoSuchItem/DWG.Customer",\n'
+        '    target="Lakehouse/NoSuchItem/Tables/DWG.Customer",\n'
         '    workspace="No Such Workspace",\n)\n',
     )
     repository = parse_item_repository(Location(str(root)))

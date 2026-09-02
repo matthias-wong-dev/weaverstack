@@ -117,7 +117,7 @@ def _write(root: Path, relative: str, text: str) -> None:
 def _estate(root: Path, **replacements: str) -> Path:
     files = {
         "Lakehouse/Sales/schemas/Sales.yml": SCHEMA,
-        "Lakehouse/Sales/Sales__Order.py": ORDER,
+        "Lakehouse/Sales/Tables/Sales__Order.py": ORDER,
         "Lakehouse/Sales/tests/Sales__OrdersReconcile.py": PYTHON_TEST,
         "Lakehouse/Sales/assumptions/Sales.NoOrphans.sql": SPARK_ASSUMPTION,
         "Warehouse/Reporting/schemas/Sales.yml": SCHEMA,
@@ -219,7 +219,7 @@ def test_a_spark_sql_validation_is_compiled_into_a_module(estate):
 def test_loads_and_validations_are_claimed_together(estate):
     roles = _by_role(item_runtime_artefacts(estate, item=LAKEHOUSE, destination=SALES))
 
-    assert roles["Lakehouse/Sales/file:_/Load/Sales__Order.py"] == ROLE_LOAD
+    assert roles["Lakehouse/Sales/file:_/Load/Tables/Sales__Order.py"] == ROLE_LOAD
     assert (
         roles["Lakehouse/Sales/file:_/Load/tests/Sales__OrdersReconcile.py"]
         == ROLE_TEST
@@ -385,7 +385,7 @@ def test_an_item_with_neither_gets_no_runtime_tree(tmp_path):
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", SCHEMA)
     _write(
         tmp_path,
-        "Lakehouse/Sales/Sales.View.sql",
+        "Lakehouse/Sales/Tables/Sales.View.sql",
         "/*\nView ID: Sales.View\nDescription: A view.\nLineage: A source.\n"
         "Dependencies: []\n*/\nselect 1 as Id;\n",
     )

@@ -60,7 +60,7 @@ Description: The materialised rows match the independent calculation.
 
 Primary key: Id
 """
-from {dependency} import {dependency}
+from Tables.{dependency} import {dependency}
 
 from weaver import Test
 
@@ -84,7 +84,7 @@ Assumption ID: {object_id}
 
 Description: Every row carries a customer.
 """
-from {dependency} import {dependency}
+from Tables.{dependency} import {dependency}
 
 from weaver import Assumption
 
@@ -125,7 +125,7 @@ def lakehouse(tmp_path):
     """A Lakehouse item with one table, ready for validation to be added."""
 
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
-    _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
+    _write(tmp_path, "Lakehouse/Sales/Tables/Sales__Order.py", _table("Sales.Order"))
     return tmp_path
 
 
@@ -292,8 +292,8 @@ def test_the_filename_and_the_declared_id_must_agree(lakehouse):
 
 
 @weaver_test()
-def test_a_test_may_not_take_an_objects_logical_id(lakehouse):
-    """Both are the item's Schema.Object, so both cannot be Sales.Order."""
+def test_a_lakehouse_test_may_take_a_tables_schema_object(lakehouse):
+    """The table names its area and the Test names none, so they are two names."""
 
     _write(
         lakehouse,
@@ -301,8 +301,27 @@ def test_a_test_may_not_take_an_objects_logical_id(lakehouse):
         _python_test("Sales.Order", reads="Sales.Order"),
     )
 
+    repository = parse(lakehouse)
+    model = item(repository, "Sales")
+
+    assert "Lakehouse/Sales/Tables/Sales.Order" in [
+        str(each) for each in model.documents
+    ]
+    assert [str(each) for each in model.validations] == ["Lakehouse/Sales/Sales.Order"]
+
+
+@weaver_test()
+def test_a_warehouse_test_may_not_take_a_relations_logical_id(warehouse):
+    """A Warehouse has no areas, so both are Sales.Order and both cannot be."""
+
+    _write(
+        warehouse,
+        "Warehouse/Reporting/tests/Sales.Order.sql",
+        _tsql_test("Sales.Order"),
+    )
+
     with pytest.raises(DiscoveryError, match="declared twice"):
-        parse(lakehouse)
+        parse(warehouse)
 
 
 @weaver_test()
@@ -328,7 +347,9 @@ def test_the_same_validation_id_in_two_items_is_ordinary(tmp_path):
 
     for name in ("Sales", "Inventory"):
         _write(tmp_path, f"Lakehouse/{name}/schemas/Sales.yml", _schema("Sales"))
-        _write(tmp_path, f"Lakehouse/{name}/Sales__Order.py", _table("Sales.Order"))
+        _write(
+            tmp_path, f"Lakehouse/{name}/Tables/Sales__Order.py", _table("Sales.Order")
+        )
         _write(
             tmp_path,
             f"Lakehouse/{name}/tests/Sales__Reconciles.py",
@@ -362,7 +383,7 @@ def test_a_python_import_is_a_validation_dependency(lakehouse):
         if edge.consumer == consumer and edge.producer is not None
     ]
 
-    assert producers == ["Lakehouse/Sales/Sales.Order"]
+    assert producers == ["Lakehouse/Sales/Tables/Sales.Order"]
 
 
 @weaver_test()
@@ -397,7 +418,9 @@ def _validation_edges(repository, consumer_text: str):
 def test_a_declaration_replaces_inference(lakehouse):
     """The rule every kind uses, validation included."""
 
-    _write(lakehouse, "Lakehouse/Sales/Sales__Customer.py", _table("Sales.Customer"))
+    _write(
+        lakehouse, "Lakehouse/Sales/Tables/Sales__Customer.py", _table("Sales.Customer")
+    )
     source = _python_test("Sales.OrdersReconcile").replace(
         "Primary key: Id", "Primary key: Id\n\nDependencies:\n  - Sales.Customer"
     )
@@ -453,7 +476,7 @@ def test_a_spark_sql_validation_infers_its_references(tmp_path):
     """No `Dependencies:` header, and the graph is still right."""
 
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
-    _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
+    _write(tmp_path, "Lakehouse/Sales/Tables/Sales__Order.py", _table("Sales.Order"))
     _write(
         tmp_path,
         "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql",
@@ -682,7 +705,7 @@ def test_the_same_rule_holds_for_spark_sql(tmp_path):
     """Where it matters most, because a Spark query is lazy."""
 
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
-    _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
+    _write(tmp_path, "Lakehouse/Sales/Tables/Sales__Order.py", _table("Sales.Order"))
     _write(
         tmp_path,
         "Lakehouse/Sales/tests/Sales.OrdersReconcile.sql",

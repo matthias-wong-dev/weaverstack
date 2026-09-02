@@ -1,5 +1,5 @@
 logical:
-  Warehouse/Serving/SRC.Customer: Lakehouse/Curated/CUR.Customer
-  Warehouse/Serving/SRC.Transaction: Lakehouse/Curated/CUR.Transaction
-  Warehouse/Serving/SRC.Product: Lakehouse/Curated/CUR.Product
-  Warehouse/Serving/SRC.RetiredCustomer: Lakehouse/Curated/CUR.RetiredCustomer
+  Warehouse/Serving/SRC.Customer: Lakehouse/Curated/Tables/CUR.Customer
+  Warehouse/Serving/SRC.Transaction: Lakehouse/Curated/Tables/CUR.Transaction
+  Warehouse/Serving/SRC.Product: Lakehouse/Curated/Tables/CUR.Product
+  Warehouse/Serving/SRC.RetiredCustomer: Lakehouse/Curated/Tables/CUR.RetiredCustomer

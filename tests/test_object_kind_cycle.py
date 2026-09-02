@@ -41,7 +41,7 @@ from weaver.store import FilesystemStore
 from weaver.targets import ItemRef
 
 ITEM = WeaverItemId.parse("Lakehouse/Sales")
-SUMMARY = "Lakehouse/Sales/Sales.Summary"
+SUMMARY = "Lakehouse/Sales/Tables/Sales.Summary"
 TARGET = "Sales_LH"
 #: The four-part name every generated statement spells the object with.
 QUALIFIED = f"`{WORKSPACE}`.`{TARGET}`.`Sales`.`Summary`"
@@ -116,8 +116,8 @@ def _estate(tmp_path: Path, summary: str) -> Path:
 
     root = tmp_path / "Estate"
     _write(root, "Lakehouse/Sales/schemas/Sales.yml", _SCHEMA)
-    _write(root, "Lakehouse/Sales/Sales__Order.py", _ORDER)
-    _write(root, "Lakehouse/Sales/Sales.Summary.sql", summary)
+    _write(root, "Lakehouse/Sales/Tables/Sales__Order.py", _ORDER)
+    _write(root, "Lakehouse/Sales/Tables/Sales.Summary.sql", summary)
     return root
 
 
@@ -257,13 +257,13 @@ def _cycle(tmp_path: Path):
     first_source = _repository(root)
     first = _generate(tmp_path, first_source, state=_empty_state(), name="first")
 
-    _write(root, "Lakehouse/Sales/Sales.Summary.sql", _AS_TABLE)
+    _write(root, "Lakehouse/Sales/Tables/Sales.Summary.sql", _AS_TABLE)
     second_source = _repository(root)
     second = _generate(
         tmp_path, second_source, state=_installed_state(first_source), name="second"
     )
 
-    _write(root, "Lakehouse/Sales/Sales.Summary.sql", _AS_VIEW)
+    _write(root, "Lakehouse/Sales/Tables/Sales.Summary.sql", _AS_VIEW)
     third = _generate(
         tmp_path,
         _repository(root),

@@ -60,7 +60,7 @@ def test_a_repository_and_its_installed_estate_agree_completely(tmp_path):
     """
 
     repository = single_document_repository(
-        tmp_path, documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")}
+        tmp_path, documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")}
     )
 
     result = reconcile(
@@ -115,7 +115,7 @@ def test_a_claim_the_inventory_disproves_becomes_stale():
     )
 
     assert document_id("DWG.Customer") not in result.catalogue.registered
-    assert result.stale_objects == ("Lakehouse/Sales/DWG.Customer",)
+    assert result.stale_objects == ("Lakehouse/Sales/Tables/DWG.Customer",)
     assert result.stale_claims
 
 
@@ -313,10 +313,10 @@ def _keyed_and_unkeyed(tmp_path):
     repository = single_document_repository(
         tmp_path,
         documents={
-            "DWG__Customer.py": keyed,
-            "DWG__Event.py": unkeyed.replace("DWG.Customer", "DWG.Event").replace(
-                "DWG__Customer", "DWG__Event"
-            ),
+            "Tables/DWG__Customer.py": keyed,
+            "Tables/DWG__Event.py": unkeyed.replace(
+                "DWG.Customer", "DWG.Event"
+            ).replace("DWG__Customer", "DWG__Event"),
         },
     )
     documents = repository.source_documents
@@ -364,7 +364,7 @@ def test_a_keyed_table_whose_shape_version_moves_is_selected_for_rebuild(tmp_pat
     keyed, _unkeyed = _keyed_and_unkeyed(tmp_path)
     identity = keyed.logical_id
     repository = single_document_repository(
-        tmp_path, documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")}
+        tmp_path, documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")}
     )
     selected = {document_id("DWG.Customer")}
 

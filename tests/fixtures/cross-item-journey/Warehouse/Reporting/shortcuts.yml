@@ -1,2 +1,2 @@
 logical:
-  Warehouse/Reporting/Rpt.PortableCustomer: Lakehouse/Sales/DWG.Customer
+  Warehouse/Reporting/Rpt.PortableCustomer: Lakehouse/Sales/Tables/DWG.Customer

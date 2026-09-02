@@ -523,7 +523,7 @@ def _shortcut_estate(tmp_path):
 
     root = tmp_path / "shortcuts"
     _write(root, "Lakehouse/Raw/schemas/Sales.yml", _schema("Sales"))
-    _write(root, "Lakehouse/Raw/Sales__Customer.py", _table("Sales.Customer"))
+    _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", _table("Sales.Customer"))
     _write(root, "Lakehouse/Curated/schemas/Sales.yml", _schema("Sales"))
     _write(
         root,
@@ -532,11 +532,11 @@ def _shortcut_estate(tmp_path):
         "Sales__Landed = Shortcut(\n"
         '    shortcut_type="table",\n'
         '    target_type="logical",\n'
-        '    target="Lakehouse/Raw/Sales.Customer",\n)\n\n'
+        '    target="Lakehouse/Raw/Tables/Sales.Customer",\n)\n\n'
         "Sales__External = Shortcut(\n"
         '    shortcut_type="table",\n'
         '    target_type="physical",\n'
-        '    target="Lakehouse/Reference/Ref.Customer",\n'
+        '    target="Lakehouse/Reference/Tables/Ref.Customer",\n'
         '    workspace="Shared Data",\n)\n\n'
         "Sales__Incoming = Shortcut(\n"
         '    shortcut_type="folder",\n'
@@ -623,20 +623,23 @@ def test_a_shortcut_row_names_the_shortcut_the_way_registry_does(tmp_path):
 def test_a_logical_target_is_stored_whole_for_a_reader_to_rebuild(tmp_path):
     """The producer's identity, without Installation and without parsing.
 
-    ``Lakehouse/Raw/Sales.Customer`` comes straight out of the four target
-    columns, which is what lets the estate DAG be reconstructed from the
-    catalogue alone.
+    ``Lakehouse/Raw/Tables/Sales.Customer`` comes straight out of the four target
+    columns, read back the way Registry rows are read back, which is what lets
+    the estate DAG be reconstructed from the catalogue alone.
     """
+
+    from weaver.installed import stored_identity
 
     _repository, rows = _shortcut_rows(tmp_path)
     row = rows["Sales.Landed"]
 
     assert row["target_type"] == "logical"
-    rebuilt = (
-        f"{row['target_item_type']}/{row['target_item_name']}/"
-        f"{row['target_schema_name']}.{row['target_object_name']}"
+    rebuilt = stored_identity(
+        WeaverItemId(row["target_item_type"], row["target_item_name"]),
+        row["target_schema_name"],
+        row["target_object_name"],
     )
-    assert rebuilt == "Lakehouse/Raw/Sales.Customer"
+    assert str(rebuilt) == "Lakehouse/Raw/Tables/Sales.Customer"
     # A logical target is bound, so where it lands stays Installation's answer.
     assert row["target_workspace_name"] is None
 

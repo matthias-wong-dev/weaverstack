@@ -83,7 +83,7 @@ def repository(tmp_path):
 
     root = tmp_path / "Estate"
     _write(root, "Lakehouse/Sales/schemas/DWG.yml", _schema("DWG"))
-    _write(root, "Lakehouse/Sales/DWG__Customer.py", _table("DWG.Customer"))
+    _write(root, "Lakehouse/Sales/Tables/DWG__Customer.py", _table("DWG.Customer"))
     return root
 
 
@@ -131,7 +131,7 @@ def public_shortcut_build(tmp_path, monkeypatch):
     _write(root, "Lakehouse/Archive/schemas/History.yml", _schema("History"))
     _write(
         root,
-        "Lakehouse/Archive/History__Event.py",
+        "Lakehouse/Archive/Tables/History__Event.py",
         _table("History.Event"),
     )
 
@@ -210,7 +210,7 @@ def test_public_partial_build_records_an_unbound_item(public_shortcut_build):
 
     bundle = public_shortcut_build.run()
     omitted = {node.node_id: node.reason for node in bundle.plan.omitted_nodes}
-    assert omitted["Lakehouse/Archive/History.Event"] == "target_unbound"
+    assert omitted["Lakehouse/Archive/Tables/History.Event"] == "target_unbound"
 
 
 # --- notebook inference -------------------------------------------------------

@@ -170,7 +170,7 @@ def test_amber_exits_one(captured):
                     code="load_pending",
                     severity=AMBER,
                     message="no load has settled since this object was built",
-                    object_id="Lakehouse/Sales/Sales.Order",
+                    object_id="Lakehouse/Sales/Tables/Sales.Order",
                 ),
             ),
         )
@@ -239,7 +239,7 @@ def test_the_slowest_loads_and_the_rows_that_moved_are_shown(captured, capsys):
     captured["report"] = _report(
         load_activity=(
             LoadActivity(
-                object_id="Lakehouse/Sales/Sales.HarmSurvey",
+                object_id="Lakehouse/Sales/Tables/Sales.HarmSurvey",
                 target="Lakehouse/Sales_LH",
                 workflow_id="workflow-1",
                 duration_ms=31200,

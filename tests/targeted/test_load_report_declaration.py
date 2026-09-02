@@ -46,11 +46,11 @@ def _report() -> LoadRunReport:
         fault_tolerant=True,
         nodes=(
             LoadNodeReport(
-                node_id="load:Lakehouse/Sales/Sales.Customer",
-                logical_id="Lakehouse/Sales/Sales.Customer",
+                node_id="load:Lakehouse/Sales/Tables/Sales.Customer",
+                logical_id="Lakehouse/Sales/Tables/Sales.Customer",
                 physical_target="Lakehouse/Sales",
                 primitive_kind="python_table",
-                dispatch_location="/lh/Files/_/Load/Sales__Customer.py",
+                dispatch_location="/lh/Files/_/Load/Tables/Sales__Customer.py",
                 status=SUCCEEDED_WITH_REJECTS,
                 executed=True,
                 messages=(
@@ -92,12 +92,12 @@ def _report() -> LoadRunReport:
         ),
         edges=(
             (
-                "load:Lakehouse/Sales/Sales.Customer",
+                "load:Lakehouse/Sales/Tables/Sales.Customer",
                 "load:Warehouse/Reporting/Sales.Summary",
             ),
         ),
         order=(
-            "load:Lakehouse/Sales/Sales.Customer",
+            "load:Lakehouse/Sales/Tables/Sales.Customer",
             "load:Warehouse/Reporting/Sales.Summary",
         ),
         messages=(LoadMessage("info", "planning", "two nodes", source="load_plan"),),
@@ -123,7 +123,7 @@ def test_a_report_survives_the_crossing_whole():
 
 @weaver_test()
 def test_the_counts_a_node_reported_survive():
-    node = _crossed(_report()).by_node["load:Lakehouse/Sales/Sales.Customer"]
+    node = _crossed(_report()).by_node["load:Lakehouse/Sales/Tables/Sales.Customer"]
 
     assert node.result == LoadResult(
         succeeded=False,
@@ -138,7 +138,7 @@ def test_the_counts_a_node_reported_survive():
 
 @weaver_test()
 def test_a_nodes_messages_survive_with_their_severity_and_detail():
-    node = _crossed(_report()).by_node["load:Lakehouse/Sales/Sales.Customer"]
+    node = _crossed(_report()).by_node["load:Lakehouse/Sales/Tables/Sales.Customer"]
     (message,) = node.messages
 
     assert (message.severity, message.code) == ("warning", PRIMITIVE_REJECTS)
@@ -163,7 +163,7 @@ def test_the_graph_survives_as_edges_rather_than_lists():
 
     assert crossed.edges == (
         (
-            "load:Lakehouse/Sales/Sales.Customer",
+            "load:Lakehouse/Sales/Tables/Sales.Customer",
             "load:Warehouse/Reporting/Sales.Summary",
         ),
     )

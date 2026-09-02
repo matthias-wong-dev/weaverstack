@@ -29,7 +29,7 @@ BEGAN = datetime(2026, 8, 22, 3, 4, 5, tzinfo=timezone.utc)
 STARTED = "2026-08-22T03:04:05+00:00"
 FINISHED = "2026-08-22T03:04:07+00:00"
 
-CUSTOMER = "Lakehouse/Sales/DWG.Customer"
+CUSTOMER = "Lakehouse/Sales/Tables/DWG.Customer"
 RECONCILE = "Lakehouse/Sales/DWG.CustomerReconcile"
 
 

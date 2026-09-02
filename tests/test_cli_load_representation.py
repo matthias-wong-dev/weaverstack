@@ -78,8 +78,8 @@ def _report(
         fault_tolerant=False,
         nodes=(
             LoadNodeReport(
-                node_id="load:Lakehouse/Sales/Sales.Customer",
-                logical_id="Lakehouse/Sales/Sales.Customer",
+                node_id="load:Lakehouse/Sales/Tables/Sales.Customer",
+                logical_id="Lakehouse/Sales/Tables/Sales.Customer",
                 physical_target="Lakehouse/Sales",
                 primitive_kind="python_table",
                 dispatch_location="/x/Sales__Customer.py",
@@ -301,7 +301,7 @@ def test_a_successful_run_renders_its_nodes_and_exits_zero(recorded, capsys):
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "load:Lakehouse/Sales/Sales.Customer" in captured.out
+    assert "load:Lakehouse/Sales/Tables/Sales.Customer" in captured.out
     assert "succeeded" in captured.out
 
 
@@ -311,7 +311,9 @@ def test_json_renders_the_whole_report(recorded, capsys):
     payload = json.loads(capsys.readouterr().out)
 
     assert payload["status"] == TASK_SUCCEEDED
-    assert payload["nodes"][0]["node_id"] == "load:Lakehouse/Sales/Sales.Customer"
+    assert (
+        payload["nodes"][0]["node_id"] == "load:Lakehouse/Sales/Tables/Sales.Customer"
+    )
 
 
 @weaver_test()
@@ -335,7 +337,7 @@ def test_a_tolerant_run_that_reports_failure_renders_and_exits_non_zero(
     assert exit_code == 1
     output = capsys.readouterr().out
     assert "✗ failed" in output
-    assert "load:Lakehouse/Sales/Sales.Customer" in output
+    assert "load:Lakehouse/Sales/Tables/Sales.Customer" in output
 
 
 @weaver_test()
@@ -346,7 +348,7 @@ def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
 
     def raising(targets, **kwargs):
         raise LoadError(
-            "load:Lakehouse/Sales/Sales.Customer failed: rows were rejected",
+            "load:Lakehouse/Sales/Tables/Sales.Customer failed: rows were rejected",
             report=partial,
             workflow_id="0f8b2c1d",
         )
@@ -359,7 +361,7 @@ def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
     assert exit_code == 1
     # The partial report is the useful half of the answer, so it is rendered
     # rather than discarded in favour of the message.
-    assert "load:Lakehouse/Sales/Sales.Customer" in captured.out
+    assert "load:Lakehouse/Sales/Tables/Sales.Customer" in captured.out
     assert "rows were rejected" in captured.err
     assert "Workflow: 0f8b2c1d" in captured.err
 
@@ -437,7 +439,7 @@ class _FakeTds:
                 {
                     "item_type": item_type,
                     "item_name": item_name,
-                    "schema_name": "_/Load",
+                    "schema_name": "_/Load/Tables",
                     "object_name": f"{schema}__{name}.py",
                     "object_type": "file",
                     "object_role": "load",

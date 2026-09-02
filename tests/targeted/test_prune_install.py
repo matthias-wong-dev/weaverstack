@@ -48,8 +48,8 @@ def estate(tmp_path):
         tmp_path,
         schemas=("DWG", "Raw"),
         documents={
-            "DWG__Customer.py": lakehouse_table("DWG.Customer"),
-            "DWG.ActiveCustomer.sql": spark_view(
+            "Tables/DWG__Customer.py": lakehouse_table("DWG.Customer"),
+            "Tables/DWG.ActiveCustomer.sql": spark_view(
                 "DWG.ActiveCustomer", depends_on="DWG.Customer"
             ),
             "Files/Raw__CustomerCsv.py": folder_document("Raw.CustomerCsv"),
@@ -231,12 +231,12 @@ def test_another_items_objects_are_not_this_items_to_remove(tmp_path):
 
     root = tmp_path / "estate"
     single_document_repository(
-        root, documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")}
+        root, documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")}
     )
     other = single_document_repository(
         root,
         item="Lakehouse/Other",
-        documents={"DWG__Neighbour.py": lakehouse_table("DWG.Neighbour")},
+        documents={"Tables/DWG__Neighbour.py": lakehouse_table("DWG.Neighbour")},
     )
 
     stage = lakehouse_prune_stage(

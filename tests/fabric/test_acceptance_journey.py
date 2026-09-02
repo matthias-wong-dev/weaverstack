@@ -1107,19 +1107,19 @@ def _dag_id(journey, item: str, qualified: str) -> str:
 REPOSITORY_EDITS = (
     # A description only. Nothing physical follows from it.
     (
-        "Lakehouse/Landing/LAND__Product.py",
+        "Lakehouse/Landing/Tables/LAND__Product.py",
         "Description: The foreign product table, copied whole through the schema "
         "shortcut.",
         "Description: Products, as the foreign estate delivers them.",
     ),
     # A new column on an unprotected table, so the physical table is replaced.
     (
-        "Lakehouse/Landing/LAND__Region.py",
+        "Lakehouse/Landing/Tables/LAND__Region.py",
         "  RegionName: string",
         "  RegionName: string\n  RegionLabel: string",
     ),
     (
-        "Lakehouse/Landing/LAND__Region.py",
+        "Lakehouse/Landing/Tables/LAND__Region.py",
         "        return Source__Region(self).dataframe()",
         "        return Source__Region(self).dataframe().selectExpr(\n"
         '            "RegionId", "RegionName", "upper(RegionName) as RegionLabel"\n'
@@ -1130,12 +1130,12 @@ REPOSITORY_EDITS = (
     # schema is left alone, because a declared column it does not have would
     # need the physical table altered. See design/todo/preservative-build.md.
     (
-        "Lakehouse/Curated/CUR__Customer.py",
+        "Lakehouse/Curated/Tables/CUR__Customer.py",
         "Description: One row per current customer, kept up to date incrementally.",
         "Description: One row per current customer, kept current incrementally.",
     ),
     (
-        "Lakehouse/Curated/CUR__Customer.py",
+        "Lakehouse/Curated/Tables/CUR__Customer.py",
         "        changed = source.where(source.UpdatedAt > self.bookmark())",
         "        changed = source.where(source.UpdatedAt > self.bookmark()).select(\n"
         '            "CustomerId", "CustomerName", "UpdatedAt"\n'
@@ -1143,7 +1143,7 @@ REPOSITORY_EDITS = (
     ),
     # A view definition, which is replaced rather than migrated.
     (
-        "Lakehouse/Curated/CUR.CustomerCurrent.sql",
+        "Lakehouse/Curated/Tables/CUR.CustomerCurrent.sql",
         "    CustomerId\n  , CustomerName",
         "    CustomerId\n  , CustomerName\n  , upper(CustomerName) as CustomerUpper",
     ),
@@ -1353,19 +1353,19 @@ def test_the_rebuilt_estate_still_loads_and_validates(acceptance):
 #: is what puts a bookmark's whole life inside one failed build and its recovery.
 BREAKING_EDITS = (
     (
-        "Lakehouse/Landing/LAND__Product.py",
+        "Lakehouse/Landing/Tables/LAND__Product.py",
         "  ProductName: string",
         "  ProductName: string\n  ProductLabel: string",
     ),
     (
-        "Lakehouse/Landing/LAND__Product.py",
+        "Lakehouse/Landing/Tables/LAND__Product.py",
         "        return Reference(self).Product.dataframe()",
         "        return Reference(self).Product.dataframe().selectExpr(\n"
         '            "ProductId", "ProductName", "upper(ProductName) as ProductLabel"\n'
         "        )",
     ),
     (
-        "Lakehouse/Curated/CUR__Customer.py",
+        "Lakehouse/Curated/Tables/CUR__Customer.py",
         "Description: One row per current customer, kept current incrementally.",
         "Description: One row per current customer, kept current by the window.",
     ),

@@ -100,13 +100,15 @@ def _estate(tmp_path: Path) -> Path:
         "Warehouse/Audit",
     ):
         _write(root, f"{item}/schemas/Sales.yml", _schema("Sales"))
-    _write(root, "Lakehouse/Raw/Sales__Customer.py", _table("Sales.Customer"))
+    _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", _table("Sales.Customer"))
     _write(
         root,
         "Lakehouse/Raw/Files/Sales__Customer.py",
         _folder("Sales.Customer"),
     )
-    _write(root, "Lakehouse/Curated/Sales__Customer.py", _table("Sales.Customer"))
+    _write(
+        root, "Lakehouse/Curated/Tables/Sales__Customer.py", _table("Sales.Customer")
+    )
     _write(
         root,
         "Warehouse/Reporting/Sales.Customer.sql",
@@ -138,7 +140,7 @@ def test_reads_multiple_items_and_owned_documents_without_execution(tmp_path):
         "Warehouse/_weaver",
     )
     assert WeaverSchemaId.parse("Lakehouse/Raw/Sales") in repository.schema_documents
-    table = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+    table = WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer")
     folder = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Customer")
     assert table in repository.source_documents
     assert folder in repository.source_documents
@@ -211,11 +213,11 @@ def test_item_signature_covers_its_schema_document_and_support_files(tmp_path):
 @weaver_test()
 def test_python_document_signature_covers_only_its_transitive_lib_imports(tmp_path):
     root = _estate(tmp_path)
-    customer_path = root / "Lakehouse/Raw/Sales__Customer.py"
+    customer_path = root / "Lakehouse/Raw/Tables/Sales__Customer.py"
     customer_path.write_text(
         customer_path.read_text().replace(
             "from weaver import Table",
-            "from weaver import Table\nfrom .lib.entry import rows",
+            "from weaver import Table\nfrom lib.entry import rows",
         ),
         encoding="utf-8",
     )
@@ -227,7 +229,7 @@ def test_python_document_signature_covers_only_its_transitive_lib_imports(tmp_pa
     _write(root, "Lakehouse/Raw/lib/unused.py", "VALUE = 1\n")
 
     before = parse_item_repository(Location(str(root)))
-    customer = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+    customer = WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer")
     folder = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Customer")
 
     _write(root, "Lakehouse/Raw/lib/unused.py", "VALUE = 2\n")
@@ -258,7 +260,7 @@ def test_an_external_reference_contributes_only_to_its_own_item_signature(tmp_pa
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n"
         "  Warehouse/Reporting/Sales.PortableCustomer: "
-        "Lakehouse/Curated/Sales.Customer\n",
+        "Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     after = parse_item_repository(Location(str(root)))
 
@@ -289,15 +291,15 @@ def test_unrelated_root_and_item_content_is_ignored(tmp_path):
     _write(root, "SemanticModels/schemas/model.yml", "entities: []\n")
     _write(root, "Notebooks/Explore.ipynb", "{}\n")
     _write(root, "Lakehouse/Raw/_draft/note.txt", "parked in the wrong place")
-    _write(root, "Lakehouse/Raw/README.md", "Notes for this item.\n")
+    _write(root, "Lakehouse/Raw/Tables/README.md", "Notes for this item.\n")
 
     repository = parse_item_repository(Location(str(root)))
 
     assert (
-        WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+        WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer")
         in repository.source_documents
     )
-    assert "Lakehouse/Raw/README.md" not in repository.support_files
+    assert "Lakehouse/Raw/Tables/README.md" not in repository.support_files
 
 
 @weaver_test()
@@ -327,11 +329,13 @@ def test_the_owning_item_decides_which_sql_a_document_speaks(tmp_path):
     """
 
     root = _estate(tmp_path)
-    _write(root, "Lakehouse/Curated/Sales.Rollup.sql", _spark_view("Sales.Rollup"))
+    _write(
+        root, "Lakehouse/Curated/Tables/Sales.Rollup.sql", _spark_view("Sales.Rollup")
+    )
     repository = parse_item_repository(Location(str(root)))
 
     lakehouse = repository.source_documents[
-        WeaverDocumentId.parse("Lakehouse/Curated/Sales.Rollup")
+        WeaverDocumentId.parse("Lakehouse/Curated/Tables/Sales.Rollup")
     ]
     warehouse = repository.source_documents[
         WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
@@ -351,7 +355,9 @@ def test_a_dialect_suffix_is_not_a_document_name(tmp_path):
 
     root = _estate(tmp_path)
     _write(
-        root, "Lakehouse/Curated/Sales.Rollup.spark.sql", _spark_view("Sales.Rollup")
+        root,
+        "Lakehouse/Curated/Tables/Sales.Rollup.spark.sql",
+        _spark_view("Sales.Rollup"),
     )
     with pytest.raises(DiscoveryError, match="must name Schema and Object"):
         parse_item_repository(Location(str(root)))
@@ -365,7 +371,7 @@ def test_a_declaration_surface_at_the_root_names_the_item_it_belongs_to(tmp_path
         "shortcuts.yml",
         "logical:\n"
         "  Warehouse/Reporting/Sales.PortableCustomer: "
-        "Lakehouse/Curated/Sales.Customer\n",
+        "Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="belongs to the item that declares it"):
         parse_item_repository(Location(str(root)))
@@ -379,7 +385,7 @@ def test_an_external_destination_belongs_to_the_item_declaring_it(tmp_path):
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n"
         "  Warehouse/Audit/Sales.PortableCustomer: "
-        "Lakehouse/Curated/Sales.Customer\n",
+        "Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="declares Warehouse/Reporting's own"):
         parse_item_repository(Location(str(root)))
@@ -394,7 +400,7 @@ def test_an_external_reference_certifies_only_its_own_item(tmp_path):
         "Warehouse/Audit/shortcuts.yml",
         "logical:\n"
         "  Warehouse/Audit/Sales.PortableCustomer: "
-        "Lakehouse/Curated/Sales.Customer\n",
+        "Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     after = parse_item_repository(Location(str(root)))
 
@@ -407,7 +413,7 @@ def test_an_external_reference_certifies_only_its_own_item(tmp_path):
 @weaver_test()
 def test_schema_must_be_declared_by_the_owning_item(tmp_path):
     root = _estate(tmp_path)
-    _write(root, "Lakehouse/Raw/Other__Thing.py", _table("Other.Thing"))
+    _write(root, "Lakehouse/Raw/Tables/Other__Thing.py", _table("Other.Thing"))
     with pytest.raises(DiscoveryError, match="not declared by item Lakehouse/Raw"):
         parse_item_repository(Location(str(root)))
 
@@ -461,13 +467,13 @@ def test_canonical_metadata_reference_resolves_across_items(tmp_path):
     root = _estate(tmp_path)
     source = _table("Sales.Customer").replace(
         "Description: A declared table.",
-        "Description: $Lakehouse/Curated/Sales.Customer",
+        "Description: $Lakehouse/Curated/Tables/Sales.Customer",
     )
-    _write(root, "Lakehouse/Raw/Sales__Customer.py", source)
+    _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", source)
 
     repository = parse_item_repository(Location(str(root)))
     assert repository.source_documents[
-        WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+        WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer")
     ].document.description.is_reference
 
 
@@ -477,7 +483,7 @@ def test_short_metadata_reference_is_item_relative_and_exact_case(tmp_path):
     source = _table("Sales.Customer").replace(
         "Description: A declared table.", "Description: $sales.Missing"
     )
-    _write(root, "Lakehouse/Raw/Sales__Customer.py", source)
+    _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", source)
     with pytest.raises(DiscoveryError, match="does not resolve exactly"):
         parse_item_repository(Location(str(root)))
 
@@ -488,7 +494,7 @@ def test_files_metadata_reference_uses_its_distinct_namespace(tmp_path):
     source = _table("Sales.Customer").replace(
         "Lineage: A source system.", "Lineage: $Files/Sales.Customer"
     )
-    _write(root, "Lakehouse/Raw/Sales__Customer.py", source)
+    _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", source)
     parse_item_repository(Location(str(root)))
 
 
@@ -502,7 +508,7 @@ def test_external_references_are_item_local_and_one_source_may_repeat(tmp_path):
             root,
             f"{item}/shortcuts.yml",
             "logical:\n"
-            f"  {item}/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
+            f"  {item}/Sales.PortableCustomer: Lakehouse/Curated/Tables/Sales.Customer\n",
         )
     repository = parse_item_repository(Location(str(root)))
     # Weaver-owned surface references are composed in as well; the authored
@@ -528,7 +534,7 @@ def test_a_shortcut_destination_must_not_collide_with_a_native_document(tmp_path
         root,
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n"
-        "  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Sales.Customer\n",
+        "  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="the repository already declares"):
         parse_item_repository(Location(str(root)))
@@ -557,14 +563,14 @@ def test_a_logical_shortcut_may_target_a_physical_shortcut_destination(tmp_path)
     """A cross-workspace physical boundary can be projected logically onward."""
 
     root = _estate(tmp_path)
-    (root / "Lakehouse/Raw/Sales__Customer.py").unlink()
+    (root / "Lakehouse/Raw/Tables/Sales__Customer.py").unlink()
     _write(
         root,
         "Lakehouse/Raw/shortcuts.py",
         "from weaver import Shortcut\n\nSales__Customer = Shortcut(\n"
         '    shortcut_type="table",\n'
         '    target_type="physical",\n'
-        '    target="Lakehouse/External/Sales.Customer",\n'
+        '    target="Lakehouse/External/Tables/Sales.Customer",\n'
         '    workspace="Source Workspace",\n'
         ")\n",
     )
@@ -573,7 +579,7 @@ def test_a_logical_shortcut_may_target_a_physical_shortcut_destination(tmp_path)
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n"
         "  Warehouse/Reporting/Sales.CustomerRaw: "
-        "Lakehouse/Raw/Sales.Customer\n",
+        "Lakehouse/Raw/Tables/Sales.Customer\n",
     )
 
     repository = parse_item_repository(Location(str(root)))
@@ -583,9 +589,9 @@ def test_a_logical_shortcut_may_target_a_physical_shortcut_destination(tmp_path)
         for shortcut in repository.logical_shortcuts
         if str(shortcut.destination) == "Warehouse/Reporting/Sales.CustomerRaw"
     )
-    assert str(shortcut.source) == "Lakehouse/Raw/Sales.Customer"
+    assert str(shortcut.source) == "Lakehouse/Raw/Tables/Sales.Customer"
     assert any(
-        edge.upstream == "Lakehouse/Raw/Sales.Customer"
+        edge.upstream == "Lakehouse/Raw/Tables/Sales.Customer"
         and edge.downstream == "Warehouse/Reporting/Sales.CustomerRaw"
         for edge in repository.dependency_graph.edges
     )
@@ -599,7 +605,7 @@ def test_an_external_target_must_resolve_with_exact_case(tmp_path):
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n"
         "  Warehouse/Reporting/Sales.PortableCustomer: "
-        "Lakehouse/Curated/sales.Customer\n",
+        "Lakehouse/Curated/Tables/sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="declared spelling"):
         parse_item_repository(Location(str(root)))
@@ -625,9 +631,9 @@ def test_duplicate_external_destination_is_rejected_by_the_yaml_reader(tmp_path)
         root,
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n"
-        "  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Raw/Sales.Customer\n"
+        "  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Raw/Tables/Sales.Customer\n"
         "  Warehouse/Reporting/Sales.PortableCustomer: "
-        "Lakehouse/Curated/Sales.Customer\n",
+        "Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     with pytest.raises(Exception, match="duplicate metadata key"):
         parse_item_repository(Location(str(root)))
@@ -646,7 +652,7 @@ def test_metadata_reference_may_resolve_through_an_external_destination(tmp_path
         "Warehouse/Audit/shortcuts.yml",
         "logical:\n"
         "  Warehouse/Audit/Sales.PortableCustomer: "
-        "Lakehouse/Curated/Sales.Customer\n",
+        "Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     parse_item_repository(Location(str(root)))
 
@@ -656,14 +662,14 @@ def test_item_metadata_reference_cycle_is_a_hard_error(tmp_path):
     root = _estate(tmp_path)
     raw = _table("Sales.Customer").replace(
         "Description: A declared table.",
-        "Description: $Lakehouse/Curated/Sales.Customer",
+        "Description: $Lakehouse/Curated/Tables/Sales.Customer",
     )
     curated = _table("Sales.Customer").replace(
         "Description: A declared table.",
-        "Description: $Lakehouse/Raw/Sales.Customer",
+        "Description: $Lakehouse/Raw/Tables/Sales.Customer",
     )
-    _write(root, "Lakehouse/Raw/Sales__Customer.py", raw)
-    _write(root, "Lakehouse/Curated/Sales__Customer.py", curated)
+    _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", raw)
+    _write(root, "Lakehouse/Curated/Tables/Sales__Customer.py", curated)
     with pytest.raises(DiscoveryError, match="metadata reference cycle"):
         parse_item_repository(Location(str(root)))
 
@@ -674,10 +680,10 @@ def test_canonical_foreign_key_target_is_validated(tmp_path):
     source = _table("Sales.Customer").replace(
         "Schema:\n  Id: string",
         "Foreign keys:\n"
-        "  - Id: Lakehouse/Curated/Sales.Customer[Id]\n"
+        "  - Id: Lakehouse/Curated/Tables/Sales.Customer[Id]\n"
         "Schema:\n  Id: string",
     )
-    _write(root, "Lakehouse/Raw/Sales__Customer.py", source)
+    _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", source)
     parse_item_repository(Location(str(root)))
 
 
@@ -688,6 +694,6 @@ def test_document_local_shortcut_headers_are_rejected(tmp_path):
         "Lineage: A source system.",
         "Lineage: A source system.\nWarehouse alias: Sales.CustomerAlias",
     )
-    _write(root, "Lakehouse/Raw/Sales__Customer.py", source)
+    _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", source)
     with pytest.raises(MetadataError, match="has been replaced"):
         parse_item_repository(Location(str(root)))

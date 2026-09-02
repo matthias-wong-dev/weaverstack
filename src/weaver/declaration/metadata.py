@@ -342,14 +342,24 @@ class Reference:
 
     @property
     def target(self) -> str:
-        within = (
-            f"Files/{self.schema}.{self.object}"
-            if self.is_files
-            else self.object_id.qualified
-        )
+        """This reference spelled out, item-qualified where it names an item.
+
+        An item-qualified reference is the logical identity, so a Lakehouse one
+        carries its area. Unqualified, it is a relation in the referring item
+        and stays ``Schema.Object``, which is the vocabulary an author writes.
+        """
+
         if self.item_type is None:
+            within = (
+                f"Files/{self.schema}.{self.object}"
+                if self.is_files
+                else self.object_id.qualified
+            )
             return within
-        return f"{self.item_type}/{self.item_name}/{within}"
+        area = ""
+        if self.item_type == "Lakehouse":
+            area = "Files/" if self.is_files else "Tables/"
+        return f"{self.item_type}/{self.item_name}/{area}{self.object_id.qualified}"
 
     @property
     def is_item_qualified(self) -> bool:
@@ -961,20 +971,25 @@ def _parse_logical_reference(
     item_name: str | None = None
     is_files = False
     object_text: str
+    # ``Tables`` is written where a reference is spelled as the canonical
+    # identity. A relation reference names ``Schema.Object`` and Weaver puts it
+    # in the area its item gives it, which is what keeps ``$Sales.Customer``
+    # relational.
     if len(parts) == 1:
         object_text = parts[0]
-    elif len(parts) == 2 and parts[0] == "Files":
-        is_files = True
+    elif len(parts) == 2 and parts[0] in ("Files", "Tables"):
+        is_files = parts[0] == "Files"
         object_text = parts[1]
     elif len(parts) == 3:
         item_type, item_name, object_text = parts
-    elif len(parts) == 4 and parts[2] == "Files":
-        item_type, item_name, _, object_text = parts
-        is_files = True
+    elif len(parts) == 4 and parts[2] in ("Files", "Tables"):
+        item_type, item_name, area, object_text = parts
+        is_files = area == "Files"
     else:
         raise MetadataError(
-            f"{key} reference must be Schema.Object, Files/Schema.Object or an "
-            f"item-qualified logical identity, got {target!r}"
+            f"{key} reference must be Schema.Object, Tables/Schema.Object, "
+            f"Files/Schema.Object or an item-qualified logical identity, got "
+            f"{target!r}"
         )
     if object_text.count(".") != 1:
         raise MetadataError(

@@ -16,7 +16,7 @@ Revision notes:
   - 2026-07-31 Created.
 """
 
-from DWG__Customer import DWG__Customer
+from Tables.DWG__Customer import DWG__Customer
 
 from weaver import Table
 

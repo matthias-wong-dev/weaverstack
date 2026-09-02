@@ -133,9 +133,12 @@ def load_statuses(catalogue: Catalogue) -> Mapping[WeaverDocumentId, RuntimeStat
 
 
 def test_statuses(catalogue: Catalogue) -> Mapping[WeaverDocumentId, RuntimeStatus]:
-    """Every current validation status the catalogue holds, by logical identity."""
+    """Every current validation status the catalogue holds, by logical identity.
 
-    return _statuses(catalogue, TEST_STATUS)
+    Keyed as a validation, because ``_.TestStatus`` holds nothing else.
+    """
+
+    return _statuses(catalogue, TEST_STATUS, validation=True)
 
 
 def bookmarks(catalogue: Catalogue) -> Mapping[WeaverDocumentId, datetime]:
@@ -154,10 +157,12 @@ def bookmarks(catalogue: Catalogue) -> Mapping[WeaverDocumentId, datetime]:
     return MappingProxyType(found)
 
 
-def _statuses(catalogue: Catalogue, table) -> Mapping[WeaverDocumentId, RuntimeStatus]:
+def _statuses(
+    catalogue: Catalogue, table, *, validation: bool = False
+) -> Mapping[WeaverDocumentId, RuntimeStatus]:
     found: dict[WeaverDocumentId, RuntimeStatus] = {}
     for row in catalogue.table_rows(table):
-        identity = _row_identity(row)
+        identity = _row_identity(row, validation=validation)
         failure_count = row.get("failure_count")
         found[identity] = RuntimeStatus(
             identity=identity,
@@ -170,15 +175,21 @@ def _statuses(catalogue: Catalogue, table) -> Mapping[WeaverDocumentId, RuntimeS
     return MappingProxyType(found)
 
 
-def _row_identity(row: Mapping[str, object]) -> WeaverDocumentId:
+def _row_identity(
+    row: Mapping[str, object], *, validation: bool = False
+) -> WeaverDocumentId:
+    from .declaration.metadata import ObjectId
+    from .declaration.model import WeaverDocumentId as _Document
     from .declaration.model import WeaverItemId
 
     item = WeaverItemId(
         str(row.get("item_type") or ""), str(row.get("item_name") or "")
     )
-    return stored_identity(
-        item, str(row.get("schema_name") or ""), str(row.get("object_name") or "")
-    )
+    schema = str(row.get("schema_name") or "")
+    name = str(row.get("object_name") or "")
+    if validation:
+        return _Document.validation(item, ObjectId(schema, name))
+    return stored_identity(item, schema, name)
 
 
 # --- the report ---------------------------------------------------------------

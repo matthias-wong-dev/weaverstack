@@ -199,7 +199,7 @@ def test_a_lakehouse_run_requires_an_environment_before_it_dispatches(tmp_path):
 
     repository = single_document_repository(
         tmp_path / "estate",
-        documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
+        documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
     state = RunState(
         catalogue=installed_catalogue(repository, item_bindings((ITEM, "Sales_LH")))
@@ -245,7 +245,7 @@ def test_a_run_with_no_item_covers_every_installed_item(tmp_path):
 
     repository = single_document_repository(
         tmp_path / "estate",
-        documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
+        documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
     state = RunState(
         catalogue=installed_catalogue(repository, item_bindings((ITEM, "Sales_LH")))

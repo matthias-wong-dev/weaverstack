@@ -350,7 +350,7 @@ class Catalogue:
         from .tables import TEST_DICTIONARY
 
         return tuple(
-            WeaverDocumentId(
+            WeaverDocumentId.validation(
                 _item_of(row),
                 ObjectId(
                     str(row.get("schema_name") or ""),

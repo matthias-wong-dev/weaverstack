@@ -71,7 +71,7 @@ def test_the_installed_graph_maps_logical_items_to_physical_targets(estate):
         WeaverItemId.parse(LOAD_PRODUCER): RAW,
         WeaverItemId.parse(LOAD_CONSUMER): REPORTING,
     }
-    assert estate.node(f"{LOAD_PRODUCER}/Sales.Order").target == RAW
+    assert estate.node(f"{LOAD_PRODUCER}/Tables/Sales.Order").target == RAW
 
 
 @weaver_test()
@@ -240,7 +240,7 @@ def test_load_dag_resolves_a_python_import_as_a_dependency(tmp_path):
     for relative, text in {
         f"{LOAD_PRODUCER}/schemas/Sales.yml": schema_document("Sales"),
         f"{LOAD_PRODUCER}/Files/Sales__Drop.py": folder_document("Sales.Drop"),
-        f"{LOAD_PRODUCER}/Sales__Customer.py": '''\
+        f"{LOAD_PRODUCER}/Tables/Sales__Customer.py": '''\
 """
 Table ID: Sales.Customer
 
@@ -333,8 +333,8 @@ def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse
 _CONSUMER_REFERENCES = logical_shortcuts(
     LOAD_CONSUMER,
     **{
-        "Sales.Order": f"{LOAD_PRODUCER}/Sales.Order",
-        "Sales.Customer": f"{LOAD_PRODUCER}/Sales.Customer",
+        "Sales.Order": f"{LOAD_PRODUCER}/Tables/Sales.Order",
+        "Sales.Customer": f"{LOAD_PRODUCER}/Tables/Sales.Customer",
     },
 )
 
@@ -345,8 +345,8 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
 
     for relative, text in {
         f"{LOAD_PRODUCER}/schemas/Sales.yml": schema_document("Sales"),
-        f"{LOAD_PRODUCER}/Sales__Order.py": lakehouse_table("Sales.Order"),
-        f"{LOAD_PRODUCER}/Sales__Customer.py": lakehouse_table("Sales.Customer"),
+        f"{LOAD_PRODUCER}/Tables/Sales__Order.py": lakehouse_table("Sales.Order"),
+        f"{LOAD_PRODUCER}/Tables/Sales__Customer.py": lakehouse_table("Sales.Customer"),
         f"{LOAD_CONSUMER}/schemas/Sales.yml": schema_document("Sales"),
         _CONSUMER_REFERENCES[0]: _CONSUMER_REFERENCES[1],
         f"{LOAD_CONSUMER}/Sales.Summary.sql": warehouse_table(
@@ -516,7 +516,7 @@ def test_a_request_for_one_of_two_items_sharing_a_target_loads_that_item_alone()
                     _registry("Lakehouse/Raw", "Sales", "Order"),
                     _registry(
                         "Lakehouse/Raw",
-                        "_/Load",
+                        "_/Load/Tables",
                         "Sales__Order.py",
                         object_type="file",
                         role="load",
@@ -529,7 +529,7 @@ def test_a_request_for_one_of_two_items_sharing_a_target_loads_that_item_alone()
                     _registry("Lakehouse/Staging", "Sales", "Customer"),
                     _registry(
                         "Lakehouse/Staging",
-                        "_/Load",
+                        "_/Load/Tables",
                         "Sales__Customer.py",
                         object_type="file",
                         role="load",
@@ -586,7 +586,7 @@ def test_load_dag_rejects_unresolved_dependencies():
                     _registry("Lakehouse/Raw", "Sales", "Order"),
                     _registry(
                         "Lakehouse/Raw",
-                        "_/Load",
+                        "_/Load/Tables",
                         "Sales__Order.py",
                         object_type="file",
                         role="load",
@@ -615,14 +615,14 @@ def test_load_dag_rejects_cycles():
                     _registry("Lakehouse/Raw", "Sales", "Customer"),
                     _registry(
                         "Lakehouse/Raw",
-                        "_/Load",
+                        "_/Load/Tables",
                         "Sales__Order.py",
                         object_type="file",
                         role="load",
                     ),
                     _registry(
                         "Lakehouse/Raw",
-                        "_/Load",
+                        "_/Load/Tables",
                         "Sales__Customer.py",
                         object_type="file",
                         role="load",
@@ -651,7 +651,7 @@ def test_load_dag_ignores_a_fully_qualified_physical_read():
                     _registry("Lakehouse/Raw", "Sales", "Order"),
                     _registry(
                         "Lakehouse/Raw",
-                        "_/Load",
+                        "_/Load/Tables",
                         "Sales__Order.py",
                         object_type="file",
                         role="load",
@@ -696,7 +696,7 @@ def _shortcut_estate(root):
         "Sales__External = Shortcut(\n"
         '    shortcut_type="table",\n'
         '    target_type="physical",\n'
-        '    target="Lakehouse/Reference/Ref.Customer",\n'
+        '    target="Lakehouse/Reference/Tables/Ref.Customer",\n'
         '    workspace="Shared Data",\n)\n\n'
         "Sales__Incoming = Shortcut(\n"
         '    shortcut_type="folder",\n'
@@ -711,7 +711,7 @@ def _shortcut_estate(root):
     )
     _write(
         root,
-        f"{item}/Sales__Report.py",
+        f"{item}/Tables/Sales__Report.py",
         lakehouse_table("Sales.Report").replace(
             "from weaver import Table",
             "from shortcuts import Reference, Sales__External, Sales__Incoming\n\n"
@@ -735,7 +735,7 @@ def _resolved_producers(tmp_path):
     bindings = item_bindings((item, "Curated_LH"))
     estate = installed_catalogue(repository, bindings).dag()
 
-    consumer = WeaverDocumentId.parse(f"{item}/Sales.Report")
+    consumer = WeaverDocumentId.parse(f"{item}/Tables/Sales.Report")
     dag = load_dag(estate, items=(WeaverItemId.parse(item),))
     return estate, consumer, dag
 
@@ -751,7 +751,9 @@ def test_a_folder_shortcut_import_resolves_beneath_files(tmp_path):
     estate, _consumer, _dag = _resolved_producers(tmp_path)
 
     assert WeaverDocumentId.parse("Lakehouse/Curated/Files/Sales.Incoming") in estate
-    assert WeaverDocumentId.parse("Lakehouse/Curated/Sales.Incoming") not in estate
+    assert (
+        WeaverDocumentId.parse("Lakehouse/Curated/Tables/Sales.Incoming") not in estate
+    )
 
 
 @weaver_test()
@@ -814,7 +816,7 @@ def _same_name_estate(root):
     # incidental.
     _write(
         root,
-        f"{item}/Sales__Customer.py",
+        f"{item}/Tables/Sales__Customer.py",
         '''\
 """
 Table ID: Sales.Customer
@@ -858,7 +860,7 @@ def test_a_folder_shortcut_and_a_table_of_one_name_are_two_installed_nodes(tmp_p
     item, estate = _same_name_estate_dag(tmp_path)
 
     assert WeaverDocumentId.parse(f"{item}/Files/Sales.Customer") in estate
-    assert WeaverDocumentId.parse(f"{item}/Sales.Customer") in estate
+    assert WeaverDocumentId.parse(f"{item}/Tables/Sales.Customer") in estate
 
 
 @weaver_test()
@@ -868,7 +870,7 @@ def test_a_table_importing_the_folder_shortcut_it_shares_a_name_with_is_external
     """The declaration answers, so the import is the physical read it is."""
 
     item, estate = _same_name_estate_dag(tmp_path)
-    table = WeaverDocumentId.parse(f"{item}/Sales.Customer")
+    table = WeaverDocumentId.parse(f"{item}/Tables/Sales.Customer")
 
     assert estate.external_references[table] == ("shortcuts.Sales__Customer",)
     assert not estate.unresolved
@@ -907,7 +909,9 @@ def test_a_python_shortcut_import_orders_a_warehouse_before_its_lakehouse_consum
         f"{consumer}/schemas/PUB.yml": schema_document("PUB"),
         f"{consumer}/schemas/WH.yml": schema_document("WH"),
         shortcut_path: shortcut_text,
-        f"{consumer}/PUB__Reporting.py": lakehouse_table("PUB.Reporting").replace(
+        f"{consumer}/Tables/PUB__Reporting.py": lakehouse_table(
+            "PUB.Reporting"
+        ).replace(
             "from weaver import Table",
             "from shortcuts import WH__Reporting\n\nfrom weaver import Table",
         ),
@@ -998,7 +1002,11 @@ def _delta_table(item: str, schema: str, name: str, *, role="data"):
     return [
         _registry(item, schema, name, object_type="table", role=role),
         _registry(
-            item, "_/Load", f"{schema}__{name}.py", object_type="file", role="load"
+            item,
+            "_/Load/Tables",
+            f"{schema}__{name}.py",
+            object_type="file",
+            role="load",
         ),
     ]
 
@@ -1081,7 +1089,7 @@ def test_a_real_folder_and_a_real_table_of_one_name_are_two_load_nodes(tmp_path)
                 Shortcut=[
                     shortcut_row(
                         f"{CURATED_ITEM}/Sales.ThingRaw",
-                        f"{SOURCE_ITEM}/{SAME_NAME}",
+                        f"{SOURCE_ITEM}/Tables/{SAME_NAME}",
                         shortcut_type="view",
                     )
                 ],
@@ -1095,7 +1103,7 @@ def test_a_real_folder_and_a_real_table_of_one_name_are_two_load_nodes(tmp_path)
 
     # The installed graph keeps them apart, which is what the planner must carry.
     assert estate.node(f"{SOURCE_ITEM}/Files/{SAME_NAME}").object_type == "folder"
-    assert estate.node(f"{SOURCE_ITEM}/{SAME_NAME}").object_type == "table"
+    assert estate.node(f"{SOURCE_ITEM}/Tables/{SAME_NAME}").object_type == "table"
 
     dag = load_dag(
         estate,
@@ -1168,7 +1176,7 @@ def test_a_folder_shortcut_and_a_real_table_of_one_name_stay_apart(tmp_path):
         }
     )
     estate = catalogue.dag()
-    table = WeaverDocumentId.parse(f"{SOURCE_ITEM}/{SAME_NAME}")
+    table = WeaverDocumentId.parse(f"{SOURCE_ITEM}/Tables/{SAME_NAME}")
 
     # The shortcut is what the import names, so the read is external and the
     # table is not made to depend on itself.
@@ -1263,7 +1271,7 @@ def test_a_real_folder_and_a_table_shortcut_of_one_name_stay_apart(tmp_path):
                 ],
                 Shortcut=[
                     shortcut_row(
-                        f"{SOURCE_ITEM}/{SAME_NAME}",
+                        f"{SOURCE_ITEM}/Tables/{SAME_NAME}",
                         f"{upstream}/{SAME_NAME}",
                     )
                 ],
@@ -1275,7 +1283,7 @@ def test_a_real_folder_and_a_table_shortcut_of_one_name_stay_apart(tmp_path):
 
     # Three installed identities at two spellings, all distinct.
     assert estate.node(f"{SOURCE_ITEM}/Files/{SAME_NAME}").role == "data"
-    assert estate.node(f"{SOURCE_ITEM}/{SAME_NAME}").role == "shortcut"
+    assert estate.node(f"{SOURCE_ITEM}/Tables/{SAME_NAME}").role == "shortcut"
 
     dag = load_dag(
         estate,

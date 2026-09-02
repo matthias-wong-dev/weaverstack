@@ -50,7 +50,7 @@ def _repository(root):
     _write(root, f"{LANDING}/schemas/Raw.yml", schema_document("Raw"))
     _write(
         root,
-        f"{LANDING}/Raw__Customer.py",
+        f"{LANDING}/Tables/Raw__Customer.py",
         lakehouse_table("Raw.Customer"),
     )
     _write(root, f"{CURATED}/schemas/Wh.yml", schema_document("Wh"))

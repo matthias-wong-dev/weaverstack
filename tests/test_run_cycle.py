@@ -85,7 +85,7 @@ def node(node_id: str, **kwargs) -> RunNode:
             PhysicalObjectRef(
                 target_id=str(kwargs.get("target", SALES)),
                 target_kind="lakehouse",
-                schema="_/Load",
+                schema="_/Load/Tables",
                 object=f"{node_id}.py",
                 object_type="file",
             ),
@@ -688,7 +688,7 @@ def test_a_node_is_named_by_what_it_does_to_which_object():
     from weaver.run.runner import node_label
 
     load = RunNode(
-        node_id="load:Lakehouse/Sales/Sales.Customer",
+        node_id="load:Lakehouse/Sales/Tables/Sales.Customer",
         physical_target="Lakehouse/Sales",
         primitive_kind="python_module",
         logical_id=_Logical("Sales.Customer"),

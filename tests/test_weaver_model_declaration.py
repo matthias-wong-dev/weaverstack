@@ -21,18 +21,18 @@ from weaver.targets import DeltaTarget
 @weaver_test()
 def test_item_and_document_identities_round_trip_exactly():
     item = WeaverItemId.parse("Lakehouse/Raw")
-    table = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+    table = WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer")
     folder = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Customer")
 
     assert str(item) == "Lakehouse/Raw"
-    assert str(table) == "Lakehouse/Raw/Sales.Customer"
+    assert str(table) == "Lakehouse/Raw/Tables/Sales.Customer"
     assert str(folder) == "Lakehouse/Raw/Files/Sales.Customer"
     assert table != folder
 
 
 @weaver_test()
 def test_same_object_name_in_distinct_typed_items_is_distinct():
-    lakehouse = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+    lakehouse = WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer")
     warehouse = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
 
     assert lakehouse != warehouse
@@ -67,11 +67,14 @@ def test_lookup_is_exact_case():
     item = WeaverItem(
         item_id,
         schemas=(WeaverSchemaId.parse("Lakehouse/Raw/Sales"),),
-        documents=(WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer"),),
+        documents=(WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer"),),
     )
     repository = WeaverRepository("Estate", (item,))
 
-    assert repository["Lakehouse/Raw"]["Sales.Customer"].object_id.object == "Customer"
+    assert (
+        repository["Lakehouse/Raw"]["Tables/Sales.Customer"].object_id.object
+        == "Customer"
+    )
     with pytest.raises(DiscoveryError):
         repository["Lakehouse/raw"]
     with pytest.raises(DiscoveryError):
@@ -85,8 +88,8 @@ def test_case_only_duplicate_declarations_are_rejected():
         WeaverItem(
             item_id,
             documents=(
-                WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer"),
-                WeaverDocumentId.parse("Lakehouse/Raw/sales.Customer"),
+                WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer"),
+                WeaverDocumentId.parse("Lakehouse/Raw/Tables/sales.Customer"),
             ),
         )
 

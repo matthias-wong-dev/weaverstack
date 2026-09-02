@@ -378,7 +378,7 @@ def test_an_unchanged_descendant_is_re_certified_by_the_build_that_rebuilds_it(
 
     state = installed_catalogue(estate)
 
-    customer = estate.root.path / "Lakehouse" / "Sales" / "DWG__Customer.py"
+    customer = estate.root.path / "Lakehouse" / "Sales" / "Tables" / "DWG__Customer.py"
     customer.write_text(
         customer.read_text(encoding="utf-8").replace(
             "Description: ", "Description: revised, ", 1

@@ -72,7 +72,7 @@ def _estate(root):
     files = {
         f"{ITEM}/schemas/DWG.yml": schema_document("DWG"),
         f"{ITEM}/schemas/Raw.yml": schema_document("Raw"),
-        f"{ITEM}/DWG__Customer.py": lakehouse_table("DWG.Customer"),
+        f"{ITEM}/Tables/DWG__Customer.py": lakehouse_table("DWG.Customer"),
         f"{ITEM}/Files/Raw__CustomerCsv.py": folder_document("Raw.CustomerCsv"),
         f"{ITEM}/tests/DWG__CustomerReconcile.py": lakehouse_test(
             "DWG.CustomerReconcile"
@@ -221,7 +221,7 @@ def _keys(catalogue, table) -> set[tuple]:
 def _rebuilt_table(tmp_path):
     return _changed(
         tmp_path,
-        f"{ITEM}/DWG__Customer.py",
+        f"{ITEM}/Tables/DWG__Customer.py",
         lakehouse_table("DWG.Customer").replace("Description:", "Description: edited,"),
         name="rebuilt_table",
     )

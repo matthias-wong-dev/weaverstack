@@ -26,9 +26,11 @@ def test_push_replaces_destination_without_an_extra_source_root(tmp_path):
     )
 
     assert not (destination / "obsolete.txt").exists()
-    assert (destination / "Lakehouse" / "Raw" / "Sales__Customer.py").is_file()
+    assert (
+        destination / "Lakehouse" / "Raw" / "Tables" / "Sales__Customer.py"
+    ).is_file()
     assert not (destination / source.name).exists()
-    assert "Lakehouse/Raw/Sales__Customer.py" in result.files
+    assert "Lakehouse/Raw/Tables/Sales__Customer.py" in result.files
     assert not any("_ignore" in path for path in result.files)
     assert not (destination / "Lakehouse" / "_weaver").exists()
 

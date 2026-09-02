@@ -262,7 +262,9 @@ def _load_artefact(identity) -> dict:
         )
     schema, name = identity.object_id.schema, identity.object_id.object
     return registry_row(
-        WeaverDocumentId.parse(f"{identity.item}/file:_/Load/{schema}__{name}.py"),
+        WeaverDocumentId.parse(
+            f"{identity.item}/file:_/Load/{identity.area}/{schema}__{name}.py"
+        ),
         object_type="file",
         object_role="load",
     )
@@ -303,7 +305,7 @@ def test_amber_beats_green_and_red_beats_amber():
 def test_overall_status_is_the_worst_section():
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1))
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1))
         .validation(f"{RAW}/Sales.Integrity", result="failed", ran=at(1))
         .report()
     )
@@ -319,7 +321,7 @@ def test_overall_status_is_the_worst_section():
 def test_a_green_estate_is_green_everywhere():
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1))
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1))
         .validation(f"{RAW}/Sales.Integrity", result="succeeded", ran=at(0.5))
         .reads(f"{RAW}/Sales.Integrity", "Sales.Order")
         .report()
@@ -335,7 +337,9 @@ def test_a_green_estate_is_green_everywhere():
 
 @weaver_test()
 def test_a_recent_success_is_green():
-    report = _Estate().table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1)).report()
+    report = (
+        _Estate().table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1)).report()
+    )
 
     assert report.load.status == GREEN
     assert report.load.counts == {"succeeded": 1}
@@ -343,7 +347,11 @@ def test_a_recent_success_is_green():
 
 @weaver_test()
 def test_a_success_older_than_as_of_is_amber():
-    report = _Estate().table(f"{RAW}/Sales.Order", loaded=at(30), moved=at(30)).report()
+    report = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(30), moved=at(30))
+        .report()
+    )
 
     assert report.load.status == AMBER
     assert codes(report.load) == (LOAD_STALE_TIME,)
@@ -353,7 +361,7 @@ def test_a_success_older_than_as_of_is_amber():
 def test_a_loadable_with_no_status_is_amber_and_pending():
     """A freshly rebuilt loadable has no status row."""
 
-    report = _Estate().table(f"{RAW}/Sales.Order").report()
+    report = _Estate().table(f"{RAW}/Tables/Sales.Order").report()
 
     assert report.load.status == AMBER
     assert codes(report.load) == (LOAD_PENDING,)
@@ -363,7 +371,9 @@ def test_a_loadable_with_no_status_is_amber_and_pending():
 @weaver_test()
 def test_a_rejecting_load_is_amber():
     report = (
-        _Estate().table(f"{RAW}/Sales.Order", loaded=at(1), result="rejected").report()
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), result="rejected")
+        .report()
     )
 
     assert report.load.status == AMBER
@@ -373,7 +383,11 @@ def test_a_rejecting_load_is_amber():
 @pytest.mark.parametrize("result", ["failed", "error", "blocked"])
 @weaver_test()
 def test_a_load_that_did_not_succeed_is_red(result):
-    report = _Estate().table(f"{RAW}/Sales.Order", loaded=at(1), result=result).report()
+    report = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), result=result)
+        .report()
+    )
 
     assert report.load.status == RED
     assert codes(report.load) == (LOAD_FAILED,)
@@ -386,9 +400,9 @@ def test_a_view_is_not_a_load_subject():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1))
-        .view(f"{RAW}/Sales.Live")
-        .reads(f"{RAW}/Sales.Live", "Sales.Order")
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1))
+        .view(f"{RAW}/Tables/Sales.Live")
+        .reads(f"{RAW}/Tables/Sales.Live", "Sales.Order")
         .report()
     )
 
@@ -398,7 +412,9 @@ def test_a_view_is_not_a_load_subject():
 
 @weaver_test()
 def test_a_generated_runtime_artefact_is_not_a_load_subject():
-    report = _Estate().table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1)).report()
+    report = (
+        _Estate().table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1)).report()
+    )
 
     assert [finding.object_id for finding in report.findings] == []
     assert report.load.subjects == 1
@@ -413,16 +429,16 @@ def test_a_node_loaded_before_its_ancestor_is_stale():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.A", loaded=at(4), moved=at(4))
-        .table(f"{RAW}/Sales.B", loaded=at(5), moved=at(5))
-        .reads(f"{RAW}/Sales.B", "Sales.A")
+        .table(f"{RAW}/Tables/Sales.A", loaded=at(4), moved=at(4))
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
         .report()
     )
 
     assert report.load.status == AMBER
     stale = about(report.load, LOAD_STALE_ANCESTOR)
-    assert [finding.object_id for finding in stale] == [f"{RAW}/Sales.B"]
-    assert f"{RAW}/Sales.A" in stale[0].message
+    assert [finding.object_id for finding in stale] == [f"{RAW}/Tables/Sales.B"]
+    assert f"{RAW}/Tables/Sales.A" in stale[0].message
 
 
 @weaver_test()
@@ -431,11 +447,11 @@ def test_staleness_reaches_through_a_view():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.A", loaded=at(4), moved=at(4))
-        .view(f"{RAW}/Sales.Live")
-        .table(f"{RAW}/Sales.B", loaded=at(5), moved=at(5))
-        .reads(f"{RAW}/Sales.Live", "Sales.A")
-        .reads(f"{RAW}/Sales.B", "Sales.Live")
+        .table(f"{RAW}/Tables/Sales.A", loaded=at(4), moved=at(4))
+        .view(f"{RAW}/Tables/Sales.Live")
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
+        .reads(f"{RAW}/Tables/Sales.Live", "Sales.A")
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.Live")
         .report()
     )
 
@@ -448,25 +464,25 @@ def test_staleness_is_transitive():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.A", loaded=at(1), moved=at(1))
-        .table(f"{RAW}/Sales.B", loaded=at(5), moved=at(5))
-        .table(f"{RAW}/Sales.C", loaded=at(6), moved=at(6))
-        .reads(f"{RAW}/Sales.B", "Sales.A")
-        .reads(f"{RAW}/Sales.C", "Sales.B")
+        .table(f"{RAW}/Tables/Sales.A", loaded=at(1), moved=at(1))
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
+        .table(f"{RAW}/Tables/Sales.C", loaded=at(6), moved=at(6))
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
+        .reads(f"{RAW}/Tables/Sales.C", "Sales.B")
         .report()
     )
 
     assert sorted(
         finding.object_id for finding in about(report.load, LOAD_STALE_ANCESTOR)
-    ) == [f"{RAW}/Sales.B", f"{RAW}/Sales.C"]
+    ) == [f"{RAW}/Tables/Sales.B", f"{RAW}/Tables/Sales.C"]
 
 
 @weaver_test()
 def test_staleness_crosses_a_logical_shortcut():
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1))
-        .shortcut(f"{REPORTING}/Sales.Order", f"{RAW}/Sales.Order")
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1))
+        .shortcut(f"{REPORTING}/Sales.Order", f"{RAW}/Tables/Sales.Order")
         .table(f"{REPORTING}/Sales.Summary", loaded=at(5), moved=at(5))
         .reads(f"{REPORTING}/Sales.Summary", "Sales.Order")
         .report()
@@ -482,9 +498,9 @@ def test_a_blocked_ancestor_is_not_newer_data():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.A", loaded=at(1), result="blocked")
-        .table(f"{RAW}/Sales.B", loaded=at(5), moved=at(5))
-        .reads(f"{RAW}/Sales.B", "Sales.A")
+        .table(f"{RAW}/Tables/Sales.A", loaded=at(1), result="blocked")
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
         .report()
     )
 
@@ -501,9 +517,9 @@ def test_a_static_skip_does_not_make_its_descendants_stale():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Reference", loaded=at(0.5), moved=at(40))
-        .table(f"{RAW}/Sales.B", loaded=at(5), moved=at(5))
-        .reads(f"{RAW}/Sales.B", "Sales.Reference")
+        .table(f"{RAW}/Tables/Sales.Reference", loaded=at(0.5), moved=at(40))
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.Reference")
         .report()
     )
 
@@ -516,8 +532,8 @@ def test_target_filtering_reports_the_selection_and_reads_the_rest():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1), result="failed")
-        .shortcut(f"{REPORTING}/Sales.Order", f"{RAW}/Sales.Order")
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1), result="failed")
+        .shortcut(f"{REPORTING}/Sales.Order", f"{RAW}/Tables/Sales.Order")
         .table(f"{REPORTING}/Sales.Summary", loaded=at(5), moved=at(5))
         .reads(f"{REPORTING}/Sales.Summary", "Sales.Order")
         .report(targets=(REPORTING_WH,))
@@ -540,7 +556,9 @@ def test_target_filtering_reports_the_selection_and_reads_the_rest():
 def test_a_static_object_loaded_months_ago_stays_green():
     report = (
         _Estate()
-        .table(f"{RAW}/Ref.Country", loaded=at(3000), moved=at(3000), is_static=True)
+        .table(
+            f"{RAW}/Tables/Ref.Country", loaded=at(3000), moved=at(3000), is_static=True
+        )
         .report()
     )
 
@@ -552,9 +570,11 @@ def test_a_static_object_loaded_months_ago_stays_green():
 def test_a_static_object_is_not_made_stale_by_an_ancestor():
     report = (
         _Estate()
-        .table(f"{RAW}/Ref.Source", loaded=at(1), moved=at(1))
-        .table(f"{RAW}/Ref.Country", loaded=at(3000), moved=at(3000), is_static=True)
-        .reads(f"{RAW}/Ref.Country", "Ref.Source")
+        .table(f"{RAW}/Tables/Ref.Source", loaded=at(1), moved=at(1))
+        .table(
+            f"{RAW}/Tables/Ref.Country", loaded=at(3000), moved=at(3000), is_static=True
+        )
+        .reads(f"{RAW}/Tables/Ref.Country", "Ref.Source")
         .report()
     )
 
@@ -564,7 +584,7 @@ def test_a_static_object_is_not_made_stale_by_an_ancestor():
 
 @weaver_test()
 def test_a_static_object_that_has_never_loaded_is_amber():
-    report = _Estate().table(f"{RAW}/Ref.Country", is_static=True).report()
+    report = _Estate().table(f"{RAW}/Tables/Ref.Country", is_static=True).report()
 
     assert report.load.status == AMBER
     assert codes(report.load) == (LOAD_PENDING,)
@@ -575,7 +595,7 @@ def test_a_static_object_that_has_never_loaded_is_amber():
 def test_a_static_object_that_did_not_load_is_red(result):
     report = (
         _Estate()
-        .table(f"{RAW}/Ref.Country", loaded=at(1), result=result, is_static=True)
+        .table(f"{RAW}/Tables/Ref.Country", loaded=at(1), result=result, is_static=True)
         .report()
     )
 
@@ -587,7 +607,9 @@ def test_a_static_object_that_did_not_load_is_red(result):
 def test_a_static_object_that_rejected_rows_is_amber():
     report = (
         _Estate()
-        .table(f"{RAW}/Ref.Country", loaded=at(1), result="rejected", is_static=True)
+        .table(
+            f"{RAW}/Tables/Ref.Country", loaded=at(1), result="rejected", is_static=True
+        )
         .report()
     )
 
@@ -601,9 +623,11 @@ def test_a_static_bookmark_is_lineage_for_what_reads_it():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Ref.Country", loaded=at(1400), moved=at(1400), is_static=True)
-        .table(f"{RAW}/Fact.Customer", loaded=at(700), moved=at(700))
-        .reads(f"{RAW}/Fact.Customer", "Ref.Country")
+        .table(
+            f"{RAW}/Tables/Ref.Country", loaded=at(1400), moved=at(1400), is_static=True
+        )
+        .table(f"{RAW}/Tables/Fact.Customer", loaded=at(700), moved=at(700))
+        .reads(f"{RAW}/Tables/Fact.Customer", "Ref.Country")
         .report(as_of=at(2000))
     )
 
@@ -616,23 +640,23 @@ def test_a_genuine_static_reload_puts_its_consumers_behind():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Ref.Country", loaded=at(1), moved=at(1), is_static=True)
-        .table(f"{RAW}/Fact.Customer", loaded=at(700), moved=at(700))
-        .reads(f"{RAW}/Fact.Customer", "Ref.Country")
+        .table(f"{RAW}/Tables/Ref.Country", loaded=at(1), moved=at(1), is_static=True)
+        .table(f"{RAW}/Tables/Fact.Customer", loaded=at(700), moved=at(700))
+        .reads(f"{RAW}/Tables/Fact.Customer", "Ref.Country")
         .report(as_of=at(2000))
     )
 
     assert report.load.status == AMBER
     stale = about(report.load, LOAD_STALE_ANCESTOR)
-    assert [finding.object_id for finding in stale] == [f"{RAW}/Fact.Customer"]
-    assert f"{RAW}/Ref.Country" in stale[0].message
+    assert [finding.object_id for finding in stale] == [f"{RAW}/Tables/Fact.Customer"]
+    assert f"{RAW}/Tables/Ref.Country" in stale[0].message
 
 
 @weaver_test()
 def test_a_static_reload_makes_a_validation_over_it_stale():
     report = (
         _Estate()
-        .table(f"{RAW}/Ref.Country", loaded=at(1), moved=at(1), is_static=True)
+        .table(f"{RAW}/Tables/Ref.Country", loaded=at(1), moved=at(1), is_static=True)
         .validation(f"{RAW}/Ref.Integrity", result="succeeded", ran=at(700))
         .reads(f"{RAW}/Ref.Integrity", "Ref.Country")
         .report()
@@ -648,7 +672,7 @@ def test_a_static_reload_makes_a_validation_over_it_stale():
 def test_a_passing_validation_with_nothing_loaded_since_is_green():
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(4), moved=at(4))
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(4), moved=at(4))
         .validation(f"{RAW}/Sales.Integrity", result="succeeded", ran=at(3))
         .reads(f"{RAW}/Sales.Integrity", "Sales.Order")
         .report()
@@ -664,10 +688,10 @@ def test_a_validation_whose_data_moved_after_it_passed_is_stale():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.A", loaded=at(6), moved=at(6))
-        .table(f"{RAW}/Sales.B", loaded=at(1), moved=at(1))
+        .table(f"{RAW}/Tables/Sales.A", loaded=at(6), moved=at(6))
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(1), moved=at(1))
         .validation(f"{RAW}/Sales.Integrity", result="succeeded", ran=at(3))
-        .reads(f"{RAW}/Sales.B", "Sales.A")
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
         .reads(f"{RAW}/Sales.Integrity", "Sales.B")
         .report()
     )
@@ -682,7 +706,7 @@ def test_time_alone_does_not_make_a_validation_stale():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(80), moved=at(80))
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(80), moved=at(80))
         .validation(f"{RAW}/Sales.Integrity", result="succeeded", ran=at(70))
         .reads(f"{RAW}/Sales.Integrity", "Sales.Order")
         .report()
@@ -753,35 +777,40 @@ def test_a_validation_with_no_installed_artefact_is_build_red():
 def test_a_declared_object_registry_does_not_certify_is_build_red():
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1))
-        .declared_not_installed(f"{RAW}/Sales.Missing")
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1))
+        .declared_not_installed(f"{RAW}/Tables/Sales.Missing")
         .report()
     )
 
     assert report.build.status == RED
-    assert about(report.build, NOT_INSTALLED)[0].object_id == f"{RAW}/Sales.Missing"
+    assert (
+        about(report.build, NOT_INSTALLED)[0].object_id == f"{RAW}/Tables/Sales.Missing"
+    )
 
 
 @weaver_test()
 def test_a_certified_object_the_target_does_not_hold_is_build_red():
-    estate = _Estate().table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1))
+    estate = _Estate().table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1))
     empty = target_inventory(kind="lakehouse", target_name="Raw_LH")
 
     report = estate.report(inventories={RAW_LH: empty})
 
     assert report.build.status == RED
-    assert about(report.build, CERTIFIED_MISSING)[0].object_id == f"{RAW}/Sales.Order"
+    assert (
+        about(report.build, CERTIFIED_MISSING)[0].object_id
+        == f"{RAW}/Tables/Sales.Order"
+    )
 
 
 @weaver_test()
 def test_a_certified_object_the_target_holds_is_build_green():
-    estate = _Estate().table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1))
+    estate = _Estate().table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1))
     present = target_inventory(
         kind="lakehouse",
         target_name="Raw_LH",
         schemas=("Sales",),
         tables=("Sales.Order",),
-        files=("_/Load/Sales__Order.py",),
+        files=("_/Load/Tables/Sales__Order.py",),
     )
 
     report = estate.report(inventories={RAW_LH: present})
@@ -795,16 +824,16 @@ def test_a_lakehouse_view_is_not_asked_of_storage():
 
     estate = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1))
-        .view(f"{RAW}/Sales.Live")
-        .reads(f"{RAW}/Sales.Live", "Sales.Order")
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1))
+        .view(f"{RAW}/Tables/Sales.Live")
+        .reads(f"{RAW}/Tables/Sales.Live", "Sales.Order")
     )
     present = target_inventory(
         kind="lakehouse",
         target_name="Raw_LH",
         schemas=("Sales",),
         tables=("Sales.Order",),
-        files=("_/Load/Sales__Order.py",),
+        files=("_/Load/Tables/Sales__Order.py",),
     )
 
     report = estate.report(inventories={RAW_LH: present})
@@ -818,11 +847,15 @@ def test_two_objects_at_one_physical_address_are_build_red():
         rows={
             WeaverItemId.parse(RAW): {
                 INSTALLATION.name: (installation_row(RAW, "Shared_LH"),),
-                REGISTRY.name: (registry_row(document_id(f"{RAW}/Sales.Order")),),
+                REGISTRY.name: (
+                    registry_row(document_id(f"{RAW}/Tables/Sales.Order")),
+                ),
             },
             WeaverItemId.parse(CURATED): {
                 INSTALLATION.name: (installation_row(CURATED, "Shared_LH"),),
-                REGISTRY.name: (registry_row(document_id(f"{CURATED}/Sales.Order")),),
+                REGISTRY.name: (
+                    registry_row(document_id(f"{CURATED}/Tables/Sales.Order")),
+                ),
             },
         }
     )
@@ -837,7 +870,7 @@ def test_two_objects_at_one_physical_address_are_build_red():
 def test_a_consistent_estate_reports_no_build_findings():
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1))
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1))
         .validation(f"{RAW}/Sales.Integrity", result="succeeded", ran=at(0.5))
         .reads(f"{RAW}/Sales.Integrity", "Sales.Order")
         .report()
@@ -854,9 +887,9 @@ def test_a_consistent_estate_reports_no_build_findings():
 def test_findings_are_ordered_worst_first_then_by_code_and_object():
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.A", loaded=at(1), result="failed")
-        .table(f"{RAW}/Sales.B")
-        .table(f"{RAW}/Sales.C", loaded=at(1), result="rejected")
+        .table(f"{RAW}/Tables/Sales.A", loaded=at(1), result="failed")
+        .table(f"{RAW}/Tables/Sales.B")
+        .table(f"{RAW}/Tables/Sales.C", loaded=at(1), result="rejected")
         .report()
     )
 
@@ -867,9 +900,9 @@ def test_findings_are_ordered_worst_first_then_by_code_and_object():
 def test_the_same_estate_reports_the_same_thing_twice():
     estate = (
         _Estate()
-        .table(f"{RAW}/Sales.A", loaded=at(4), moved=at(4))
-        .table(f"{RAW}/Sales.B", loaded=at(5), moved=at(5))
-        .reads(f"{RAW}/Sales.B", "Sales.A")
+        .table(f"{RAW}/Tables/Sales.A", loaded=at(4), moved=at(4))
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
     )
 
     assert estate.report().to_mapping() == estate.report().to_mapping()
@@ -877,7 +910,9 @@ def test_the_same_estate_reports_the_same_thing_twice():
 
 @weaver_test()
 def test_the_mapping_carries_the_format_version_and_the_machine_vocabulary():
-    report = _Estate().table(f"{RAW}/Sales.Order", loaded=at(1), moved=at(1)).report()
+    report = (
+        _Estate().table(f"{RAW}/Tables/Sales.Order", loaded=at(1), moved=at(1)).report()
+    )
     mapping = report.to_mapping()
 
     assert mapping["format_version"] == FORMAT_VERSION
@@ -892,7 +927,7 @@ def test_the_mapping_is_json_safe():
 
     report = (
         _Estate()
-        .table(f"{RAW}/Sales.Order", loaded=at(30), moved=at(30))
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(30), moved=at(30))
         .validation(f"{RAW}/Sales.Integrity", result="failed", ran=at(1))
         .report(
             load_history=LoadHistory(
@@ -914,7 +949,9 @@ def test_the_mapping_is_json_safe():
 
 @weaver_test()
 def test_arrays_stay_present_when_empty():
-    mapping = _Estate().table(f"{RAW}/Sales.Order", loaded=at(1)).report().to_mapping()
+    mapping = (
+        _Estate().table(f"{RAW}/Tables/Sales.Order", loaded=at(1)).report().to_mapping()
+    )
 
     assert mapping["sections"]["tests"]["findings"] == []
     assert mapping["latest_load"] is None
@@ -961,8 +998,8 @@ def test_the_slowest_loads_come_from_the_whole_window():
     )
 
     assert [each.object_id for each in report.slowest(2)] == [
-        f"{RAW}/Sales.A",
-        f"{RAW}/Sales.B",
+        f"{RAW}/Tables/Sales.A",
+        f"{RAW}/Tables/Sales.B",
     ]
 
 
@@ -983,7 +1020,7 @@ def test_movement_is_what_a_load_changed_rather_than_what_it_read():
         )
     )
 
-    assert [each.object_id for each in report.moved()] == [f"{RAW}/Sales.B"]
+    assert [each.object_id for each in report.moved()] == [f"{RAW}/Tables/Sales.B"]
 
 
 @weaver_test()
@@ -1002,7 +1039,7 @@ def test_counts_are_preserved_exactly():
     )
 
     assert report.load_activity[0].to_mapping() == {
-        "object_id": f"{RAW}/Sales.A",
+        "object_id": f"{RAW}/Tables/Sales.A",
         "target": None,
         "workflow_id": "workflow-1",
         "started_at": None,
@@ -1020,7 +1057,7 @@ def test_counts_are_preserved_exactly():
 
 @weaver_test()
 def test_a_catalogue_read_without_a_window_reports_no_activity():
-    report = _Estate().table(f"{RAW}/Sales.Order", loaded=at(1)).report()
+    report = _Estate().table(f"{RAW}/Tables/Sales.Order", loaded=at(1)).report()
 
     assert report.latest_load is None
     assert report.load_activity == ()
