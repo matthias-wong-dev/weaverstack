@@ -102,6 +102,9 @@ class RunRequest:
     fault_tolerant: bool = False
     #: Plan, resolve and report without dispatching anything.
     dry_run: bool = False
+    #: Reconstruct each selected table from zero. ``load`` only, and local to
+    #: what the request selected.
+    reload: bool = False
 
     def __post_init__(self) -> None:
         from ..errors import CommandError
@@ -117,6 +120,8 @@ class RunRequest:
             raise CommandError("a load selects installed objects with names=")
         if self.kind == TEST and self.names:
             raise CommandError("a test selects one installed validation with name=")
+        if self.reload and self.kind != LOAD:
+            raise CommandError("reload is a load mode")
 
     @classmethod
     def load(cls, items: Sequence, **policy) -> "RunRequest":
@@ -146,6 +151,7 @@ class RunRequest:
             "file": self.file,
             "fault_tolerant": self.fault_tolerant,
             "dry_run": self.dry_run,
+            "reload": self.reload,
         }
 
 
@@ -261,10 +267,13 @@ class Runner:
         session: object | None = None,
         dispatch: Callable | None = None,
         on_node: Callable | None = None,
+        before_node: Callable | None = None,
     ) -> RunResult:
         """Execute the graph and return a result for every planned node.
 
-        ``on_node`` receives each result when its status settles.
+        ``on_node`` receives each result when its status settles. ``before_node``
+        receives each node the run is about to dispatch; nothing blocked, skipped
+        or unresolved reaches it.
         """
 
         started = _now()
@@ -340,7 +349,11 @@ class Runner:
 
                 settle(
                     self._dispatched(
-                        node, dispatch=dispatch, session=session, resolved=resolved
+                        node,
+                        dispatch=dispatch,
+                        session=session,
+                        resolved=resolved,
+                        before=before_node,
                     ),
                     None,
                 )
@@ -401,8 +414,14 @@ class Runner:
                 )
         return tuple(settled)
 
-    def _dispatched(self, node, *, dispatch, session, resolved=None) -> RunNodeResult:
-        """Dispatch one node and record failures as node results."""
+    def _dispatched(
+        self, node, *, dispatch, session, resolved=None, before=None
+    ) -> RunNodeResult:
+        """Dispatch one node and record failures as node results.
+
+        ``before`` runs inside the same try, so a failure in it settles as this
+        node's failure rather than the run's.
+        """
 
         from .outcome import settle
 
@@ -411,12 +430,15 @@ class Runner:
         # Record one timing frame for each dispatched node.
         with _node_substep(session, node) as frame:
             try:
+                if before is not None:
+                    before(node)
                 returned = dispatch(
                     node,
                     session=session,
                     state=self.state,
                     resolved=resolved,
                     fault_tolerant=self.request.fault_tolerant,
+                    reload=self.request.reload,
                     open_runtime=self.runtime_scope(session),
                     workspace=self.workspace,
                     publication=self.publication,
@@ -499,6 +521,7 @@ class Runner:
             status=run_status(nodes, dry_run=self.request.dry_run),
             dry_run=self.request.dry_run,
             fault_tolerant=self.request.fault_tolerant,
+            reload=self.request.reload,
             nodes=nodes,
             edges=graph.edges,
             order=tuple(node.node_id for node in graph.order()),

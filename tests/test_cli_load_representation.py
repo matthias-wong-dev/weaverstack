@@ -114,6 +114,7 @@ def test_the_command_exposes_every_option_the_contract_names():
             "environment.yml",
             "--fault-tolerant",
             "--dry-run",
+            "--reload",
             "--name",
             "Sales.Customer",
             "--name",
@@ -127,6 +128,7 @@ def test_the_command_exposes_every_option_the_contract_names():
     assert load.workspace_config == "environment.yml"
     assert load.fault_tolerant
     assert load.dry_run
+    assert load.reload
     assert load.names == ["Sales.Customer", "Sales.Order"]
 
 
@@ -184,6 +186,29 @@ def test_fault_tolerance_and_dry_run_reach_the_api(recorded):
 
     assert recorded[0]["fault_tolerant"] is True
     assert recorded[0]["dry_run"] is True
+
+
+@weaver_test()
+def test_reload_reaches_the_api(recorded):
+    main(_command("--reload"))
+
+    assert recorded[0]["reload"] is True
+
+
+@weaver_test()
+def test_a_load_without_reload_asks_for_none(recorded):
+    main(_command())
+
+    assert recorded[0]["reload"] is False
+
+
+@weaver_test()
+def test_the_rendered_report_says_a_reload_ran(capsys):
+    """The mode a user asked for, back on the line they read."""
+
+    _cli_module()._print_load(_report(reload=True))
+
+    assert capsys.readouterr().out.startswith("load (reload) succeeded:")
 
 
 @weaver_test()

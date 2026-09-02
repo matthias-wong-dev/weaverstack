@@ -9,11 +9,15 @@ rows are queued, batched and written on a worker, and a failure is surfaced by
 :meth:`CatalogueWriter.flush`. Whether a lost row matters is the caller's
 judgement, a lost ``_.Log`` row loses evidence, a lost bookmark makes the next
 load read a window it has already read, so this raises and lets them decide.
+
+:meth:`CatalogueWriter.delete` removes named rows. It runs its statement and
+waits, because a caller removing rows is about to do the work that removal
+precedes.
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 
 class CatalogueWriter:
@@ -21,10 +25,17 @@ class CatalogueWriter:
 
     ``flusher_for`` is asked for a table's write stream on first use, so a
     catalogue nothing writes to opens no connection and starts no worker.
+    ``execute`` runs one statement against the same Warehouse and waits.
     """
 
-    def __init__(self, flusher_for: Callable[[Any], Any]) -> None:
+    def __init__(
+        self,
+        flusher_for: Callable[[Any], Any],
+        *,
+        execute: Callable[[str], None] | None = None,
+    ) -> None:
         self._flusher_for = flusher_for
+        self._execute = execute
         self._flushers: dict[str, Any] = {}
 
     def submit(self, table, row: Mapping[str, Any]) -> None:
@@ -36,6 +47,27 @@ class CatalogueWriter:
         """Merge one row on the table's own key."""
 
         self._flusher(table).update(row)
+
+    def delete(self, table, rows: Sequence[Mapping[str, Any]]) -> None:
+        """Remove the named rows, and wait for the removal.
+
+        Each row carries the table's key. Queued rows are drained first, so a
+        merge already in flight cannot land behind the removal.
+        """
+
+        from ..errors import CommandError
+        from .render import render_delete_rows
+
+        statement = render_delete_rows(table, list(rows))
+        if statement is None:
+            return
+        if self._execute is None:
+            raise CommandError(
+                f"{table.qualified} cannot be deleted from here: this catalogue "
+                "was built without a connection to run a statement through"
+            )
+        self.flush()
+        self._execute(statement)
 
     def flush(self) -> None:
         """Wait for every queued row, and surface the first failure."""
@@ -67,6 +99,9 @@ class RefusingWriter:
     def update(self, table, row) -> None:
         self._refuse(table)
 
+    def delete(self, table, rows) -> None:
+        self._refuse(table)
+
     def flush(self) -> None:
         return None
 
@@ -80,7 +115,8 @@ def writer_for(session, workspace=None) -> CatalogueWriter:
     """Where a Session sends the catalogue's runtime writes.
 
     One flusher per table, opened on first use, so a catalogue nothing writes to
-    starts no worker and opens no connection.
+    starts no worker and opens no connection. A removal runs over the Session's
+    TDS against the same Warehouse.
     """
 
     from ..targets import WarehouseTarget
@@ -88,7 +124,10 @@ def writer_for(session, workspace=None) -> CatalogueWriter:
     resolved = session.workspace_or_default(workspace)
     target = WarehouseTarget(warehouse=resolved.catalogue_item)
     return CatalogueWriter(
-        lambda table: session.flusher(table, warehouse=target, workspace=resolved)
+        lambda table: session.flusher(table, warehouse=target, workspace=resolved),
+        execute=lambda statement: session.execute_tsql(
+            statement, target=target, workspace=resolved
+        ),
     )
 
 

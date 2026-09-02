@@ -422,8 +422,8 @@ def test_the_scope_is_what_runs_a_python_node():
     sent = []
 
     class Scope:
-        def dispatch_python(self, node, *, expected_class, fault_tolerant):
-            sent.append((node, expected_class, fault_tolerant))
+        def dispatch_python(self, node, *, expected_class, fault_tolerant, reload):
+            sent.append((node, expected_class, fault_tolerant, reload))
             # A row, which is what a scope answers with in either position.
             return LoadResult(succeeded=True, rows_read=3).as_row()
 
@@ -435,7 +435,7 @@ def test_the_scope_is_what_runs_a_python_node():
         open_runtime=LazyRunScope(Scope),
     )
 
-    assert sent == [(node, "Sales__Customer", False)]
+    assert sent == [(node, "Sales__Customer", False, False)]
     assert result.rows_read == 3
 
 

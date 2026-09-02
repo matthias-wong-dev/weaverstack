@@ -7,6 +7,10 @@ procedure raised.
 The implementation procedure is in [_], and the source object's schema is part
 of its name. `@item_name` omitted means recover it from [_].[Installation].
 
+`@reload = 1` reconstructs the object from zero: [_].[LoadStatus] goes to Pending
+and the [_].[Bookmark] row is removed, then the implementation procedure clears
+the target and runs. It reaches this object alone.
+
 Every write is a MERGE, including the appends. In every Warehouse but the one
 the catalogue lives in these tables are views across databases, and Fabric
 refuses a plain INSERT through such a view while accepting a MERGE's. An
@@ -18,6 +22,7 @@ create or alter procedure [_].[Load]
     @object_name varchar(261)
   , @fault_tolerant bit = 0
   , @ignore_stability_threshold bit = 0
+  , @reload bit = 0
   , @item_name varchar(128) = null
 as
 begin
@@ -92,6 +97,7 @@ begin
                 set @weaver_call = N'exec ' + @weaver_target + N' '
                     + N'@fault_tolerant = @fault_tolerant'
                     + N', @ignore_stability_threshold = @ignore_stability_threshold'
+                    + N', @reload = @reload'
                     + N', @weaver_succeeded = @weaver_succeeded output'
                     + N', @weaver_rows_read = @weaver_rows_read output'
                     + N', @weaver_rows_inserted = @weaver_rows_inserted output'
@@ -105,11 +111,68 @@ begin
             end;
         end;
 
+        if @weaver_call is not null and @reload = 1
+        begin
+            -- Invalidate this object's load state before the implementation
+            -- clears its target, so a failed reload cannot retain the previous
+            -- bookmark.
+            merge into [_].[LoadStatus] as target
+            using (select
+                N'Warehouse' as [Item type]
+                , @item_name as [Item name]
+                , @weaver_schema as [Schema name]
+                , @weaver_object as [Object name]
+            ) as source
+               on
+                target.[Item type] = source.[Item type]
+                  and target.[Item name] = source.[Item name]
+                  and target.[Schema name] = source.[Schema name]
+                  and target.[Object name] = source.[Object name]
+            when matched then update set
+                target.[Workflow ID] = @weaver_workflow
+                , target.[Result] = N'Pending'
+                , target.[Started datetime] = @weaver_started
+                , target.[Completed datetime] = null
+                , target.[Duration milliseconds] = null
+                , target.[Row update datetime] = sysdatetime()
+            when not matched then insert (
+                [Item type]
+                , [Item name]
+                , [Schema name]
+                , [Object name]
+                , [Workflow ID]
+                , [Result]
+                , [Started datetime]
+                , [Row insert datetime]
+                , [Row update datetime]
+                , [Row delete datetime]
+            )
+            values (
+                source.[Item type]
+                , source.[Item name]
+                , source.[Schema name]
+                , source.[Object name]
+                , @weaver_workflow
+                , N'Pending'
+                , @weaver_started
+                , sysdatetime()
+                , sysdatetime()
+                , convert(datetime2(6), '9999-12-31 23:59:59.999999')
+            );
+
+            delete from [_].[Bookmark]
+             where [Item type] = N'Warehouse'
+               and [Item name] = @item_name
+               and [Schema name] = @weaver_schema
+               and [Object name] = @weaver_object;
+        end;
+
         if @weaver_call is not null
         begin
             exec sp_executesql @weaver_call,
                 N'@fault_tolerant bit,
                    @ignore_stability_threshold bit,
+                   @reload bit,
                    @weaver_succeeded bit output,
                    @weaver_rows_read bigint output,
                    @weaver_rows_inserted bigint output,
@@ -121,6 +184,7 @@ begin
                    @weaver_is_static_skip bit output',
                 @fault_tolerant = @fault_tolerant,
                 @ignore_stability_threshold = @ignore_stability_threshold,
+                @reload = @reload,
                 @weaver_succeeded = @succeeded output,
                 @weaver_rows_read = @rows_read output,
                 @weaver_rows_inserted = @rows_inserted output,
@@ -285,7 +349,7 @@ begin
         , coalesce(@rows_updated, 0)
         , coalesce(@rows_deleted, 0)
         , coalesce(@rows_rejected, 0)
-        , cast(0 as bit)
+        , cast(@reload as bit)
         , cast(coalesce(@is_static_skip, 0) as bit)
         , sysdatetime()
         , sysdatetime()

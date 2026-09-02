@@ -543,6 +543,7 @@ new object                     no row
 first clean load               MERGE inserts the instant
 later clean load               MERGE updates it
 dropped and rebuilt            DELETE, before the physical work
+reloaded                       DELETE, before the clear
 no longer declared or loaded   DELETE
 unchanged object               left alone
 ```
@@ -613,7 +614,7 @@ places to disagree.
 [Rows updated]
 [Rows deleted]
 [Rows rejected]
-[Is reload]              false until reload is available
+[Is reload]              whether the load ran in reload mode
 [Is static skip]
 ```
 
@@ -632,6 +633,31 @@ the engine knows which happened.
 There is no target row count. `Rows read` plus the mutation counts are already
 useful, and counting the target would be an expensive engine-specific read taken
 for telemetry alone.
+
+### Reload
+
+Reload reconstructs a selected table from zero. Before the authored load runs:
+
+1. `_.LoadStatus` is set to `Pending`.
+2. The object's `_.Bookmark` row is removed.
+3. The target table is cleared.
+
+A missing `_.Bookmark` row reads as `BOOKMARK_SENTINEL`. The sentinel is not
+stored.
+
+Reload is local to the selected objects. It does not reload or invalidate
+dependent objects. `--name Sales.Order` reloads one table; an item with no name
+filter reloads every table it owns. A folder is refused before anything runs.
+
+If reload fails after the target is cleared, the bookmark remains absent and
+`_.LoadStatus` records the failed execution, so a later load cannot continue from
+the previous bookmark.
+
+`_.LoadStatistic.[Is reload]` records whether the execution was requested as a
+reload, including one that failed.
+
+The surfaces are `weaver load --reload`, `weaver.load(..., reload=True)`,
+`table.load(reload=True)` and `exec [_].[Load] ..., @reload = 1`.
 
 ### `_.TestStatus`
 

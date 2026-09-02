@@ -441,3 +441,59 @@ def test_a_changed_upstream_document_does_not_rebuild_an_unchanged_artefact(tmp_
     assert f"{ITEM}/file:{LOAD_ROOT}/DWG__Customer.py" in rebuilt
     # The helper is untouched, and nothing carried impact to it.
     assert f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py" not in rebuilt
+
+
+@weaver_test()
+def test_moving_the_tsql_generator_version_rebuilds_procedures_and_no_tables(
+    tmp_path, monkeypatch
+):
+    """A load procedure is signed on its own, and nothing declares against it.
+
+    So raising the generator's version reaches every Warehouse load procedure and
+    stops there. The table each one loads keeps its signature, is not selected,
+    and is not dropped, which is what keeps a Weaver upgrade from emptying an
+    estate it only needed to regenerate procedures for.
+    """
+
+    import weaver.declaration.load
+
+    root = tmp_path / "repo"
+    _write(root, f"{WAREHOUSE_ITEM}/schemas/DWG.yml", schema_document("DWG"))
+    _write(
+        root,
+        f"{WAREHOUSE_ITEM}/DWG.Customer.sql",
+        warehouse_table(CUSTOMER, primary_key="CustomerId"),
+    )
+    _write(
+        root,
+        f"{WAREHOUSE_ITEM}/DWG.Active.sql",
+        warehouse_view(
+            VIEW,
+            select="select CustomerId from [DWG].[Customer]",
+            depends_on=CUSTOMER,
+        ),
+    )
+    identity = item_id(WAREHOUSE_ITEM)
+    before = parse_item_repository(Location(str(root)))
+    catalogue = FixtureCatalogue.from_repository(before, item=identity)
+
+    # A repository holds the programmables it was parsed with, so the estate is
+    # read again under the new version, exactly as the next build reads it.
+    monkeypatch.setattr(weaver.declaration.load, "TSQL_LOAD_VERSION", 99)
+    after = parse_item_repository(Location(str(root)))
+    wanted = {key for key in after.source_documents if key.item == identity}
+    wanted |= {a.identity for a in item_load_artefacts(after, item=identity)}
+    selection = select_build(
+        after,
+        catalogue.registered,
+        selected=wanted,
+        inventories={identity: FixtureInventory.from_repository(before, item=identity)},
+    )
+
+    procedure = f"{WAREHOUSE_ITEM}/procedure:_/Load {CUSTOMER}"
+    assert [str(value) for value in selection.selected_for_build] == [procedure]
+    assert [str(value) for value in selection.selected_for_drop] == [procedure]
+    # The table the procedure loads, and the view over it, are not reached.
+    assert f"{WAREHOUSE_ITEM}/{CUSTOMER}" not in [
+        str(value) for value in selection.impact.impacted
+    ]

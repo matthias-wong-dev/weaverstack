@@ -5,6 +5,7 @@
 create or alter procedure $load_procedure
     @fault_tolerant bit = 0
   , @ignore_stability_threshold bit = 0
+  , @reload bit = 0
 $result_parameters
 as
 begin
@@ -29,6 +30,12 @@ begin
 $bookmark_key
 
 $static_gate
+
+    -- Clear before the staging query: an incremental body may read the target.
+    if @reload = 1
+    begin
+        delete from $target_table;
+    end;
 
 $preprocessing_banner
 $start_artifact_cleanup

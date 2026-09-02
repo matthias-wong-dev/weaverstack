@@ -286,7 +286,7 @@ def test_a_static_warehouse_load_returns_early_when_it_has_a_bookmark_row():
 
     payload = _procedure(static=True)
 
-    assert "if @weaver_bookmark is not null" in payload
+    assert "if @reload = 0 and @weaver_bookmark is not null" in payload
     assert "return;" in payload
     assert "if exists (select 1 from [Sales].[Country])" not in payload
     # No stored sentinel: absence is the answer, so nothing coalesces to 1900.
@@ -316,9 +316,9 @@ def test_the_static_gate_precedes_the_staging_query():
 
     payload = _procedure(static=True)
 
-    assert payload.index("if @weaver_bookmark is not null") < payload.index(
-        "Data transformation"
-    )
+    assert payload.index(
+        "if @reload = 0 and @weaver_bookmark is not null"
+    ) < payload.index("Data transformation")
 
 
 @weaver_test()
@@ -328,8 +328,21 @@ def test_the_bookmark_is_read_before_the_static_gate_that_reads_it():
     payload = _procedure(static=True)
 
     assert payload.index("select @weaver_bookmark =") < payload.index(
-        "if @weaver_bookmark is not null"
+        "if @reload = 0 and @weaver_bookmark is not null"
     )
+
+
+@weaver_test()
+def test_a_reload_passes_the_static_gate():
+    """Static means "load this once", and a reload is the caller asking again.
+
+    The gate is inside the procedure, which is independently runnable, so the
+    mode reaches it as a parameter.
+    """
+
+    payload = _procedure(static=True)
+
+    assert "if @reload = 0 and @weaver_bookmark is not null" in payload
 
 
 @weaver_test()
@@ -378,7 +391,7 @@ def test_a_non_static_warehouse_load_carries_no_gate_at_all():
     payload = _procedure(static=False)
 
     assert "Not static: this object is loaded on every run." in payload
-    assert "if @weaver_bookmark is not null" not in payload
+    assert "if @reload = 0 and @weaver_bookmark is not null" not in payload
 
 
 @weaver_test()

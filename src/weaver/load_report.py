@@ -160,6 +160,9 @@ class LoadRunReport:
     status: str
     dry_run: bool
     fault_tolerant: bool
+    #: Whether the run reconstructed each selected table from zero. A dry run
+    #: carries it too, which is how it reports the reload it did not do.
+    reload: bool = False
     nodes: tuple[LoadNodeReport, ...] = ()
     edges: tuple[tuple[str, str], ...] = ()
     order: tuple[str, ...] = ()
@@ -184,6 +187,7 @@ class LoadRunReport:
             "status": self.status,
             "dry_run": self.dry_run,
             "fault_tolerant": self.fault_tolerant,
+            "reload": self.reload,
             "workspace": self.workspace,
             "workflow_id": self.workflow_id,
             "started_at": self.started_at,
@@ -203,6 +207,7 @@ class LoadRunReport:
             status=payload["status"],
             dry_run=bool(payload.get("dry_run", False)),
             fault_tolerant=bool(payload.get("fault_tolerant", False)),
+            reload=bool(payload.get("reload", False)),
             nodes=tuple(
                 LoadNodeReport.from_mapping(one) for one in payload.get("nodes") or ()
             ),

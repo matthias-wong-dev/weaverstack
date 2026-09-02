@@ -38,6 +38,7 @@ class Recording:
     def __init__(self, *, failing: Exception | None = None) -> None:
         self.submitted: list[tuple[str, dict]] = []
         self.updated: list[tuple[str, dict]] = []
+        self.deleted: list[tuple[str, dict]] = []
         self.flushes = 0
         self._failing = failing
 
@@ -46,6 +47,9 @@ class Recording:
 
     def update(self, table, row) -> None:
         self.updated.append((table.name, dict(row)))
+
+    def delete(self, table, rows) -> None:
+        self.deleted.extend((table.name, dict(row)) for row in rows)
 
     def flush(self) -> None:
         self.flushes += 1
@@ -58,6 +62,11 @@ class Recording:
         return [
             row for name, row in self.submitted + self.updated if name == table_name
         ]
+
+    def removed(self, table_name: str) -> list[dict]:
+        """Which of one table's rows were ended, by the key that named them."""
+
+        return [row for name, row in self.deleted if name == table_name]
 
 
 def installed(

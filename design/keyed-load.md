@@ -347,6 +347,18 @@ constraint, no participant table and no merge-conflict recovery table. What
 Weaver was going to write is answerable from staging and the keys to remove; the
 rest are implementation mechanics, not artefacts.
 
+## Reload
+
+Reload does not change keyed-load semantics. It runs the existing load with no
+bookmark and an empty target.
+
+An incremental source therefore starts from its initial position, and
+target-dependent source logic sees an empty target. `Incremental` continues to
+decide what a deletion means; reload infers no deletes from absence.
+
+The clear is `delete from`, so the table's shape, its audit columns and its row
+signature stand. See `design/catalogue.md` for the state a reload leaves.
+
 ## Where it is proved
 
 Rendering and contract claims run on every commit

@@ -114,16 +114,17 @@ def session(tmp_path):
     )
 
 
-def dry_run(session, *targets, names=(), fault_tolerant=False):
+def dry_run(session, *targets, names=(), fault_tolerant=False, reload=False):
     return _dry_run(
         session,
         items=targets or (RAW, REPORTING),
         names=names,
         fault_tolerant=fault_tolerant,
+        reload=reload,
     )
 
 
-def _dry_run(session, *, items, names=(), fault_tolerant=False):
+def _dry_run(session, *, items, names=(), fault_tolerant=False, reload=False):
     return run_load(
         session.session,
         workspace=session.workspace,
@@ -132,6 +133,7 @@ def _dry_run(session, *, items, names=(), fault_tolerant=False):
         names=names,
         fault_tolerant=fault_tolerant,
         dry_run=True,
+        reload=reload,
     )
 
 
@@ -245,6 +247,7 @@ def test_load_dry_run_emits_the_normal_run_report_shape(session):
         "status",
         "dry_run",
         "fault_tolerant",
+        "reload",
         "workspace",
         "workflow_id",
         "workflow_id",
@@ -355,3 +358,41 @@ def test_a_dry_run_never_reports_an_execution_status(session):
     assert statuses <= set(VALIDATION_STATUSES)
     assert SUCCEEDED not in statuses
     assert statuses == {VALIDATED}
+
+
+# --- a dry run of a reload -----------------------------------------------------
+
+
+@weaver_test()
+def test_a_dry_run_reload_reports_the_mode_without_ending_any_state(session):
+    """The destructive half of a reload is the half a dry run must not reach.
+
+    Nothing here can write: the store refuses, the resolver refuses to refresh
+    and the dispatchers fail the test. What is left to assert is that the report
+    still says which mode was asked for.
+    """
+
+    report = dry_run(session, RAW, names=("Sales.Order", "Sales.Daily"), reload=True)
+
+    assert report.reload is True
+    assert report.dry_run is True
+    assert report.to_mapping()["reload"] is True
+    assert all(not node.executed for node in report.nodes)
+    assert report.workflow_id is None
+
+
+@weaver_test()
+def test_an_ordinary_dry_run_reports_no_reload(session):
+    assert dry_run(session, RAW, names=("Sales.Order",)).reload is False
+
+
+@weaver_test()
+def test_a_dry_run_reload_that_selected_a_folder_is_refused(session):
+    """Refused at planning, which is a step a dry run reaches too."""
+
+    from weaver.errors import CommandError
+
+    with pytest.raises(CommandError, match="reload covers tables") as raised:
+        dry_run(session, RAW, reload=True)
+
+    assert EXPORT in str(raised.value)

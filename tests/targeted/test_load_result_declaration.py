@@ -26,6 +26,10 @@ def test_the_result_columns_are_the_dataclass_fields():
     If the two could drift, a generated program would project a column the
     reader does not look for, and the mismatch would surface as a load whose
     counts were silently zero rather than as a generation error.
+
+    Every field is a transport column. Caller policy, such as the mode a load was
+    asked to run in, belongs to whoever asked and is written by the recorder;
+    a field here that no engine reports would weaken exactly this check.
     """
 
     assert RESULT_COLUMNS == tuple(LoadResult.__dataclass_fields__)

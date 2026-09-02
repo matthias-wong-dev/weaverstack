@@ -310,10 +310,17 @@ def _status(estate: Estate) -> dict | None:
 
 
 def _statistics(estate: Estate) -> list:
+    """This object's statistics, oldest first.
+
+    ``_.LoadStatistic`` is appended, so a sequence that loads more than once
+    leaves more than one row and the order is what says which load is which.
+    """
+
     rows = estate.executor.query(
         "select [Rows read] as [read], [Rows inserted] as inserted, "
         "[Is reload] as reload, [Is static skip] as skip "
-        "from [_].[LoadStatistic] " + _identity_predicate(estate)
+        "from [_].[LoadStatistic] " + _identity_predicate(estate) + " "
+        "order by [Started datetime]"
     )
     return [dict(row) for row in rows]
 
@@ -1286,3 +1293,299 @@ def test_a_proposal_that_would_leave_a_key_conflicted_stops_the_load(merge_estat
         assert "declared unique key" in message, label
     assert _wide_contents(merge_estate) == seeded
     assert _by_key(seeded)["c2"][1] == "Two"
+
+
+# --- reload, executed ---------------------------------------------------------
+#
+# Reload reconstructs one table from zero: its load state is ended, its target is
+# emptied, and the authored body then runs against both. The ordering is the
+# claim, and only an engine can settle it, so the estate here is one whose body
+# reads its own target:
+#
+#     select the source rows this table does not already hold
+#
+# Against a populated target that produces nothing. So a reload that reconstructs
+# the whole population is a reload that emptied the target before the body ran,
+# and one that emptied it afterwards would leave it empty.
+
+#: Incremental, and its body anti-joins its own target.
+RELOAD_OBJECT = "LoadReload"
+
+GROWN = CLEAN + [("c3", "Three")]
+
+
+def _reload_source(object_name: str, *, body: str) -> str:
+    """One declaration, over whichever body a step needs.
+
+    The shape-only build runs the body, and on a first build the target is not
+    there to be read, so the table is built from a body that reads the source
+    alone. The procedure is generated over the body that reads the target: a
+    procedure install shapes the body into statements and reads ``sys.columns``,
+    and the body itself runs only when the procedure is called.
+    """
+
+    return f"""/*
+Table ID: {SCHEMA}.{object_name}
+
+Description: Customers this table does not already hold.
+
+Lineage: The sales system.
+
+Primary key: Customer id
+
+Incremental: true
+
+Schema:
+  Customer id: varchar(50)
+  Customer name: varchar(200)
+*/
+{body}
+"""
+
+
+def _reads_the_source(object_name: str) -> str:
+    return f"select [Customer id], [Customer name] from [{SCHEMA}].[{object_name}Raw]"
+
+
+def _reads_the_target(object_name: str) -> str:
+    """The anti-join: the source rows this table does not already hold."""
+
+    return (
+        f"select r.[Customer id], r.[Customer name]\n"
+        f"  from [{SCHEMA}].[{object_name}Raw] as r\n"
+        f"  left join [{SCHEMA}].[{object_name}] as t\n"
+        f"    on t.[Customer id] = r.[Customer id]\n"
+        f" where t.[Customer id] is null"
+    )
+
+
+def _reload_document(object_name: str, body: str):
+    return read_source_document(
+        f"{SCHEMA}.{object_name}.sql",
+        _reload_source(object_name, body=body).encode("utf-8"),
+        WAREHOUSE,
+    )
+
+
+def _install_reload(executor, object_name: str, catalogue: str) -> Estate:
+    executor.execute_script(
+        f"if schema_id(N'{SCHEMA}') is null exec('create schema [{SCHEMA}]');"
+        "if schema_id(N'_') is null exec('create schema [_]');"
+    )
+    install_runtime_references(executor, catalogue)
+    record_installation(executor)
+    estate = Estate(executor, object_name)
+    _drop(estate)
+    executor.execute_script(
+        f"create table [{SCHEMA}].[{estate.raw}] "
+        "([Customer id] varchar(50) null, [Customer name] varchar(200) null);"
+    )
+    executor.execute_script(
+        _reload_document(object_name, _reads_the_source(object_name))
+        .create_ddl()
+        .content
+    )
+    executor.execute_script(
+        _reload_document(object_name, _reads_the_target(object_name))
+        .create_load(item=ITEM)
+        .payload.decode("utf-8")
+    )
+    executor.execute_script(entry_point_script("Load"))
+    return estate
+
+
+@pytest.fixture(scope="module")
+def reload_estate(
+    clean_disposable_warehouse, fabric_workspace, fabric_initialise_catalogue
+):
+    """A target-dependent incremental table, under a name of its own."""
+
+    fabric_initialise_catalogue()
+    built = _install_reload(
+        clean_disposable_warehouse.executor,
+        RELOAD_OBJECT,
+        fabric_workspace.catalogue_item.name,
+    )
+    yield built
+    _drop(built)
+    forget_installations(built.executor)
+
+
+def _reload(estate: Estate, *, fault_tolerant: bool = False) -> None:
+    """``exec _.[Load] ... @reload = 1``, which ends the state and then clears."""
+
+    estate.executor.execute_script(
+        f"exec [_].[Load] @object_name = N'{SCHEMA}.{estate.object_name}'"
+        f", @fault_tolerant = {1 if fault_tolerant else 0}"
+        ", @reload = 1;"
+    )
+
+
+def _reload_run(estate):
+    """Seed, grow, reload, then fail a reload. One chain, four states.
+
+    Each step is the next one's starting state, and every claim reads what it is
+    about at the moment it happened.
+    """
+
+    _reset(estate)
+
+    _source_rows(estate, CLEAN)
+    _standalone(estate)
+    seeded = {"contents": _contents(estate), "bookmark": _bookmark(estate)}
+
+    # An ordinary incremental run: the body sees the two rows already there and
+    # produces only the third.
+    _source_rows(estate, GROWN)
+    _standalone(estate)
+    grown = {
+        "contents": _contents(estate),
+        "statistics": _statistics(estate)[-1],
+        "bookmark": _bookmark(estate),
+    }
+
+    # The same source, reloaded. An emptied target makes the body produce all
+    # three; a target still holding them would make it produce none.
+    _reload(estate)
+    reloaded = {
+        "contents": _contents(estate),
+        "statistics": _statistics(estate)[-1],
+        "status": _status(estate),
+        "bookmark": _bookmark(estate),
+    }
+
+    # A reload that cannot settle. The row with no key is refused, and the run
+    # is intolerant, so the procedure raises after the target was emptied.
+    _source_rows(estate, GROWN + [(None, "NoKey")])
+    with pytest.raises(Exception) as raised:
+        _reload(estate)
+    return Ran(
+        result=None,
+        contents=_contents(estate),
+        extra={
+            "seeded": seeded,
+            "grown": grown,
+            "reloaded": reloaded,
+            "refusal": str(raised.value),
+            "status": _status(estate),
+            "statistics": _statistics(estate)[-1],
+            "bookmark": _bookmark(estate),
+        },
+    )
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_the_reload_lifecycle(reload_estate):
+    """The whole mode, executed: cleared first, reconstructed, and recorded.
+
+    One sequence, four states, every claim about the moment it happened. The body
+    reads its own target, so what a reload produced is the evidence that the
+    target was empty when the body ran.
+
+    The last state is a reload that did not settle. Its target is gone, so the
+    account of it as loaded has to be gone with it: the bookmark is back at the
+    sentinel, and the next run is a reload from zero again.
+    """
+
+    run = _reload_run(reload_estate)
+    seeded, grown, reloaded = (
+        run.extra["seeded"],
+        run.extra["grown"],
+        run.extra["reloaded"],
+    )
+
+    # The premise: an ordinary incremental run adds the one row it did not hold.
+    assert seeded["contents"] == CLEAN
+    assert grown["contents"] == GROWN
+    assert grown["statistics"]["read"] == 1
+    assert grown["statistics"]["inserted"] == 1
+    assert grown["statistics"]["reload"] is False
+
+    # The reload: the body saw an empty target, so it read the whole population
+    # and wrote it back.
+    assert reloaded["contents"] == GROWN
+    assert reloaded["statistics"]["read"] == len(GROWN)
+    assert reloaded["statistics"]["inserted"] == len(GROWN)
+    assert reloaded["statistics"]["reload"] is True
+    assert reloaded["status"]["result"] == "Succeeded"
+    # A clean reload settles like any other clean load, so the bookmark advances.
+    assert reloaded["bookmark"] > grown["bookmark"]
+
+    # The reload that did not settle: emptied, refused, and left saying so. No
+    # bookmark row at all, which is what a build's invalidation leaves and what
+    # the next load reads as the sentinel.
+    assert "rejected" in run.extra["refusal"]
+    assert run.contents == []
+    assert run.extra["status"]["result"] == "Failed"
+    assert run.extra["statistics"]["reload"] is True
+    assert run.extra["bookmark"] is None
+
+
+def _static_reload_run(estate):
+    """Seed a Static object, fail a reload of it, then load it the ordinary way.
+
+    The regression the removed row buys. A Static object is skipped once a
+    bookmark row says a clean load has run for this incarnation, so a reload that
+    emptied the target and then failed must leave no row: otherwise the next
+    ordinary load reports a successful load of nothing over an empty table.
+    """
+
+    _reset(estate)
+
+    _source_rows(estate, CLEAN)
+    _standalone(estate)
+    seeded = {"contents": _contents(estate), "bookmark": _bookmark(estate)}
+
+    # A reload that cannot settle: the target is emptied, the blank key is
+    # refused, and the intolerant run raises.
+    _source_rows(estate, CLEAN + [(None, "NoKey")])
+    with pytest.raises(Exception) as raised:
+        _reload(estate)
+    failed = {
+        "contents": _contents(estate),
+        "bookmark": _bookmark(estate),
+        "status": _status(estate),
+        "refusal": str(raised.value),
+    }
+
+    # The ordinary load that follows. Nothing here says reload.
+    _source_rows(estate, CLEAN)
+    _standalone(estate)
+    return Ran(
+        result=None,
+        contents=_contents(estate),
+        extra={
+            "seeded": seeded,
+            "failed": failed,
+            "statistics": _statistics(estate)[-1],
+            "bookmark": _bookmark(estate),
+        },
+    )
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_failed_static_reload_leaves_the_next_load_to_run(static_estate):
+    """What closes the Static gate is a bookmark row, so a reload removes it.
+
+    Stored as a sentinel instead, the row would still be there and the gate would
+    still close, over a table the reload had just emptied.
+    """
+
+    run = _static_reload_run(static_estate)
+    seeded, failed = run.extra["seeded"], run.extra["failed"]
+
+    assert seeded["contents"] == CLEAN
+    assert seeded["bookmark"] is not None
+
+    # The reload emptied the target and then could not settle.
+    assert "rejected" in failed["refusal"]
+    assert failed["contents"] == []
+    assert failed["status"]["result"] == "Failed"
+    assert failed["bookmark"] is None
+
+    # The ordinary load that follows runs rather than skipping, and says so.
+    assert run.contents == CLEAN
+    assert run.extra["statistics"]["skip"] is False
+    assert run.extra["statistics"]["reload"] is False
+    assert run.extra["statistics"]["read"] == len(CLEAN)
+    assert run.extra["bookmark"] is not None

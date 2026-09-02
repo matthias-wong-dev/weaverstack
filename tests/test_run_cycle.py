@@ -772,3 +772,93 @@ class _Logical:
 
     def __str__(self):
         return self.object_id.qualified
+
+
+# --- what runs before a node is dispatched ------------------------------------
+#
+# A reload ends an object's load state while the target it describes is still
+# there, and that is where. The Runner names no mode: it offers the seam, and
+# ``weaver.operations.load`` fills it.
+
+
+@weaver_test()
+def test_each_dispatched_node_reaches_before_node_ahead_of_its_dispatch():
+    order = []
+    dispatch = controlled({})
+    made = runner(nodes=[node("a"), node("b")], edges=[("a", "b")])
+
+    made.run(
+        dispatch=lambda one, **asked: (
+            (order.append(f"dispatch {one.node_id}")) or dispatch(one, **asked)
+        ),
+        before_node=lambda one: order.append(f"before {one.node_id}"),
+    )
+
+    assert order == ["before a", "dispatch a", "before b", "dispatch b"]
+
+
+@weaver_test()
+def test_a_node_that_never_dispatches_never_reaches_before_node():
+    """Nothing was cleared for it, so nothing about it may be ended."""
+
+    seen = []
+    made = runner(nodes=[node("a"), node("b")], edges=[("a", "b")])
+
+    made.run(
+        dispatch=controlled({"a": Outcome(status=FAILED)}),
+        before_node=lambda one: seen.append(one.node_id),
+    )
+
+    assert seen == ["a"]
+
+
+@weaver_test()
+def test_a_before_node_failure_is_that_nodes_failure_and_nothing_dispatches():
+    """A reload whose state reset did not land must not go on to clear a target."""
+
+    dispatch = controlled({})
+    made = runner(nodes=[node("a"), node("b")], fault_tolerant=True)
+
+    result = made.run(
+        dispatch=dispatch,
+        before_node=_failing_on("a", RuntimeError("the catalogue went away")),
+    )
+
+    assert result.by_node["a"].status == FAILED
+    assert dispatch.seen == ["b"]
+
+
+def _failing_on(node_id: str, error: Exception):
+    def before(one):
+        if one.node_id == node_id:
+            raise error
+
+    return before
+
+
+@weaver_test()
+def test_the_reload_mode_reaches_every_dispatch():
+    asked = []
+    made = runner(nodes=[node("a")], reload=True)
+
+    made.run(dispatch=lambda one, **policy: asked.append(policy) or Outcome())
+
+    assert asked[0]["reload"] is True
+
+
+@weaver_test()
+def test_an_ordinary_run_dispatches_without_reload():
+    asked = []
+    made = runner(nodes=[node("a")])
+
+    made.run(dispatch=lambda one, **policy: asked.append(policy) or Outcome())
+
+    assert asked[0]["reload"] is False
+
+
+@weaver_test()
+def test_reload_is_a_load_mode():
+    from weaver.errors import CommandError
+
+    with pytest.raises(CommandError, match="reload is a load mode"):
+        RunRequest.test([SALES], reload=True)
