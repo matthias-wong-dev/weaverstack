@@ -10,10 +10,10 @@ rows are queued, batched and written on a worker, and a failure is surfaced by
 judgement, a lost ``_.Log`` row loses evidence, a lost bookmark makes the next
 load read a window it has already read, so this raises and lets them decide.
 
-:meth:`CatalogueWriter.delete` is the exception to all of that. It removes named
-rows, and it runs the statement rather than queueing it, because what follows a
-removal is the destructive work the removal was written to precede. A build's
-own invalidation runs the same rendering through the installer.
+:meth:`CatalogueWriter.delete` is the exception to all of that. What follows a
+removal is the destructive work the removal was written to precede, so it runs
+the statement and waits. A build's own invalidation runs the same rendering
+through the installer.
 """
 
 from __future__ import annotations

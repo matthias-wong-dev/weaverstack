@@ -148,9 +148,9 @@ def load_statistic_row(
     The counts describe the target rather than the source, so ``rows_read`` need
     not equal the sum of the others.
 
-    ``reload`` is the mode the caller asked for, passed in rather than read off
-    the result. A load that raised has no result to read it from, and the mode it
-    ran in is a fact about the request either way.
+    ``reload`` is the mode the caller asked for, and it is passed in. A load that
+    raised has no result to read it from, and the mode it ran in is a fact about
+    the request either way.
     """
 
     started, completed = _instants(node)
