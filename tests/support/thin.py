@@ -274,7 +274,8 @@ def thin_estate(
     """
 
     documents = {
-        f"{SCHEMA}__{name}.py": lakehouse_table(f"{SCHEMA}.{name}") for name in outcomes
+        f"Tables/{SCHEMA}__{name}.py": lakehouse_table(f"{SCHEMA}.{name}")
+        for name in outcomes
     }
     # Under ``tests/``, which is where a repository declares one: the folder is
     # what makes it a validation rather than another table.
