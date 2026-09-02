@@ -716,16 +716,25 @@ def test_a_lakehouse_table_and_folder_are_read_from_their_own_areas(tmp_path):
 
 
 @weaver_test()
-def test_a_table_at_the_lakehouse_item_root_is_refused_with_the_move(tmp_path):
+def test_a_declaration_at_the_lakehouse_item_root_is_refused_with_its_move(tmp_path):
+    """The file's own key says where it belongs, so the message names one move."""
+
     root = _estate(tmp_path)
     _write(root, "Lakehouse/Raw/Sales__Order.py", _table("Sales.Order"))
+    _write(root, "Lakehouse/Raw/Sales__Export.py", _folder("Sales.Export"))
 
     with pytest.raises(DiscoveryError) as refused:
         parse_item_repository(Location(str(root)))
+    assert "Move this file to Lakehouse/Raw/Files/Sales__Export.py" in str(
+        refused.value
+    )
 
-    message = str(refused.value)
-    assert "Move this file to Lakehouse/Raw/Tables/Sales__Order.py" in message
-    assert "or to Lakehouse/Raw/Files/Sales__Order.py" in message
+    (root / "Lakehouse/Raw/Sales__Export.py").unlink()
+    with pytest.raises(DiscoveryError) as refused:
+        parse_item_repository(Location(str(root)))
+    assert "Move this file to Lakehouse/Raw/Tables/Sales__Order.py" in str(
+        refused.value
+    )
 
 
 @weaver_test()

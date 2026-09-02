@@ -380,22 +380,34 @@ def _standard_parts(authored: RepositoryPart) -> tuple[RepositoryPart, ...]:
     return tuple(parts)
 
 
+#: What a declaration's own key says it is, and the directory that holds it.
+#: Read from the bytes so a misplaced file is told where it belongs rather than
+#: given the whole list.
+_DECLARED_DIRECTORY = {
+    b"Table ID:": TABLES,
+    b"View ID:": TABLES,
+    b"Folder ID:": FILES,
+    b"Test ID:": "tests",
+    b"Assumption ID:": "assumptions",
+}
+
+
+def _declared_directory(root: Location, store: Store, relative: str) -> str | None:
+    """Where a misplaced source file belongs, from the key it declares."""
+
+    if not relative.endswith((".py", ".sql")):
+        return None
+    data = store.read(root.join(*relative.split("/")))
+    for marker, directory in _DECLARED_DIRECTORY.items():
+        if marker in data:
+            return directory
+    return None
+
+
 def _looks_like_weaver_declaration(root: Location, store: Store, relative: str) -> bool:
     """Whether a misplaced source file carries Weaver declaration metadata."""
 
-    if not relative.endswith((".py", ".sql")):
-        return False
-    data = store.read(root.join(*relative.split("/")))
-    return any(
-        marker in data
-        for marker in (
-            b"Table ID:",
-            b"View ID:",
-            b"Folder ID:",
-            b"Test ID:",
-            b"Assumption ID:",
-        )
-    )
+    return _declared_directory(root, store, relative) is not None
 
 
 def _has_misplaced_weaver_structure(
@@ -667,8 +679,11 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
                     "with no further subdirectories"
                 )
         elif item.item_type == LAKEHOUSE:
-            if _looks_like_weaver_declaration(root, store, relative):
-                raise DiscoveryError(_misplaced_lakehouse_declaration(relative, within))
+            directory = _declared_directory(root, store, relative)
+            if directory is not None:
+                raise DiscoveryError(
+                    _misplaced_lakehouse_declaration(relative, within, directory)
+                )
             continue
         elif len(within) != 1:
             if _looks_like_weaver_declaration(root, store, relative):
@@ -767,20 +782,20 @@ def _valid_object_placement(item_type: str, *, area: str | None, source) -> bool
     return area == TABLES and source.kind in (TABLE, VIEW)
 
 
-def _misplaced_lakehouse_declaration(relative: str, within: list[str]) -> str:
-    """What to tell an author whose declaration is outside a Lakehouse area.
+def _misplaced_lakehouse_declaration(
+    relative: str, within: list[str], directory: str
+) -> str:
+    """What to tell an author whose declaration is outside the directory for it.
 
     A Lakehouse holds its Delta tables under ``Tables`` and everything else
-    under ``Files``, and a declaration names its area. The message carries the
-    move, because the file is right and only its location is wrong.
+    under ``Files``, and a validation under ``tests`` or ``assumptions``. The
+    file's own key says which, so the message names one move.
     """
 
     item = relative[: -len("/".join(within)) - 1]
-    filename = within[-1]
     return (
-        f"{relative}: a Lakehouse Table or View is declared under {TABLES}/, and "
-        f"a Folder under {FILES}/. Move this file to "
-        f"{item}/{TABLES}/{filename}, or to {item}/{FILES}/{filename}."
+        f"{relative}: a Lakehouse declaration lives under {directory}/. Move "
+        f"this file to {item}/{directory}/{within[-1]}."
     )
 
 
