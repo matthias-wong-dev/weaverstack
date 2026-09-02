@@ -820,15 +820,19 @@ def installed_shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
 
 
 def stored_identity(item: WeaverItemId, schema: str, name: str) -> WeaverDocumentId:
-    """One stored ``schema_name``/``object_name`` pair back as an identity.
+    """One stored ``schema_name``/``object_name`` pair back as an object identity.
 
-    A Lakehouse data object names its area, so the stored value says which it
-    is. What names none is a Warehouse relation or, in a Lakehouse, a validation.
+    The area the stored schema names, and the relational schema under it. What
+    names none is a Warehouse relation, which sits in no area.
+
+    An object identity, because that is what the tables keyed this way hold:
+    Registry, Bookmark, LoadStatus and LoadStatistic record what an item
+    materialises. A validation is read by the reader that knows it is reading
+    validations, through :meth:`WeaverDocumentId.validation`. ``_.Dependency``
+    holds both, and resolves the two against the nodes it has.
     """
 
     area, relational = stored_area(schema)
-    if area is None and item.item_type == LAKEHOUSE:
-        return WeaverDocumentId.validation(item, ObjectId(relational, name))
     return WeaverDocumentId(item, ObjectId(relational, name), is_files=area == FILES)
 
 
@@ -870,9 +874,10 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
     describes something declared and not installed, so it contributes no edge:
     the graph is of what is there.
 
-    A row names its declaring object in two columns, and an object and a
-    validation of one ``Schema.Object`` are stored the same way. The nodes settle
-    which it was: the graph already holds one of them and not the other.
+    ``_.Dependency`` is the one table that holds both an object's rows and a
+    validation's. An object names its area and a validation names none, so the
+    stored schema usually settles it; where it does not, the nodes do, because
+    the graph holds one of the two and not the other.
     """
 
     found = []
@@ -882,7 +887,10 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
             name = str(row.get("referencing_object_name") or "")
             consumer = stored_identity(item, schema, name)
             if str(consumer) not in nodes:
-                consumer = WeaverDocumentId.validation(item, ObjectId(schema, name))
+                area, relational = stored_area(schema)
+                if area is not None:
+                    continue
+                consumer = WeaverDocumentId.validation(item, ObjectId(relational, name))
                 if str(consumer) not in nodes:
                     continue
             found.append(

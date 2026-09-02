@@ -76,14 +76,38 @@ def test_the_two_areas_are_two_registry_rows(repository):
 
 
 @weaver_test()
-def test_each_area_reads_back_as_the_identity_that_wrote_it(repository):
+def test_each_area_reads_back_as_the_identity_that_wrote_it():
     """Round trip, which is the property the two directions of the rule have."""
 
     item = WeaverItemId.parse(ITEM)
+    warehouse = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
 
-    for identity in (TABLE, FOLDER, VALIDATION):
+    for identity in (TABLE, FOLDER):
         schema_name, object_name = catalogue_columns(identity)
         assert stored_identity(item, schema_name, object_name) == identity
+
+    schema_name, object_name = catalogue_columns(warehouse)
+    assert stored_identity(warehouse.item, schema_name, object_name) == warehouse
+
+
+@weaver_test()
+def test_a_validation_is_read_back_by_the_reader_that_knows_it_is_one():
+    """It names no area, and the table it came from is what says it is one.
+
+    ``stored_identity`` reads an object row, because Registry, Bookmark,
+    LoadStatus and LoadStatistic hold nothing else.
+    """
+
+    item = WeaverItemId.parse(ITEM)
+    schema_name, object_name = catalogue_columns(VALIDATION)
+
+    assert (
+        WeaverDocumentId.validation(
+            item, VALIDATION.object_id.__class__(schema_name, object_name)
+        )
+        == VALIDATION
+    )
+    assert stored_identity(item, schema_name, object_name) != VALIDATION
 
 
 @weaver_test()
