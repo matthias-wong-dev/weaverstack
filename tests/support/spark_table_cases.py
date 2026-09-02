@@ -169,7 +169,7 @@ def install_action(case: TableCase, *, action_id: str | None = None):
     return InstallAction(
         id=action_id or f"build-delta-{SCHEMA}.{case.name}",
         kind="build_table",
-        resource_node_id=f"Lakehouse/Sales/{SCHEMA}.{case.name}",
+        resource_node_id=f"Lakehouse/Sales/Tables/{SCHEMA}.{case.name}",
         executor="spark_table",
         payload=f"payload/{case.name}.spark-table.json",
         payload_sha256="unused",
@@ -184,7 +184,7 @@ def view_action():
     return InstallAction(
         id=f"object-{SCHEMA}.{EXACT_CASE_READER}",
         kind="build_view",
-        resource_node_id=f"Lakehouse/Sales/{SCHEMA}.{EXACT_CASE_READER}",
+        resource_node_id=f"Lakehouse/Sales/Tables/{SCHEMA}.{EXACT_CASE_READER}",
         executor="spark_sql",
         payload=f"payload/{EXACT_CASE_READER}.spark.sql",
         payload_sha256="unused",

@@ -466,7 +466,8 @@ def _assert_the_endpoint_barrier_is_in_the_graph(journey, report) -> None:
     )
     deployed = by_node[f"load:{curated}/CUR.Customer"].dispatch_location
     assert deployed.startswith(f"{curated}/")
-    assert "/_/Load/" in deployed
+    # Under the area it was authored in, which is what the import namespace is.
+    assert deployed.endswith("/_/Load/Tables/CUR__Customer.py")
 
 
 def _ids(observation, name: str, column: str) -> list:
@@ -1096,9 +1097,13 @@ def _installed_dag(journey):
 
 
 def _dag_id(journey, item: str, qualified: str) -> str:
-    """One node id, as the installed graph spells it."""
+    """One node id, as the installed graph spells it.
 
-    return f"{item}/{qualified}"
+    A Lakehouse data object names the area it sits in, and these are all tables.
+    """
+
+    area = "Tables/" if item.startswith("Lakehouse/") else ""
+    return f"{item}/{area}{qualified}"
 
 
 # --- Scenario G: the repository moves ---------------------------------------
