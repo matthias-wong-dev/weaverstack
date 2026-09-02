@@ -135,6 +135,22 @@ def test_the_two_role_vocabularies_are_one():
 
 
 @weaver_test()
+def test_the_two_area_vocabularies_are_one():
+    """`metadata` repeats the Lakehouse areas rather than importing them.
+
+    It has to: identity is built on metadata, so importing back would be a real
+    cycle. A reference and an identity spell one area, and this is what keeps the
+    two copies from drifting.
+    """
+
+    from weaver.declaration import metadata, model
+
+    assert metadata.TABLES_AREA == model.TABLES
+    assert metadata.FILES_AREA == model.FILES
+    assert set(metadata.AREAS) == set(model.AREAS)
+
+
+@weaver_test()
 def test_build_planning_has_no_generic_physical_module():
     assert not (CORE / "build_bundle" / "physical.py").exists()
 

@@ -26,6 +26,13 @@ TEST = "Test"
 ASSUMPTION = "Assumption"
 VALIDATION_KINDS = frozenset({TEST, ASSUMPTION})
 
+#: The two areas a Lakehouse holds, spelled here as well as in
+#: :mod:`weaver.declaration.model` because identity is built on this module and
+#: the import goes one way. ``tests/test_core_boundary.py`` asserts they agree.
+TABLES_AREA = "Tables"
+FILES_AREA = "Files"
+AREAS = (TABLES_AREA, FILES_AREA)
+
 
 def is_validation_kind(kind: str) -> bool:
     """Whether this kind declares a validation rather than a data object."""
@@ -334,7 +341,9 @@ class Reference:
                 f"reference item type must be Lakehouse or Warehouse, got {self.item_type!r}"
             )
         if self.is_files and self.item_type == "Warehouse":
-            raise MetadataError("Files references may only name a Lakehouse item")
+            raise MetadataError(
+                f"{FILES_AREA} references may only name a Lakehouse item"
+            )
 
     @property
     def object_id(self) -> ObjectId:
@@ -350,15 +359,14 @@ class Reference:
         """
 
         if self.item_type is None:
-            within = (
-                f"Files/{self.schema}.{self.object}"
+            return (
+                f"{FILES_AREA}/{self.object_id.qualified}"
                 if self.is_files
                 else self.object_id.qualified
             )
-            return within
         area = ""
         if self.item_type == "Lakehouse":
-            area = "Files/" if self.is_files else "Tables/"
+            area = f"{FILES_AREA}/" if self.is_files else f"{TABLES_AREA}/"
         return f"{self.item_type}/{self.item_name}/{area}{self.object_id.qualified}"
 
     @property
@@ -971,25 +979,29 @@ def _parse_logical_reference(
     item_name: str | None = None
     is_files = False
     object_text: str
-    # ``Tables`` is written where a reference is spelled as the canonical
-    # identity. A relation reference names ``Schema.Object`` and Weaver puts it
-    # in the area its item gives it, which is what keeps ``$Sales.Customer``
-    # relational.
+    # An item-relative reference is a relation in the referring item, so it is
+    # ``Schema.Object``, and ``Files/`` says the Folder of that name instead. An
+    # item-qualified one is the logical identity, so a Lakehouse one names its
+    # area.
     if len(parts) == 1:
         object_text = parts[0]
-    elif len(parts) == 2 and parts[0] in ("Files", "Tables"):
-        is_files = parts[0] == "Files"
+    elif len(parts) == 2 and parts[0] == FILES_AREA:
+        is_files = True
         object_text = parts[1]
     elif len(parts) == 3:
         item_type, item_name, object_text = parts
-    elif len(parts) == 4 and parts[2] in ("Files", "Tables"):
+    elif len(parts) == 4 and parts[2] in AREAS:
         item_type, item_name, area, object_text = parts
-        is_files = area == "Files"
+        if item_type != "Lakehouse":
+            raise MetadataError(
+                f"{key} reference {target!r} names the Lakehouse area "
+                f"{area!r}, and a {item_type} has none"
+            )
+        is_files = area == FILES_AREA
     else:
         raise MetadataError(
-            f"{key} reference must be Schema.Object, Tables/Schema.Object, "
-            f"Files/Schema.Object or an item-qualified logical identity, got "
-            f"{target!r}"
+            f"{key} reference must be Schema.Object, Files/Schema.Object or an "
+            f"item-qualified logical identity, got {target!r}"
         )
     if object_text.count(".") != 1:
         raise MetadataError(
