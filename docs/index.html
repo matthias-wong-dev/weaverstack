@@ -452,11 +452,13 @@
                   <span class="tree-folder tree-depth-1">Raw/</span>
                   <span class="tree-folder tree-depth-2">Files/</span>
                   <span class="tree-file tree-depth-3 object-1" data-id="01">Sales__Export.py</span>
-                  <span class="tree-file tree-depth-2 object-2" data-id="02">Sales__Customer.py</span>
-                  <span class="tree-file tree-depth-2 object-3" data-id="03">Sales.Clean.sql</span>
+                  <span class="tree-folder tree-depth-2">Tables/</span>
+                  <span class="tree-file tree-depth-3 object-2" data-id="02">Sales__Customer.py</span>
+                  <span class="tree-file tree-depth-3 object-3" data-id="03">Sales.Clean.sql</span>
                   <span class="tree-folder tree-depth-1">ML/</span>
                   <span class="tree-folder tree-depth-2 closed">Files/</span>
-                  <span class="tree-file tree-depth-2 object-4" data-id="04">Sales__Prediction.py</span>
+                  <span class="tree-folder tree-depth-2">Tables/</span>
+                  <span class="tree-file tree-depth-3 object-4" data-id="04">Sales__Prediction.py</span>
                   <span class="tree-folder">Warehouse/</span>
                   <span class="tree-folder tree-depth-1">Reporting/</span>
                   <span class="tree-file tree-depth-2 object-5" data-id="05">Sales.Forecast.sql</span>
@@ -523,10 +525,12 @@
 ├── <span class="code-orange">Raw/</span>
 │   ├── Files/
 │   │   └── <span class="code-green">Sales__Export.py</span>
-│   ├── <span class="code-green">Sales__Customer.py</span>
-│   └── <span class="code-green">Sales.Clean.sql</span>
+│   └── Tables/
+│       ├── <span class="code-green">Sales__Customer.py</span>
+│       └── <span class="code-green">Sales.Clean.sql</span>
 ├── <span class="code-orange">ML/</span>
-│   └── <span class="code-green">Sales__Prediction.py</span>
+│   └── Tables/
+│       └── <span class="code-green">Sales__Prediction.py</span>
 └── <span class="code-dim">_weaver/</span>
 
 <span class="code-blue">Warehouse/</span>
@@ -622,7 +626,7 @@
               <div class="panel-bar"><span>build-plan.yml</span><span>inspectable</span></div>
               <pre><span class="code-blue">selection:</span>
   <span class="code-green">new:</span>
-    - Lakehouse/ML/Sales.Prediction
+    - Lakehouse/ML/Tables/Sales.Prediction
   <span class="code-orange">changed:</span>
     - Warehouse/Reporting/Sales.Forecast
 

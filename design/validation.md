@@ -33,7 +33,7 @@ Lakehouse and a Warehouse item:
 ```text
 Lakehouse/Sales/
     schemas/Sales.yml
-    Sales__Order.py
+    Tables/Sales__Order.py
     tests/
         Sales__OrdersReconcile.py
         Sales.OrderSummaryReconciliation.sql
@@ -41,6 +41,12 @@ Lakehouse/Sales/
         Sales__OrdersUpToDate.py
         Sales.NoOrphanOrders.sql
 ```
+
+A validation materialises nothing, so it sits in neither Lakehouse area and its
+identity names none: `Lakehouse/Sales/Sales.OrdersReconcile` beside the table
+`Lakehouse/Sales/Tables/Sales.Order`. In a Lakehouse the two are separate names,
+and one item may hold both. A Warehouse has no areas, so a Warehouse Test and a
+Warehouse relation of one `Schema.Object` still collide and are refused.
 
 The owning item continues to choose the SQL dialect — a `.sql` file is Spark SQL
 in a Lakehouse and T-SQL in a Warehouse — and Python validation runs through
@@ -327,8 +333,8 @@ Lakehouse/Sales/file:_/Load/assumptions/Sales__OrdersUpToDate.py
 ```
 
 **Under the existing runtime root, not beside it.** That root is the item's
-Python import root, so `from Sales__Order import Sales__Order` resolves from a
-validation exactly as it does from a load — no second import root, no duplicated
+Python import root, so `from Tables.Sales__Order import Sales__Order` resolves
+from a validation exactly as it does from a load — no second import root, no duplicated
 object modules. The folder is named `_/Load`; renaming it to `_/Runtime` is a
 cosmetic change outside this work.
 

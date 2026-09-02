@@ -282,10 +282,12 @@ results = {}
 root = destination.files_root() + "/_/Load"
 sys.path.insert(0, root)
 results["deployed"] = sorted(os.listdir(root))
+results["tables"] = sorted(os.listdir(os.path.join(root, "Tables")))
 
-# The import a deployed tree is laid out for: `Files.*`, because the authored
-# path is reproduced verbatim beneath the root, `Files/Raw__CustomerCsv.py`
-# stays where it was written, so the module name says the same thing it did.
+# The import a deployed tree is laid out for: `Files.*` and `Tables.*`, because
+# the authored path is reproduced verbatim beneath the root.
+# `Files/Raw__CustomerCsv.py` stays where it was written, so the module name says
+# the same thing it did.
 from Files.Raw__CustomerCsv import Raw__CustomerCsv
 
 results["imported"] = Raw__CustomerCsv.__name__
@@ -306,9 +308,9 @@ results["spark_path_is_abfss"] = export.spark_path().startswith("abfss://")
 results["published"] = sorted(p.name for p in export.path().iterdir())
 
 # The SQL-authored table, which is a deployed Python module like every other:
-# `DWG.NamedCustomer.sql` was compiled into `DWG__NamedCustomer.py`, so it
-# imports, constructs and loads exactly as the hand-written ones do.
-from DWG__NamedCustomer import DWG__NamedCustomer
+# `Tables/DWG.NamedCustomer.sql` was compiled into `Tables/DWG__NamedCustomer.py`,
+# so it imports, constructs and loads exactly as the hand-written ones do.
+from Tables.DWG__NamedCustomer import DWG__NamedCustomer
 
 results["sql_authored_module"] = DWG__NamedCustomer.__name__
 results["sql_authored_is_generated"] = (
@@ -566,10 +568,11 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(deployed):
 
     seen = deployed
 
-    # The tree the installer wrote, laid out as authored: the item's own modules
-    # at the root, and the `Files/` segment preserved rather than flattened.
+    # The tree the installer wrote, laid out as authored: both Lakehouse areas
+    # preserved rather than flattened.
     assert "Files" in seen["deployed"]
-    assert "DWG__Customer.py" in seen["deployed"]
+    assert "Tables" in seen["deployed"]
+    assert "DWG__Customer.py" in seen["tables"]
     # `lib/` travels whole. This fixture's holds only a CSV, so a `.py` filter
     # left it out entirely and the folder's read() found nothing to copy.
     assert "lib" in seen["deployed"]
@@ -590,8 +593,8 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(deployed):
 def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(deployed):
     """The conversion's claim, asked of Fabric.
 
-    `DWG.NamedCustomer.sql` is authored in Spark SQL and installed as
-    `DWG__NamedCustomer.py`. What this asserts is that the file the build wrote
+    `Tables/DWG.NamedCustomer.sql` is authored in Spark SQL and installed as
+    `Tables/DWG__NamedCustomer.py`. What this asserts is that the file the build wrote
     is importable in the session, carries its authored contract, and loads
     through the ordinary `Table.load()`, so a SQL-authored table and a
     Python-authored one are the same primitive by the time anything runs.

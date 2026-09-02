@@ -236,7 +236,7 @@ execution.
 
 The clearest case is source provenance. A build may involve hundreds of files, and
 by the time an action fails the only spellings left are the deployed ones —
-`_/Load/Sales__Customer.py`, `[_].[Load Sales.Customer]`. Neither is a file anyone
+`_/Load/Tables/Sales__Customer.py`, `[_].[Load Sales.Customer]`. Neither is a file anyone
 has open. So the authored path travels with the action:
 
 ```text
@@ -245,7 +245,7 @@ SourceDocument.relative_path
     → InstallAction.source_path
       → plan.yml, and back
         → ActionResult.source_path
-          → "Source: Lakehouse/Sales/Sales__Customer.py"
+          → "Source: Lakehouse/Sales/Tables/Sales__Customer.py"
 ```
 
 The path cannot always be derived from the deployed artefact: a Spark SQL table

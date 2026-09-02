@@ -9,9 +9,9 @@ Three artefacts, from three kinds of source:
 
 .. code-block:: text
 
-    Warehouse/Reporting/Sales__Customer.sql   -> _.[Load Sales.Customer]
-    Lakehouse/Sales/lib/dates.py              -> Files/_/Load/lib/dates.py
-    Lakehouse/Sales/Sales__Customer.sql       -> Files/_/Load/Sales__Customer.sql
+    Warehouse/Reporting/Sales__Customer.sql    -> _.[Load Sales.Customer]
+    Lakehouse/Sales/lib/dates.py               -> Files/_/Load/lib/dates.py
+    Lakehouse/Sales/Tables/Sales.Customer.sql  -> Files/_/Load/Tables/Sales__Customer.py
 
 A view produces nothing: its definition is its query, so there is no work to
 schedule.
@@ -62,8 +62,9 @@ LOAD_FOLDER = "Load"
 
 #: The deployed runtime tree, relative to a Lakehouse's ``Files`` area. It is
 #: also the Python import root the orchestrator will execute with, which is why
-#: the authored tree is reproduced beneath it verbatim: ``from lib.dates import
-#: parse_date`` keeps working because ``lib`` sits exactly where it was authored.
+#: the authored tree is reproduced beneath it verbatim: ``from Tables.Sales__Customer
+#: import Sales__Customer`` and ``from lib.dates import parse_date`` keep working
+#: because ``Tables`` and ``lib`` sit exactly where they were authored.
 LOAD_ROOT = f"{ETL_SCHEMA}/{LOAD_FOLDER}"
 
 #: The deployed module an item's programs import their shortcuts from. It sits
@@ -280,9 +281,9 @@ def item_validation_artefacts(
 
     A Lakehouse validation is a module under the deployed runtime tree, in a
     ``tests/`` or ``assumptions/`` subdirectory. Under that root rather than
-    beside it, because it is the item's Python import root: ``from Sales__Order
-    import Sales__Order`` then resolves from a validation as it does from a
-    load. A Warehouse validation is a generated Programmable of the repository,
+    beside it, because it is the item's Python import root: ``from
+    Tables.Sales__Order import Sales__Order`` then resolves from a validation as
+    it does from a load. A Warehouse validation is a generated Programmable of the repository,
     so its artefact comes from there and this producer claims nothing.
     """
 
@@ -561,10 +562,9 @@ def _file_artefact(
 ) -> RuntimeArtefact:
     """One deployed file, at the item-relative path reproduced under the root.
 
-    The authored path is preserved whole, ``Files/`` segment included:
-    ``Sales__Customer.py`` at the item root and ``Files/Sales__Customer.py`` are
-    different documents, and flattening them would deploy two files to one
-    path.
+    The authored path is preserved whole, area included:
+    ``Tables/Sales__Customer.py`` and ``Files/Sales__Customer.py`` are different
+    documents, and flattening them would deploy two files to one path.
     """
 
     path = f"{LOAD_ROOT}/{relative}"
