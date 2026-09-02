@@ -8,8 +8,8 @@ The implementation procedure is in [_], and the source object's schema is part
 of its name. `@item_name` omitted means recover it from [_].[Installation].
 
 `@reload = 1` reconstructs the object from zero. This ends its load state first,
-putting [_].[LoadStatus] to Pending and [_].[Bookmark] back to the sentinel, and
-the implementation procedure then empties the target and runs. That order is what
+putting [_].[LoadStatus] to Pending and removing the [_].[Bookmark] row, and the
+implementation procedure then empties the target and runs. That order is what
 keeps a bookmark from standing over rows that are gone. It reaches this object
 and nothing else: a consumer of it loads next as it always would.
 
@@ -115,12 +115,13 @@ begin
 
         if @weaver_call is not null and @reload = 1
         begin
-            -- End this object's load state before the implementation empties
-            -- its target. In every Warehouse but the catalogue's these are views
-            -- across databases, and Fabric takes a MERGE through one, so the
-            -- sentinel and Pending are what these writes can be. Both read as an
-            -- object with nothing settled: an incremental source asks for
-            -- everything, and health reports it as not yet loaded.
+            -- End this object's load state before the implementation empties its
+            -- target: [_].[LoadStatus] to Pending, and the [_].[Bookmark] row
+            -- gone. An absent bookmark row is the one physical shape of "no
+            -- clean load has established progress", and it is what the Static
+            -- gate below reads. Both are MERGEs, including the deletion: in
+            -- every Warehouse but the catalogue's these are views across
+            -- databases, and Fabric takes a MERGE through one.
             merge into [_].[LoadStatus] as target
             using (select
                 N'Warehouse' as [Item type]
@@ -177,29 +178,7 @@ begin
                   and target.[Item name] = source.[Item name]
                   and target.[Schema name] = source.[Schema name]
                   and target.[Object name] = source.[Object name]
-            when matched then update set
-                target.[Bookmark datetime] = convert(datetime2(6), '1900-01-01 00:00:00.000000')
-                , target.[Row update datetime] = sysdatetime()
-            when not matched then insert (
-                [Item type]
-                , [Item name]
-                , [Schema name]
-                , [Object name]
-                , [Bookmark datetime]
-                , [Row insert datetime]
-                , [Row update datetime]
-                , [Row delete datetime]
-            )
-            values (
-                source.[Item type]
-                , source.[Item name]
-                , source.[Schema name]
-                , source.[Object name]
-                , convert(datetime2(6), '1900-01-01 00:00:00.000000')
-                , sysdatetime()
-                , sysdatetime()
-                , convert(datetime2(6), '9999-12-31 23:59:59.999999')
-            );
+            when matched then delete;
         end;
 
         if @weaver_call is not null

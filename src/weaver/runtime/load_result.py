@@ -8,9 +8,7 @@ the same, and this module is where that meaning is written down once.
 The field names are the contract. :data:`RESULT_COLUMNS` names them in order
 and the generated Warehouse procedure declares its output parameters from the
 same list (:data:`weaver.declaration.tsql_load.RESULT_PARAMETERS`), so a field
-added there reaches every transport. ``is_reload`` sits outside that list. An
-engine is told to reload and repeats it back, so the interface that asked stamps
-it.
+added here reaches every transport.
 
 Success is not "nothing raised": a load that rejected rows reports
 ``succeeded=False`` even when it was asked to tolerate them and did.
@@ -69,16 +67,6 @@ class LoadResult:
     #: skip and a load that read an empty window are both a success with nothing
     #: moved, and only the engine that ran it can say which happened.
     is_static_skip: bool = False
-    #: Whether this load ran in reload mode. Outside :data:`RESULT_COLUMNS`: the
-    #: caller asked for the reload, and the interface that asked stamps it on the
-    #: way back. See :func:`weaver.objects._recorded_load` and
-    #: :func:`weaver.run.dispatch.dispatch_primitive`.
-    is_reload: bool = False
-
-    def reloaded(self) -> "LoadResult":
-        """This result, marked as the reload the caller asked for."""
-
-        return replace(self, is_reload=True)
 
     @classmethod
     def failure(cls, message: str, **counts: int) -> "LoadResult":

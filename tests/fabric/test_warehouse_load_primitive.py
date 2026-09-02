@@ -1511,9 +1511,81 @@ def test_the_reload_lifecycle(reload_estate):
     # A clean reload settles like any other clean load, so the bookmark advances.
     assert reloaded["bookmark"] > grown["bookmark"]
 
-    # The reload that did not settle: emptied, refused, and left saying so.
+    # The reload that did not settle: emptied, refused, and left saying so. No
+    # bookmark row at all, which is what a build's invalidation leaves and what
+    # the next load reads as the sentinel.
     assert "rejected" in run.extra["refusal"]
     assert run.contents == []
     assert run.extra["status"]["result"] == "Failed"
     assert run.extra["statistics"]["reload"] is True
-    assert str(run.extra["bookmark"]).startswith("1900-01-01")
+    assert run.extra["bookmark"] is None
+
+
+def _static_reload_run(estate):
+    """Seed a Static object, fail a reload of it, then load it the ordinary way.
+
+    The regression the removed row buys. A Static object is skipped once a
+    bookmark row says a clean load has run for this incarnation, so a reload that
+    emptied the target and then failed must leave no row: otherwise the next
+    ordinary load reports a successful load of nothing over an empty table.
+    """
+
+    _reset(estate)
+
+    _source_rows(estate, CLEAN)
+    _standalone(estate)
+    seeded = {"contents": _contents(estate), "bookmark": _bookmark(estate)}
+
+    # A reload that cannot settle: the target is emptied, the blank key is
+    # refused, and the intolerant run raises.
+    _source_rows(estate, CLEAN + [(None, "NoKey")])
+    with pytest.raises(Exception) as raised:
+        _reload(estate)
+    failed = {
+        "contents": _contents(estate),
+        "bookmark": _bookmark(estate),
+        "status": _status(estate),
+        "refusal": str(raised.value),
+    }
+
+    # The ordinary load that follows. Nothing here says reload.
+    _source_rows(estate, CLEAN)
+    _standalone(estate)
+    return Ran(
+        result=None,
+        contents=_contents(estate),
+        extra={
+            "seeded": seeded,
+            "failed": failed,
+            "statistics": _statistics(estate)[-1],
+            "bookmark": _bookmark(estate),
+        },
+    )
+
+
+@weaver_test(remote=True, resources={"tds"})
+def test_a_failed_static_reload_leaves_the_next_load_to_run(static_estate):
+    """What closes the Static gate is a bookmark row, so a reload removes it.
+
+    Stored as a sentinel instead, the row would still be there and the gate would
+    still close, over a table the reload had just emptied.
+    """
+
+    run = _static_reload_run(static_estate)
+    seeded, failed = run.extra["seeded"], run.extra["failed"]
+
+    assert seeded["contents"] == CLEAN
+    assert seeded["bookmark"] is not None
+
+    # The reload emptied the target and then could not settle.
+    assert "rejected" in failed["refusal"]
+    assert failed["contents"] == []
+    assert failed["status"]["result"] == "Failed"
+    assert failed["bookmark"] is None
+
+    # The ordinary load that follows runs rather than skipping, and says so.
+    assert run.contents == CLEAN
+    assert run.extra["statistics"]["skip"] is False
+    assert run.extra["statistics"]["reload"] is False
+    assert run.extra["statistics"]["read"] == len(CLEAN)
+    assert run.extra["bookmark"] is not None

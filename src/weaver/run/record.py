@@ -12,8 +12,8 @@ A blocked node has a status and no statistics: it did nothing, and a row of
 zeroes for it would read as a load that moved nothing. A node about no object at
 all, such as an endpoint refresh, has evidence and no state.
 
-A reload writes two of these rows before the load runs. See
-:meth:`RunRecord.reset`.
+A reload writes a Pending status and removes the bookmark row, both before the
+load runs. See :meth:`RunRecord.reset`.
 
 Row construction, writing and flushing stay three things. See
 ``design/catalogue.md`` for the operational-state model these rows belong to.
@@ -23,14 +23,13 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from ..catalogue.tables import (
     BLOCKED,
     BOOKMARK,
-    BOOKMARK_SENTINEL,
     ERROR,
     FAILED,
     LOAD_STATISTIC,
@@ -141,11 +140,17 @@ def load_status_row(node, identity, *, workflow_id: str) -> dict:
     }
 
 
-def load_statistic_row(node, identity, *, workflow_id: str) -> dict:
+def load_statistic_row(
+    node, identity, *, workflow_id: str, reload: bool = False
+) -> dict:
     """The ``_.LoadStatistic`` row one executed load appends.
 
     The counts describe the target rather than the source, so ``rows_read`` need
     not equal the sum of the others.
+
+    ``reload`` is the mode the caller asked for, passed in rather than read off
+    the result. A load that raised has no result to read it from, and the mode it
+    ran in is a fact about the request either way.
     """
 
     started, completed = _instants(node)
@@ -162,23 +167,9 @@ def load_statistic_row(node, identity, *, workflow_id: str) -> dict:
         "rows_updated": _count(result, "rows_updated"),
         "rows_deleted": _count(result, "rows_deleted"),
         "rows_rejected": _count(result, "rows_rejected"),
-        "is_reload": bool(getattr(result, "is_reload", False)),
+        "is_reload": bool(reload),
         "is_static_skip": bool(getattr(result, "is_static_skip", False)),
     }
-
-
-def reset_bookmark_row(identity) -> dict:
-    """The ``_.Bookmark`` row a reload puts back to the sentinel.
-
-    ``_.Bookmark`` in a built target is a view over the catalogue Warehouse, and
-    Fabric takes a MERGE through one. The sentinel is what a MERGE can write, and
-    it reads as a deleted row does: an object at the sentinel has had no clean
-    load for its current incarnation, so an incremental read asks for everything.
-    """
-
-    from ..catalogue.claims import bookmark_row
-
-    return bookmark_row(identity, BOOKMARK_SENTINEL)
 
 
 def reset_load_status_row(identity, *, workflow_id: str, started) -> dict:
@@ -218,6 +209,12 @@ def test_status_row(node, identity, *, workflow_id: str) -> dict:
 
 def _identity(identity) -> dict:
     """One installed object's four-part identity, as every table keys it."""
+
+    return bookmark_key(identity)
+
+
+def bookmark_key(identity) -> dict:
+    """One ``_.Bookmark`` row's key, and nothing about how far it reached."""
 
     from ..catalogue.claims import bookmark_row
 
@@ -265,6 +262,10 @@ class RunRecord:
     workflow_id: str
     task_type: str
     catalogue: Any
+    #: The objects this record has reset for a reload. Membership is what
+    #: ``_.LoadStatistic`` writes ``Is reload`` from, so a reload that raised
+    #: before it produced a result is still recorded as the reload it was.
+    reloaded: set = field(default_factory=set)
 
     def settled(self, node) -> None:
         """Record one settled node: its evidence, and the state it left."""
@@ -292,7 +293,12 @@ class RunRecord:
             # and a row of zeroes for it would read as a load that moved nothing.
             self.catalogue.submit(
                 LOAD_STATISTIC,
-                load_statistic_row(node, identity, workflow_id=self.workflow_id),
+                load_statistic_row(
+                    node,
+                    identity,
+                    workflow_id=self.workflow_id,
+                    reload=identity in self.reloaded,
+                ),
             )
         self._bookmark(node, identity)
 
@@ -300,20 +306,27 @@ class RunRecord:
         """End this object's load state, and wait for it, before it is cleared.
 
         What follows empties the target, and the next incremental read starts
-        from whatever bookmark stands over it. So these two rows are flushed here
-        instead of joining the run's queue, and that flush is the barrier the
-        clear waits on. Both are in flight together.
+        from whatever bookmark stands over it. So the status is written and the
+        bookmark row removed here rather than joining the run's queue, and both
+        are durable before the clear.
+
+        ``_.LoadStatus`` goes to Pending and ``_.Bookmark`` loses its row. That
+        is what a build's invalidation leaves, and it is the one physical shape
+        of "no clean load has established progress": an absent bookmark row.
         """
 
         started = datetime.now(timezone.utc)
+        # Recorded before either write, so an object whose reset did not land is
+        # still recorded as the reload it was asked to be.
+        self.reloaded.add(identity)
         self.catalogue.update(
             LOAD_STATUS,
             reset_load_status_row(
                 identity, workflow_id=self.workflow_id, started=started
             ),
         )
-        self.catalogue.update(BOOKMARK, reset_bookmark_row(identity))
         self.flush()
+        self.catalogue.remove(BOOKMARK, [bookmark_key(identity)])
 
     def _bookmark(self, node, identity) -> None:
         """Advance the bookmark, for a clean load that established an instant.

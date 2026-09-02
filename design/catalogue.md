@@ -543,7 +543,7 @@ new object                     no row
 first clean load               MERGE inserts the instant
 later clean load               MERGE updates it
 dropped and rebuilt            DELETE, before the physical work
-reloaded                       MERGE to the sentinel, before the clear
+reloaded                       DELETE, before the clear
 no longer declared or loaded   DELETE
 unchanged object               left alone
 ```
@@ -642,7 +642,7 @@ from zero. Three writes and one clear, in this order:
 
 ```text
 _.LoadStatus   → Pending, carrying the workflow and the instant it started
-_.Bookmark     → the sentinel
+_.Bookmark     → the row is removed
 the target     → emptied
 the authored load → runs
 ```
@@ -654,10 +654,15 @@ zero. And the state is ended while the target still holds the rows it describes,
 so a reload that fails half way leaves no bookmark and no settled status over rows
 that are gone. The retry is a reload again, and a clean load is what ends that.
 
-A build deletes these rows. A reload writes over them: in every Warehouse but the
-catalogue's they are views across databases, and Fabric takes a MERGE through one,
-so the sentinel and `Pending` are what these writes can be. Both read as a build's
-deletion reads: no clean load has settled for this incarnation.
+The bookmark row goes, exactly as a build's invalidation removes it. There is one
+physical shape for "no clean load has established progress", and it is an absent
+row; the sentinel is what an absent row reads as and is never stored. That is what
+keeps the `Static` gate honest, because what closes it is a row being there.
+
+From `_.Load` the removal is a `MERGE … WHEN MATCHED THEN DELETE`: in every
+Warehouse but the catalogue's these are views across databases, and Fabric takes a
+MERGE through one. From Python it is the scoped `DELETE` a build renders, run
+against the catalogue Warehouse where these are its own tables.
 
 **Reload is local.** It reaches what the request selected and walks no further.
 Nothing downstream is reloaded and nothing downstream is invalidated, so a
@@ -665,11 +670,12 @@ consumer of a reloaded table loads next as it always would. Selection is the onl
 thing that decides scope: `--name Sales.Order` reloads one table, and an item with
 no name filter reloads every table it owns.
 
-`Is reload` records the mode, whatever the load then found. Who wrote it is who
-asked for it: an engine told to reload can only repeat it back, so the interface
-that asked stamps it. Folders are outside this: their contents are files, and
-`weaver load --reload` over a selection holding one is refused before anything
-runs.
+`Is reload` records the mode, whatever the load then found, and a reload that
+raised before it produced anything is still recorded as one. The recorder writes
+it from the objects whose state it ended, so no result carries it and none has to:
+an engine told to reload could only repeat it back. Folders are outside all of
+this: their contents are files, and `weaver load --reload` over a selection
+holding one is refused before anything runs.
 
 ### `_.TestStatus`
 

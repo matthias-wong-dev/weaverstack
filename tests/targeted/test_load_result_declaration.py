@@ -18,14 +18,6 @@ from support.weaver_test import weaver_test
 
 from weaver.runtime import RESULT_COLUMNS, LoadResult
 
-#: The fields a transport does not carry, and why each one is not a column.
-#: Named here so adding a field has to say which of the two it is.
-NOT_TRANSPORTED = {
-    # The caller asked for the reload, so a load told to do one can only repeat
-    # it back. The interface that asked stamps it instead.
-    "is_reload": "stamped by the interface that asked, not reported by an engine",
-}
-
 
 @weaver_test()
 def test_the_result_columns_are_the_dataclass_fields():
@@ -34,14 +26,13 @@ def test_the_result_columns_are_the_dataclass_fields():
     If the two could drift, a generated program would project a column the
     reader does not look for, and the mismatch would surface as a load whose
     counts were silently zero rather than as a generation error.
+
+    Every field is a transport column. Caller policy, such as the mode a load was
+    asked to run in, belongs to whoever asked and is written by the recorder;
+    a field here that no engine reports would weaken exactly this check.
     """
 
-    fields = tuple(LoadResult.__dataclass_fields__)
-
-    assert RESULT_COLUMNS == tuple(
-        name for name in fields if name not in NOT_TRANSPORTED
-    )
-    assert set(NOT_TRANSPORTED) <= set(fields)
+    assert RESULT_COLUMNS == tuple(LoadResult.__dataclass_fields__)
 
 
 @weaver_test()

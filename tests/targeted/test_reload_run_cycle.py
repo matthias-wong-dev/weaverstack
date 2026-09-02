@@ -33,7 +33,7 @@ from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import BOOKMARK, BOOKMARK_SENTINEL, LOAD_STATUS
+from weaver.catalogue.tables import BOOKMARK, LOAD_STATISTIC, LOAD_STATUS
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.operations.load import _refuse_unsupported_reload, _reset_before
@@ -159,17 +159,20 @@ def test_only_the_loadable_tables_have_state_to_end(catalogue):
 
 
 @weaver_test()
-def test_the_reset_writes_the_sentinel_and_pending_for_each_object(catalogue):
+def test_the_reset_ends_the_status_and_removes_the_bookmark_row(catalogue):
+    """Pending and an absent row: the same state a build's invalidation leaves."""
+
     record, writer = _record()
     runner = _runner(catalogue, items=(REPORTING,))
 
     runner.run(dispatch=_succeeds, before_node=_reset_before(record))
 
-    (bookmark,) = writer.rows(BOOKMARK.name)
     (status,) = writer.rows(LOAD_STATUS.name)
-    assert bookmark["bookmark_datetime"] == BOOKMARK_SENTINEL
     assert status["result"] == "pending"
     assert status["workflow_id"] == "workflow"
+    (removed,) = writer.removed(BOOKMARK.name)
+    assert removed["object_name"] == "Summary"
+    assert "bookmark_datetime" not in removed
 
 
 @weaver_test()
@@ -207,3 +210,53 @@ def test_a_reload_that_selected_only_tables_is_allowed(catalogue):
     runner = _runner(catalogue, items=(RAW,), names=("Sales.Order", "Sales.Daily"))
 
     assert _refuse_unsupported_reload(runner.plan()) is None
+
+
+# --- what a reload records ----------------------------------------------------
+
+
+@weaver_test()
+def test_a_reload_that_threw_is_still_recorded_as_a_reload(catalogue):
+    """``Is reload`` is the mode the run asked for, not something a result carries.
+
+    The primitive threw, so there is no result to read a mode off. What the
+    recorder holds is the object whose state it ended, and that is the fact.
+    """
+
+    record, writer = _record()
+    runner = _runner(catalogue, items=(REPORTING,))
+
+    def failing(node, **policy):
+        raise RuntimeError("the cluster went away")
+
+    runner.run(
+        dispatch=failing, before_node=_reset_before(record), on_node=record.settled
+    )
+
+    (statistic,) = writer.rows(LOAD_STATISTIC.name)
+    assert statistic["is_reload"] is True
+    assert writer.rows(LOAD_STATUS.name)[-1]["result"] == "error"
+
+
+@weaver_test()
+def test_a_reload_that_settled_is_recorded_as_a_reload(catalogue):
+    record, writer = _record()
+    runner = _runner(catalogue, items=(REPORTING,))
+
+    runner.run(
+        dispatch=_succeeds, before_node=_reset_before(record), on_node=record.settled
+    )
+
+    (statistic,) = writer.rows(LOAD_STATISTIC.name)
+    assert statistic["is_reload"] is True
+
+
+@weaver_test()
+def test_an_ordinary_run_records_no_reload(catalogue):
+    record, writer = _record()
+    runner = _runner(catalogue, items=(REPORTING,), reload=False)
+
+    runner.run(dispatch=_succeeds, on_node=record.settled)
+
+    (statistic,) = writer.rows(LOAD_STATISTIC.name)
+    assert statistic["is_reload"] is False

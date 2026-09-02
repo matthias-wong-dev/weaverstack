@@ -319,13 +319,13 @@ def _recorded_load(object, **policy) -> "LoadResult":
         record.reset(object._installed)
     started = datetime.now(timezone.utc)
     try:
-        result = _stamped(object._load(**policy), reload)
+        result = object._load(**policy)
     except Exception as raised:
         _settle(
             record,
             _settled(
                 object,
-                _stamped(_carried(raised), reload),
+                _carried(raised),
                 started=started,
                 raised=True,
                 refused=isinstance(raised, WeaverError),
@@ -341,17 +341,6 @@ def _settle(record, settled) -> None:
 
     record.settled(settled)
     record.flush()
-
-
-def _stamped(result, reload: bool):
-    """One result, carrying whether the caller asked for a reload.
-
-    Reload is what this interface was asked for, and an engine told to reload
-    repeats it back. So it is stamped here, and :data:`RESULT_COLUMNS` carries
-    no column for it.
-    """
-
-    return result.reloaded() if reload else result
 
 
 def _settled(object, result, *, started, raised: bool = False, refused: bool = False):

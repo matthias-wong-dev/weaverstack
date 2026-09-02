@@ -36,9 +36,11 @@ def dispatch_primitive(
     Warehouse-only runs therefore do not open a Spark runtime.
 
     ``reload`` reaches the two branches that load an object. Each engine empties
-    the target before it runs the authored source; the caller has already put the
-    object's load state back. Only a table reaches here with it set, because
+    the target before it runs the authored source; the caller has already ended
+    the object's load state. Only a table reaches here with it set, because
     :func:`weaver.operations.load.run_load` refuses the rest before anything runs.
+    What ran in reload mode is recorded by the recorder that asked for it, not
+    reported back through a result.
     """
 
     if session is None:
@@ -141,8 +143,6 @@ def _warehouse_procedure(
         outputs=PROCEDURE_RESULT_PARAMETERS,
     )
     result = LoadResult.from_row(logical_result_row(row))
-    if reload:
-        result = result.reloaded()
     if publication is not None:
         publication.settled(node.node_id, result)
     return result
@@ -209,7 +209,7 @@ def _python(
     # The scope answers with the row the primitive reported, in either position.
     # What that row means is settled here, which is the one module a load's
     # vocabulary belongs in.
-    result = LoadResult.from_row(
+    return LoadResult.from_row(
         _scope(open_runtime, node).dispatch_python(
             node,
             expected_class=expected,
@@ -217,7 +217,6 @@ def _python(
             reload=reload,
         )
     )
-    return result.reloaded() if reload else result
 
 
 def python_primitive(

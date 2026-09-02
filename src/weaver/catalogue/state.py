@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from ..declaration.metadata import ObjectId
 from ..declaration.model import (
@@ -191,6 +191,38 @@ class Catalogue:
             tuple(row.get(name) for name in table.key)
         ] = dict(row)
         self.writer.update(table, row)
+
+    def remove(self, table, rows: Sequence[Mapping[str, object]]) -> None:
+        """End the life of these rows, in the Warehouse now and in memory.
+
+        Named rows, keyed as the table keys them. In memory as well as in the
+        Warehouse for the reason :meth:`update` writes both ways: a caller that
+        just ended a bookmark's life and then asks for it is asking about the
+        object it just reset, and the answer is the sentinel.
+        """
+
+        keys = {tuple(row.get(name) for name in table.key) for row in rows}
+        self._written.setdefault(table.name, {})
+        for key in keys:
+            self._written[table.name].pop(key, None)
+        self.rows = MappingProxyType(
+            {
+                item: MappingProxyType(
+                    {
+                        name: tuple(
+                            row
+                            for row in table_rows
+                            if name != table.name
+                            or tuple(row.get(column) for column in table.key)
+                            not in keys
+                        )
+                        for name, table_rows in tables.items()
+                    }
+                )
+                for item, tables in self.rows.items()
+            }
+        )
+        self.writer.delete(table, rows)
 
     def flush(self) -> None:
         """Wait for every row this catalogue wrote. Raises what did not land."""

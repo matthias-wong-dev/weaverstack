@@ -354,7 +354,7 @@ means what it always meant, and `Incremental` still decides what a deletion is.
 What a reload changes is where the machine starts:
 
 ```text
-the bookmark   at the sentinel
+the bookmark   no row, which reads as the sentinel
 the target     empty
 ```
 
@@ -369,7 +369,8 @@ join its own target to find what it has still to produce.
 
 Who does what: the recorder ends the object's load state and the execution
 primitive clears the target, which is the same division `_load()` and `load()`
-already draw. `design/catalogue.md` holds the state and the ordering.
+already draw. The recorder also writes `Is reload`, so a reload that raised is
+recorded as one. `design/catalogue.md` holds the state and the ordering.
 
 ## Where it is proved
 
