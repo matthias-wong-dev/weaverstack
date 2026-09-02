@@ -332,11 +332,11 @@ Lakehouse/Sales/file:_/Load/tests/Sales__IncrementalCount.py
 Lakehouse/Sales/file:_/Load/assumptions/Sales__OrdersUpToDate.py
 ```
 
-**Under the existing runtime root, not beside it.** That root is the item's
-Python import root, so `from Tables.Sales__Order import Sales__Order` resolves
-from a validation exactly as it does from a load — no second import root, no duplicated
-object modules. The folder is named `_/Load`; renaming it to `_/Runtime` is a
-cosmetic change outside this work.
+**Under the existing runtime root.** That root is the item's Python import root,
+so `from Tables.Sales__Order import Sales__Order` resolves from a validation as
+it does from a load. One import root, and one copy of each object module. The
+folder is named `_/Load`; renaming it to `_/Runtime` is a cosmetic change outside
+this work.
 
 A generated validation's signature is salted with its generator version
 (`SPARK_VALIDATION_VERSION`, `TSQL_VALIDATION_VERSION`), so an edit to a

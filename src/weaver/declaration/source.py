@@ -559,7 +559,7 @@ def _imported_modules(module: ast.Module) -> tuple[str, ...]:
     ``Files`` are the two packages an item's own object modules sit in, so what
     is recorded there is the module inside them. Relative imports are helper
     imports and are excluded. Which of the rest is a dependency is decided by
-    the repository, which knows every object's module name.
+    the repository, which holds every object's module name.
     """
 
     names: list[str] = []

@@ -259,6 +259,27 @@ def test_load_rejects_an_unsupported_format_version(tmp_path):
         load_bundle(location, store=store)
 
 
+@weaver_test()
+def test_a_version_two_bundle_is_refused_rather_than_reinterpreted(tmp_path):
+    """Version 2 spelled a Lakehouse table ``Lakehouse/Raw/Sales.Customer``.
+
+    That spelling is a validation identity now, so installing an old bundle
+    under the current grammar would install something else. A bundle is
+    installed by the grammar it was generated with.
+    """
+
+    store = FilesystemStore()
+    location = Location(str(tmp_path / "bundle"))
+    plan = replace(_identified_plan(), format_version=2)
+    store.write(location.join("plan.yml"), plan_to_yaml(plan).encode("utf-8"))
+
+    with pytest.raises(BuildError) as refused:
+        load_bundle(location, store=store)
+
+    assert "unsupported bundle format version 2" in str(refused.value)
+    assert "generate it again" in str(refused.value)
+
+
 def _validate(plan):
     from weaver.build_bundle.bundle import validate_plan_structure
 

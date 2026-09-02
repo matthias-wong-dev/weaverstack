@@ -568,8 +568,8 @@ def test_a_developer_can_run_a_deployed_folder_load_primitive(deployed):
 
     seen = deployed
 
-    # The tree the installer wrote, laid out as authored: both Lakehouse areas
-    # preserved rather than flattened.
+    # The tree the installer wrote, laid out as authored: each Lakehouse area is
+    # a directory of the deployed tree, as it is a directory of the repository.
     assert "Files" in seen["deployed"]
     assert "Tables" in seen["deployed"]
     assert "DWG__Customer.py" in seen["tables"]

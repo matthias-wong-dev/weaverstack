@@ -697,3 +697,89 @@ def test_document_local_shortcut_headers_are_rejected(tmp_path):
     _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", source)
     with pytest.raises(MetadataError, match="has been replaced"):
         parse_item_repository(Location(str(root)))
+
+
+# --- the two Lakehouse areas ---------------------------------------------------
+
+
+@weaver_test()
+def test_a_lakehouse_table_and_folder_are_read_from_their_own_areas(tmp_path):
+    repository = parse_item_repository(Location(str(_estate(tmp_path))))
+    item = repository["Lakehouse/Raw"]
+
+    assert (
+        WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer") in item.documents
+    )
+    assert (
+        WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Customer") in item.documents
+    )
+
+
+@weaver_test()
+def test_a_table_at_the_lakehouse_item_root_is_refused_with_the_move(tmp_path):
+    root = _estate(tmp_path)
+    _write(root, "Lakehouse/Raw/Sales__Order.py", _table("Sales.Order"))
+
+    with pytest.raises(DiscoveryError) as refused:
+        parse_item_repository(Location(str(root)))
+
+    message = str(refused.value)
+    assert "Move this file to Lakehouse/Raw/Tables/Sales__Order.py" in message
+    assert "or to Lakehouse/Raw/Files/Sales__Order.py" in message
+
+
+@weaver_test()
+def test_a_spark_sql_table_at_the_lakehouse_item_root_is_refused(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/Sales.Order.sql",
+        "/*\nTable ID: Sales.Order\nDescription: Orders.\nLineage: A source.\n"
+        "Primary key: Id\nSchema:\n  Id: string\n*/\nselect 1 as Id;\n",
+    )
+
+    with pytest.raises(DiscoveryError, match="Lakehouse/Raw/Tables/Sales.Order.sql"):
+        parse_item_repository(Location(str(root)))
+
+
+@weaver_test()
+def test_neither_area_takes_a_subdirectory(tmp_path):
+    root = _estate(tmp_path)
+    _write(root, "Lakehouse/Raw/Tables/Sales/Sales__Order.py", _table("Sales.Order"))
+
+    with pytest.raises(DiscoveryError, match="directly under Tables/"):
+        parse_item_repository(Location(str(root)))
+
+    root = _estate(tmp_path / "second")
+    _write(root, "Lakehouse/Raw/Files/Sales/Sales__Order.py", _folder("Sales.Order"))
+
+    with pytest.raises(DiscoveryError, match="directly under Files/"):
+        parse_item_repository(Location(str(root)))
+
+
+@weaver_test()
+def test_a_document_belongs_to_the_area_that_materialises_it(tmp_path):
+    root = _estate(tmp_path)
+    _write(root, "Lakehouse/Raw/Tables/Sales__Export.py", _folder("Sales.Export"))
+
+    with pytest.raises(DiscoveryError, match="Folder in python does not belong"):
+        parse_item_repository(Location(str(root)))
+
+    root = _estate(tmp_path / "second")
+    _write(root, "Lakehouse/Raw/Files/Sales__Order.py", _table("Sales.Order"))
+
+    with pytest.raises(DiscoveryError, match="Table in python does not belong"):
+        parse_item_repository(Location(str(root)))
+
+
+@weaver_test()
+def test_a_warehouse_has_no_areas(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Warehouse/Reporting/Tables/Sales.Order.sql",
+        _warehouse_table("Sales.Order"),
+    )
+
+    with pytest.raises(DiscoveryError, match="Tables/ belongs to a Lakehouse item"):
+        parse_item_repository(Location(str(root)))

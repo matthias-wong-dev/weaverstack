@@ -532,9 +532,17 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             continue
         if within[0] in VALIDATION_DIRECTORIES and len(within) == 1:
             continue
+        if within[0] in AREAS:
+            if item.item_type != LAKEHOUSE:
+                raise DiscoveryError(
+                    f"{relative}: {within[0]}/ belongs to a Lakehouse item"
+                )
+            raise DiscoveryError(
+                f"{relative}: a declaration lives directly under {within[0]}/, "
+                "with no further subdirectories"
+            )
         if within[0] in {
             "schemas",
-            *AREAS,
             "lib",
             PROGRAMMABLES_DIRECTORY,
             *VALIDATION_DIRECTORIES,

@@ -14,7 +14,7 @@ from test_item_repository_declaration import (
 
 from weaver.declaration import parse_item_repository, project_bound_documents
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-from weaver.errors import BuildError, GraphError
+from weaver.errors import BuildError, DiscoveryError, GraphError
 from weaver.locations import Location
 
 
@@ -251,3 +251,149 @@ def test_dependency_cycle_across_items_is_rejected(tmp_path):
     )
     with pytest.raises(GraphError, match="dependency cycle"):
         parse_item_repository(Location(str(root)))
+
+
+# --- imports name a Lakehouse area ---------------------------------------------
+
+
+@weaver_test()
+def test_an_absolute_import_resolves_through_the_area_it_names(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales__Order.py",
+        _table("Sales.Order").replace(
+            "from weaver import Table",
+            "from weaver import Table\n"
+            "from Files.Sales__Customer import Sales__Customer\n"
+            "from Tables.Sales__Customer import Sales__Customer as Delta",
+        ),
+    )
+    repository = parse_item_repository(Location(str(root)))
+
+    folder = _edge(
+        repository, "Lakehouse/Raw/Tables/Sales.Order", "Files.Sales__Customer"
+    )
+    table = _edge(
+        repository, "Lakehouse/Raw/Tables/Sales.Order", "Tables.Sales__Customer"
+    )
+
+    assert str(folder.producer) == "Lakehouse/Raw/Files/Sales.Customer"
+    assert str(table.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+
+
+@weaver_test()
+def test_an_import_naming_no_area_carries_the_move(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales__Order.py",
+        _table("Sales.Order").replace(
+            "from weaver import Table",
+            "from weaver import Table\nfrom Sales__Customer import Sales__Customer",
+        ),
+    )
+
+    with pytest.raises(DiscoveryError, match="import Tables.Sales__Customer"):
+        parse_item_repository(Location(str(root)))
+
+
+@weaver_test()
+def test_a_relative_import_starts_in_the_importing_programs_own_area(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales__Order.py",
+        _table("Sales.Order").replace(
+            "from weaver import Table",
+            "from weaver import Table\nfrom .Sales__Customer import Sales__Customer",
+        ),
+    )
+    _write(
+        root,
+        "Lakehouse/Raw/Files/Sales__Export.py",
+        _folder("Sales.Export").replace(
+            "from weaver import Folder",
+            "from weaver import Folder\nfrom .Sales__Customer import Sales__Customer",
+        ),
+    )
+    repository = parse_item_repository(Location(str(root)))
+
+    from_table = _edge(
+        repository, "Lakehouse/Raw/Tables/Sales.Order", ".Sales__Customer"
+    )
+    from_folder = _edge(
+        repository, "Lakehouse/Raw/Files/Sales.Export", ".Sales__Customer"
+    )
+
+    assert str(from_table.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+    assert str(from_folder.producer) == "Lakehouse/Raw/Files/Sales.Customer"
+
+
+@weaver_test()
+def test_a_validation_names_the_area_it_reads(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/tests/Sales__CustomerCount.py",
+        '"""\nTest ID: Sales.CustomerCount\n\nDescription: The count matches.\n\n'
+        'Primary key: Id\n"""\n'
+        "from Tables.Sales__Customer import Sales__Customer\n\n"
+        "from weaver import Test\n\n\n"
+        "class Sales__CustomerCount(Test):\n"
+        "    def expected(self):\n"
+        "        return Sales__Customer(self).dataframe()\n\n"
+        "    def actual(self):\n"
+        "        return Sales__Customer(self).dataframe()\n",
+    )
+    repository = parse_item_repository(Location(str(root)))
+
+    edge = _edge(
+        repository, "Lakehouse/Raw/Sales.CustomerCount", "Tables.Sales__Customer"
+    )
+
+    assert str(edge.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+
+
+@weaver_test()
+def test_a_relation_reference_stays_relational_and_reaches_the_items_area(tmp_path):
+    """``Sales.Customer`` is what an author writes, in SQL and in metadata alike.
+
+    Weaver puts it in the area its item gives it: ``Tables`` in a Lakehouse, and
+    nowhere in a Warehouse, which has none.
+    """
+
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales.Rollup.sql",
+        "/*\nTable ID: Sales.Rollup\nDescription: A rollup.\n"
+        "Lineage: Sales.Customer.\nPrimary key: Id\n"
+        "Dependencies:\n  - Sales.Customer\nSchema:\n  Id: string\n*/\n"
+        "select Id from Sales.Customer;\n",
+    )
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales__Order.py",
+        _table("Sales.Order").replace(
+            "Lineage: A source system.",
+            "Lineage: A source system.\n\nDependencies:\n  - Sales.Customer",
+        ),
+    )
+    _write(
+        root,
+        "Warehouse/Reporting/Sales.Rollup.sql",
+        _warehouse_table("Sales.Rollup").replace(
+            "select cast(1 as varchar(20)) as Id;",
+            "select c.Id from Sales.Customer as c;",
+        ),
+    )
+    repository = parse_item_repository(Location(str(root)))
+
+    spark = _edge(repository, "Lakehouse/Raw/Tables/Sales.Rollup", "Sales.Customer")
+    declared = _edge(repository, "Lakehouse/Raw/Tables/Sales.Order", "Sales.Customer")
+    tsql = _edge(repository, "Warehouse/Reporting/Sales.Rollup", "Sales.Customer")
+
+    assert str(spark.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+    assert str(declared.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+    assert str(tsql.producer) == "Warehouse/Reporting/Sales.Customer"

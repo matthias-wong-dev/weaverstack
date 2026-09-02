@@ -286,11 +286,14 @@ class WeaverDocumentId:
                     shape=PROCEDURE_SHAPE,
                 )
             if parts[2] in AREAS:
-                return cls(
-                    WeaverItemId(parts[0], parts[1]),
-                    _object_id(parts[3]),
-                    is_files=parts[2] == FILES,
-                )
+                item = WeaverItemId(parts[0], parts[1])
+                if item.item_type != LAKEHOUSE:
+                    raise IdentityError(
+                        f"{parts[2]} is a Lakehouse area, and {item} is a "
+                        f"{item.item_type}, whose relations are ItemType/"
+                        "ItemName/Schema.Object"
+                    )
+                return cls(item, _object_id(parts[3]), is_files=parts[2] == FILES)
         if len(parts) == 3:
             item = WeaverItemId(parts[0], parts[1])
             # A Lakehouse data object names its area, so what is left without one

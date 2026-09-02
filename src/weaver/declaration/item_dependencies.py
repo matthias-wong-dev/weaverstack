@@ -267,8 +267,8 @@ def _resolve_destination(
         return destination, "native"
     if destination in logical_pairs:
         return logical_pairs[destination], "shortcut"
-    # A Lakehouse relation names the Tables area, so a name that matches a
-    # validation instead is answered by the rule rather than by an absence.
+    # A Lakehouse relation names the Tables area, so a bare name that matches a
+    # validation is answered by the rule that put them in separate namespaces.
     validation = WeaverDocumentId.validation(destination.item, destination.object_id)
     _reject_validation_producer(
         validation, native=native, consumer=consumer, written=written
