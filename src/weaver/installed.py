@@ -95,6 +95,10 @@ _FILES_PREFIX = "Files/"
 #: cannot carry a dot, so ``Sales.Seed`` is spelled ``Sales__Seed``.
 _PYTHON_ID_SEPARATOR = "__"
 
+#: The one directory beneath an item that holds runtime source rather than
+#: declarations. An import of it names a helper, never a Weaver object.
+LIB = "lib"
+
 
 # --- nodes --------------------------------------------------------------------
 
@@ -1097,13 +1101,22 @@ def _python_module_identity(
             # rejects. It names no Weaver object.
             return None
         components = base[: len(base) - parents] + components
-    if len(components) != 2 or components[0] not in AREAS:
-        # A `lib/` helper, a shortcut symbol, or an import naming no area at
-        # all. None of them names a Weaver object.
+    if not components or components[0] == LIB:
+        # A helper module. It is real source and it is not a Weaver object, so
+        # it orders nothing.
         return None
     parts = python_id_parts(components[-1])
     if len(parts) != 2 or not all(part.strip() for part in parts):
         return None
+    if len(components) != 2 or components[0] not in AREAS:
+        # An object module named without its area, which is how an estate built
+        # before the areas were explicit recorded one. Refused, so an ordering
+        # edge leaves the graph only when a build says it has.
+        raise CatalogueStateError(
+            f"{consumer} imports {reference!r}, which names an object module "
+            f"and no Lakehouse area. Build {consumer.item} again to record the "
+            "dependency as this Weaver spells it"
+        )
     return WeaverDocumentId(
         consumer.item,
         ObjectId(parts[0].strip(), parts[1].strip()),

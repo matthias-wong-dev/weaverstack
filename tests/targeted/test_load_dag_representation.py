@@ -605,6 +605,41 @@ def test_load_dag_rejects_unresolved_dependencies():
 
 
 @weaver_test()
+def test_a_stored_import_naming_no_area_is_refused():
+    """An estate built before the areas were explicit recorded ``Sales__Order``.
+
+    That names an object module and no area, and there is one of each in the
+    item. Refused, because dropping the edge would lose an ordering silently and
+    a build records the reference again.
+    """
+
+    catalogue = _catalogue(
+        **{
+            "Lakehouse/Raw": _rows(
+                Installation=[_installation("Lakehouse/Raw", "Raw_LH")],
+                Registry=[
+                    _registry("Lakehouse/Raw", "Sales", "Order"),
+                    _registry("Lakehouse/Raw", "Sales", "Customer"),
+                    _registry(
+                        "Lakehouse/Raw",
+                        "_/Load/Tables",
+                        "Sales__Order.py",
+                        object_type="file",
+                        role="load",
+                    ),
+                ],
+                Dependency=[
+                    _dependency("Lakehouse/Raw", "Sales", "Order", "Sales__Customer")
+                ],
+            )
+        }
+    )
+
+    with pytest.raises(LoadError, match="names an object module"):
+        load_dag(catalogue.dag(), items=(PRODUCER,))
+
+
+@weaver_test()
 def test_load_dag_rejects_cycles():
     catalogue = _catalogue(
         **{
