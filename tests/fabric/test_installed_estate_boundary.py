@@ -594,17 +594,17 @@ def test_a_sql_authored_table_is_deployed_and_loaded_as_a_python_primitive(deplo
     """The conversion's claim, asked of Fabric.
 
     `Tables/DWG.NamedCustomer.sql` is authored in Spark SQL and installed as
-    `Tables/DWG__NamedCustomer.py`. What this asserts is that the file the build wrote
-    is importable in the session, carries its authored contract, and loads
+    `Tables/DWG__NamedCustomer.py`. What this asserts is that the file the build
+    wrote is importable in the session, carries its authored contract, and loads
     through the ordinary `Table.load()`, so a SQL-authored table and a
     Python-authored one are the same primitive by the time anything runs.
     """
 
     seen = deployed
 
-    assert "DWG__NamedCustomer.py" in seen["deployed"]
+    assert "DWG__NamedCustomer.py" in seen["tables"]
     # No installed `.sql` load file survives the conversion.
-    assert not [name for name in seen["deployed"] if name.endswith(".sql")]
+    assert not [name for name in seen["tables"] if name.endswith(".sql")]
     assert seen["sql_authored_module"] == "DWG__NamedCustomer"
     # The authored header travelled whole and is what the primitive reads.
     assert seen["sql_authored_is_generated"] is True
