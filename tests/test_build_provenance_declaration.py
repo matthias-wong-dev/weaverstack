@@ -18,7 +18,7 @@ from where the authored file is parsed, all the way to the failure:
             → InstallAction.source_path
                 → plan.yml, and back
                     → ActionResult.source_path
-                        → "Source: Lakehouse/Sales/Sales__Customer.py"
+                        → "Source: Lakehouse/Sales/Tables/Sales__Customer.py"
 
 **Carried, never reconstructed.** Deriving it later from an action id, a
 procedure name or a deployed path would be a guess presented as evidence, and
@@ -208,11 +208,13 @@ def test_a_failure_with_no_authored_source_still_names_what_failed():
         action_id="shortcut-Lakehouse-Reporting-DWG.Customer",
         error_type="ShortcutError",
         message="the shortcut did not become addressable",
-        artefact="Lakehouse/Reporting/DWG.Customer",
+        artefact="Lakehouse/Reporting/Tables/DWG.Customer",
     ).describe()
 
     assert "Source:" not in described
-    assert described.startswith("Error installing Lakehouse/Reporting/DWG.Customer")
+    assert described.startswith(
+        "Error installing Lakehouse/Reporting/Tables/DWG.Customer"
+    )
 
 
 @weaver_test()

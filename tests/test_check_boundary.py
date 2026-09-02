@@ -20,7 +20,7 @@ def _repository(root: Path) -> Path:
 @weaver_test()
 def test_check_parses_a_valid_repository_without_running_authored_python(tmp_path):
     root = _repository(tmp_path / "repository")
-    source = root / "Lakehouse" / "Raw" / "DWG__Customer.py"
+    source = root / "Lakehouse" / "Raw" / "Tables" / "DWG__Customer.py"
     source.write_text(
         source.read_text(encoding="utf-8")
         + "\nraise RuntimeError('must not execute')\n",

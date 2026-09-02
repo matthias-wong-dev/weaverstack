@@ -16,9 +16,9 @@ Revision notes:
   - 2026-07-24 Created.
 """
 
-from weaver import Table
+from Files.Raw__CustomerCsv import Raw__CustomerCsv
 
-from .Files.Raw__CustomerCsv import Raw__CustomerCsv
+from weaver import Table
 
 
 class DWG__Customer(Table):

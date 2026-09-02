@@ -187,7 +187,9 @@ def test_impact_classifies_new_changed_and_unchanged_documents(tmp_path):
         selected=raw,
         physical_types=_present_types(repository, raw),
     )
-    assert [str(value) for value in impact.changed] == ["Lakehouse/Raw/Sales.Customer"]
+    assert [str(value) for value in impact.changed] == [
+        "Lakehouse/Raw/Tables/Sales.Customer"
+    ]
     assert set(impact.to_mapping()) == {"new", "changed", "impacted_descendants"}
 
 
@@ -214,7 +216,7 @@ def test_changed_root_expands_through_same_item_descendants(tmp_path):
     assert {str(value) for value in impact.impacted_descendants} == {
         "Lakehouse/Raw/Files/Sales.Archive",
         "Lakehouse/Raw/Files/Sales.Export",
-        "Lakehouse/Raw/Sales.Customer",
+        "Lakehouse/Raw/Tables/Sales.Customer",
     }
 
 
@@ -243,7 +245,7 @@ def test_cross_item_descendants_propagate_when_both_items_are_bound(tmp_path):
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    curated = WeaverDocumentId.parse("Lakehouse/Curated/Sales.Customer")
+    curated = WeaverDocumentId.parse("Lakehouse/Curated/Tables/Sales.Customer")
     reporting = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
     rows = {}
     for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
@@ -269,7 +271,7 @@ def test_an_item_left_out_of_the_build_is_still_deferred(tmp_path):
     """
 
     repository = _repository(_dependency_estate(tmp_path))
-    curated = WeaverDocumentId.parse("Lakehouse/Curated/Sales.Customer")
+    curated = WeaverDocumentId.parse("Lakehouse/Curated/Tables/Sales.Customer")
     reporting = WeaverDocumentId.parse("Warehouse/Reporting/Sales.Customer")
     rows = {}
     for item_text in ("Lakehouse/Curated", "Warehouse/Reporting"):
@@ -298,7 +300,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
     installed_repository = _repository(root)
     installed = _catalogue(installed_repository, "Lakehouse/Raw")
 
-    existing_path = root / "Lakehouse/Raw/Sales__Customer.py"
+    existing_path = root / "Lakehouse/Raw/Tables/Sales__Customer.py"
     existing_path.write_text(
         existing_path.read_text()
         .replace(
@@ -313,7 +315,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         .replace(
             "from weaver import Table",
             "from weaver import Table\n"
-            "from .Files.Sales__Customer import Sales__Customer as SourceCustomer",
+            "from Files.Sales__Customer import Sales__Customer as SourceCustomer",
         ),
         encoding="utf-8",
     )
@@ -337,7 +339,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         selected=selected,
         inventories=_raw_inventory(installed_repository),
     )
-    existing = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+    existing = WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer")
     new = WeaverDocumentId.parse("Lakehouse/Raw/Files/Sales.Protected")
     assert selection.prohibited == (existing,)
     assert existing not in selection.selected_for_drop
@@ -373,7 +375,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
         bundle.location.join(*catalogue_action.payload.split("/"))
     ).decode()
     assert "The current governed declaration." in catalogue_payload
-    assert ".Files.Sales__Customer" in catalogue_payload
+    assert "Files.Sales__Customer" in catalogue_payload
     registry_action = next(
         action
         for _sequence, _batch, action in bundle.plan.actions()
@@ -389,8 +391,8 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
     ("relative", "identity", "drop_kind", "build_kind"),
     [
         (
-            "Lakehouse/Raw/Sales__Customer.py",
-            "Lakehouse/Raw/Sales.Customer",
+            "Lakehouse/Raw/Tables/Sales__Customer.py",
+            "Lakehouse/Raw/Tables/Sales.Customer",
             DROP_TABLE,
             BUILD_TABLE,
         ),
@@ -459,7 +461,7 @@ def test_uncertified_physical_protected_object_is_changed_retained_and_recertifi
 @weaver_test()
 def test_uncertified_physical_protected_loadable_keeps_its_runtime_state(tmp_path):
     root = _estate(tmp_path)
-    path = root / "Lakehouse/Raw/Sales__Customer.py"
+    path = root / "Lakehouse/Raw/Tables/Sales__Customer.py"
     path.write_text(
         path.read_text().replace(
             "Primary key: Id", "Primary key: Id\nProhibit rebuild: true"
@@ -487,7 +489,7 @@ def test_uncertified_physical_protected_loadable_keeps_its_runtime_state(tmp_pat
         ),
     )
 
-    customer = WeaverDocumentId.parse("Lakehouse/Raw/Sales.Customer")
+    customer = WeaverDocumentId.parse("Lakehouse/Raw/Tables/Sales.Customer")
     assert customer in bundle.plan.selection.prohibited
     assert bundle.plan.runtime_state == ()
 
@@ -612,12 +614,12 @@ def test_a_repointed_shortcut_is_replaced(tmp_path):
     """The declaration is the shortcut, so changing what it points at changes it."""
 
     root = _dependency_estate(tmp_path)
-    _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
+    _write(root, "Lakehouse/Curated/Tables/Sales__Archive.py", _table("Sales.Archive"))
     installed = _shortcut_catalogue(_repository(root))
     _write(
         root,
         "Warehouse/Reporting/shortcuts.yml",
-        "logical:\n  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Sales.Archive\n",
+        "logical:\n  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Tables/Sales.Archive\n",
     )
     repository = _repository(root)
     bundle = _shortcut_bundle(tmp_path, repository, rows=installed)
@@ -714,14 +716,14 @@ def test_a_shortcut_is_never_dropped_by_the_document_pipeline(tmp_path):
     """
 
     root = _dependency_estate(tmp_path)
-    _write(root, "Lakehouse/Curated/Sales__Archive.py", _table("Sales.Archive"))
+    _write(root, "Lakehouse/Curated/Tables/Sales__Archive.py", _table("Sales.Archive"))
     installed = _shortcut_catalogue(_repository(root))
     _write(
         root,
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n"
         "  Warehouse/Reporting/Sales.PortableCustomer: "
-        "Lakehouse/Curated/Sales.Archive\n",
+        "Lakehouse/Curated/Tables/Sales.Archive\n",
     )
     repository = _repository(root)
     bundle = _shortcut_bundle(tmp_path, repository, rows=installed)
@@ -1076,9 +1078,9 @@ def test_changed_root_uncertifies_drops_and_rebuilds_in_dependency_order(tmp_pat
         if kind in {BUILD_FOLDER, BUILD_TABLE}
     ]
     assert dropped.index("Lakehouse/Raw/Files/Sales.Export") < dropped.index(
-        "Lakehouse/Raw/Sales.Customer"
+        "Lakehouse/Raw/Tables/Sales.Customer"
     )
-    assert built.index("Lakehouse/Raw/Sales.Customer") < built.index(
+    assert built.index("Lakehouse/Raw/Tables/Sales.Customer") < built.index(
         "Lakehouse/Raw/Files/Sales.Export"
     )
 
@@ -1107,10 +1109,10 @@ def test_managed_drop_uses_the_installed_type_when_an_object_changes_type(tmp_pa
             }
         }
     )
-    (root / "Lakehouse/Raw/Sales__Customer.py").unlink()
+    (root / "Lakehouse/Raw/Tables/Sales__Customer.py").unlink()
     _write(
         root,
-        "Lakehouse/Raw/Sales.Customer.sql",
+        "Lakehouse/Raw/Tables/Sales.Customer.sql",
         """/*
 View ID: Sales.Customer
 Description: A replacement view.
@@ -1134,7 +1136,7 @@ select 1 as Id
         ),
     )
     actions = [action for _sequence, _batch, action in bundle.plan.actions()]
-    customer = "Lakehouse/Raw/Sales.Customer"
+    customer = "Lakehouse/Raw/Tables/Sales.Customer"
     assert any(
         action.kind == DROP_TABLE and action.resource_node_id == customer
         for action in actions

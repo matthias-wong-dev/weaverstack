@@ -23,7 +23,13 @@ if TYPE_CHECKING:
 LAKEHOUSE = "Lakehouse"
 WAREHOUSE = "Warehouse"
 ITEM_TYPES = frozenset({LAKEHOUSE, WAREHOUSE})
+
+#: The two areas a Lakehouse holds, and the first component of every Lakehouse
+#: data identity. Fabric keeps a Lakehouse's Delta tables under ``Tables`` and
+#: everything else under ``Files``, and a Weaver identity says which.
+TABLES = "Tables"
 FILES = "Files"
+AREAS = (TABLES, FILES)
 
 #: What an identity's two parts mean, which is what decides how they are
 #: validated and spelled. Weaver has one identity, a schema and an object within
@@ -35,14 +41,18 @@ FILES = "Files"
 #: ``PROCEDURE``  ``_`` + ``Load Sales.Customer``: an ordinary schema, and an
 #:                object name that carries the dot and space of the object it
 #:                loads.
+#: ``VALIDATION`` ``Sales`` + ``CustomerCount``: a Test or an Assumption. Its
+#:                two parts are an object's, and it occupies no Lakehouse area,
+#:                because it materialises nothing.
 #:
 #: Validation branches on this rather than assuming table-style naming
 #: everywhere, and the Registry stores the real logical target name rather than
 #: something encoded to fit one validator.
 OBJECT_SHAPE = "object"
+VALIDATION_SHAPE = "validation"
 FILE_SHAPE = "file"
 PROCEDURE_SHAPE = "procedure"
-SHAPES = (OBJECT_SHAPE, FILE_SHAPE, PROCEDURE_SHAPE)
+SHAPES = (OBJECT_SHAPE, VALIDATION_SHAPE, FILE_SHAPE, PROCEDURE_SHAPE)
 
 #: How a non-object shape marks itself in the one-line spelling. A file's schema
 #: is a path and its object carries an extension, so ``Schema.Object`` cannot
@@ -233,6 +243,12 @@ class WeaverDocumentId:
             schema = _logical_name(self.object_id.schema, what="schema name")
             name = _logical_name(self.object_id.object, what="object name")
         object.__setattr__(self, "object_id", ObjectId(schema=schema, object=name))
+        if self.shape == VALIDATION_SHAPE and self.item.item_type != LAKEHOUSE:
+            raise IdentityError(
+                "the validation shape says an identity occupies no Lakehouse "
+                f"area, and a {self.item.item_type} has none. Use the object "
+                "shape"
+            )
         if self.is_files and self.shape != OBJECT_SHAPE:
             raise IdentityError(
                 "the Files/ prefix belongs to a Folder document; a "
@@ -269,20 +285,41 @@ class WeaverDocumentId:
                     ObjectId(schema=parts[2][len(marker) :], object=parts[3]),
                     shape=PROCEDURE_SHAPE,
                 )
-            if parts[2] == FILES:
-                return cls(
-                    WeaverItemId(parts[0], parts[1]),
-                    _object_id(parts[3]),
-                    is_files=True,
-                )
+            if parts[2] in AREAS:
+                item = WeaverItemId(parts[0], parts[1])
+                if item.item_type != LAKEHOUSE:
+                    raise IdentityError(
+                        f"{parts[2]} is a Lakehouse area, and {item} is a "
+                        f"{item.item_type}, whose relations are ItemType/"
+                        "ItemName/Schema.Object"
+                    )
+                return cls(item, _object_id(parts[3]), is_files=parts[2] == FILES)
         if len(parts) == 3:
-            return cls(WeaverItemId(parts[0], parts[1]), _object_id(parts[2]))
+            item = WeaverItemId(parts[0], parts[1])
+            # A Lakehouse data object names its area, so what is left without one
+            # is a Test or an Assumption. A Warehouse has no areas, and an
+            # ordinary object is spelled this way there.
+            shape = VALIDATION_SHAPE if item.item_type == LAKEHOUSE else OBJECT_SHAPE
+            return cls(item, _object_id(parts[2]), shape=shape)
         raise IdentityError(
-            "document identity must be ItemType/ItemName/Schema.Object, "
+            "document identity must be Warehouse/ItemName/Schema.Object, "
+            "Lakehouse/ItemName/Tables/Schema.Object, "
             "Lakehouse/ItemName/Files/Schema.Object, "
             "Lakehouse/ItemName/file:Path/Name.ext or "
             f"Warehouse/ItemName/procedure:Schema/Object, got {text!r}"
         )
+
+    @classmethod
+    def validation(cls, item: "WeaverItemId", object_id: ObjectId):
+        """The identity of one Test or Assumption declared by ``item``.
+
+        A validation reads the estate and materialises nothing, so it names no
+        Lakehouse area. One constructor for every reader of a Test, so a
+        declaration and the ``_.TestDictionary`` row recording it agree.
+        """
+
+        shape = VALIDATION_SHAPE if item.item_type == LAKEHOUSE else OBJECT_SHAPE
+        return cls(item, object_id, shape=shape)
 
     @classmethod
     def parse_local(cls, item: "WeaverItemId", text: str) -> "WeaverDocumentId":
@@ -293,14 +330,29 @@ class WeaverDocumentId:
         """
 
         parts = _split(text, what="document identity")
+        if len(parts) == 2 and parts[0] in AREAS:
+            return cls(item, _object_id(parts[1]), is_files=parts[0] == FILES)
         if len(parts) == 1:
-            return cls(item, _object_id(parts[0]))
-        if len(parts) == 2 and parts[0] == FILES:
-            return cls(item, _object_id(parts[1]), is_files=True)
+            shape = VALIDATION_SHAPE if item.item_type == LAKEHOUSE else OBJECT_SHAPE
+            return cls(item, _object_id(parts[0]), shape=shape)
         raise IdentityError(
-            "an item-relative document identity must be Schema.Object or "
-            f"Files/Schema.Object, got {text!r}"
+            "an item-relative document identity must be Tables/Schema.Object or "
+            "Files/Schema.Object in a Lakehouse, and Schema.Object in a "
+            f"Warehouse, got {text!r}"
         )
+
+    @property
+    def area(self) -> str | None:
+        """The Lakehouse area this names, or None where it names none.
+
+        The one place the rule lives. A Lakehouse data object sits in ``Tables``
+        or in ``Files``, and everything else, being a Warehouse relation, a
+        validation, a deployed file and a stored procedure, sits in neither.
+        """
+
+        if self.shape != OBJECT_SHAPE or self.item.item_type != LAKEHOUSE:
+            return None
+        return FILES if self.is_files else TABLES
 
     @property
     def relative(self) -> str:
@@ -310,7 +362,8 @@ class WeaverDocumentId:
         if self.shape == PROCEDURE_SHAPE:
             marker = _SHAPE_MARKERS[PROCEDURE_SHAPE]
             return f"{marker}{self.object_id.schema}/{self.object_id.object}"
-        prefix = f"{FILES}/" if self.is_files else ""
+        area = self.area
+        prefix = f"{area}/" if area else ""
         return f"{prefix}{self.object_id.qualified}"
 
     def __str__(self) -> str:
@@ -582,6 +635,11 @@ class ShortcutDeclaration:
         parts = _split(self.target, what="shortcut target")
         tail = "/".join(parts[2:])
         if self.shortcut_type in (TABLE_SHORTCUT, VIEW_SHORTCUT):
+            # A logical Lakehouse target is a Weaver identity, so it names the
+            # Tables area; a physical one names a Fabric item, whose Tables area
+            # the source path adds. Either spelling reaches the same relation.
+            if parts[2] == TABLES:
+                tail = "/".join(parts[3:])
             _object_id(tail)
         elif self.is_schema:
             _logical_name(tail, what="target schema")
@@ -719,8 +777,10 @@ class WeaverItem:
                     f"every programmable must belong to item {self.identity}"
                 )
         _reject_duplicates(self.schemas, what="schema")
-        # One namespace across both, so a Test and a Table cannot both claim
-        # Sales.Order inside one item.
+        # One namespace across both. A Warehouse spells a validation as it
+        # spells a relation, so a Test and a table there cannot both claim
+        # Sales.Order; a Lakehouse table names its area and a Lakehouse
+        # validation does not, so the two are separate names.
         _reject_duplicates(self.documents + self.validations, what="document")
         _reject_duplicates(
             tuple(each.identity for each in self.programmables),

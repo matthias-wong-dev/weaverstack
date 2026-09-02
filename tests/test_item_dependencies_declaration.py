@@ -14,7 +14,7 @@ from test_item_repository_declaration import (
 
 from weaver.declaration import parse_item_repository, project_bound_documents
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
-from weaver.errors import BuildError, GraphError
+from weaver.errors import BuildError, DiscoveryError, GraphError
 from weaver.locations import Location
 
 
@@ -22,7 +22,7 @@ def _dependency_estate(tmp_path):
     root = _estate(tmp_path)
     raw_table = _table("Sales.Customer").replace(
         "from weaver import Table",
-        "from weaver import Table\nfrom .Files.Sales__Landing import Sales__Landing",
+        "from weaver import Table\nfrom Files.Sales__Landing import Sales__Landing",
     )
     landing = _folder("Sales.Landing").replace(
         "from weaver import Folder",
@@ -30,7 +30,7 @@ def _dependency_estate(tmp_path):
     )
     export = _folder("Sales.Export").replace(
         "from weaver import Folder",
-        "from weaver import Folder\nfrom ..Sales__Customer import Sales__Customer",
+        "from weaver import Folder\nfrom Tables.Sales__Customer import Sales__Customer",
     )
     archive = _folder("Sales.Archive").replace(
         "from weaver import Folder",
@@ -44,7 +44,7 @@ def _dependency_estate(tmp_path):
         "select cast(1 as varchar(20)) as Id;",
         "select c.Id from Raw_LH.Sales.Customer as c;",
     )
-    _write(root, "Lakehouse/Raw/Sales__Customer.py", raw_table)
+    _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", raw_table)
     _write(root, "Lakehouse/Raw/Files/Sales__Landing.py", landing)
     _write(root, "Lakehouse/Raw/Files/Sales__Export.py", export)
     _write(root, "Lakehouse/Raw/Files/Sales__Archive.py", archive)
@@ -53,7 +53,7 @@ def _dependency_estate(tmp_path):
     _write(
         root,
         "Warehouse/Reporting/shortcuts.yml",
-        "logical:\n  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Sales.Customer\n",
+        "logical:\n  Warehouse/Reporting/Sales.PortableCustomer: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     return root
 
@@ -73,13 +73,13 @@ def test_relative_python_imports_resolve_across_tables_and_files(tmp_path):
 
     delta_to_folder = _edge(
         repository,
-        "Lakehouse/Raw/Sales.Customer",
-        ".Files.Sales__Landing",
+        "Lakehouse/Raw/Tables/Sales.Customer",
+        "Files.Sales__Landing",
     )
     folder_to_delta = _edge(
         repository,
         "Lakehouse/Raw/Files/Sales.Export",
-        "..Sales__Customer",
+        "Tables.Sales__Customer",
     )
     folder_to_folder = _edge(
         repository,
@@ -88,7 +88,7 @@ def test_relative_python_imports_resolve_across_tables_and_files(tmp_path):
     )
 
     assert str(delta_to_folder.producer) == "Lakehouse/Raw/Files/Sales.Landing"
-    assert str(folder_to_delta.producer) == "Lakehouse/Raw/Sales.Customer"
+    assert str(folder_to_delta.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
     assert str(folder_to_folder.producer) == "Lakehouse/Raw/Files/Sales.Landing"
     assert all(
         edge.is_within_item
@@ -116,7 +116,7 @@ def test_two_part_sql_reference_resolves_through_cross_item_shortcut(tmp_path):
     )
 
     assert edge.reference == "Sales.PortableCustomer"
-    assert str(edge.producer) == "Lakehouse/Curated/Sales.Customer"
+    assert str(edge.producer) == "Lakehouse/Curated/Tables/Sales.Customer"
     assert edge.uses_shortcut
     assert not edge.is_within_item
 
@@ -133,7 +133,7 @@ def test_the_shortcut_destination_is_its_own_node_between_source_and_consumer(tm
 
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
     graph = repository.dependency_graph
-    source = "Lakehouse/Curated/Sales.Customer"
+    source = "Lakehouse/Curated/Tables/Sales.Customer"
     shortcut = "Warehouse/Reporting/Sales.PortableCustomer"
     consumer = "Warehouse/Reporting/Sales.Customer"
 
@@ -158,13 +158,13 @@ def test_an_shortcut_no_document_consumes_still_waits_for_its_source(tmp_path):
     _write(
         root,
         "Warehouse/Audit/shortcuts.yml",
-        "logical:\n  Warehouse/Audit/Sales.Unread: Lakehouse/Curated/Sales.Customer\n",
+        "logical:\n  Warehouse/Audit/Sales.Unread: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     graph = parse_item_repository(Location(str(root))).dependency_graph
 
     shortcut = "Warehouse/Audit/Sales.Unread"
     assert shortcut in graph.nodes
-    assert ("Lakehouse/Curated/Sales.Customer", shortcut) in {
+    assert ("Lakehouse/Curated/Tables/Sales.Customer", shortcut) in {
         (edge.upstream, edge.downstream) for edge in graph.edges
     }
 
@@ -188,7 +188,7 @@ def test_published_dependency_edges_ignore_the_shortcut_node(tmp_path):
     shortcut_edge = _edge(
         repository, "Warehouse/Reporting/Sales.Customer", "Sales.PortableCustomer"
     )
-    assert str(shortcut_edge.producer) == "Lakehouse/Curated/Sales.Customer"
+    assert str(shortcut_edge.producer) == "Lakehouse/Curated/Tables/Sales.Customer"
     assert not shortcut_edge.is_within_item
 
 
@@ -231,13 +231,13 @@ def test_dependency_cycle_across_items_is_rejected(tmp_path):
     root = _estate(tmp_path)
     curated = _table("Sales.Customer").replace(
         "from weaver import Table",
-        "from weaver import Table\nfrom Sales__Reporting import Sales__Reporting",
+        "from weaver import Table\nfrom Tables.Sales__Reporting import Sales__Reporting",
     )
     reporting = _warehouse_table("Sales.Customer").replace(
         "select cast(1 as varchar(20)) as Id;",
         "select c.Id from Sales.Curated as c;",
     )
-    _write(root, "Lakehouse/Curated/Sales__Customer.py", curated)
+    _write(root, "Lakehouse/Curated/Tables/Sales__Customer.py", curated)
     _write(root, "Warehouse/Reporting/Sales.Customer.sql", reporting)
     _write(
         root,
@@ -247,7 +247,153 @@ def test_dependency_cycle_across_items_is_rejected(tmp_path):
     _write(
         root,
         "Warehouse/Reporting/shortcuts.yml",
-        "logical:\n  Warehouse/Reporting/Sales.Curated: Lakehouse/Curated/Sales.Customer\n",
+        "logical:\n  Warehouse/Reporting/Sales.Curated: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     with pytest.raises(GraphError, match="dependency cycle"):
         parse_item_repository(Location(str(root)))
+
+
+# --- imports name a Lakehouse area ---------------------------------------------
+
+
+@weaver_test()
+def test_an_absolute_import_resolves_through_the_area_it_names(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales__Order.py",
+        _table("Sales.Order").replace(
+            "from weaver import Table",
+            "from weaver import Table\n"
+            "from Files.Sales__Customer import Sales__Customer\n"
+            "from Tables.Sales__Customer import Sales__Customer as Delta",
+        ),
+    )
+    repository = parse_item_repository(Location(str(root)))
+
+    folder = _edge(
+        repository, "Lakehouse/Raw/Tables/Sales.Order", "Files.Sales__Customer"
+    )
+    table = _edge(
+        repository, "Lakehouse/Raw/Tables/Sales.Order", "Tables.Sales__Customer"
+    )
+
+    assert str(folder.producer) == "Lakehouse/Raw/Files/Sales.Customer"
+    assert str(table.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+
+
+@weaver_test()
+def test_an_import_naming_no_area_carries_the_move(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales__Order.py",
+        _table("Sales.Order").replace(
+            "from weaver import Table",
+            "from weaver import Table\nfrom Sales__Customer import Sales__Customer",
+        ),
+    )
+
+    with pytest.raises(DiscoveryError, match="import Tables.Sales__Customer"):
+        parse_item_repository(Location(str(root)))
+
+
+@weaver_test()
+def test_a_relative_import_starts_in_the_importing_programs_own_area(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales__Order.py",
+        _table("Sales.Order").replace(
+            "from weaver import Table",
+            "from weaver import Table\nfrom .Sales__Customer import Sales__Customer",
+        ),
+    )
+    _write(
+        root,
+        "Lakehouse/Raw/Files/Sales__Export.py",
+        _folder("Sales.Export").replace(
+            "from weaver import Folder",
+            "from weaver import Folder\nfrom .Sales__Customer import Sales__Customer",
+        ),
+    )
+    repository = parse_item_repository(Location(str(root)))
+
+    from_table = _edge(
+        repository, "Lakehouse/Raw/Tables/Sales.Order", ".Sales__Customer"
+    )
+    from_folder = _edge(
+        repository, "Lakehouse/Raw/Files/Sales.Export", ".Sales__Customer"
+    )
+
+    assert str(from_table.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+    assert str(from_folder.producer) == "Lakehouse/Raw/Files/Sales.Customer"
+
+
+@weaver_test()
+def test_a_validation_names_the_area_it_reads(tmp_path):
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/tests/Sales__CustomerCount.py",
+        '"""\nTest ID: Sales.CustomerCount\n\nDescription: The count matches.\n\n'
+        'Primary key: Id\n"""\n'
+        "from Tables.Sales__Customer import Sales__Customer\n\n"
+        "from weaver import Test\n\n\n"
+        "class Sales__CustomerCount(Test):\n"
+        "    def expected(self):\n"
+        "        return Sales__Customer(self).dataframe()\n\n"
+        "    def actual(self):\n"
+        "        return Sales__Customer(self).dataframe()\n",
+    )
+    repository = parse_item_repository(Location(str(root)))
+
+    edge = _edge(
+        repository, "Lakehouse/Raw/Sales.CustomerCount", "Tables.Sales__Customer"
+    )
+
+    assert str(edge.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+
+
+@weaver_test()
+def test_a_relation_reference_stays_relational_and_reaches_the_items_area(tmp_path):
+    """``Sales.Customer`` is what an author writes, in SQL and in metadata alike.
+
+    Weaver puts it in the area its item gives it: ``Tables`` in a Lakehouse, and
+    nowhere in a Warehouse, which has none.
+    """
+
+    root = _estate(tmp_path)
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales.Rollup.sql",
+        "/*\nTable ID: Sales.Rollup\nDescription: A rollup.\n"
+        "Lineage: Sales.Customer.\nPrimary key: Id\n"
+        "Dependencies:\n  - Sales.Customer\nSchema:\n  Id: string\n*/\n"
+        "select Id from Sales.Customer;\n",
+    )
+    _write(
+        root,
+        "Lakehouse/Raw/Tables/Sales__Order.py",
+        _table("Sales.Order").replace(
+            "Lineage: A source system.",
+            "Lineage: A source system.\n\nDependencies:\n  - Sales.Customer",
+        ),
+    )
+    _write(
+        root,
+        "Warehouse/Reporting/Sales.Rollup.sql",
+        _warehouse_table("Sales.Rollup").replace(
+            "select cast(1 as varchar(20)) as Id;",
+            "select c.Id from Sales.Customer as c;",
+        ),
+    )
+    repository = parse_item_repository(Location(str(root)))
+
+    spark = _edge(repository, "Lakehouse/Raw/Tables/Sales.Rollup", "Sales.Customer")
+    declared = _edge(repository, "Lakehouse/Raw/Tables/Sales.Order", "Sales.Customer")
+    tsql = _edge(repository, "Warehouse/Reporting/Sales.Rollup", "Sales.Customer")
+
+    assert str(spark.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+    assert str(declared.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
+    assert str(tsql.producer) == "Warehouse/Reporting/Sales.Customer"

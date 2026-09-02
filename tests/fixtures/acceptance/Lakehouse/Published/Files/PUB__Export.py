@@ -15,7 +15,7 @@ Revision notes:
 
 import json
 
-from PUB__Reporting import PUB__Reporting
+from Tables.PUB__Reporting import PUB__Reporting
 
 from weaver import Folder
 

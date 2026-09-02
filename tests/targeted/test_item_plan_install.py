@@ -72,7 +72,7 @@ def kinds(planned) -> list[str]:
 @pytest.fixture
 def customer(tmp_path):
     return single_document_repository(
-        tmp_path, documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")}
+        tmp_path, documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")}
     )
 
 
@@ -243,8 +243,8 @@ def test_a_view_is_built_after_the_table_it_reads(tmp_path):
     repository = single_document_repository(
         tmp_path,
         documents={
-            "DWG__Customer.py": lakehouse_table("DWG.Customer"),
-            "DWG.ActiveCustomer.sql": spark_view(
+            "Tables/DWG__Customer.py": lakehouse_table("DWG.Customer"),
+            "Tables/DWG.ActiveCustomer.sql": spark_view(
                 "DWG.ActiveCustomer", depends_on="DWG.Customer"
             ),
         },
@@ -266,8 +266,8 @@ def test_a_view_is_built_after_the_table_it_reads(tmp_path):
         for action in batch.actions
         if action.kind.startswith("build_")
     ]
-    assert ordered.index("Lakehouse/Sales/DWG.Customer") < ordered.index(
-        "Lakehouse/Sales/DWG.ActiveCustomer"
+    assert ordered.index("Lakehouse/Sales/Tables/DWG.Customer") < ordered.index(
+        "Lakehouse/Sales/Tables/DWG.ActiveCustomer"
     )
 
 

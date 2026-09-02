@@ -93,7 +93,7 @@ select 1 as CustomerId;
 @weaver_test()
 def test_an_installed_item_with_no_load_work_is_a_successful_no_op(tmp_path):
     repository = single_document_repository(
-        tmp_path / "views", documents={"DWG.Nothing.sql": VIEW_ONLY}
+        tmp_path / "views", documents={"Tables/DWG.Nothing.sql": VIEW_ONLY}
     )
     catalogue = installed_catalogue(repository, item_bindings((ITEM, "Views_LH")))
     workspace, session = _session(tmp_path, items=("Weaver_LH", "Views_LH"))

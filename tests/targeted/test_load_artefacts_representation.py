@@ -83,9 +83,11 @@ def estate(tmp_path):
     root = tmp_path / "repo"
     _write(root, f"{ITEM}/schemas/DWG.yml", schema_document("DWG"))
     _write(root, f"{ITEM}/schemas/Raw.yml", schema_document("Raw"))
-    _write(root, f"{ITEM}/DWG__Customer.py", lakehouse_table(CUSTOMER))
-    _write(root, f"{ITEM}/DWG.Summary.sql", SPARK_TABLE.format(object_id=SUMMARY))
-    _write(root, f"{ITEM}/DWG.Active.sql", spark_view(VIEW, depends_on=CUSTOMER))
+    _write(root, f"{ITEM}/Tables/DWG__Customer.py", lakehouse_table(CUSTOMER))
+    _write(
+        root, f"{ITEM}/Tables/DWG.Summary.sql", SPARK_TABLE.format(object_id=SUMMARY)
+    )
+    _write(root, f"{ITEM}/Tables/DWG.Active.sql", spark_view(VIEW, depends_on=CUSTOMER))
     _write(root, f"{ITEM}/Files/Raw__Export.py", folder_document("Raw.Export"))
     _write(root, f"{ITEM}/lib/dates.py", "def parse_date(value):\n    return value\n")
     # Not Python, and deployed all the same: lib/ is reproduced verbatim, so a
@@ -113,6 +115,39 @@ def identities(artefacts) -> list[str]:
 
 
 @weaver_test()
+def test_the_authored_path_decides_the_deployed_one(estate):
+    """The runtime tree reproduces the repository, area for area.
+
+    Asserted as pairs because that is the contract an author reads: what a
+    program imports is where the file was written. A Spark SQL table is the one
+    that moves, and only its filename does, because it is compiled into the
+    module it deploys as.
+    """
+
+    deployed = {
+        artefact.source_path: str(artefact.identity)
+        for artefact in load_artefacts(estate)
+        if artefact.source_path is not None and artefact.object_type == FILE_TYPE
+    }
+
+    assert deployed == {
+        f"{ITEM}/Tables/DWG__Customer.py": (
+            f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Customer.py"
+        ),
+        f"{ITEM}/Tables/DWG.Summary.sql": (
+            f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Summary.py"
+        ),
+        f"{ITEM}/Files/Raw__Export.py": (
+            f"{ITEM}/file:{LOAD_ROOT}/Files/Raw__Export.py"
+        ),
+        f"{ITEM}/lib/dates.py": f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py",
+        f"{ITEM}/lib/data/holidays.csv": (
+            f"{ITEM}/file:{LOAD_ROOT}/lib/data/holidays.csv"
+        ),
+    }
+
+
+@weaver_test()
 def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
     """The whole derivation, as one visible set.
 
@@ -124,10 +159,10 @@ def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
     """
 
     assert identities(load_artefacts(estate)) == [
-        f"{ITEM}/file:{LOAD_ROOT}/DWG__Customer.py",
-        # The SQL-authored table, compiled into the module it deploys as.
-        f"{ITEM}/file:{LOAD_ROOT}/DWG__Summary.py",
         f"{ITEM}/file:{LOAD_ROOT}/Files/Raw__Export.py",
+        f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Customer.py",
+        # The SQL-authored table, compiled into the module it deploys as.
+        f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Summary.py",
         f"{ITEM}/file:{LOAD_ROOT}/lib/data/holidays.csv",
         f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py",
         # The Warehouse's own procedure for the one table it loads, and the two
@@ -258,7 +293,7 @@ def test_a_deployed_module_is_signed_by_its_own_bytes(tmp_path):
     def build(helper: str):
         root = tmp_path / helper[-4]
         _write(root, f"{ITEM}/schemas/DWG.yml", schema_document("DWG"))
-        _write(root, f"{ITEM}/DWG__Customer.py", lakehouse_table(CUSTOMER))
+        _write(root, f"{ITEM}/Tables/DWG__Customer.py", lakehouse_table(CUSTOMER))
         _write(root, f"{ITEM}/lib/dates.py", helper)
         return parse_item_repository(Location(str(root)))
 
@@ -280,9 +315,9 @@ def test_a_template_version_moves_only_the_bodies_it_renders(estate, monkeypatch
 
     import weaver.declaration.load
 
-    spark_file = f"{ITEM}/file:{LOAD_ROOT}/DWG__Summary.py"
+    spark_file = f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Summary.py"
     procedure = f"{WAREHOUSE_ITEM}/procedure:_/Load Sales.Customer"
-    module = f"{ITEM}/file:{LOAD_ROOT}/DWG__Customer.py"
+    module = f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Customer.py"
     before = {
         name: signature_of(estate, name) for name in (spark_file, procedure, module)
     }
@@ -376,7 +411,7 @@ def test_changing_one_module_rebuilds_that_module_alone(tmp_path):
 
     root = tmp_path / "repo"
     _write(root, f"{ITEM}/schemas/DWG.yml", schema_document("DWG"))
-    _write(root, f"{ITEM}/DWG__Customer.py", lakehouse_table(CUSTOMER))
+    _write(root, f"{ITEM}/Tables/DWG__Customer.py", lakehouse_table(CUSTOMER))
     _write(root, f"{ITEM}/lib/dates.py", "def parse(value):\n    return value\n")
     _write(root, f"{ITEM}/lib/text.py", "def upper(value):\n    return value\n")
     before = parse_item_repository(Location(str(root)))
@@ -410,15 +445,15 @@ def test_a_changed_upstream_document_does_not_rebuild_an_unchanged_artefact(tmp_
 
     root = tmp_path / "repo"
     _write(root, f"{ITEM}/schemas/DWG.yml", schema_document("DWG"))
-    _write(root, f"{ITEM}/DWG__Customer.py", lakehouse_table(CUSTOMER))
-    _write(root, f"{ITEM}/DWG.Active.sql", spark_view(VIEW, depends_on=CUSTOMER))
+    _write(root, f"{ITEM}/Tables/DWG__Customer.py", lakehouse_table(CUSTOMER))
+    _write(root, f"{ITEM}/Tables/DWG.Active.sql", spark_view(VIEW, depends_on=CUSTOMER))
     _write(root, f"{ITEM}/lib/dates.py", "def parse(value):\n    return value\n")
     before = parse_item_repository(Location(str(root)))
 
     catalogue = FixtureCatalogue.from_repository(before, item=item_id())
     _write(
         root,
-        f"{ITEM}/DWG__Customer.py",
+        f"{ITEM}/Tables/DWG__Customer.py",
         lakehouse_table(CUSTOMER, columns={"CustomerId": "string", "Name": "string"}),
     )
     after = parse_item_repository(Location(str(root)))
@@ -437,8 +472,8 @@ def test_a_changed_upstream_document_does_not_rebuild_an_unchanged_artefact(tmp_
 
     # The table changed, so the view over it is rebuilt, and the table's own
     # deployed copy is rebuilt because its bytes changed.
-    assert f"{ITEM}/{VIEW}" in rebuilt
-    assert f"{ITEM}/file:{LOAD_ROOT}/DWG__Customer.py" in rebuilt
+    assert f"{ITEM}/Tables/{VIEW}" in rebuilt
+    assert f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Customer.py" in rebuilt
     # The helper is untouched, and nothing carried impact to it.
     assert f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py" not in rebuilt
 

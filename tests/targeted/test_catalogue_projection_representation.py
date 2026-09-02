@@ -40,8 +40,8 @@ def repository(tmp_path):
         tmp_path,
         schemas=("DWG", "Raw"),
         documents={
-            "DWG__Customer.py": lakehouse_table(CUSTOMER),
-            "DWG.ActiveCustomer.sql": spark_view(VIEW, depends_on=CUSTOMER),
+            "Tables/DWG__Customer.py": lakehouse_table(CUSTOMER),
+            "Tables/DWG.ActiveCustomer.sql": spark_view(VIEW, depends_on=CUSTOMER),
             "Files/Raw__CustomerCsv.py": folder_document("Raw.CustomerCsv"),
         },
     )
@@ -90,7 +90,7 @@ def test_everything_declared_is_certified(repository):
         document_id(VIEW),
         document_id(FOLDER),
         document_id(f"{item_id()}/Files/_.Load"),
-        document_id(f"{item_id()}/file:_/Load/DWG__Customer.py"),
+        document_id(f"{item_id()}/file:_/Load/Tables/DWG__Customer.py"),
         document_id(f"{item_id()}/file:_/Load/Files/Raw__CustomerCsv.py"),
     }
     assert any(
@@ -210,7 +210,7 @@ def test_an_shortcut_is_not_certified_until_it_is_bound(tmp_path):
 
     repository = shortcut_repository(tmp_path / "repo")
     consumer = item_id("Lakehouse/Curated")
-    shortcut = document_id("Lakehouse/Curated/DWG.PortableCustomer")
+    shortcut = document_id("Lakehouse/Curated/Tables/DWG.PortableCustomer")
 
     logical = Catalogue.from_repository(repository)
 
@@ -224,7 +224,7 @@ def test_binding_certifies_the_shortcut_as_what_it_physically_is(tmp_path):
 
     repository = shortcut_repository(tmp_path / "repo")
     producer, consumer = item_id("Lakehouse/Raw"), item_id("Lakehouse/Curated")
-    shortcut = document_id("Lakehouse/Curated/DWG.PortableCustomer")
+    shortcut = document_id("Lakehouse/Curated/Tables/DWG.PortableCustomer")
     kinds = {producer: "lakehouse", consumer: "lakehouse"}
 
     logical = Catalogue.from_repository(repository)
@@ -293,8 +293,8 @@ def test_several_items_project_into_one_catalogue(tmp_path):
         Catalogue.from_repository(repository),
         repository,
         {
-            document_id("Lakehouse/Raw/DWG.Customer"),
-            document_id("Lakehouse/Curated/DWG.CustomerName"),
+            document_id("Lakehouse/Raw/Tables/DWG.Customer"),
+            document_id("Lakehouse/Curated/Tables/DWG.CustomerName"),
         },
     )
 
@@ -319,7 +319,7 @@ def test_an_items_rows_carry_its_own_scope(tmp_path):
     catalogue = retaining(
         Catalogue.from_repository(repository),
         repository,
-        {document_id("Lakehouse/Curated/DWG.CustomerName")},
+        {document_id("Lakehouse/Curated/Tables/DWG.CustomerName")},
     )
 
     for row in catalogue.rows[consumer][REGISTRY.name]:

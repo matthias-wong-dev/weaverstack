@@ -53,7 +53,7 @@ def estate(tmp_path):
     repository = single_document_repository(
         root,
         item="Lakehouse/Sales",
-        documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
+        documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
     workspace = given_workspace(catalogue="Warehouse/Weaver")

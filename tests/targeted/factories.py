@@ -46,7 +46,12 @@ from weaver.catalogue.tables import (
 )
 from weaver.declaration import parse_item_repository
 from weaver.declaration.metadata import ObjectId
-from weaver.declaration.model import WAREHOUSE, WeaverDocumentId, WeaverItemId
+from weaver.declaration.model import (
+    TABLES,
+    WAREHOUSE,
+    WeaverDocumentId,
+    WeaverItemId,
+)
 from weaver.etl import (
     FILE_TYPE,
     PROCEDURE_TYPE,
@@ -67,11 +72,23 @@ WAREHOUSE_ITEM = "Warehouse/Reporting"
 
 
 def document_id(text: str) -> WeaverDocumentId:
-    """``Lakehouse/Sales/DWG.Customer``, or the item-relative spelling."""
+    """``Lakehouse/Sales/Tables/DWG.Customer``, or the item-relative spelling.
 
-    if text.count("/") == 0:
-        text = f"{ITEM}/{text}"
+    A bare ``Schema.Object`` names a relation in :data:`ITEM`, so it becomes a
+    ``Tables`` identity. Spell a validation out, or use :func:`validation_id`.
+    """
+
+    if "/" not in text:
+        text = f"{ITEM}/{TABLES}/{text}"
     return WeaverDocumentId.parse(text)
+
+
+def validation_id(text: str, *, item: str = ITEM) -> WeaverDocumentId:
+    """One Test or Assumption identity, which names no Lakehouse area."""
+
+    return WeaverDocumentId.validation(
+        WeaverItemId.parse(item), ObjectId(*text.split(".", 1))
+    )
 
 
 def item_id(text: str = ITEM) -> WeaverItemId:
@@ -995,7 +1012,7 @@ def shortcut_repository(
     _write(root, f"{producer}/schemas/{schema}.yml", schema_document(schema))
     _write(
         root,
-        f"{producer}/{schema}__Customer.py",
+        f"{producer}/Tables/{schema}__Customer.py",
         lakehouse_table(f"{schema}.Customer"),
     )
     _write(root, f"{consumer}/schemas/{schema}.yml", schema_document(schema))
@@ -1003,7 +1020,7 @@ def shortcut_repository(
         root,
         *logical_shortcuts(
             consumer,
-            **{f"{schema}.PortableCustomer": f"{producer}/{schema}.Customer"},
+            **{f"{schema}.PortableCustomer": f"{producer}/Tables/{schema}.Customer"},
         ),
     )
     if consumer_view:
@@ -1023,7 +1040,7 @@ def shortcut_repository(
         else:
             _write(
                 root,
-                f"{consumer}/{schema}.CustomerName.sql",
+                f"{consumer}/Tables/{schema}.CustomerName.sql",
                 spark_view(
                     f"{schema}.CustomerName", depends_on=f"{schema}.PortableCustomer"
                 ),
@@ -1066,9 +1083,9 @@ def full_estate(root: Path):
     for relative, text in {
         f"{ITEM}/schemas/DWG.yml": schema_document("DWG"),
         f"{ITEM}/schemas/Raw.yml": schema_document("Raw"),
-        f"{ITEM}/DWG__Customer.py": lakehouse_table("DWG.Customer"),
-        f"{ITEM}/DWG.Summary.sql": SPARK_TABLE.format(object_id="DWG.Summary"),
-        f"{ITEM}/DWG.ActiveCustomer.sql": spark_view(
+        f"{ITEM}/Tables/DWG__Customer.py": lakehouse_table("DWG.Customer"),
+        f"{ITEM}/Tables/DWG.Summary.sql": SPARK_TABLE.format(object_id="DWG.Summary"),
+        f"{ITEM}/Tables/DWG.ActiveCustomer.sql": spark_view(
             "DWG.ActiveCustomer", depends_on="DWG.Customer"
         ),
         f"{ITEM}/Files/Raw__CustomerCsv.py": folder_document("Raw.CustomerCsv"),
@@ -1116,7 +1133,7 @@ LOAD_CONSUMER = "Warehouse/Reporting"
 #: The consumer's bound reference to the producer's table, as its own surface
 #: spells it.
 BOUND_CONSUMER_PATH, BOUND_CONSUMER_TEXT = logical_shortcuts(
-    LOAD_CONSUMER, **{"Sales.Order": f"{LOAD_PRODUCER}/Sales.Order"}
+    LOAD_CONSUMER, **{"Sales.Order": f"{LOAD_PRODUCER}/Tables/Sales.Order"}
 )
 LOAD_PRODUCER_TARGET = "Raw_LH"
 LOAD_CONSUMER_TARGET = "Reporting_WH"
@@ -1144,10 +1161,10 @@ def load_estate(root: Path):
 
     for relative, text in {
         f"{LOAD_PRODUCER}/schemas/Sales.yml": schema_document("Sales"),
-        f"{LOAD_PRODUCER}/Sales__Order.py": lakehouse_table(
+        f"{LOAD_PRODUCER}/Tables/Sales__Order.py": lakehouse_table(
             "Sales.Order", columns={"OrderId": "string", "Amount": "decimal(18,2)"}
         ),
-        f"{LOAD_PRODUCER}/Sales.Daily.sql": SPARK_TABLE_WITH_DEPENDENCY.format(
+        f"{LOAD_PRODUCER}/Tables/Sales.Daily.sql": SPARK_TABLE_WITH_DEPENDENCY.format(
             object_id="Sales.Daily", depends_on="Sales.Order"
         ),
         f"{LOAD_PRODUCER}/Files/Sales__Export.py": folder_document("Sales.Export"),
@@ -1230,9 +1247,9 @@ def single_document_repository(
 
 def build_action(
     *,
-    id: str = "object-Lakehouse--Sales--DWG.Customer",
+    id: str = "object-Lakehouse--Sales--Tables--DWG.Customer",
     kind: str = "build_table",
-    resource_node_id: str = "Lakehouse/Sales/DWG.Customer",
+    resource_node_id: str = "Lakehouse/Sales/Tables/DWG.Customer",
     executor: str = "spark_sql",
     payload: str | None = None,
     payload_sha256: str | None = None,

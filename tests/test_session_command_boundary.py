@@ -551,7 +551,7 @@ def _installed(root, *, physical: str):
 
     repository = single_document_repository(
         root / f"estate-{physical}",
-        documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
+        documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
     return installed_catalogue(repository, item_bindings((ITEM, physical)))
 

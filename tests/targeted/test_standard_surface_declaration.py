@@ -59,7 +59,7 @@ def _surface(repository, item_text: str):
 @pytest.mark.parametrize(
     "item_text,document",
     [
-        (ITEM, {"DWG__Customer.py": lakehouse_table("DWG.Customer")}),
+        (ITEM, {"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")}),
         (WAREHOUSE_ITEM, {"DWG.Customer.sql": warehouse_table("DWG.Customer")}),
     ],
 )
@@ -120,7 +120,7 @@ def test_a_lakehouse_receives_weavers_schema(tmp_path):
     repository = single_document_repository(
         tmp_path / "repo",
         item=ITEM,
-        documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
+        documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
     assert "_" in {schema.schema for schema in repository[ITEM].schemas}

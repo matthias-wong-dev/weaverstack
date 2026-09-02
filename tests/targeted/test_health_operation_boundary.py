@@ -84,7 +84,9 @@ def _installed_catalogue() -> Catalogue:
         rows={
             WeaverItemId.parse(RAW): {
                 INSTALLATION.name: (installation_row(RAW, "Raw_LH"),),
-                REGISTRY.name: (registry_row(document_id(f"{RAW}/Sales.Order")),),
+                REGISTRY.name: (
+                    registry_row(document_id(f"{RAW}/Tables/Sales.Order")),
+                ),
             }
         }
     )
@@ -304,7 +306,7 @@ def test_activity_names_the_target_each_object_is_installed_in():
 
     found = load_activity(history, targets=bound)
 
-    assert found[0].object_id == f"{RAW}/Sales.Order"
+    assert found[0].object_id == f"{RAW}/Tables/Sales.Order"
     assert found[0].target == "Lakehouse/Raw_LH"
 
 

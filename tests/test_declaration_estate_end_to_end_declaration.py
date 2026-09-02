@@ -71,9 +71,9 @@ def test_every_object_is_classified_from_its_filename_and_item(authored):
         name: (document.language, document.kind) for name, document in authored.items()
     } == {
         "Lakehouse/Sales/Files/Sales.OrderExport": (PYTHON, "Folder"),
-        "Lakehouse/Sales/Sales.Order": (PYTHON, "Table"),
-        "Lakehouse/Sales/Sales.Customer": (PYTHON, "Table"),
-        "Lakehouse/Sales/Sales.OrderSummary": (SPARK_SQL, "Table"),
+        "Lakehouse/Sales/Tables/Sales.Order": (PYTHON, "Table"),
+        "Lakehouse/Sales/Tables/Sales.Customer": (PYTHON, "Table"),
+        "Lakehouse/Sales/Tables/Sales.OrderSummary": (SPARK_SQL, "Table"),
         "Warehouse/Reporting/Sales.Customer": (SQL, "Table"),
         "Warehouse/Reporting/Reporting.OrderReport": (SQL, "Table"),
         "Warehouse/Reporting/Reporting.OrderView": (SQL, "View"),
@@ -88,7 +88,7 @@ def test_one_id_belongs_to_two_items_without_ambiguity(authored):
     the item is part of the identity, so there is nothing left to resolve.
     """
 
-    lakehouse = authored["Lakehouse/Sales/Sales.Customer"]
+    lakehouse = authored["Lakehouse/Sales/Tables/Sales.Customer"]
     warehouse = authored["Warehouse/Reporting/Sales.Customer"]
     assert lakehouse.qualified == warehouse.qualified == "Sales.Customer"
     assert lakehouse.language == PYTHON and warehouse.language == SQL
@@ -100,7 +100,7 @@ def test_one_id_belongs_to_two_items_without_ambiguity(authored):
 
 @weaver_test()
 def test_a_python_table_carries_its_full_contract(authored):
-    document = authored["Lakehouse/Sales/Sales.Order"].document
+    document = authored["Lakehouse/Sales/Tables/Sales.Order"].document
     assert document.primary_key == ("Order id",)
     assert document.not_null == ("Order id", "Order date")
     assert document.comparison_columns == ("Last modified",)
@@ -141,7 +141,7 @@ def test_a_view_prohibits_rebuild_with_its_reason(authored):
 
 @weaver_test()
 def test_a_spark_table_declares_schema_and_dependencies(authored):
-    document = authored["Lakehouse/Sales/Sales.OrderSummary"].document
+    document = authored["Lakehouse/Sales/Tables/Sales.OrderSummary"].document
     assert [column.name for column in document.schema] == [
         "Customer id",
         "Order count",
@@ -158,7 +158,7 @@ def test_a_spark_table_declares_schema_and_dependencies(authored):
 
 @weaver_test()
 def test_python_objects_name_their_class_for_the_file(authored):
-    assert authored["Lakehouse/Sales/Sales.Order"].class_name == "Sales__Order"
+    assert authored["Lakehouse/Sales/Tables/Sales.Order"].class_name == "Sales__Order"
     assert (
         authored["Lakehouse/Sales/Files/Sales.OrderExport"].class_name
         == "Sales__OrderExport"
@@ -175,7 +175,7 @@ def test_lib_files_travel_with_their_item_but_are_not_objects(repository):
 
 @weaver_test()
 def test_the_spark_table_stages_through_a_temporary_view(authored):
-    analysis = authored["Lakehouse/Sales/Sales.OrderSummary"].sql_analysis
+    analysis = authored["Lakehouse/Sales/Tables/Sales.OrderSummary"].sql_analysis
     assert analysis.statement_count == 2
     assert analysis.result_set_count == 1
     assert analysis.permanent_ddl == ()
@@ -219,9 +219,11 @@ def test_references_across_every_language(authored):
         for name, document in authored.items()
     } == {
         "Lakehouse/Sales/Files/Sales.OrderExport": [],
-        "Lakehouse/Sales/Sales.Order": [],
-        "Lakehouse/Sales/Sales.Customer": [],
-        "Lakehouse/Sales/Sales.OrderSummary": ["Sales.Cancelled", "Sales.Order"],
+        # Both tables import ``Files.Sales__OrderExport``, and the module inside
+        # an area is what a Python reference is read from.
+        "Lakehouse/Sales/Tables/Sales.Order": ["Sales.OrderExport"],
+        "Lakehouse/Sales/Tables/Sales.Customer": ["Sales.OrderExport"],
+        "Lakehouse/Sales/Tables/Sales.OrderSummary": ["Sales.Cancelled", "Sales.Order"],
         "Warehouse/Reporting/Sales.Customer": ["Sales_LH.Sales.Customer"],
         "Warehouse/Reporting/Reporting.OrderReport": [
             "Sales.Customer",
@@ -234,7 +236,7 @@ def test_references_across_every_language(authored):
 
 @weaver_test()
 def test_the_spark_temporary_view_is_not_a_reference(authored):
-    document = authored["Lakehouse/Sales/Sales.OrderSummary"]
+    document = authored["Lakehouse/Sales/Tables/Sales.OrderSummary"]
     assert "recent" not in str(document.discovered_references)
 
 
@@ -258,7 +260,7 @@ def test_comments_in_the_fixtures_contribute_nothing(authored):
 def test_a_declaration_sits_beside_what_was_discovered(authored):
     """Declaration overrides discovery; both are kept so a lint can compare."""
 
-    summary = authored["Lakehouse/Sales/Sales.OrderSummary"]
+    summary = authored["Lakehouse/Sales/Tables/Sales.OrderSummary"]
     assert [str(d) for d in summary.declared_dependencies] == ["Sales.Order"]
     assert "Sales.Cancelled" in [str(r) for r in summary.discovered_references]
 
@@ -308,10 +310,10 @@ def test_an_item_signature_moves_only_for_its_own_content(repository, tmp_path):
 def test_the_declaration_orders_upstream_before_downstream(repository):
     order = repository.dependency_graph.order()
     assert order.index("Lakehouse/Sales/Files/Sales.OrderExport") < order.index(
-        "Lakehouse/Sales/Sales.Order"
+        "Lakehouse/Sales/Tables/Sales.Order"
     )
-    assert order.index("Lakehouse/Sales/Sales.Order") < order.index(
-        "Lakehouse/Sales/Sales.OrderSummary"
+    assert order.index("Lakehouse/Sales/Tables/Sales.Order") < order.index(
+        "Lakehouse/Sales/Tables/Sales.OrderSummary"
     )
     assert order.index("Warehouse/Reporting/Reporting.OrderReport") < order.index(
         "Warehouse/Reporting/Reporting.OrderView"
@@ -330,12 +332,12 @@ def test_the_layers_show_what_can_run_together(repository, authored):
             "Warehouse/Reporting/Sales.Customer",
         ),
         (
-            "Lakehouse/Sales/Sales.Customer",
-            "Lakehouse/Sales/Sales.Order",
+            "Lakehouse/Sales/Tables/Sales.Customer",
+            "Lakehouse/Sales/Tables/Sales.Order",
             "Warehouse/Reporting/Reporting.OrderReport",
         ),
         (
-            "Lakehouse/Sales/Sales.OrderSummary",
+            "Lakehouse/Sales/Tables/Sales.OrderSummary",
             "Warehouse/Reporting/Reporting.OrderView",
         ),
     )
@@ -388,7 +390,7 @@ def test_descendants_are_what_a_rebuild_would_uncertify(repository):
             "Lakehouse/Sales/Files/Sales.OrderExport"
         )
     ) == {
-        "Lakehouse/Sales/Sales.Order",
-        "Lakehouse/Sales/Sales.Customer",
-        "Lakehouse/Sales/Sales.OrderSummary",
+        "Lakehouse/Sales/Tables/Sales.Order",
+        "Lakehouse/Sales/Tables/Sales.Customer",
+        "Lakehouse/Sales/Tables/Sales.OrderSummary",
     }

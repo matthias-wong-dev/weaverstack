@@ -55,7 +55,7 @@ def test_an_unused_shortcut_still_orders_its_two_items(tmp_path):
     _write(
         root,
         "Lakehouse/Curated/shortcuts.py",
-        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Lakehouse/Raw/Sales.Customer",\n)\n',
+        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Lakehouse/Raw/Tables/Sales.Customer",\n)\n',
     )
     repository = parse_item_repository(Location(str(root)))
     layer_of = {
@@ -103,10 +103,10 @@ def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
     root = _estate(tmp_path)
     _write(
         root,
-        "Lakehouse/Curated/Sales__Summary.py",
+        "Lakehouse/Curated/Tables/Sales__Summary.py",
         _table("Sales.Summary").replace(
             "from weaver import Table",
-            "from weaver import Table\nfrom Sales__Audited import Sales__Audited",
+            "from weaver import Table\nfrom Tables.Sales__Audited import Sales__Audited",
         ),
     )
     _write(
@@ -130,7 +130,7 @@ def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
     _write(
         root,
         "Warehouse/Reporting/shortcuts.yml",
-        "logical:\n  Warehouse/Reporting/Sales.Landed: Lakehouse/Curated/Sales.Customer\n",
+        "logical:\n  Warehouse/Reporting/Sales.Landed: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
 
     with pytest.raises(GraphError, match="item dependency cycle"):

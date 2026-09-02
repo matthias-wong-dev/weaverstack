@@ -101,7 +101,10 @@ def test_the_estate_declares_both_physical_sides(repository):
         if shortcut.destination_identity is None
     ]
     assert authored == [
-        ("Warehouse/Reporting/Rpt.PortableCustomer", "Lakehouse/Sales/DWG.Customer")
+        (
+            "Warehouse/Reporting/Rpt.PortableCustomer",
+            "Lakehouse/Sales/Tables/DWG.Customer",
+        )
     ]
     assert all(
         shortcut.destination_identity is None or shortcut.relative_path == ""
@@ -132,7 +135,7 @@ def test_the_warehouse_waits_for_the_lakehouse_it_reads(plan):
     while the crossing between them was stale.
     """
 
-    produced = _when(plan, "Lakehouse--Sales--DWG.Customer")
+    produced = _when(plan, "Lakehouse--Sales--Tables--DWG.Customer")
     refreshed = _when(plan, "refresh-sql-endpoint-Lakehouse--Sales")
     shortcut = _when(plan, "shortcuts-Warehouse--Reporting")
     reported = _when(plan, "Warehouse--Reporting--Rpt.CustomerReport")

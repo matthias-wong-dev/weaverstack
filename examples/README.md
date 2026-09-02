@@ -149,8 +149,8 @@ argument rather than a `load()` one, because an authored `read()` is called by
 Weaver and takes nothing, so whatever it may reach is set before the load
 begins.
 
-`Sales.OrderSummary` is authored as `Sales.OrderSummary.sql` and
-installed as `Sales__OrderSummary.py` — a `SparkSqlTable` carrying the
+`Sales.OrderSummary` is authored as `Tables/Sales.OrderSummary.sql` and
+installed as `Tables/Sales__OrderSummary.py`, a `SparkSqlTable` carrying the
 authored SQL. Nothing about loading it differs, which is the point: the
 whole Delta load lifecycle lives in one place, so a table authored in SQL
 and one authored in Python cannot come to behave differently.

@@ -50,7 +50,7 @@ from weaver.locations import Location
 
 ITEM = "Lakehouse/Landing"
 FOLDER = f"{ITEM}/Files/ACQSC.HarmSurveyXlsx"
-CONSUMER = f"{ITEM}/ACQSC.Consumer"
+CONSUMER = f"{ITEM}/Tables/ACQSC.Consumer"
 TARGET = "Lakehouse/Drop/Files/ACQSC/HarmSurveyXlsx"
 
 
@@ -74,7 +74,7 @@ def estate(tmp_path):
     )
     _write(
         root,
-        f"{ITEM}/ACQSC__Consumer.py",
+        f"{ITEM}/Tables/ACQSC__Consumer.py",
         '"""\n'
         "Table ID: ACQSC.Consumer\n"
         "Description: Reads the shortcut.\n"
@@ -360,10 +360,10 @@ def test_a_pointer_standing_where_a_document_is_declared_is_unpicked(tmp_path):
     """
 
     repository = single_document_repository(
-        tmp_path, documents={"DWG__Portable.py": lakehouse_table("DWG.Portable")}
+        tmp_path, documents={"Tables/DWG__Portable.py": lakehouse_table("DWG.Portable")}
     )
     item = next(model.identity for model in repository.items)
-    identity = document_id(f"{item}/DWG.Portable")
+    identity = document_id(f"{item}/Tables/DWG.Portable")
     target = bound_target(id="landing", item_id="Landing_LH")
 
     plan = plan_item_build(
@@ -619,9 +619,9 @@ def test_a_logical_shortcut_still_carries_impact_to_its_consumer(tmp_path):
     """
 
     repository = shortcut_repository(tmp_path / "repo")
-    source = document_id("Lakehouse/Raw/DWG.Customer")
-    destination = document_id("Lakehouse/Curated/DWG.PortableCustomer")
-    view = document_id("Lakehouse/Curated/DWG.CustomerName")
+    source = document_id("Lakehouse/Raw/Tables/DWG.Customer")
+    destination = document_id("Lakehouse/Curated/Tables/DWG.PortableCustomer")
+    view = document_id("Lakehouse/Curated/Tables/DWG.CustomerName")
     selected = {source, destination, view}
     declared = declared_signatures(repository, selected)
 
@@ -656,10 +656,10 @@ def test_a_changed_runtime_artefact_still_ends_the_walk(tmp_path):
     from weaver.etl import runtime_artefacts
 
     repository = single_document_repository(
-        tmp_path, documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")}
+        tmp_path, documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")}
     )
     item = next(model.identity for model in repository.items)
-    table = document_id(f"{item}/DWG.Customer")
+    table = document_id(f"{item}/Tables/DWG.Customer")
     artefact = next(
         each
         for each in runtime_artefacts(repository)
@@ -698,13 +698,13 @@ def test_a_same_item_native_dependency_still_carries_impact(tmp_path):
     repository = single_document_repository(
         tmp_path,
         documents={
-            "DWG__Customer.py": lakehouse_table(table),
-            "DWG.ActiveCustomer.sql": spark_view(view, depends_on=table),
+            "Tables/DWG__Customer.py": lakehouse_table(table),
+            "Tables/DWG.ActiveCustomer.sql": spark_view(view, depends_on=table),
         },
     )
     item = next(model.identity for model in repository.items)
-    producer = document_id(f"{item}/{table}")
-    consumer = document_id(f"{item}/{view}")
+    producer = document_id(f"{item}/Tables/{table}")
+    consumer = document_id(f"{item}/Tables/{view}")
     declared = declared_signatures(repository, {producer, consumer})
 
     impact = determine_impact(

@@ -269,12 +269,12 @@ def test_the_live_line_reports_the_innermost_open_frame():
     with ConsoleSession(progress=out) as session:
         with session.task("Load"):
             with session.step("Execute"):
-                with session.substep("Lakehouse/Sales/DWG.Customer"):
+                with session.substep("Lakehouse/Sales/Tables/DWG.Customer"):
                     during = out.getvalue()
 
     latest = during.rsplit("\r", 2)[-1]
     assert latest.startswith("⋯")
-    assert latest.split()[1] == "Lakehouse/Sales/DWG.Customer"
+    assert latest.split()[1] == "Lakehouse/Sales/Tables/DWG.Customer"
 
 
 @weaver_test()
@@ -394,7 +394,7 @@ def test_a_run_s_timings_ride_its_completion_document(session):
 
     with session.task("Load"):
         with session.step("Execute"):
-            with session.substep("Lakehouse/Sales/DWG.Customer"):
+            with session.substep("Lakehouse/Sales/Tables/DWG.Customer"):
                 pass
 
     document = _completion_document(
@@ -408,7 +408,7 @@ def test_a_run_s_timings_ride_its_completion_document(session):
     )
 
     assert [entry["name"] for entry in document["timings"]] == [
-        "Lakehouse/Sales/DWG.Customer",
+        "Lakehouse/Sales/Tables/DWG.Customer",
         "Execute",
         "Load",
     ]

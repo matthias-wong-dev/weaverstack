@@ -46,7 +46,7 @@ def _write(root, relative: str, text: str) -> None:
 def lakehouse(tmp_path):
     return single_document_repository(
         tmp_path / "repo",
-        documents={"DWG__Customer.py": lakehouse_table(CUSTOMER)},
+        documents={"Tables/DWG__Customer.py": lakehouse_table(CUSTOMER)},
     )
 
 
@@ -165,7 +165,7 @@ def test_each_artefact_becomes_one_action_carrying_its_own_bytes(lakehouse):
     assert [action.kind for action in actions] == ["write_file"]
     action = actions[0]
     assert action.executor == "load_file"
-    assert action.resource_node_id == f"{ITEM}/file:{LOAD_ROOT}/DWG__Customer.py"
+    assert action.resource_node_id == f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Customer.py"
     assert b"class DWG__Customer" in payloads[action.payload]
 
 

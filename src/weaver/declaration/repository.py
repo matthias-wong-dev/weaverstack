@@ -31,9 +31,11 @@ from .metadata import (
     VIEW,
 )
 from .model import (
+    AREAS,
     FILES,
     ITEM_TYPES,
     LAKEHOUSE,
+    TABLES,
     WAREHOUSE,
     RepositoryShortcut,
     ShortcutDeclaration,
@@ -89,7 +91,7 @@ VALIDATION_DIRECTORIES = {"tests": TEST, "assumptions": ASSUMPTION}
 #: The subdirectories an item may author, for the message that lists them.
 _AUTHORED_SUBDIRECTORIES = (
     "only schemas/, lib/, tests/, assumptions/, Warehouse programmables/ and "
-    "Lakehouse Files/ are authored subdirectories of an item"
+    "Lakehouse Tables/ and Files/ are authored subdirectories of an item"
 )
 
 
@@ -132,7 +134,7 @@ def _read_validation(
             f"{_directory_for(source.document.kind)}/"
         )
 
-    identity = WeaverDocumentId(item, source.object_id)
+    identity = WeaverDocumentId.validation(item, source.object_id)
     source = replace(source, logical_id=identity)
     _insert_exact_case(source_documents, identity, source, relative, what="declaration")
 
@@ -313,6 +315,10 @@ def read_repository_fragment(
             programmables[programmable.identity] = programmable
         else:
             source = read_source_document(path, data, item.item_type)
+            # A fragment is composed from a package-owned path, and it is given
+            # the identity an authored file in the same area would get, so
+            # Weaver-owned content and user content spell one Folder or one
+            # table the same way.
             identity = WeaverDocumentId(
                 item, source.object_id, is_files=within[0] == FILES
             )
@@ -374,22 +380,33 @@ def _standard_parts(authored: RepositoryPart) -> tuple[RepositoryPart, ...]:
     return tuple(parts)
 
 
+#: What a declaration's own key says it is, and the directory that holds it.
+#: Read from the bytes, so a misplaced file is told the one move it needs.
+_DECLARED_DIRECTORY = {
+    b"Table ID:": TABLES,
+    b"View ID:": TABLES,
+    b"Folder ID:": FILES,
+    b"Test ID:": "tests",
+    b"Assumption ID:": "assumptions",
+}
+
+
+def _declared_directory(root: Location, store: Store, relative: str) -> str | None:
+    """Where a misplaced source file belongs, from the key it declares."""
+
+    if not relative.endswith((".py", ".sql")):
+        return None
+    data = store.read(root.join(*relative.split("/")))
+    for marker, directory in _DECLARED_DIRECTORY.items():
+        if marker in data:
+            return directory
+    return None
+
+
 def _looks_like_weaver_declaration(root: Location, store: Store, relative: str) -> bool:
     """Whether a misplaced source file carries Weaver declaration metadata."""
 
-    if not relative.endswith((".py", ".sql")):
-        return False
-    data = store.read(root.join(*relative.split("/")))
-    return any(
-        marker in data
-        for marker in (
-            b"Table ID:",
-            b"View ID:",
-            b"Folder ID:",
-            b"Test ID:",
-            b"Assumption ID:",
-        )
-    )
+    return _declared_directory(root, store, relative) is not None
 
 
 def _has_misplaced_weaver_structure(
@@ -514,7 +531,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         within = parts[2:]
         if within[0] == "schemas" and within == ["schemas"]:
             continue
-        if within[0] == FILES and within == [FILES] and item.item_type == LAKEHOUSE:
+        if within[0] in AREAS and len(within) == 1 and item.item_type == LAKEHOUSE:
             continue
         if within[0] == "lib" and item.item_type == LAKEHOUSE:
             continue
@@ -526,9 +543,17 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             continue
         if within[0] in VALIDATION_DIRECTORIES and len(within) == 1:
             continue
+        if within[0] in AREAS:
+            if item.item_type != LAKEHOUSE:
+                raise DiscoveryError(
+                    f"{relative}: {within[0]}/ belongs to a Lakehouse item"
+                )
+            raise DiscoveryError(
+                f"{relative}: a declaration lives directly under {within[0]}/, "
+                "with no further subdirectories"
+            )
         if within[0] in {
             "schemas",
-            FILES,
             "lib",
             PROGRAMMABLES_DIRECTORY,
             *VALIDATION_DIRECTORIES,
@@ -643,19 +668,26 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             )
             continue
 
-        is_files = within[0] == FILES
-        if is_files:
+        area = within[0] if within[0] in AREAS else None
+        if area is not None:
             if item.item_type != LAKEHOUSE:
-                raise DiscoveryError(f"{relative}: Files/ belongs to a Lakehouse item")
+                raise DiscoveryError(f"{relative}: {area}/ belongs to a Lakehouse item")
             if len(within) != 2:
                 raise DiscoveryError(
-                    f"{relative}: Folder documents live directly under Files/"
+                    f"{relative}: a declaration lives directly under {area}/, "
+                    "with no further subdirectories"
                 )
+        elif item.item_type == LAKEHOUSE:
+            directory = _declared_directory(root, store, relative)
+            if directory is not None:
+                raise DiscoveryError(
+                    _misplaced_lakehouse_declaration(relative, within, directory)
+                )
+            continue
         elif len(within) != 1:
             if _looks_like_weaver_declaration(root, store, relative):
                 raise DiscoveryError(
-                    f"{relative}: a Weaver object declaration belongs at the "
-                    "item root or directly under Files/"
+                    f"{relative}: a Weaver object declaration belongs at the item root"
                 )
             continue
 
@@ -667,15 +699,13 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
             store.read(root.join(*relative.split("/"))),
             item.item_type,
         )
-        if not _valid_object_placement(
-            item.item_type, is_files=is_files, source=source
-        ):
-            location = "Files/" if is_files else f"{item.item_type} item root"
+        if not _valid_object_placement(item.item_type, area=area, source=source):
+            location = f"{area}/" if area else f"{item.item_type} item root"
             raise DiscoveryError(
                 f"{relative}: {source.document.kind} in {source.language} does not "
                 f"belong at the {location}"
             )
-        identity = WeaverDocumentId(item, source.object_id, is_files=is_files)
+        identity = WeaverDocumentId(item, source.object_id, is_files=area == FILES)
         source = replace(source, logical_id=identity)
         _insert_exact_case(
             source_documents, identity, source, relative, what="document"
@@ -741,14 +771,31 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     )
 
 
-def _valid_object_placement(item_type: str, *, is_files: bool, source) -> bool:
+def _valid_object_placement(item_type: str, *, area: str | None, source) -> bool:
     """Whether an object document occupies a valid location in its owning item."""
 
     if item_type == WAREHOUSE:
-        return not is_files and source.language == SQL and source.kind in (TABLE, VIEW)
-    if is_files:
+        return area is None and source.language == SQL and source.kind in (TABLE, VIEW)
+    if area == FILES:
         return source.kind == FOLDER
-    return source.kind in (TABLE, VIEW)
+    return area == TABLES and source.kind in (TABLE, VIEW)
+
+
+def _misplaced_lakehouse_declaration(
+    relative: str, within: list[str], directory: str
+) -> str:
+    """What to tell an author whose declaration is outside the directory for it.
+
+    A Lakehouse holds its Delta tables under ``Tables`` and everything else
+    under ``Files``, and a validation under ``tests`` or ``assumptions``. The
+    file's own key says which, so the message names one move.
+    """
+
+    item = relative[: -len("/".join(within)) - 1]
+    return (
+        f"{relative}: a Lakehouse declaration lives under {directory}/. Move "
+        f"this file to {item}/{directory}/{within[-1]}."
+    )
 
 
 def _generated_content(authored: RepositoryPart) -> RepositoryPart:

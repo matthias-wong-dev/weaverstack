@@ -52,7 +52,9 @@ def test_warehouse_procedure_address_comes_from_the_catalogue_graph(catalogue):
 def test_python_table_address_and_class_come_from_the_catalogue_graph(catalogue):
     resolved = _resolved(catalogue)[ORDER]
 
-    assert resolved.dispatch_location == "Lakehouse/Raw_LH/_/Load/Sales__Order.py"
+    assert (
+        resolved.dispatch_location == "Lakehouse/Raw_LH/_/Load/Tables/Sales__Order.py"
+    )
     assert resolved.expected_class == "Sales__Order"
     assert resolved.valid
 
@@ -61,7 +63,9 @@ def test_python_table_address_and_class_come_from_the_catalogue_graph(catalogue)
 def test_compiled_sql_table_uses_its_deployed_python_address(catalogue):
     resolved = _resolved(catalogue)[DAILY]
 
-    assert resolved.dispatch_location == "Lakehouse/Raw_LH/_/Load/Sales__Daily.py"
+    assert (
+        resolved.dispatch_location == "Lakehouse/Raw_LH/_/Load/Tables/Sales__Daily.py"
+    )
     assert resolved.expected_class == "Sales__Daily"
 
 

@@ -37,8 +37,8 @@ def chain(tmp_path):
     return single_document_repository(
         tmp_path,
         documents={
-            "DWG__Customer.py": lakehouse_table(TABLE),
-            "DWG.ActiveCustomer.sql": spark_view(VIEW, depends_on=TABLE),
+            "Tables/DWG__Customer.py": lakehouse_table(TABLE),
+            "Tables/DWG.ActiveCustomer.sql": spark_view(VIEW, depends_on=TABLE),
         },
     )
 
@@ -136,8 +136,8 @@ def test_a_signature_is_derived_from_the_declaration_not_stored_anywhere(
     twin = single_document_repository(
         tmp_path / "twin",
         documents={
-            "DWG__Customer.py": lakehouse_table(TABLE),
-            "DWG.ActiveCustomer.sql": spark_view(VIEW, depends_on=TABLE),
+            "Tables/DWG__Customer.py": lakehouse_table(TABLE),
+            "Tables/DWG.ActiveCustomer.sql": spark_view(VIEW, depends_on=TABLE),
         },
     )
 
@@ -253,7 +253,7 @@ def test_an_object_that_prohibits_rebuild_is_never_dropped(tmp_path):
         "Description: A declared table.\nProhibit rebuild: true",
     )
     repository = single_document_repository(
-        tmp_path, documents={"DWG__Customer.py": declaration}
+        tmp_path, documents={"Tables/DWG__Customer.py": declaration}
     )
     stale = {document_id(TABLE): registered_document(TABLE, signature="an-old-hash")}
 

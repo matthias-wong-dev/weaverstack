@@ -142,8 +142,10 @@ def build(tmp_path: Path, *, schemas: list[str], objects: dict[str, str]) -> Loc
         (directory / f"{schema}.yml").write_text(
             f"Schema ID: {schema}\n", encoding="utf-8"
         )
+    tables = tmp_path / ITEM / "Tables"
+    tables.mkdir(parents=True, exist_ok=True)
     for name, text in objects.items():
-        (tmp_path / ITEM / name).write_text(textwrap.dedent(text), encoding="utf-8")
+        (tables / name).write_text(textwrap.dedent(text), encoding="utf-8")
     return Location(str(tmp_path))
 
 
@@ -165,7 +167,10 @@ def test_a_declared_schema_lets_the_object_read(tmp_path):
         schemas=["Sales"],
         objects={"Sales__Thing.py": PY_TABLE.format(schema="Sales")},
     )
-    assert f"{ITEM}/Sales.Thing" in parse_item_repository(root).dependency_graph.nodes
+    assert (
+        f"{ITEM}/Tables/Sales.Thing"
+        in parse_item_repository(root).dependency_graph.nodes
+    )
 
 
 @weaver_test()

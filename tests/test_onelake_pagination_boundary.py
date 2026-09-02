@@ -39,7 +39,7 @@ def test_a_single_page_returns_its_entries(monkeypatch):
     store = _store(
         monkeypatch,
         headers={},
-        paths=[{"name": "lh.Lakehouse/Files/a.csv", "contentLength": "10"}],
+        paths=[{"name": "lh.Lakehouse/Files/Tables/a.csv", "contentLength": "10"}],
     )
     entries = store.list(
         Location("https://onelake.dfs.fabric.microsoft.com/ws/lh/Files")
@@ -52,7 +52,7 @@ def test_a_continuation_token_fails_loudly(monkeypatch):
     store = _store(
         monkeypatch,
         headers={"x-ms-continuation": "next-page-token"},
-        paths=[{"name": "lh.Lakehouse/Files/a.csv", "contentLength": "10"}],
+        paths=[{"name": "lh.Lakehouse/Files/Tables/a.csv", "contentLength": "10"}],
     )
     with pytest.raises(NotImplementedError, match="pagination is not implemented"):
         store.list(Location("https://onelake.dfs.fabric.microsoft.com/ws/lh/Files"))

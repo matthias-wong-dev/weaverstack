@@ -5,25 +5,25 @@ from weaver import Shortcut
 SRC__Customer = Shortcut(
     shortcut_type="table",
     target_type="logical",
-    target="Lakehouse/Landing/LAND.Customer",
+    target="Lakehouse/Landing/Tables/LAND.Customer",
 )
 
 SRC__Transaction = Shortcut(
     shortcut_type="table",
     target_type="logical",
-    target="Lakehouse/Landing/LAND.Transaction",
+    target="Lakehouse/Landing/Tables/LAND.Transaction",
 )
 
 SRC__Product = Shortcut(
     shortcut_type="table",
     target_type="logical",
-    target="Lakehouse/Landing/LAND.Product",
+    target="Lakehouse/Landing/Tables/LAND.Product",
 )
 
 SRC__Region = Shortcut(
     shortcut_type="table",
     target_type="logical",
-    target="Lakehouse/Landing/LAND.Region",
+    target="Lakehouse/Landing/Tables/LAND.Region",
 )
 
 SRC__SourceEvents = Shortcut(

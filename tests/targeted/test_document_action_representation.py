@@ -46,7 +46,7 @@ def lakehouse_customer(tmp_path):
     return single_document_repository(
         tmp_path,
         documents={
-            "DWG__Customer.py": lakehouse_table(
+            "Tables/DWG__Customer.py": lakehouse_table(
                 "DWG.Customer",
                 columns={"CustomerId": "string", "CustomerName": "string"},
             )
@@ -60,7 +60,7 @@ def test_a_lakehouse_table_renders_a_spark_sql_build_action(lakehouse_customer):
 
     assert rendered.action.kind == "build_table"
     assert rendered.action.executor == "spark_sql"
-    assert rendered.action.resource_node_id == "Lakehouse/Sales/DWG.Customer"
+    assert rendered.action.resource_node_id == "Lakehouse/Sales/Tables/DWG.Customer"
 
 
 @weaver_test()
@@ -69,7 +69,7 @@ def test_the_action_id_is_derived_from_the_document_identity(lakehouse_customer)
 
     rendered = _render(lakehouse_customer, "DWG.Customer")
 
-    assert rendered.action.id == "object-Lakehouse--Sales--DWG.Customer"
+    assert rendered.action.id == "object-Lakehouse--Sales--Tables--DWG.Customer"
 
 
 @weaver_test()
@@ -93,7 +93,7 @@ def test_the_payload_filename_carries_the_ddls_extension(lakehouse_customer):
 
     rendered = _render(lakehouse_customer, "DWG.Customer")
 
-    assert rendered.action.payload == "Lakehouse--Sales--DWG.Customer.spark.sql"
+    assert rendered.action.payload == "Lakehouse--Sales--Tables--DWG.Customer.spark.sql"
 
 
 @weaver_test()
@@ -149,8 +149,8 @@ def test_a_spark_view_renders_a_build_view_action(tmp_path):
     repository = single_document_repository(
         tmp_path,
         documents={
-            "DWG__Customer.py": lakehouse_table("DWG.Customer"),
-            "DWG.ActiveCustomer.sql": spark_view(
+            "Tables/DWG__Customer.py": lakehouse_table("DWG.Customer"),
+            "Tables/DWG.ActiveCustomer.sql": spark_view(
                 "DWG.ActiveCustomer", depends_on="DWG.Customer"
             ),
         },

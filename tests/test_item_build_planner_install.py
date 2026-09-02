@@ -266,7 +266,7 @@ def test_a_bound_shortcut_freezes_both_addresses_by_target_id(tmp_path):
     _write(
         root,
         "Lakehouse/Curated/shortcuts.py",
-        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Lakehouse/Raw/Sales.Customer",\n)\n',
+        'from weaver import Shortcut\n\nSales__Landed = Shortcut(\n    shortcut_type="table",\n    target_type="logical",\n    target="Lakehouse/Raw/Tables/Sales.Customer",\n)\n',
     )
     repository = _repository(root)
     store = FilesystemStore()
@@ -294,14 +294,14 @@ def test_a_bound_shortcut_freezes_both_addresses_by_target_id(tmp_path):
     authored = next(
         entry
         for entry in frozen["shortcuts"]
-        if entry["shortcut"] == "Lakehouse/Curated/Sales.Landed"
+        if entry["shortcut"] == "Lakehouse/Curated/Tables/Sales.Landed"
     )
     assert authored == {
-        "shortcut": "Lakehouse/Curated/Sales.Landed",
+        "shortcut": "Lakehouse/Curated/Tables/Sales.Landed",
         "type": "table",
         "path": "Tables/Sales",
         "name": "Landed",
-        "source": "Lakehouse/Raw/Sales.Customer",
+        "source": "Lakehouse/Raw/Tables/Sales.Customer",
         "source_area": "Tables",
         "source_object": "Customer",
         "source_schema": "Sales",
@@ -330,7 +330,7 @@ def test_a_shortcut_is_materialised_before_the_documents_that_use_it(tmp_path):
     # The source item produces the table, its endpoint catches up, and only then
     # does the consuming item's shortcut, and the document reading it, exist.
     assert (
-        at["object-Lakehouse--Curated--Sales.Customer"]
+        at["object-Lakehouse--Curated--Tables--Sales.Customer"]
         < at["refresh-sql-endpoint-Lakehouse--Curated"]
         < at["shortcuts-Warehouse--Reporting"]
         < at["object-Warehouse--Reporting--Sales.Customer"]
@@ -340,14 +340,14 @@ def test_a_shortcut_is_materialised_before_the_documents_that_use_it(tmp_path):
 @weaver_test()
 def test_a_physical_shortcut_can_feed_a_logical_warehouse_shortcut(tmp_path):
     root = _estate(tmp_path)
-    (root / "Lakehouse/Raw/Sales__Customer.py").unlink()
+    (root / "Lakehouse/Raw/Tables/Sales__Customer.py").unlink()
     _write(
         root,
         "Lakehouse/Raw/shortcuts.py",
         "from weaver import Shortcut\n\nSales__Customer = Shortcut(\n"
         '    shortcut_type="table",\n'
         '    target_type="physical",\n'
-        '    target="Lakehouse/External/Sales.Customer",\n'
+        '    target="Lakehouse/External/Tables/Sales.Customer",\n'
         '    workspace="Source Workspace",\n'
         ")\n",
     )
@@ -356,7 +356,7 @@ def test_a_physical_shortcut_can_feed_a_logical_warehouse_shortcut(tmp_path):
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n"
         "  Warehouse/Reporting/Sales.CustomerRaw: "
-        "Lakehouse/Raw/Sales.Customer\n",
+        "Lakehouse/Raw/Tables/Sales.Customer\n",
     )
     repository = _repository(root)
     store = FilesystemStore()
@@ -945,7 +945,7 @@ def test_each_affected_lakehouse_refreshes_inside_its_own_item_group(tmp_path):
     }
     # Each item's refresh closes that item, before the catalogue tail.
     assert (
-        at["object-Lakehouse--Raw--Sales.Customer"]
+        at["object-Lakehouse--Raw--Tables--Sales.Customer"]
         < at["refresh-sql-endpoint-Lakehouse--Raw"]
         < at["publish-registry"]
     )

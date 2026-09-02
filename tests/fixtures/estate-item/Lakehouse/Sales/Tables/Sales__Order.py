@@ -27,10 +27,10 @@ Revision notes:
   - 2026-07-23 Created.
 """
 
-from weaver import Table
+from Files.Sales__OrderExport import Sales__OrderExport
+from lib.dates import parse_order_date
 
-from .Files.Sales__OrderExport import Sales__OrderExport
-from .lib.dates import parse_order_date
+from weaver import Table
 
 
 class Sales__Order(Table):

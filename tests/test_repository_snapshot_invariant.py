@@ -42,7 +42,7 @@ def test_a_filesystem_source_is_copied_rather_than_read_in_place(tmp_path):
     ) as snapshot:
         assert snapshot != root.resolve()
         assert snapshot.is_dir()
-        assert (snapshot / "Lakehouse/Raw/Sales__Customer.py").is_file()
+        assert (snapshot / "Lakehouse/Raw/Tables/Sales__Customer.py").is_file()
 
 
 @weaver_test()
@@ -93,7 +93,7 @@ def test_editing_the_source_after_the_snapshot_does_not_change_the_repository(
     """The whole point: the build's view of the source is fixed at snapshot time."""
 
     root = _estate(tmp_path)
-    document = root / "Lakehouse/Raw/Sales__Customer.py"
+    document = root / "Lakehouse/Raw/Tables/Sales__Customer.py"
 
     with prepare_repository(
         Location(str(root)), source_store=FilesystemStore()
@@ -101,7 +101,7 @@ def test_editing_the_source_after_the_snapshot_does_not_change_the_repository(
         before = prepared.repository.signature
 
         document.write_text("# edited while the build was running\n", encoding="utf-8")
-        (root / "Lakehouse/Raw/Sales__Injected.py").write_text(
+        (root / "Lakehouse/Raw/Tables/Sales__Injected.py").write_text(
             "# a document that appeared mid-build\n", encoding="utf-8"
         )
 
@@ -109,7 +109,7 @@ def test_editing_the_source_after_the_snapshot_does_not_change_the_repository(
         identities = {
             str(identity) for identity in prepared.repository.source_documents
         }
-        assert "Lakehouse/Raw/Sales.Injected" not in identities
+        assert "Lakehouse/Raw/Tables/Sales.Injected" not in identities
 
 
 @weaver_test()

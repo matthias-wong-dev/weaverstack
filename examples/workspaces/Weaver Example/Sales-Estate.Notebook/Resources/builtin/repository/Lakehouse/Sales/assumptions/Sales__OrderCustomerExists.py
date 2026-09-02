@@ -17,8 +17,8 @@ Revision notes:
   - 2026-08-08 Created.
 """
 
-from Sales__Customer import Sales__Customer
-from Sales__Order import Sales__Order
+from Tables.Sales__Customer import Sales__Customer
+from Tables.Sales__Order import Sales__Order
 
 from weaver import Assumption
 

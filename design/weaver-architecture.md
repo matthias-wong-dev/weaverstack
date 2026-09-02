@@ -42,7 +42,8 @@ repository/
 │   ├── Raw/
 │   │   ├── schemas/
 │   │   │   └── Sales.yml
-│   │   ├── Sales__Customer.py
+│   │   ├── Tables/
+│   │   │   └── Sales__Customer.py
 │   │   ├── Files/
 │   │   │   └── Sales__Customer.py
 │   │   └── lib/
@@ -50,7 +51,8 @@ repository/
 │   ├── Curated/
 │   │   ├── schemas/
 │   │   │   └── Sales.yml
-│   │   └── Sales.Rollup.sql
+│   │   └── Tables/
+│   │       └── Sales.Rollup.sql
 │
 ├── Warehouse/
 │   └── Reporting/
@@ -95,8 +97,8 @@ Examples include:
 
 | Document | Represents |
 |----------|------------|
-| `Sales__Customer.py` | Python-authored Delta table |
-| `Sales.Rollup.sql` | Spark SQL object |
+| `Tables/Sales__Customer.py` | Python-authored Delta table |
+| `Tables/Sales.Rollup.sql` | Spark SQL object |
 | `Sales.Customer.sql` | T-SQL object |
 | `schemas/*.yml` | Schema declarations |
 | `shortcuts.py` | Fabric shortcuts a Lakehouse declares |
@@ -156,7 +158,7 @@ Each Weaver Document has a defined contract describing the artefacts it generate
 For example,
 
 ```
-Sales__Customer.py
+Tables/Sales__Customer.py
 
 ↓
 

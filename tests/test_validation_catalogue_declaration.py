@@ -47,7 +47,7 @@ def repository(tmp_path):
     """One table, one Test that reads it, and one Assumption over the same."""
 
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
-    _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
+    _write(tmp_path, "Lakehouse/Sales/Tables/Sales__Order.py", _table("Sales.Order"))
     _write(
         tmp_path,
         "Lakehouse/Sales/tests/Sales__OrdersReconcile.py",
@@ -116,7 +116,7 @@ def test_an_assumption_has_no_primary_key(repository):
 @weaver_test()
 def test_a_test_without_a_key_projects_a_null_key(tmp_path):
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
-    _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
+    _write(tmp_path, "Lakehouse/Sales/Tables/Sales__Order.py", _table("Sales.Order"))
     _write(
         tmp_path,
         "Lakehouse/Sales/tests/Sales__OrdersReconcile.py",
@@ -133,7 +133,7 @@ def test_a_test_without_a_key_projects_a_null_key(tmp_path):
 @weaver_test()
 def test_a_composite_key_is_projected_in_declared_order(tmp_path):
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
-    _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
+    _write(tmp_path, "Lakehouse/Sales/Tables/Sales__Order.py", _table("Sales.Order"))
     _write(
         tmp_path,
         "Lakehouse/Sales/tests/Sales__OrdersReconcile.py",
@@ -152,7 +152,7 @@ def test_a_composite_key_is_projected_in_declared_order(tmp_path):
 @weaver_test()
 def test_a_referenced_description_keeps_its_pointer(tmp_path):
     _write(tmp_path, "Lakehouse/Sales/schemas/Sales.yml", _schema("Sales"))
-    _write(tmp_path, "Lakehouse/Sales/Sales__Order.py", _table("Sales.Order"))
+    _write(tmp_path, "Lakehouse/Sales/Tables/Sales__Order.py", _table("Sales.Order"))
     _write(
         tmp_path,
         "Lakehouse/Sales/tests/Sales__OrdersReconcile.py",
@@ -224,8 +224,8 @@ def test_a_validation_dependency_names_the_logical_validation(repository):
 
     # The reference is kept exactly as the author wrote it, and a Python
     # dependency is written as an import.
-    assert ("OrdersReconcile", "Sales__Order") in edges
-    assert ("OrdersHaveCustomers", "Sales__Order") in edges
+    assert ("OrdersReconcile", "Tables.Sales__Order") in edges
+    assert ("OrdersHaveCustomers", "Tables.Sales__Order") in edges
 
 
 @weaver_test()

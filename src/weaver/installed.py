@@ -39,11 +39,14 @@ from .catalogue.tables import (
 )
 from .declaration.metadata import ASSUMPTION, TEST, ObjectId
 from .declaration.model import (
+    AREAS,
     FILE_SHAPE,
+    FILES,
     LAKEHOUSE,
     LOGICAL_TARGET,
     OBJECT_SHAPE,
     SCHEMA_SHORTCUT,
+    TABLES,
     WAREHOUSE,
     WeaverDocumentId,
     WeaverItemId,
@@ -94,10 +97,7 @@ _PYTHON_ID_SEPARATOR = "__"
 
 #: The one directory beneath an item that holds runtime source rather than
 #: declarations. An import of it names a helper, never a Weaver object.
-_LIB = "lib"
-
-#: The item-relative directory a Folder document lives in.
-_FILES = "Files"
+LIB = "lib"
 
 
 # --- nodes --------------------------------------------------------------------
@@ -527,19 +527,19 @@ def primitive_candidates(
             return ()
         return ((WAREHOUSE_PROCEDURE, load_procedure_id(item, identity.object_id)),)
     if object_type == "folder":
-        return (
-            (
-                PYTHON_FOLDER,
-                _deployed_file(item, f"{_FILES_PREFIX}{schema}__{name}.py"),
-            ),
-        )
+        return ((PYTHON_FOLDER, _deployed_file(item, f"{FILES}/{schema}__{name}.py")),)
     if object_type != "table":
         return ()
-    return ((PYTHON_TABLE, _deployed_file(item, f"{schema}__{name}.py")),)
+    return ((PYTHON_TABLE, _deployed_file(item, f"{TABLES}/{schema}__{name}.py")),)
 
 
 def _deployed_file(item: WeaverItemId, relative: str) -> WeaverDocumentId:
-    """A file in the deployed runtime tree, as the Registry stores it."""
+    """A file in the deployed runtime tree, as the Registry stores it.
+
+    The area is part of the path, because the runtime tree reproduces the
+    authored one: a Lakehouse Table module lands under ``Tables`` and a Folder
+    module under ``Files``.
+    """
 
     path = f"{LOAD_ROOT}/{relative}"
     directory, _, name = path.rpartition("/")
@@ -739,7 +739,7 @@ def _validations(catalogue: Catalogue, installations):
     for item, tables in catalogue.rows.items():
         target = installations.get(item)
         for row in tables.get(TEST_DICTIONARY.name, ()):
-            logical = WeaverDocumentId(
+            logical = WeaverDocumentId.validation(
                 item,
                 ObjectId(
                     schema=str(row.get("schema_name") or ""),
@@ -872,18 +872,22 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
     A row whose declaring object is neither registered nor a declared validation
     describes something declared and not installed, so it contributes no edge:
     the graph is of what is there.
+
+    A row names its declaring object in two columns, and an object and a
+    validation of one ``Schema.Object`` are stored the same way. The nodes settle
+    which it was: the graph already holds one of them and not the other.
     """
 
     found = []
     for item, tables in catalogue.rows.items():
         for row in tables.get(DEPENDENCY.name, ()):
-            consumer = stored_identity(
-                item,
-                str(row.get("referencing_schema_name") or ""),
-                str(row.get("referencing_object_name") or ""),
-            )
+            schema = str(row.get("referencing_schema_name") or "")
+            name = str(row.get("referencing_object_name") or "")
+            consumer = stored_identity(item, schema, name)
             if str(consumer) not in nodes:
-                continue
+                consumer = WeaverDocumentId.validation(item, ObjectId(schema, name))
+                if str(consumer) not in nodes:
+                    continue
             found.append(
                 _DependencyRow(
                     consumer=consumer,
@@ -1089,22 +1093,34 @@ def _python_module_identity(
     level = len(reference) - len(reference.lstrip("."))
     components = tuple(part for part in reference.split(".") if part)
     if level:
-        base = (_FILES,) if consumer.is_files else ()
+        area = consumer.area
+        base = (area,) if area else ()
         parents = level - 1
         if parents > len(base):
             # An import that leaves the item, which repository parsing
             # rejects. It names no Weaver object.
             return None
         components = base[: len(base) - parents] + components
-    if not components or components[0] == _LIB:
+    if not components or components[0] == LIB:
+        # A helper module. It is real source and it is not a Weaver object, so
+        # it orders nothing.
         return None
     parts = python_id_parts(components[-1])
     if len(parts) != 2 or not all(part.strip() for part in parts):
         return None
+    if len(components) != 2 or components[0] not in AREAS:
+        # An object module named without its area, which is how an estate built
+        # before the areas were explicit recorded one. Refused, so an ordering
+        # edge leaves the graph only when a build says it has.
+        raise CatalogueStateError(
+            f"{consumer} imports {reference!r}, which names an object module "
+            f"and no Lakehouse area. Build {consumer.item} again to record the "
+            "dependency as this Weaver spells it"
+        )
     return WeaverDocumentId(
         consumer.item,
         ObjectId(parts[0].strip(), parts[1].strip()),
-        is_files=components[0] == _FILES,
+        is_files=components[0] == FILES,
     )
 
 

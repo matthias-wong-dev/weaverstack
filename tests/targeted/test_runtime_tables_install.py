@@ -182,7 +182,7 @@ def test_a_loadable_table_and_folder_are_bookmarkable(estate):
 
     found = {str(one) for one in item_bookmarkable_objects(estate, item=item_id(ITEM))}
 
-    assert "Lakehouse/Sales/DWG.Customer" in found
+    assert "Lakehouse/Sales/Tables/DWG.Customer" in found
     assert "Lakehouse/Sales/Files/Raw.CustomerCsv" in found
 
 
@@ -547,7 +547,7 @@ def test_a_catalogue_table_cannot_be_dropped_by_a_managed_drop():
         assert "cannot be dropped" in str(raised.value)
 
     # And nothing else is spared by it.
-    _refuse_protected("Sales", "Customer", "Lakehouse/Sales/Sales.Customer")
+    _refuse_protected("Sales", "Customer", "Lakehouse/Sales/Tables/Sales.Customer")
 
 
 @weaver_test()
@@ -663,7 +663,7 @@ def _without_the_folder(tmp_path):
     root = tmp_path / "smaller"
     for relative, text in {
         f"{ITEM}/schemas/DWG.yml": schema_document("DWG"),
-        f"{ITEM}/DWG__Customer.py": lakehouse_table("DWG.Customer"),
+        f"{ITEM}/Tables/DWG__Customer.py": lakehouse_table("DWG.Customer"),
     }.items():
         path = root / relative
         path.parent.mkdir(parents=True, exist_ok=True)

@@ -102,7 +102,7 @@ class _Documents:
 
     def __getitem__(self, qualified: str):
         return self.repository.source_documents[
-            WeaverDocumentId.parse(f"{ITEM}/{qualified}")
+            WeaverDocumentId.parse(f"{ITEM}/Tables/{qualified}")
         ]
 
 
@@ -113,7 +113,7 @@ def _repo(tmp_path, files: dict[str, str], schemas=("_Control",)):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"Schema ID: {schema}\n", encoding="utf-8")
     for name, text in files.items():
-        path = root / ITEM / name
+        path = root / ITEM / "Tables" / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     return _Documents(
@@ -127,7 +127,7 @@ def test_an_object_in_an_underscore_schema_is_read_as_an_object(tmp_path):
     document = repo["_Control.Registry"]
     assert document.object_id.schema == "_Control"
     assert document.object_id.object == "Registry"
-    assert document.node_id == f"{ITEM}/_Control.Registry"
+    assert document.node_id == f"{ITEM}/Tables/_Control.Registry"
     assert repo.support_files == ()
 
 
@@ -199,7 +199,7 @@ def test_an_explicit_none_suppresses_discovery(tmp_path):
     consumer = _python_object(
         "Sales.Ignored",
         extra="Dependencies: []\n",
-        imports="from Sales__Order import Sales__Order\n",
+        imports="from Tables.Sales__Order import Sales__Order\n",
     )
     parent = _python_object("Sales.Order")
     repo = _repo(
@@ -209,13 +209,13 @@ def test_an_explicit_none_suppresses_discovery(tmp_path):
     )
     document = repo["Sales.Ignored"]
     assert document.referenced_object_ids  # discovery did see the import
-    assert repo.dependency_graph.upstream_of(f"{ITEM}/Sales.Ignored") == ()
+    assert repo.dependency_graph.upstream_of(f"{ITEM}/Tables/Sales.Ignored") == ()
 
 
 @weaver_test()
 def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):
     consumer = _python_object(
-        "Sales.Derived", imports="from Sales__Order import Sales__Order\n"
+        "Sales.Derived", imports="from Tables.Sales__Order import Sales__Order\n"
     )
     parent = _python_object("Sales.Order")
     repo = _repo(
@@ -223,8 +223,8 @@ def test_a_python_object_without_the_key_still_discovers_its_imports(tmp_path):
         {"Sales__Derived.py": consumer, "Sales__Order.py": parent},
         schemas=("Sales",),
     )
-    assert repo.dependency_graph.upstream_of(f"{ITEM}/Sales.Derived") == (
-        f"{ITEM}/Sales.Order",
+    assert repo.dependency_graph.upstream_of(f"{ITEM}/Tables/Sales.Derived") == (
+        f"{ITEM}/Tables/Sales.Order",
     )
 
 

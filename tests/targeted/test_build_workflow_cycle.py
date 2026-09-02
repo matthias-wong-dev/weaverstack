@@ -64,7 +64,7 @@ def estate(tmp_path):
     repository = single_document_repository(
         root,
         item="Lakehouse/Sales",
-        documents={"DWG__Customer.py": lakehouse_table("DWG.Customer")},
+        documents={"Tables/DWG__Customer.py": lakehouse_table("DWG.Customer")},
     )
 
     workspace = given_workspace(catalogue="Warehouse/Weaver")
@@ -279,7 +279,7 @@ def test_a_catalogue_that_certifies_the_document_plans_no_rebuild(estate):
         for _s, _b, action in result.plan.actions()
         if action.kind.startswith("build_")
     }
-    assert "Lakehouse/Sales/DWG.Customer" not in rebuilt
+    assert "Lakehouse/Sales/Tables/DWG.Customer" not in rebuilt
 
 
 @weaver_test()

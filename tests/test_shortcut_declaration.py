@@ -51,13 +51,13 @@ def test_a_table_shortcut_is_named_by_its_symbol(tmp_path):
         root,
         "Lakehouse/Curated",
         "Sales__Landed = Shortcut(\n"
-        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
         + ")\n",
     )
     repository = _parse(root)
 
     declaration = repository.shortcuts[0]
-    assert str(declaration.destination) == "Lakehouse/Curated/Sales.Landed"
+    assert str(declaration.destination) == "Lakehouse/Curated/Tables/Sales.Landed"
     assert declaration.relative_path == "Lakehouse/Curated/shortcuts.py"
     assert declaration.is_logical
 
@@ -115,7 +115,7 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
         root,
         "Warehouse/Reporting/shortcuts.yml",
         "logical:\n"
-        "  Warehouse/Reporting/Sales.Landed: Lakehouse/Curated/Sales.Customer\n"
+        "  Warehouse/Reporting/Sales.Landed: Lakehouse/Curated/Tables/Sales.Customer\n"
         "physical:\n"
         "  Warehouse/Reporting/Sales.External: Warehouse/Reference/Sales.Customer\n",
     )
@@ -140,14 +140,17 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
     [
         (
             "X = Shortcut(\n"
-            + _declaration("view", "logical", "Lakehouse/Raw/Sales.Customer")
+            + _declaration("view", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
             + ")",
             "belongs to a Warehouse item",
         ),
         (
             "Sales__X = Shortcut(\n"
             + _declaration(
-                "table", "logical", "Lakehouse/Raw/Sales.Customer", workspace="Other"
+                "table",
+                "logical",
+                "Lakehouse/Raw/Tables/Sales.Customer",
+                workspace="Other",
             )
             + ")",
             "cannot name a workspace",
@@ -160,7 +163,7 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
         ),
         (
             "Landed = Shortcut(\n"
-            + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+            + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
             + ")",
             "must be Schema__Object",
         ),
@@ -184,13 +187,15 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
         ),
         (
             "Sales__X = Shortcut(\n"
-            + _declaration("table", "sortof", "Lakehouse/Raw/Sales.Customer")
+            + _declaration("table", "sortof", "Lakehouse/Raw/Tables/Sales.Customer")
             + ")",
             "target_type must be one of logical, physical",
         ),
         (
             "Sales__X = Shortcut(\n"
-            + _declaration("table", "logical", "Lakehouse/Curated/Sales.Customer")
+            + _declaration(
+                "table", "logical", "Lakehouse/Curated/Tables/Sales.Customer"
+            )
             + ")",
             "which is the item declaring it",
         ),
@@ -216,7 +221,7 @@ def test_a_target_type_is_compared_rather_than_coerced():
                 name="Sales__X",
                 shortcut_type="table",
                 target_type=value,
-                target="Lakehouse/Raw/Sales.Customer",
+                target="Lakehouse/Raw/Tables/Sales.Customer",
             )
 
 
@@ -230,14 +235,14 @@ def test_a_target_type_is_compared_rather_than_coerced():
             "must be a constant",
         ),
         (
-            'Sales__X = other(shortcut_type="table", target_type="logical", target="Lakehouse/Raw/Sales.Customer")\n',
+            'Sales__X = other(shortcut_type="table", target_type="logical", target="Lakehouse/Raw/Tables/Sales.Customer")\n',
             "declares Shortcuts only",
         ),
         ('Sales__X = Shortcut(shortcut_type="table")\n', "declares no target_type"),
         (
             "Sales__X = Shortcut(\n"
             + _declaration(
-                "table", "logical", "Lakehouse/Raw/Sales.Customer", mode="fast"
+                "table", "logical", "Lakehouse/Raw/Tables/Sales.Customer", mode="fast"
             )
             + ")\n",
             "names 'mode'",
@@ -259,7 +264,7 @@ def test_an_unknown_warehouse_section_is_refused(tmp_path):
     _write(
         root,
         "Warehouse/Reporting/shortcuts.yml",
-        "bound:\n  Warehouse/Reporting/Sales.X: Lakehouse/Curated/Sales.Customer\n",
+        "bound:\n  Warehouse/Reporting/Sales.X: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
     with pytest.raises(DiscoveryError, match="names section\\(s\\) bound"):
         _parse(root)
@@ -272,10 +277,10 @@ def test_two_declarations_may_not_differ_only_by_case(tmp_path):
         root,
         "Lakehouse/Curated",
         "Sales__Landed = Shortcut(\n"
-        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
         + ")\n"
         "sales__landed = Shortcut(\n"
-        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Order")
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Order")
         + ")\n",
     )
     with pytest.raises(DiscoveryError, match="differ only by case"):
@@ -289,7 +294,7 @@ def test_a_shortcut_may_not_be_called_what_the_item_already_declares(tmp_path):
         root,
         "Lakehouse/Curated",
         "Sales__Customer = Shortcut(\n"
-        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
         + ")\n",
     )
     with pytest.raises(DiscoveryError, match="already declares"):
@@ -303,7 +308,7 @@ def test_each_item_type_declares_on_its_own_surface(tmp_path):
         root,
         "Warehouse/Reporting",
         "Sales__X = Shortcut(\n"
-        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
         + ")\n",
     )
     with pytest.raises(DiscoveryError, match="belong to a Lakehouse item"):
@@ -351,7 +356,10 @@ def test_a_table_shortcut_may_not_sit_inside_a_schema_shortcut(tmp_path):
         + ")\n\n"
         "Reference__Extra = Shortcut(\n"
         + _declaration(
-            "table", "physical", "Lakehouse/Ref/Sales.Extra", workspace="Shared Data"
+            "table",
+            "physical",
+            "Lakehouse/Ref/Tables/Sales.Extra",
+            workspace="Shared Data",
         )
         + ")\n",
     )
@@ -369,12 +377,12 @@ def test_importing_a_logical_shortcut_depends_on_what_it_points_at(tmp_path):
         root,
         "Lakehouse/Curated",
         "Sales__Landed = Shortcut(\n"
-        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
         + ")\n",
     )
     _write(
         root,
-        "Lakehouse/Curated/Sales__Report.py",
+        "Lakehouse/Curated/Tables/Sales__Report.py",
         _table("Sales.Report").replace(
             "from weaver import Table",
             "from shortcuts import Sales__Landed\n\nfrom weaver import Table",
@@ -385,10 +393,10 @@ def test_importing_a_logical_shortcut_depends_on_what_it_points_at(tmp_path):
     edge = next(
         edge
         for edge in repository.dependency_edges
-        if str(edge.consumer) == "Lakehouse/Curated/Sales.Report"
+        if str(edge.consumer) == "Lakehouse/Curated/Tables/Sales.Report"
     )
     assert edge.reference == "shortcuts.Sales__Landed"
-    assert str(edge.producer) == "Lakehouse/Raw/Sales.Customer"
+    assert str(edge.producer) == "Lakehouse/Raw/Tables/Sales.Customer"
     assert edge.uses_shortcut
 
 
@@ -404,14 +412,14 @@ def test_importing_a_physical_shortcut_is_a_boundary(tmp_path):
         + _declaration(
             "table",
             "physical",
-            "Lakehouse/Reference/Sales.Customer",
+            "Lakehouse/Reference/Tables/Sales.Customer",
             workspace="Shared Data",
         )
         + ")\n",
     )
     _write(
         root,
-        "Lakehouse/Curated/Sales__Report.py",
+        "Lakehouse/Curated/Tables/Sales__Report.py",
         _table("Sales.Report").replace(
             "from weaver import Table",
             "from shortcuts import Sales__External\n\nfrom weaver import Table",
@@ -435,12 +443,12 @@ def test_importing_a_name_no_shortcut_declares_says_what_is_declared(tmp_path):
         root,
         "Lakehouse/Curated",
         "Sales__Landed = Shortcut(\n"
-        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
         + ")\n",
     )
     _write(
         root,
-        "Lakehouse/Curated/Sales__Report.py",
+        "Lakehouse/Curated/Tables/Sales__Report.py",
         _table("Sales.Report").replace(
             "from weaver import Table",
             "from shortcuts import Sales__Missing\n\nfrom weaver import Table",
@@ -478,7 +486,7 @@ def test_the_deployed_module_reads_the_destination_and_names_the_source(tmp_path
         root,
         "Lakehouse/Curated",
         "Sales__Landed = Shortcut(\n"
-        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
         + ")\n\n"
         "Sales__Incoming = Shortcut(\n"
         + _declaration("folder", "logical", "Lakehouse/Raw/Files/Sales.Customer")
@@ -494,7 +502,7 @@ def test_the_deployed_module_reads_the_destination_and_names_the_source(tmp_path
 
     assert (
         "Sales__Landed = TableShortcut(schema='Sales', object='Landed', "
-        "source='Lakehouse/Raw/Sales.Customer')" in deployed
+        "source='Lakehouse/Raw/Tables/Sales.Customer')" in deployed
     )
     assert (
         "Sales__Incoming = FolderShortcut(schema='Sales', object='Incoming', "
@@ -515,7 +523,7 @@ def test_a_physical_declaration_deploys_no_weaver_source(tmp_path):
         + _declaration(
             "table",
             "physical",
-            "Lakehouse/Reference/Sales.Customer",
+            "Lakehouse/Reference/Tables/Sales.Customer",
             workspace="Shared",
         )
         + ")\n",
@@ -537,7 +545,7 @@ def test_the_authored_declaration_is_not_the_runtime_one():
     declaration = Shortcut(
         shortcut_type="table",
         target_type="logical",
-        target="Lakehouse/Raw/Sales.Customer",
+        target="Lakehouse/Raw/Tables/Sales.Customer",
     )
     with pytest.raises(LoadError, match="deployed 'shortcuts' module"):
         declaration(object())
@@ -551,7 +559,7 @@ def test_a_declaration_is_certified_with_the_item_that_declares_it(tmp_path):
         root,
         "Lakehouse/Curated",
         "Sales__Landed = Shortcut(\n"
-        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
         + ")\n",
     )
     after = _parse(root)
@@ -575,7 +583,7 @@ def test_a_declaration_carries_its_own_signature():
             "name": "Sales__Landed",
             "shortcut_type": "table",
             "target_type": "logical",
-            "target": "Lakehouse/Raw/Sales.Customer",
+            "target": "Lakehouse/Raw/Tables/Sales.Customer",
         }
         arguments.update(overrides)
         return ShortcutDeclaration(**arguments)
@@ -586,7 +594,7 @@ def test_a_declaration_carries_its_own_signature():
     )
     assert (
         declaration().signature
-        != declaration(target="Lakehouse/Raw/Sales.Order").signature
+        != declaration(target="Lakehouse/Raw/Tables/Sales.Order").signature
     )
 
 
@@ -696,3 +704,108 @@ def test_a_schema_shortcut_reads_a_table_by_name():
 
     with pytest.raises(LoadError, match="reads a table by name"):
         shortcut.table("")
+
+
+# --- destinations and targets name the area ------------------------------------
+
+
+@weaver_test()
+def test_a_shortcut_destination_sits_in_the_area_its_type_gives_it():
+    """``shortcut_type`` decides the destination's area, as it decides its path."""
+
+    table = ShortcutDeclaration(
+        owner=CURATED,
+        name="Sales__Customer",
+        shortcut_type="table",
+        target_type="logical",
+        target="Lakehouse/Raw/Tables/Sales.Customer",
+    )
+    folder = ShortcutDeclaration(
+        owner=CURATED,
+        name="Sales__Customer",
+        shortcut_type="folder",
+        target_type="logical",
+        target="Lakehouse/Raw/Files/Sales.Customer",
+    )
+
+    assert str(table.destination) == "Lakehouse/Curated/Tables/Sales.Customer"
+    assert str(folder.destination) == "Lakehouse/Curated/Files/Sales.Customer"
+    assert table.destination != folder.destination
+
+
+@weaver_test()
+def test_a_warehouse_view_destination_stays_a_bare_relation():
+    view = ShortcutDeclaration(
+        owner=WeaverItemId.parse("Warehouse/Reporting"),
+        name="Sales__Customer",
+        shortcut_type="view",
+        target_type="logical",
+        target="Lakehouse/Curated/Tables/Sales.Customer",
+    )
+
+    assert str(view.destination) == "Warehouse/Reporting/Sales.Customer"
+    assert str(view.logical_source) == "Lakehouse/Curated/Tables/Sales.Customer"
+
+
+@weaver_test()
+def test_a_logical_lakehouse_table_target_names_its_area(tmp_path):
+    """A logical target is a Weaver identity, and the old spelling is not one."""
+
+    root = _estate(tmp_path)
+    _shortcuts(
+        root,
+        "Lakehouse/Curated",
+        "Sales__Portable = Shortcut(\n"
+        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + ")\n",
+    )
+
+    with pytest.raises(DiscoveryError, match="is not a managed object"):
+        _parse(root)
+
+
+@weaver_test()
+def test_a_logical_target_that_names_its_area_resolves(tmp_path):
+    root = _estate(tmp_path)
+    _shortcuts(
+        root,
+        "Lakehouse/Curated",
+        "Sales__Portable = Shortcut(\n"
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
+        + ")\n",
+    )
+
+    pairs = {
+        str(pair.destination): str(pair.source)
+        for pair in _parse(root).logical_shortcuts
+    }
+
+    assert pairs["Lakehouse/Curated/Tables/Sales.Portable"] == (
+        "Lakehouse/Raw/Tables/Sales.Customer"
+    )
+
+
+@weaver_test()
+def test_a_physical_table_target_may_spell_its_area_or_leave_it_out():
+    """A physical target names a Fabric item, whose Tables area the path adds."""
+
+    spelled = ShortcutDeclaration(
+        owner=CURATED,
+        name="Sales__Portable",
+        shortcut_type="table",
+        target_type="physical",
+        target="Lakehouse/External/Tables/Sales.Customer",
+        workspace="Shared Data",
+    )
+    bare = ShortcutDeclaration(
+        owner=CURATED,
+        name="Sales__Portable",
+        shortcut_type="table",
+        target_type="physical",
+        target="Lakehouse/External/Sales.Customer",
+        workspace="Shared Data",
+    )
+
+    assert spelled.target_tail == bare.target_tail == "Sales.Customer"
+    assert spelled.target_object == bare.target_object
+    assert spelled.target_schema == bare.target_schema == "Sales"

@@ -400,7 +400,7 @@ def test_converges_after_a_deletion_by_losing_only_that_object(estate, tmp_path)
     catalogue = Catalogue.from_repository(estate)
 
     # The estate as it is once the author deletes one document.
-    (tmp_path / "repo" / ITEM / "DWG.Summary.sql").unlink()
+    (tmp_path / "repo" / ITEM / "Tables" / "DWG.Summary.sql").unlink()
     after = parse_item_repository(Location(str(tmp_path / "repo")))
 
     reached, declared = converged(
@@ -415,7 +415,7 @@ def test_converges_after_a_deletion_by_losing_only_that_object(estate, tmp_path)
     lost_files = set(holdings(before[item_id(ITEM)])["files"]) - set(
         holdings(reached[item_id(ITEM)])["files"]
     )
-    assert lost_files == {"_/load/dwg__summary.py"}
+    assert lost_files == {"_/load/tables/dwg__summary.py"}
 
 
 @weaver_test()

@@ -39,13 +39,14 @@ independently of data processing.
 Each object document belongs to one logical item:
 
 ```text
-Lakehouse/Raw/Files/Sales.Export       -> folder
-Lakehouse/Raw/Sales.Customer           -> Delta table or view
-Warehouse/Reporting/Sales.Customer     -> Warehouse table or view
+Lakehouse/Raw/Files/Sales.Export        -> folder
+Lakehouse/Raw/Tables/Sales.Customer     -> Delta table or view
+Warehouse/Reporting/Sales.Customer      -> Warehouse table or view
 ```
 
-The canonical document identity is item plus schema plus object name, including
-the `Files/` namespace for folders. The item's type chooses the dialect and
+The canonical document identity is item plus schema plus object name, and a
+Lakehouse one names the Fabric area it sits in: `Tables/` for a Table or a View,
+`Files/` for a Folder. A Warehouse has no areas and names none. The item's type chooses the dialect and
 materialisation form. Physical binding is separate: `Lakehouse/Raw` can be
 bound to a differently named Lakehouse without changing its logical identity.
 
@@ -133,7 +134,7 @@ logical pairs such as:
 
 ```text
 Warehouse/_weaver/_.Bookmark -> Warehouse/Reporting/_.Bookmark
-Warehouse/_weaver/_.Log      -> Lakehouse/Sales/_.Log
+Warehouse/_weaver/_.Log      -> Lakehouse/Sales/Tables/_.Log
 ```
 
 Authored SQL that reads `_.Bookmark` resolves through the local destination, the
@@ -744,9 +745,9 @@ stops claiming it — the same machinery a table travels through.
 Three of them, from three kinds of source:
 
 ```text
-Warehouse/Reporting/Sales__Customer.sql   ->  _.[Load Sales.Customer]
-Lakehouse/Sales/lib/dates.py              ->  Files/_/Load/lib/dates.py
-Lakehouse/Sales/Sales.OrderSummary.sql    ->  Files/_/Load/Sales__OrderSummary.py
+Warehouse/Reporting/Sales__Customer.sql      ->  _.[Load Sales.Customer]
+Lakehouse/Sales/lib/dates.py                 ->  Files/_/Load/lib/dates.py
+Lakehouse/Sales/Tables/Sales.OrderSummary.sql -> Files/_/Load/Tables/Sales__OrderSummary.py
 ```
 
 The third is the one worth reading twice. A Spark SQL table is *compiled* into a

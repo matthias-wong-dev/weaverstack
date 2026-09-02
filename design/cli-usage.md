@@ -619,7 +619,7 @@ Weaver Health  Amber
 Load    Amber
   Last load activity   6h 14m ago
   17 succeeded · 1 pending
-  Amber  Lakehouse/Sales/Sales.OrderSummary
+  Amber  Lakehouse/Sales/Tables/Sales.OrderSummary
          no load has settled since this object was built
 
 Tests   Green
@@ -629,7 +629,7 @@ Build   Green
   Installed estate consistent (48 objects)
 
 Slowest loads
-  Lakehouse/Sales/Sales.Order              31.2s
+  Lakehouse/Sales/Tables/Sales.Order       31.2s
 ```
 
 The status words are the contract, so the output reads the same redirected to a

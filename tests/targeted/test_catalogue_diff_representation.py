@@ -46,8 +46,8 @@ def repository(tmp_path):
     return single_document_repository(
         tmp_path,
         documents={
-            "DWG__Customer.py": lakehouse_table(CUSTOMER),
-            "DWG__Order.py": lakehouse_table(ORDER),
+            "Tables/DWG__Customer.py": lakehouse_table(CUSTOMER),
+            "Tables/DWG__Order.py": lakehouse_table(ORDER),
         },
     )
 

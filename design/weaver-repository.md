@@ -25,7 +25,8 @@ repository/
 │   ├── Raw/
 │   │   ├── schemas/
 │   │   │   └── Sales.yml
-│   │   ├── Sales__Customer.py
+│   │   ├── Tables/
+│   │   │   └── Sales__Customer.py
 │   │   ├── Files/
 │   │   │   └── Sales__Customer.py
 │   │   └── lib/
@@ -34,7 +35,8 @@ repository/
 │   │   ├── schemas/
 │   │   │   └── Sales.yml
 │   │   ├── shortcuts.py                Fabric shortcuts this item declares
-│   │   └── Sales.Rollup.sql            Spark SQL — it is in a Lakehouse
+│   │   └── Tables/
+│   │       └── Sales.Rollup.sql        Spark SQL, it is in a Lakehouse
 │   └── _weaver/                        refused: this item is Weaver's own
 ├── Warehouse/
 │   └── Reporting/
@@ -50,15 +52,44 @@ repository/
     └── unfinished.py                   explicitly excluded content
 ```
 
-Each schema and source document belongs to exactly one item. `Files/` contains
-Folder documents owned by a Lakehouse; it is not a separate deployment target.
-`lib/` contains Python helpers for that Lakehouse item. Discovery selects the
+Each schema and source document belongs to exactly one item. A Lakehouse names
+the Fabric area its data objects sit in: `Tables/` holds its Tables and Views,
+and `Files/` its Folders. Neither is a separate deployment target. `lib/`
+contains Python helpers for that Lakehouse item. Discovery selects the
 `Lakehouse/` and `Warehouse/` trees and the recognised surfaces inside each
 item. Unrelated siblings and unrelated item content are absent from discovery
 and the repository signature. `_ignore/` explicitly excludes content that would
 otherwise be recognised. A misplaced Weaver declaration and a malformed
 recognised surface are refused. Authors do not add `__init__.py`; Weaver supplies
 package loading.
+
+## The deployed tree reproduces the authored one
+
+A build copies a Lakehouse item's runtime source beneath `Files/_/Load`, path for
+path, so what a program imports is what an author reads in the repository:
+
+```text
+Tables/Sales__Customer.py        ->  Files/_/Load/Tables/Sales__Customer.py
+Tables/Sales.Rollup.sql          ->  Files/_/Load/Tables/Sales__Rollup.py
+Files/Sales__Export.py           ->  Files/_/Load/Files/Sales__Export.py
+lib/csv_helpers.py               ->  Files/_/Load/lib/csv_helpers.py
+tests/Sales__Reconciles.py       ->  Files/_/Load/tests/Sales__Reconciles.py
+shortcuts.py                     ->  Files/_/Load/shortcuts.py
+```
+
+The root is the Python import root, so an object module is imported by its area:
+
+```python
+from Tables.Sales__Customer import Sales__Customer
+from Files.Sales__Export import Sales__Export
+from lib.csv_helpers import rows
+from shortcuts import Reference__Product
+```
+
+A relative import starts in the importing program's own area, so `.Sales__Order`
+written in a `Tables/` module names `Tables.Sales__Order`. A validation sits in
+neither area, so it names the area it reads. Weaver supplies package loading;
+authors add no `__init__.py`.
 
 ## The item chooses the SQL dialect
 
@@ -67,7 +98,7 @@ containing item already decides: a Lakehouse materialises Delta through Spark,
 a Warehouse materialises through T-SQL.
 
 ```text
-Lakehouse/Raw/DWG.Customer.sql          Spark SQL
+Lakehouse/Raw/Tables/DWG.Customer.sql   Spark SQL
 Warehouse/Reporting/DWG.Customer.sql    T-SQL
 ```
 
@@ -87,7 +118,7 @@ from weaver import Shortcut
 Sales__Customer = Shortcut(
     shortcut_type="table",
     target_type="logical",
-    target="Lakehouse/Sales/Sales.Customer",
+    target="Lakehouse/Sales/Tables/Sales.Customer",
 )
 
 Reference = Shortcut(
@@ -193,7 +224,7 @@ write.
 
 ```yaml
 logical:
-  Warehouse/Reporting/Sales.Customer: Lakehouse/Sales/Sales.Customer
+  Warehouse/Reporting/Sales.Customer: Lakehouse/Sales/Tables/Sales.Customer
 
 physical:
   Warehouse/Reporting/Sales.ReferenceCustomer: Warehouse/Reference/Sales.Customer
@@ -267,7 +298,7 @@ bundle was planned from.
 
 Flat repositories are not inferred. Discovery fails with concrete instructions:
 
-- move Delta and Spark documents to `Lakehouse/<item>/`;
+- move Delta and Spark documents to `Lakehouse/<item>/Tables/`;
 - move Warehouse documents to `Warehouse/<item>/`;
 - move Folder documents to `Lakehouse/<item>/Files/`;
 - replace `_schemas/` with each owning item's `schemas/`;

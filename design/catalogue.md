@@ -131,7 +131,7 @@ target the four target columns give the producer's identity whole:
 | table | Logical | Lakehouse | Sales | Sales | Customer |
 | folder | Logical | Lakehouse | Sales | Files/Sales | Customer |
 
-so a reader rebuilds `Lakehouse/Sales/Sales.Customer` from the row alone, with no
+so a reader rebuilds `Lakehouse/Sales/Tables/Sales.Customer` from the row alone, with no
 join to Installation, no parsing, and no knowledge of a Fabric workspace or item
 id. That is what lets the estate DAG be reconstructed from the catalogue. The
 `Files/` prefix applies on this side too, because a logical folder shortcut

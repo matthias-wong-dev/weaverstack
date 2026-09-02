@@ -45,7 +45,7 @@ CUSTOMER = "DWG.Customer"
 @pytest.fixture
 def repository(tmp_path):
     return single_document_repository(
-        tmp_path, documents={"DWG__Customer.py": lakehouse_table(CUSTOMER)}
+        tmp_path, documents={"Tables/DWG__Customer.py": lakehouse_table(CUSTOMER)}
     )
 
 

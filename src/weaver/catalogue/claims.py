@@ -27,11 +27,13 @@ from .tables import (
 def catalogue_schema(identity: WeaverDocumentId) -> str:
     """The ``schema_name`` this identity is stored under.
 
-    A Folder carries its ``Files/`` prefix because that prefix is part of what
-    distinguishes it from a table of the same name. A load artefact does not get
-    one. Its schema is already the real thing, being the containing path for a
-    file and the Warehouse schema for a procedure, and prefixing it would store
-    something that is not the target's own name.
+    The relational schema, and for a Folder the ``Files/`` prefix, because that
+    prefix is part of what distinguishes it from a table of the same name. A
+    Table's ``Tables`` area is absent: it is what a Lakehouse holds its tables
+    in, and ``Sales`` is the schema. A load artefact gets no prefix either. Its
+    schema is already the real thing, being the containing path for a file and
+    the Warehouse schema for a procedure, and prefixing it would store something
+    that is not the target's own name.
     """
 
     prefix = "Files/" if identity.is_files else ""

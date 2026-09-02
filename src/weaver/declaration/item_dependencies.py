@@ -9,7 +9,9 @@ from ..errors import BuildError, DiscoveryError, GraphError
 from ..graph import Graph
 from .metadata import ObjectId
 from .model import (
+    AREAS,
     FILES,
+    TABLES,
     ItemDependency,
     WeaverDocumentId,
     WeaverItemId,
@@ -265,6 +267,12 @@ def _resolve_destination(
         return destination, "native"
     if destination in logical_pairs:
         return logical_pairs[destination], "shortcut"
+    # A Lakehouse relation names the Tables area, so a bare name that matches a
+    # validation is answered by the rule that put them in separate namespaces.
+    validation = WeaverDocumentId.validation(destination.item, destination.object_id)
+    _reject_validation_producer(
+        validation, native=native, consumer=consumer, written=written
+    )
     case_match = folded_native.get(str(destination).casefold()) or folded_logical.get(
         str(destination).casefold()
     )
@@ -294,12 +302,18 @@ def _python_references(
         for written, components in candidates:
             if components and components[0] == "lib":
                 continue
-            is_files = bool(components and components[0] == FILES)
             object_module = components[-1] if components else ""
             parts = object_module.split("__")
             if len(parts) != 2 or not all(parts):
                 continue
-            if len(components) != (2 if is_files else 1):
+            if len(components) == 1:
+                raise DiscoveryError(
+                    f"{source.node_id}: import {written!r} names no Lakehouse "
+                    f"area. A Table or View module sits under {TABLES}/ and a "
+                    f"Folder module under {FILES}/, so import "
+                    f"{TABLES}.{object_module} or {FILES}.{object_module}."
+                )
+            if len(components) != 2 or components[0] not in AREAS:
                 raise DiscoveryError(
                     f"{source.node_id}: import {written!r} does not resolve to an "
                     "item object or lib module"
@@ -310,7 +324,7 @@ def _python_references(
                     WeaverDocumentId(
                         source.logical_id.item,
                         ObjectId(parts[0], parts[1]),
-                        is_files=is_files,
+                        is_files=components[0] == FILES,
                     ),
                 )
             )
@@ -369,7 +383,12 @@ def _resolved_python_modules(
 ) -> list[tuple[str, tuple[str, ...]]]:
     module = tuple(imported.module.split(".")) if imported.module else ()
     if imported.level:
-        base = (FILES,) if logical_id.is_files else ()
+        # A program's package under the deployed runtime tree, which is the area
+        # it was authored in. A validation is authored outside both areas and
+        # has none, so a relative import from one names no object and is
+        # reported against the explicit spelling.
+        area = logical_id.area
+        base = (area,) if area else ()
         parents = imported.level - 1
         if parents > len(base):
             raise DiscoveryError(

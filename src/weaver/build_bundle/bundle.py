@@ -37,7 +37,7 @@ from ..store import Store
 from .models import DELETE_FILE, OMISSION_REASONS, BuildPlan
 
 #: The only bundle format this code writes and accepts.
-SUPPORTED_FORMAT_VERSION = 2
+SUPPORTED_FORMAT_VERSION = 3
 
 PLAN_FILENAME = "plan.yml"
 PAYLOAD_DIR = "payload"
@@ -235,7 +235,9 @@ def validate_plan_structure(plan: BuildPlan) -> None:
     if plan.format_version != SUPPORTED_FORMAT_VERSION:
         raise BuildError(
             f"unsupported bundle format version {plan.format_version} "
-            f"(this build supports {SUPPORTED_FORMAT_VERSION})"
+            f"(this build supports {SUPPORTED_FORMAT_VERSION}). A bundle is "
+            "installed by the identity grammar it was generated with, so "
+            "generate it again with this version of Weaver"
         )
 
     for node in plan.omitted_nodes:
