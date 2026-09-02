@@ -134,7 +134,7 @@ logical pairs such as:
 
 ```text
 Warehouse/_weaver/_.Bookmark -> Warehouse/Reporting/_.Bookmark
-Warehouse/_weaver/_.Log      -> Lakehouse/Sales/_.Log
+Warehouse/_weaver/_.Log      -> Lakehouse/Sales/Tables/_.Log
 ```
 
 Authored SQL that reads `_.Bookmark` resolves through the local destination, the
