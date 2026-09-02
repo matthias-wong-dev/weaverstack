@@ -103,7 +103,7 @@ class RunRequest:
     #: Plan, resolve and report without dispatching anything.
     dry_run: bool = False
     #: Reconstruct each selected table from zero. ``load`` only, and local to
-    #: what the request selected: nothing downstream is reloaded or invalidated.
+    #: what the request selected.
     reload: bool = False
 
     def __post_init__(self) -> None:
@@ -272,9 +272,8 @@ class Runner:
         """Execute the graph and return a result for every planned node.
 
         ``on_node`` receives each result when its status settles. ``before_node``
-        receives each node the run is about to dispatch, and a reload uses it to
-        end that object's load state while the target it describes is still
-        there. Nothing blocked, skipped or unresolved reaches it.
+        receives each node the run is about to dispatch; nothing blocked, skipped
+        or unresolved reaches it.
         """
 
         started = _now()
@@ -420,9 +419,8 @@ class Runner:
     ) -> RunNodeResult:
         """Dispatch one node and record failures as node results.
 
-        ``before`` runs inside the same try, so a reload whose state reset did
-        not land settles as this node's failure. Nothing has been cleared at that
-        point: the reset is what precedes the clear.
+        ``before`` runs inside the same try, so a failure in it settles as this
+        node's failure rather than the run's.
         """
 
         from .outcome import settle

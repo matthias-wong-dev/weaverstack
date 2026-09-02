@@ -162,7 +162,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (14, "f0ec3fe3b5c47c66b6711c1b2ccce906df4e7fbec3407ccc5af218ce6e27d9e9"),
+    "tsql": (14, "16de8ff61d4c1f4b7143879c43411f8c474409831afc5084675eba45f86a942c"),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 

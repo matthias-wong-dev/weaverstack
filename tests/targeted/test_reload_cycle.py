@@ -1,24 +1,18 @@
 """Reload: reconstructing one table from zero, and the order it happens in.
 
-``reload`` is an execution mode, not a second way to author a load. What it
-changes is the state the ordinary authored load runs against:
+``reload`` is an execution mode, not a second way to author a load. It runs the
+ordinary authored load against changed state:
 
 .. code-block:: text
 
     _.LoadStatus  → Pending
-    _.Bookmark    → the row is gone
+    _.Bookmark    → the row is removed
     the target    → emptied
     read()        → runs, against both
 
-The ordering is the whole claim. Two kinds of incremental source depend on it,
-and they depend on different halves: one asks for source changes after its
-bookmark, and one joins the target to find what it has still to produce. So the
-reset has to be durable before the clear, and the clear has to happen before
-``read()`` is called.
-
-The reset is what a reload does; the object it reaches is the one selected.
-Nothing walks descendants, and ``design/catalogue.md`` says why a consumer is
-still correct: it loads next as it always would.
+The claims here are the ordering and what the reset writes. The state has to be
+durable before the clear, and the clear has to happen before ``read()``, because
+an incremental source reads either the bookmark or the target.
 
 Pure Python. The clear is one statement, so a session that records statements
 proves when it was submitted, and the catalogue is a real
@@ -312,11 +306,7 @@ def test_a_clean_reload_then_advances_the_bookmark_as_any_load_does():
 
 @weaver_test()
 def test_the_reset_leaves_load_status_pending_before_the_load_settles():
-    """An unsettled incarnation, said rather than left as a gap.
-
-    ``Pending`` is the vocabulary's own "current state not yet established", and
-    it carries the workflow that emptied the target.
-    """
+    """``Pending``, carrying the workflow that emptied the target."""
 
     table, catalogue, _events = _built(_table())
 

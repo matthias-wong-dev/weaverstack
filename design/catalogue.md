@@ -636,46 +636,28 @@ for telemetry alone.
 
 ### Reload
 
-`weaver load --reload`, `weaver.load(..., reload=True)`, `table.load(reload=True)`
-and `exec [_].[Load] ..., @reload = 1` all mean one thing: reconstruct this table
-from zero. Three writes and one clear, in this order:
+Reload reconstructs a selected table from zero. Before the authored load runs:
 
-```text
-_.LoadStatus   → Pending, carrying the workflow and the instant it started
-_.Bookmark     → the row is removed
-the target     → emptied
-the authored load → runs
-```
+1. `_.LoadStatus` is set to `Pending`.
+2. The object's `_.Bookmark` row is removed.
+3. The target table is cleared.
 
-The order is the property. Two kinds of incremental source depend on it and on
-different halves of it: one asks its source for changes after the bookmark, and
-one joins the target to find what it has still to produce. Both then start from
-zero. And the state is ended while the target still holds the rows it describes,
-so a reload that fails half way leaves no bookmark and no settled status over rows
-that are gone. The retry is a reload again, and a clean load is what ends that.
+A missing `_.Bookmark` row reads as `BOOKMARK_SENTINEL`. The sentinel is not
+stored.
 
-The bookmark row goes, exactly as a build's invalidation removes it. There is one
-physical shape for "no clean load has established progress", and it is an absent
-row; the sentinel is what an absent row reads as and is never stored. That is what
-keeps the `Static` gate honest, because what closes it is a row being there.
+Reload is local to the selected objects. It does not reload or invalidate
+dependent objects. `--name Sales.Order` reloads one table; an item with no name
+filter reloads every table it owns. A folder is refused before anything runs.
 
-From `_.Load` the removal is a `MERGE … WHEN MATCHED THEN DELETE`: in every
-Warehouse but the catalogue's these are views across databases, and Fabric takes a
-MERGE through one. From Python it is the scoped `DELETE` a build renders, run
-against the catalogue Warehouse where these are its own tables.
+If reload fails after the target is cleared, the bookmark remains absent and
+`_.LoadStatus` records the failed execution, so a later load cannot continue from
+the previous bookmark.
 
-**Reload is local.** It reaches what the request selected and walks no further.
-Nothing downstream is reloaded and nothing downstream is invalidated, so a
-consumer of a reloaded table loads next as it always would. Selection is the only
-thing that decides scope: `--name Sales.Order` reloads one table, and an item with
-no name filter reloads every table it owns.
+`_.LoadStatistic.[Is reload]` records whether the execution was requested as a
+reload, including one that failed.
 
-`Is reload` records the mode, whatever the load then found, and a reload that
-raised before it produced anything is still recorded as one. The recorder writes
-it from the objects whose state it ended, so no result carries it and none has to:
-an engine told to reload could only repeat it back. Folders are outside all of
-this: their contents are files, and `weaver load --reload` over a selection
-holding one is refused before anything runs.
+The surfaces are `weaver load --reload`, `weaver.load(..., reload=True)`,
+`table.load(reload=True)` and `exec [_].[Load] ..., @reload = 1`.
 
 ### `_.TestStatus`
 

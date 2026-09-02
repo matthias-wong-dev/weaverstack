@@ -10,10 +10,9 @@ rows are queued, batched and written on a worker, and a failure is surfaced by
 judgement, a lost ``_.Log`` row loses evidence, a lost bookmark makes the next
 load read a window it has already read, so this raises and lets them decide.
 
-:meth:`CatalogueWriter.delete` is the exception to all of that. What follows a
-removal is the destructive work the removal was written to precede, so it runs
-the statement and waits. A build's own invalidation runs the same rendering
-through the installer.
+:meth:`CatalogueWriter.delete` removes named rows. It runs its statement and
+waits, because a caller removing rows is about to do the work that removal
+precedes.
 """
 
 from __future__ import annotations
@@ -52,9 +51,8 @@ class CatalogueWriter:
     def delete(self, table, rows: Sequence[Mapping[str, Any]]) -> None:
         """Remove the named rows, and wait for the removal.
 
-        The rows carry the table's key and nothing else: the row is going, so its
-        other values are no part of the decision. Queued rows for the table are
-        drained first, so a merge already in flight cannot land behind this.
+        Each row carries the table's key. Queued rows are drained first, so a
+        merge already in flight cannot land behind the removal.
         """
 
         from ..errors import CommandError
@@ -117,8 +115,8 @@ def writer_for(session, workspace=None) -> CatalogueWriter:
     """Where a Session sends the catalogue's runtime writes.
 
     One flusher per table, opened on first use, so a catalogue nothing writes to
-    starts no worker and opens no connection. A removal goes over the Session's
-    TDS to the same Warehouse, where these are the catalogue's own tables.
+    starts no worker and opens no connection. A removal runs over the Session's
+    TDS against the same Warehouse.
     """
 
     from ..targets import WarehouseTarget

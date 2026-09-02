@@ -12,8 +12,8 @@ A blocked node has a status and no statistics: it did nothing, and a row of
 zeroes for it would read as a load that moved nothing. A node about no object at
 all, such as an endpoint refresh, has evidence and no state.
 
-A reload writes a Pending status and removes the bookmark row, both before the
-load runs. See :meth:`RunRecord.reset`.
+A reload writes a Pending status and removes the bookmark row before the load
+runs. See :meth:`RunRecord.reset`.
 
 Row construction, writing and flushing stay three things. See
 ``design/catalogue.md`` for the operational-state model these rows belong to.
@@ -148,9 +148,8 @@ def load_statistic_row(
     The counts describe the target rather than the source, so ``rows_read`` need
     not equal the sum of the others.
 
-    ``reload`` is the mode the caller asked for, and it is passed in. A load that
-    raised has no result to read it from, and the mode it ran in is a fact about
-    the request either way.
+    ``reload`` is the mode the caller asked for. A load that raised leaves no
+    result to read it from.
     """
 
     started, completed = _instants(node)
@@ -175,10 +174,8 @@ def load_statistic_row(
 def reset_load_status_row(identity, *, workflow_id: str, started) -> dict:
     """The ``_.LoadStatus`` row a reload writes before it clears the target.
 
-    ``Pending`` is the vocabulary's own "current state not yet established", and
-    health reads it as it reads an absent row. The workflow and the start instant
-    say which run emptied the target, so a reload that never settles still says
-    what happened to it.
+    ``Pending`` is the vocabulary's "current state not yet established", and
+    health reads it as it reads an absent row.
     """
 
     return {
@@ -214,7 +211,7 @@ def _identity(identity) -> dict:
 
 
 def bookmark_key(identity) -> dict:
-    """One ``_.Bookmark`` row's key, and nothing about how far it reached."""
+    """One ``_.Bookmark`` row's key, without its instant."""
 
     from ..catalogue.claims import bookmark_row
 
@@ -262,9 +259,8 @@ class RunRecord:
     workflow_id: str
     task_type: str
     catalogue: Any
-    #: The objects this record has reset for a reload. Membership is what
-    #: ``_.LoadStatistic`` writes ``Is reload`` from, so a reload that raised
-    #: before it produced a result is still recorded as the reload it was.
+    #: The objects this record has reset for a reload. ``_.LoadStatistic`` writes
+    #: ``Is reload`` from it, so a reload that raised is still recorded as one.
     reloaded: set = field(default_factory=set)
 
     def settled(self, node) -> None:
@@ -303,21 +299,16 @@ class RunRecord:
         self._bookmark(node, identity)
 
     def reset(self, identity) -> None:
-        """End this object's load state, and wait for it, before it is cleared.
+        """Invalidate this object's load state before it is reconstructed.
 
-        What follows empties the target, and the next incremental read starts
-        from whatever bookmark stands over it. So the status is written and the
-        bookmark row removed here rather than joining the run's queue, and both
-        are durable before the clear.
-
-        ``_.LoadStatus`` goes to Pending and ``_.Bookmark`` loses its row. That
-        is what a build's invalidation leaves, and it is the one physical shape
-        of "no clean load has established progress": an absent bookmark row.
+        ``_.LoadStatus`` goes to Pending and the ``_.Bookmark`` row is removed.
+        Both are durable before this returns, so a failed reload cannot retain
+        the previous bookmark over a cleared target.
         """
 
         started = datetime.now(timezone.utc)
-        # Recorded before either write, so an object whose reset did not land is
-        # still recorded as the reload it was asked to be.
+        # Before either write: a reset that did not land was still asked for as
+        # a reload.
         self.reloaded.add(identity)
         self.catalogue.update(
             LOAD_STATUS,

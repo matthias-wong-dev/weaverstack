@@ -193,12 +193,10 @@ class Catalogue:
         self.writer.update(table, row)
 
     def remove(self, table, rows: Sequence[Mapping[str, object]]) -> None:
-        """End the life of these rows, in the Warehouse now and in memory.
+        """Remove these rows, in the Warehouse now and in memory.
 
-        Named rows, keyed as the table keys them. In memory as well as in the
-        Warehouse for the reason :meth:`update` writes both ways: a caller that
-        just ended a bookmark's life and then asks for it is asking about the
-        object it just reset, and the answer is the sentinel.
+        In memory as well, for the reason :meth:`update` writes both ways: a
+        caller reads back what it just wrote.
         """
 
         keys = {tuple(row.get(name) for name in table.key) for row in rows}

@@ -57,11 +57,10 @@ def load(
     items. It is an operator override: only those nodes run, without dependency
     expansion or dependency ordering.
 
-    ``reload`` reconstructs each selected table from zero: its bookmark goes back
-    to the sentinel, its ``_.LoadStatus`` goes to Pending, its target is emptied,
-    and the authored load runs against both. It reaches exactly what this request
-    selected. Nothing downstream is reloaded and nothing downstream is
-    invalidated, so a consumer of a reloaded table loads next as it always would.
+    ``reload`` reconstructs each selected table from zero: its ``_.Bookmark`` row
+    is removed, its ``_.LoadStatus`` goes to Pending, its target is emptied, and
+    the authored load runs. It reaches what this request selected and nothing
+    downstream.
 
     ``workspace``, ``catalogue`` and ``environment`` are names, resolved as
     ``build`` resolves them; ``session`` is where an already-resolved
@@ -173,9 +172,7 @@ def run_load(
             can_refresh=can_refresh(session, workspace),
         )
         if reload:
-            # Before anything runs, and before a dry run reports: reload clears a
-            # target, and this is where the run says which of its nodes it cannot
-            # clear.
+            # Before execution and before a dry run reports.
             _refuse_unsupported_reload(runner.plan())
 
     # A dry run writes nothing durable: a row for work nobody did would be
@@ -208,9 +205,7 @@ def run_load(
     return report
 
 
-#: The primitive kinds a reload can reconstruct. Each empties its target before
-#: it runs the authored source. A folder's contents are files and clearing them
-#: is a reconciliation Weaver does not do here, so a folder is refused instead.
+#: The primitive kinds a reload can reconstruct.
 RELOADABLE_KINDS = (WAREHOUSE_PROCEDURE, PYTHON_TABLE)
 
 
@@ -229,15 +224,12 @@ def _refuse_unsupported_reload(graph) -> None:
 
 
 def _reset_before(record):
-    """End each reloaded object's load state as the run reaches it.
+    """Invalidate each reloaded object's load state as the run reaches it.
 
-    Per node and not up front: a node the run never reaches keeps its bookmark,
-    because nothing cleared the rows that bookmark describes.
+    Per node, so a node the run never dispatches keeps its bookmark.
     """
 
     def reset(node) -> None:
-        # The graph node carries the identity itself, so nothing is parsed back
-        # out of a spelling. A barrier is not an object and has none.
         if node.primitive_kind in RELOADABLE_KINDS and node.logical_id is not None:
             record.reset(node.logical_id)
 

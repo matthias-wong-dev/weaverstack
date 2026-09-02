@@ -1,23 +1,21 @@
 """Reload through a run: which objects it reaches, and which it leaves alone.
 
-Reload is local. It reconstructs what the request selected and walks no further:
+Reload is local to the selection:
 
 .. code-block:: text
 
     A → B → C
 
     reload A    A     reset, cleared, reconstructed
-                B, C  untouched, and loaded next as they always would be
+                B, C  untouched
 
-So there is no descendant invalidation here to test, and the claim worth proving
-is the negative one: nothing outside the selection has its state ended. The run's
-recorder is what ends it, one node at a time and only as the run reaches that
-node, so a node the run never dispatched keeps the bookmark describing rows
-nothing cleared.
+So the claim worth proving is the negative one: nothing outside the selection has
+its load state ended. The reset runs per node as the run reaches it, so a node the
+run never dispatched keeps its bookmark.
 
-The estate is :func:`factories.load_estate`, whose chain is exactly that shape,
-and whose folder is what reload refuses. Dispatch is injected, so the seam under
-test is the orchestration rather than an engine.
+The estate is :func:`factories.load_estate`, whose chain is that shape and whose
+folder is what a reload refuses. Dispatch is injected, so what is under test is
+the orchestration.
 """
 
 from __future__ import annotations
@@ -139,8 +137,7 @@ def test_a_reload_of_a_whole_item_reaches_every_table_it_selected(catalogue):
 def test_only_the_loadable_tables_have_state_to_end(catalogue):
     """An endpoint refresh is not an object and a folder is not reloadable.
 
-    Both are dispatched by this run, so what the reset skipped is a decision it
-    made rather than a node it never saw.
+    Both are dispatched by this run, so the reset saw them and skipped them.
     """
 
     record, writer = _record()

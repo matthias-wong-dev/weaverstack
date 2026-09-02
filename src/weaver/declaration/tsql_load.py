@@ -291,8 +291,7 @@ def _static_gate(contract: LoadContract) -> str:
     load emptied is still skipped. Before the staging query, so a
     loaded object costs no source read.
 
-    ``@reload`` passes through it. A reload is the caller asking for this one to
-    be loaded again, and the gate is what that is said against.
+    ``@reload`` passes through it: a reload asks for this one to be loaded again.
 
     A non-static object gets a comment rather than a disabled branch.
     """
@@ -305,7 +304,7 @@ def _static_gate(contract: LoadContract) -> str:
     return (
         "-- Static: loaded once. A bookmark row means a clean load has run for\n"
         "-- this incarnation, so this reports a successful load of nothing. A\n"
-        "-- reload asks for it again, so it passes through.\n"
+        "-- reload asks for it again.\n"
         "if @reload = 0 and @weaver_bookmark is not null\n"
         "begin\n"
         f"{_indent(seeded, 4)}\n"

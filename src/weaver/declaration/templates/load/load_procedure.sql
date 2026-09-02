@@ -31,9 +31,7 @@ $bookmark_key
 
 $static_gate
 
-    -- A reload reconstructs this table from zero. Before the staging query,
-    -- because an incremental body may join the target to find what it has still
-    -- to produce. The caller has already put the bookmark back to the sentinel.
+    -- Clear before the staging query: an incremental body may read the target.
     if @reload = 1
     begin
         delete from $target_table;

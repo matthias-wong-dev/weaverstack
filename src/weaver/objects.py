@@ -297,10 +297,8 @@ def _recorded_load(object, **policy) -> "LoadResult":
     Weaver itself named is Failed and anything else is Error, which is the line
     ``_.Load`` draws from ``error_number()``.
 
-    ``reload`` in ``policy`` also names what this interface does before the load:
-    the object's load state is ended and made durable, and only then is the load
-    called to empty the target and run. So a reload that fails half way leaves no
-    bookmark and no settled status over rows that are gone.
+    ``reload`` in ``policy`` invalidates the object's load state before the load
+    is called to clear the target and run.
     """
 
     from .run.record import RunRecord, new_workflow_id
@@ -546,8 +544,8 @@ class Folder(WeaverObject):
         calls :meth:`_load` and records what settled itself, so one row has one
         writer.
 
-        ``reload`` is refused. Reload clears the target before ``read()`` runs,
-        and for a folder that is a file reconciliation this branch does not have.
+        ``reload`` is refused: clearing a folder is a file reconciliation Weaver
+        does not do.
         """
 
         if reload:
@@ -720,9 +718,9 @@ class Table(WeaverObject):
         calls :meth:`_load` and records what settled itself, so one row has one
         writer.
 
-        ``reload`` reconstructs the table from zero: the bookmark goes back to
-        the sentinel, ``_.LoadStatus`` goes to Pending, the target is emptied,
-        and the authored load then runs against both.
+        ``reload`` reconstructs the table from zero: the bookmark row is
+        removed, ``_.LoadStatus`` goes to Pending, the target is emptied, and the
+        authored load then runs.
         """
 
         return _recorded_load(
@@ -746,10 +744,9 @@ class Table(WeaverObject):
         ``ignore_stability_threshold`` waives the declared delete and update
         limits for one run, for when a very large change is the correct answer.
 
-        ``reload`` empties the target before ``read()`` is called. Two kinds of
-        incremental source depend on that ordering: one reads its window from the
-        bookmark, which the caller has already put back to the sentinel, and one
-        joins against the target itself. Both then start from zero.
+        ``reload`` empties the target before ``read()`` is called. The caller has
+        already removed the bookmark, so an incremental source starts from zero
+        either way it reads.
         """
 
         self._anchor()
@@ -766,13 +763,12 @@ class Table(WeaverObject):
         # bookmark decides it, not the table's contents. Static means "load this
         # once", and the bookmark records whether that has happened, so a table
         # populated by hand is still loaded and a table a clean load emptied is
-        # still skipped. A reload is the caller saying to load it again.
+        # still skipped. A reload asks for it again.
         if not reload and contract.static and self.bookmark() > _sentinel():
             return LoadResult(succeeded=True, is_static_skip=True)
 
         if reload:
-            # Before read(), because an incremental source may join against the
-            # target to find what it has still to produce.
+            # Clear before read(): incremental source logic may inspect the target.
             clear_table(self.spark, contract=contract, lakehouse=self.lakehouse)
 
         # Staging: unvalidated, unreconciled, nothing yet classified as new or

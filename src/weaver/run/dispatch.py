@@ -35,12 +35,9 @@ def dispatch_primitive(
     ``open_runtime`` is called only by branches that import a deployed module.
     Warehouse-only runs therefore do not open a Spark runtime.
 
-    ``reload`` reaches the two branches that load an object. Each engine empties
-    the target before it runs the authored source; the caller has already ended
-    the object's load state. Only a table reaches here with it set, because
-    :func:`weaver.operations.load.run_load` refuses the rest before anything runs.
-    What ran in reload mode is recorded by the recorder that asked for it, not
-    reported back through a result.
+    ``reload`` reaches the two branches that load an object, where each engine
+    clears the target before running the authored source. Only a table arrives
+    here with it set; :func:`weaver.operations.load.run_load` refuses the rest.
     """
 
     if session is None:
@@ -132,7 +129,7 @@ def _warehouse_procedure(
     if publication is not None:
         publication.observe(node, session, workspace)
     sql = session.sql_executor(target, workspace=workspace)
-    # `@reload` is named only when it is set. A procedure installed before reload
+    # `@reload` is named only when set: a procedure installed before reload
     # existed has no such parameter, and an ordinary load of it still runs.
     inputs = (("fault_tolerant", 1 if fault_tolerant else 0),)
     if reload:
@@ -288,9 +285,8 @@ def python_primitive(
     # asynchronously, so a primitive that recorded itself would be a second
     # writer of the same row.
     #
-    # `reload` is passed only when it is set, because a Folder's `_load` does not
-    # take it. Planning refuses a folder reload, so a folder never arrives here
-    # with one.
+    # `reload` is named only when set: a Folder's `_load` does not take it, and
+    # planning has already refused a folder reload.
     policy = {"fault_tolerant": fault_tolerant}
     if reload:
         policy["reload"] = True
