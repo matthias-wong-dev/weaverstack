@@ -12,9 +12,9 @@ document and touches nothing else. The table is not dropped, not rebuilt and not
 reloaded, and the build after that has nothing left to do.
 
 The estate is the one :mod:`test_build_fixed_point_cycle` reaches a fixed point
-over, and the harness is imported from it rather than restated: what is asserted
-here is the difference between two builds of that estate, so the second build has
-to be the same build.
+over, and the harness is imported from it. What is asserted here is the
+difference between two builds of that estate, so the second build has to be the
+same build.
 """
 
 from __future__ import annotations
@@ -159,9 +159,8 @@ def test_the_delta_table_is_neither_dropped_nor_rebuilt(estate, tmp_path):
 def test_the_moved_source_keeps_its_structural_signature(estate, tmp_path):
     """Unchanged content, so an unchanged signature, so nothing to select.
 
-    This is what makes the claim above hold for a reason rather than by
-    accident: had the authored path reached the signature, every Lakehouse table
-    in the estate would have been selected for rebuild by the move alone.
+    A document's signature covers its own bytes and the helpers it can reach,
+    and the authored path is in neither. That is what the claim above rests on.
     """
 
     from weaver.build_bundle.incremental import declared_signatures

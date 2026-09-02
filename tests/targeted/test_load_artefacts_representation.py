@@ -115,6 +115,39 @@ def identities(artefacts) -> list[str]:
 
 
 @weaver_test()
+def test_the_authored_path_decides_the_deployed_one(estate):
+    """The runtime tree reproduces the repository, area for area.
+
+    Asserted as pairs because that is the contract an author reads: what a
+    program imports is where the file was written. A Spark SQL table is the one
+    that moves, and only its filename does, because it is compiled into the
+    module it deploys as.
+    """
+
+    deployed = {
+        artefact.source_path: str(artefact.identity)
+        for artefact in load_artefacts(estate)
+        if artefact.source_path is not None and artefact.object_type == FILE_TYPE
+    }
+
+    assert deployed == {
+        f"{ITEM}/Tables/DWG__Customer.py": (
+            f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Customer.py"
+        ),
+        f"{ITEM}/Tables/DWG.Summary.sql": (
+            f"{ITEM}/file:{LOAD_ROOT}/Tables/DWG__Summary.py"
+        ),
+        f"{ITEM}/Files/Raw__Export.py": (
+            f"{ITEM}/file:{LOAD_ROOT}/Files/Raw__Export.py"
+        ),
+        f"{ITEM}/lib/dates.py": f"{ITEM}/file:{LOAD_ROOT}/lib/dates.py",
+        f"{ITEM}/lib/data/holidays.csv": (
+            f"{ITEM}/file:{LOAD_ROOT}/lib/data/holidays.csv"
+        ),
+    }
+
+
+@weaver_test()
 def test_every_source_that_owns_a_load_artefact_owns_exactly_one(estate):
     """The whole derivation, as one visible set.
 

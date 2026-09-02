@@ -704,3 +704,108 @@ def test_a_schema_shortcut_reads_a_table_by_name():
 
     with pytest.raises(LoadError, match="reads a table by name"):
         shortcut.table("")
+
+
+# --- destinations and targets name the area ------------------------------------
+
+
+@weaver_test()
+def test_a_shortcut_destination_sits_in_the_area_its_type_gives_it():
+    """``shortcut_type`` decides the destination's area, as it decides its path."""
+
+    table = ShortcutDeclaration(
+        owner=CURATED,
+        name="Sales__Customer",
+        shortcut_type="table",
+        target_type="logical",
+        target="Lakehouse/Raw/Tables/Sales.Customer",
+    )
+    folder = ShortcutDeclaration(
+        owner=CURATED,
+        name="Sales__Customer",
+        shortcut_type="folder",
+        target_type="logical",
+        target="Lakehouse/Raw/Files/Sales.Customer",
+    )
+
+    assert str(table.destination) == "Lakehouse/Curated/Tables/Sales.Customer"
+    assert str(folder.destination) == "Lakehouse/Curated/Files/Sales.Customer"
+    assert table.destination != folder.destination
+
+
+@weaver_test()
+def test_a_warehouse_view_destination_stays_a_bare_relation():
+    view = ShortcutDeclaration(
+        owner=WeaverItemId.parse("Warehouse/Reporting"),
+        name="Sales__Customer",
+        shortcut_type="view",
+        target_type="logical",
+        target="Lakehouse/Curated/Tables/Sales.Customer",
+    )
+
+    assert str(view.destination) == "Warehouse/Reporting/Sales.Customer"
+    assert str(view.logical_source) == "Lakehouse/Curated/Tables/Sales.Customer"
+
+
+@weaver_test()
+def test_a_logical_lakehouse_table_target_names_its_area(tmp_path):
+    """A logical target is a Weaver identity, and the old spelling is not one."""
+
+    root = _estate(tmp_path)
+    _shortcuts(
+        root,
+        "Lakehouse/Curated",
+        "Sales__Portable = Shortcut(\n"
+        + _declaration("table", "logical", "Lakehouse/Raw/Sales.Customer")
+        + ")\n",
+    )
+
+    with pytest.raises(DiscoveryError, match="is not a managed object"):
+        _parse(root)
+
+
+@weaver_test()
+def test_a_logical_target_that_names_its_area_resolves(tmp_path):
+    root = _estate(tmp_path)
+    _shortcuts(
+        root,
+        "Lakehouse/Curated",
+        "Sales__Portable = Shortcut(\n"
+        + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
+        + ")\n",
+    )
+
+    pairs = {
+        str(pair.destination): str(pair.source)
+        for pair in _parse(root).logical_shortcuts
+    }
+
+    assert pairs["Lakehouse/Curated/Tables/Sales.Portable"] == (
+        "Lakehouse/Raw/Tables/Sales.Customer"
+    )
+
+
+@weaver_test()
+def test_a_physical_table_target_may_spell_its_area_or_leave_it_out():
+    """A physical target names a Fabric item, whose Tables area the path adds."""
+
+    spelled = ShortcutDeclaration(
+        owner=CURATED,
+        name="Sales__Portable",
+        shortcut_type="table",
+        target_type="physical",
+        target="Lakehouse/External/Tables/Sales.Customer",
+        workspace="Shared Data",
+    )
+    bare = ShortcutDeclaration(
+        owner=CURATED,
+        name="Sales__Portable",
+        shortcut_type="table",
+        target_type="physical",
+        target="Lakehouse/External/Sales.Customer",
+        workspace="Shared Data",
+    )
+
+    assert spelled.target_tail == bare.target_tail == "Sales.Customer"
+    assert spelled.target_object == bare.target_object
+    assert spelled.target_schema == bare.target_schema == "Sales"
