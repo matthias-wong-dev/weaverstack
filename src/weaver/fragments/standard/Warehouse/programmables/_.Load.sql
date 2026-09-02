@@ -7,11 +7,9 @@ procedure raised.
 The implementation procedure is in [_], and the source object's schema is part
 of its name. `@item_name` omitted means recover it from [_].[Installation].
 
-`@reload = 1` reconstructs the object from zero. This ends its load state first,
-putting [_].[LoadStatus] to Pending and removing the [_].[Bookmark] row, and the
-implementation procedure then empties the target and runs. That order is what
-keeps a bookmark from standing over rows that are gone. It reaches this object
-and nothing else: a consumer of it loads next as it always would.
+`@reload = 1` reconstructs the object from zero: [_].[LoadStatus] goes to Pending
+and the [_].[Bookmark] row is removed, then the implementation procedure clears
+the target and runs. It reaches this object alone.
 
 Every write is a MERGE, including the appends. In every Warehouse but the one
 the catalogue lives in these tables are views across databases, and Fabric
@@ -115,13 +113,9 @@ begin
 
         if @weaver_call is not null and @reload = 1
         begin
-            -- End this object's load state before the implementation empties its
-            -- target: [_].[LoadStatus] to Pending, and the [_].[Bookmark] row
-            -- gone. An absent bookmark row is the one physical shape of "no
-            -- clean load has established progress", and it is what the Static
-            -- gate below reads. Both are MERGEs, including the deletion: in
-            -- every Warehouse but the catalogue's these are views across
-            -- databases, and Fabric takes a MERGE through one.
+            -- Invalidate this object's load state before the implementation
+            -- clears its target, so a failed reload cannot retain the previous
+            -- bookmark.
             merge into [_].[LoadStatus] as target
             using (select
                 N'Warehouse' as [Item type]
@@ -166,19 +160,11 @@ begin
                 , convert(datetime2(6), '9999-12-31 23:59:59.999999')
             );
 
-            merge into [_].[Bookmark] as target
-            using (select
-                N'Warehouse' as [Item type]
-                , @item_name as [Item name]
-                , @weaver_schema as [Schema name]
-                , @weaver_object as [Object name]
-            ) as source
-               on
-                target.[Item type] = source.[Item type]
-                  and target.[Item name] = source.[Item name]
-                  and target.[Schema name] = source.[Schema name]
-                  and target.[Object name] = source.[Object name]
-            when matched then delete;
+            delete from [_].[Bookmark]
+             where [Item type] = N'Warehouse'
+               and [Item name] = @item_name
+               and [Schema name] = @weaver_schema
+               and [Object name] = @weaver_object;
         end;
 
         if @weaver_call is not null

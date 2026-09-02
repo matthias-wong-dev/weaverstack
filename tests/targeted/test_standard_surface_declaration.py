@@ -173,12 +173,7 @@ def test_the_load_entry_point_passes_reload_to_the_implementation():
 
 @weaver_test()
 def test_the_load_entry_point_ends_the_load_state_before_it_calls():
-    """The barrier a reload rests on, and the order it is written in.
-
-    The status goes to Pending and the bookmark row goes, while the target still
-    holds the rows they describe. Both are MERGEs, the removal included, because
-    in every Warehouse but the catalogue's these are views across databases.
-    """
+    """Pending status and no bookmark row, both before the implementation runs."""
 
     sql = standard_fragment(WAREHOUSE)["programmables/_.Load.sql"].decode("utf-8")
 
@@ -187,18 +182,14 @@ def test_the_load_entry_point_ends_the_load_state_before_it_calls():
     assert reset < called
     ending = sql[reset:called]
     assert "N'Pending'" in ending
-    assert "when matched then delete;" in ending
+    assert "delete from [_].[Bookmark]" in ending
     # The status first: nothing may read Succeeded beside an absent bookmark.
     assert ending.index("[_].[LoadStatus]") < ending.index("[_].[Bookmark]")
 
 
 @weaver_test()
 def test_the_load_entry_point_stores_no_bookmark_sentinel():
-    """The sentinel is what an absent row reads as, and is never written.
-
-    Two physical shapes for "no clean load has established progress" would give
-    the Static gate and every incremental read two things to agree about.
-    """
+    """The sentinel is what an absent row reads as, and is never written."""
 
     sql = standard_fragment(WAREHOUSE)["programmables/_.Load.sql"].decode("utf-8")
 
