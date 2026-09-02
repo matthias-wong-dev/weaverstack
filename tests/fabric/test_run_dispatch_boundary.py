@@ -255,12 +255,13 @@ def test_every_settled_node_reaches_the_log_from_the_desktop(thin, tolerated):
     }
 
     # The physical identity, not a logical one: `_.Log` is read looking
-    # at an estate, and the target is where the work happened.
+    # at an estate, and the target is where the work happened. The two object
+    # columns are keyed as every other table keys them, area and all.
     for row in logged.values():
         assert row["Task type"] == "load"
         assert row["Target type"] == "Lakehouse"
         assert row["Target name"] == LAKEHOUSE
-        assert row["Schema name"] == "Thin"
+        assert row["Schema name"] == "Tables/Thin"
 
     # And the frozen vocabulary, both values of it this run produces.
     assert logged["Success"]["Result"] == "Succeeded"

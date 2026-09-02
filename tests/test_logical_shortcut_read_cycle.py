@@ -472,7 +472,7 @@ def test_a_folder_source_and_a_table_source_of_one_name_are_two_bookmarks(tmp_pa
     table = TableShortcut(
         schema=LOCAL_SCHEMA,
         object=LOCAL_OBJECT,
-        source=f"{LANDING}/{SOURCE_SCHEMA}.{SOURCE_OBJECT}",
+        source=f"{LANDING}/Tables/{SOURCE_SCHEMA}.{SOURCE_OBJECT}",
     )(consumer)
 
     assert folder.bookmark() == SOURCE_LOADED

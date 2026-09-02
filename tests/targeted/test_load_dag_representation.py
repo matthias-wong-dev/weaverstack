@@ -124,9 +124,9 @@ def test_load_dag_finds_the_installed_primitive_for_each_dispatch_kind(estate):
 
     assert {node.node_id: node.primitive_kind for node in dag.nodes} == {
         "load:Lakehouse/Raw_LH/Files/Sales.Export": PYTHON_FOLDER,
-        "load:Lakehouse/Raw_LH/Sales.Order": PYTHON_TABLE,
+        "load:Lakehouse/Raw_LH/Tables/Sales.Order": PYTHON_TABLE,
         # A Spark-SQL-authored table dispatches as what it installs as.
-        "load:Lakehouse/Raw_LH/Sales.Daily": PYTHON_TABLE,
+        "load:Lakehouse/Raw_LH/Tables/Sales.Daily": PYTHON_TABLE,
         "refresh:Lakehouse/Raw_LH": ENDPOINT_REFRESH,
         "load:Warehouse/Reporting_WH/Sales.Summary": WAREHOUSE_PROCEDURE,
     }
@@ -141,8 +141,8 @@ def test_load_dag_loads_every_object_in_the_requested_targets(estate):
 
     assert node_ids(dag) == (
         "load:Lakehouse/Raw_LH/Files/Sales.Export",
-        "load:Lakehouse/Raw_LH/Sales.Order",
-        "load:Lakehouse/Raw_LH/Sales.Daily",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Order",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Daily",
     )
 
 
@@ -176,7 +176,7 @@ def test_load_dag_excludes_unrelated_downstream_objects(estate):
 def test_load_dag_crosses_targets_only_when_both_are_requested(estate):
     dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
-    assert "load:Lakehouse/Raw_LH/Sales.Order" in dag.by_id
+    assert "load:Lakehouse/Raw_LH/Tables/Sales.Order" in dag.by_id
     assert "refresh:Lakehouse/Raw_LH" in dag.by_id
     assert "load:Warehouse/Reporting_WH/Sales.Summary" in dag.by_id
 
@@ -190,8 +190,8 @@ def test_names_select_exact_nodes_without_dependencies_or_edges(estate):
     )
 
     assert set(node_ids(dag)) == {
-        "load:Lakehouse/Raw_LH/Sales.Order",
-        "load:Lakehouse/Raw_LH/Sales.Daily",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Order",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Daily",
     }
     assert dag.edges == ()
 
@@ -200,7 +200,7 @@ def test_names_select_exact_nodes_without_dependencies_or_edges(estate):
 def test_a_name_is_resolved_case_insensitively_within_the_requested_targets(estate):
     dag = load_dag(estate, items=(PRODUCER,), names=("sales.order",))
 
-    assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Sales.Order",)
+    assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Tables/Sales.Order",)
 
 
 @weaver_test()
@@ -217,8 +217,8 @@ def test_load_dag_orders_direct_dependencies(estate):
     dag = load_dag(estate, items=(PRODUCER,))
 
     assert (
-        "load:Lakehouse/Raw_LH/Sales.Order",
-        "load:Lakehouse/Raw_LH/Sales.Daily",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Order",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Daily",
     ) in dag.edges
 
 
@@ -283,7 +283,7 @@ class Sales__Customer(Table):
     assert dag.edges == (
         (
             "load:Lakehouse/Raw_LH/Files/Sales.Drop",
-            "load:Lakehouse/Raw_LH/Sales.Customer",
+            "load:Lakehouse/Raw_LH/Tables/Sales.Customer",
         ),
     )
 
@@ -295,7 +295,7 @@ def test_load_dag_crosses_items_through_shortcutes(estate):
     dag = load_dag(estate, items=(PRODUCER, CONSUMER))
     consumer = "load:Warehouse/Reporting_WH/Sales.Summary"
 
-    assert "load:Lakehouse/Raw_LH/Sales.Order" in dag.by_id
+    assert "load:Lakehouse/Raw_LH/Tables/Sales.Order" in dag.by_id
     # And the crossing is represented physically: the consumer waits on the
     # barrier rather than on the producer directly.
     assert dag.upstream(consumer) == {"refresh:Lakehouse/Raw_LH"}
@@ -306,7 +306,7 @@ def test_load_dag_inserts_endpoint_refresh_before_shortcut_consumers(estate):
     dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
     assert (
-        "load:Lakehouse/Raw_LH/Sales.Order",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Order",
         "refresh:Lakehouse/Raw_LH",
     ) in dag.edges
     assert (
@@ -322,8 +322,8 @@ def test_load_dag_places_the_barrier_after_every_selected_load_in_that_lakehouse
     dag = load_dag(estate, items=(PRODUCER, CONSUMER))
 
     assert dag.upstream("refresh:Lakehouse/Raw_LH") == {
-        "load:Lakehouse/Raw_LH/Sales.Order",
-        "load:Lakehouse/Raw_LH/Sales.Daily",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Order",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Daily",
         "load:Lakehouse/Raw_LH/Files/Sales.Export",
     }
 
@@ -372,8 +372,8 @@ def test_load_dag_coalesces_one_endpoint_refresh_per_lakehouse(tmp_path):
     refreshes = [node for node in dag.nodes if node.primitive_kind == ENDPOINT_REFRESH]
     assert [node.node_id for node in refreshes] == ["refresh:Lakehouse/Raw_LH"]
     assert dag.upstream("refresh:Lakehouse/Raw_LH") == {
-        "load:Lakehouse/Raw_LH/Sales.Order",
-        "load:Lakehouse/Raw_LH/Sales.Customer",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Order",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Customer",
     }
 
 
@@ -409,7 +409,19 @@ def _installation(item: str, target: str):
 
 
 def _registry(item: str, schema: str, name: str, *, object_type="table", role="data"):
+    """One Registry row, keyed as the catalogue keys it.
+
+    A Lakehouse relation names ``Tables``; a Folder and a load artefact arrive
+    with the schema they are stored under already spelled out.
+    """
+
     identity = WeaverItemId.parse(item)
+    if (
+        identity.item_type == "Lakehouse"
+        and object_type in ("table", "view")
+        and "/" not in schema
+    ):
+        schema = f"Tables/{schema}"
     return {
         "item_type": identity.item_type,
         "item_name": identity.item_name,
@@ -423,8 +435,12 @@ def _registry(item: str, schema: str, name: str, *, object_type="table", role="d
 
 
 def _dependency(item: str, schema: str, name: str, reference: str, within=True):
+    """One Dependency row, keyed as the declaring object is keyed."""
+
     identity = WeaverItemId.parse(item)
     referenced = identity if within else WeaverItemId.parse("Lakehouse/Elsewhere")
+    if identity.item_type == "Lakehouse" and "/" not in schema:
+        schema = f"Tables/{schema}"
     return {
         "item_type": identity.item_type,
         "item_name": identity.item_name,
@@ -494,8 +510,8 @@ def test_ambiguity_elsewhere_in_the_estate_does_not_stop_an_unrelated_load(estat
 
     assert node_ids(dag) == (
         "load:Lakehouse/Raw_LH/Files/Sales.Export",
-        "load:Lakehouse/Raw_LH/Sales.Order",
-        "load:Lakehouse/Raw_LH/Sales.Daily",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Order",
+        "load:Lakehouse/Raw_LH/Tables/Sales.Daily",
     )
 
 
@@ -542,7 +558,7 @@ def test_a_request_for_one_of_two_items_sharing_a_target_loads_that_item_alone()
 
     # Raw's object, dispatched at the Lakehouse the two items share. Staging's
     # is installed there too and was not requested.
-    assert node_ids(dag) == ("load:Lakehouse/Shared_LH/Sales.Order",)
+    assert node_ids(dag) == ("load:Lakehouse/Shared_LH/Tables/Sales.Order",)
 
     both = load_dag(
         catalogue.dag(),
@@ -555,8 +571,8 @@ def test_a_request_for_one_of_two_items_sharing_a_target_loads_that_item_alone()
     # Ordered by logical identity, so the two items' objects interleave by
     # item name rather than by the physical name they share.
     assert node_ids(both) == (
-        "load:Lakehouse/Shared_LH/Sales.Order",
-        "load:Lakehouse/Shared_LH/Sales.Customer",
+        "load:Lakehouse/Shared_LH/Tables/Sales.Order",
+        "load:Lakehouse/Shared_LH/Tables/Sales.Customer",
     )
 
 
@@ -706,7 +722,7 @@ def test_load_dag_ignores_a_fully_qualified_physical_read():
     )
     dag = load_dag(catalogue.dag(), items=(PRODUCER,))
 
-    assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Sales.Order",)
+    assert node_ids(dag) == ("load:Lakehouse/Raw_LH/Tables/Sales.Order",)
     assert [message.code for message in dag.messages] == ["dependency_external"]
 
 
@@ -919,7 +935,7 @@ def test_a_table_importing_the_folder_shortcut_it_shares_a_name_with_loads(tmp_p
     item, estate = _same_name_estate_dag(tmp_path)
     dag = load_dag(estate, items=(WeaverItemId.parse(item),))
 
-    assert node_ids(dag) == ("load:Lakehouse/Curated_LH/Sales.Customer",)
+    assert node_ids(dag) == ("load:Lakehouse/Curated_LH/Tables/Sales.Customer",)
 
 
 @weaver_test()
@@ -969,7 +985,7 @@ def test_a_python_shortcut_import_orders_a_warehouse_before_its_lakehouse_consum
     from weaver.load_plan import ONELAKE_PUBLICATION, OneLakeReadiness
 
     producer = "load:Warehouse/Serving_WH/SERVE.Reporting"
-    consumer = "load:Lakehouse/Published_LH/PUB.Reporting"
+    consumer = "load:Lakehouse/Published_LH/Tables/PUB.Reporting"
     barrier = "publish:Warehouse/Serving_WH/SERVE.Reporting"
 
     # The barrier replaces the direct edge, as the endpoint refresh does in the
@@ -1146,7 +1162,7 @@ def test_a_real_folder_and_a_real_table_of_one_name_are_two_load_nodes(tmp_path)
     )
 
     folder_node = f"load:Lakehouse/{SOURCE_TARGET}/Files/{SAME_NAME}"
-    table_node = f"load:Lakehouse/{SOURCE_TARGET}/{SAME_NAME}"
+    table_node = f"load:Lakehouse/{SOURCE_TARGET}/Tables/{SAME_NAME}"
 
     # Two nodes, not one.
     assert folder_node in dag.by_id
@@ -1219,7 +1235,7 @@ def test_a_folder_shortcut_and_a_real_table_of_one_name_stay_apart(tmp_path):
     assert not estate.unresolved
 
     dag = load_dag(estate, items=(WeaverItemId.parse(SOURCE_ITEM),))
-    table_node = f"load:Lakehouse/{SOURCE_TARGET}/{SAME_NAME}"
+    table_node = f"load:Lakehouse/{SOURCE_TARGET}/Tables/{SAME_NAME}"
 
     # The pointer holds no load primitive, so the table is the only loadable.
     assert node_ids(dag) == (table_node,)
@@ -1271,7 +1287,7 @@ def test_a_logical_folder_shortcut_keeps_its_managed_producer(tmp_path):
     )
 
     producer = f"load:Lakehouse/Landing_LH/Files/{SAME_NAME}"
-    consumer = f"load:Lakehouse/{SOURCE_TARGET}/{SAME_NAME}"
+    consumer = f"load:Lakehouse/{SOURCE_TARGET}/Tables/{SAME_NAME}"
 
     assert producer in dag.by_id
     assert consumer in dag.by_id
@@ -1307,7 +1323,7 @@ def test_a_real_folder_and_a_table_shortcut_of_one_name_stay_apart(tmp_path):
                 Shortcut=[
                     shortcut_row(
                         f"{SOURCE_ITEM}/Tables/{SAME_NAME}",
-                        f"{upstream}/{SAME_NAME}",
+                        f"{upstream}/Tables/{SAME_NAME}",
                     )
                 ],
                 Dependency=[_dependency(SOURCE_ITEM, "Sales", "Report", SAME_NAME)],
@@ -1326,8 +1342,8 @@ def test_a_real_folder_and_a_table_shortcut_of_one_name_stay_apart(tmp_path):
     )
 
     folder_node = f"load:Lakehouse/{SOURCE_TARGET}/Files/{SAME_NAME}"
-    report_node = f"load:Lakehouse/{SOURCE_TARGET}/Sales.Report"
-    producer_node = f"load:Lakehouse/Landing_LH/{SAME_NAME}"
+    report_node = f"load:Lakehouse/{SOURCE_TARGET}/Tables/Sales.Report"
+    producer_node = f"load:Lakehouse/Landing_LH/Tables/{SAME_NAME}"
 
     # The Folder is its own loadable and did not collapse into the pointer.
     assert folder_node in dag.by_id

@@ -25,7 +25,15 @@ from .state import RunState
 
 
 def node_label(node) -> str:
-    """Return a display label that includes the target and logical object."""
+    """One node, named by what it does and the logical object it does it to.
+
+    The canonical logical identity, so what a run prints is what the repository
+    declares and what a request selects: ``Load Lakehouse/Landing/Tables/
+    Sales.Customer``. A Folder and a table of one ``Schema.Object`` read apart
+    because the area is part of the name. Where an item is bound is
+    Installation's to say, and a physical operation says it: an endpoint refresh
+    and a OneLake publication name the target because the target is the subject.
+    """
 
     from .resolution import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 
@@ -43,26 +51,9 @@ def node_label(node) -> str:
     if what is None:
         # Barriers and directly constructed nodes have no logical label.
         return node.node_id
-    name = _display_name(what)
     # Validations use their Test or Assumption kind in the display label.
     verb = "Load" if node.role == LOAD else "Test"
-    return f"{verb} {target}/{name}" if target is not None else f"{verb} {name}"
-
-
-def _display_name(identity) -> str:
-    """One object, spelled as the catalogue stores it.
-
-    The area comes with it, so a Folder and a table of one ``Schema.Object``
-    read apart on the line somebody watches go past, as they do in the plan and
-    in the graph.
-    """
-
-    from ..catalogue.claims import catalogue_columns
-
-    if getattr(identity, "object_id", None) is None:
-        return str(identity)
-    schema, name = catalogue_columns(identity)
-    return f"{schema}.{name}"
+    return f"{verb} {what}"
 
 
 @contextmanager
@@ -491,7 +482,15 @@ class Runner:
         if target_type:
             target_type = str(target_type).title()
         target_name = getattr(node.physical_target, "name", None)
-        object_id = getattr(node.logical_id, "object_id", None)
+        from ..catalogue.claims import catalogue_columns
+
+        # Keyed as every catalogue table keys it, area and all, because these
+        # two columns are what the ``_.Log`` row is written from.
+        stored = (
+            catalogue_columns(node.logical_id)
+            if getattr(node.logical_id, "object_id", None) is not None
+            else (None, None)
+        )
         return RunNodeResult(
             node_id=node.node_id,
             physical_target=str(node.physical_target),
@@ -509,8 +508,8 @@ class Runner:
             finished_at=_now() if executed else None,
             target_type=target_type,
             target_name=target_name,
-            schema_name=getattr(object_id, "schema", None),
-            object_name=getattr(object_id, "object", None),
+            schema_name=stored[0],
+            object_name=stored[1],
         )
 
     def _result(self, nodes, *, started: str) -> RunResult:

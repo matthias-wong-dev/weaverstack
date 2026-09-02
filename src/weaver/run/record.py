@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from ..catalogue.claims import catalogue_schema
 from ..catalogue.tables import (
     BLOCKED,
     BOOKMARK,
@@ -389,7 +390,7 @@ def settled_load(
         finished_at=_isoformat(completed),
         target_type=physical_target.partition("/")[0] or None,
         target_name=physical_target.partition("/")[2] or None,
-        schema_name=identity.object_id.schema,
+        schema_name=catalogue_schema(identity),
         object_name=identity.object_id.object,
     )
 
@@ -429,7 +430,7 @@ def settled_validation(
         finished_at=_isoformat(completed),
         target_type=physical_target.partition("/")[0] or None,
         target_name=physical_target.partition("/")[2] or None,
-        schema_name=identity.object_id.schema,
+        schema_name=catalogue_schema(identity),
         object_name=identity.object_id.object,
     )
 
@@ -472,12 +473,23 @@ def _object_of(node) -> tuple[str | None, str | None]:
 def _object_parts(logical_id: str | None) -> tuple[str | None, str | None]:
     """The schema and object a node's logical id names, if it names one.
 
-    A logical id is ``<ItemType>/<ItemName>/<Schema>.<Object>``; a node such as
-    an endpoint refresh has no object at all and says so with nulls.
+    Keyed as every other table keys it, area and all, so a Folder and a table of
+    one ``Schema.Object`` are two rows in the log as they are two rows in
+    Registry. A node such as an endpoint refresh names no object and says so
+    with nulls, and so does anything whose logical id is not a document
+    identity.
     """
+
+    from ..catalogue.claims import catalogue_columns
+    from ..declaration.model import WeaverDocumentId
+    from ..errors import IdentityError
 
     if not logical_id:
         return None, None
+    try:
+        return catalogue_columns(WeaverDocumentId.parse(str(logical_id)))
+    except IdentityError:
+        pass
     qualified = str(logical_id).rsplit("/", 1)[-1]
     schema, separator, name = qualified.rpartition(".")
     if not separator:

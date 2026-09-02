@@ -82,22 +82,25 @@ def installed(
     ``at`` gives each one a bookmark; without it they have none, which is what an
     object no clean load has run for has.
 
-    ``files`` says the objects are Folders, whose catalogue identity carries the
-    ``Files/`` prefix, a Folder and a Table of the same name are two objects.
+    ``files`` says the objects are Folders. Either way the row is keyed through
+    the production rule, so a Folder and a Table of one ``Schema.Object`` are two
+    objects here for the reason they are two objects in a Warehouse.
     """
 
+    from weaver.catalogue.claims import bookmark_row, catalogue_columns
+
     owner = WeaverItemId.parse(item)
-    schema_prefix = "Files/" if files else ""
     registry = []
     bookmarks = []
     for name in objects:
-        schema, object = name.split(".", 1)
+        one = identity(name, item=item, files=files)
+        schema_name, object_name = catalogue_columns(one)
         registry.append(
             {
                 "item_type": owner.item_type,
                 "item_name": owner.item_name,
-                "schema_name": f"{schema_prefix}{schema}",
-                "object_name": object,
+                "schema_name": schema_name,
+                "object_name": object_name,
                 "object_type": "folder" if files else "table",
                 "object_role": "data",
                 "signature": "s",
@@ -105,15 +108,7 @@ def installed(
             }
         )
         if at is not None:
-            bookmarks.append(
-                {
-                    "item_type": owner.item_type,
-                    "item_name": owner.item_name,
-                    "schema_name": f"{schema_prefix}{schema}",
-                    "object_name": object,
-                    "bookmark_datetime": at,
-                }
-            )
+            bookmarks.append(bookmark_row(one, at))
     tables = {
         "Installation": (
             {
@@ -161,6 +156,8 @@ def validating(
             {
                 "item_type": owner.item_type,
                 "item_name": owner.item_name,
+                # A validation names no Lakehouse area, because it materialises
+                # nothing to put in one.
                 "schema_name": name.split(".", 1)[0],
                 "object_name": name.split(".", 1)[1],
                 "test_type": kind,

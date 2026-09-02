@@ -1,15 +1,17 @@
 """Moving a Lakehouse source under ``Tables/`` moves its module, not its data.
 
-An estate built before the areas were explicit holds its load modules at the
-runtime root: ``_/Load/DWG__Customer.py``. Its Delta tables are unaffected by the
-move, because the catalogue never stored an area. ``schema_name`` is ``DWG`` and
-``object_name`` is ``Customer``, and the row an old build wrote reads back as
-``Lakehouse/Sales/Tables/DWG.Customer``, which is the same key the new
-declaration claims.
+An estate whose load modules sit at the runtime root, ``_/Load/DWG__Customer.py``,
+is one built before the areas were explicit. Moving the sources under ``Tables/``
+replaces one runtime file per Lakehouse document. The Delta table is not
+dropped, not rebuilt and not reloaded, because the authored path reaches neither
+the physical name nor the signature, and the build after that has nothing left
+to do.
 
-So the first build after the upgrade replaces one runtime file per Lakehouse
-document and touches nothing else. The table is not dropped, not rebuilt and not
-reloaded, and the build after that has nothing left to do.
+What the catalogue stores changed too, in a second step: a Lakehouse relation is
+keyed ``Tables/DWG`` now, where it was keyed ``DWG``. That is a breaking
+catalogue migration and is asserted separately, in
+:mod:`test_area_keyed_catalogue_cycle`. Here the catalogue is the current one
+throughout, so what this isolates is the file move.
 
 The estate is the one :mod:`test_build_fixed_point_cycle` reaches a fixed point
 over, and the harness is imported from it. What is asserted here is the
@@ -20,6 +22,7 @@ same build.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
 import test_build_fixed_point_cycle as harness
@@ -48,9 +51,9 @@ def estate(tmp_path):
 def _before_the_move(catalogue: Catalogue) -> Catalogue:
     """The same catalogue, with each Lakehouse load module where it used to sit.
 
-    Only the file rows move. A table's Registry row carries its relational
-    schema and its object name and no area at all, so there is nothing in it for
-    the move to change.
+    Only the file rows move. A table's Registry row names the area the table
+    sits in, not the path its module was deployed to, so the file move leaves it
+    alone.
     """
 
     rows = {
@@ -142,7 +145,7 @@ def test_the_move_replaces_the_load_module_and_nothing_else(estate, tmp_path):
 
 @weaver_test()
 def test_the_delta_table_is_neither_dropped_nor_rebuilt(estate, tmp_path):
-    """The catalogue key did not move, so the data has nothing to answer for."""
+    """The source moved and the object did not, so the data has nothing to answer for."""
 
     bundle = _migrating_build(estate, tmp_path)
     table = WeaverDocumentId.parse(TABLE)
@@ -180,3 +183,114 @@ def test_the_migration_is_one_build_long(estate, tmp_path):
 
     assert actions(_migrating_build(estate, tmp_path))
     assert actions(build(estate, tmp_path, catalogue=installed_catalogue(estate))) == []
+
+
+# --- the catalogue key, which moved separately ---------------------------------
+#
+# An estate built before the area was stored keys its Lakehouse relations bare:
+# `DWG`, where this Weaver writes `Tables/DWG`. That is a breaking catalogue
+# migration, and what matters is which of its consequences are physical.
+
+
+def _before_the_key_moved(catalogue: Catalogue) -> Catalogue:
+    """The same catalogue, with each Lakehouse relation keyed as it once was.
+
+    Only the relations. A Folder always carried ``Files/``, and a load artefact's
+    schema is a path, so neither is touched. That asymmetry is the thing this
+    change removed.
+    """
+
+    rows = {
+        item: {
+            name: tuple(
+                {**row, "schema_name": str(row["schema_name"]).removeprefix("Tables/")}
+                if str(row.get("schema_name", "")).startswith("Tables/")
+                else row
+                for row in table_rows
+            )
+            for name, table_rows in tables.items()
+        }
+        for item, tables in catalogue.rows.items()
+    }
+    return Catalogue(rows=rows, materialised=catalogue.materialised)
+
+
+@weaver_test()
+def test_the_old_key_still_names_the_object_it_named(estate, tmp_path):
+    """A bare Lakehouse relation reads back as the relation, not as a validation.
+
+    This is what keeps an upgrading estate's tables recognised. Read as
+    validations they would every one look new, and a build would rebuild the lot.
+    """
+
+    old = _before_the_key_moved(installed_catalogue(estate))
+    table = WeaverDocumentId.parse(TABLE)
+
+    assert table in old.registered
+    assert old.registered[table].object_type == "table"
+
+
+@weaver_test()
+def test_the_key_moving_rebuilds_no_table_and_drops_nothing(estate, tmp_path):
+    """The physical name never carried the area, so no physical work follows."""
+
+    bundle = build(
+        estate, tmp_path, catalogue=_before_the_key_moved(installed_catalogue(estate))
+    )
+    planned = actions(bundle)
+
+    assert WeaverDocumentId.parse(TABLE) not in bundle.plan.selection.selected_for_build
+    assert not [
+        action
+        for action in planned
+        if action.kind in ("drop_table", "drop_folder", "build_table", "load_table")
+    ]
+
+
+@weaver_test()
+def test_the_key_moving_republishes_the_registry_row(estate, tmp_path):
+    """The row is rewritten under the area, which is the whole of the change."""
+
+    bundle = build(
+        estate, tmp_path, catalogue=_before_the_key_moved(installed_catalogue(estate))
+    )
+
+    assert "publish_registry" in {action.kind for action in actions(bundle)}
+
+
+@weaver_test()
+def test_the_key_moving_costs_the_bookmark_and_says_so(estate, tmp_path):
+    """The one behavioural consequence the key move has.
+
+    A bookmark is keyed as Registry keys the object, so a row written under the
+    old spelling is not the row the new one reads. The table loads from the
+    sentinel once, reading its source from the beginning. A Weaver table is
+    upserted by its declared key, so that pass rewrites the rows it holds.
+
+    The old row does not linger. Reconciliation withdraws the claim it belonged
+    to, and the build invalidates its runtime state, so the row is deleted by
+    the same build that republishes the object under its area.
+    """
+
+    from weaver.catalogue.claims import bookmark_row
+    from weaver.catalogue.state import BOOKMARK_SENTINEL
+
+    loaded_at = datetime(2026, 9, 1, 6, 0, tzinfo=timezone.utc)
+    table = WeaverDocumentId.parse(TABLE)
+    settled = installed_catalogue(estate)
+    rows = {item: dict(tables) for item, tables in settled.rows.items()}
+    rows[table.item]["Bookmark"] = (bookmark_row(table, loaded_at),)
+    loaded = Catalogue(rows=rows, materialised=settled.materialised)
+
+    old = _before_the_key_moved(loaded)
+
+    assert loaded.bookmark(table) == loaded_at
+    assert old.bookmark(table) == BOOKMARK_SENTINEL
+
+    # And the build clears the row the old key held, rather than leaving it.
+    invalidated = {
+        (one.table, row["schema_name"], row["object_name"])
+        for one in build(estate, tmp_path, catalogue=old).plan.runtime_state
+        for row in one.rows
+    }
+    assert ("Bookmark", "DWG", "Customer") in invalidated

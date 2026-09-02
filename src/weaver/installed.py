@@ -23,7 +23,7 @@ from functools import cached_property
 from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence
 
-from .catalogue.claims import catalogue_columns
+from .catalogue.claims import catalogue_columns, stored_area
 from .catalogue.state import Catalogue
 from .catalogue.tables import (
     DEPENDENCY,
@@ -86,10 +86,6 @@ TEST_TYPE_FOR_KIND = {kind: name for name, kind in KIND_FOR_TEST_TYPE.items()}
 
 #: Which role a validation kind carries in the Registry.
 _ROLE_FOR_VALIDATION_KIND = {TEST: ROLE_TEST, ASSUMPTION: ROLE_ASSUMPTION}
-
-#: What a Folder's stored schema carries, so a table and a folder of the same
-#: name stay apart.
-_FILES_PREFIX = "Files/"
 
 #: What separates schema from object in a Python module name. A module name
 #: cannot carry a dot, so ``Sales.Seed`` is spelled ``Sales__Seed``.
@@ -184,10 +180,9 @@ class InstalledNode:
     def load_key(self) -> str:
         """This node's identity within its physical target.
 
-        The catalogue's own spelling, so a Folder carries its ``Files/`` area
-        and a table does not. That is what separates ``Files/Sales.Thing`` from
-        ``Sales.Thing`` where a Lakehouse owns both and the table reads the
-        Folder.
+        The catalogue's own spelling, so a Lakehouse object carries its area:
+        ``Tables/Sales.Thing`` and ``Files/Sales.Thing`` are the two a Lakehouse
+        owning both keeps apart, and a Warehouse relation names none.
         """
 
         schema, name = catalogue_columns(self.identity)
@@ -825,14 +820,20 @@ def installed_shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
 
 
 def stored_identity(item: WeaverItemId, schema: str, name: str) -> WeaverDocumentId:
-    """One stored ``schema_name``/``object_name`` pair back as an identity."""
+    """One stored ``schema_name``/``object_name`` pair back as an object identity.
 
-    is_files = schema.startswith(_FILES_PREFIX)
-    return WeaverDocumentId(
-        item,
-        ObjectId(schema[len(_FILES_PREFIX) :] if is_files else schema, name),
-        is_files=is_files,
-    )
+    The area the stored schema names, and the relational schema under it. What
+    names none is a Warehouse relation, which sits in no area.
+
+    An object identity, because that is what the tables keyed this way hold:
+    Registry, Bookmark, LoadStatus and LoadStatistic record what an item
+    materialises. ``_.TestStatus`` and ``_.TestDictionary`` hold validations, and
+    are read through :meth:`WeaverDocumentId.validation`. ``_.Dependency`` holds
+    both, and resolves the two against the nodes it has.
+    """
+
+    area, relational = stored_area(schema)
+    return WeaverDocumentId(item, ObjectId(relational, name), is_files=area == FILES)
 
 
 def _shortcut_edges(shortcuts, nodes) -> tuple[InstalledEdge, ...]:
@@ -873,9 +874,10 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
     describes something declared and not installed, so it contributes no edge:
     the graph is of what is there.
 
-    A row names its declaring object in two columns, and an object and a
-    validation of one ``Schema.Object`` are stored the same way. The nodes settle
-    which it was: the graph already holds one of them and not the other.
+    ``_.Dependency`` is the one table that holds both an object's rows and a
+    validation's. An object names its area and a validation names none, so the
+    stored schema usually settles it; where it does not, the nodes do, because
+    the graph holds one of the two and not the other.
     """
 
     found = []
@@ -885,7 +887,10 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
             name = str(row.get("referencing_object_name") or "")
             consumer = stored_identity(item, schema, name)
             if str(consumer) not in nodes:
-                consumer = WeaverDocumentId.validation(item, ObjectId(schema, name))
+                area, relational = stored_area(schema)
+                if area is not None:
+                    continue
+                consumer = WeaverDocumentId.validation(item, ObjectId(relational, name))
                 if str(consumer) not in nodes:
                     continue
             found.append(

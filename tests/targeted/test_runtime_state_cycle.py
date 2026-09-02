@@ -54,11 +54,15 @@ from weaver.targets import ItemRef
 CATALOGUE = WarehouseBinding(ItemRef("Weaver"), workspace_name=WORKSPACE)
 
 #: The three objects the estate declares, as their current-state rows key them.
-CUSTOMER = ("DWG", "Customer")
+#: The four keys, as every operational table stores them. A Lakehouse data
+#: object names its area and a validation names none, so the Test sits beside
+#: the table it reconciles without colliding with it.
+CUSTOMER = ("Tables/DWG", "Customer")
 CSV = ("Files/Raw", "CustomerCsv")
 RECONCILE = ("DWG", "CustomerReconcile")
 
-#: One object in the other item, so scope can be asserted.
+#: One object in the other item, which is a Warehouse and has no areas, so
+#: scope can be asserted.
 OTHER = ("Sales", "Customer")
 
 

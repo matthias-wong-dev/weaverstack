@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Iterable, Mapping
 
+from ..catalogue.claims import stored_area
 from ..catalogue.tables import (
     CATALOGUE_SCHEMA,
     STANDARD_SURFACE_TABLES,
@@ -187,8 +188,13 @@ class TargetInventory:
         for a type this did not know about would answer no for something that
         is plainly there, and reconciliation reads a no as proof the claim is
         stale.
+
+        ``schema`` is accepted as the catalogue stores it or as the target holds
+        it. A Lakehouse area is a Weaver spelling and nothing a Fabric inventory
+        reports, so it comes off here and one comparison serves both callers.
         """
 
+        _area, schema = stored_area(schema)
         if object_type == "file":
             # A file is addressed by path, and its schema already is the path
             # beneath Files, so the two halves join with a separator rather than
@@ -197,11 +203,7 @@ class TargetInventory:
         if object_type == "stored_procedure":
             return _holds(self.procedures, f"{schema}.{name}")
         if object_type == "folder":
-            prefix = "Files/"
-            physical_schema = schema
-            if schema.casefold().startswith(prefix.casefold()):
-                physical_schema = schema[len(prefix) :]
-            return _holds(self.folders, f"{physical_schema}.{name}")
+            return _holds(self.folders, f"{schema}.{name}")
         if object_type == "schema":
             return schema.casefold() == name.casefold() and _holds(self.schemas, schema)
         if (
