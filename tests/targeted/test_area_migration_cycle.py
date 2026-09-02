@@ -22,6 +22,7 @@ same build.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
 import test_build_fixed_point_cycle as harness
@@ -182,3 +183,101 @@ def test_the_migration_is_one_build_long(estate, tmp_path):
 
     assert actions(_migrating_build(estate, tmp_path))
     assert actions(build(estate, tmp_path, catalogue=installed_catalogue(estate))) == []
+
+
+# --- the catalogue key, which moved separately ---------------------------------
+#
+# An estate built before the area was stored keys its Lakehouse relations bare:
+# `DWG`, where this Weaver writes `Tables/DWG`. That is a breaking catalogue
+# migration, and what matters is which of its consequences are physical.
+
+
+def _before_the_key_moved(catalogue: Catalogue) -> Catalogue:
+    """The same catalogue, with each Lakehouse relation keyed as it once was.
+
+    Only the relations. A Folder always carried ``Files/``, and a load artefact's
+    schema is a path, so neither is touched. That asymmetry is the thing this
+    change removed.
+    """
+
+    rows = {
+        item: {
+            name: tuple(
+                {**row, "schema_name": str(row["schema_name"]).removeprefix("Tables/")}
+                if str(row.get("schema_name", "")).startswith("Tables/")
+                else row
+                for row in table_rows
+            )
+            for name, table_rows in tables.items()
+        }
+        for item, tables in catalogue.rows.items()
+    }
+    return Catalogue(rows=rows, materialised=catalogue.materialised)
+
+
+@weaver_test()
+def test_the_old_key_still_names_the_object_it_named(estate, tmp_path):
+    """A bare Lakehouse relation reads back as the relation, not as a validation.
+
+    This is what keeps an upgrading estate's tables recognised. Read as
+    validations they would every one look new, and a build would rebuild the lot.
+    """
+
+    old = _before_the_key_moved(installed_catalogue(estate))
+    table = WeaverDocumentId.parse(TABLE)
+
+    assert table in old.registered
+    assert old.registered[table].object_type == "table"
+
+
+@weaver_test()
+def test_the_key_moving_rebuilds_no_table_and_drops_nothing(estate, tmp_path):
+    """The physical name never carried the area, so no physical work follows."""
+
+    bundle = build(
+        estate, tmp_path, catalogue=_before_the_key_moved(installed_catalogue(estate))
+    )
+    planned = actions(bundle)
+
+    assert WeaverDocumentId.parse(TABLE) not in bundle.plan.selection.selected_for_build
+    assert not [
+        action
+        for action in planned
+        if action.kind in ("drop_table", "drop_folder", "build_table", "load_table")
+    ]
+
+
+@weaver_test()
+def test_the_key_moving_republishes_the_registry_row(estate, tmp_path):
+    """The row is rewritten under the area, which is the whole of the change."""
+
+    bundle = build(
+        estate, tmp_path, catalogue=_before_the_key_moved(installed_catalogue(estate))
+    )
+
+    assert "publish_registry" in {action.kind for action in actions(bundle)}
+
+
+@weaver_test()
+def test_the_key_moving_costs_the_bookmark_and_says_so(estate, tmp_path):
+    """The one behavioural consequence the key move has.
+
+    A bookmark is keyed as Registry keys the object, so a row written under the
+    old spelling is not the row the new one reads. The table loads from the
+    sentinel once, reading its source from the beginning. A Weaver table is
+    upserted by its declared key, so that pass rewrites the rows it holds. The
+    old row stays behind, orphaned, and nothing reads it.
+    """
+
+    from weaver.catalogue.claims import bookmark_row
+    from weaver.catalogue.state import BOOKMARK_SENTINEL
+
+    loaded_at = datetime(2026, 9, 1, 6, 0, tzinfo=timezone.utc)
+    table = WeaverDocumentId.parse(TABLE)
+    settled = installed_catalogue(estate)
+    rows = {item: dict(tables) for item, tables in settled.rows.items()}
+    rows[table.item]["Bookmark"] = (bookmark_row(table, loaded_at),)
+    loaded = Catalogue(rows=rows, materialised=settled.materialised)
+
+    assert loaded.bookmark(table) == loaded_at
+    assert _before_the_key_moved(loaded).bookmark(table) == BOOKMARK_SENTINEL
