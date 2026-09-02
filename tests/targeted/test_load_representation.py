@@ -162,7 +162,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (13, "a0e41349c6c79761a511eb218c084e5ca0f3ac26f2592fe8da8adee5a583bc2a"),
+    "tsql": (14, "f0ec3fe3b5c47c66b6711c1b2ccce906df4e7fbec3407ccc5af218ce6e27d9e9"),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 
@@ -277,6 +277,51 @@ def test_the_procedure_takes_a_fault_tolerant_parameter_defaulting_to_refusal():
     )
 
     assert "@fault_tolerant bit = 0" in payload
+
+
+@weaver_test()
+def test_the_procedure_takes_a_reload_parameter_defaulting_to_off():
+    """An ordinary load must not empty a target, so off is what a caller gets."""
+
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
+
+    assert "@reload bit = 0" in payload
+
+
+@weaver_test()
+def test_a_reload_empties_the_target_before_the_staging_query_runs():
+    """The ordering the mode rests on.
+
+    A body may join its own target to find what it has still to produce, so a
+    clear that ran afterwards would reconstruct nothing.
+    """
+
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
+
+    clear = payload.index("if @reload = 1")
+    assert "delete from [Sales].[Customer];" in payload[clear : clear + 200]
+    assert clear < payload.index("Data transformation")
+
+
+@weaver_test()
+def test_an_ordinary_load_of_a_keyed_table_empties_nothing():
+    """The clear is behind the mode, and nothing else reaches it."""
+
+    payload = (
+        _warehouse()
+        .create_load(item=WeaverItemId("Warehouse", "Reporting"))
+        .payload.decode()
+    )
+
+    assert payload.count("delete from [Sales].[Customer];") == 1
 
 
 @weaver_test()

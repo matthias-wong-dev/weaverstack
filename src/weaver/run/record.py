@@ -12,6 +12,9 @@ A blocked node has a status and no statistics: it did nothing, and a row of
 zeroes for it would read as a load that moved nothing. A node about no object at
 all, such as an endpoint refresh, has evidence and no state.
 
+A reload writes two of these rows before the load runs. See
+:meth:`RunRecord.reset`.
+
 Row construction, writing and flushing stay three things. See
 ``design/catalogue.md`` for the operational-state model these rows belong to.
 """
@@ -21,12 +24,13 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from ..catalogue.tables import (
     BLOCKED,
     BOOKMARK,
+    BOOKMARK_SENTINEL,
     ERROR,
     FAILED,
     LOAD_STATISTIC,
@@ -158,9 +162,41 @@ def load_statistic_row(node, identity, *, workflow_id: str) -> dict:
         "rows_updated": _count(result, "rows_updated"),
         "rows_deleted": _count(result, "rows_deleted"),
         "rows_rejected": _count(result, "rows_rejected"),
-        # Written rather than left null, so counting reloads gives zero.
-        "is_reload": False,
+        "is_reload": bool(getattr(result, "is_reload", False)),
         "is_static_skip": bool(getattr(result, "is_static_skip", False)),
+    }
+
+
+def reset_bookmark_row(identity) -> dict:
+    """The ``_.Bookmark`` row a reload puts back to the sentinel.
+
+    ``_.Bookmark`` in a built target is a view over the catalogue Warehouse, and
+    Fabric takes a MERGE through one. The sentinel is what a MERGE can write, and
+    it reads as a deleted row does: an object at the sentinel has had no clean
+    load for its current incarnation, so an incremental read asks for everything.
+    """
+
+    from ..catalogue.claims import bookmark_row
+
+    return bookmark_row(identity, BOOKMARK_SENTINEL)
+
+
+def reset_load_status_row(identity, *, workflow_id: str, started) -> dict:
+    """The ``_.LoadStatus`` row a reload writes before it clears the target.
+
+    ``Pending`` is the vocabulary's own "current state not yet established", and
+    health reads it as it reads an absent row. The workflow and the start instant
+    say which run emptied the target, so a reload that never settles still says
+    what happened to it.
+    """
+
+    return {
+        **_identity(identity),
+        "workflow_id": workflow_id,
+        "result": PENDING,
+        "started_datetime": started,
+        "completed_datetime": None,
+        "duration_milliseconds": None,
     }
 
 
@@ -259,6 +295,25 @@ class RunRecord:
                 load_statistic_row(node, identity, workflow_id=self.workflow_id),
             )
         self._bookmark(node, identity)
+
+    def reset(self, identity) -> None:
+        """End this object's load state, and wait for it, before it is cleared.
+
+        What follows empties the target, and the next incremental read starts
+        from whatever bookmark stands over it. So these two rows are flushed here
+        instead of joining the run's queue, and that flush is the barrier the
+        clear waits on. Both are in flight together.
+        """
+
+        started = datetime.now(timezone.utc)
+        self.catalogue.update(
+            LOAD_STATUS,
+            reset_load_status_row(
+                identity, workflow_id=self.workflow_id, started=started
+            ),
+        )
+        self.catalogue.update(BOOKMARK, reset_bookmark_row(identity))
+        self.flush()
 
     def _bookmark(self, node, identity) -> None:
         """Advance the bookmark, for a clean load that established an instant.
@@ -380,7 +435,11 @@ def _isoformat(at) -> str | None:
 
 
 def _installed(node):
-    """The installed object this node was about, or None if it was about none."""
+    """The installed object this settled node was about, or None if it was none.
+
+    A settled node carries its identity as the text a row is keyed by, which is
+    what this reads. A graph node carries the identity itself.
+    """
 
     from ..declaration.model import WeaverDocumentId, parse_installed_identity
 

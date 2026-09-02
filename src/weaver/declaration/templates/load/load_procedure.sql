@@ -5,6 +5,7 @@
 create or alter procedure $load_procedure
     @fault_tolerant bit = 0
   , @ignore_stability_threshold bit = 0
+  , @reload bit = 0
 $result_parameters
 as
 begin
@@ -29,6 +30,14 @@ begin
 $bookmark_key
 
 $static_gate
+
+    -- A reload reconstructs this table from zero. Before the staging query,
+    -- because an incremental body may join the target to find what it has still
+    -- to produce. The caller has already put the bookmark back to the sentinel.
+    if @reload = 1
+    begin
+        delete from $target_table;
+    end;
 
 $preprocessing_banner
 $start_artifact_cleanup

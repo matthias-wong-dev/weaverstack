@@ -290,33 +290,68 @@ def _sentinel():
     return BOOKMARK_SENTINEL
 
 
-def _recorded_load(object, *arguments) -> "LoadResult":
+def _recorded_load(object, **policy) -> "LoadResult":
     """One object's load, with its operational record written before it returns.
 
     Anything the load raises is recorded and then re-raised unchanged. A refusal
     Weaver itself named is Failed and anything else is Error, which is the line
     ``_.Load`` draws from ``error_number()``.
+
+    ``reload`` in ``policy`` also names what this interface does before the load:
+    the object's load state is ended and made durable, and only then is the load
+    called to empty the target and run. So a reload that fails half way leaves no
+    bookmark and no settled status over rows that are gone.
     """
 
-    # Before the try, so the refusal to start is never recorded: an unanchored
-    # object has no catalogue to record into and no identity to record against.
-    object._anchor()
+    from .run.record import RunRecord, new_workflow_id
+
+    # Before anything else, so the refusal to start is never recorded: an
+    # unanchored object has no catalogue to record into and no identity to
+    # record against.
+    catalogue = object._anchor()
+    reload = bool(policy.get("reload", False))
+    record = RunRecord(
+        workflow_id=new_workflow_id(),
+        task_type=object._task_type,
+        catalogue=catalogue,
+    )
+    if reload:
+        record.reset(object._installed)
     started = datetime.now(timezone.utc)
     try:
-        result = object._load(*arguments)
+        result = _stamped(object._load(**policy), reload)
     except Exception as raised:
-        object._record(
+        _settle(
+            record,
             _settled(
                 object,
-                _carried(raised),
+                _stamped(_carried(raised), reload),
                 started=started,
                 raised=True,
                 refused=isinstance(raised, WeaverError),
-            )
+            ),
         )
         raise
-    object._record(_settled(object, result, started=started))
+    _settle(record, _settled(object, result, started=started))
     return result
+
+
+def _settle(record, settled) -> None:
+    """Record one settled unit of work, and wait for it."""
+
+    record.settled(settled)
+    record.flush()
+
+
+def _stamped(result, reload: bool):
+    """One result, carrying whether the caller asked for a reload.
+
+    Reload is what this interface was asked for, and an engine told to reload
+    repeats it back. So it is stamped here, and :data:`RESULT_COLUMNS` carries
+    no column for it.
+    """
+
+    return result.reloaded() if reload else result
 
 
 def _settled(object, result, *, started, raised: bool = False, refused: bool = False):
@@ -510,7 +545,7 @@ class Folder(WeaverObject):
         destination = self.path()
         return destination.with_name(f"{destination.name}{STAGING_SUFFIX}")
 
-    def load(self, fault_tolerant: bool = False) -> "LoadResult":
+    def load(self, fault_tolerant: bool = False, reload: bool = False) -> "LoadResult":
         """Run this folder's load and record what it did.
 
         Independently runnable, needing no repository and no bundle::
@@ -521,9 +556,18 @@ class Folder(WeaverObject):
         operational state, and flushes before returning. An orchestrated run
         calls :meth:`_load` and records what settled itself, so one row has one
         writer.
+
+        ``reload`` is refused. Reload clears the target before ``read()`` runs,
+        and for a folder that is a file reconciliation this branch does not have.
         """
 
-        return _recorded_load(self, fault_tolerant)
+        if reload:
+            raise LoadError(
+                f"{self.object_id}: reload covers tables. A folder's contents are "
+                "files, and clearing them is a reconciliation Weaver does not do "
+                "here. Load it without reload."
+            )
+        return _recorded_load(self, fault_tolerant=fault_tolerant)
 
     def _load(self, fault_tolerant: bool = False) -> "LoadResult":
         """Run this folder's ``read()`` and publish what it staged.
@@ -674,6 +718,7 @@ class Table(WeaverObject):
         self,
         fault_tolerant: bool = False,
         ignore_stability_threshold: bool = False,
+        reload: bool = False,
     ) -> "LoadResult":
         """Run this table's load and record what it did.
 
@@ -685,14 +730,24 @@ class Table(WeaverObject):
         operational state, and flushes before returning. An orchestrated run
         calls :meth:`_load` and records what settled itself, so one row has one
         writer.
+
+        ``reload`` reconstructs the table from zero: the bookmark goes back to
+        the sentinel, ``_.LoadStatus`` goes to Pending, the target is emptied,
+        and the authored load then runs against both.
         """
 
-        return _recorded_load(self, fault_tolerant, ignore_stability_threshold)
+        return _recorded_load(
+            self,
+            fault_tolerant=fault_tolerant,
+            ignore_stability_threshold=ignore_stability_threshold,
+            reload=reload,
+        )
 
     def _load(
         self,
         fault_tolerant: bool = False,
         ignore_stability_threshold: bool = False,
+        reload: bool = False,
     ) -> "LoadResult":
         """Run this table's ``read()`` and write what it staged.
 
@@ -701,13 +756,18 @@ class Table(WeaverObject):
 
         ``ignore_stability_threshold`` waives the declared delete and update
         limits for one run, for when a very large change is the correct answer.
+
+        ``reload`` empties the target before ``read()`` is called. Two kinds of
+        incremental source depend on that ordering: one reads its window from the
+        bookmark, which the caller has already put back to the sentinel, and one
+        joins against the target itself. Both then start from zero.
         """
 
         self._anchor()
 
         from .runtime.load_contract import LoadContract
         from .runtime.load_result import LoadResult
-        from .runtime.table_load import load_table
+        from .runtime.table_load import clear_table, load_table
 
         # Before the gate and before read(), so the instant a clean load is
         # bookmarked at precedes everything it read.
@@ -717,9 +777,14 @@ class Table(WeaverObject):
         # bookmark decides it, not the table's contents. Static means "load this
         # once", and the bookmark records whether that has happened, so a table
         # populated by hand is still loaded and a table a clean load emptied is
-        # still skipped.
-        if contract.static and self.bookmark() > _sentinel():
+        # still skipped. A reload is the caller saying to load it again.
+        if not reload and contract.static and self.bookmark() > _sentinel():
             return LoadResult(succeeded=True, is_static_skip=True)
+
+        if reload:
+            # Before read(), because an incremental source may join against the
+            # target to find what it has still to produce.
+            clear_table(self.spark, contract=contract, lakehouse=self.lakehouse)
 
         # Staging: unvalidated, unreconciled, nothing yet classified as new or
         # changed.

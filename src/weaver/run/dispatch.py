@@ -24,6 +24,7 @@ def dispatch_primitive(
     state=None,
     resolved=None,
     fault_tolerant: bool = False,
+    reload: bool = False,
     open_runtime=None,
     workspace=None,
     collect=False,
@@ -33,6 +34,11 @@ def dispatch_primitive(
 
     ``open_runtime`` is called only by branches that import a deployed module.
     Warehouse-only runs therefore do not open a Spark runtime.
+
+    ``reload`` reaches the two branches that load an object. Each engine empties
+    the target before it runs the authored source; the caller has already put the
+    object's load state back. Only a table reaches here with it set, because
+    :func:`weaver.operations.load.run_load` refuses the rest before anything runs.
     """
 
     if session is None:
@@ -48,10 +54,12 @@ def dispatch_primitive(
         return _validation(node, session, workspace, open_runtime, collect)
     if kind == WAREHOUSE_PROCEDURE:
         return _warehouse_procedure(
-            node, session, workspace, fault_tolerant, publication
+            node, session, workspace, fault_tolerant, publication, reload
         )
     if kind in (PYTHON_TABLE, PYTHON_FOLDER):
-        return _python(node, session, workspace, resolved, fault_tolerant, open_runtime)
+        return _python(
+            node, session, workspace, resolved, fault_tolerant, open_runtime, reload
+        )
     if kind == ENDPOINT_REFRESH:
         return _endpoint_refresh(node, session, workspace)
     if kind == ONELAKE_PUBLICATION:
@@ -95,7 +103,9 @@ def _scope(open_runtime, node):
     return open_runtime.get()
 
 
-def _warehouse_procedure(node, session, workspace, fault_tolerant: bool, publication):
+def _warehouse_procedure(
+    node, session, workspace, fault_tolerant: bool, publication, reload: bool = False
+):
     """The installed load procedure, called by name over the Session's TDS.
 
     The object's own procedure, not the generic ``_.Load`` wrapper: the run
@@ -120,12 +130,19 @@ def _warehouse_procedure(node, session, workspace, fault_tolerant: bool, publica
     if publication is not None:
         publication.observe(node, session, workspace)
     sql = session.sql_executor(target, workspace=workspace)
+    # `@reload` is named only when it is set. A procedure installed before reload
+    # existed has no such parameter, and an ordinary load of it still runs.
+    inputs = (("fault_tolerant", 1 if fault_tolerant else 0),)
+    if reload:
+        inputs = inputs + (("reload", 1),)
     row = sql.call_procedure(
         load_procedure_name(node.logical_id.object_id),
-        inputs=(("fault_tolerant", 1 if fault_tolerant else 0),),
+        inputs=inputs,
         outputs=PROCEDURE_RESULT_PARAMETERS,
     )
     result = LoadResult.from_row(logical_result_row(row))
+    if reload:
+        result = result.reloaded()
     if publication is not None:
         publication.settled(node.node_id, result)
     return result
@@ -160,7 +177,15 @@ def _onelake_publication(node, session, workspace, publication):
     return LoadResult(succeeded=True)
 
 
-def _python(node, session, workspace, resolved, fault_tolerant: bool, open_runtime):
+def _python(
+    node,
+    session,
+    workspace,
+    resolved,
+    fault_tolerant: bool,
+    open_runtime,
+    reload: bool = False,
+):
     """One deployed Python primitive, run where its module can be imported.
 
     A deployed module is imported inside the session that owns the Spark it will
@@ -184,11 +209,15 @@ def _python(node, session, workspace, resolved, fault_tolerant: bool, open_runti
     # The scope answers with the row the primitive reported, in either position.
     # What that row means is settled here, which is the one module a load's
     # vocabulary belongs in.
-    return LoadResult.from_row(
+    result = LoadResult.from_row(
         _scope(open_runtime, node).dispatch_python(
-            node, expected_class=expected, fault_tolerant=fault_tolerant
+            node,
+            expected_class=expected,
+            fault_tolerant=fault_tolerant,
+            reload=reload,
         )
     )
+    return result.reloaded() if reload else result
 
 
 def python_primitive(
@@ -205,6 +234,7 @@ def python_primitive(
     workspace=None,
     catalogue=None,
     node_identity=None,
+    reload: bool = False,
 ):
     """Import the deployed module, construct its object, and load it.
 
@@ -258,7 +288,14 @@ def python_primitive(
     # `_load` and never `load`: the run records what settled, centrally and
     # asynchronously, so a primitive that recorded itself would be a second
     # writer of the same row.
-    return primitive._load(fault_tolerant=fault_tolerant)
+    #
+    # `reload` is passed only when it is set, because a Folder's `_load` does not
+    # take it. Planning refuses a folder reload, so a folder never arrives here
+    # with one.
+    policy = {"fault_tolerant": fault_tolerant}
+    if reload:
+        policy["reload"] = True
+    return primitive._load(**policy)
 
 
 def _endpoint_refresh(node, session, workspace):

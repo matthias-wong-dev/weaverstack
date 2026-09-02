@@ -382,6 +382,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Continue independent branches after a failure.",
     )
     load.add_argument(
+        "--reload",
+        action="store_true",
+        help=(
+            "Reconstruct each selected table from zero: reset its bookmark, "
+            "empty it, then load. Reaches only what this command selects."
+        ),
+    )
+    load.add_argument(
         "--dry-run",
         action="store_true",
         help="Show the load plan without running it.",
@@ -1128,6 +1136,7 @@ def _load_once(args: argparse.Namespace) -> int:
             names=args.names,
             fault_tolerant=args.fault_tolerant,
             dry_run=args.dry_run,
+            reload=args.reload,
             session=_session(args),
         )
     except LoadError as exc:
@@ -1154,6 +1163,7 @@ def _run_load(
     names=None,
     fault_tolerant: bool,
     dry_run: bool,
+    reload: bool = False,
     session=None,
 ):
     """Run one load through the selected Session."""
@@ -1166,6 +1176,7 @@ def _run_load(
             names=names,
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
+            reload=reload,
             session=opened,
             **_command_context(workspace),
         )
@@ -1175,7 +1186,8 @@ def _print_load(report) -> None:
     """One renderer, for a report produced here or one that crossed Livy."""
 
     mode = "plan" if report.dry_run else "load"
-    print(f"{mode} {report.status}: {', '.join(report.requested)}\n")
+    reload = " (reload)" if getattr(report, "reload", False) else ""
+    print(f"{mode}{reload} {report.status}: {', '.join(report.requested)}\n")
     for node in report.nodes:
         mark = "✗" if node.status in ("failed", "blocked", "invalid") else "✓"
         counts = ""

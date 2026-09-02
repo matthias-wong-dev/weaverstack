@@ -131,6 +131,18 @@ MERGE_CONFLICT_MESSAGE = (
 )
 
 
+def clear_table(spark, *, contract: LoadContract, lakehouse) -> None:
+    """Empty one Delta table, leaving its shape and its Weaver columns.
+
+    What a reload does before the authored source runs. ``DELETE FROM`` and not a
+    drop: the table's schema, its audit columns and its row signature are the
+    installed object, and a reload replaces the rows in it.
+    """
+
+    schema, name = contract.object_id.schema, contract.object_id.object
+    spark.sql(f"DELETE FROM {lakehouse.qualify(schema, name)}")
+
+
 def load_table(
     spark,
     *,
@@ -1158,5 +1170,6 @@ __all__ = [
     "OPERATION_COLUMN",
     "MERGE_CONFLICT_MESSAGE",
     "TOLERATED_MESSAGE",
+    "clear_table",
     "load_table",
 ]

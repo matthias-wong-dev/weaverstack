@@ -12,6 +12,7 @@ from typing import Sequence
 
 from ..declaration.model import WeaverItemId
 from ..errors import CommandError, LoadError
+from ..installed import PYTHON_FOLDER, PYTHON_TABLE, WAREHOUSE_PROCEDURE
 from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 from ..load_report import (
     BLOCKED,
@@ -42,6 +43,7 @@ def load(
     workspace_config: str | Path | None = None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
+    reload: bool = False,
     session=None,
 ) -> LoadRunReport:
     """Load the installed objects the named items own.
@@ -54,6 +56,12 @@ def load(
     ``names`` selects exact installed ``Schema.Object`` loadables inside those
     items. It is an operator override: only those nodes run, without dependency
     expansion or dependency ordering.
+
+    ``reload`` reconstructs each selected table from zero: its bookmark goes back
+    to the sentinel, its ``_.LoadStatus`` goes to Pending, its target is emptied,
+    and the authored load runs against both. It reaches exactly what this request
+    selected. Nothing downstream is reloaded and nothing downstream is
+    invalidated, so a consumer of a reloaded table loads next as it always would.
 
     ``workspace``, ``catalogue`` and ``environment`` are names, resolved as
     ``build`` resolves them; ``session`` is where an already-resolved
@@ -96,6 +104,7 @@ def load(
                 names=selected_names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
+                reload=reload,
             )
 
 
@@ -108,6 +117,7 @@ def run_load(
     state=None,
     fault_tolerant: bool = False,
     dry_run: bool = False,
+    reload: bool = False,
 ) -> LoadRunReport:
     """Run the catalogue graph through a Session.
 
@@ -157,10 +167,16 @@ def run_load(
                 names=names,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
+                reload=reload,
             ),
             workspace=workspace,
             can_refresh=can_refresh(session, workspace),
         )
+        if reload:
+            # Before anything runs, and before a dry run reports: reload clears a
+            # target, and this is where the run says which of its nodes it cannot
+            # clear.
+            _refuse_unsupported_reload(runner.plan())
 
     # A dry run writes nothing durable: a row for work nobody did would be
     # evidence of a load that never happened, and a bookmark it moved would make
@@ -177,6 +193,7 @@ def run_load(
             session=session,
             dispatch=dispatch_primitive,
             on_node=None if record is None else record.settled,
+            before_node=None if record is None or not reload else _reset_before(record),
         )
 
     if record is not None:
@@ -191,6 +208,42 @@ def run_load(
     return report
 
 
+#: The primitive kinds a reload can reconstruct. Each empties its target before
+#: it runs the authored source. A folder's contents are files and clearing them
+#: is a reconciliation Weaver does not do here, so a folder is refused instead.
+RELOADABLE_KINDS = (WAREHOUSE_PROCEDURE, PYTHON_TABLE)
+
+
+def _refuse_unsupported_reload(graph) -> None:
+    """Stop a reload that selected something it cannot reconstruct."""
+
+    refused = sorted(
+        node.node_id for node in graph.nodes if node.primitive_kind == PYTHON_FOLDER
+    )
+    if refused:
+        raise CommandError(
+            "reload covers tables, and this selection holds folders: "
+            + ", ".join(refused)
+            + ". Select the tables by name, or load without reload."
+        )
+
+
+def _reset_before(record):
+    """End each reloaded object's load state as the run reaches it.
+
+    Per node and not up front: a node the run never reaches keeps its bookmark,
+    because nothing cleared the rows that bookmark describes.
+    """
+
+    def reset(node) -> None:
+        # The graph node carries the identity itself, so nothing is parsed back
+        # out of a spelling. A barrier is not an object and has none.
+        if node.primitive_kind in RELOADABLE_KINDS and node.logical_id is not None:
+            record.reset(node.logical_id)
+
+    return reset
+
+
 def _as_load_report(result, *, started, record) -> LoadRunReport:
     """One RunResult, rendered as the shape a load's readers expect.
 
@@ -203,6 +256,7 @@ def _as_load_report(result, *, started, record) -> LoadRunReport:
         status=result.status,
         dry_run=result.dry_run,
         fault_tolerant=result.fault_tolerant,
+        reload=result.reload,
         nodes=tuple(
             LoadNodeReport(
                 node_id=node.node_id,

@@ -543,6 +543,7 @@ new object                     no row
 first clean load               MERGE inserts the instant
 later clean load               MERGE updates it
 dropped and rebuilt            DELETE, before the physical work
+reloaded                       MERGE to the sentinel, before the clear
 no longer declared or loaded   DELETE
 unchanged object               left alone
 ```
@@ -613,7 +614,7 @@ places to disagree.
 [Rows updated]
 [Rows deleted]
 [Rows rejected]
-[Is reload]              false until reload is available
+[Is reload]              whether the load ran in reload mode
 [Is static skip]
 ```
 
@@ -632,6 +633,43 @@ the engine knows which happened.
 There is no target row count. `Rows read` plus the mutation counts are already
 useful, and counting the target would be an expensive engine-specific read taken
 for telemetry alone.
+
+### Reload
+
+`weaver load --reload`, `weaver.load(..., reload=True)`, `table.load(reload=True)`
+and `exec [_].[Load] ..., @reload = 1` all mean one thing: reconstruct this table
+from zero. Three writes and one clear, in this order:
+
+```text
+_.LoadStatus   → Pending, carrying the workflow and the instant it started
+_.Bookmark     → the sentinel
+the target     → emptied
+the authored load → runs
+```
+
+The order is the property. Two kinds of incremental source depend on it and on
+different halves of it: one asks its source for changes after the bookmark, and
+one joins the target to find what it has still to produce. Both then start from
+zero. And the state is ended while the target still holds the rows it describes,
+so a reload that fails half way leaves no bookmark and no settled status over rows
+that are gone. The retry is a reload again, and a clean load is what ends that.
+
+A build deletes these rows. A reload writes over them: in every Warehouse but the
+catalogue's they are views across databases, and Fabric takes a MERGE through one,
+so the sentinel and `Pending` are what these writes can be. Both read as a build's
+deletion reads: no clean load has settled for this incarnation.
+
+**Reload is local.** It reaches what the request selected and walks no further.
+Nothing downstream is reloaded and nothing downstream is invalidated, so a
+consumer of a reloaded table loads next as it always would. Selection is the only
+thing that decides scope: `--name Sales.Order` reloads one table, and an item with
+no name filter reloads every table it owns.
+
+`Is reload` records the mode, whatever the load then found. Who wrote it is who
+asked for it: an engine told to reload can only repeat it back, so the interface
+that asked stamps it. Folders are outside this: their contents are files, and
+`weaver load --reload` over a selection holding one is refused before anything
+runs.
 
 ### `_.TestStatus`
 

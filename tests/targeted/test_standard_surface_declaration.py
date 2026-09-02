@@ -14,6 +14,7 @@ from support.weaver_test import weaver_test
 from weaver.catalogue.builtin import BUILTIN_ITEM
 from weaver.catalogue.tables import (
     BOOKMARK,
+    BOOKMARK_SENTINEL_TEXT,
     INSTALLATION,
     LOAD_STATISTIC,
     LOAD_STATUS,
@@ -158,6 +159,46 @@ def test_the_load_entry_point_carries_the_whole_load_abi():
 
     for physical in RESULT_PARAMETER_NAMES.values():
         assert f"@{physical} = @{physical} output" in sql, physical
+
+
+@weaver_test()
+def test_the_load_entry_point_passes_reload_to_the_implementation():
+    """``_.Load`` is the recorder; the procedure it calls is what clears."""
+
+    sql = standard_fragment(WAREHOUSE)["programmables/_.Load.sql"].decode("utf-8")
+
+    assert "@reload bit = 0" in sql
+    assert "@reload = @reload" in sql
+
+
+@weaver_test()
+def test_the_load_entry_point_ends_the_load_state_before_it_calls():
+    """The barrier a reload rests on, and the order it is written in.
+
+    The bookmark goes back to the sentinel and the status to Pending while the
+    target still holds the rows they describe. Both are MERGEs, because in every
+    Warehouse but the catalogue's these are views across databases.
+    """
+
+    sql = standard_fragment(WAREHOUSE)["programmables/_.Load.sql"].decode("utf-8")
+
+    reset = sql.index("if @weaver_call is not null and @reload = 1")
+    called = sql.index("exec sp_executesql @weaver_call")
+    assert reset < called
+    ending = sql[reset:called]
+    assert BOOKMARK_SENTINEL_TEXT in ending
+    assert "N'Pending'" in ending
+    # The status first: nothing may read Succeeded beside a reset bookmark.
+    assert ending.index("[_].[LoadStatus]") < ending.index("[_].[Bookmark]")
+
+
+@weaver_test()
+def test_the_load_entry_point_records_the_mode_it_ran_in():
+    """``_.LoadStatistic`` says what the load was, and reload is one of them."""
+
+    sql = standard_fragment(WAREHOUSE)["programmables/_.Load.sql"].decode("utf-8")
+
+    assert "cast(@reload as bit)" in sql
 
 
 @weaver_test()

@@ -258,6 +258,8 @@ class RunResult:
     status: str
     dry_run: bool = False
     fault_tolerant: bool = False
+    #: Whether the run reconstructed each selected table from zero.
+    reload: bool = False
     nodes: tuple[RunNodeResult, ...] = ()
     edges: tuple[tuple[str, str], ...] = ()
     order: tuple[str, ...] = ()
@@ -286,6 +288,7 @@ class RunResult:
             "status": self.status,
             "dry_run": self.dry_run,
             "fault_tolerant": self.fault_tolerant,
+            "reload": self.reload,
             "selection": (
                 list(self.selection)
                 if isinstance(self.selection, tuple)

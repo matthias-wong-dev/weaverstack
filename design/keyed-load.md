@@ -347,6 +347,30 @@ constraint, no participant table and no merge-conflict recovery table. What
 Weaver was going to write is answerable from staging and the keys to remove; the
 rest are implementation mechanics, not artefacts.
 
+## Reload
+
+A reload changes none of this. The state machine is the same one, the declaration
+means what it always meant, and `Incremental` still decides what a deletion is.
+What a reload changes is where the machine starts:
+
+```text
+the bookmark   at the sentinel
+the target     empty
+```
+
+So an incremental source asks for everything, and every row it produces classifies
+as an insert. Nothing is inferred from absence, nothing is treated as a full
+population, and a delete claim is narrowed against an empty target and retires
+nothing.
+
+The clear is `delete from`, which leaves the table's shape, its audit columns and
+its row signature standing. It runs before the authored body, because a body may
+join its own target to find what it has still to produce.
+
+Who does what: the recorder ends the object's load state and the execution
+primitive clears the target, which is the same division `_load()` and `load()`
+already draw. `design/catalogue.md` holds the state and the ordering.
+
 ## Where it is proved
 
 Rendering and contract claims run on every commit

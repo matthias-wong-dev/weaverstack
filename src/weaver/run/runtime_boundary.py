@@ -45,7 +45,7 @@ class RunScope(Protocol):
     """Where a run's deployed modules are imported, and how it dispatches into them."""
 
     def dispatch_python(
-        self, node, *, expected_class: str, fault_tolerant: bool
+        self, node, *, expected_class: str, fault_tolerant: bool, reload: bool = False
     ) -> dict:
         """Run one deployed module and answer with the row it reported.
 
@@ -75,7 +75,9 @@ class DirectRunScope:
         self._workspace = workspace
         self._catalogue = catalogue
 
-    def dispatch_python(self, node, *, expected_class: str, fault_tolerant: bool):
+    def dispatch_python(
+        self, node, *, expected_class: str, fault_tolerant: bool, reload: bool = False
+    ):
         from .dispatch import python_primitive
 
         return python_primitive(
@@ -86,6 +88,7 @@ class DirectRunScope:
             object=node.primitive_object.object,
             expected_class=expected_class,
             fault_tolerant=fault_tolerant,
+            reload=reload,
             runtime_scope=self.runtime_scope,
             session=self._session,
             workspace=self._workspace,
@@ -173,7 +176,9 @@ class FabricRunScope:
 
     # --- what dispatch asks of it -------------------------------------------
 
-    def dispatch_python(self, node, *, expected_class: str, fault_tolerant: bool):
+    def dispatch_python(
+        self, node, *, expected_class: str, fault_tolerant: bool, reload: bool = False
+    ):
         """One deployed Python primitive, run in this scope.
 
         The node is flattened rather than serialised, so the far side never has
@@ -193,6 +198,7 @@ class FabricRunScope:
                 "object": node.primitive_object.object,
                 "expected_class": expected_class,
                 "fault_tolerant": fault_tolerant,
+                "reload": reload,
                 "identity": str(node.logical_id) if node.logical_id else None,
             },
             detail=node.node_id,
