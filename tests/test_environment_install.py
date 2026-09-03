@@ -622,3 +622,48 @@ def test_a_failed_publish_names_the_component(monkeypatch, tmp_path):
 
     with pytest.raises(FabricError, match="sparkLibraries did not settle"):
         _definition_publication(monkeypatch, client, path)
+
+
+@pytest.mark.parametrize(
+    "stored,local",
+    [
+        (b'{"value": 1}', b'{"value": "1"}'),
+        (b'{"value": true}', b'{"value": "true"}'),
+        (b'{"value": null}', b'{"value": "null"}'),
+    ],
+)
+@weaver_test()
+def test_a_platform_scalar_type_is_part_of_the_definition(
+    monkeypatch, tmp_path, stored, local
+):
+    """Reading a text part as content must not erase what its scalars are.
+
+    Normalisation covers what Fabric was seen to do, and retyping a JSON value
+    is not among it.
+    """
+
+    path = _local(tmp_path, **{PLATFORM: local})
+    client = _DefinitionClient(current={PLATFORM: stored})
+
+    result = _definition_publication(monkeypatch, client, path)
+
+    assert client.sent, "a retyped scalar is a different definition"
+    assert result.action == "updated"
+
+
+@weaver_test()
+def test_a_spark_setting_retyped_is_still_a_change(monkeypatch, tmp_path):
+    """Only ``runtime_version`` is compared as text, and only because Fabric
+    returns it unquoted."""
+
+    path = _local(
+        tmp_path, **{SPARK_COMPUTE: b'enable_native_execution_engine: "false"\n'}
+    )
+    client = _DefinitionClient(
+        current={SPARK_COMPUTE: b"enable_native_execution_engine: false\n"}
+    )
+
+    result = _definition_publication(monkeypatch, client, path)
+
+    assert client.sent
+    assert result.action == "updated"

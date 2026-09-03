@@ -481,7 +481,7 @@ def overlay_weaver(
 
 
 #: Definition parts Fabric stores as text and hands back reformatted.
-_TEXT_PARTS = {PLATFORM: "json", EXTERNAL_LIBRARIES: "yaml", SPARK_COMPUTE: "yaml"}
+_TEXT_PARTS = frozenset({PLATFORM, EXTERNAL_LIBRARIES, SPARK_COMPUTE})
 
 
 def _comparable(definition: EnvironmentDefinition) -> dict:
@@ -505,46 +505,55 @@ def _comparable(definition: EnvironmentDefinition) -> dict:
         if path in weaver:
             reduced[path] = None
         elif path in _TEXT_PARTS:
-            reduced[path] = _text_content(content, _TEXT_PARTS[path])
+            reduced[path] = _text_content(content, path)
         else:
             reduced[path] = content
     return reduced
 
 
-def _text_content(content: bytes, language: str):
-    """One text part as its parsed content, or as text when it will not parse."""
+def _text_content(content: bytes, path: str):
+    """One text part as its parsed content, or as text when it will not parse.
+
+    Parsing is what makes the line endings irrelevant, and scalar types are kept
+    as they parse, so ``{"value": 1}`` and ``{"value": "1"}`` stay different
+    documents.
+    """
 
     import json
 
     text = content.decode("utf-8-sig", "replace").replace("\r\n", "\n")
     try:
-        if language == "json":
-            return json.dumps(_scalars_as_text(json.loads(text)), sort_keys=True)
+        if path == PLATFORM:
+            return json.dumps(json.loads(text), sort_keys=True)
         import yaml
 
-        return json.dumps(_scalars_as_text(yaml.safe_load(text)), sort_keys=True)
+        loaded = yaml.safe_load(text)
+        return json.dumps(_as_fabric_stores(loaded, path), sort_keys=True)
     except Exception:
         # Unparsable content is still content, and a change to it is a change.
         return text
 
 
-def _scalars_as_text(value):
-    """The same structure with every scalar as the text it was written as.
+#: Keys Fabric stores as text and returns unquoted, so YAML reads back a number.
+#: Only what publishing was observed to do, per part.
+_RESTRINGIFIED = {SPARK_COMPUTE: frozenset({"runtime_version"})}
 
-    Fabric stores ``runtime_version: '1.3'`` and returns it unquoted, so YAML
-    reads back a float where the file held a string. The document is the same
-    one, and comparing the scalars as text is what says so.
+
+def _as_fabric_stores(value, path: str):
+    """The parsed part with the fields Fabric requotes read as text.
+
+    ``runtime_version: '1.3'`` comes back as ``runtime_version: 1.3``, which YAML
+    loads as a float. That one field is compared as text so the round trip is not
+    a change. Every other scalar keeps the type it parsed as.
     """
 
-    if isinstance(value, dict):
-        return {str(key): _scalars_as_text(each) for key, each in value.items()}
-    if isinstance(value, list):
-        return [_scalars_as_text(each) for each in value]
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
+    fields = _RESTRINGIFIED.get(path)
+    if not fields or not isinstance(value, dict):
+        return value
+    return {
+        key: (str(each) if key in fields and each is not None else each)
+        for key, each in value.items()
+    }
 
 
 # --- the result ----------------------------------------------------------------

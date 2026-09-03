@@ -378,3 +378,137 @@ def test_every_conflicting_requirement_is_reported_at_once():
     message = str(raised.value)
     assert "sqlparse==0.5.3" in message
     assert "pyyaml==1.0" in message
+
+
+# --- a pip entry is a YAML scalar ----------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        '"weaverstack>=0.4"',
+        "'weaverstack>=0.4'",
+        "weaverstack>=0.4  # keep this pin",
+        '"weaverstack>=0.4"  # quoted and annotated',
+    ],
+)
+@weaver_test()
+def test_released_finds_a_quoted_or_annotated_weaver_requirement(written):
+    """A list item is a YAML scalar, so quotes and comments are not the value.
+
+    Reading the raw line as a requirement finds nothing, and a second Weaver
+    entry lands beside the one already there.
+    """
+
+    text = f"dependencies:\n  - pip:\n      - {written}\n      - numpy\n"
+
+    result = released_external_libraries(text, source="x")
+
+    assert pip_entries(result, source="x") == ("weaverstack>=0.4", "numpy")
+    # The line is kept as authored, so the quoting and the note survive.
+    assert written in result
+
+
+@pytest.mark.parametrize(
+    "written",
+    ['"weaverstack>=0.4"', "'weaverstack==0.4.0'", "weaverstack>=0.4  # keep this"],
+)
+@weaver_test()
+def test_development_removes_a_quoted_or_annotated_weaver_requirement(written):
+    """Left behind, PyPI Weaver installs beside the checkout's own wheel."""
+
+    text = f"dependencies:\n  - pip:\n      - {written}\n      - numpy\n"
+
+    entries = pip_entries(
+        development_external_libraries(text, requirements=(), source="x"), source="x"
+    )
+
+    assert entries == ("numpy",)
+
+
+@weaver_test()
+def test_a_pip_option_is_not_read_as_a_requirement():
+    """``--index-url`` names no distribution, and stays where it was written."""
+
+    text = (
+        "dependencies:\n"
+        "  - pip:\n"
+        "      - --index-url https://example.invalid/simple\n"
+        "      - numpy\n"
+    )
+
+    result = released_external_libraries(text, source="x")
+
+    assert "      - --index-url https://example.invalid/simple" in result
+    assert pip_entries(result, source="x") == (
+        "--index-url https://example.invalid/simple",
+        "numpy",
+        "weaverstack",
+    )
+
+
+# --- proving two specifiers exclude each other ---------------------------------
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["sqlparse>0.6,<1.0", "sqlparse>0.7,<0.8", "sqlparse>=0.6,<1.0", "sqlparse!=0.6.1"],
+)
+@weaver_test()
+def test_a_compatible_exclusive_range_is_kept(written):
+    """A range Weaver's floor sits inside is compatible, bound or not.
+
+    ``>0.7,<0.8`` names no version that satisfies both bounds itself, so a check
+    that only tried the bounds refused it.
+    """
+
+    text = f"dependencies:\n  - pip:\n      - {written}\n"
+
+    entries = pip_entries(
+        development_external_libraries(
+            text, requirements=("sqlparse>=0.6.0",), source="x"
+        ),
+        source="x",
+    )
+
+    assert entries == (written,)
+
+
+@pytest.mark.parametrize(
+    "written,needs",
+    [
+        ("sqlparse==0.5.3", "sqlparse>=0.6.0"),
+        ("sqlparse<0.6", "sqlparse>=0.6.0"),
+        ("sqlparse<0.6.0", "sqlparse>=0.6.0"),
+        ("sqlparse<=0.5", "sqlparse>=0.6.0"),
+        ("sqlparse>1.0", "sqlparse<0.9"),
+    ],
+)
+@weaver_test()
+def test_only_provable_exclusion_is_refused(written, needs):
+    text = f"dependencies:\n  - pip:\n      - {written}\n"
+
+    with pytest.raises(CommandError, match="Weaver cannot run against"):
+        development_external_libraries(text, requirements=(needs,), source="x")
+
+
+@pytest.mark.parametrize(
+    "written", ["sqlparse==0.6.*", "sqlparse~=0.6.0", "sqlparse<=0.6.0"]
+)
+@weaver_test()
+def test_what_cannot_be_proved_is_left_alone(written):
+    """A prefix match and a compatible release constrain nothing provably.
+
+    Refusing a valid Environment is the worse failure, so these pass.
+    """
+
+    text = f"dependencies:\n  - pip:\n      - {written}\n"
+
+    entries = pip_entries(
+        development_external_libraries(
+            text, requirements=("sqlparse>=0.6.0",), source="x"
+        ),
+        source="x",
+    )
+
+    assert entries == (written,)

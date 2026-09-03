@@ -209,6 +209,21 @@ def requirement_name(entry: str) -> str | None:
         return None
 
 
+def pip_scalar(item: str) -> str | None:
+    """The value one pip list item holds, read as YAML rather than as text.
+
+    A list item is a YAML scalar, so ``"weaverstack>=0.4"`` carries quotes and
+    ``weaverstack>=0.4  # keep this pin`` carries a comment. Both name a
+    requirement, and reading the raw text as one finds neither.
+    """
+
+    try:
+        value = yaml.safe_load(item)
+    except yaml.YAMLError:
+        return None
+    return value if isinstance(value, str) else None
+
+
 def weaver_requirement(entries: Iterable[str]) -> str | None:
     """The Weaver requirement a pip list already carries, as it is written."""
 
@@ -290,21 +305,85 @@ def _check_authored_constraints(
 
 
 def _satisfiable(authored, required) -> bool:
-    """Whether some version satisfies both specifiers.
+    """Whether some version can satisfy both specifiers.
 
-    Proof-based: a bare name constrains nothing, and a specifier is refused only
-    where no version either side names can satisfy both. An unpinned range that
-    Weaver's own bound falls inside stays as it is.
+    Conservative: it answers no only where the two exclude each other provably,
+    from an exact pin or from bounds that do not overlap. Anything it cannot
+    prove is left alone, because refusing a valid Environment is the worse
+    failure. ``!=`` and prefix matches constrain nothing here.
     """
 
     if not authored.specifier:
         return True
-    candidates = {
-        clause.version.rstrip("*").rstrip(".")
-        for clause in list(authored.specifier) + list(required.specifier)
-    }
-    combined = authored.specifier & required.specifier
-    return any(combined.contains(each, prereleases=True) for each in candidates)
+
+    for pin in _pinned(authored.specifier):
+        if not required.specifier.contains(pin, prereleases=True):
+            return False
+
+    low, low_closed = _lower(authored.specifier)
+    other_low, other_low_closed = _lower(required.specifier)
+    if other_low is not None and (low is None or other_low > low):
+        low, low_closed = other_low, other_low_closed
+    elif other_low is not None and other_low == low:
+        low_closed = low_closed and other_low_closed
+
+    high, high_closed = _upper(authored.specifier)
+    other_high, other_high_closed = _upper(required.specifier)
+    if other_high is not None and (high is None or other_high < high):
+        high, high_closed = other_high, other_high_closed
+    elif other_high is not None and other_high == high:
+        high_closed = high_closed and other_high_closed
+
+    if low is None or high is None:
+        return True
+    if low > high:
+        return False
+    return low != high or (low_closed and high_closed)
+
+
+def _versions(specifier, operators):
+    """Every parsable version the specifier names with one of these operators."""
+
+    from packaging.version import InvalidVersion, Version
+
+    found = []
+    for clause in specifier:
+        if clause.operator not in operators or "*" in clause.version:
+            continue
+        try:
+            found.append(Version(clause.version))
+        except InvalidVersion:
+            continue
+    return found
+
+
+def _pinned(specifier):
+    """The exact versions a specifier pins to."""
+
+    return _versions(specifier, {"=="})
+
+
+def _lower(specifier):
+    """The highest lower bound a specifier states, and whether it includes it."""
+
+    closed = _versions(specifier, {">=", "==", "~="})
+    open_ = _versions(specifier, {">"})
+    highest = max(closed + open_, default=None)
+    if highest is None:
+        return None, True
+    # Where both a closed and an open bound name it, the open one is stricter.
+    return highest, highest not in open_
+
+
+def _upper(specifier):
+    """The lowest upper bound a specifier states, and whether it includes it."""
+
+    closed = _versions(specifier, {"<=", "=="})
+    open_ = _versions(specifier, {"<"})
+    lowest = min(closed + open_, default=None)
+    if lowest is None:
+        return None, True
+    return lowest, lowest not in open_
 
 
 def _edit_pip(
@@ -343,7 +422,10 @@ def _edit_pip(
             break
         if line.strip():
             item_indent = line[: len(line) - len(line.lstrip())]
-            name = requirement_name(line.strip().lstrip("-").strip())
+            # The item's YAML value, so a quoted or commented entry is read as
+            # the requirement it names. The line itself is kept as authored.
+            scalar = pip_scalar(line.strip().lstrip("-").strip())
+            name = requirement_name(scalar) if scalar is not None else None
             if name in dropped:
                 end += 1
                 continue
