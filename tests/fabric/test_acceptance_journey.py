@@ -1079,7 +1079,7 @@ def test_the_json_report_is_a_publishable_artefact(acceptance):
 
     payload = json.loads(json.dumps(report.to_mapping()))
 
-    assert payload["format_version"] == 1
+    assert payload["format_version"] == 2
     assert payload["status"] == "green"
     assert set(payload["sections"]) == {"load", "tests", "build"}
     assert payload["as_of"].endswith("+00:00")
