@@ -430,9 +430,14 @@ reported before anything is staged. It is a comparison of two specifiers, so
 Weaver resolves nothing; Fabric resolves the external libraries when it
 publishes.
 
-A publication that would change nothing does not republish. Definition parts
-compare by their bytes, except a Weaver wheel, which compares by filename: the
-version is content addressed, and the zip around it is not reproducible.
+A publication that would change nothing does not republish. A Weaver wheel
+compares by filename, because the version is content addressed and the zip
+around it is not reproducible; every other custom library compares by its bytes.
+The three text parts compare by what they say, because Fabric returns them the
+way it stores them: a checkout written on Windows sends `
+` and reads back
+`
+`, and `runtime_version: '1.3'` reads back unquoted.
 
 There is no separate initialise lifecycle. The package-owned catalogue is built
 by the ordinary build: `Warehouse/_weaver` is composed into every parsed

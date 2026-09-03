@@ -37,6 +37,8 @@ from .environment_definition import (
     CUSTOM_LIBRARIES,
     DISTRIBUTION,
     EXTERNAL_LIBRARIES,
+    PLATFORM,
+    SPARK_COMPUTE,
     EnvironmentDefinition,
     definition_from_payload,
     definition_payload,
@@ -403,8 +405,6 @@ def update_definition(
 ) -> None:
     """Send a complete definition to an Environment that already exists."""
 
-    from .environment_definition import PLATFORM
-
     query = "?updateMetadata=true" if PLATFORM in definition.parts else ""
     response = client.request(
         "POST",
@@ -480,20 +480,71 @@ def overlay_weaver(
     return EnvironmentDefinition(parts=parts)
 
 
+#: Definition parts Fabric stores as text and hands back reformatted.
+_TEXT_PARTS = {PLATFORM: "json", EXTERNAL_LIBRARIES: "yaml", SPARK_COMPUTE: "yaml"}
+
+
 def _comparable(definition: EnvironmentDefinition) -> dict:
     """One definition reduced to what a change is judged on.
 
-    Ordinary parts compare by their bytes. A Weaver wheel compares by its path
-    alone, because the filename carries the content-addressed version and a
-    rebuild of an unchanged checkout produces the same version in a differently
-    compressed zip.
+    A Weaver wheel compares by its path alone, because the filename carries the
+    content-addressed version and a rebuild of an unchanged checkout produces the
+    same version in a differently compressed zip. Every other custom library
+    compares by its bytes.
+
+    The three text parts compare by what they say. Fabric returns them with the
+    line endings and the quoting it stores, so a checkout written on Windows
+    reads back with ``\\n`` for its ``\\r\\n`` and ``runtime_version: '1.3'``
+    reads back as ``runtime_version: 1.3``. Comparing those bytes makes every
+    publication a change, and each one costs a Fabric publish.
     """
 
     weaver = set(_weaver_parts(definition))
-    return {
-        path: (None if path in weaver else content)
-        for path, content in definition.parts.items()
-    }
+    reduced: dict = {}
+    for path, content in definition.parts.items():
+        if path in weaver:
+            reduced[path] = None
+        elif path in _TEXT_PARTS:
+            reduced[path] = _text_content(content, _TEXT_PARTS[path])
+        else:
+            reduced[path] = content
+    return reduced
+
+
+def _text_content(content: bytes, language: str):
+    """One text part as its parsed content, or as text when it will not parse."""
+
+    import json
+
+    text = content.decode("utf-8-sig", "replace").replace("\r\n", "\n")
+    try:
+        if language == "json":
+            return json.dumps(_scalars_as_text(json.loads(text)), sort_keys=True)
+        import yaml
+
+        return json.dumps(_scalars_as_text(yaml.safe_load(text)), sort_keys=True)
+    except Exception:
+        # Unparsable content is still content, and a change to it is a change.
+        return text
+
+
+def _scalars_as_text(value):
+    """The same structure with every scalar as the text it was written as.
+
+    Fabric stores ``runtime_version: '1.3'`` and returns it unquoted, so YAML
+    reads back a float where the file held a string. The document is the same
+    one, and comparing the scalars as text is what says so.
+    """
+
+    if isinstance(value, dict):
+        return {str(key): _scalars_as_text(each) for key, each in value.items()}
+    if isinstance(value, list):
+        return [_scalars_as_text(each) for each in value]
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 # --- the result ----------------------------------------------------------------
@@ -535,9 +586,27 @@ class EnvironmentPublishResult:
         }
 
 
-def _settled(status: str) -> None:
-    if status.casefold() not in {"success", "succeeded"}:
-        raise FabricError(f"Environment publish finished with status {status!r}.")
+def _settled(status: str, environment: Item, *, client: FabricClient) -> None:
+    """Raise unless the publish succeeded, naming the component that did not.
+
+    Fabric publishes Spark settings and Spark libraries separately and reports a
+    state for each. A library it cannot resolve fails the publish, so the
+    per-component states are what say where to look.
+    """
+
+    if status.casefold() in {"success", "succeeded"}:
+        return
+    info = client.get_json(_environment_base(environment))
+    details = (info.get("properties") or {}).get("publishDetails") or {}
+    components = details.get("componentPublishInfo") or {}
+    failed = sorted(
+        name
+        for name, component in components.items()
+        if str((component or {}).get("state") or "").casefold()
+        not in {"success", "succeeded"}
+    )
+    detail = f" Fabric reports {', '.join(failed)} did not settle." if failed else ""
+    raise FabricError(f"Environment publish finished with status {status!r}.{detail}")
 
 
 def publish_environment(
@@ -667,7 +736,7 @@ def _publish_definition(
     with step("Publish", "Fabric resolves the staged libraries"):
         status = publish_and_wait(item, client=client)
     timings["publish"] = round(time.perf_counter() - started, 2)
-    _settled(status)
+    _settled(status, item, client=client)
     return _result(
         workspace,
         item,
@@ -750,7 +819,7 @@ def _publish_libraries(
     with step("Publish", "Fabric resolves the staged libraries"):
         status = publish_and_wait(item, client=client)
     timings["publish"] = round(time.perf_counter() - started, 2)
-    _settled(status)
+    _settled(status, item, client=client)
     return _result(
         workspace,
         item,

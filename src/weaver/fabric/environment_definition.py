@@ -245,9 +245,7 @@ def development_external_libraries(
     """
 
     wanted = tuple(requirements)
-    _check_authored_constraints(
-        pip_entries(text, source=source), wanted, source=source
-    )
+    _check_authored_constraints(pip_entries(text, source=source), wanted, source=source)
     return _edit_pip(text, drop=(DISTRIBUTION,), ensure=wanted, source=source)
 
 

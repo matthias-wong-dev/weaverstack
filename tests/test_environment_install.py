@@ -287,6 +287,7 @@ class _DefinitionClient:
     def __init__(self, *, current=None, state="Success", missing=False):
         self.current = current or {}
         self.state = state
+        self.components: dict = {}
         self.missing = missing
         self.sent: list[dict] = []
         self.created: list[dict] = []
@@ -296,7 +297,10 @@ class _DefinitionClient:
         self.timeout = 30
 
     def get_json(self, path):
-        return {"properties": {"publishDetails": {"state": self.state}}}
+        details = {"state": self.state}
+        if self.components:
+            details["componentPublishInfo"] = self.components
+        return {"properties": {"publishDetails": details}}
 
     def request(self, method, path, *, payload=None, expected=()):
         if path.endswith("/getDefinition"):
@@ -546,3 +550,75 @@ def test_the_external_library_import_sends_the_file_as_octet_stream(monkeypatch)
     assert sent["headers"]["Content-Type"] == "application/octet-stream"
     assert sent["data"] == b"dependencies:\n  - pip:\n      - weaverstack\n"
     assert "files" not in sent["extra"]
+
+
+@weaver_test()
+def test_a_definition_fabric_reformatted_is_not_a_change(monkeypatch, tmp_path):
+    """Fabric hands the text parts back the way it stores them.
+
+    Measured against the tenant: a checkout written on Windows sends `\r\n` and
+    reads back `\n`, and `runtime_version: '1.3'` reads back unquoted, which YAML
+    then loads as a float. Comparing those bytes made every publication a change,
+    and each one costs a Fabric publish.
+    """
+
+    path = _local(
+        tmp_path,
+        **{
+            PLATFORM: b'{\r\n  "metadata": {\r\n    "type": "Environment"\r\n  }\r\n}',
+            SPARK_COMPUTE: b"runtime_version: '1.3'\r\ndriver_cores: 4\r\n",
+            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n",
+        },
+    )
+    client = _DefinitionClient(
+        current={
+            PLATFORM: b'{\n  "metadata": {\n    "type": "Environment"\n  }\n}',
+            SPARK_COMPUTE: b"runtime_version: 1.3\ndriver_cores: 4\n",
+            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n",
+        }
+    )
+
+    result = _definition_publication(monkeypatch, client, path)
+
+    assert client.sent == []
+    assert client.published == 0
+    assert result.action == "unchanged"
+
+
+@weaver_test()
+def test_a_changed_setting_is_still_a_change(monkeypatch, tmp_path):
+    """Reading the text parts as content must not read past a real edit."""
+
+    path = _local(
+        tmp_path,
+        **{
+            SPARK_COMPUTE: b"runtime_version: '1.3'\ndriver_cores: 8\n",
+            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n",
+        },
+    )
+    client = _DefinitionClient(
+        current={
+            SPARK_COMPUTE: b"runtime_version: 1.3\ndriver_cores: 4\n",
+            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n",
+        }
+    )
+
+    result = _definition_publication(monkeypatch, client, path)
+
+    assert client.sent, "a changed driver_cores must reach Fabric"
+    assert result.action == "updated"
+
+
+@weaver_test()
+def test_a_failed_publish_names_the_component(monkeypatch, tmp_path):
+    """Fabric publishes settings and libraries apart and reports each."""
+
+    path = _local(tmp_path, **{PLATFORM: PLATFORM_JSON})
+    client = _DefinitionClient(state="Failed")
+    client.components = {
+        "sparkSettings": {"state": "Success"},
+        "sparkLibraries": {"state": "Failed"},
+    }
+
+    with pytest.raises(FabricError, match="sparkLibraries did not settle"):
+        _definition_publication(monkeypatch, client, path)
