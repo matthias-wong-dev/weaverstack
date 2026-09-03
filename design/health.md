@@ -158,10 +158,42 @@ ordinary command error path rather than fabricating a finding. See
 
 ## Bounded history
 
-`_.Log` and `_.LoadStatistic` grow with the estate's age, so health reads one
-window: the most recent load workflow, and the statistics that workflow's loads
-appended. The engine does the filtering and the limiting, so the cost is one
-workflow's worth however long the estate has been running.
+Health is a view of current state, so its history read starts from current
+state. `_.LoadStatus` holds one row per loadable object carrying the workflow
+whose load produced that object's state, and the window is the `_.LoadStatistic`
+row behind each of those rows.
+
+The match is on five columns, being the workflow and the object's four-part
+logical identity:
+
+```text
+_.LoadStatus  →  _.LoadStatistic
+    Workflow ID
+    Item type
+    Item name
+    Schema name
+    Object name
+```
+
+All five, because neither half identifies a load on its own. The workflow alone
+carries every other object that workflow loaded. The object alone carries every
+historical execution of it, and `_.LoadStatistic` accumulates them.
+
+Current state spans as many workflows as it took to reach. A workflow that loads
+84 objects, followed by one that loads 2 of them, leaves 82 objects explained by
+the first and 2 by the second, and health reports all 84. Reading the globally
+latest workflow out of `_.Log` and taking its statistics would discard the 82,
+because a later partial load is not a later account of the whole estate.
+
+`CurrentLoad.workflow_ids` therefore holds every workflow behind current
+state, and `counts` are `_.LoadStatus`'s own results. `completed_at` is the most recent load among them, which is what the
+terminal shows as the last load activity. Health reads `_.Log` for nothing.
+
+`_.LoadStatistic` grows with the estate's age, so nothing reads it whole. The
+match is rendered as a semi-join in the statement, so the engine does the work
+and the window is the size of the estate rather than of its history. A semi-join
+rather than an inner one, because `_.LoadStatus` is keyed by the object and the
+read stays one table's projection.
 
 The window is acquired behind `read_installed_catalogue(..., load_history=True)`
 and carried on the catalogue as `Catalogue.load_history`. It sits apart from
@@ -174,7 +206,7 @@ Warehouse
     │
     read_installed_catalogue(...)
     ├─ current catalogue state
-    └─ bounded latest-load history
+    └─ the statistics behind it
     │
 Catalogue
     ├─ dag()

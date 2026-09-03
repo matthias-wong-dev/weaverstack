@@ -101,8 +101,10 @@ _LOAD_RED = (FAILED, ERROR, BLOCKED)
 #: The validation outcomes that make a subject Red.
 _TEST_RED = (FAILED, ERROR, BLOCKED)
 
-#: The format version of :meth:`HealthReport.to_mapping`.
-FORMAT_VERSION = 1
+#: The format version of :meth:`HealthReport.to_mapping`. Version 2 replaced
+#: ``latest_load``, one workflow read from ``_.Log``, with ``current_load``,
+#: the workflows behind current ``_.LoadStatus`` state.
+FORMAT_VERSION = 2
 
 
 def worst(severities) -> str:
@@ -305,22 +307,28 @@ class LoadActivity:
 
 
 @dataclass(frozen=True)
-class LoadWorkflow:
-    """The most recent recorded load activity, as ``_.Log`` describes it.
+class CurrentLoad:
+    """What the estate's current load state is, and when it was reached.
 
-    One workflow id and the window its rows span. The runtime records
-    orchestrated and standalone loads under the same ``load`` task type, so this
-    is the latest load activity and does not claim to be a scheduled run.
+    ``counts`` are every loadable object's current ``_.LoadStatus`` result.
+    ``workflow_ids`` are the workflows that state came from, oldest object
+    first: a partial load leaves the objects it did not touch explained by the
+    load that last did, so current state spans as many workflows as it took.
+    ``completed_at`` is the most recent of them, which is the estate's last load
+    activity.
+
+    The runtime records orchestrated and standalone loads under the same
+    ``load`` task type, so none of this claims to be a scheduled run.
     """
 
-    workflow_id: str
+    workflow_ids: tuple[str, ...] = ()
     started_at: datetime | None = None
     completed_at: datetime | None = None
     counts: Mapping[str, int] = field(default_factory=dict)
 
     def to_mapping(self) -> dict:
         return {
-            "workflow_id": self.workflow_id,
+            "workflow_ids": list(self.workflow_ids),
             "started_at": _isoformat(self.started_at),
             "completed_at": _isoformat(self.completed_at),
             "counts": dict(sorted(self.counts.items())),
@@ -338,7 +346,7 @@ class HealthReport:
     build: HealthSection
     #: The physical targets reported on, in the grammar a request names them.
     targets: tuple[str, ...] = ()
-    latest_load: LoadWorkflow | None = None
+    current_load: CurrentLoad | None = None
     load_activity: tuple[LoadActivity, ...] = ()
 
     @property
@@ -390,20 +398,20 @@ class HealthReport:
                 TESTS: self.tests.to_mapping(),
                 BUILD: self.build.to_mapping(),
             },
-            "latest_load": None
-            if self.latest_load is None
-            else self.latest_load.to_mapping(),
+            "current_load": None
+            if self.current_load is None
+            else self.current_load.to_mapping(),
             "load_activity": [each.to_mapping() for each in self.load_activity],
         }
 
 
-def latest_load(history) -> LoadWorkflow | None:
+def current_load(history) -> CurrentLoad | None:
     """The window a catalogue was read with, as a report carries it."""
 
     if history is None:
         return None
-    return LoadWorkflow(
-        workflow_id=history.workflow_id,
+    return CurrentLoad(
+        workflow_ids=tuple(history.workflow_ids),
         started_at=_aware(history.started_at),
         completed_at=_aware(history.completed_at),
         counts=MappingProxyType(dict(history.counts)),
@@ -494,7 +502,7 @@ def assess(
         tests=evaluation.tests(),
         build=evaluation.build(),
         targets=tuple(str(target) for target in (selected or dag.targets)),
-        latest_load=latest_load(history),
+        current_load=current_load(history),
         load_activity=load_activity(history, targets=dag.installations),
     )
 
@@ -917,11 +925,11 @@ __all__ = [
     "TEST_PENDING",
     "TEST_STALE_DEPENDENCY",
     "LoadActivity",
-    "LoadWorkflow",
+    "CurrentLoad",
     "RuntimeStatus",
     "assess",
     "bookmarks",
-    "latest_load",
+    "current_load",
     "load_activity",
     "load_statuses",
     "test_statuses",

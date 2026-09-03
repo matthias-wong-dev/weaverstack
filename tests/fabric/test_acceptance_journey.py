@@ -958,7 +958,7 @@ def test_a_loaded_and_validated_estate_reports_green(acceptance):
     assert report.status == "green"
 
     # The bounded window found the load that ran, and it moved rows.
-    assert report.latest_load is not None
+    assert report.current_load is not None
     assert report.load_activity
     assert any(each.rows_read for each in report.load_activity)
 
