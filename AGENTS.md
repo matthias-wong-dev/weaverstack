@@ -312,6 +312,9 @@ InstalledEstate                    InstalledObject / InstalledDependency
 _validation_dependencies           InstalledValidation.dependencies
 weaver.declaration.graph           a per-model topological sort
 stale_shortcut_destinations        delete-then-create shortcut replacement
+environment_packages               resolve_wheel_closure / plan_requirements
+Weaver's own dependency resolver   EnvironmentPackageConflict
+SUPPORTED_FABRIC_RUNTIMES          per-runtime wheel ABI selection
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the

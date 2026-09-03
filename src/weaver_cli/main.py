@@ -544,7 +544,21 @@ def build_parser() -> argparse.ArgumentParser:
     environment_publish.add_argument(
         "environment_ref",
         metavar="ENVIRONMENT",
+        nargs="?",
         help="Fabric Environment name or Workspace/Environment reference.",
+    )
+    environment_publish.add_argument(
+        "--path",
+        metavar="DIRECTORY",
+        help=(
+            "A local <Name>.Environment definition to publish. It names the "
+            "Environment and supplies its whole definition."
+        ),
+    )
+    environment_publish.add_argument(
+        "--dev",
+        action="store_true",
+        help="Supply Weaver as a wheel built from this checkout.",
     )
     _add_workspace_args(
         environment_publish, include_catalogue=False, include_environment=False
@@ -691,29 +705,53 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
     from dataclasses import replace
 
     from weaver.fabric.environment import resolve_environment_owner
+    from weaver.fabric.environment_definition import environment_name_from_path
     from weaver.sessions.host import use_or_create_session
     from weaver.workspaces import EnvironmentRef, Workspace
 
-    environment = EnvironmentRef.parse(args.environment_ref)
-    if (
-        environment.workspace is not None
-        and args.workspace is None
-        and args.workspace_config is None
-    ):
-        workspace = Workspace(workspace=environment.workspace, environment=environment)
-    else:
+    if args.path is not None and args.environment_ref is not None:
+        raise CommandError(
+            "--path names the Environment through its directory, so ENVIRONMENT "
+            "is not given as well."
+        )
+    if args.path is None and args.environment_ref is None:
+        raise CommandError(
+            "Name a Fabric Environment, or pass --path to publish a local "
+            "<Name>.Environment definition."
+        )
+
+    if args.path is not None:
+        # The directory names the Environment. Workspace configuration may name
+        # a different one, and it is not consulted here.
         workspace = _resolve_workspace(args)
-        resolve_environment_owner(workspace.workspace, environment)
-        workspace = replace(workspace, environment=environment)
+        label = environment_name_from_path(args.path)
+        environment = None
+    else:
+        environment = EnvironmentRef.parse(args.environment_ref)
+        if (
+            environment.workspace is not None
+            and args.workspace is None
+            and args.workspace_config is None
+        ):
+            workspace = Workspace(
+                workspace=environment.workspace, environment=environment
+            )
+        else:
+            workspace = _resolve_workspace(args)
+            resolve_environment_owner(workspace.workspace, environment)
+            workspace = replace(workspace, environment=environment)
+        label = str(environment)
     _prefer_desktop_credential()
     from weaver.fabric import publish_environment
 
     started = time.perf_counter()
     with use_or_create_session(_session(args), workspace=workspace) as session:
-        with session.task("Publish Environment", str(environment)):
+        with session.task("Publish Environment", label):
             result = publish_environment(
                 workspace.workspace,
                 environment,
+                path=args.path,
+                dev=args.dev,
                 session=session,
             )
     total = time.perf_counter() - started

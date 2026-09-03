@@ -3,7 +3,7 @@
 from support.weaver_test import weaver_test
 
 from weaver.fabric.environment import project_root, runtime_dependencies
-from weaver.fabric.environment_packages import DESKTOP_ONLY, runtime_requirements
+from weaver.fabric.environment_definition import DESKTOP_ONLY, runtime_requirements
 
 
 def _names() -> set[str]:

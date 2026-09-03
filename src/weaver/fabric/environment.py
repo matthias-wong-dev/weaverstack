@@ -1,14 +1,29 @@
-"""Install Weaver into an existing Fabric Environment.
+"""Publish Weaver into a Fabric Environment.
 
-Publication reuses compatible published packages, adds absent requirements as
-custom wheels, and replaces Weaver wheels. Other Environment content is kept.
+Two switches, independent of each other:
+
+``--path``
+    where the Environment definition comes from. Absent, the Environment in the
+    workspace is authoritative and Weaver is added to what is already staged.
+    Present, the local ``*.Environment`` directory is authoritative and its
+    definition is sent whole.
+
+``--dev``
+    how Weaver itself is supplied. Released, one PyPI ``weaverstack``
+    requirement and no Weaver custom wheel. Development, the checkout's wheel
+    and no PyPI requirement, with Weaver's own Fabric requirements named because
+    a Fabric custom wheel installs no dependencies of its own.
+
+One overlay, two transports. Without ``--path`` the staging library APIs carry
+it, which leaves Spark compute and every unrelated library untouched, including
+edits a user has staged and not yet published. With ``--path`` the item
+definition APIs carry it. The local directory is never written to.
 """
 
 from __future__ import annotations
 
 import subprocess
 import sys
-import tempfile
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -18,14 +33,22 @@ from urllib.parse import quote
 from ..errors import CommandError
 from ..workspaces import EnvironmentRef
 from .client import FabricClient, FabricError, send
-from .environment_packages import (
-    EnvironmentPackageConflict,
-    ResolvedRequirement,
-    custom_library_names,
-    fabric_runtime,
-    plan_requirements,
-    resolve_wheel_closure,
+from .environment_definition import (
+    CUSTOM_LIBRARIES,
+    DISTRIBUTION,
+    EXTERNAL_LIBRARIES,
+    EnvironmentDefinition,
+    definition_from_payload,
+    definition_payload,
+    development_external_libraries,
+    environment_name_from_path,
+    read_environment_definition,
+    released_external_libraries,
     runtime_requirements,
+    weaver_requirement,
+)
+from .environment_definition import (
+    pip_entries as _pip_entries,
 )
 from .resources import (
     ENVIRONMENT,
@@ -36,9 +59,15 @@ from .resources import (
     find_workspace,
 )
 
-DISTRIBUTION = "weaverstack"
 WHEEL_PREFIX = f"{DISTRIBUTION}-"
 WHEEL_SUFFIX = ".whl"
+
+RELEASED = "released"
+DEVELOPMENT = "dev"
+
+CREATED = "created"
+UPDATED = "updated"
+UNCHANGED = "unchanged"
 
 
 def project_root() -> Path:
@@ -50,7 +79,7 @@ def project_root() -> Path:
             return parent
     raise CommandError(
         "A Weaver project root was not found. Run `weaver fabric environment "
-        "publish` from a checkout containing pyproject.toml."
+        "publish --dev` from a checkout containing pyproject.toml."
     )
 
 
@@ -147,11 +176,13 @@ def find_existing_environment(
     except ItemNotFoundError as exc:
         raise CommandError(
             f"Environment {environment_name!r} was not found in workspace "
-            f"{workspace.name!r}.\nCreate the Environment in Fabric first, "
-            "configure any packages you require, publish it, then run Weaver "
-            "publish again."
+            f"{workspace.name!r}.\nCreate the Environment in Fabric first, or "
+            "publish a local definition with --path, which creates it."
         ) from exc
     return workspace, environment
+
+
+# --- the Fabric surface --------------------------------------------------------
 
 
 def _staging_base(environment: Item) -> str:
@@ -195,10 +226,56 @@ def read_published_spark_compute(environment: Item, *, client: FabricClient) -> 
 def library_wheels(libraries: dict) -> list[str]:
     """Return Custom library names from a GA library response."""
 
-    return list(custom_library_names(libraries))
+    return [
+        str(entry.get("name") or "")
+        for entry in libraries.get("libraries", ())
+        if str(entry.get("libraryType") or "").casefold() == "custom"
+    ]
 
 
 staged_wheels = library_wheels
+
+
+def read_staging_external_libraries(environment: Item, *, client: FabricClient) -> str:
+    """The staged ``environment.yml``, which is published plus pending."""
+
+    path = f"{_staging_base(environment)}/libraries/exportExternalLibraries"
+    try:
+        response = client.request("GET", path, expected=(200,))
+    except FabricError as exc:
+        if exc.status_code == 404:
+            return ""
+        raise
+    return response.content.decode("utf-8-sig")
+
+
+def import_external_libraries(
+    environment: Item, text: str, *, client: FabricClient
+) -> None:
+    """Replace the staged external library list with this ``environment.yml``."""
+
+    import requests
+
+    path = f"{_staging_base(environment)}/libraries/importExternalLibraries"
+    url = f"{client.api_base_url}/{path}"
+    try:
+        response = send(
+            "POST",
+            url,
+            headers={"Authorization": f"Bearer {client.token}"},
+            files={
+                "file": ("environment.yml", text.encode("utf-8"), "application/x-yaml")
+            },
+            timeout=client.timeout,
+        )
+    except requests.exceptions.RequestException as exc:
+        raise FabricError(f"POST {url} could not be reached: {exc}") from exc
+    if response.status_code not in (200, 201, 202):
+        raise FabricError(
+            f"importing external libraries returned {response.status_code}: "
+            f"{response.text.strip()[:400] or 'no body'}",
+            status_code=response.status_code,
+        )
 
 
 def publish_state(environment: Item, *, client: FabricClient) -> str:
@@ -239,7 +316,7 @@ def upload_wheel(environment: Item, wheel: Path, *, client: FabricClient) -> Non
 
 def delete_stale_wheels(
     environment: Item,
-    keep: str,
+    keep: str | None,
     staged: list[str],
     *,
     client: FabricClient,
@@ -298,6 +375,127 @@ def publish_and_wait(
     )
 
 
+# --- the definition surface ----------------------------------------------------
+
+
+def read_definition(
+    environment: Item, *, client: FabricClient
+) -> EnvironmentDefinition:
+    """The Environment's current definition, through the long-running read."""
+
+    response = client.request(
+        "POST", f"{_environment_base(environment)}/getDefinition", expected=(200, 202)
+    )
+    if response.status_code == 200:
+        return definition_from_payload(response.json())
+    operation = response.headers.get("x-ms-operation-id")
+    client.wait_for_operation(response)
+    return definition_from_payload(
+        client.request("GET", f"operations/{operation}/result", expected=(200,)).json()
+    )
+
+
+def update_definition(
+    environment: Item, definition: EnvironmentDefinition, *, client: FabricClient
+) -> None:
+    """Send a complete definition to an Environment that already exists."""
+
+    from .environment_definition import PLATFORM
+
+    query = "?updateMetadata=true" if PLATFORM in definition.parts else ""
+    response = client.request(
+        "POST",
+        f"{_environment_base(environment)}/updateDefinition{query}",
+        payload={"definition": definition_payload(definition)},
+        expected=(200, 202),
+    )
+    client.wait_for_operation(response)
+
+
+def create_with_definition(
+    workspace: WorkspaceItem,
+    name: str,
+    definition: EnvironmentDefinition,
+    *,
+    client: FabricClient,
+) -> Item:
+    """Create an Environment from a complete definition and resolve it."""
+
+    response = client.request(
+        "POST",
+        f"workspaces/{workspace.id}/environments",
+        payload={"displayName": name, "definition": definition_payload(definition)},
+        expected=(200, 201, 202),
+    )
+    client.wait_for_operation(response)
+    return find_item(workspace, name, item_type=ENVIRONMENT, client=client)
+
+
+# --- the overlay ---------------------------------------------------------------
+
+
+def _weaver_parts(definition: EnvironmentDefinition) -> tuple[str, ...]:
+    """Every custom-library part Weaver owns in a definition."""
+
+    return tuple(
+        path
+        for path in definition.parts
+        if path.startswith(CUSTOM_LIBRARIES) and is_weaver_wheel(path.split("/")[-1])
+    )
+
+
+def overlay_weaver(
+    definition: EnvironmentDefinition,
+    *,
+    dev: bool,
+    wheel: Path | None = None,
+    requirements: tuple[str, ...] = (),
+    source: str,
+) -> EnvironmentDefinition:
+    """The same definition with Weaver supplied the way this mode supplies it.
+
+    Everything Weaver does not own is carried through byte for byte: the
+    platform metadata, the Spark compute settings, every other custom library
+    and every other entry in the external library list.
+    """
+
+    parts = dict(definition.parts)
+    for path in _weaver_parts(definition):
+        parts.pop(path)
+    text = definition.external_libraries()
+    if dev:
+        if wheel is None:
+            raise CommandError("A development publication needs a built wheel.")
+        parts[EXTERNAL_LIBRARIES] = development_external_libraries(
+            text, requirements=requirements, source=source
+        ).encode("utf-8")
+        parts[f"{CUSTOM_LIBRARIES}{wheel.name}"] = wheel.read_bytes()
+    else:
+        parts[EXTERNAL_LIBRARIES] = released_external_libraries(
+            text, source=source
+        ).encode("utf-8")
+    return EnvironmentDefinition(parts=parts)
+
+
+def _comparable(definition: EnvironmentDefinition) -> dict:
+    """One definition reduced to what a change is judged on.
+
+    Ordinary parts compare by their bytes. A Weaver wheel compares by its path
+    alone, because the filename carries the content-addressed version and a
+    rebuild of an unchanged checkout produces the same version in a differently
+    compressed zip.
+    """
+
+    weaver = set(_weaver_parts(definition))
+    return {
+        path: (None if path in weaver else content)
+        for path, content in definition.parts.items()
+    }
+
+
+# --- the result ----------------------------------------------------------------
+
+
 @dataclass
 class EnvironmentPublishResult:
     """What one Environment publication did, serialisable for the CLI."""
@@ -306,13 +504,12 @@ class EnvironmentPublishResult:
     workspace_id: str
     environment_name: str
     environment_id: str
-    package_name: str
-    package_version: str
-    wheel_filename: str
-    requirements: tuple[ResolvedRequirement, ...]
-    staged_dependency_wheels: tuple[str, ...]
-    reused_requirements: tuple[str, ...]
-    wheel_changed: bool
+    source_path: str | None
+    mode: str
+    weaver_requirement: str | None
+    wheel_filename: str | None
+    removed_wheels: tuple[str, ...]
+    action: str
     published: bool
     publish_status: str
     timings: dict = field(default_factory=dict)
@@ -323,150 +520,284 @@ class EnvironmentPublishResult:
             "workspace_id": self.workspace_id,
             "environment_name": self.environment_name,
             "environment_id": self.environment_id,
-            "package_name": self.package_name,
-            "package_version": self.package_version,
+            "source_path": self.source_path,
+            "mode": self.mode,
+            "weaver_requirement": self.weaver_requirement,
             "wheel_filename": self.wheel_filename,
-            "requirements": [item.as_dict() for item in self.requirements],
-            "staged_dependency_wheels": list(self.staged_dependency_wheels),
-            "reused_requirements": list(self.reused_requirements),
-            "wheel_changed": self.wheel_changed,
+            "removed_wheels": list(self.removed_wheels),
+            "action": self.action,
             "published": self.published,
             "publish_status": self.publish_status,
             "timings": dict(self.timings),
         }
 
 
-def _version_from_wheel(filename: str) -> str:
-    from packaging.utils import parse_wheel_filename
-
-    _name, version, _build, _tags = parse_wheel_filename(filename)
-    return str(version)
-
-
-def _conflict_message(
-    reference: EnvironmentRef, conflict: EnvironmentPackageConflict
-) -> str:
-    lines = [f"Cannot publish Weaver into {str(reference)!r}.", ""]
-    for item in conflict.conflicts:
-        supplied = ", ".join(item.provided) or "an unknown version"
-        required = item.required or "any version"
-        lines.extend(
-            [
-                f"{item.location.capitalize()} provides:",
-                f"  {item.name}=={supplied}",
-                "Weaver requires:",
-                f"  {item.name}{required}",
-                "",
-            ]
-        )
-    lines.extend(
-        [
-            "Resolve the package version in the Fabric Environment and publish it,",
-            "then run Weaver publish again. No Environment changes were staged.",
-        ]
-    )
-    return "\n".join(lines)
+def _settled(status: str) -> None:
+    if status.casefold() not in {"success", "succeeded"}:
+        raise FabricError(f"Environment publish finished with status {status!r}.")
 
 
 def publish_environment(
     workspace_name: str | None,
-    environment: EnvironmentRef | str,
+    environment: EnvironmentRef | str | None = None,
     *,
+    path: str | Path | None = None,
+    dev: bool = False,
     client: FabricClient | None = None,
     root: Path | None = None,
     session=None,
 ) -> EnvironmentPublishResult:
-    """Install or update Weaver in an existing Fabric Environment."""
+    """Publish Weaver into a Fabric Environment.
 
-    root = root or project_root()
+    ``path`` names a local ``*.Environment`` directory, which then supplies both
+    the Environment name and its whole definition. Without one, ``environment``
+    names an Environment that already exists and only Weaver's own libraries are
+    touched.
+    """
+
     client = client or FabricClient()
-    owner_name, reference = resolve_environment_owner(workspace_name, environment)
     step = _reporter(session)
     timings: dict[str, float] = {}
 
+    wheel: Path | None = None
+    requirements: tuple[str, ...] = ()
+    if dev:
+        checkout = root or project_root()
+        requirements = runtime_requirements(checkout)
+        started = time.perf_counter()
+        with step("Build the Weaver wheel"):
+            wheel = build_wheel(checkout)
+        timings["build"] = round(time.perf_counter() - started, 2)
+
+    if path is not None:
+        return _publish_definition(
+            workspace_name,
+            path,
+            dev=dev,
+            wheel=wheel,
+            requirements=requirements,
+            client=client,
+            step=step,
+            timings=timings,
+        )
+    if environment is None:
+        raise CommandError(
+            "Name the Environment to publish into, or pass --path to publish a "
+            "local definition."
+        )
+    return _publish_libraries(
+        workspace_name,
+        environment,
+        dev=dev,
+        wheel=wheel,
+        requirements=requirements,
+        client=client,
+        step=step,
+        timings=timings,
+    )
+
+
+def _publish_definition(
+    workspace_name: str | None,
+    path: str | Path,
+    *,
+    dev: bool,
+    wheel: Path | None,
+    requirements: tuple[str, ...],
+    client: FabricClient,
+    step,
+    timings: dict,
+) -> EnvironmentPublishResult:
+    """The local definition is authoritative: send it whole, then publish."""
+
+    directory = Path(path)
+    name = environment_name_from_path(directory)
+    local = read_environment_definition(directory)
+    desired = overlay_weaver(
+        local, dev=dev, wheel=wheel, requirements=requirements, source=str(directory)
+    )
+
+    if workspace_name is None:
+        raise CommandError(
+            "Publishing a local Environment definition requires --workspace or "
+            "workspace configuration."
+        )
+
+    with step("Find the workspace"):
+        workspace = find_workspace(workspace_name, client=client)
+    try:
+        with step("Find the Environment"):
+            item = find_item(workspace, name, item_type=ENVIRONMENT, client=client)
+    except ItemNotFoundError:
+        item = None
+
+    started = time.perf_counter()
+    if item is None:
+        with step("Create the Environment", "from the local definition"):
+            item = create_with_definition(workspace, name, desired, client=client)
+        action = CREATED
+    else:
+        with step("Read the Environment definition"):
+            current = read_definition(item, client=client)
+        if _comparable(current) == _comparable(desired) and publish_state(
+            item, client=client
+        ).casefold() in {"success", "succeeded"}:
+            timings["send"] = round(time.perf_counter() - started, 2)
+            return _result(
+                workspace,
+                item,
+                source_path=str(directory),
+                dev=dev,
+                desired=desired,
+                removed=(),
+                action=UNCHANGED,
+                published=False,
+                status="AlreadyInstalled",
+                timings=timings,
+            )
+        with step("Update the Environment definition"):
+            update_definition(item, desired, client=client)
+        action = UPDATED
+    timings["send"] = round(time.perf_counter() - started, 2)
+
+    started = time.perf_counter()
+    with step("Publish", "Fabric resolves the staged libraries"):
+        status = publish_and_wait(item, client=client)
+    timings["publish"] = round(time.perf_counter() - started, 2)
+    _settled(status)
+    return _result(
+        workspace,
+        item,
+        source_path=str(directory),
+        dev=dev,
+        desired=desired,
+        removed=(),
+        action=action,
+        published=True,
+        status=status,
+        timings=timings,
+    )
+
+
+def _publish_libraries(
+    workspace_name: str | None,
+    environment: EnvironmentRef | str,
+    *,
+    dev: bool,
+    wheel: Path | None,
+    requirements: tuple[str, ...],
+    client: FabricClient,
+    step,
+    timings: dict,
+) -> EnvironmentPublishResult:
+    """The Environment is authoritative: change only Weaver's own libraries."""
+
+    owner_name, reference = resolve_environment_owner(workspace_name, environment)
     with step("Find the Environment"):
         workspace, item = find_existing_environment(
             owner_name, reference.name, client=client
         )
 
-    with step("Read Environment state"):
-        spark_compute = read_published_spark_compute(item, client=client)
-        runtime = fabric_runtime(spark_compute.get("runtimeVersion", ""))
-        published = read_published(item, client=client)
-        staging = read_staging(item, client=client)
+    with step("Read the staged libraries"):
+        text = read_staging_external_libraries(item, client=client)
+        staged = library_wheels(read_staging(item, client=client))
 
-    requirements = runtime_requirements(root)
-    with tempfile.TemporaryDirectory(prefix="weaver-fabric-wheels-") as temporary:
-        t = time.perf_counter()
-        with step("Resolve Weaver requirements"):
-            closure = resolve_wheel_closure(
-                requirements, Path(temporary), runtime=runtime
-            )
-            try:
-                package_plan = plan_requirements(
-                    closure, published=published, staging=staging
-                )
-            except EnvironmentPackageConflict as exc:
-                raise CommandError(_conflict_message(reference, exc)) from exc
-        timings["resolve"] = time.perf_counter() - t
+    source = f"{reference}"
+    wanted = (
+        development_external_libraries(text, requirements=requirements, source=source)
+        if dev
+        else released_external_libraries(text, source=source)
+    )
+    keep = wheel.name if dev and wheel is not None else None
+    stale = [name for name in staged if is_weaver_wheel(name) and name != keep]
+    upload_needed = keep is not None and keep not in staged
+    changed = wanted != text or bool(stale) or upload_needed
 
-        t = time.perf_counter()
-        with step("Build the Weaver wheel"):
-            wheel = build_wheel(root)
-        timings["build"] = time.perf_counter() - t
+    removed: list[str] = []
+    started = time.perf_counter()
+    if changed:
+        with step("Stage Weaver libraries"):
+            if wanted != text:
+                import_external_libraries(item, wanted, client=client)
+            if upload_needed and wheel is not None:
+                upload_wheel(item, wheel, client=client)
+            removed = delete_stale_wheels(item, keep, staged, client=client)
+    timings["send"] = round(time.perf_counter() - started, 2)
 
-        published_custom = set(library_wheels(published))
-        staged_custom = set(library_wheels(staging))
-        published_weaver = {name for name in published_custom if is_weaver_wheel(name)}
-        staged_weaver = {name for name in staged_custom if is_weaver_wheel(name)}
-        wheel_changed = wheel.name not in published_weaver
-        stale_weaver = (published_weaver | staged_weaver) - {wheel.name}
-        related_change = (
-            package_plan.needs_publish or wheel_changed or bool(stale_weaver)
+    if not changed and publish_state(item, client=client).casefold() in {
+        "success",
+        "succeeded",
+    }:
+        return _result(
+            workspace,
+            item,
+            source_path=None,
+            dev=dev,
+            desired=None,
+            removed=(),
+            action=UNCHANGED,
+            published=False,
+            status="AlreadyInstalled",
+            requirement=weaver_requirement(_pip_entries(wanted, source=source)),
+            wheel_filename=keep,
+            timings=timings,
         )
 
-        uploaded_dependencies: list[str] = []
-        t = time.perf_counter()
-        if related_change:
-            with step("Stage Weaver libraries"):
-                for dependency in package_plan.upload:
-                    upload_wheel(item, dependency.path, client=client)
-                    uploaded_dependencies.append(dependency.filename)
-                if wheel.name not in staged_custom:
-                    upload_wheel(item, wheel, client=client)
-                delete_stale_wheels(
-                    item,
-                    wheel.name,
-                    sorted(staged_custom | published_custom | {wheel.name}),
-                    client=client,
-                )
-        timings["upload"] = time.perf_counter() - t
+    started = time.perf_counter()
+    with step("Publish", "Fabric resolves the staged libraries"):
+        status = publish_and_wait(item, client=client)
+    timings["publish"] = round(time.perf_counter() - started, 2)
+    _settled(status)
+    return _result(
+        workspace,
+        item,
+        source_path=None,
+        dev=dev,
+        desired=None,
+        removed=tuple(removed),
+        action=UPDATED,
+        published=True,
+        status=status,
+        requirement=weaver_requirement(_pip_entries(wanted, source=source)),
+        wheel_filename=keep,
+        timings=timings,
+    )
 
-    if related_change:
-        t = time.perf_counter()
-        with step("Publish", "Fabric resolves the staged libraries"):
-            status = publish_and_wait(item, client=client)
-        timings["publish"] = time.perf_counter() - t
-        if status.casefold() not in {"success", "succeeded"}:
-            raise FabricError(f"Environment publish finished with status {status!r}.")
-        published_now = True
-    else:
-        status = "AlreadyInstalled"
-        published_now = False
 
+def _result(
+    workspace,
+    item,
+    *,
+    source_path,
+    dev,
+    desired,
+    removed,
+    action,
+    published,
+    status,
+    timings,
+    requirement=None,
+    wheel_filename=None,
+) -> EnvironmentPublishResult:
+    """One result, however the publication reached it."""
+
+    if desired is not None:
+        entries = _pip_entries(desired.external_libraries(), source="definition")
+        requirement = weaver_requirement(entries)
+        wheels = [path.split("/")[-1] for path in _weaver_parts(desired)]
+        wheel_filename = wheels[0] if wheels else None
     return EnvironmentPublishResult(
         workspace_name=workspace.name,
         workspace_id=workspace.id,
         environment_name=item.name,
         environment_id=item.id,
-        package_name=DISTRIBUTION,
-        package_version=_version_from_wheel(wheel.name),
-        wheel_filename=wheel.name,
-        requirements=package_plan.requirements,
-        staged_dependency_wheels=tuple(uploaded_dependencies),
-        reused_requirements=package_plan.reused,
-        wheel_changed=wheel_changed,
-        published=published_now,
+        source_path=source_path,
+        mode=DEVELOPMENT if dev else RELEASED,
+        weaver_requirement=requirement,
+        wheel_filename=wheel_filename,
+        removed_wheels=tuple(removed),
+        action=action,
+        published=published,
         publish_status=status,
-        timings={key: round(value, 2) for key, value in timings.items()},
+        timings=timings,
     )

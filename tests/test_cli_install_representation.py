@@ -156,3 +156,72 @@ def test_environment_publish_rejects_a_conflicting_workspace(monkeypatch):
     )
     with pytest.raises(CommandError, match="conflicts"):
         handle_environment_publish(args)
+
+
+# --- the two switches ----------------------------------------------------------
+
+
+@weaver_test()
+def test_a_path_and_a_named_environment_are_not_both_given(monkeypatch):
+    """``--path`` names the Environment through its directory."""
+
+    from weaver.errors import CommandError
+    from weaver_cli.main import build_parser, handle_environment_publish
+
+    args = build_parser().parse_args(
+        ["fabric", "environment", "publish", "Runtime", "--path", "x/R.Environment"]
+    )
+
+    with pytest.raises(CommandError, match="is not given as well"):
+        handle_environment_publish(args)
+
+
+@weaver_test()
+def test_publishing_needs_a_name_or_a_path():
+    from weaver.errors import CommandError
+    from weaver_cli.main import build_parser, handle_environment_publish
+
+    args = build_parser().parse_args(["fabric", "environment", "publish"])
+
+    with pytest.raises(CommandError, match="or pass --path"):
+        handle_environment_publish(args)
+
+
+@weaver_test()
+def test_a_path_reaches_the_operation_with_the_mode(monkeypatch, tmp_path, capsys):
+    """The directory names the Environment, and workspace configuration does not.
+
+    The workspace here is configured for ``Runtime``; the definition publishes
+    ``Sales``, and the two are not required to agree.
+    """
+
+    cli = import_module("weaver_cli.main")
+    from weaver.workspaces import Workspace
+    from weaver_cli.main import build_parser, handle_environment_publish
+
+    definition = tmp_path / "Sales.Environment"
+    definition.mkdir()
+    seen = {}
+
+    workspace = Workspace(workspace="Analytics", environment="Runtime")
+    monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(cli, "_session", lambda args: _RecordingSession())
+
+    import weaver.fabric as fabric
+
+    def publish(workspace_name, environment=None, **keywords):
+        seen.update(keywords, workspace_name=workspace_name, environment=environment)
+        return _Result()
+
+    monkeypatch.setattr(fabric, "publish_environment", publish)
+
+    args = build_parser().parse_args(
+        ["fabric", "environment", "publish", "--path", str(definition), "--dev"]
+    )
+
+    assert handle_environment_publish(args) == 0
+    assert seen["path"] == str(definition)
+    assert seen["dev"] is True
+    assert seen["environment"] is None
+    assert seen["workspace_name"] == "Analytics"

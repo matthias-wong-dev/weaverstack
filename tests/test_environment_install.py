@@ -1,9 +1,12 @@
-"""Package-preserving Fabric Environment publication without Fabric."""
+"""Publishing Weaver into a Fabric Environment, in both modes and both sources.
+
+``--path`` and ``--dev`` are independent, so the four combinations are the
+subject here: where the definition comes from, and how Weaver is supplied.
+"""
 
 from __future__ import annotations
 
-import types
-import zipfile
+import base64
 from pathlib import Path
 
 import pytest
@@ -11,688 +14,503 @@ from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
 from weaver.fabric import environment as env_mod
-from weaver.fabric import environment_packages as packages_mod
-from weaver.fabric.client import FabricClient, FabricError
+from weaver.fabric.client import FabricError
 from weaver.fabric.environment import (
-    _version_from_wheel,
-    delete_stale_wheels,
-    find_existing_environment,
     is_weaver_wheel,
-    read_published,
-    read_published_spark_compute,
-    read_staging,
+    library_wheels,
     resolve_environment_owner,
-    staged_wheels,
 )
-from weaver.fabric.environment_packages import (
-    EnvironmentPackageConflict,
-    ResolvedWheel,
-    describe_wheel_closure,
-    fabric_runtime,
-    inspect_libraries,
-    plan_requirements,
-    resolve_wheel_closure,
+from weaver.fabric.environment_definition import (
+    CUSTOM_LIBRARIES,
+    EXTERNAL_LIBRARIES,
+    PLATFORM,
+    SPARK_COMPUTE,
 )
 from weaver.fabric.resources import Item, ItemNotFoundError, WorkspaceItem
 
+WHEEL = "weaverstack-0.1.2.dev99-py3-none-any.whl"
+OTHER_WHEEL = "userpackage-1.0-py3-none-any.whl"
+PLATFORM_JSON = b'{"metadata": {"type": "Environment", "displayName": "Runtime"}}'
+SPARK_YML = b"runtime_version: 1.3\n"
+
 
 def _env() -> Item:
-    return Item(id="env1", name="Runtime", type="Environment", workspace_id="ws1")
+    return Item(id="env-id", name="Runtime", type="Environment", workspace_id="ws-id")
+
+
+def _workspace() -> WorkspaceItem:
+    return WorkspaceItem(id="ws-id", name="Analytics")
 
 
 def _libraries(*entries) -> dict:
     return {"libraries": list(entries)}
 
 
-def _external(name: str, version: str) -> dict:
-    return {"name": name, "libraryType": "External", "version": version}
-
-
 def _custom(filename: str) -> dict:
     return {"name": filename, "libraryType": "Custom"}
 
 
-def _wheel(
-    name: str,
-    version: str,
-    required: str = "",
-    *,
-    dependencies=(),
-    top_level=True,
-) -> ResolvedWheel:
-    filename = f"{name.replace('-', '_')}-{version}-py3-none-any.whl"
-    return ResolvedWheel(
-        name,
-        version,
-        filename,
-        Path(filename),
-        required,
-        tuple(dependencies),
-        top_level,
-    )
+def _external(name: str, version: str = "") -> dict:
+    return {"name": name, "libraryType": "External", "version": version}
 
 
-def _write_wheel(path: Path, name: str, version: str, requires=()) -> None:
-    metadata = [
-        "Metadata-Version: 2.1",
-        f"Name: {name}",
-        f"Version: {version}",
-        *(f"Requires-Dist: {requirement}" for requirement in requires),
-        "",
-    ]
-    with zipfile.ZipFile(path, "w") as archive:
-        archive.writestr(
-            f"{name.replace('-', '_')}-{version}.dist-info/METADATA",
-            "\n".join(metadata),
-        )
+def _built_wheel(tmp_path: Path, name: str = WHEEL) -> Path:
+    path = tmp_path / name
+    path.write_bytes(b"wheel bytes")
+    return path
+
+
+# --- what Weaver owns ----------------------------------------------------------
 
 
 @weaver_test()
 def test_only_weaver_wheels_are_owned():
-    assert is_weaver_wheel("weaverstack-0.1.0-py3-none-any.whl")
-    assert not is_weaver_wheel("sqlparse-0.5.3-py3-none-any.whl")
+    assert is_weaver_wheel(WHEEL)
+    assert not is_weaver_wheel(OTHER_WHEEL)
     assert not is_weaver_wheel("weaverstack-0.1.0.tar.gz")
 
 
 @weaver_test()
-def test_version_is_read_from_a_wheel_filename():
-    assert _version_from_wheel("weaverstack-0.1.0-py3-none-any.whl") == "0.1.0"
-
-
-@weaver_test()
-def test_wheel_closure_carries_transitive_constraints(tmp_path):
-    _write_wheel(
-        tmp_path / "alpha-1.0-py3-none-any.whl",
-        "alpha",
-        "1.0",
-        requires=("beta>=2",),
-    )
-    _write_wheel(tmp_path / "beta-2.1-py3-none-any.whl", "beta", "2.1")
-    closure = describe_wheel_closure(
-        tmp_path, ("alpha>=1",), runtime=fabric_runtime("1.3")
-    )
-    by_name = {wheel.name: wheel for wheel in closure}
-    assert by_name["alpha"].required == ">=1"
-    assert by_name["alpha"].dependencies == ("beta",)
-    assert by_name["alpha"].top_level is True
-    assert by_name["beta"].required == ">=2"
-    assert by_name["beta"].top_level is False
-
-
-@weaver_test()
 def test_ga_custom_libraries_are_read_by_name():
-    libraries = _libraries(
-        _custom("weaverstack-0.1.0-py3-none-any.whl"),
-        _external("pyyaml", "6.0.2"),
-    )
-    assert staged_wheels(libraries) == ["weaverstack-0.1.0-py3-none-any.whl"]
+    libraries = _libraries(_custom(WHEEL), _external("pyyaml"), _custom(OTHER_WHEEL))
 
-
-class _ReadClient:
-    def __init__(self, response=None, status_code=None):
-        self.response = response
-        self.status_code = status_code
-        self.paths = []
-        self.keys = []
-        self.not_found_empty = []
-
-    def paged(self, path, *, key="value", not_found_empty=False):
-        self.paths.append(path)
-        self.keys.append(key)
-        self.not_found_empty.append(not_found_empty)
-        if self.status_code is not None:
-            if self.status_code == 404 and not_found_empty:
-                return []
-            raise FabricError("library lookup failed", status_code=self.status_code)
-        return self.response.get(key, [])
-
-
-@weaver_test()
-def test_library_reads_request_the_ga_contract():
-    client = _ReadClient(_libraries())
-    assert read_published(_env(), client=client) == _libraries()
-    assert read_staging(_env(), client=client) == _libraries()
-    assert client.paths == [
-        "workspaces/ws1/environments/env1/libraries?beta=false",
-        "workspaces/ws1/environments/env1/staging/libraries?beta=false",
-    ]
-    assert client.keys == ["libraries", "libraries"]
-    assert client.not_found_empty == [True, True]
-
-
-@weaver_test()
-def test_library_reads_include_every_page(monkeypatch):
-    first = "workspaces/ws1/environments/env1/libraries?beta=false"
-    second = "https://fabric.example/v1/next-page"
-    payloads = {
-        first: {
-            "libraries": [_external("pyyaml", "6.0.2")],
-            "continuationUri": second,
-        },
-        second: {"libraries": [_custom("company_lib-1.0-py3-none-any.whl")]},
-    }
-    client = FabricClient(token="token")
-    monkeypatch.setattr(client, "get_json", payloads.__getitem__)
-    assert read_published(_env(), client=client) == _libraries(
-        _external("pyyaml", "6.0.2"),
-        _custom("company_lib-1.0-py3-none-any.whl"),
-    )
-
-
-@weaver_test()
-def test_a_missing_later_library_page_is_not_treated_as_an_empty_list(monkeypatch):
-    first = "workspaces/ws1/environments/env1/libraries?beta=false"
-    second = "https://fabric.example/v1/next-page"
-    client = FabricClient(token="token")
-
-    def get_json(path):
-        if path == first:
-            return {
-                "libraries": [_external("pyyaml", "6.0.2")],
-                "continuationUri": second,
-            }
-        raise FabricError("next page failed", status_code=404)
-
-    monkeypatch.setattr(client, "get_json", get_json)
-    with pytest.raises(FabricError, match="next page failed"):
-        read_published(_env(), client=client)
-
-
-@weaver_test()
-def test_published_spark_compute_uses_the_ga_contract():
-    class _ComputeClient:
-        def __init__(self):
-            self.paths = []
-
-        def get_json(self, path):
-            self.paths.append(path)
-            return {"runtimeVersion": "2.0"}
-
-    client = _ComputeClient()
-    assert read_published_spark_compute(_env(), client=client) == {
-        "runtimeVersion": "2.0"
-    }
-    assert client.paths == ["workspaces/ws1/environments/env1/sparkcompute?beta=false"]
-
-
-@weaver_test()
-def test_fabric_runtime_maps_to_its_python_wheel_target():
-    assert (fabric_runtime("1.3").python_version, fabric_runtime("1.3").abi) == (
-        "3.11",
-        "cp311",
-    )
-    assert (fabric_runtime("2.0").python_version, fabric_runtime("2.0").abi) == (
-        "3.13",
-        "cp313",
-    )
-    with pytest.raises(CommandError, match="Runtime '3.0'.*No Environment changes"):
-        fabric_runtime("3.0")
-
-
-@weaver_test()
-def test_runtime_2_resolves_cp313_linux_wheels(monkeypatch, tmp_path):
-    commands = []
-
-    def run(command, **kwargs):
-        commands.append(command)
-        return types.SimpleNamespace(returncode=0, stderr="", stdout="")
-
-    monkeypatch.setattr(packages_mod.subprocess, "run", run)
-    monkeypatch.setattr(packages_mod, "describe_wheel_closure", lambda *a, **k: ())
-    resolve_wheel_closure(["pyyaml"], tmp_path, runtime=fabric_runtime("2.0"))
-    command = commands[0]
-    assert command[command.index("--python-version") + 1] == "3.13"
-    assert command[command.index("--abi") + 1] == "cp313"
-
-
-@weaver_test()
-def test_unpublished_library_lists_are_empty():
-    client = _ReadClient(status_code=404)
-    assert read_published(_env(), client=client) == _libraries()
-    assert read_staging(_env(), client=client) == _libraries()
-
-
-@pytest.mark.parametrize("status_code", [401, 403, 429, 500])
-@weaver_test()
-def test_library_failures_other_than_not_found_are_preserved(status_code):
-    with pytest.raises(FabricError, match="lookup failed"):
-        read_published(_env(), client=_ReadClient(status_code=status_code))
+    assert library_wheels(libraries) == [WHEEL, OTHER_WHEEL]
 
 
 @weaver_test()
 def test_environment_reference_owner_resolution():
-    owner, reference = resolve_environment_owner("Analytics", "Runtime")
-    assert owner == "Analytics"
-    assert (reference.workspace, reference.name) == (None, "Runtime")
-
-    owner, reference = resolve_environment_owner(None, "Platform/Runtime")
-    assert owner == "Platform"
-    assert (reference.workspace, reference.name) == ("Platform", "Runtime")
+    assert resolve_environment_owner("Analytics", "Runtime")[0] == "Analytics"
+    assert resolve_environment_owner(None, "Platform/Runtime")[0] == "Platform"
 
 
 @weaver_test()
 def test_qualified_environment_conflicting_with_workspace_is_rejected():
-    with pytest.raises(CommandError, match="conflicts"):
+    with pytest.raises(CommandError, match="conflicts with workspace"):
         resolve_environment_owner("Analytics", "Platform/Runtime")
 
 
 @weaver_test()
-def test_publish_resolves_an_existing_environment_without_creation(monkeypatch):
-    workspace = WorkspaceItem("ws1", "Analytics")
-    monkeypatch.setattr(env_mod, "find_workspace", lambda *a, **k: workspace)
-    monkeypatch.setattr(
-        env_mod,
-        "find_item",
-        lambda *a, **k: Item("env1", "Runtime", "Environment", "ws1"),
-    )
-    found_workspace, found_environment = find_existing_environment(
-        "Analytics", "Runtime", client=object()
-    )
-    assert found_workspace is workspace
-    assert found_environment.id == "env1"
+def test_an_unqualified_environment_needs_a_workspace():
+    with pytest.raises(CommandError, match="requires --workspace"):
+        resolve_environment_owner(None, "Runtime")
 
 
-@weaver_test()
-def test_missing_environment_names_the_fabric_provisioning_action(monkeypatch):
-    monkeypatch.setattr(
-        env_mod,
-        "find_workspace",
-        lambda *a, **k: WorkspaceItem("ws1", "Analytics"),
-    )
-    monkeypatch.setattr(
-        env_mod,
-        "find_item",
-        lambda *a, **k: (_ for _ in ()).throw(ItemNotFoundError("missing")),
-    )
-    with pytest.raises(CommandError, match="Create the Environment in Fabric first"):
-        find_existing_environment("Analytics", "Runtime", client=object())
+# --- the library route: the Environment is authoritative ------------------------
 
 
-class _DeleteClient:
-    def __init__(self):
+class _LibraryClient:
+    """A Fabric client recording what a library-route publication asked for."""
+
+    def __init__(self, *, staged=(), external="", state="Success"):
+        self.staged = list(staged)
+        self.external = external
+        self.state = state
+        self.imported: list[str] = []
+        self.uploaded: list[str] = []
         self.deleted: list[str] = []
+        self.published = 0
+        self.api_base_url = "https://api.invalid/v1"
+        self.token = "token"
+        self.timeout = 30
 
-    def request(self, method, path, *, expected=()):
-        assert method == "DELETE"
-        self.deleted.append(path)
+    def paged(self, path, *, key, not_found_empty=False):
+        return list(self.staged)
+
+    def get_json(self, path):
+        if path.endswith("/sparkcompute?beta=false"):
+            return {"runtimeVersion": "1.3"}
+        return {"properties": {"publishDetails": {"state": self.state}}}
+
+    def request(self, method, path, *, payload=None, expected=()):
+        if method == "GET" and path.endswith("exportExternalLibraries"):
+            return _Response(200, content=self.external.encode("utf-8"))
+        if method == "DELETE":
+            self.deleted.append(path.rsplit("/", 1)[-1])
+            return _Response(200)
+        if path.endswith("/publish?beta=false"):
+            self.published += 1
+            return _Response(202)
+        raise AssertionError(f"unexpected {method} {path}")
 
 
-@weaver_test()
-def test_stale_cleanup_uses_ga_paths_and_deletes_only_weaver_wheels():
-    client = _DeleteClient()
-    removed = delete_stale_wheels(
-        _env(),
-        "weaverstack-0.2.0-py3-none-any.whl",
-        [
-            "weaverstack-0.1.0-py3-none-any.whl",
-            "networkx-3.4.2-py3-none-any.whl",
-            "company_lib-1.0-py3-none-any.whl",
-        ],
-        client=client,
+class _Response:
+    def __init__(self, status_code, content=b"", payload=None, headers=None):
+        self.status_code = status_code
+        self.content = content
+        self.text = content.decode("utf-8", "replace")
+        self._payload = payload
+        self.headers = headers or {}
+
+    def json(self):
+        return self._payload
+
+
+def _library_publication(monkeypatch, client, *, dev=False, wheel=None):
+    """Run one library-route publication against a recording client."""
+
+    monkeypatch.setattr(
+        env_mod, "find_workspace", lambda name, client=None: _workspace()
     )
-    assert removed == ["weaverstack-0.1.0-py3-none-any.whl"]
-    assert client.deleted == [
-        "workspaces/ws1/environments/env1/staging/libraries/"
-        "weaverstack-0.1.0-py3-none-any.whl"
-    ]
-    assert all(is_weaver_wheel(path.rsplit("/", 1)[-1]) for path in client.deleted)
-
-
-@weaver_test()
-def test_wheel_upload_uses_the_ga_binary_endpoint(monkeypatch, tmp_path):
-    wheel = tmp_path / "dependency-1.0-py3-none-any.whl"
-    wheel.write_bytes(b"wheel bytes")
-    seen = {}
-
-    def send(method, url, **kwargs):
-        seen.update(method=method, url=url, **kwargs)
-        return types.SimpleNamespace(status_code=201, text="")
-
-    monkeypatch.setattr(env_mod, "send", send)
-    client = types.SimpleNamespace(
-        api_base_url="https://fabric.example/v1", token="token", timeout=60
-    )
-    env_mod.upload_wheel(_env(), wheel, client=client)
-
-    assert seen["method"] == "POST"
-    assert seen["url"].endswith(
-        "/workspaces/ws1/environments/env1/staging/libraries/"
-        "dependency-1.0-py3-none-any.whl"
-    )
-    assert seen["headers"]["Content-Type"] == "application/octet-stream"
-    assert seen["data"] == b"wheel bytes"
-
-
-@weaver_test()
-def test_ga_library_inspection_normalizes_external_and_custom_packages():
-    packages = inspect_libraries(
-        _libraries(
-            _external("Foo_Bar", "2.1"),
-            _custom("other.package-3.0-py3-none-any.whl"),
-            {"name": "helpers.jar", "libraryType": "Custom"},
-        )
-    )
-    assert [(item.name, item.version, item.source) for item in packages] == [
-        ("foo-bar", "2.1", "external"),
-        ("other-package", "3.0", "custom-wheel"),
-    ]
-
-
-@weaver_test()
-def test_compatible_published_packages_are_reused():
-    plan = plan_requirements(
-        [_wheel("pyyaml", "6.0.2", ">=6")],
-        published=_libraries(_external("PyYAML", "6.0.2")),
-        staging=_libraries(),
-    )
-    assert plan.upload == ()
-    assert plan.reused == ("pyyaml==6.0.2",)
-    assert plan.requirements[0].source == "external"
-    assert plan.needs_publish is False
-
-
-@weaver_test()
-def test_unpinned_external_package_satisfies_an_unbounded_requirement():
-    plan = plan_requirements(
-        [_wheel("pyyaml", "6.0.3")],
-        published=_libraries(_external("pyyaml", "")),
-        staging=_libraries(),
-    )
-    assert plan.upload == ()
-    assert plan.reused == ("pyyaml (unversioned)",)
-    assert plan.requirements[0].resolved_version == "unspecified"
-
-
-@weaver_test()
-def test_unpinned_external_package_cannot_prove_a_version_bound():
-    with pytest.raises(EnvironmentPackageConflict):
-        plan_requirements(
-            [_wheel("pyyaml", "6.0.3", ">=6")],
-            published=_libraries(_external("pyyaml", "")),
-            staging=_libraries(),
-        )
-
-
-@weaver_test()
-def test_exact_resolved_user_custom_wheel_is_reused():
-    plan = plan_requirements(
-        [_wheel("sqlparse", "0.5.3", ">=0.5")],
-        published=_libraries(_custom("sqlparse-0.5.3-py3-none-any.whl")),
-        staging=_libraries(),
-    )
-    assert plan.upload == ()
-    assert plan.requirements[0].resolved_version == "0.5.3"
-    assert plan.requirements[0].source == "custom-wheel"
-
-
-@weaver_test()
-def test_compatible_custom_version_without_resolved_metadata_is_rejected():
-    with pytest.raises(EnvironmentPackageConflict) as info:
-        plan_requirements(
-            [_wheel("sqlparse", "0.5.3", ">=0.5")],
-            published=_libraries(_custom("sqlparse-0.5.2-py3-none-any.whl")),
-            staging=_libraries(),
-        )
-    assert info.value.conflicts[0].required == ("==0.5.3 (resolved wheel closure)")
-
-
-@weaver_test()
-def test_pending_custom_version_without_resolved_metadata_is_rejected():
-    with pytest.raises(EnvironmentPackageConflict) as info:
-        plan_requirements(
-            [_wheel("sqlparse", "0.5.3", ">=0.5")],
-            published=_libraries(_custom("sqlparse-0.5.3-py3-none-any.whl")),
-            staging=_libraries(_custom("sqlparse-0.5.2-py3-none-any.whl")),
-        )
-    assert info.value.conflicts[0].location == "staging"
-
-
-@weaver_test()
-def test_external_requirement_reuses_fabrics_resolved_dependency_closure():
-    root = _wheel("mssql-python", "1.13.0", dependencies=("cryptography",))
-    dependency = _wheel("cryptography", "50.0.1", ">=2.5", top_level=False)
-    plan = plan_requirements(
-        [root, dependency],
-        published=_libraries(_external("mssql-python", "")),
-        staging=_libraries(_external("mssql-python", "")),
-    )
-    assert plan.upload == ()
-    assert [requirement.name for requirement in plan.requirements] == ["mssql-python"]
-
-
-@weaver_test()
-def test_missing_custom_requirement_stages_its_complete_closure():
-    root = _wheel("alpha", "1.0", dependencies=("beta",))
-    dependency = _wheel("beta", "2.0", ">=2", top_level=False)
-    plan = plan_requirements(
-        [root, dependency], published=_libraries(), staging=_libraries()
-    )
-    assert [wheel.name for wheel in plan.upload] == ["alpha", "beta"]
-
-
-@weaver_test()
-def test_existing_custom_requirement_stages_its_missing_dependencies():
-    root = _wheel("alpha", "1.0", dependencies=("beta",))
-    dependency = _wheel("beta", "2.0", ">=2", top_level=False)
-    plan = plan_requirements(
-        [root, dependency],
-        published=_libraries(_custom(root.filename)),
-        staging=_libraries(_custom(root.filename)),
-    )
-    assert [wheel.name for wheel in plan.upload] == ["beta"]
-
-
-@weaver_test()
-def test_missing_requirement_selects_an_additive_wheel():
-    wheel = _wheel("sqlparse", "0.5.3", ">=0.5")
-    plan = plan_requirements([wheel], published=_libraries(), staging=_libraries())
-    assert plan.upload == (wheel,)
-    assert plan.requirements[0].source == "weaver-injected"
-    assert plan.needs_publish is True
-
-
-@weaver_test()
-def test_compatible_pending_wheel_finishes_without_duplicate_upload():
-    plan = plan_requirements(
-        [_wheel("sqlparse", "0.5.3", ">=0.5")],
-        published=_libraries(),
-        staging=_libraries(_custom("sqlparse-0.5.3-py3-none-any.whl")),
-    )
-    assert plan.upload == ()
-    assert plan.needs_publish is True
-
-
-@pytest.mark.parametrize(
-    ("published", "staging"),
-    [
-        (_libraries(_external("sqlparse", "0.4.0")), _libraries()),
-        (_libraries(), _libraries(_custom("sqlparse-0.4.0-py3-none-any.whl"))),
-        (
-            _libraries(_external("sqlparse", "0.5.3")),
-            _libraries(_custom("sqlparse-0.4.0-py3-none-any.whl")),
-        ),
-    ],
-)
-@weaver_test()
-def test_incompatible_packages_are_rejected(published, staging):
-    with pytest.raises(EnvironmentPackageConflict):
-        plan_requirements(
-            [_wheel("sqlparse", "0.5.3", ">=0.5")],
-            published=published,
-            staging=staging,
-        )
-
-
-def _wire_publish(
-    monkeypatch,
-    *,
-    published: dict,
-    staging: dict,
-    closure: tuple[ResolvedWheel, ...],
-    wheel_name: str,
-):
-    events = {"uploads": [], "deletes": [], "publishes": 0}
     monkeypatch.setattr(
         env_mod,
-        "find_existing_environment",
-        lambda *a, **k: (WorkspaceItem("ws1", "Analytics"), _env()),
+        "find_item",
+        lambda workspace, name, item_type=None, client=None: _env(),
     )
-    monkeypatch.setattr(env_mod, "read_published", lambda *a, **k: published)
-    monkeypatch.setattr(env_mod, "read_staging", lambda *a, **k: staging)
     monkeypatch.setattr(
         env_mod,
-        "read_published_spark_compute",
-        lambda *a, **k: {"runtimeVersion": "1.3"},
-    )
-    monkeypatch.setattr(env_mod, "resolve_wheel_closure", lambda *a, **k: closure)
-    monkeypatch.setattr(
-        env_mod, "build_wheel", lambda *a, **k: Path("dist") / wheel_name
+        "import_external_libraries",
+        lambda item, text, client: client.imported.append(text),
     )
     monkeypatch.setattr(
         env_mod,
         "upload_wheel",
-        lambda _env, wheel, **k: events["uploads"].append(wheel.name),
+        lambda item, path, client: client.uploaded.append(path.name),
     )
-    monkeypatch.setattr(
-        env_mod,
-        "delete_stale_wheels",
-        lambda _env, _keep, staged, **k: events["deletes"].extend(
-            name for name in staged if is_weaver_wheel(name) and name != _keep
-        ),
+    if dev:
+        monkeypatch.setattr(env_mod, "build_wheel", lambda root: wheel)
+        monkeypatch.setattr(
+            env_mod, "runtime_requirements", lambda root: ("pyyaml", "mssql-python")
+        )
+    return env_mod.publish_environment(
+        "Analytics", "Runtime", dev=dev, client=client, root=Path(".")
     )
-
-    def publish(*args, **kwargs):
-        events["publishes"] += 1
-        return "Success"
-
-    monkeypatch.setattr(env_mod, "publish_and_wait", publish)
-    return events
 
 
 @weaver_test()
-def test_satisfied_environment_is_an_idempotent_noop(monkeypatch):
-    current = "weaverstack-0.2.0-py3-none-any.whl"
-    closure = (_wheel("pyyaml", "6.0.2", ">=6"),)
-    published = _libraries(_external("pyyaml", "6.0.2"), _custom(current))
-    staging = _libraries(
-        _external("pyyaml", "6.0.2"),
-        _custom(current),
-        _custom("company_lib-1.0-py3-none-any.whl"),
+def test_released_adds_one_weaver_requirement_and_keeps_the_rest(monkeypatch):
+    """Nothing but Weaver's own libraries changes, and the rest is untouched."""
+
+    client = _LibraryClient(
+        staged=[_custom(OTHER_WHEEL), _external("fuzzywuzzy", "0.18.0")],
+        external="dependencies:\n  - pip:\n      - fuzzywuzzy==0.18.0\n",
     )
-    events = _wire_publish(
-        monkeypatch,
-        published=published,
-        staging=staging,
-        closure=closure,
-        wheel_name=current,
+
+    result = _library_publication(monkeypatch, client)
+
+    assert "weaverstack" in client.imported[0]
+    assert "fuzzywuzzy==0.18.0" in client.imported[0]
+    assert client.uploaded == []
+    assert client.deleted == []
+    assert result.mode == "released"
+    assert result.weaver_requirement == "weaverstack"
+    assert result.published
+
+
+@weaver_test()
+def test_released_removes_a_weaver_custom_wheel(monkeypatch):
+    """Switching back from --dev must not leave the wheel taking precedence."""
+
+    client = _LibraryClient(staged=[_custom(WHEEL), _custom(OTHER_WHEEL)])
+
+    result = _library_publication(monkeypatch, client)
+
+    assert client.deleted == [WHEEL]
+    assert OTHER_WHEEL not in client.deleted
+    assert result.removed_wheels == (WHEEL,)
+
+
+@weaver_test()
+def test_development_uploads_the_checkout_wheel_and_names_its_requirements(
+    monkeypatch, tmp_path
+):
+    """A Fabric custom wheel installs no dependencies, so Weaver's are listed."""
+
+    client = _LibraryClient(
+        external="dependencies:\n  - pip:\n      - weaverstack==0.4.0\n"
     )
-    result = env_mod.publish_environment("Analytics", "Runtime", client=object())
-    assert result.publish_status == "AlreadyInstalled"
+    wheel = _built_wheel(tmp_path)
+
+    result = _library_publication(monkeypatch, client, dev=True, wheel=wheel)
+
+    imported = client.imported[0]
+    assert "weaverstack==0.4.0" not in imported
+    assert "pyyaml" in imported and "mssql-python" in imported
+    assert client.uploaded == [WHEEL]
+    assert result.mode == "dev"
+    assert result.wheel_filename == WHEEL
+    assert result.weaver_requirement is None
+
+
+@weaver_test()
+def test_development_replaces_a_stale_weaver_wheel(monkeypatch, tmp_path):
+    stale = "weaverstack-0.1.2.dev1-py3-none-any.whl"
+    client = _LibraryClient(staged=[_custom(stale), _custom(OTHER_WHEEL)])
+    wheel = _built_wheel(tmp_path)
+
+    result = _library_publication(monkeypatch, client, dev=True, wheel=wheel)
+
+    assert client.uploaded == [WHEEL]
+    assert client.deleted == [stale]
+    assert result.removed_wheels == (stale,)
+
+
+@weaver_test()
+def test_an_environment_already_carrying_weaver_is_a_noop(monkeypatch, tmp_path):
+    """The publish is minutes, so an unchanged Environment does not pay for one."""
+
+    wheel = _built_wheel(tmp_path)
+    client = _LibraryClient(
+        staged=[_custom(WHEEL)],
+        external="dependencies:\n  - pip:\n      - pyyaml\n      - mssql-python\n",
+    )
+
+    result = _library_publication(monkeypatch, client, dev=True, wheel=wheel)
+
+    assert client.imported == []
+    assert client.uploaded == []
+    assert client.published == 0
+    assert result.action == "unchanged"
     assert result.published is False
-    assert result.wheel_changed is False
-    assert events == {"uploads": [], "deletes": [], "publishes": 0}
+    assert result.publish_status == "AlreadyInstalled"
 
 
 @weaver_test()
-def test_missing_dependency_and_new_weaver_are_staged_then_published(monkeypatch):
-    old = "weaverstack-0.1.0-py3-none-any.whl"
-    current = "weaverstack-0.2.0-py3-none-any.whl"
-    dependency = _wheel("sqlparse", "0.5.3", ">=0.5")
-    events = _wire_publish(
-        monkeypatch,
-        published=_libraries(_custom(old), _custom("company_lib-1.0-py3-none-any.whl")),
-        staging=_libraries(_custom(old), _custom("company_lib-1.0-py3-none-any.whl")),
-        closure=(dependency,),
-        wheel_name=current,
-    )
-    result = env_mod.publish_environment("Analytics", "Runtime", client=object())
-    assert events["uploads"] == [dependency.filename, current]
-    assert events["deletes"] == [old]
-    assert events["publishes"] == 1
-    assert result.staged_dependency_wheels == (dependency.filename,)
-    assert result.published is True
+def test_a_missing_environment_says_how_to_get_one(monkeypatch):
+    def missing(workspace, name, item_type=None, client=None):
+        raise ItemNotFoundError(name)
 
-
-@weaver_test()
-def test_package_conflict_fails_before_build_or_mutation(monkeypatch):
-    dependency = _wheel("sqlparse", "0.5.3", ">=0.5")
-    events = _wire_publish(
-        monkeypatch,
-        published=_libraries(_external("sqlparse", "0.4.0")),
-        staging=_libraries(),
-        closure=(dependency,),
-        wheel_name="weaverstack-0.2.0-py3-none-any.whl",
-    )
     monkeypatch.setattr(
-        env_mod,
-        "build_wheel",
-        lambda *a, **k: pytest.fail("built after a detectable conflict"),
+        env_mod, "find_workspace", lambda name, client=None: _workspace()
     )
-    with pytest.raises(CommandError, match="No Environment changes were staged"):
-        env_mod.publish_environment("Analytics", "Runtime", client=object())
-    assert events == {"uploads": [], "deletes": [], "publishes": 0}
+    monkeypatch.setattr(env_mod, "find_item", missing)
+
+    with pytest.raises(CommandError, match="--path, which creates it"):
+        env_mod.publish_environment("Analytics", "Runtime", client=_LibraryClient())
+
+
+# --- the definition route: the local directory is authoritative -----------------
+
+
+class _DefinitionClient:
+    """A Fabric client recording what a definition-route publication sent."""
+
+    def __init__(self, *, current=None, state="Success", missing=False):
+        self.current = current or {}
+        self.state = state
+        self.missing = missing
+        self.sent: list[dict] = []
+        self.created: list[dict] = []
+        self.published = 0
+        self.api_base_url = "https://api.invalid/v1"
+        self.token = "token"
+        self.timeout = 30
+
+    def get_json(self, path):
+        return {"properties": {"publishDetails": {"state": self.state}}}
+
+    def request(self, method, path, *, payload=None, expected=()):
+        if path.endswith("/getDefinition"):
+            return _Response(
+                200,
+                payload={
+                    "definition": {
+                        "parts": [
+                            {
+                                "path": name,
+                                "payload": base64.b64encode(content).decode("ascii"),
+                                "payloadType": "InlineBase64",
+                            }
+                            for name, content in self.current.items()
+                        ]
+                    }
+                },
+            )
+        if "updateDefinition" in path:
+            self.sent.append(payload)
+            return _Response(200)
+        if path.endswith("/environments"):
+            self.created.append(payload)
+            return _Response(201)
+        if path.endswith("/publish?beta=false"):
+            self.published += 1
+            return _Response(202)
+        raise AssertionError(f"unexpected {method} {path}")
+
+    def wait_for_operation(self, response, **kwargs):
+        return {}
+
+
+def _local(tmp_path: Path, **parts) -> Path:
+    root = tmp_path / "Runtime.Environment"
+    root.mkdir(parents=True, exist_ok=True)
+    for relative, content in parts.items():
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    return root
+
+
+def _sent_parts(client) -> dict:
+    payload = client.sent[-1] if client.sent else client.created[-1]
+    return {
+        part["path"]: base64.b64decode(part["payload"])
+        for part in payload["definition"]["parts"]
+    }
+
+
+def _definition_publication(monkeypatch, client, path, *, dev=False, wheel=None):
+    monkeypatch.setattr(
+        env_mod, "find_workspace", lambda name, client=None: _workspace()
+    )
+    if client.missing:
+
+        def missing(workspace, name, item_type=None, client=None):
+            if client is None or not getattr(missing, "created", False):
+                missing.created = True
+                raise ItemNotFoundError(name)
+            return _env()
+
+        monkeypatch.setattr(env_mod, "find_item", missing)
+    else:
+        monkeypatch.setattr(
+            env_mod,
+            "find_item",
+            lambda workspace, name, item_type=None, client=None: _env(),
+        )
+    if dev:
+        monkeypatch.setattr(env_mod, "build_wheel", lambda root: wheel)
+        monkeypatch.setattr(env_mod, "runtime_requirements", lambda root: ("pyyaml",))
+    return env_mod.publish_environment(
+        "Analytics", path=path, dev=dev, client=client, root=Path(".")
+    )
 
 
 @weaver_test()
-def test_unknown_published_runtime_fails_before_library_reads_or_mutation(
-    monkeypatch,
+def test_the_local_definition_is_sent_whole_with_weaver_overlaid(monkeypatch, tmp_path):
+    """Everything the user authored survives; Weaver adds only its own."""
+
+    path = _local(
+        tmp_path,
+        **{
+            PLATFORM: PLATFORM_JSON,
+            SPARK_COMPUTE: SPARK_YML,
+            f"{CUSTOM_LIBRARIES}{OTHER_WHEEL}": b"user bytes",
+        },
+    )
+    client = _DefinitionClient(current={PLATFORM: b"stale"})
+
+    result = _definition_publication(monkeypatch, client, path)
+
+    parts = _sent_parts(client)
+    assert parts[PLATFORM] == PLATFORM_JSON
+    assert parts[SPARK_COMPUTE] == SPARK_YML
+    assert parts[f"{CUSTOM_LIBRARIES}{OTHER_WHEEL}"] == b"user bytes"
+    assert b"weaverstack" in parts[EXTERNAL_LIBRARIES]
+    assert result.action == "updated"
+    assert result.source_path == str(path)
+
+
+@weaver_test()
+def test_the_local_directory_is_never_written_to(monkeypatch, tmp_path):
+    """A generated wheel must not dirty the checkout it was built from."""
+
+    path = _local(tmp_path, **{PLATFORM: PLATFORM_JSON})
+    before = {
+        entry.relative_to(path).as_posix(): entry.read_bytes()
+        for entry in path.rglob("*")
+        if entry.is_file()
+    }
+    wheel = _built_wheel(tmp_path)
+
+    _definition_publication(
+        monkeypatch, _DefinitionClient(), path, dev=True, wheel=wheel
+    )
+
+    after = {
+        entry.relative_to(path).as_posix(): entry.read_bytes()
+        for entry in path.rglob("*")
+        if entry.is_file()
+    }
+    assert after == before
+
+
+@weaver_test()
+def test_development_overlays_the_wheel_and_drops_the_pypi_requirement(
+    monkeypatch, tmp_path
 ):
-    monkeypatch.setattr(
-        env_mod,
-        "find_existing_environment",
-        lambda *a, **k: (WorkspaceItem("ws1", "Analytics"), _env()),
+    path = _local(
+        tmp_path,
+        **{
+            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack==0.4.0\n",
+            f"{CUSTOM_LIBRARIES}weaverstack-0.0.1-py3-none-any.whl": b"stale",
+        },
     )
-    monkeypatch.setattr(
-        env_mod,
-        "read_published_spark_compute",
-        lambda *a, **k: {"runtimeVersion": "9.0"},
-    )
-    monkeypatch.setattr(
-        env_mod,
-        "read_published",
-        lambda *a, **k: pytest.fail("read libraries after unknown runtime"),
-    )
-    monkeypatch.setattr(
-        env_mod,
-        "upload_wheel",
-        lambda *a, **k: pytest.fail("staged after unknown runtime"),
-    )
-    with pytest.raises(CommandError, match="Runtime '9.0'.*No Environment changes"):
-        env_mod.publish_environment("Analytics", "Runtime", client=object())
+    wheel = _built_wheel(tmp_path)
+    client = _DefinitionClient()
+
+    result = _definition_publication(monkeypatch, client, path, dev=True, wheel=wheel)
+
+    parts = _sent_parts(client)
+    assert f"{CUSTOM_LIBRARIES}{WHEEL}" in parts
+    assert "weaverstack-0.0.1-py3-none-any.whl" not in str(parts)
+    assert b"weaverstack==0.4.0" not in parts[EXTERNAL_LIBRARIES]
+    assert b"pyyaml" in parts[EXTERNAL_LIBRARIES]
+    assert result.wheel_filename == WHEEL
+    assert result.weaver_requirement is None
 
 
 @weaver_test()
-def test_fabric_client_preserves_failure_status(monkeypatch):
-    response = types.SimpleNamespace(
-        status_code=429, text="slow down", content=b"", headers={}
-    )
-    attempts: list = []
-    monkeypatch.setattr(
-        "requests.request", lambda *args, **kwargs: attempts.append(1) or response
-    )
-    monkeypatch.setattr("weaver.fabric.client.time.sleep", lambda _seconds: None)
-    with pytest.raises(FabricError) as info:
-        FabricClient(token="token").get_json("workspaces")
-    assert info.value.status_code == 429
-    assert len(attempts) == 4
+def test_a_missing_environment_is_created_from_the_definition(monkeypatch, tmp_path):
+    path = _local(tmp_path, **{PLATFORM: PLATFORM_JSON})
+    client = _DefinitionClient(missing=True)
+
+    result = _definition_publication(monkeypatch, client, path)
+
+    assert client.created, "a missing Environment is created with its definition"
+    assert client.created[-1]["displayName"] == "Runtime"
+    assert result.action == "created"
+    assert result.published
 
 
 @weaver_test()
-def test_a_long_publish_reports_the_last_state(monkeypatch):
-    monkeypatch.setattr(env_mod, "publish_state", lambda *a, **k: "Running")
-    monkeypatch.setattr(env_mod.time, "sleep", lambda _seconds: None)
+def test_an_identical_definition_does_not_republish(monkeypatch, tmp_path):
+    path = _local(tmp_path, **{PLATFORM: PLATFORM_JSON})
+    overlaid = b"dependencies:\n  - pip:\n      - weaverstack\n"
+    client = _DefinitionClient(
+        current={PLATFORM: PLATFORM_JSON, EXTERNAL_LIBRARIES: overlaid}
+    )
 
-    class _Client:
-        def __init__(self):
-            self.paths = []
+    result = _definition_publication(monkeypatch, client, path)
 
-        def request(self, *args, **kwargs):
-            self.paths.append(args[1])
-            return None
+    assert client.sent == []
+    assert client.published == 0
+    assert result.action == "unchanged"
+    assert result.published is False
 
-    client = _Client()
-    with pytest.raises(FabricError, match="'Running'"):
-        env_mod.publish_and_wait(_env(), client=client, timeout=0.01, poll_interval=0)
-    assert client.paths == [
-        "workspaces/ws1/environments/env1/staging/publish?beta=false"
-    ]
+
+@weaver_test()
+def test_a_rebuilt_wheel_with_the_same_version_is_not_a_change(monkeypatch, tmp_path):
+    """The version is content addressed; the zip around it is not reproducible.
+
+    Comparing the wheel's bytes would republish on every run of an unchanged
+    checkout, which costs minutes and changes nothing.
+    """
+
+    path = _local(tmp_path)
+    wheel = _built_wheel(tmp_path)
+    client = _DefinitionClient(
+        current={
+            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - pyyaml\n",
+            f"{CUSTOM_LIBRARIES}{WHEEL}": b"different compression, same version",
+        }
+    )
+
+    result = _definition_publication(monkeypatch, client, path, dev=True, wheel=wheel)
+
+    assert client.sent == []
+    assert result.action == "unchanged"
+
+
+@weaver_test()
+def test_a_failed_publish_is_an_error(monkeypatch, tmp_path):
+    path = _local(tmp_path, **{PLATFORM: PLATFORM_JSON})
+    client = _DefinitionClient(state="Failed")
+
+    with pytest.raises(FabricError, match="finished with status"):
+        _definition_publication(monkeypatch, client, path)
+
+
+@weaver_test()
+def test_publishing_without_a_name_or_a_path_says_so():
+    with pytest.raises(CommandError, match="or pass --path"):
+        env_mod.publish_environment("Analytics", None, client=_LibraryClient())

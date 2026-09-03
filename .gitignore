@@ -239,3 +239,7 @@ spark-warehouse/
 
 # Derby
 derby.log
+
+# A development publication builds a wheel and overlays it in memory. One that
+# reached a checkout was staged from an exported Environment.
+*.Environment/Libraries/CustomLibraries/weaverstack-*.whl

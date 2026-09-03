@@ -590,20 +590,29 @@ environment publish`. Commands that run Weaver-authored Python inside Fabric,
 including `load` and `test`, need this reference. A build and bundle installation
 execute frozen SQL and bundle payloads, so neither needs it.
 
-Environment publication installs Weaver into an existing Fabric Environment.
-It reads every page of the published and staged package sets, reuses compatible
-packages, adds absent Weaver requirements as custom wheels, and reports
-incompatible versions before staging. Wheel resolution targets the Python and
-ABI of the Environment's published Fabric runtime. Runtime 1.3 maps to
-CPython 3.11 and `cp311`; Runtime 2.0 maps to CPython 3.13 and `cp313`. An
-unrecognised runtime stops publication before mutation.
+Environment publication has two independent switches. `--path` selects where the
+definition comes from, and `--dev` selects how Weaver is supplied. One overlay
+reaches Fabric through two transports.
 
-An External library carries the dependency closure Fabric published for it. A
-missing requirement receives the binary dependency closure Weaver resolves. A
-custom wheel is reused only when its version is the resolved version whose
-dependency metadata Weaver read; otherwise publication stops before mutation.
-Weaver owns `weaverstack-*.whl`. The Environment definition and every other
-custom library remain user-owned.
+Without `--path` the Environment in the workspace is authoritative, and the
+staging library APIs carry the change: the staged `environment.yml` is read,
+Weaver's own entry is set in it, and it is imported back. Spark compute, every
+other custom library and every other external entry are untouched, including
+staged edits that have not been published. The Environment must already exist.
+
+With `--path` the local `<Name>.Environment` directory is authoritative, and the
+item definition APIs carry it. The directory names the Environment, the whole
+definition is sent, and a missing Environment is created from it. The local
+directory is never written to, so a development wheel does not reach a checkout.
+
+Weaver owns two things and nothing else: the `weaverstack` requirement in the
+external library list, and `weaverstack-*.whl` among the custom libraries.
+Released publication holds one PyPI requirement and no Weaver wheel, keeping an
+authored specifier. `--dev` holds the checkout's wheel and no PyPI requirement,
+and names Weaver's Fabric requirements, because a Fabric custom wheel installs
+no dependencies of its own. Fabric resolves the external libraries on publish,
+so the Environment definition is the package contract and Weaver keeps no second
+resolver. Every other library, setting and platform value remains user-owned.
 
 ---
 
