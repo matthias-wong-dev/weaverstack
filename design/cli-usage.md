@@ -433,11 +433,11 @@ publishes.
 A publication that would change nothing does not republish. A Weaver wheel
 compares by filename, because the version is content addressed and the zip
 around it is not reproducible; every other custom library compares by its bytes.
-The three text parts compare by what they say, because Fabric returns them the
-way it stores them: a checkout written on Windows sends `
-` and reads back
-`
-`, and `runtime_version: '1.3'` reads back unquoted.
+The three text parts compare as parsed documents, because Fabric returns them
+with the line endings it stores: a checkout written on Windows sends CRLF and
+reads back LF. Scalar types are part of that comparison, so `1` and `"1"` are
+different definitions. `runtime_version` is the one field compared as text,
+because Fabric returns `'1.3'` unquoted.
 
 There is no separate initialise lifecycle. The package-owned catalogue is built
 by the ordinary build: `Warehouse/_weaver` is composed into every parsed
