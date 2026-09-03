@@ -232,7 +232,9 @@ def _execute(entries, parsed_commands, *, session) -> int:
         try:
             status = parsed.handler(parsed)
         except WeaverError as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            from .main import _render_error
+
+            _render_error(exc)
             return _stopped(number, entry)
         if status:
             return _stopped(number, entry)

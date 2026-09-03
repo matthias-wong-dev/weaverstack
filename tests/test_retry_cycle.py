@@ -461,3 +461,36 @@ def test_one_keypress_is_read_as_itself(sent, expected):
         if "GOT:" in line
     ]
     assert answer == [f"GOT:{expected}"]
+
+
+# --- the boundary that makes a build retryable --------------------------------
+
+
+@weaver_test()
+def test_a_repository_the_parse_rejects_is_offered_another_attempt(monkeypatch, capsys):
+    """What the loop is for, joined to the command that feeds it.
+
+    The mechanism is proved above with synthetic attempts. This is the one case
+    that carries a real build into it: a repository the parse rejected becomes a
+    failed attempt, and the prompt reads one key before the command ends.
+    """
+
+    import weaver
+    from weaver.errors import DiscoveryError
+    from weaver.workspaces import Workspace
+
+    monkeypatch.setattr(
+        _cli(), "_resolve_workspace", lambda args: Workspace(workspace="Analytics")
+    )
+    terminal = _Terminal(monkeypatch, keys=[ESC])
+
+    def refuse(*arguments, **keywords):
+        raise DiscoveryError("Lakehouse/Sales/Tables/Sales__Order.py: refused")
+
+    monkeypatch.setattr(weaver, "build", refuse)
+    parsed = _cli().build_parser().parse_args(["build", "."])
+    parsed.session = _Session()
+
+    assert _cli().handle_build(parsed) == 1
+    assert terminal.presses == 1
+    assert "Sales__Order.py: refused" in capsys.readouterr().err

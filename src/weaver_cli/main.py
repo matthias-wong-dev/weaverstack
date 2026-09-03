@@ -7,7 +7,14 @@ import sys
 import time
 
 import weaver
-from weaver.errors import CommandError, WeaverError
+from weaver.errors import (
+    CommandError,
+    DiscoveryError,
+    GraphError,
+    IdentityError,
+    MetadataError,
+    WeaverError,
+)
 
 #: The capacity verbs, kept here so building the parser imports nothing from
 #: `weaver.fabric`, because `weaver --help` should not pay for a transport.
@@ -971,6 +978,12 @@ def handle_compose(args: argparse.Namespace) -> int:
 #: Retry controls for an interactive task failure.
 RETRY_PROMPT = "Enter to retry, Esc to exit."
 
+#: The errors a repository edit clears. Each attempt re-reads the source tree,
+#: so these become a failed attempt the retry prompt offers to run again.
+#: Workspace configuration, request errors, transports and installation stay
+#: raised: another attempt reads the same argument and reaches the same host.
+SOURCE_ERRORS = (DiscoveryError, GraphError, IdentityError, MetadataError)
+
 ESC = "\x1b"
 INTERRUPT = "\x03"
 END_OF_FILE = "\x04"
@@ -1144,7 +1157,7 @@ def _load_once(args: argparse.Namespace) -> int:
         # the message is the other, so both are shown before the non-zero exit.
         if getattr(exc, "report", None) is not None:
             _print_load(exc.report)
-        print(f"error: {exc}", file=sys.stderr)
+        _render_error(exc)
         if getattr(exc, "workflow_id", None):
             print(f"  Workflow: {exc.workflow_id}", file=sys.stderr)
         return 1
@@ -1241,7 +1254,7 @@ def _test_once(args: argparse.Namespace) -> int:
             session=_session(args),
         )
     except ValidationError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _render_error(exc)
         return 1
 
     if args.json:
@@ -1531,15 +1544,21 @@ def _build_once(args: argparse.Namespace) -> int:
     import json
 
     workspace = _resolve_workspace(args)
-    with _running_session(args, workspace) as opened:
-        result = weaver.build(
-            args.repository,
-            items=args.items,
-            bundle_only=args.bundle_only,
-            bundle_path=args.bundle_path,
-            session=opened,
-            **_command_context(workspace),
-        )
+    try:
+        with _running_session(args, workspace) as opened:
+            result = weaver.build(
+                args.repository,
+                items=args.items,
+                bundle_only=args.bundle_only,
+                bundle_path=args.bundle_path,
+                session=opened,
+                **_command_context(workspace),
+            )
+    except SOURCE_ERRORS as exc:
+        # A repository the parse rejected. Reported as a failed attempt so the
+        # retry prompt offers the next one, which re-reads the edited tree.
+        _render_error(exc)
+        return 1
     payload = result.to_mapping()
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -1566,10 +1585,16 @@ def _check_once(args: argparse.Namespace) -> int:
     try:
         check(args.repository)
     except WeaverError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _render_error(exc)
         return 1
     print("Repository valid.")
     return 0
+
+
+def _render_error(exc: BaseException) -> None:
+    """Print one failure, in the spelling every command uses."""
+
+    print(f"error: {exc}", file=sys.stderr)
 
 
 def _indented(text: str, prefix: str = "  ") -> str:
@@ -1598,7 +1623,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(handler(args))
     except WeaverError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _render_error(exc)
         return 1
 
 
