@@ -394,18 +394,50 @@ The qualified form names the owning workspace directly:
 weaver fabric environment publish Platform/Runtime
 ```
 
-The Environment must already exist. Publication reuses compatible published
-packages, stages missing Weaver requirements as custom wheels, and reports
-incompatible versions before mutation. It does not change the Environment
-definition or unrelated custom libraries. Weaver does not create Fabric
-Environments.
+Two switches, independent of each other. `--path` says where the definition
+comes from, `--dev` says how Weaver itself is supplied.
 
-Fabric resolves the dependency closure for External libraries. Weaver reads the
-Environment's published runtime and supplies a matching Linux binary wheel
-closure when a requirement is absent. Runtime 1.3 uses CPython 3.11 wheels and
-Runtime 2.0 uses CPython 3.13 wheels. Unknown runtimes stop before staging.
-A custom wheel is reused only when it matches the version Weaver resolved, so
-its dependency metadata describes the wheel that remains installed.
+```bash
+weaver fabric environment publish Runtime --workspace Analytics
+weaver fabric environment publish Runtime --workspace Analytics --dev
+weaver fabric environment publish --path deploy/Runtime.Environment --workspace Analytics
+weaver fabric environment publish --path deploy/Runtime.Environment --workspace Analytics --dev
+```
+
+Without `--path`, the Environment in the workspace is authoritative and must
+already exist. Weaver changes its own libraries and nothing else: Spark compute,
+every other custom library and every other entry in the external library list
+are left as they are, including staged edits that have not been published.
+
+With `--path`, a local `<Name>.Environment` directory is authoritative. The
+directory names the Environment, so `Sales.Environment` publishes `Sales`
+whatever workspace configuration names, and the definition is sent whole. A
+missing Environment is created from it. The directory is never written to.
+`Environment/` is a repository convention; the path may point anywhere.
+
+Released publication leaves exactly one effective PyPI `weaverstack`
+requirement in the external library list and removes any Weaver custom wheel. An
+authored specifier is kept, so `weaverstack==0.4.0` stays pinned; a second entry
+for the same distribution goes, because which one installs would otherwise be
+pip's choice.
+
+`--dev` builds a wheel from the checkout, removes the PyPI requirement, and names
+Weaver's own Fabric requirements, because a Fabric custom wheel installs no
+dependencies of its own. A requirement the Environment already carries keeps its
+authored specifier where that specifier can satisfy Weaver's. One that cannot,
+such as `sqlparse==0.5.3` against a Weaver requirement of `sqlparse>=0.6.0`, is
+reported before anything is staged. It is a comparison of two specifiers, so
+Weaver resolves nothing; Fabric resolves the external libraries when it
+publishes.
+
+A publication that would change nothing does not republish. A Weaver wheel
+compares by filename, because the version is content addressed and the zip
+around it is not reproducible; every other custom library compares by its bytes.
+The three text parts compare as parsed documents, because Fabric returns them
+with the line endings it stores: a checkout written on Windows sends CRLF and
+reads back LF. Scalar types are part of that comparison, so `1` and `"1"` are
+different definitions. `runtime_version` is the one field compared as text,
+because Fabric returns `'1.3'` unquoted.
 
 There is no separate initialise lifecycle. The package-owned catalogue is built
 by the ordinary build: `Warehouse/_weaver` is composed into every parsed

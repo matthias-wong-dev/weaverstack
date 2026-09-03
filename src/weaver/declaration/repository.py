@@ -51,7 +51,7 @@ from .programmable import (
     read_programmable,
 )
 from .references import validate_repository_metadata
-from .schemas import SchemaSes, read_schema_document
+from .schemas import SchemaSes, inferred_schema, read_schema_document
 from .shortcuts import (
     LAKEHOUSE_FILE,
     SHORTCUT_FILES,
@@ -737,6 +737,15 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     ) + _read_item_declarations(
         root, store, warehouse_shortcut_files, read=read_warehouse_shortcuts
     )
+    # Every schema an item owns, whether a file declared it or an identity
+    # implied it. Completed here so the shortcut checks below, composition, the
+    # item model and the catalogue all read one set.
+    _complete_owned_schemas(
+        schema_documents,
+        schemas_by_item,
+        source_documents=source_documents,
+        shortcuts=shortcuts,
+    )
     validate_destinations(
         shortcuts,
         documents=source_documents,
@@ -842,21 +851,17 @@ def compose_repository(
 
     items: list[WeaverItem] = []
     for item_id in merged.items:
+        # Every schema this item owns: the ones a file declared and the ones its
+        # identities implied, completed while the repository was read.
         schemas = tuple(
             sorted((each for each in merged.schemas if each.item == item_id), key=str)
         )
-        declared = {each.schema for each in schemas}
         documents: list[WeaverDocumentId] = []
         validations: list[WeaverDocumentId] = []
         for identity in sorted(
             (each for each in source_documents if each.item == item_id), key=str
         ):
             source = source_documents[identity]
-            if identity.object_id.schema not in declared:
-                raise DiscoveryError(
-                    f"{source.relative_path}: schema "
-                    f"{identity.object_id.schema!r} is not declared by item {item_id}"
-                )
             (validations if source.is_validation else documents).append(identity)
         programmables = tuple(
             merged.programmables[identity]
@@ -1081,9 +1086,12 @@ def _item_signature(
     for identity in item.declarations:
         source = source_documents[identity]
         entries.append((source.relative_path, source.source_hash))
+    # An explicit schema file is item source. An inferred schema is not a file,
+    # and the identity that implied it already signs itself above.
     for identity in item.schemas:
         schema = schema_documents[identity]
-        entries.append((schema.relative_path, schema.source_hash))
+        if schema.relative_path is not None:
+            entries.append((schema.relative_path, schema.source_hash))
     # An authored programmable is item source. Weaver's own fragments and the
     # generated procedures sign themselves, as every runtime artefact does.
     for programmable in item.programmables:
@@ -1116,13 +1124,17 @@ def _insert_exact_case(
     rendered = str(identity)
     for existing, existing_value in destination.items():
         if str(existing) == rendered:
-            prior = getattr(existing_value, "relative_path", str(existing))
+            prior = getattr(existing_value, "relative_path", None) or str(existing)
             raise DiscoveryError(
                 f"{rendered} is declared twice: {prior} and {relative}"
             )
         if str(existing).casefold() == rendered.casefold():
+            # Both files, so either spelling can be the one to change.
+            prior = getattr(existing_value, "relative_path", None)
+            where = f" ({prior} and {relative})" if prior else f" ({relative})"
             raise DiscoveryError(
-                f"{rendered} and {existing} differ only by case and cannot coexist"
+                f"{rendered} and {existing} differ only by case and cannot "
+                f"coexist{where}"
             )
     destination[identity] = value
 
@@ -1232,3 +1244,61 @@ def importable_module_name(relative_path: str) -> str | None:
     if stem.endswith("/__init__"):
         stem = stem[: -len("/__init__")]
     return stem.replace("/", ".")
+
+
+def _complete_owned_schemas(
+    schema_documents: dict[WeaverSchemaId, SchemaSes],
+    schemas_by_item: dict[WeaverItemId, list[WeaverSchemaId]],
+    *,
+    source_documents: Mapping[WeaverDocumentId, SourceDocument],
+    shortcuts: Iterable[ShortcutDeclaration],
+) -> None:
+    """Add the schemas an item's managed identities imply.
+
+    An authored table, view, Folder, Test or Assumption owns its schema, and so
+    does a shortcut destination the item materialises. A schema shortcut is the
+    exception: it presents the source item's namespace, so the item owns nothing
+    there, and `validate_destinations` refuses an item that claims both.
+
+    An explicit declaration is kept as it stands. Case is exact, so an object in
+    ``sales`` beside a declared ``Sales`` is a collision. Each implied schema
+    carries the path of the declaration that implied it, so that collision names
+    a file to open.
+    """
+
+    # Schema name and the authored file that established it, per item.
+    implied: dict[WeaverItemId, list[tuple[str, str]]] = {
+        item: [] for item in schemas_by_item
+    }
+    for identity in sorted(source_documents, key=str):
+        source = source_documents[identity]
+        implied.setdefault(identity.item, []).append(
+            (identity.object_id.schema, source.relative_path)
+        )
+    for declaration in shortcuts:
+        if declaration.is_schema:
+            continue
+        destination = declaration.destination
+        if isinstance(destination, WeaverDocumentId):
+            implied.setdefault(destination.item, []).append(
+                (destination.object_id.schema, declaration.relative_path)
+            )
+
+    for item, names in implied.items():
+        declared = {
+            identity.schema for identity in schemas_by_item.setdefault(item, [])
+        }
+        seen: list[str] = []
+        for name, relative in names:
+            if name in declared or name in seen:
+                continue
+            seen.append(name)
+            identity = WeaverSchemaId(item, name)
+            _insert_exact_case(
+                schema_documents,
+                identity,
+                inferred_schema(name),
+                relative or f"{item}",
+                what="schema",
+            )
+            schemas_by_item[item].append(identity)

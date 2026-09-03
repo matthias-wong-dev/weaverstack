@@ -6,6 +6,8 @@ explicit destination so a session can address multiple Lakehouses.
 
 from __future__ import annotations
 
+import io
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -233,6 +235,31 @@ _MOUNT_POINT = "/weaver/{item}"
 MOUNT_OPTIONS = {"fileCacheTimeout": 0}
 
 
+@contextmanager
+def _quiet_mount():
+    """Swallow what ``fs.mount`` writes, and nothing else.
+
+    The mount writes a sentinel-wrapped JSON table to ``sys.stdout``, which a
+    Fabric notebook renders as a table of the mount it just made. Weaver mounts
+    for the side effect, so ``redirect_stdout`` is enough and covers a Livy
+    statement, where ``get_ipython()`` is None. IPython's capture also takes the
+    rich display channel, for a notebook that publishes there instead.
+
+    ``stderr`` stays open: a mount that failed for a real reason reports there,
+    and so does :meth:`weaver.sessions.base.Session.warn`.
+    """
+
+    try:
+        from IPython.utils.capture import capture_output
+    except ImportError:
+        with redirect_stdout(io.StringIO()):
+            yield
+        return
+
+    with capture_output(stdout=True, stderr=False, display=True):
+        yield
+
+
 def _mounted(name: str, spark_root: str) -> str:
     """Mount this Lakehouse's OneLake root, or reuse the mount already made.
 
@@ -260,7 +287,8 @@ def _mounted(name: str, spark_root: str) -> str:
 
     point = _MOUNT_POINT.format(item=_item_of(spark_root))
     try:
-        utils.fs.mount(spark_root, point, MOUNT_OPTIONS)
+        with _quiet_mount():
+            utils.fs.mount(spark_root, point, MOUNT_OPTIONS)
     except Exception:
         # Already mounted, by us in a path that did not reach the cache or by the
         # host itself. Mounting twice is an error, so the useful move is to ask

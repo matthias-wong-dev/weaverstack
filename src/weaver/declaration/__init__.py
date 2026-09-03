@@ -70,9 +70,8 @@ from .references import (
 )
 from .repository import parse_item_repository
 from .schemas import (
-    SCHEMAS_DIRECTORY,
     SchemaSes,
-    is_schema_file,
+    inferred_schema,
     parse_schema_document,
     read_schema_document,
 )
@@ -106,8 +105,7 @@ __all__ = [
     "resolve_item_dependencies",
     "project_bound_documents",
     "SchemaSes",
-    "SCHEMAS_DIRECTORY",
-    "is_schema_file",
+    "inferred_schema",
     "parse_schema_document",
     "read_schema_document",
     "SourceDocument",

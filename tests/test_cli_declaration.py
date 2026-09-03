@@ -179,3 +179,84 @@ def test_the_retired_bind_grammar_says_what_replaced_it():
         handle_build(parsed)
 
     assert "--item Lakehouse/Landing=Lakehouse/Landing_Dev" in str(raised.value)
+
+
+# --- what a build failure is ---------------------------------------------------
+
+
+class _BorrowedSession:
+    """A Session the command borrows, so nothing here opens one."""
+
+    closed = False
+
+
+def _cli():
+    """The command module, not the ``main`` function of the same dotted name."""
+
+    import sys
+
+    import weaver_cli.main  # noqa: F401 - imported for its effect on sys.modules
+
+    return sys.modules["weaver_cli.main"]
+
+
+def _parsed_build(monkeypatch):
+    """One parsed ``build``, with a workspace and a Session already settled."""
+
+    from weaver.workspaces import Workspace
+
+    monkeypatch.setattr(
+        _cli(), "_resolve_workspace", lambda args: Workspace(workspace="Analytics")
+    )
+    parsed = _cli().build_parser().parse_args(["build", "."])
+    parsed.session = _BorrowedSession()
+    return parsed
+
+
+@pytest.mark.parametrize(
+    "error",
+    ["DiscoveryError", "GraphError", "IdentityError", "MetadataError"],
+)
+@weaver_test()
+def test_a_rejected_repository_is_a_failed_build(error, monkeypatch, capsys):
+    """The four errors a repository parse raises, and one answer to them.
+
+    Each is cleared by editing the repository, and the next attempt re-reads the
+    tree, so the build renders the error and returns a failure. That failure is
+    what the retry prompt offers to run again.
+    """
+
+    import weaver
+    from weaver import errors
+
+    parsed = _parsed_build(monkeypatch)
+
+    def refuse(*arguments, **keywords):
+        raise getattr(errors, error)("Lakehouse/Sales/Tables/Sales__Order.py: refused")
+
+    monkeypatch.setattr(weaver, "build", refuse)
+
+    assert _cli()._build_once(parsed) == 1
+    assert "Sales__Order.py: refused" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_workspace_failure_is_not_a_build_failure(monkeypatch):
+    """Only the source tree is retryable.
+
+    Configuration, Fabric resolution and the transports reach the same answer on
+    the next attempt, so they stay raised and end the command.
+    """
+
+    import weaver
+    from weaver.errors import ConfigError
+
+    parsed = _parsed_build(monkeypatch)
+
+    def refuse(*arguments, **keywords):
+        raise ConfigError("catalogue Warehouse is not configured")
+
+    monkeypatch.setattr(weaver, "build", refuse)
+
+    with pytest.raises(ConfigError):
+        _cli()._build_once(parsed)

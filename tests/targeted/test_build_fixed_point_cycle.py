@@ -452,8 +452,12 @@ def test_changing_one_document_publishes_that_change_and_no_more(estate, tmp_pat
     state = installed_catalogue(estate)
 
     document = None
-    for candidate in (estate.root.path / "Lakehouse" / "Sales").rglob("*.py"):
-        if "Files" not in candidate.parts and candidate.name != "__init__.py":
+    for candidate in sorted((estate.root.path / "Lakehouse" / "Sales").rglob("*.py")):
+        if "Files" in candidate.parts or candidate.name == "__init__.py":
+            continue
+        # The edit below revises declared metadata, so the file has to carry
+        # some. A lib module does not, and selecting one edited nothing.
+        if "Description: " in candidate.read_text(encoding="utf-8"):
             document = candidate
             break
     assert document is not None, "the fixture must own a Lakehouse document"

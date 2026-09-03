@@ -265,15 +265,22 @@ def test_python_validation_belongs_to_a_lakehouse(warehouse):
 
 
 @weaver_test()
-def test_a_validation_schema_must_be_declared_by_the_item(lakehouse):
+def test_a_validation_implies_its_schema_like_any_other_identity(lakehouse):
+    """A Test carries an ordinary ``Schema.Object`` identity, so it owns its schema.
+
+    It materialises nothing, so the schema is logical here: the build stage is
+    what decides whether a physical schema is created for it.
+    """
+
     _write(
         lakehouse,
         "Lakehouse/Sales/tests/Finance__OrdersReconcile.py",
         _python_test("Finance.OrdersReconcile"),
     )
 
-    with pytest.raises(DiscoveryError, match="'Finance' is not declared"):
-        parse(lakehouse)
+    repository = parse(lakehouse)
+
+    assert "Finance" in {identity.schema for identity in repository.schema_documents}
 
 
 @weaver_test()

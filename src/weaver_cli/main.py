@@ -7,7 +7,14 @@ import sys
 import time
 
 import weaver
-from weaver.errors import CommandError, WeaverError
+from weaver.errors import (
+    CommandError,
+    DiscoveryError,
+    GraphError,
+    IdentityError,
+    MetadataError,
+    WeaverError,
+)
 
 #: The capacity verbs, kept here so building the parser imports nothing from
 #: `weaver.fabric`, because `weaver --help` should not pay for a transport.
@@ -537,7 +544,21 @@ def build_parser() -> argparse.ArgumentParser:
     environment_publish.add_argument(
         "environment_ref",
         metavar="ENVIRONMENT",
+        nargs="?",
         help="Fabric Environment name or Workspace/Environment reference.",
+    )
+    environment_publish.add_argument(
+        "--path",
+        metavar="DIRECTORY",
+        help=(
+            "A local <Name>.Environment definition to publish. It names the "
+            "Environment and supplies its whole definition."
+        ),
+    )
+    environment_publish.add_argument(
+        "--dev",
+        action="store_true",
+        help="Supply Weaver as a wheel built from this checkout.",
     )
     _add_workspace_args(
         environment_publish, include_catalogue=False, include_environment=False
@@ -684,29 +705,53 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
     from dataclasses import replace
 
     from weaver.fabric.environment import resolve_environment_owner
+    from weaver.fabric.environment_definition import environment_name_from_path
     from weaver.sessions.host import use_or_create_session
     from weaver.workspaces import EnvironmentRef, Workspace
 
-    environment = EnvironmentRef.parse(args.environment_ref)
-    if (
-        environment.workspace is not None
-        and args.workspace is None
-        and args.workspace_config is None
-    ):
-        workspace = Workspace(workspace=environment.workspace, environment=environment)
-    else:
+    if args.path is not None and args.environment_ref is not None:
+        raise CommandError(
+            "--path names the Environment through its directory, so ENVIRONMENT "
+            "is not given as well."
+        )
+    if args.path is None and args.environment_ref is None:
+        raise CommandError(
+            "Name a Fabric Environment, or pass --path to publish a local "
+            "<Name>.Environment definition."
+        )
+
+    if args.path is not None:
+        # The directory names the Environment. Workspace configuration may name
+        # a different one, and it is not consulted here.
         workspace = _resolve_workspace(args)
-        resolve_environment_owner(workspace.workspace, environment)
-        workspace = replace(workspace, environment=environment)
+        label = environment_name_from_path(args.path)
+        environment = None
+    else:
+        environment = EnvironmentRef.parse(args.environment_ref)
+        if (
+            environment.workspace is not None
+            and args.workspace is None
+            and args.workspace_config is None
+        ):
+            workspace = Workspace(
+                workspace=environment.workspace, environment=environment
+            )
+        else:
+            workspace = _resolve_workspace(args)
+            resolve_environment_owner(workspace.workspace, environment)
+            workspace = replace(workspace, environment=environment)
+        label = str(environment)
     _prefer_desktop_credential()
     from weaver.fabric import publish_environment
 
     started = time.perf_counter()
     with use_or_create_session(_session(args), workspace=workspace) as session:
-        with session.task("Publish Environment", str(environment)):
+        with session.task("Publish Environment", label):
             result = publish_environment(
                 workspace.workspace,
                 environment,
+                path=args.path,
+                dev=args.dev,
                 session=session,
             )
     total = time.perf_counter() - started
@@ -971,6 +1016,12 @@ def handle_compose(args: argparse.Namespace) -> int:
 #: Retry controls for an interactive task failure.
 RETRY_PROMPT = "Enter to retry, Esc to exit."
 
+#: The errors a repository edit clears. Each attempt re-reads the source tree,
+#: so these become a failed attempt the retry prompt offers to run again.
+#: Workspace configuration, request errors, transports and installation stay
+#: raised: another attempt reads the same argument and reaches the same host.
+SOURCE_ERRORS = (DiscoveryError, GraphError, IdentityError, MetadataError)
+
 ESC = "\x1b"
 INTERRUPT = "\x03"
 END_OF_FILE = "\x04"
@@ -1144,7 +1195,7 @@ def _load_once(args: argparse.Namespace) -> int:
         # the message is the other, so both are shown before the non-zero exit.
         if getattr(exc, "report", None) is not None:
             _print_load(exc.report)
-        print(f"error: {exc}", file=sys.stderr)
+        _render_error(exc)
         if getattr(exc, "workflow_id", None):
             print(f"  Workflow: {exc.workflow_id}", file=sys.stderr)
         return 1
@@ -1241,7 +1292,7 @@ def _test_once(args: argparse.Namespace) -> int:
             session=_session(args),
         )
     except ValidationError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _render_error(exc)
         return 1
 
     if args.json:
@@ -1531,15 +1582,21 @@ def _build_once(args: argparse.Namespace) -> int:
     import json
 
     workspace = _resolve_workspace(args)
-    with _running_session(args, workspace) as opened:
-        result = weaver.build(
-            args.repository,
-            items=args.items,
-            bundle_only=args.bundle_only,
-            bundle_path=args.bundle_path,
-            session=opened,
-            **_command_context(workspace),
-        )
+    try:
+        with _running_session(args, workspace) as opened:
+            result = weaver.build(
+                args.repository,
+                items=args.items,
+                bundle_only=args.bundle_only,
+                bundle_path=args.bundle_path,
+                session=opened,
+                **_command_context(workspace),
+            )
+    except SOURCE_ERRORS as exc:
+        # A repository the parse rejected. Reported as a failed attempt so the
+        # retry prompt offers the next one, which re-reads the edited tree.
+        _render_error(exc)
+        return 1
     payload = result.to_mapping()
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -1566,10 +1623,16 @@ def _check_once(args: argparse.Namespace) -> int:
     try:
         check(args.repository)
     except WeaverError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _render_error(exc)
         return 1
     print("Repository valid.")
     return 0
+
+
+def _render_error(exc: BaseException) -> None:
+    """Print one failure, in the spelling every command uses."""
+
+    print(f"error: {exc}", file=sys.stderr)
 
 
 def _indented(text: str, prefix: str = "  ") -> str:
@@ -1598,7 +1661,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(handler(args))
     except WeaverError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        _render_error(exc)
         return 1
 
 

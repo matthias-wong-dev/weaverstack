@@ -41,8 +41,10 @@ weaver fabric environment publish weaver --workspace-config workspace.yml
 weaver build ./estate --workspace-config workspace.yml --item Lakehouse/Sales
 ```
 
-The Fabric Environment must already exist. Publication preserves its package
-definition and unrelated custom libraries.
+Publication changes Weaver's own libraries and leaves the rest of the
+Environment alone. `--path <Name>.Environment` publishes a local definition
+instead, creating the Environment when it is absent, and `--dev` supplies Weaver
+as a wheel built from the checkout.
 
 A Weaver **item** is logical, `Lakehouse/Sales`. A **target** is the Fabric item
 it is deployed to, `Sales_Dev`. Build, load, test and health name items: a build

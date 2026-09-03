@@ -52,9 +52,18 @@ repository/
     └── unfinished.py                   explicitly excluded content
 ```
 
-Each schema and source document belongs to exactly one item. A Lakehouse names
-the Fabric area its data objects sit in: `Tables/` holds its Tables and Views,
-and `Files/` its Folders. Neither is a separate deployment target. `lib/`
+Each schema and source document belongs to exactly one item.
+
+A managed item-owned identity implies its schema. `Sales.Customer.sql` in a
+Warehouse item establishes the schema `Sales` there, and so does
+`Tables/Sales.Customer.sql` in a Lakehouse. `schemas/<Schema>.yml` is optional
+schema metadata for that same schema, and it may also declare a schema no object
+sits in yet. An implied schema carries a null description. Schema names are exact
+identities, so an object in `sales` beside a declared `Sales` is refused rather
+than treated as the same schema.
+
+A Lakehouse names the Fabric area its data objects sit in: `Tables/` holds its
+Tables and Views, and `Files/` its Folders. Neither is a separate deployment target. `lib/`
 contains Python helpers for that Lakehouse item. Discovery selects the
 `Lakehouse/` and `Warehouse/` trees and the recognised surfaces inside each
 item. Unrelated siblings and unrelated item content are absent from discovery

@@ -40,7 +40,12 @@ def _published_environment_yml(client, environment) -> bytes:
 def test_publish_preserves_user_environment_state_and_is_idempotent(
     fabric_workspace, fabric_client
 ):
-    """One live publication keeps user state and the next changes nothing."""
+    """One live publication keeps user state and the next changes nothing.
+
+    ``dev=True``, because the suite's Environment carries a Weaver wheel built
+    from a checkout. Released mode is the other contract: it would remove that
+    wheel and install Weaver from PyPI, which is a different Environment.
+    """
 
     from weaver.fabric.environment import (
         ENVIRONMENT,
@@ -68,6 +73,7 @@ def test_publish_preserves_user_environment_state_and_is_idempotent(
     first = publish_environment(
         fabric_workspace.workspace,
         fabric_workspace.environment,
+        dev=True,
         client=fabric_client,
         root=root,
     )
@@ -78,6 +84,8 @@ def test_publish_preserves_user_environment_state_and_is_idempotent(
         before_compute
     )
     assert _published_environment_yml(fabric_client, environment) == before_yml
+    assert first.mode == "dev"
+    assert first.weaver_requirement is None, "a dev publication installs no PyPI Weaver"
     assert first.wheel_filename in {
         str(entry.get("name") or "")
         for entry in after_libraries.get("libraries", ())
@@ -88,9 +96,12 @@ def test_publish_preserves_user_environment_state_and_is_idempotent(
     second = publish_environment(
         fabric_workspace.workspace,
         fabric_workspace.environment,
+        dev=True,
         client=fabric_client,
         root=root,
     )
     assert second.publish_status == "AlreadyInstalled"
     assert second.published is False
-    assert second.staged_dependency_wheels == ()
+    assert second.action == "unchanged"
+    assert second.mode == "dev"
+    assert second.removed_wheels == ()
