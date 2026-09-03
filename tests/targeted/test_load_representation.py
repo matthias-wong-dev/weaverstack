@@ -18,6 +18,8 @@ ordinary ``Table.load()``, proved once for both authoring languages.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from support.generated_load import procedure as _procedure
 from support.weaver_test import weaver_test
@@ -162,7 +164,7 @@ def test_a_view_has_no_generated_load():
 #: A fingerprint of what each generator currently emits, beside the version that
 #: describes it. See the test below.
 GENERATED_FINGERPRINTS = {
-    "tsql": (14, "16de8ff61d4c1f4b7143879c43411f8c474409831afc5084675eba45f86a942c"),
+    "tsql": (15, "e7fe4dd295cfb3c32cc3e43e20e4f9e2da3d77a658be0534acaf68d5f3052d4e"),
     "spark": (9, "d0cdda197f8619dc2f679b7ef270154e439b76aaaf27f5001c79b489304a6acf"),
 }
 
@@ -510,6 +512,19 @@ def _constrained_source(*, incremental: bool = False) -> str:
         "from [Src].[Raw]",
         "from [Src].[Raw];\n\nselect [Customer id] from [Src].[Retired]",
     )
+
+
+@weaver_test()
+def test_wide_column_lists_promote_string_agg_inputs_to_lob():
+    """A wide table's generated column lists may legitimately exceed 8 KB."""
+
+    aggregates = re.findall(
+        r"string_agg\(\s+convert\(nvarchar\(max\),",
+        _installer(),
+        flags=re.IGNORECASE,
+    )
+
+    assert len(aggregates) == 6
 
 
 @weaver_test()

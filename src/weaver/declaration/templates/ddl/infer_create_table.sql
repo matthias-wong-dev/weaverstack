@@ -69,10 +69,10 @@ select
         select
             N'create table $target_table (' + char(10)
             + string_agg(
-                case
+                convert(nvarchar(max), case
                     when column_ordinal = $first_ordinal then N'    ' + column_definition
                     else N'  , ' + column_definition
-                end,
+                end),
                 char(10)
             ) within group (order by column_ordinal)
             + char(10) + N');'
@@ -82,7 +82,8 @@ select
         select
             N'alter table $target_table add constraint $pk_constraint '
             + N'primary key nonclustered ('
-            + string_agg(quotename(column_name), N', ') within group (order by column_ordinal)
+            + string_agg(convert(nvarchar(max), quotename(column_name)), N', ')
+                within group (order by column_ordinal)
             + N') not enforced;'
         from primary_key_columns
     );

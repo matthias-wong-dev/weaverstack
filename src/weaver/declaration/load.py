@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 #: Signature salts for generated load output. Increment the corresponding value
 #: whenever that generator changes.
-TSQL_LOAD_VERSION = 14
+TSQL_LOAD_VERSION = 15
 SPARK_LOAD_VERSION = 9
 
 #: What object a generated load installs, in the catalogue's vocabulary. A
