@@ -308,14 +308,14 @@ def _python_references(
                 continue
             if len(components) == 1:
                 raise DiscoveryError(
-                    f"{source.node_id}: import {written!r} names no Lakehouse "
+                    f"{source.relative_path}: import {written!r} names no Lakehouse "
                     f"area. A Table or View module sits under {TABLES}/ and a "
                     f"Folder module under {FILES}/, so import "
                     f"{TABLES}.{object_module} or {FILES}.{object_module}."
                 )
             if len(components) != 2 or components[0] not in AREAS:
                 raise DiscoveryError(
-                    f"{source.node_id}: import {written!r} does not resolve to an "
+                    f"{source.relative_path}: import {written!r} does not resolve to an "
                     "item object or lib module"
                 )
             references.append(
@@ -354,7 +354,7 @@ def _shortcut_reference(
     written = f"{SHORTCUTS_MODULE}.{name}"
     if name in (SHORTCUTS_MODULE, "*"):
         raise DiscoveryError(
-            f"{source.node_id}: import each shortcut by name, as "
+            f"{source.relative_path}: import each shortcut by name, as "
             f"'from {SHORTCUTS_MODULE} import <Name>'. Discovery reads the "
             "imports to learn what this document depends on."
         )
@@ -362,7 +362,7 @@ def _shortcut_reference(
     if declaration is None:
         known = ", ".join(sorted(declared)) or "nothing"
         raise DiscoveryError(
-            f"{source.node_id}: import {written!r} names no shortcut. "
+            f"{source.relative_path}: import {written!r} names no shortcut. "
             f"{source.logical_id.item}/{SHORTCUTS_MODULE}.py declares {known}."
         )
     if declaration.is_logical:

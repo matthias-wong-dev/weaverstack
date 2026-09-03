@@ -294,8 +294,12 @@ def test_an_import_naming_no_area_carries_the_move(tmp_path):
         ),
     )
 
-    with pytest.raises(DiscoveryError, match="import Tables.Sales__Customer"):
+    with pytest.raises(DiscoveryError, match="import Tables.Sales__Customer") as raised:
         parse_item_repository(Location(str(root)))
+
+    # The file to open, not the identity it declares. A logical ID names the
+    # object the import sits in; the path names where the import is written.
+    assert str(raised.value).startswith("Lakehouse/Raw/Tables/Sales__Order.py: ")
 
 
 @weaver_test()
