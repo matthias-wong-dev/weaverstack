@@ -289,7 +289,7 @@ def _edit_pip(
                 continue
             if name in wanted:
                 # Already declared. The spelling in the file wins, so a pinned
-                # requirement is not quietly widened.
+                # requirement keeps its pin.
                 wanted.pop(name)
         kept.append(line)
         end += 1

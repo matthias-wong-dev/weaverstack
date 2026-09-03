@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -424,3 +425,102 @@ def test_the_inferred_root_is_spelled_exactly_as_the_fabric_one():
     assert _ABFSS_ROOT.format(workspace="ws-id", item="lh-id") == abfss_root(
         "ws-id", "lh-id"
     )
+
+
+# --- what a mount says out loud -------------------------------------------------
+
+
+@weaver_test()
+def test_the_mount_happens_inside_the_quiet_context(monkeypatch):
+    """Weaver mounts for the side effect, and Fabric renders a table for it.
+
+    The suppression wraps the mount and nothing else, so the seam is asserted
+    at the call itself.
+    """
+
+    import weaver.lakehouse as module
+
+    quiet = []
+
+    @contextmanager
+    def _recording():
+        quiet.append("open")
+        try:
+            yield
+        finally:
+            quiet.append("closed")
+
+    class FakeFs:
+        def mount(self, source, point, options=None):
+            assert quiet == ["open"], "the mount ran outside the quiet context"
+
+        def getMountPath(self, point):
+            assert quiet == ["open", "closed"], "the path lookup was suppressed too"
+            return f"/synfs/notebook/session-1{point}"
+
+    monkeypatch.setattr(module, "_quiet_mount", _recording)
+    monkeypatch.setattr(
+        module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})()
+    )
+    monkeypatch.setattr(module, "_MOUNTS", {})
+
+    lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
+
+    assert lakehouse.files_root() == "/synfs/notebook/session-1/weaver/lh/Files"
+    assert quiet == ["open", "closed"]
+
+
+@weaver_test()
+def test_the_mount_table_reaches_no_stdout(monkeypatch, capsys):
+    """What the notebook renders is written to ``sys.stdout`` by the mount.
+
+    Measured against a real Fabric mount, which emits a sentinel-wrapped JSON
+    table there and publishes nothing on the rich display channel.
+    """
+
+    import weaver.lakehouse as module
+
+    table = '\x00sentinel{"table": {"rows": []}}\x00sentinel'
+
+    class FakeFs:
+        def mount(self, source, point, options=None):
+            print(table)
+
+        def getMountPath(self, point):
+            return f"/synfs/notebook/session-1{point}"
+
+    monkeypatch.setattr(
+        module, "_notebook_utils", lambda: type("U", (), {"fs": FakeFs()})()
+    )
+    monkeypatch.setattr(module, "_MOUNTS", {})
+
+    Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh").files_root()
+
+    assert table not in capsys.readouterr().out
+
+
+@weaver_test()
+def test_suppression_needs_no_ipython(monkeypatch, capsys):
+    """Fabric supplies IPython; a console reaching in over Livy may not.
+
+    ``redirect_stdout`` alone removes the table, so the fallback still
+    suppresses, and importing Weaver gains no dependency.
+    """
+
+    import builtins
+
+    import weaver.lakehouse as module
+
+    real_import = builtins.__import__
+
+    def without_ipython(name, *args, **keywords):
+        if name.startswith("IPython"):
+            raise ImportError("no IPython here")
+        return real_import(name, *args, **keywords)
+
+    monkeypatch.setattr(builtins, "__import__", without_ipython)
+
+    with module._quiet_mount():
+        print("the mount table")
+
+    assert "the mount table" not in capsys.readouterr().out

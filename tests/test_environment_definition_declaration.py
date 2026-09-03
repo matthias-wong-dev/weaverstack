@@ -95,8 +95,8 @@ def test_a_file_is_not_a_definition(tmp_path):
 def test_an_unsupported_part_is_refused(tmp_path):
     """Fabric takes four kinds of part, so a fifth is reported here.
 
-    Named against the file the user wrote rather than as a publish failure
-    minutes later.
+    The message names the file the user wrote, and the read happens before
+    anything is sent.
     """
 
     root = _definition(tmp_path, **{"README.md": "notes"})
@@ -177,8 +177,8 @@ def test_a_weaver_requirement_is_never_added_twice():
 
     entries = pip_entries(released_external_libraries(text, source="x"), source="x")
 
-    # PEP 503 compares distribution names case-insensitively, so this is the
-    # Weaver requirement already and a second one would be two of it.
+    # PEP 503 compares distribution names case-insensitively, so this entry is
+    # the Weaver requirement.
     assert entries == ("WeaverStack>=0.4",)
 
 
