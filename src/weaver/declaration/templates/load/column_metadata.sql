@@ -16,19 +16,19 @@
 )
 select
     @weaver_source_columns = string_agg(
-        case when row_ordinal = 1 then quotename(name) else char(10) + N'      , ' + quotename(name) end,
+        convert(nvarchar(max), case when row_ordinal = 1 then quotename(name) else char(10) + N'      , ' + quotename(name) end),
         N''
     ) within group (order by column_id)
   , @weaver_staging_select_columns = string_agg(
-        case when row_ordinal = 1 then N's.' + quotename(name) else char(10) + N'      , s.' + quotename(name) end,
+        convert(nvarchar(max), case when row_ordinal = 1 then N's.' + quotename(name) else char(10) + N'      , s.' + quotename(name) end),
         N''
     ) within group (order by column_id)
   , @weaver_query_select_columns = string_agg(
-        case when row_ordinal = 1 then N'q.' + quotename(name) else char(10) + N'      , q.' + quotename(name) end,
+        convert(nvarchar(max), case when row_ordinal = 1 then N'q.' + quotename(name) else char(10) + N'      , q.' + quotename(name) end),
         N''
     ) within group (order by column_id)
   , @weaver_upsert_select_columns = string_agg(
-        case when row_ordinal = 1 then N'u.' + quotename(name) else char(10) + N'      , u.' + quotename(name) end,
+        convert(nvarchar(max), case when row_ordinal = 1 then N'u.' + quotename(name) else char(10) + N'      , u.' + quotename(name) end),
         N''
     ) within group (order by column_id)
 from source_columns;

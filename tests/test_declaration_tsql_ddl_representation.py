@@ -9,6 +9,7 @@ runs against the Play Warehouse under Fabric; here we pin the generated text.
 
 from __future__ import annotations
 
+import re
 import textwrap
 
 from support.weaver_test import weaver_test
@@ -163,6 +164,21 @@ def test_inferred_builds_the_table_dynamically_from_temp_metadata():
     assert "exec sys.sp_executesql @weaver_create_sql" in content
     # No declared types are baked in.
     assert "varchar(200)" not in content
+
+
+@weaver_test()
+def test_inferred_column_lists_promote_string_agg_inputs_to_lob():
+    """A wide table's create statement may legitimately exceed 4,000 characters.
+
+    ``string_agg`` returns ``nvarchar(4000)`` for an ``nvarchar`` input of
+    declared length, and raises 9829 once the concatenation passes it. Both
+    lists here are built from ``quotename``, so both need the LOB input.
+    """
+
+    content = _ddl("Reporting.CustomerReport.sql", INFERRED).content
+    aggregates = re.findall(r"string_agg\(\s*convert\(nvarchar\(max\),", content)
+
+    assert len(aggregates) == 2
 
 
 @weaver_test()
