@@ -278,7 +278,11 @@ def test_an_unused_schema_is_still_valid(tmp_path):
 
 @weaver_test()
 def test_an_implied_and_a_declared_spelling_may_not_differ_by_case(tmp_path):
-    """Schema identity is exact, so the two are separate names in collision."""
+    """Schema identity is exact, so the two are separate names in collision.
+
+    The message names both files, because either spelling can be the one to
+    change and the author has to find them.
+    """
 
     root = build(
         tmp_path,
@@ -286,8 +290,12 @@ def test_an_implied_and_a_declared_spelling_may_not_differ_by_case(tmp_path):
         objects={"sales__Thing.py": PY_TABLE.format(schema="sales")},
     )
 
-    with pytest.raises(DiscoveryError, match="differ only by case"):
+    with pytest.raises(DiscoveryError, match="differ only by case") as raised:
         parse_item_repository(root)
+
+    message = str(raised.value)
+    assert f"{ITEM}/schemas/Sales.yml" in message
+    assert f"{ITEM}/Tables/sales__Thing.py" in message
 
 
 # --- case-only duplicate schemas ---------------------------------------------

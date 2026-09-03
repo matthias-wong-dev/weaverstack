@@ -607,10 +607,13 @@ directory is never written to, so a development wheel does not reach a checkout.
 
 Weaver owns two things and nothing else: the `weaverstack` requirement in the
 external library list, and `weaverstack-*.whl` among the custom libraries.
-Released publication holds one PyPI requirement and no Weaver wheel, keeping an
-authored specifier. `--dev` holds the checkout's wheel and no PyPI requirement,
-and names Weaver's Fabric requirements, because a Fabric custom wheel installs
-no dependencies of its own. Fabric resolves the external libraries on publish,
+Released publication holds exactly one effective PyPI requirement and no Weaver
+wheel, keeping an authored specifier and dropping a duplicate entry for the same
+distribution. `--dev` holds the checkout's wheel and no PyPI requirement, and
+names Weaver's Fabric requirements, because a Fabric custom wheel installs no
+dependencies of its own. An authored requirement survives only where its
+specifier can satisfy Weaver's, compared with `packaging` and reported before
+anything is staged. Fabric resolves the external libraries on publish,
 so the Environment definition is the package contract and Weaver keeps no second
 resolver. Every other library, setting and platform value remains user-owned.
 

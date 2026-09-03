@@ -1129,8 +1129,12 @@ def _insert_exact_case(
                 f"{rendered} is declared twice: {prior} and {relative}"
             )
         if str(existing).casefold() == rendered.casefold():
+            # Both files, so either spelling can be the one to change.
+            prior = getattr(existing_value, "relative_path", None)
+            where = f" ({prior} and {relative})" if prior else f" ({relative})"
             raise DiscoveryError(
-                f"{rendered} and {existing} differ only by case and cannot coexist"
+                f"{rendered} and {existing} differ only by case and cannot "
+                f"coexist{where}"
             )
     destination[identity] = value
 
@@ -1257,19 +1261,27 @@ def _complete_owned_schemas(
     there, and `validate_destinations` refuses an item that claims both.
 
     An explicit declaration is kept as it stands. Case is exact, so an object in
-    ``sales`` beside a declared ``Sales`` is a collision.
+    ``sales`` beside a declared ``Sales`` is a collision. Each implied schema
+    carries the path of the declaration that implied it, so that collision names
+    a file to open.
     """
 
-    implied: dict[WeaverItemId, list[str]] = {item: [] for item in schemas_by_item}
+    # Schema name and the authored file that established it, per item.
+    implied: dict[WeaverItemId, list[tuple[str, str]]] = {
+        item: [] for item in schemas_by_item
+    }
     for identity in sorted(source_documents, key=str):
-        implied.setdefault(identity.item, []).append(identity.object_id.schema)
+        source = source_documents[identity]
+        implied.setdefault(identity.item, []).append(
+            (identity.object_id.schema, source.relative_path)
+        )
     for declaration in shortcuts:
         if declaration.is_schema:
             continue
         destination = declaration.destination
         if isinstance(destination, WeaverDocumentId):
             implied.setdefault(destination.item, []).append(
-                destination.object_id.schema
+                (destination.object_id.schema, declaration.relative_path)
             )
 
     for item, names in implied.items():
@@ -1277,7 +1289,7 @@ def _complete_owned_schemas(
             identity.schema for identity in schemas_by_item.setdefault(item, [])
         }
         seen: list[str] = []
-        for name in names:
+        for name, relative in names:
             if name in declared or name in seen:
                 continue
             seen.append(name)
@@ -1286,7 +1298,7 @@ def _complete_owned_schemas(
                 schema_documents,
                 identity,
                 inferred_schema(name),
-                f"{item}: implied by {name}.*",
+                relative or f"{item}",
                 what="schema",
             )
             schemas_by_item[item].append(identity)

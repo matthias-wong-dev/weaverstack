@@ -238,14 +238,75 @@ def development_external_libraries(
     PyPI requirement alongside it would resolve to a published version. Its
     imports still have to resolve, and a custom wheel brings no dependencies of
     its own, so Weaver's own requirements are named here.
+
+    An entry the Environment already carries keeps its authored specifier only
+    where that specifier can satisfy Weaver's. One that cannot is reported here,
+    before anything is staged.
     """
 
-    return _edit_pip(
-        text,
-        drop=(DISTRIBUTION,),
-        ensure=tuple(requirements),
-        source=source,
+    wanted = tuple(requirements)
+    _check_authored_constraints(
+        pip_entries(text, source=source), wanted, source=source
     )
+    return _edit_pip(text, drop=(DISTRIBUTION,), ensure=wanted, source=source)
+
+
+def _check_authored_constraints(
+    entries: Iterable[str], requirements: Iterable[str], *, source: str
+) -> None:
+    """Refuse an authored requirement that excludes what Weaver needs.
+
+    ``sqlparse==0.5.3`` beside a Weaver requirement of ``sqlparse>=0.6.0`` gives
+    a published Environment Weaver cannot import from, and the failure would
+    surface as an ImportError in the first notebook cell. It is a comparison of
+    two specifiers, so it needs no resolver.
+    """
+
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    authored: dict[str, str] = {}
+    for entry in entries:
+        name = requirement_name(entry)
+        if name is not None:
+            authored.setdefault(name, entry.strip())
+
+    conflicts: list[str] = []
+    for text in requirements:
+        try:
+            required = Requirement(text)
+        except InvalidRequirement:  # pragma: no cover - read from pyproject
+            continue
+        written = authored.get(normalise_distribution(required.name))
+        if written is None:
+            continue
+        if not _satisfiable(Requirement(written), required):
+            conflicts.append(f"  {written}    Weaver needs {text}")
+    if conflicts:
+        raise CommandError(
+            f"{source}: {EXTERNAL_LIBRARIES} pins package versions Weaver cannot "
+            "run against:\n"
+            + "\n".join(conflicts)
+            + "\nWiden or remove those requirements and publish again. No "
+            "Environment changes were staged."
+        )
+
+
+def _satisfiable(authored, required) -> bool:
+    """Whether some version satisfies both specifiers.
+
+    Proof-based: a bare name constrains nothing, and a specifier is refused only
+    where no version either side names can satisfy both. An unpinned range that
+    Weaver's own bound falls inside stays as it is.
+    """
+
+    if not authored.specifier:
+        return True
+    candidates = {
+        clause.version.rstrip("*").rstrip(".")
+        for clause in list(authored.specifier) + list(required.specifier)
+    }
+    combined = authored.specifier & required.specifier
+    return any(combined.contains(each, prereleases=True) for each in candidates)
 
 
 def _edit_pip(
@@ -277,6 +338,7 @@ def _edit_pip(
     end = index + 1
     kept: list[str] = []
     item_indent = f"{indent}    "
+    settled: set[str] = set()
     while end < len(lines):
         line = lines[end]
         if line.strip() and not line.startswith(item_indent):
@@ -287,10 +349,16 @@ def _edit_pip(
             if name in dropped:
                 end += 1
                 continue
+            if name is not None and name in settled:
+                # A second entry for a name Weaver manages. One requirement can
+                # be effective, so the first spelling stands and this one goes.
+                end += 1
+                continue
             if name in wanted:
                 # Already declared. The spelling in the file wins, so a pinned
                 # requirement keeps its pin.
                 wanted.pop(name)
+                settled.add(name)
         kept.append(line)
         end += 1
 

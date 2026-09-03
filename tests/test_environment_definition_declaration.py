@@ -282,3 +282,99 @@ def test_custom_libraries_are_listed_by_filename():
         "other-1.0-py3-none-any.whl",
         "weaverstack-0.1.0-py3-none-any.whl",
     )
+
+
+# --- one effective Weaver requirement -----------------------------------------
+
+
+@weaver_test()
+def test_duplicate_weaver_requirements_collapse_to_the_authored_spelling():
+    """Two entries for one distribution leave which version installs to pip."""
+
+    text = (
+        "dependencies:\n"
+        "  - pip:\n"
+        "      - weaverstack==0.4.0\n"
+        "      - numpy\n"
+        "      - weaverstack>=0.2\n"
+    )
+
+    entries = pip_entries(released_external_libraries(text, source="x"), source="x")
+
+    assert entries == ("weaverstack==0.4.0", "numpy")
+
+
+@weaver_test()
+def test_case_variant_weaver_requirements_are_the_same_requirement():
+    text = (
+        "dependencies:\n"
+        "  - pip:\n"
+        "      - weaverstack\n"
+        "      - WeaverStack==1.0\n"
+        "      - weaverstack>=2\n"
+    )
+
+    entries = pip_entries(released_external_libraries(text, source="x"), source="x")
+
+    assert entries == ("weaverstack",)
+
+
+# --- what a development publication may keep ----------------------------------
+
+
+WEAVER_NEEDS = ("pyyaml", "sqlparse>=0.6.0", "mssql-python")
+
+
+@pytest.mark.parametrize(
+    "written", ["sqlparse==0.5.3", "sqlparse<0.6", "sqlparse<=0.5"]
+)
+@weaver_test()
+def test_a_requirement_weaver_cannot_run_against_is_refused(written):
+    """A published Environment Weaver cannot import from is caught here.
+
+    The alternative is an ImportError in the first notebook cell, minutes after
+    the publish.
+    """
+
+    text = f"dependencies:\n  - pip:\n      - {written}\n"
+
+    with pytest.raises(CommandError, match="Weaver cannot run against") as raised:
+        development_external_libraries(text, requirements=WEAVER_NEEDS, source="x")
+
+    message = str(raised.value)
+    assert written in message
+    assert "sqlparse>=0.6.0" in message
+    assert "No Environment changes were staged." in message
+
+
+@pytest.mark.parametrize(
+    "written", ["sqlparse==0.6.1", "sqlparse>=0.5", "sqlparse", "sqlparse>=0.6,<1.0"]
+)
+@weaver_test()
+def test_a_compatible_requirement_keeps_its_authored_specifier(written):
+    """Weaver names a floor, and anything that can meet it stays as it is."""
+
+    text = f"dependencies:\n  - pip:\n      - {written}\n"
+
+    entries = pip_entries(
+        development_external_libraries(text, requirements=WEAVER_NEEDS, source="x"),
+        source="x",
+    )
+
+    assert written in entries
+
+
+@weaver_test()
+def test_every_conflicting_requirement_is_reported_at_once():
+    """One publish, one list of what to change."""
+
+    text = "dependencies:\n  - pip:\n      - sqlparse==0.5.3\n      - pyyaml==1.0\n"
+
+    with pytest.raises(CommandError) as raised:
+        development_external_libraries(
+            text, requirements=("pyyaml>=6", "sqlparse>=0.6.0"), source="x"
+        )
+
+    message = str(raised.value)
+    assert "sqlparse==0.5.3" in message
+    assert "pyyaml==1.0" in message

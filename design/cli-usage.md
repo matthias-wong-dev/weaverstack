@@ -415,12 +415,20 @@ whatever workspace configuration names, and the definition is sent whole. A
 missing Environment is created from it. The directory is never written to.
 `Environment/` is a repository convention; the path may point anywhere.
 
-Released publication puts one PyPI `weaverstack` requirement in the external
-library list and removes any Weaver custom wheel. An authored specifier is kept,
-so `weaverstack==0.4.0` stays pinned. `--dev` builds a wheel from the checkout,
-removes the PyPI requirement, and names Weaver's own Fabric requirements,
-because a Fabric custom wheel installs no dependencies of its own. Fabric
-resolves the external libraries when it publishes.
+Released publication leaves exactly one effective PyPI `weaverstack`
+requirement in the external library list and removes any Weaver custom wheel. An
+authored specifier is kept, so `weaverstack==0.4.0` stays pinned; a second entry
+for the same distribution goes, because which one installs would otherwise be
+pip's choice.
+
+`--dev` builds a wheel from the checkout, removes the PyPI requirement, and names
+Weaver's own Fabric requirements, because a Fabric custom wheel installs no
+dependencies of its own. A requirement the Environment already carries keeps its
+authored specifier where that specifier can satisfy Weaver's. One that cannot,
+such as `sqlparse==0.5.3` against a Weaver requirement of `sqlparse>=0.6.0`, is
+reported before anything is staged. It is a comparison of two specifiers, so
+Weaver resolves nothing; Fabric resolves the external libraries when it
+publishes.
 
 A publication that would change nothing does not republish. Definition parts
 compare by their bytes, except a Weaver wheel, which compares by filename: the
