@@ -132,9 +132,16 @@ def test_an_object_in_an_underscore_schema_is_read_as_an_object(tmp_path):
 
 
 @weaver_test()
-def test_an_underscore_schema_must_still_be_declared(tmp_path):
-    with pytest.raises(DiscoveryError, match="is not declared by item"):
-        _repo(tmp_path, {"_Control.Registry.sql": REGISTRY}, schemas=("Sales",))
+def test_a_leading_underscore_schema_is_implied_like_any_other(tmp_path):
+    """``_Control`` is an ordinary name. ``_`` alone is the reserved one.
+
+    The item declares a schema file for ``Sales`` and none for ``_Control``, and
+    the object establishes the second on its own.
+    """
+
+    repo = _repo(tmp_path, {"_Control.Registry.sql": REGISTRY}, schemas=("Sales",))
+
+    assert repo["_Control.Registry"].object_id.schema == "_Control"
 
 
 @weaver_test()

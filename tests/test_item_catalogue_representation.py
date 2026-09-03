@@ -663,3 +663,54 @@ def test_a_physical_target_names_the_fabric_item_and_its_workspace(tmp_path):
     assert rows["Reference"]["target_object_name"] is None
     assert rows["Sales.Incoming"]["target_object_name"] is None
     assert rows["Sales.Incoming"]["target_schema_name"] == "Incoming/Daily"
+
+
+@weaver_test()
+def test_one_logical_schema_describes_every_area_it_is_used_in(tmp_path):
+    """The repository owns one `Sales`; the catalogue stores it per area.
+
+    `Tables/Sales` and `Files/Sales` are storage spellings of one logical schema,
+    so both rows carry that schema's metadata and its one signature. Adding or
+    removing `schemas/Sales.yml` moves both together.
+    """
+
+    repository = parse_item_repository(Location(str(_estate(tmp_path))))
+    projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
+    owned = next(
+        document
+        for identity, document in repository.schema_documents.items()
+        if str(identity.item) == "Lakehouse/Raw" and identity.schema == "Sales"
+    )
+
+    sales = [
+        row
+        for row in projection.for_table(SCHEMA_DICTIONARY)
+        if row["schema_name"] in ("Tables/Sales", "Files/Sales")
+    ]
+
+    assert {row["schema_name"] for row in sales} == {"Tables/Sales", "Files/Sales"}
+    assert {row["description"] for row in sales} == {owned.description}
+    assert {row["signature"] for row in sales} == {owned.source_hash}
+    assert {row["description_reference"] for row in sales} == {None}
+
+
+@weaver_test()
+def test_an_implied_schema_is_catalogued_with_no_description(tmp_path):
+    """An item that declared no schema file still describes what it uses."""
+
+    from weaver.declaration.schemas import inferred_schema
+
+    root = _estate(tmp_path)
+    (root / "Lakehouse" / "Raw" / "schemas" / "Sales.yml").unlink()
+    repository = parse_item_repository(Location(str(root)))
+    projection = _project(repository, "Lakehouse/Raw", "Raw_Dev")
+
+    sales = [
+        row
+        for row in projection.for_table(SCHEMA_DICTIONARY)
+        if row["schema_name"] in ("Tables/Sales", "Files/Sales")
+    ]
+
+    assert {row["schema_name"] for row in sales} == {"Tables/Sales", "Files/Sales"}
+    assert {row["description"] for row in sales} == {None}
+    assert {row["signature"] for row in sales} == {inferred_schema("Sales").source_hash}

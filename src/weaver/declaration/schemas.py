@@ -1,27 +1,26 @@
-"""Schema Weaver document files, one declared schema per file under ``_schemas``.
+"""Schema documents, one per file under an item's ``schemas`` directory.
 
-A repository declares its schemas explicitly rather than letting a two-part
-object ID conjure one on the fly. Every ``Schema.Object`` an object or a shortcut
-uses implies a schema, and that schema must be declared here or the repository
-is invalid.
+A managed item-owned identity implies its schema. ``Warehouse/MyWH/Sales.Customer.sql``
+establishes the schema ``Sales`` in that Warehouse, and so does
+``Lakehouse/MyLH/Tables/Sales.Customer.sql``.
 
 ::
 
-    repo/
-      _schemas/
+    Warehouse/MyWH/
+      schemas/
         Sales.yml
-        Reporting.yml
-      Sales__Order.py
-      Reporting.OrderReport.sql
+      Sales.Customer.sql
 
-Each file names exactly one schema, and its filename without ``.yml`` must match
-the declared ``Schema ID`` exactly, case included. A schema is a
-repository resource: it is not owned by a Lakehouse, a Warehouse, a tier or an
-object folder, and declaring one does not create anything physical.
+The file is optional metadata for the same schema, and it may also declare a
+schema no object sits in yet. Each file names exactly one schema, and its
+filename without ``.yml`` must match the declared ``Schema ID`` exactly, case
+included. Declaring a schema creates nothing physical: the build stage plans
+that from the identities an item owns.
 """
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -30,8 +29,6 @@ import yaml
 from ..errors import DiscoveryError, MetadataError
 from .metadata import _UniqueKeyLoader
 
-#: The directory schema Weaver document files live in, relative to the repository root.
-SCHEMAS_DIRECTORY = "_schemas"
 SCHEMA_SUFFIX = ".yml"
 
 _SCHEMA_ID = "Schema ID"
@@ -41,35 +38,49 @@ _ALLOWED_KEYS = {_SCHEMA_ID, _DESCRIPTION}
 
 @dataclass(frozen=True)
 class SchemaSes:
-    """One declared schema, kept as a distinct repository resource."""
+    """One schema an item owns, whether a file declares it or an object implies it."""
 
     schema_id: str
     description: str | None
-    relative_path: str
+    #: Where the declaration was read from. ``None`` for an inferred schema,
+    #: which :attr:`is_explicit` reads back.
+    relative_path: str | None
     #: The declaration's content hash, on the same terms as an object's. It is
     #: what the catalogue records as the signature of a schema row. Empty for a
     #: schema parsed from text rather than read from a file.
     source_hash: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def is_explicit(self) -> bool:
+        """Whether a ``schemas/<Schema>.yml`` declared this schema."""
+
+        return self.relative_path is not None
+
+
+def inferred_schema(schema_id: str) -> SchemaSes:
+    """The schema a managed identity implies, carrying no metadata.
+
+    The signature covers the schema name and nothing else, so editing the object
+    that happened to imply the schema does not read as a schema metadata change.
+    """
+
+    digest = hashlib.sha256()
+    digest.update(b"weaver:inferred-schema\n")
+    digest.update(schema_id.encode("utf-8"))
+    return SchemaSes(
+        schema_id=schema_id,
+        description=None,
+        relative_path=None,
+        source_hash=digest.hexdigest(),
+    )
+
 
 def schema_id_for_filename(relative_path: str) -> str:
-    """The Schema ID a ``_schemas`` filename claims, before the file is read."""
+    """The Schema ID a ``schemas/`` filename claims, before the file is read."""
 
     filename = relative_path.rsplit("/", 1)[-1]
     return filename[: -len(SCHEMA_SUFFIX)]
-
-
-def is_schema_file(relative_path: str) -> bool:
-    """True for ``_schemas/<name>.yml`` at the repository root."""
-
-    parts = relative_path.split("/")
-    return (
-        len(parts) == 2
-        and parts[0] == SCHEMAS_DIRECTORY
-        and parts[1].endswith(SCHEMA_SUFFIX)
-        and len(parts[1]) > len(SCHEMA_SUFFIX)
-    )
 
 
 def read_schema_document(relative_path: str, data: bytes) -> SchemaSes:

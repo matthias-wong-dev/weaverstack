@@ -97,7 +97,7 @@ persistence boundary maps between them and nothing above it sees SQL.
 |---|---|---|
 | `_.Installation` | logical item | The physical target currently bound, the installed item's signature, and the Weaver version that last reconciled it. |
 | `_.Registry` | installed object | What Weaver certifies. `object_type` is folder, table, view, file or stored_procedure; `object_role` is `data` for something that holds or shapes rows, `load` for something that does the work of filling one, and `test` or `assumption` for the runnable form of a validation. `build_datetime` dates the build that published the row. |
-| `_.SchemaDictionary` | schema in use | Only schemas the installation actually uses. |
+| `_.SchemaDictionary` | stored namespace in use | Only schemas the installation actually uses, keyed by the namespace they are stored under. One logical schema an item owns can produce several rows: a Lakehouse `Sales` used by a table and a Folder stores `Tables/Sales` and `Files/Sales`, both carrying that schema's description and signature. An implied schema records a null description and a signature over its name alone. |
 | `_.TableDictionary` | table or view | Tables and views together — they are described the same way. Keys, behavioural flags, description and lineage. |
 | `_.FolderDictionary` | managed folder | Keeps the folder's two-part identity, and its file key — the scope of what Weaver manages inside it. |
 | `_.ColumnDictionary` | described column | Purely descriptive: the columns an author wrote a note about, plus Weaver's surrogate. Not every column. |

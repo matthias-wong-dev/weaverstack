@@ -13,7 +13,7 @@ from weaver.catalogue.tables import (
     RUNTIME_TABLES,
 )
 from weaver.declaration import parse_item_repository
-from weaver.declaration.model import WeaverDocumentId, WeaverSchemaId
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId, WeaverSchemaId
 from weaver.errors import DiscoveryError, MetadataError
 from weaver.locations import Location
 
@@ -411,11 +411,20 @@ def test_an_external_reference_certifies_only_its_own_item(tmp_path):
 
 
 @weaver_test()
-def test_schema_must_be_declared_by_the_owning_item(tmp_path):
+def test_a_new_schema_arrives_with_the_object_that_uses_it(tmp_path):
+    """Adding a table in a schema the item did not have adds the schema too."""
+
     root = _estate(tmp_path)
     _write(root, "Lakehouse/Raw/Tables/Other__Thing.py", _table("Other.Thing"))
-    with pytest.raises(DiscoveryError, match="not declared by item Lakehouse/Raw"):
-        parse_item_repository(Location(str(root)))
+
+    repository = parse_item_repository(Location(str(root)))
+    item = WeaverItemId.parse("Lakehouse/Raw")
+
+    assert "Other" in {
+        identity.schema
+        for identity in repository.schema_documents
+        if identity.item == item
+    }
 
 
 @weaver_test()
