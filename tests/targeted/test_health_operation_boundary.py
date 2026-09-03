@@ -1,13 +1,13 @@
 """What ``weaver.health`` reads, and what it does not.
 
-Health answers from the catalogue, one bounded window of its history tables, and
-each selected target's physical state. It runs no authored code, so it opens no
+Health answers from the catalogue, the statistics behind its current load
+state, and each selected target's physical state. It runs no authored code, so it opens no
 Livy session, and these hold it to that against a `TestSession`, which records
 every crossing a host was asked to make.
 
-The bounded reads are their own claim: ``_.LoadStatistic`` grows with the
-estate's age, so what health asks of it is the rows behind current
-``_.LoadStatus`` state and no more.
+The bounded read is its own claim: ``_.LoadStatistic`` accumulates, so what
+health asks of it is the rows behind current ``_.LoadStatus`` state and no
+more.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from factories import document_id, installation_row, registry_row
 from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
-from weaver.catalogue.history import DEFAULT_LIMIT, read_load_history
+from weaver.catalogue.history import read_load_history
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     INSTALLATION,
@@ -180,19 +180,33 @@ class _Connection:
         return found[0]
 
 
-def _history_connection(*, statistics=(), workflow="workflow-1", results=()):
+def _history_connection(*, statistics=(), workflow="workflow-1", statuses=()):
     """A Warehouse holding current load state and the statistics behind it."""
 
     return _Connection(
         shape=(LOAD_STATUS, LOAD_STATISTIC),
         rows=[
-            ("GROUP BY", list(results) or [{"result": "Succeeded", "row_count": 1}]),
+            ("GROUP BY", list(statuses) or [_status(workflow=workflow)]),
             (
                 LOAD_STATISTIC.name,
                 list(statistics) or [_statistic("Sales", "Order", workflow=workflow)],
             ),
         ],
     )
+
+
+def _status(
+    *, result="Succeeded", workflow="workflow-1", rows=1, started=None, completed=None
+):
+    """One grouped ``_.LoadStatus`` row, as the summary aggregate returns it."""
+
+    return {
+        "result": result,
+        "workflow_id": workflow,
+        "row_count": rows,
+        "started_datetime": started,
+        "completed_datetime": completed,
+    }
 
 
 @weaver_test()
@@ -207,9 +221,9 @@ def test_current_state_spanning_two_workflows_carries_both():
     """A later partial load explains its own objects and not the rest."""
 
     connection = _history_connection(
-        statistics=[
-            _statistic("Sales", "Order", workflow="workflow-1"),
-            _statistic("Sales", "Customer", workflow="workflow-2"),
+        statuses=[
+            _status(workflow="workflow-2"),
+            _status(workflow="workflow-1"),
         ]
     )
 
@@ -219,34 +233,47 @@ def test_current_state_spanning_two_workflows_carries_both():
 
 
 @weaver_test()
-def test_the_window_spans_its_loads_and_counts_current_results():
+def test_the_summary_comes_from_current_state_and_not_from_the_statistics():
+    """A Blocked load settles a status row and appends no statistic."""
+
     connection = _history_connection(
-        results=[
-            {"result": "Succeeded", "row_count": 18},
-            {"result": "Rejected", "row_count": 2},
-        ],
-        statistics=[
-            _statistic(
-                "Sales",
-                "Order",
+        statuses=[
+            _status(
+                result="Succeeded",
+                rows=18,
                 started=NOW - timedelta(minutes=6),
                 completed=NOW - timedelta(minutes=1),
             ),
-            _statistic(
-                "Sales",
-                "Customer",
+            _status(
+                result="Blocked",
+                rows=2,
                 started=NOW - timedelta(minutes=4),
                 completed=NOW,
             ),
         ],
+        statistics=[_statistic("Sales", "Order")],
     )
 
     window = current_load(read_load_history(connection))
 
-    assert window.workflow_ids == ("workflow-1",)
-    assert window.counts == {"succeeded": 18, "rejected": 2}
+    assert window.counts == {"succeeded": 18, "blocked": 2}
     assert window.started_at == NOW - timedelta(minutes=6)
     assert window.completed_at == NOW
+
+
+@weaver_test()
+def test_one_result_across_two_workflows_counts_once_per_result():
+    connection = _history_connection(
+        statuses=[
+            _status(result="Succeeded", workflow="workflow-1", rows=18),
+            _status(result="Succeeded", workflow="workflow-2", rows=2),
+        ]
+    )
+
+    window = current_load(read_load_history(connection))
+
+    assert window.counts == {"succeeded": 20}
+    assert window.workflow_ids == ("workflow-1", "workflow-2")
 
 
 @weaver_test()
@@ -264,14 +291,15 @@ def test_the_engine_matches_the_statistics_against_current_state():
 
 
 @weaver_test()
-def test_the_engine_bounds_and_orders_the_statistics():
+def test_the_statistics_are_ordered_and_uncapped():
+    """The match is the bound, so nothing takes a prefix of the estate."""
+
     connection = _history_connection()
 
-    read_load_history(connection, limit=5)
+    read_load_history(connection)
 
     statement = connection.asked_for(LOAD_STATISTIC.name)
-    assert "TOP 5" in statement
-    assert "ORDER BY" in statement
+    assert "TOP" not in statement
     assert statement.index("ORDER BY") > statement.index("WHERE")
 
 
@@ -281,25 +309,6 @@ def test_a_bounded_read_needs_an_order_to_be_the_same_prefix_twice():
 
     with pytest.raises(ValueError, match="needs an order"):
         read_table(_Connection(shape=(LOAD_STATISTIC,)), LOAD_STATISTIC, top=5)
-
-
-@weaver_test()
-def test_a_full_window_says_it_is_a_prefix():
-    connection = _history_connection(
-        statistics=[_statistic("Sales", f"Object{index:04d}") for index in range(5)]
-    )
-
-    history = read_load_history(connection, limit=5)
-
-    assert history.is_truncated
-    assert DEFAULT_LIMIT > 5
-
-
-@weaver_test()
-def test_a_window_within_its_limit_is_whole():
-    connection = _history_connection(statistics=[_statistic("Sales", "Order")])
-
-    assert not read_load_history(connection, limit=5).is_truncated
 
 
 @weaver_test()

@@ -121,13 +121,13 @@ class Catalogue:
 
     @property
     def load_history(self):
-        """The bounded window of history this catalogue was read with, if any.
+        """Current load state and the statistics behind it, if any.
 
-        A :class:`weaver.catalogue.history.LoadHistory`, being the most recent
-        load workflow and the statistics it appended. Held apart from ``rows``,
-        because ``_.Log`` and ``_.LoadStatistic`` grow with the estate's age and
-        :meth:`table_rows` answers for a materialised table. ``None`` where the
-        read did not ask for one.
+        A :class:`weaver.catalogue.history.LoadHistory`, summarising
+        ``_.LoadStatus`` and carrying the ``_.LoadStatistic`` rows that explain
+        it. Held apart from ``rows``, because ``_.LoadStatistic`` grows with the
+        estate's age and :meth:`table_rows` answers for a materialised table.
+        ``None`` where the read did not ask for one.
         """
 
         return self._load_history
@@ -992,11 +992,12 @@ def read_installed_catalogue(
     it is history, and reading it would grow with the estate's age for an answer
     nothing asks.
 
-    ``load_history`` reads the most recent load workflow and the statistics it
-    appended, bounded by the engine, and carries them on the returned catalogue
-    as :attr:`Catalogue.load_history`. Apart from ``tables``, because a window
-    is not a materialised table. This is the one place an operation acquires it:
-    the estate is read into a catalogue, and everything reasons from that.
+    ``load_history`` summarises current ``_.LoadStatus`` state and reads the
+    ``_.LoadStatistic`` rows matching it, and carries them on the returned
+    catalogue as :attr:`Catalogue.load_history`. Apart from ``tables``, because
+    a window is not a materialised table. This is the one place an operation
+    acquires it: the estate is read into a catalogue, and everything reasons
+    from that.
 
     The shape check is weaker than the build's: a missing table reads as no rows
     rather than a fault, because an estate with no shortcuts has never had a

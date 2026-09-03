@@ -1,15 +1,26 @@
-"""The history behind the estate's current load state.
+"""Current load state, and the statistics that explain it.
 
-``_.LoadStatus`` holds one row per loadable object, carrying the workflow whose
-load produced that object's current state. :func:`read_load_history` starts
-there and retrieves the ``_.LoadStatistic`` row behind each of those rows,
-matching on workflow and the object's four-part logical identity. Current state
-spans as many workflows as it took to reach, so the window is not one workflow's
-worth: a later partial load explains its own objects and leaves the rest
-explained by the load that last touched them.
+``_.LoadStatus`` is the estate's current load state: one row per loadable
+object, carrying how that object's load ended, when, and the workflow that ran
+it. :func:`read_load_history` summarises that table and nothing else, so the
+summary covers every current object including the ones no statistic describes.
+A Blocked load settles a status row and appends no ``_.LoadStatistic`` row.
 
-``_.LoadStatistic`` grows with the estate's age, so nothing reads it whole. The
-match and the limit are in the statement.
+``_.LoadStatistic`` then enriches those states with what each load moved,
+matched on the workflow and the object's four-part logical identity:
+
+.. code-block:: text
+
+    _.LoadStatus                     the current-state summary
+        + workflow id
+        + item type, item name
+        + schema name, object name
+             ↓
+    _.LoadStatistic                  what those loads moved
+
+``_.LoadStatistic`` accumulates, so it is never read whole. The match is the
+bound: it holds the read to the current estate, which is one row per loadable
+object at most.
 
 The window is carried on a :class:`weaver.catalogue.state.Catalogue` as
 :attr:`~weaver.catalogue.state.Catalogue.load_history`, apart from ``rows``.
@@ -30,18 +41,12 @@ from .render import Row
 from .tables import LOAD_RESULT_VOCABULARY, LOAD_STATISTIC, LOAD_STATUS
 from .tsql import identifier, qualified_name
 
-#: How many statistic rows one window may hold. It bounds a pathological estate
-#: rather than an ordinary one: the match is against current state, so the
-#: window is the size of the estate and not of its history.
-DEFAULT_LIMIT = 500
-
 #: What identifies one object's load on both sides of the match. The workflow
 #: alone would carry every other object that workflow loaded, and the object
 #: alone would carry every historical execution of it.
 _MATCH = ("workflow_id", "item_type", "item_name", "schema_name", "object_name")
 
-#: What orders a window's statistic rows, so its prefix is the same prefix every
-#: time it is read.
+#: What orders the statistic rows, so a report lists them the same way twice.
 _STATISTIC_ORDER = ("item_type", "item_name", "schema_name", "object_name")
 
 #: The alias current state is matched under, inside the statistic read.
@@ -50,16 +55,20 @@ _STATUS = "weaver_status"
 
 @dataclass(frozen=True)
 class LoadHistory:
-    """What the estate's current load state is, and the loads that produced it.
+    """What the estate's current load state is, and what those loads moved.
 
-    ``statistics`` are the ``_.LoadStatistic`` rows behind the current
-    ``_.LoadStatus`` rows, capped. ``workflow_ids`` are the workflows those rows
-    came from, so a caller can say how many loads the current state took without
-    one of them standing for the rest. ``counts`` are current state's own
-    results, from ``_.LoadStatus``.
+    ``counts``, ``workflow_ids``, ``started_at`` and ``completed_at`` summarise
+    ``_.LoadStatus``, so they cover every current object. ``statistics`` are the
+    ``_.LoadStatistic`` rows behind those states, which is a subset: a Blocked
+    load has a status and no statistic.
+
+    ``workflow_ids`` are sorted, which is an order for reading and not a
+    chronology. Current state spans as many workflows as it took to reach,
+    because a partial load leaves the objects it did not touch explained by the
+    load that last did.
 
     The runtime records orchestrated and standalone loads under one task type,
-    so this says nothing about who started any of them.
+    so none of this says who started any of them.
     """
 
     workflow_ids: tuple[str, ...] = ()
@@ -68,59 +77,70 @@ class LoadHistory:
     #: How each loadable object's current state ended, counted by result.
     counts: Mapping[str, int] = field(default_factory=dict)
     statistics: tuple[Row, ...] = ()
-    #: Whether the window filled its limit, so what it holds is a prefix.
-    is_truncated: bool = False
 
 
-def read_load_history(
-    catalogue: Any, *, limit: int = DEFAULT_LIMIT
-) -> LoadHistory | None:
+def read_load_history(catalogue: Any) -> LoadHistory | None:
     """Current load state, and the statistics behind it.
 
     ``None`` where ``_.LoadStatus`` holds no row, which is bootstrap: nothing
     has settled a load yet.
     """
 
-    counts = _counts(catalogue)
-    if counts is None:
+    summary = _current_state(catalogue)
+    if summary is None:
         return None
-    statistics = _statistics(catalogue, limit=limit)
-    started, completed = _span(statistics)
+    counts, workflow_ids, started, completed = summary
     return LoadHistory(
-        workflow_ids=_workflow_ids(statistics),
+        workflow_ids=workflow_ids,
         started_at=started,
         completed_at=completed,
         counts=MappingProxyType(counts),
-        statistics=statistics,
-        is_truncated=len(statistics) == limit,
+        statistics=_statistics(catalogue),
     )
 
 
-def _counts(catalogue: Any) -> dict[str, int] | None:
-    """How current ``_.LoadStatus`` rows ended, counted by result.
+def _current_state(catalogue: Any):
+    """``_.LoadStatus`` summarised: results, workflows, and the span they cover.
 
-    ``None`` where the table holds nothing, which is what separates bootstrap
-    from an estate whose every object failed.
+    One aggregate, so the cost is the number of result and workflow pairs rather
+    than the number of objects. ``None`` where the table holds nothing, which is
+    what separates bootstrap from an estate whose every object failed.
     """
 
     if catalogue.columns_of(LOAD_STATUS) is None:
         return None
     result = identifier(LOAD_STATUS.public_name_of("result"))
+    workflow = identifier(LOAD_STATUS.public_name_of("workflow_id"))
+    started = identifier(LOAD_STATUS.public_name_of("started_datetime"))
+    completed = identifier(LOAD_STATUS.public_name_of("completed_datetime"))
+
     counts: dict[str, int] = {}
+    workflow_ids: set[str] = set()
+    window_started = None
+    window_completed = None
     for row in catalogue.rows(
-        f"SELECT {result} AS result, COUNT(*) AS row_count "
+        f"SELECT {result} AS result, {workflow} AS workflow_id, "
+        "COUNT(*) AS row_count, "
+        f"MIN({started}) AS started_datetime, "
+        f"MAX({completed}) AS completed_datetime "
         f"FROM {qualified_name(LOAD_STATUS)} "
-        f"GROUP BY {result}"
+        f"GROUP BY {result}, {workflow}"
     ):
         values = dict(row)
-        counts[_internal_result(str(values.get("result") or ""))] = int(
-            values.get("row_count") or 0
-        )
-    return counts or None
+        outcome = _internal_result(str(values.get("result") or ""))
+        counts[outcome] = counts.get(outcome, 0) + int(values.get("row_count") or 0)
+        workflow_id = str(values.get("workflow_id") or "")
+        if workflow_id:
+            workflow_ids.add(workflow_id)
+        window_started = _earliest(window_started, values.get("started_datetime"))
+        window_completed = _latest(window_completed, values.get("completed_datetime"))
+    if not counts:
+        return None
+    return counts, tuple(sorted(workflow_ids)), window_started, window_completed
 
 
-def _statistics(catalogue: Any, *, limit: int) -> tuple[Row, ...]:
-    """The statistic row behind each current status row, bounded by the engine.
+def _statistics(catalogue: Any) -> tuple[Row, ...]:
+    """The statistic row behind each current status row, matched by the engine.
 
     A semi-join rather than an inner one: ``_.LoadStatus`` is keyed by the
     object, so matching cannot multiply a statistic row, and the read stays one
@@ -132,7 +152,6 @@ def _statistics(catalogue: Any, *, limit: int) -> tuple[Row, ...]:
         LOAD_STATISTIC,
         predicate=_matches_current_state(),
         order=_STATISTIC_ORDER,
-        top=limit,
     )
 
 
@@ -150,28 +169,6 @@ def _matches_current_state() -> str:
         f"EXISTS (SELECT 1 FROM {qualified_name(LOAD_STATUS)} AS {status} "
         f"WHERE {conditions})"
     )
-
-
-def _workflow_ids(statistics: tuple[Row, ...]) -> tuple[str, ...]:
-    """Every workflow the window's rows came from, in the order they appear."""
-
-    found = {}
-    for row in statistics:
-        workflow_id = str(row.get("workflow_id") or "")
-        if workflow_id:
-            found[workflow_id] = None
-    return tuple(found)
-
-
-def _span(statistics: tuple[Row, ...]):
-    """When the window's loads started and when the last of them finished."""
-
-    started = None
-    completed = None
-    for row in statistics:
-        started = _earliest(started, row.get("started_datetime"))
-        completed = _latest(completed, row.get("completed_datetime"))
-    return started, completed
 
 
 def _internal_result(stored: str) -> str:
@@ -199,4 +196,4 @@ def _replaces(current, candidate, *, earlier: bool) -> bool:
     return candidate < current if earlier else candidate > current
 
 
-__all__ = ["DEFAULT_LIMIT", "LoadHistory", "read_load_history"]
+__all__ = ["LoadHistory", "read_load_history"]

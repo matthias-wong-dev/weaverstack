@@ -961,7 +961,7 @@ def test_arrays_stay_present_when_empty():
 
 
 def _window(*statistics) -> LoadHistory:
-    """One catalogue's bounded window, in the shape its read carries."""
+    """One catalogue's load history, in the shape its read carries."""
 
     return LoadHistory(workflow_ids=("workflow-1",), statistics=tuple(statistics))
 

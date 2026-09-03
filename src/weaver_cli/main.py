@@ -1446,7 +1446,7 @@ _ID_WIDTH = 42
 
 
 def _health_activity(report) -> list[str]:
-    """The slowest loads and the rows that moved, from the bounded window."""
+    """The slowest loads and the rows that moved, across current state."""
 
     lines = []
     slowest = report.slowest()

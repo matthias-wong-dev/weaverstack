@@ -27,8 +27,8 @@ which is what makes a genuine reload of a reference table put its consumers
 behind.
 
 This module is pure. Everything it reads is on the catalogue it is given: the
-graph, the status tables, the bookmarks, and the bounded window of recent
-activity that catalogue was read with. See :mod:`weaver.operations.health` for
+graph, the status tables, the bookmarks, and the current load state that
+catalogue was read with. See :mod:`weaver.operations.health` for
 the operation that reads it.
 """
 
@@ -310,12 +310,12 @@ class LoadActivity:
 class CurrentLoad:
     """What the estate's current load state is, and when it was reached.
 
-    ``counts`` are every loadable object's current ``_.LoadStatus`` result.
-    ``workflow_ids`` are the workflows that state came from, oldest object
-    first: a partial load leaves the objects it did not touch explained by the
-    load that last did, so current state spans as many workflows as it took.
-    ``completed_at`` is the most recent of them, which is the estate's last load
-    activity.
+    All of it summarises ``_.LoadStatus``, so it covers every current object
+    including the ones no statistic describes. ``counts`` are those objects'
+    results. ``workflow_ids`` are the workflows the state came from, sorted:
+    a partial load leaves the objects it did not touch explained by the load
+    that last did, so current state spans as many workflows as it took.
+    ``completed_at`` is the estate's last load activity.
 
     The runtime records orchestrated and standalone loads under the same
     ``load`` task type, so none of this claims to be a scheduled run.
@@ -473,8 +473,8 @@ def assess(
     """One catalogue's operational state, as a report.
 
     Everything comes from the catalogue: what is installed, what depends on what,
-    the current status tables, the bookmarks, and the bounded window of recent
-    activity it was read with.
+    the current status tables, the bookmarks, and the current load state it was
+    read with.
 
     ``targets`` restricts what is reported on. Ancestry outside it is still read,
     because whether a selected object is behind its sources is a question about
