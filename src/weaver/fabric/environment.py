@@ -262,10 +262,13 @@ def import_external_libraries(
         response = send(
             "POST",
             url,
-            headers={"Authorization": f"Bearer {client.token}"},
-            files={
-                "file": ("environment.yml", text.encode("utf-8"), "application/x-yaml")
+            headers={
+                "Authorization": f"Bearer {client.token}",
+                # The file's bytes, as the custom library upload takes them.
+                # Fabric answers a multipart body with EnvironmentValidationFailed.
+                "Content-Type": "application/octet-stream",
             },
+            data=text.encode("utf-8"),
             timeout=client.timeout,
         )
     except requests.exceptions.RequestException as exc:

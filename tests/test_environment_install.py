@@ -514,3 +514,35 @@ def test_a_failed_publish_is_an_error(monkeypatch, tmp_path):
 def test_publishing_without_a_name_or_a_path_says_so():
     with pytest.raises(CommandError, match="or pass --path"):
         env_mod.publish_environment("Analytics", None, client=_LibraryClient())
+
+
+# --- the request shapes Fabric accepts -----------------------------------------
+
+
+@weaver_test()
+def test_the_external_library_import_sends_the_file_as_octet_stream(monkeypatch):
+    """Fabric answers a multipart body with EnvironmentValidationFailed.
+
+    Verified against the tenant: the import takes the file's bytes with
+    ``application/octet-stream``, as the custom library upload does.
+    """
+
+    sent = {}
+
+    def record(method, url, *, headers, data=None, timeout=None, **keywords):
+        sent.update(method=method, url=url, headers=headers, data=data, extra=keywords)
+        return _Response(200)
+
+    monkeypatch.setattr(env_mod, "send", record)
+
+    env_mod.import_external_libraries(
+        _env(),
+        "dependencies:\n  - pip:\n      - weaverstack\n",
+        client=_LibraryClient(),
+    )
+
+    assert sent["method"] == "POST"
+    assert sent["url"].endswith("/staging/libraries/importExternalLibraries")
+    assert sent["headers"]["Content-Type"] == "application/octet-stream"
+    assert sent["data"] == b"dependencies:\n  - pip:\n      - weaverstack\n"
+    assert "files" not in sent["extra"]
