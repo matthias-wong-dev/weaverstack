@@ -19,23 +19,23 @@
     <meta name="twitter:title" content="How Weaver works">
     <meta name="twitter:description" content="Repository, build, Catalogue, load, test and health, and the mechanics underneath them.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
-    <link rel="icon" type="image/png" sizes="128x128" href="/favicon.png">
-    <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="/assets/site.css">
+    <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
+    <link rel="manifest" href="../site.webmanifest">
+    <link rel="stylesheet" href="../assets/site.css">
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
     <header class="site-header">
       <nav class="nav wrap" aria-label="Primary">
-        <a class="brand" href="/" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
+        <a class="brand" href="../index.html" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
         <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
         <div class="nav-links" id="nav-links">
-          <a href="/get-started/">Get started</a>
-          <a href="/problem/">The problem</a>
-          <a href="/how-it-works/" aria-current="page">How it works</a>
-          <a href="/scale/">Built for scale</a>
-          <a href="/vs-dbt/">Weaver vs dbt</a>
+          <a href="../get-started/index.html">Get started</a>
+          <a href="../problem/index.html">The problem</a>
+          <a href="../how-it-works/index.html" aria-current="page">How it works</a>
+          <a href="../scale/index.html">Built for scale</a>
+          <a href="../vs-dbt/index.html">Weaver vs dbt</a>
           <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
         </div>
       </nav>
@@ -52,73 +52,20 @@
 
       <section class="section">
         <div class="wrap">
-          <h2>The whole shape, in one picture</h2>
-          <figure>
-            <svg class="dag" viewBox="0 0 860 430" role="img" aria-labelledby="life-title life-desc">
-              <title id="life-title">The Weaver lifecycle</title>
-              <desc id="life-desc">Your repository is built into a Microsoft Fabric workspace. Inside the workspace, the installed estate is recorded in the Weaver catalogue, which lives in the underscore schema of a Fabric Warehouse. Load, test and health all read the catalogue.</desc>
-              <defs>
-                <marker id="lf-ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                  <path d="M0 0 L8 4 L0 8 z" class="arrow-head"></path>
-                </marker>
-              </defs>
+          <h2>The four commands</h2>
+          <p class="lede">You build, then you load, then you test. Health is the question you ask afterwards. Each one reads the Catalogue the build wrote.</p>
 
-              <rect class="frame" x="252" y="18" width="600" height="394" rx="14"></rect>
-              <text class="lane-label" x="270" y="41">MICROSOFT FABRIC WORKSPACE</text>
+          <div class="flow">
+            <div class="flow-step"><b>build</b><small>make Fabric match your repository</small></div>
+            <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+            <div class="flow-step"><b>load</b><small>run the data work</small></div>
+            <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+            <div class="flow-step"><b>test</b><small>run your checks</small></div>
+            <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+            <div class="flow-step"><b>health</b><small>ask how the estate is</small></div>
+          </div>
 
-              <g>
-                <rect class="n-box" x="8" y="58" width="182" height="100"></rect>
-                <text class="n-title" x="24" y="84">Your repository</text>
-                <text class="n-sub" x="24" y="105">Python, T-SQL, shortcuts,</text>
-                <text class="n-sub" x="24" y="121">validations and metadata.</text>
-                <text class="n-sub" x="24" y="137">In source control.</text>
-              </g>
-
-              <path class="edge" d="M190 108 H272" marker-end="url(#lf-ah)"></path>
-              <text class="edge-label" x="231" y="100">build</text>
-
-              <g>
-                <rect class="n-box" x="282" y="58" width="540" height="100"></rect>
-                <text class="n-title" x="300" y="84">The installed estate</text>
-                <text class="n-sub" x="300" y="105">Your Lakehouses and Warehouses, after a build: schemas, folders, Delta tables,</text>
-                <text class="n-sub" x="300" y="121">Warehouse tables and views, shortcuts, and the runnable load code.</text>
-                <text class="n-sub" x="300" y="137">Materialised output only. No copied runtime, no per-target catalogue.</text>
-              </g>
-
-              <path class="edge" d="M552 158 V194" marker-end="url(#lf-ah)"></path>
-              <text class="edge-label" x="562" y="180" text-anchor="start">recorded in</text>
-
-              <g class="highlight">
-                <rect class="n-box" x="282" y="196" width="540" height="106"></rect>
-                <text class="n-title" x="300" y="222">The Weaver catalogue</text>
-                <text class="n-sub" x="300" y="243">The _ schema of a Fabric Warehouse you name. Sixteen tables holding what is</text>
-                <text class="n-sub" x="300" y="259">installed, what depends on what, where each object is physically built, how far</text>
-                <text class="n-sub" x="300" y="275">each one has loaded, whether its checks passed, and what has happened.</text>
-                <text class="n-sub" x="300" y="291">Weaver owns _ in that Warehouse and nothing else in it.</text>
-              </g>
-
-              <path class="edge" d="M552 302 V318 H366 V344" marker-end="url(#lf-ah)"></path>
-              <path class="edge" d="M552 302 V344" marker-end="url(#lf-ah)"></path>
-              <path class="edge" d="M552 302 V318 H738 V344" marker-end="url(#lf-ah)"></path>
-
-              <g>
-                <rect class="n-box" x="282" y="346" width="168" height="52"></rect>
-                <text class="n-title" x="300" y="370">Load</text>
-                <text class="n-sub" x="300" y="386">Run the data work</text>
-              </g>
-              <g>
-                <rect class="n-box" x="468" y="346" width="168" height="52"></rect>
-                <text class="n-title" x="486" y="370">Test</text>
-                <text class="n-sub" x="486" y="386">Run the checks</text>
-              </g>
-              <g>
-                <rect class="n-box" x="654" y="346" width="168" height="52"></rect>
-                <text class="n-title" x="672" y="370">Health</text>
-                <text class="n-sub" x="672" y="386">Ask how it is going</text>
-              </g>
-            </svg>
-            <figcaption>The Catalogue lives inside Fabric, in a Warehouse you name. It is not an external service and there is nothing to host.</figcaption>
-          </figure>
+          <p>Build is the one that changes structure. It creates the tables, views, shortcuts and load code in Fabric, and records all of it in the Catalogue. Load and test then work from what build installed, and health reads what they left behind.</p>
         </div>
       </section>
 
@@ -375,17 +322,17 @@
         <div class="wrap">
           <h2>Where to next</h2>
           <div class="cards three">
-            <a class="card" href="/get-started/">
+            <a class="card" href="../get-started/index.html">
               <h3>Try it</h3>
               <p>Set a project up against your own workspace and watch the whole lifecycle run on a small example.</p>
               <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
             </a>
-            <a class="card" href="/scale/">
+            <a class="card" href="../scale/index.html">
               <h3>Built for scale</h3>
               <p>The same model on a real estate: hundreds of objects, several Fabric items, one graph.</p>
               <span class="go">See it <span class="arrow" aria-hidden="true">→</span></span>
             </a>
-            <a class="card" href="/vs-dbt/">
+            <a class="card" href="../vs-dbt/index.html">
               <h3>Weaver vs dbt</h3>
               <p>Why build and load are separate, why operational state is first class, and where dbt is the better answer.</p>
               <span class="go">Compare <span class="arrow" aria-hidden="true">→</span></span>
@@ -406,11 +353,11 @@
         <div class="footer-links">
           <ul>
             <strong>Site</strong>
-            <li><a href="/get-started/">Get started</a></li>
-            <li><a href="/problem/">The problem</a></li>
-            <li><a href="/how-it-works/">How it works</a></li>
-            <li><a href="/scale/">Built for scale</a></li>
-            <li><a href="/vs-dbt/">Weaver vs dbt</a></li>
+            <li><a href="../get-started/index.html">Get started</a></li>
+            <li><a href="../problem/index.html">The problem</a></li>
+            <li><a href="../how-it-works/index.html">How it works</a></li>
+            <li><a href="../scale/index.html">Built for scale</a></li>
+            <li><a href="../vs-dbt/index.html">Weaver vs dbt</a></li>
           </ul>
           <ul>
             <strong>Project</strong>
@@ -423,6 +370,6 @@
       </div>
     </footer>
 
-    <script src="/assets/site.js" defer></script>
+    <script src="../assets/site.js" defer></script>
   </body>
 </html>

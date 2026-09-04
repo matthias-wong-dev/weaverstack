@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f5f2ea">
     <title>Weaver vs dbt</title>
-    <meta name="description" content="A fair, detailed comparison. dbt is an excellent transformation framework. Weaver starts from a broader question: what does it take to engineer and operate mature data pipelines on Microsoft Fabric?">
+    <meta name="description" content="dbt is an excellent transformation framework. Weaver starts from a broader question: what does it take to engineer and operate mature data pipelines on Microsoft Fabric?">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/vs-dbt/">
     <meta property="og:type" content="article">
@@ -19,23 +19,23 @@
     <meta name="twitter:title" content="Weaver vs dbt">
     <meta name="twitter:description" content="dbt starts with the transformation model. Weaver starts with the operational data estate.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
-    <link rel="icon" type="image/png" sizes="128x128" href="/favicon.png">
-    <link rel="manifest" href="/site.webmanifest">
-    <link rel="stylesheet" href="/assets/site.css">
+    <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
+    <link rel="manifest" href="../site.webmanifest">
+    <link rel="stylesheet" href="../assets/site.css">
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
 
     <header class="site-header">
       <nav class="nav wrap" aria-label="Primary">
-        <a class="brand" href="/" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
+        <a class="brand" href="../index.html" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
         <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
         <div class="nav-links" id="nav-links">
-          <a href="/get-started/">Get started</a>
-          <a href="/problem/">The problem</a>
-          <a href="/how-it-works/">How it works</a>
-          <a href="/scale/">Built for scale</a>
-          <a href="/vs-dbt/" aria-current="page">Weaver vs dbt</a>
+          <a href="../get-started/index.html">Get started</a>
+          <a href="../problem/index.html">The problem</a>
+          <a href="../how-it-works/index.html">How it works</a>
+          <a href="../scale/index.html">Built for scale</a>
+          <a href="../vs-dbt/index.html" aria-current="page">Weaver vs dbt</a>
           <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
         </div>
       </nav>
@@ -46,7 +46,7 @@
         <div class="wrap">
           <p class="eyebrow">Weaver vs dbt</p>
           <h1>Two different starting questions</h1>
-          <p class="lead">dbt is an excellent transformation framework, and if you are asking us, it is the best one there is. Weaver starts from a broader question: what does it take to engineer and operate mature data pipelines on Microsoft Fabric? This page is an honest account of where the two differ, including where dbt is the better answer.</p>
+          <p class="lead">dbt is an excellent transformation framework. Weaver starts from a broader question: what does it take to engineer and operate mature data pipelines on Microsoft Fabric?</p>
         </div>
       </section>
 
@@ -83,192 +83,179 @@
       <section class="section">
         <div class="wrap">
           <h2>Feature comparison</h2>
-          <p class="lede">This matrix is Weaver-shaped: it asks the questions Weaver was built to answer. It does not try to list everything dbt does that Weaver does not, because that list is long and mostly a different subject. Where Weaver falls short, the row says so.</p>
+          <p class="lede">These are the questions Weaver was built to answer, grouped by what they are about. Every row is marked for both tools.</p>
 
           <p class="small muted"><span class="mark yes">✓</span> yes &nbsp; <span class="mark part">◐</span> partly, see the note &nbsp; <span class="mark no">✕</span> no &nbsp; <span class="mark soon">Coming</span> planned</p>
 
           <div class="table-scroll">
             <table class="matrix">
               <thead>
-                <tr><th scope="col">Capability</th><th scope="col">Weaver</th><th scope="col">dbt</th></tr>
+                <tr><th scope="col">Capability</th><th scope="col"><span class="who weaver"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span></th><th scope="col"><span class="who dbt">dbt</span></th></tr>
               </thead>
               <tbody>
                 <tr class="group"><th scope="row" colspan="3">Platform</th></tr>
                 <tr>
                   <th scope="row">Fabric Lakehouse and Warehouse in one project</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span> <span class="note">a project targets one adapter</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">a project targets one adapter</span></td>
                 </tr>
                 <tr>
                   <th scope="row">One dependency graph across several Fabric items</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Fabric shortcuts declared as dependencies</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span> <span class="note">configured outside the project</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">configured outside the project</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Logical objects bound to physical Fabric items</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark part">◐</span> <span class="note">targets switch database and schema</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">targets switch database and schema</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Fabric semantic models</th>
-                  <td><span class="mark soon">Coming</span></td>
-                  <td><span class="mark no">✕</span></td>
+                  <td class="v-soon"><span class="mark soon">Coming</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
                 </tr>
 
                 <tr class="group"><th scope="row" colspan="3">Development</th></tr>
                 <tr>
                   <th scope="row">Ordinary T-SQL, with no templating needed for references</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span> <span class="note">references go through <code>ref()</code></span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">references go through <code>ref()</code></span></td>
                 </tr>
                 <tr>
                   <th scope="row">Dependencies read from the SQL itself</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span> <span class="note">declared, not inferred</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">declared, not inferred</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Python dataframe transformations</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark part">◐</span> <span class="note">Python models; not in Microsoft's Fabric adapter</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">Python models; not in Microsoft's Fabric adapter</span></td>
                 </tr>
                 <tr>
                   <th scope="row">General-purpose Python programs: APIs, SFTP, archives, files</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span> <span class="note">a model returns a relation</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">a model returns a relation</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Dependencies read from Python imports</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span> <span class="note"><code>dbt.ref()</code> inside the model</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note"><code>dbt.ref()</code> inside the model</span></td>
                 </tr>
 
                 <tr class="group"><th scope="row" colspan="3">Lifecycle</th></tr>
                 <tr>
                   <th scope="row">Deploy physical structure without loading data</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Build and load as separate commands</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Incremental selection of what to rebuild</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark yes">✓</span> <span class="note"><code>state:modified</code> against a previous manifest</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note"><code>state:modified</code> against a previous manifest</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Installed state persisted in the data platform</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span> <span class="note">artifacts are files a run produces</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">artifacts are files a run produces</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Estate health as a command</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark part">◐</span> <span class="note"><code>source freshness</code> covers sources</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note"><code>source freshness</code> covers sources</span></td>
                 </tr>
 
                 <tr class="group"><th scope="row" colspan="3">Loading and change handling</th></tr>
                 <tr>
                   <th scope="row">Load position recorded per object between runs</th>
-                  <td><span class="mark yes">✓</span> <span class="note">bookmarks</span></td>
-                  <td><span class="mark part">◐</span> <span class="note">derived at run time by querying the target</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">bookmarks</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">derived at run time by querying the target</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Row audit datetimes maintained for you</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span> <span class="note">you add the columns</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">you add the columns</span></td>
                 </tr>
                 <tr>
                   <th scope="row">A key absent from the source retires the target row</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark part">◐</span> <span class="note">snapshots, or a custom strategy</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">snapshots, or a custom strategy</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Insert, update and delete counts recorded</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark part">◐</span> <span class="note">rows affected in run results, adapter dependent</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">rows affected in run results, adapter dependent</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Duplicate-key rows refused and set aside with a reason</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span> <span class="note">a test fails after the load</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">a test fails after the load</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Null-violation rows refused and set aside with a reason</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
                 </tr>
                 <tr>
                   <th scope="row">A threshold that stops an unusually large change</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Independent branches continue after a failure</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark yes">✓</span> <span class="note">the default; descendants are skipped</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">the default; descendants are skipped</span></td>
                 </tr>
 
                 <tr class="group"><th scope="row" colspan="3">Quality and metadata</th></tr>
                 <tr>
                   <th scope="row">Data tests against what is in the platform</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark yes">✓</span></td>
-                </tr>
-                <tr>
-                  <th scope="row">Unit tests with fixture inputs</th>
-                  <td><span class="mark no">✕</span></td>
-                  <td><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Assumptions held apart from Tests as a distinct kind</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Validation results persisted in the data platform</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark no">✕</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Table and column descriptions written into the platform</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark yes">✓</span> <span class="note"><code>persist_docs</code></span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note"><code>persist_docs</code></span></td>
                 </tr>
                 <tr>
                   <th scope="row">Primary and unique key metadata</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark yes">✓</span> <span class="note">model contracts</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">model contracts</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Foreign-key metadata</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark yes">✓</span> <span class="note">model contracts</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">model contracts</span></td>
                 </tr>
                 <tr>
                   <th scope="row">Lineage metadata</th>
-                  <td><span class="mark yes">✓</span></td>
-                  <td><span class="mark yes">✓</span></td>
-                </tr>
-                <tr>
-                  <th scope="row">Generated documentation site</th>
-                  <td><span class="mark no">✕</span></td>
-                  <td><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <div class="callout">
-            <p><strong>Being fair about dbt.</strong> dbt has major strengths Weaver does not try to replicate: it runs on nearly every warehouse rather than one, it has an ecosystem of packages and adapters that took years to grow, its documentation and testing tooling are mature, and the analytics-engineering practice built around it is a genuine contribution to the field. If you need to run the same transformations across Snowflake, BigQuery and Databricks, Weaver is not the answer and is not trying to be.</p>
-          </div>
         </div>
       </section>
 
@@ -364,15 +351,15 @@
             <p>dbt starts with the transformation model.</p>
             <p>Weaver starts with the operational data estate.</p>
           </div>
-          <p>Both are reasonable places to start, and the choice is mostly about what your problem actually is. If your data is already landed and modelled and your work is the SQL on top, dbt is mature, portable and very good at that, and Weaver would be a strange thing to reach for. If your work is the whole path from a source system to a published table, across Lakehouses and Warehouses, and the hard parts are incremental loading, change handling and knowing what state the estate is in, that is the problem Weaver was built for.</p>
+          <p>The choice follows from which problem you have. If your data is already landed and modelled and the work is the SQL on top, dbt is mature, portable and very good at that. If the work is the whole path from a source system to a published table, across Lakehouses and Warehouses, and the hard parts are incremental loading, change handling and knowing what state the estate is in, that is what Weaver is for.</p>
 
           <div class="cards two">
-            <a class="card" href="/get-started/">
+            <a class="card" href="../get-started/index.html">
               <h3>Try it against your own workspace</h3>
               <p>One install and one command gets you a working example you can read.</p>
               <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
             </a>
-            <a class="card" href="/how-it-works/">
+            <a class="card" href="../how-it-works/index.html">
               <h3>See the operating model</h3>
               <p>Build, the Catalogue, load, test and health, and the mechanics underneath them.</p>
               <span class="go">How it works <span class="arrow" aria-hidden="true">→</span></span>
@@ -395,11 +382,11 @@
         <div class="footer-links">
           <ul>
             <strong>Site</strong>
-            <li><a href="/get-started/">Get started</a></li>
-            <li><a href="/problem/">The problem</a></li>
-            <li><a href="/how-it-works/">How it works</a></li>
-            <li><a href="/scale/">Built for scale</a></li>
-            <li><a href="/vs-dbt/">Weaver vs dbt</a></li>
+            <li><a href="../get-started/index.html">Get started</a></li>
+            <li><a href="../problem/index.html">The problem</a></li>
+            <li><a href="../how-it-works/index.html">How it works</a></li>
+            <li><a href="../scale/index.html">Built for scale</a></li>
+            <li><a href="../vs-dbt/index.html">Weaver vs dbt</a></li>
           </ul>
           <ul>
             <strong>Project</strong>
@@ -412,6 +399,6 @@
       </div>
     </footer>
 
-    <script src="/assets/site.js" defer></script>
+    <script src="../assets/site.js" defer></script>
   </body>
 </html>

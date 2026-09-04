@@ -23,10 +23,10 @@
     <meta name="twitter:title" content="Weaver: Microsoft Fabric, made easier.">
     <meta name="twitter:description" content="Build and operate data on Microsoft Fabric from one repository.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
-    <link rel="icon" type="image/png" sizes="128x128" href="/favicon.png">
-    <link rel="manifest" href="/site.webmanifest">
-    <link rel="sitemap" type="application/xml" href="/sitemap.xml">
-    <link rel="stylesheet" href="/assets/site.css">
+    <link rel="icon" type="image/png" sizes="128x128" href="favicon.png">
+    <link rel="manifest" href="site.webmanifest">
+    <link rel="sitemap" type="application/xml" href="sitemap.xml">
+    <link rel="stylesheet" href="assets/site.css">
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -63,14 +63,14 @@
 
     <header class="site-header">
       <nav class="nav wrap" aria-label="Primary">
-        <a class="brand" href="/" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
+        <a class="brand" href="index.html" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
         <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
         <div class="nav-links" id="nav-links">
-          <a href="/get-started/">Get started</a>
-          <a href="/problem/">The problem</a>
-          <a href="/how-it-works/">How it works</a>
-          <a href="/scale/">Built for scale</a>
-          <a href="/vs-dbt/">Weaver vs dbt</a>
+          <a href="get-started/index.html">Get started</a>
+          <a href="problem/index.html">The problem</a>
+          <a href="how-it-works/index.html">How it works</a>
+          <a href="scale/index.html">Built for scale</a>
+          <a href="vs-dbt/index.html">Weaver vs dbt</a>
           <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
         </div>
       </nav>
@@ -82,7 +82,7 @@
           <h1>Microsoft Fabric, made easier.</h1>
           <p class="lead">Weaver helps you build and operate data pipelines across Microsoft Fabric from one repository. You write normal Python and T-SQL. Weaver works out what depends on what, builds it into your Lakehouses and Warehouses, and keeps track of what has run.</p>
           <p style="margin-top: 26px;">
-            <a class="button blue" href="/get-started/">Get started</a>
+            <a class="button blue" href="get-started/index.html">Get started</a>
             <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack" style="margin-left: 8px;">View on GitHub <span class="arrow" aria-hidden="true">↗</span></a>
           </p>
         </div>
@@ -93,28 +93,28 @@
           <h2>Where would you like to start?</h2>
           <p class="lede">Four ways in, depending on what you came for.</p>
           <div class="cards two">
-            <a class="card" href="/get-started/">
+            <a class="card" href="get-started/index.html">
               <h3>Get started</h3>
               <p>Install Weaver, set up a project against your own Fabric workspace, and build, load and test a small working example. Two paths: a Fabric notebook, or your desktop.</p>
               <span class="go">Take the walkthrough <span class="arrow" aria-hidden="true">→</span></span>
             </a>
-            <a class="card" href="/problem/">
+            <a class="card" href="problem/index.html">
               <h3>The problem Weaver solves</h3>
               <p>Building one thing in Fabric is straightforward. Coordinating a whole data platform is harder. Here is where the difficulty actually comes from.</p>
               <span class="go">Read the case <span class="arrow" aria-hidden="true">→</span></span>
             </a>
-            <a class="card" href="/how-it-works/">
+            <a class="card" href="how-it-works/index.html">
               <h3>How it works</h3>
               <p>What happens when you run build, load and test, and why the Catalogue sits at the centre of all three.</p>
               <span class="go">See the model <span class="arrow" aria-hidden="true">→</span></span>
             </a>
-            <a class="card" href="/scale/">
+            <a class="card" href="scale/index.html">
               <h3>Built for scale</h3>
               <p>The same dependency model that runs the small Sales example also runs estates with hundreds of objects across several Fabric items.</p>
               <span class="go">See a real estate <span class="arrow" aria-hidden="true">→</span></span>
             </a>
           </div>
-          <p class="small muted">Comparing tools? There is a detailed, fair <a href="/vs-dbt/">Weaver vs dbt</a> page.</p>
+          <p class="small muted">Comparing tools? There is a detailed <a href="vs-dbt/index.html">Weaver vs dbt</a> page.</p>
         </div>
       </section>
 
@@ -246,7 +246,7 @@ compose.yml
             <figcaption>Item boundaries are visible. They are not execution boundaries: the Warehouse join waits for the Lakehouse table it reads.</figcaption>
           </figure>
 
-          <p><a class="text-link" href="/get-started/">Build this example against your own workspace <span class="arrow" aria-hidden="true">→</span></a></p>
+          <p><a class="text-link" href="get-started/index.html">Build this example against your own workspace <span class="arrow" aria-hidden="true">→</span></a></p>
         </div>
       </section>
 
@@ -260,7 +260,7 @@ compose.yml
 weaver initialise</pre>
           </div>
           <p>
-            <a class="button blue" href="/get-started/">Walk through the whole thing</a>
+            <a class="button blue" href="get-started/index.html">Walk through the whole thing</a>
           </p>
         </div>
       </section>
@@ -277,11 +277,11 @@ weaver initialise</pre>
         <div class="footer-links">
           <ul>
             <strong>Site</strong>
-            <li><a href="/get-started/">Get started</a></li>
-            <li><a href="/problem/">The problem</a></li>
-            <li><a href="/how-it-works/">How it works</a></li>
-            <li><a href="/scale/">Built for scale</a></li>
-            <li><a href="/vs-dbt/">Weaver vs dbt</a></li>
+            <li><a href="get-started/index.html">Get started</a></li>
+            <li><a href="problem/index.html">The problem</a></li>
+            <li><a href="how-it-works/index.html">How it works</a></li>
+            <li><a href="scale/index.html">Built for scale</a></li>
+            <li><a href="vs-dbt/index.html">Weaver vs dbt</a></li>
           </ul>
           <ul>
             <strong>Project</strong>
@@ -294,6 +294,6 @@ weaver initialise</pre>
       </div>
     </footer>
 
-    <script src="/assets/site.js" defer></script>
+    <script src="assets/site.js" defer></script>
   </body>
 </html>
