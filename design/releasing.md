@@ -77,13 +77,25 @@ ordinary CI suite.
 
 - a working tree with uncommitted changes;
 - a branch other than `main`;
-- a `HEAD` that is ahead of or behind `origin/main`, because CI builds what the
-  remote has;
+- a `HEAD` that does not match `origin/main`, because CI builds what the remote
+  has;
 - a tag that already exists on a different commit, because a version that
   reached PyPI cannot be replaced.
 
-Re-running on the same commit is the safe rerun case: the tag already names
-exactly this source, so pushing it again re-triggers the workflow.
+## Re-running a failed release
+
+Pushing a tag that is already on the remote at the same commit updates no ref,
+so GitHub raises no event and the workflow does not start again. `release.py`
+detects that and stops, saying so:
+
+```text
+v0.9.0 is already pushed for this commit, so there is nothing to do.
+Rerun the Publish to PyPI workflow in GitHub Actions to publish it.
+```
+
+Rerun the workflow from the Actions tab. If the source itself needs to change,
+it is a different release: set `VERSION` to the next version and tag that,
+because a version PyPI has accepted cannot be replaced.
 
 ## The chain into Fabric
 

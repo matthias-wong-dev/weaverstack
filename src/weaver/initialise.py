@@ -485,17 +485,7 @@ def _state_of(item, *, client) -> str:
 
 
 def _names_weaver(definition) -> bool:
-    """Whether a definition carries the Weaver this client is.
-
-    A custom wheel is a development publication and is taken as it is: the
-    checkout's own wheel is the Weaver installed there, and its version moves
-    with the source rather than with PyPI.
-
-    A PyPI requirement has to name this Weaver. An Environment holding
-    ``weaverstack==0.9.1`` is not ready for a ``0.9.0`` client, so it is
-    reported unprepared and the ordinary Environment machinery republishes it.
-    A development client pins nothing, so it asks only that Weaver is named.
-    """
+    """Whether the Environment holds a Weaver version this client accepts."""
 
     from .fabric.environment import is_weaver_wheel
     from .fabric.environment_definition import (
@@ -518,7 +508,7 @@ def _names_weaver(definition) -> bool:
 
 
 def _same_requirement(written: str, wanted: str) -> bool:
-    """Whether an authored entry asks for exactly the requirement Weaver wants."""
+    """Whether two requirement entries carry the same specifier."""
 
     from packaging.requirements import InvalidRequirement, Requirement
 

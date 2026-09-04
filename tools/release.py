@@ -1,19 +1,7 @@
 #!/usr/bin/env python3
-"""Tag the release `VERSION` names, and push it.
+"""Tag the version declared in `VERSION` and push the tag.
 
-    python tools/release.py
-
-There is no version argument. `VERSION` is the release, so there is nothing to
-mistype here and nothing to keep in step with it.
-
-Publishing belongs to GitHub Actions. Pushing the tag is the release event: the
-workflow checks the tag against `VERSION`, runs the suite, builds, verifies both
-artefacts carry that exact version, publishes to PyPI through trusted
-publishing, and creates the GitHub Release. This script uploads nothing.
-
-Before tagging it requires a clean working tree on the release branch, level
-with its remote, because the tag has to name source that CI can see and that
-nobody has edited underneath it.
+GitHub Actions performs the build and publication. See design/releasing.md.
 """
 
 from __future__ import annotations
@@ -25,7 +13,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-#: Where releases are cut from.
 RELEASE_BRANCH = "main"
 REMOTE = "origin"
 
@@ -45,7 +32,7 @@ def git(*args: str, check: bool = True) -> str:
 
 
 def declared_version() -> str:
-    """The release `VERSION` names, validated the way a build validates it."""
+    """Read and validate the version declared in `VERSION`."""
 
     sys.path.insert(0, str(ROOT))
     from hatch_build import declared_version as read
@@ -54,6 +41,8 @@ def declared_version() -> str:
 
 
 def require_clean_tree() -> None:
+    """Require no uncommitted changes."""
+
     if git("status", "--porcelain"):
         raise ReleaseError(
             "The working tree has uncommitted changes.\n"
@@ -62,7 +51,7 @@ def require_clean_tree() -> None:
 
 
 def require_release_branch() -> None:
-    """On the release branch, and level with the remote CI will build from."""
+    """Require local `main` to match `origin/main`."""
 
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     if branch != RELEASE_BRANCH:
@@ -71,54 +60,38 @@ def require_release_branch() -> None:
         )
 
     git("fetch", REMOTE, RELEASE_BRANCH, "--tags")
-    local = git("rev-parse", "HEAD")
-    remote = git("rev-parse", f"{REMOTE}/{RELEASE_BRANCH}")
-    if local == remote:
-        return
-    # Behind is fatal: CI would build a commit this checkout has never seen.
-    # Ahead is fatal too, because the tag would point at an unpushed commit.
-    behind, ahead = git(
-        "rev-list", "--left-right", "--count", f"{remote}...{local}"
-    ).split()
-    raise ReleaseError(
-        f"HEAD is {ahead} commit(s) ahead of and {behind} behind "
-        f"{REMOTE}/{RELEASE_BRANCH}.\n"
-        f"Push or pull so the two agree, then release."
-    )
+    if git("rev-parse", "HEAD") != git("rev-parse", f"{REMOTE}/{RELEASE_BRANCH}"):
+        raise ReleaseError(
+            f"HEAD does not match {REMOTE}/{RELEASE_BRANCH}.\n"
+            "Push or pull so the two agree, then release."
+        )
 
 
-def require_tag_is_free(tag: str) -> None:
-    """Refuse a tag that already exists, unless it already names this commit.
+def tag_state(tag: str) -> str:
+    """Require the release tag to be unused or already point at HEAD.
 
-    Re-running after a workflow failure is the safe case: the tag is already
-    pointing at exactly this source, so pushing it again is what re-triggers
-    the release. Moving a tag onto different source is never safe, because a
-    version that reached PyPI cannot be replaced.
+    Returns ``new``, ``local`` or ``pushed``.
     """
 
     head = git("rev-parse", "HEAD")
-    local = git("rev-parse", "--verify", "--quiet", f"refs/tags/{tag}", check=False)
-    remote = git("ls-remote", "--tags", REMOTE, f"refs/tags/{tag}")
-
-    remote_commit = remote.split()[0] if remote else ""
-    # An annotated tag's ref resolves to the tag object, so compare the commit
-    # each one points at.
-    local_commit = git("rev-list", "-n", "1", tag, check=False) if local else ""
-    remote_head = (
-        git("rev-list", "-n", "1", remote_commit, check=False) if remote_commit else ""
+    local = git("rev-list", "-n", "1", tag, check=False)
+    listed = git("ls-remote", "--tags", REMOTE, f"refs/tags/{tag}")
+    remote = (
+        git("rev-list", "-n", "1", listed.split()[0], check=False) if listed else ""
     )
 
-    for where, commit in (("locally", local_commit), (f"on {REMOTE}", remote_head)):
+    for where, commit in (("locally", local), (f"on {REMOTE}", remote)):
         if commit and commit != head:
             raise ReleaseError(
                 f"Tag {tag} already exists {where}, on a different commit.\n"
                 f"  {tag} -> {commit[:12]}\n"
                 f"  HEAD -> {head[:12]}\n\n"
-                f"That version may already be published. Set VERSION to the next "
-                f"release, and tag that."
+                "That version may already be published. Set VERSION to the next "
+                "release, and tag that."
             )
-    if local_commit == head and remote_head == head:
-        print(f"Tag {tag} already names this commit. Pushing it again.")
+    if remote:
+        return "pushed"
+    return "local" if local else "new"
 
 
 def release() -> int:
@@ -127,16 +100,20 @@ def release() -> int:
 
     require_clean_tree()
     require_release_branch()
-    require_tag_is_free(tag)
+    state = tag_state(tag)
 
-    head = git("rev-parse", "HEAD")
+    if state == "pushed":
+        # Re-pushing an identical tag updates no ref, so GitHub raises no event.
+        print(f"{tag} is already pushed for this commit, so there is nothing to do.")
+        print("Rerun the Publish to PyPI workflow in GitHub Actions to publish it.")
+        return 0
+
     print(f"Releasing weaverstack {version}")
-    print(f"  branch   {RELEASE_BRANCH}")
-    print(f"  commit   {head[:12]}")
+    print(f"  commit   {git('rev-parse', 'HEAD')[:12]}")
     print(f"  tag      {tag}")
     print()
 
-    if git("rev-parse", "--verify", "--quiet", f"refs/tags/{tag}", check=False) == "":
+    if state == "new":
         git("tag", "-a", tag, "-m", f"weaverstack {version}")
     git("push", REMOTE, tag)
 

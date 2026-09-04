@@ -1,15 +1,7 @@
 #!/usr/bin/env python3
-"""Read the version back out of the built artefacts and check it.
+"""Check that the built wheel and sdist carry the expected version.
 
-    python tools/check_release_artefacts.py --version 0.9.0
-
-Hatch derives the wheel version from `VERSION` and the release tag, and the
-release workflow has already checked those two against each other. This checks
-the third thing: that what was actually built carries that version, in both the
-wheel and the sdist, in the filename and in the metadata.
-
-Run without `--version` to check the artefacts against `VERSION` itself, for a
-local `python -m build`.
+Defaults to the version declared in `VERSION`. See design/releasing.md.
 """
 
 from __future__ import annotations
@@ -93,8 +85,7 @@ def check(directory: Path, expected: str) -> list[str]:
             raise ArtefactError(
                 f"{path.name} carries version {version}, not {expected}"
             )
-        # The filename is what an index and a Fabric Environment see, so it has
-        # to carry the same version the metadata does.
+        # An index and a Fabric Environment read the filename, not the metadata.
         if f"-{expected}" not in path.name.replace(f"{DISTRIBUTION}-", "-", 1):
             raise ArtefactError(f"{path.name} is not named for version {expected}")
     return found

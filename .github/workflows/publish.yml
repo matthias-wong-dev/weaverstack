@@ -1,9 +1,4 @@
-# Pushing a `v*` tag is the release event.
-#
-# `tools/release.py` creates that tag from VERSION, so the tag is an assertion
-# about the source rather than the source of the version. Everything here either
-# derives from VERSION or is checked against it, and nothing publishes until all
-# of it agrees.
+# Pushing a `v*` tag is the release event. See design/releasing.md.
 name: Publish to PyPI
 
 on:
@@ -25,8 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The version source fingerprints the whole history's HEAD, and the
-          # release check needs the tag that triggered this run.
+          # The version source needs the history and the triggering tag.
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -34,9 +28,7 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      # The tag is a claim about VERSION. Refuse the whole run before anything
-      # is built or published if the two disagree.
-      - name: Check the tag against VERSION
+      - name: Verify the tag matches VERSION
         id: version
         run: |
           version="$(cat VERSION)"
@@ -51,11 +43,10 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: pip install -e . --no-deps
 
-      - run: ruff check src tests examples
-      - run: ruff format --check src tests examples
+      - run: ruff check src tests examples tools hatch_build.py
+      - run: ruff format --check src tests examples tools hatch_build.py
 
-      # The ordinary suite, which is what the branch already passed. Fabric
-      # tests need live infrastructure, so they stay out of the publishing path.
+      # Fabric tests need live infrastructure, so they stay out of this path.
       - run: pytest
 
       - name: Build distributions
@@ -63,9 +54,7 @@ jobs:
           pip install build twine
           python -m build
 
-      # Hatch computed the version from VERSION and the tag. Read it back out of
-      # what was actually built rather than trusting that it did.
-      - name: Verify artefact metadata
+      - name: Verify the built artefacts carry the expected version
         run: python tools/check_release_artefacts.py --version "${{ steps.version.outputs.version }}"
 
       - run: twine check dist/*
@@ -95,8 +84,7 @@ jobs:
 
   github-release:
     name: create the GitHub Release
-    # Only after the artefacts are on PyPI, so a Release never claims a
-    # publication that did not happen.
+    # Only after PyPI, so a Release never claims a publication that failed.
     needs: [build, publish]
     runs-on: ubuntu-latest
 
