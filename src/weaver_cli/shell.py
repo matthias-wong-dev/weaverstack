@@ -287,14 +287,20 @@ def _history_path():
 def _default_workspace(args: argparse.Namespace):
     """Return the default workspace when the invocation defines one.
 
-    An invocation that named none has none, and that is a state. An invocation
-    that named a configuration file raises the ``ConfigError`` that file
+    An invocation names one on the command line, or by being run from a project
+    directory: `workspace-config.yml` beside it is what a composition of bare
+    entries runs in, and what a session with no arguments opens on. An
+    invocation with neither has none, and that is a state.
+
+    A configuration file that cannot be read raises the ``ConfigError`` it
     carries, naming the field that is wrong.
     """
 
+    from weaver.config import discovered_workspace_config
+
     from .main import _resolve_workspace, workspace_supplied
 
-    if not workspace_supplied(args):
+    if not workspace_supplied(args) and discovered_workspace_config() is None:
         return None
     return _resolve_workspace(args)
 

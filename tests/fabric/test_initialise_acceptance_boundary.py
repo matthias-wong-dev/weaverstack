@@ -17,7 +17,7 @@ from support.weaver_test import register_session, weaver_test
 
 import weaver
 from weaver.config import load_workspace
-from weaver.initialise import CREATED, EXISTING, WRITTEN
+from weaver.initialise import CREATED, EXISTING
 from weaver.sessions import ConsoleSession
 
 
@@ -26,26 +26,43 @@ def _status(report, role: str) -> str:
 
 
 @pytest.fixture
-def estate(fabric_workspace, fabric_catalogue, fabric_target_lakehouse):
-    """The fixed items this tenant already holds, named as initialise takes them."""
+def estate(
+    fabric_workspace, fabric_catalogue, fabric_target_lakehouse, environment_name
+):
+    """The fixed items this tenant already holds, named as initialise takes them.
+
+    The Environment is named too. Initialise creates the item a project declares,
+    and this suite creates no Fabric item, so every name here is one the estate
+    already has.
+    """
 
     return {
         "workspace": fabric_workspace.workspace,
         "catalogue": fabric_catalogue.name,
+        "environment": environment_name,
         "lakehouse": fabric_target_lakehouse.name,
     }
 
 
 @weaver_test(remote=True, resources={"rest"})
-def test_a_dry_run_reports_the_items_the_workspace_already_holds(estate, tmp_path):
-    """The read that decides create against reuse, asked of real Fabric."""
+def test_a_dry_run_reports_the_items_the_workspace_already_holds(
+    estate, tmp_path, rest_session
+):
+    """The read that decides create against reuse, asked of real Fabric.
+
+    Through the suite's own Session, which is what attributes the crossing.
+    Initialise reads the workspace through the Session's client rather than one
+    of its own, so the control-plane work it does is counted.
+    """
 
     report = weaver.initialise(
         tmp_path,
         workspace=estate["workspace"],
         catalogue=estate["catalogue"],
+        environment=estate["environment"],
         lakehouse=estate["lakehouse"],
         dry_run=True,
+        session=rest_session,
     )
 
     assert _status(report, "Catalogue") == EXISTING
@@ -54,21 +71,25 @@ def test_a_dry_run_reports_the_items_the_workspace_already_holds(estate, tmp_pat
 
 
 @weaver_test(remote=True, resources={"rest"})
-def test_a_project_is_written_against_items_that_are_reused(estate, tmp_path):
+def test_a_project_is_written_against_items_that_are_reused(
+    estate, tmp_path, rest_session
+):
     """Nothing is created, and the project binds to the items that were found."""
 
     report = weaver.initialise(
         tmp_path,
         workspace=estate["workspace"],
         catalogue=estate["catalogue"],
+        environment=estate["environment"],
         lakehouse=estate["lakehouse"],
         publish_environment=False,
+        session=rest_session,
     )
 
     assert report.created == ()
     assert _status(report, "Catalogue") == EXISTING
     assert _status(report, "Lakehouse") == EXISTING
-    assert _status(report, "Environment") == WRITTEN
+    assert _status(report, "Environment") == EXISTING
 
     configured = load_workspace(tmp_path / "workspace-config.yml")
     assert configured.workspace == estate["workspace"]
@@ -79,7 +100,7 @@ def test_a_project_is_written_against_items_that_are_reused(estate, tmp_path):
 
 
 @weaver_test(remote=True, resources={"rest"})
-def test_a_rerun_converges(estate, tmp_path):
+def test_a_rerun_converges(estate, tmp_path, rest_session):
     """No rollback exists, so a run that stopped part-way is finished by repeating.
 
     The same request twice writes the same bytes and creates nothing, which is
@@ -90,15 +111,19 @@ def test_a_rerun_converges(estate, tmp_path):
         tmp_path,
         workspace=estate["workspace"],
         catalogue=estate["catalogue"],
+        environment=estate["environment"],
         lakehouse=estate["lakehouse"],
         publish_environment=False,
+        session=rest_session,
     )
     second = weaver.initialise(
         tmp_path,
         workspace=estate["workspace"],
         catalogue=estate["catalogue"],
+        environment=estate["environment"],
         lakehouse=estate["lakehouse"],
         publish_environment=False,
+        session=rest_session,
     )
 
     assert first.created == ()
@@ -109,7 +134,11 @@ def test_a_rerun_converges(estate, tmp_path):
 
 @weaver_test(remote=True, resources={"rest", "tds"})
 def test_a_generated_warehouse_project_builds_loads_and_tests(
-    fabric_workspace, fabric_catalogue, emptied_disposable_warehouse, tmp_path
+    fabric_workspace,
+    fabric_catalogue,
+    environment_name,
+    emptied_disposable_warehouse,
+    tmp_path,
 ):
     """The onboarding claim, end to end, on the cheapest topology that makes it.
 
@@ -124,6 +153,7 @@ def test_a_generated_warehouse_project_builds_loads_and_tests(
             tmp_path,
             workspace=fabric_workspace.workspace,
             catalogue=fabric_catalogue.name,
+            environment=environment_name,
             warehouse=emptied_disposable_warehouse.item.name,
             example=True,
             publish_environment=False,

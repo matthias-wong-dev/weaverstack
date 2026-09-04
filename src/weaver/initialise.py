@@ -49,7 +49,6 @@ CREATED = "created"
 EXISTING = "existing"
 PUBLISHED = "published"
 UNCHANGED = "unchanged"
-WRITTEN = "written"
 PLANNED = "planned"
 
 #: What each requested item is to the project.
@@ -200,21 +199,6 @@ def initialise(
     _refuse_edited_files(destination, files)
 
     from .fabric.resources import find_workspace
-
-    physical = find_workspace(request.workspace, client=client)
-    found = _inspect(physical, request, client=client)
-    if dry_run:
-        # Nothing after this point reads a session, and nothing before it
-        # changed anything, so a dry run stops with the workspace read alone.
-        return InitialiseReport(
-            repository=str(destination),
-            workspace=request.workspace,
-            resources=_planned(request, found),
-            files=tuple(sorted(files)),
-            example=ExampleOutcome(generated=request.example),
-            dry_run=True,
-        )
-
     from .sessions.host import inside_fabric_session, use_or_create_session
 
     if publish_environment is None:
@@ -225,9 +209,26 @@ def initialise(
 
     resources = []
     with use_or_create_session(session, workspace=configured) as opened:
+        # Every crossing goes through the Session's own client, so what this
+        # asked of Fabric is attributed and counted where the rest of Weaver's
+        # is. Constructing one here would leave the control-plane reads
+        # invisible to the Session that owns them.
+        rest = client if client is not None else opened.resolver(configured).client
+        physical = find_workspace(request.workspace, client=rest)
+        found = _inspect(physical, request, client=rest)
+        if dry_run:
+            return InitialiseReport(
+                repository=str(destination),
+                workspace=request.workspace,
+                resources=_planned(request, found),
+                files=tuple(sorted(files)),
+                example=ExampleOutcome(generated=request.example),
+                dry_run=True,
+            )
+
         with opened.task("Setting up your Weaver project", request.workspace):
             resources.extend(
-                _create_missing(physical, request, found, session=opened, client=client)
+                _create_missing(physical, request, found, session=opened, client=rest)
             )
             with opened.step("Writing the project files", str(destination)):
                 _write(destination, files)
@@ -237,7 +238,7 @@ def initialise(
                     destination,
                     publish=publish_environment,
                     session=opened,
-                    client=client,
+                    client=rest,
                 )
             )
             outcome = (
@@ -428,9 +429,13 @@ def _inspect(physical, request: ProjectRequest, *, client) -> dict[str, bool]:
 def _planned(
     request: ProjectRequest, found: dict[str, bool]
 ) -> tuple[FabricItemOutcome, ...]:
-    """What a run would do to each requested item, having changed nothing."""
+    """What a run would do to each requested item, having changed nothing.
 
-    return tuple(
+    Reported in the order a real run reports them, so what a dry run shows and
+    what the run itself shows are the same list.
+    """
+
+    return _in_role_order(
         FabricItemOutcome(
             role=wanted.role,
             name=wanted.name,
@@ -486,14 +491,22 @@ def _environment_outcome(
     session,
     client,
 ) -> FabricItemOutcome:
-    """Publish the generated Environment definition, or leave it written.
+    """Publish the generated Environment definition, or create the item alone.
 
-    Publishing sends the definition whole and creates the Environment where the
-    workspace has none, so nothing here creates the item separately.
+    Publishing sends the definition whole, creates the Environment where the
+    workspace has none, stages Weaver's libraries and waits for Fabric to
+    resolve them. That last part is the minutes.
+
+    Not publishing still creates the item, because the generated configuration
+    names an Environment and a build proves its targets exist before it opens
+    anything. What is skipped is the library publication, which is what a
+    notebook already has from `%pip install weaverstack`.
     """
 
     if not publish:
-        return FabricItemOutcome(ENVIRONMENT_ROLE, request.environment, WRITTEN)
+        return _created_environment(
+            request, destination, session=session, client=client
+        )
 
     from .fabric import publish_environment as publish_definition
 
@@ -523,28 +536,77 @@ def _environment_outcome(
     )
 
 
+def _created_environment(
+    request: ProjectRequest, destination: Path, *, session, client
+) -> FabricItemOutcome:
+    """The Environment item, made from the generated definition and not published."""
+
+    from .fabric.environment import create_with_definition
+    from .fabric.environment_definition import read_environment_definition
+    from .fabric.resources import (
+        ENVIRONMENT,
+        ItemNotFoundError,
+        find_item,
+        find_workspace,
+    )
+
+    physical = find_workspace(request.workspace, client=client)
+    try:
+        find_item(physical, request.environment, item_type=ENVIRONMENT, client=client)
+        return FabricItemOutcome(ENVIRONMENT_ROLE, request.environment, EXISTING)
+    except ItemNotFoundError:
+        pass
+
+    directory = destination / environment_directory(request.environment)
+    try:
+        with session.step("Creating the Environment", request.environment):
+            create_with_definition(
+                physical,
+                request.environment,
+                read_environment_definition(directory),
+                client=client,
+            )
+    except WeaverError as exc:
+        raise InitialiseError(
+            f"The Environment '{request.environment}' could not be created.\n"
+            "\n"
+            f"Fabric returned: {exc}\n"
+            "\n"
+            "Fix that and run `weaver initialise` again. Items that already\n"
+            "exist are reused."
+        ) from exc
+    return FabricItemOutcome(ENVIRONMENT_ROLE, request.environment, CREATED)
+
+
 def _run_example(
     request: ProjectRequest, destination: Path, *, session
 ) -> ExampleOutcome:
-    """Build, load and test the generated example, stopping at the first failure."""
+    """Build, load and test the generated example, stopping at the first failure.
+
+    Each operation names the configuration this run just wrote. A borrowed
+    Session carries a workspace of its own, and its items are not the ones this
+    project declares, so leaving the configuration unnamed would build the
+    caller's estate instead of the example.
+    """
 
     from .operations.build import build
     from .operations.load import load
     from .operations.test import test
 
+    project = destination / WORKSPACE_CONFIG_FILE
     with session.step("Creating the Sales example"):
         with session.substep("Building"):
-            built = build(destination, session=session)
+            built = build(destination, workspace_config=project, session=session)
         if not built.succeeded:
             return ExampleOutcome(generated=True, build=built.status, succeeded=False)
         with session.substep("Loading"):
-            loaded = load(session=session)
+            loaded = load(workspace_config=project, session=session)
         if not loaded.succeeded:
             return ExampleOutcome(
                 generated=True, build=built.status, load=loaded.status, succeeded=False
             )
         with session.substep("Testing"):
-            tested = test(session=session)
+            tested = test(workspace_config=project, session=session)
     return ExampleOutcome(
         generated=True,
         build=built.status,

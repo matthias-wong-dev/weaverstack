@@ -124,3 +124,50 @@ def test_an_invalid_discovered_file_is_reported_against_itself(tmp_path, monkeyp
 
     with pytest.raises(ConfigError, match="must define 'workspace'"):
         resolve_workspace()
+
+
+# --- what a composition and a session run in -----------------------------------
+
+
+def _namespace(**values):
+    import argparse
+
+    defaults = {"workspace": None, "workspace_config": None, "session": None}
+    defaults.update(values)
+    return argparse.Namespace(**defaults)
+
+
+@weaver_test()
+def test_a_composition_of_bare_entries_runs_in_the_project_it_was_started_in(project):
+    """`weaver compose full` in a generated project names no workspace anywhere.
+
+    The composition resolves one for its entries, and with nothing on the
+    command line that is the configuration beside it.
+    """
+
+    from weaver_cli.shell import _default_workspace
+
+    resolved = _default_workspace(_namespace())
+
+    assert resolved is not None
+    assert resolved.workspace == "Weaver Example"
+
+
+@weaver_test()
+def test_an_invocation_outside_a_project_still_has_no_workspace(tmp_path, monkeypatch):
+    """Absence stays a state, so a command that can proceed without one does."""
+
+    from weaver_cli.shell import _default_workspace
+
+    monkeypatch.chdir(tmp_path)
+
+    assert _default_workspace(_namespace()) is None
+
+
+@weaver_test()
+def test_a_named_workspace_still_wins_over_the_project(project):
+    from weaver_cli.shell import _default_workspace
+
+    resolved = _default_workspace(_namespace(workspace="Somewhere Else"))
+
+    assert resolved.workspace == "Somewhere Else"

@@ -22,7 +22,6 @@ from weaver.initialise import (
     PLANNED,
     PUBLISHED,
     UNCHANGED,
-    WRITTEN,
     InitialiseError,
 )
 
@@ -49,6 +48,18 @@ class _Publication:
         self.published = published
 
 
+class _Resolver:
+    """The one seam a doubled host still has to have: a REST client.
+
+    Initialise reads the workspace through the Session's own client, so what it
+    asked of Fabric is counted where the rest of Weaver's crossings are. This
+    stands in for that client.
+    """
+
+    def __init__(self) -> None:
+        self.client = object()
+
+
 @pytest.fixture
 def fabric(monkeypatch):
     """A workspace whose items are a list this test controls."""
@@ -56,6 +67,7 @@ def fabric(monkeypatch):
     held: list[_Item] = []
     created: list[str] = []
     published: list[str] = []
+    environments: list[str] = []
 
     def find_workspace(name, *, client=None):
         return _Workspace()
@@ -79,6 +91,11 @@ def fabric(monkeypatch):
         published.append(str(path))
         return _Publication(published=True)
 
+    def create_with_definition(workspace, name, definition, *, client=None):
+        environments.append(name)
+        held.append(_Item(name, resources.ENVIRONMENT))
+        return held[-1]
+
     monkeypatch.setattr(resources, "find_workspace", find_workspace)
     monkeypatch.setattr(resources, "list_items", list_items)
     monkeypatch.setattr(resources, "create_lakehouse", create_lakehouse)
@@ -86,20 +103,33 @@ def fabric(monkeypatch):
     monkeypatch.setattr(
         "weaver.fabric.publish_environment", publish_environment, raising=False
     )
+    monkeypatch.setattr(
+        "weaver.fabric.environment.create_with_definition", create_with_definition
+    )
 
+    from weaver.sessions.testing import TestSession
+
+    session = TestSession(resolver=_Resolver())
     return type(
         "Fabric",
         (),
-        {"held": held, "created": created, "published": published},
+        {
+            "held": held,
+            "created": created,
+            "published": published,
+            "environments": environments,
+            "session": session,
+        },
     )
 
 
-def _initialise(tmp_path, **kwargs):
+def _initialise(tmp_path, fabric, **kwargs):
     defaults = {
         "workspace": WORKSPACE,
         "lakehouse": "Landing",
         "warehouse": "Curated",
         "example": False,
+        "session": fabric.session,
     }
     defaults.update(kwargs)
     return weaver.initialise(tmp_path, **defaults)
@@ -111,7 +141,7 @@ def _status(report, role: str) -> str:
 
 @weaver_test()
 def test_missing_items_are_created_once_each(tmp_path, fabric):
-    report = _initialise(tmp_path)
+    report = _initialise(tmp_path, fabric)
 
     assert fabric.created == [
         "Warehouse/Catalogue",
@@ -133,7 +163,7 @@ def test_existing_items_are_reused(tmp_path, fabric):
         ]
     )
 
-    report = _initialise(tmp_path)
+    report = _initialise(tmp_path, fabric)
 
     assert fabric.created == []
     assert _status(report, "Catalogue") == EXISTING
@@ -145,8 +175,8 @@ def test_existing_items_are_reused(tmp_path, fabric):
 def test_a_rerun_creates_nothing_twice(tmp_path, fabric):
     """Rerunning is how a run that stopped part-way is finished."""
 
-    first = _initialise(tmp_path)
-    second = _initialise(tmp_path)
+    first = _initialise(tmp_path, fabric)
+    second = _initialise(tmp_path, fabric)
 
     assert len(fabric.created) == 3
     assert first.created == (
@@ -168,7 +198,7 @@ def test_a_lakehouses_sql_endpoint_is_not_a_conflict(tmp_path, fabric):
         ]
     )
 
-    report = _initialise(tmp_path)
+    report = _initialise(tmp_path, fabric)
 
     assert _status(report, "Lakehouse") == EXISTING
 
@@ -180,7 +210,7 @@ def test_a_name_held_by_another_kind_of_item_is_refused_before_anything_is_made(
     fabric.held.append(_Item("Landing", resources.WAREHOUSE))
 
     with pytest.raises(InitialiseError, match="already exists"):
-        _initialise(tmp_path)
+        _initialise(tmp_path, fabric)
 
     assert fabric.created == []
     assert not (tmp_path / "workspace-config.yml").exists()
@@ -194,7 +224,7 @@ def test_a_failed_creation_names_what_fabric_said(tmp_path, fabric, monkeypatch)
     monkeypatch.setattr(resources, "create_warehouse", refuse)
 
     with pytest.raises(InitialiseError) as raised:
-        _initialise(tmp_path)
+        _initialise(tmp_path, fabric)
 
     message = str(raised.value)
     assert "You don't have permission to create this item." in message
@@ -203,7 +233,7 @@ def test_a_failed_creation_names_what_fabric_said(tmp_path, fabric, monkeypatch)
 
 @weaver_test()
 def test_the_environment_is_published_from_a_desktop(tmp_path, fabric):
-    report = _initialise(tmp_path)
+    report = _initialise(tmp_path, fabric)
 
     assert fabric.published == [str(tmp_path / "Environment" / "Weaver.Environment")]
     assert _status(report, "Environment") == PUBLISHED
@@ -217,27 +247,43 @@ def test_an_unchanged_environment_reports_no_publication(tmp_path, fabric, monke
         raising=False,
     )
 
-    report = _initialise(tmp_path)
+    report = _initialise(tmp_path, fabric)
 
     assert _status(report, "Environment") == UNCHANGED
 
 
 @weaver_test()
 def test_publishing_can_be_declined(tmp_path, fabric):
-    """What a notebook run does: the definition is written, and nothing waits."""
+    """What a notebook run does: the item is made, and no publication is waited on.
 
-    report = _initialise(tmp_path, publish_environment=False)
+    The item still has to exist. A generated project names an Environment, and a
+    desktop build proves its targets are there before it opens anything, so a
+    project naming one the workspace has not got would refuse to build.
+    """
+
+    report = _initialise(tmp_path, fabric, publish_environment=False)
 
     assert fabric.published == []
-    assert _status(report, "Environment") == WRITTEN
+    assert fabric.environments == ["Weaver"]
+    assert _status(report, "Environment") == CREATED
     assert (tmp_path / "Environment" / "Weaver.Environment" / ".platform").is_file()
+
+
+@weaver_test()
+def test_an_environment_that_is_there_is_not_made_again(tmp_path, fabric):
+    fabric.held.append(_Item("Weaver", resources.ENVIRONMENT))
+
+    report = _initialise(tmp_path, fabric, publish_environment=False)
+
+    assert fabric.environments == []
+    assert _status(report, "Environment") == EXISTING
 
 
 @weaver_test()
 def test_a_dry_run_changes_nothing(tmp_path, fabric):
     fabric.held.append(_Item("Landing", resources.LAKEHOUSE))
 
-    report = _initialise(tmp_path, dry_run=True)
+    report = _initialise(tmp_path, fabric, dry_run=True)
 
     assert fabric.created == []
     assert fabric.published == []
@@ -249,11 +295,11 @@ def test_a_dry_run_changes_nothing(tmp_path, fabric):
 
 @weaver_test()
 def test_a_project_directory_holding_edited_files_is_not_overwritten(tmp_path, fabric):
-    _initialise(tmp_path)
+    _initialise(tmp_path, fabric)
     (tmp_path / "workspace-config.yml").write_text("workspace: Somewhere Else\n")
 
     with pytest.raises(InitialiseError, match="workspace-config.yml"):
-        _initialise(tmp_path)
+        _initialise(tmp_path, fabric)
 
 
 # --- running the example -------------------------------------------------------
@@ -305,7 +351,7 @@ def operations(monkeypatch):
 
 @weaver_test()
 def test_the_example_is_built_loaded_and_tested(tmp_path, fabric, operations):
-    report = _initialise(tmp_path, example=True)
+    report = _initialise(tmp_path, fabric, example=True)
 
     assert operations == ["build", "load", "test"]
     assert report.example.generated is True
@@ -315,7 +361,7 @@ def test_the_example_is_built_loaded_and_tested(tmp_path, fabric, operations):
 
 @weaver_test()
 def test_no_example_runs_nothing(tmp_path, fabric, operations):
-    report = _initialise(tmp_path, example=False)
+    report = _initialise(tmp_path, fabric, example=False)
 
     assert operations == []
     assert report.example.ran is False
@@ -332,7 +378,7 @@ def test_a_failed_build_stops_before_the_load(
         "weaver.operations.build.build", lambda *args, **kwargs: _Failed()
     )
 
-    report = _initialise(tmp_path, example=True)
+    report = _initialise(tmp_path, fabric, example=True)
 
     assert operations == []
     assert report.example.build == "failed"
@@ -348,7 +394,7 @@ def test_a_passing_test_is_a_success_however_it_spells_it(tmp_path, fabric, oper
     not read back off the word.
     """
 
-    report = _initialise(tmp_path, example=True)
+    report = _initialise(tmp_path, fabric, example=True)
 
     assert report.example.test == "passed"
     assert report.example.succeeded is True
@@ -365,7 +411,9 @@ def test_a_notebooks_own_workspace_is_used_when_none_is_named(
         "weaver.sessions.host.current_workspace_name", lambda: WORKSPACE
     )
 
-    report = weaver.initialise(tmp_path, lakehouse="Landing", dry_run=True)
+    report = weaver.initialise(
+        tmp_path, lakehouse="Landing", dry_run=True, session=fabric.session
+    )
 
     assert report.workspace == WORKSPACE
 
@@ -377,7 +425,7 @@ def test_no_workspace_outside_fabric_says_how_to_give_one(
     monkeypatch.setattr("weaver.sessions.host.current_workspace_name", lambda: None)
 
     with pytest.raises(InitialiseError) as raised:
-        weaver.initialise(tmp_path, lakehouse="Landing")
+        weaver.initialise(tmp_path, lakehouse="Landing", session=fabric.session)
 
     message = str(raised.value)
     assert "A Fabric workspace could not be found." in message

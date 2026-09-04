@@ -293,11 +293,25 @@ class _Item:
         self.workspace_id = "ws-1"
 
 
+class _Credential:
+    """A credential the Session can hold. Nothing here asks it for a token.
+
+    The suite refuses a real one outside `-m fabric`, and the command opens a
+    Session of its own, which acquires whatever `credential()` answers at
+    construction.
+    """
+
+    def get_token(self, *scopes, **_):  # pragma: no cover - never reached
+        raise AssertionError("this test asks Fabric for nothing")
+
+
 @pytest.fixture
 def workspace_holding_nothing(monkeypatch):
     """A reachable workspace with no items in it."""
 
     from weaver.fabric import resources
+
+    monkeypatch.setattr("weaver.fabric.auth.credential", _Credential)
 
     created: list[str] = []
     held: list[_Item] = []
