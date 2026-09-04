@@ -52,7 +52,7 @@
       <section class="section">
         <div class="wrap">
           <h2>Build, load, test and health</h2>
-          <p class="lede">You build, then load, then test. Health tells you where the estate stands afterwards.</p>
+          <p class="lede">You build, then load, then test. Health reports the estate's current state afterwards.</p>
 
           <div class="flow">
             <div class="flow-step"><b>build</b><small>make Fabric match your repository</small></div>
@@ -61,10 +61,10 @@
             <span class="flow-arrow" aria-hidden="true">&#8594;</span>
             <div class="flow-step"><b>test</b><small>run your checks</small></div>
             <span class="flow-arrow" aria-hidden="true">&#8594;</span>
-            <div class="flow-step"><b>health</b><small>ask how the estate is</small></div>
+            <div class="flow-step"><b>health</b><small>report estate state</small></div>
           </div>
 
-          <p>Build creates the tables, views, shortcuts and load code your repository describes, and records them in the Catalogue. Load and test then work from what it installed, and health reads the same records to tell you whether the estate is current.</p>
+          <p>Build creates the tables, views, shortcuts and load code your repository describes, and records them in the Catalogue. Weaver uses the installed state for load and test operations, and uses the same records to assess whether the estate is current.</p>
         </div>
       </section>
 
@@ -75,7 +75,7 @@
           <p>You put each object under the Fabric item that owns it. A Lakehouse item holds Python folders, Delta tables and Spark SQL; a Warehouse item holds T-SQL tables and views. Either can hold Tests and Assumptions. Alongside them you declare shortcuts, schema and folder documents, and the metadata each object carries in its header: description, lineage, primary key, column types and thresholds.</p>
           <p>Because the workspace configuration sits in its own file, you can point the same repository at development or production without touching a single object.</p>
           <div class="callout">
-            <p><strong>A Weaver item is logical; a target is physical.</strong> You write against <code>Lakehouse/Landing</code>, and Weaver might build it into a Fabric Lakehouse called <code>Landing_Dev</code>. Build takes that binding from your workspace configuration, and load, test and health take it from the Catalogue, so the same commands run against either environment.</p>
+            <p><strong>A Weaver item is logical; a target is physical.</strong> You write against <code>Lakehouse/Landing</code>, and Weaver might build it into a Fabric Lakehouse called <code>Landing_Dev</code>. During build, Weaver reads this binding from the workspace configuration. Load, test and health use the binding recorded in the Catalogue, so the same commands run against either environment.</p>
           </div>
         </div>
       </section>
@@ -106,7 +106,7 @@
       <section class="section">
         <div class="wrap">
           <h2>3. The Catalogue</h2>
-          <p class="lede">The Catalogue is where Weaver records what it installed and how it is running. Load, test and health all read it.</p>
+          <p class="lede">The Catalogue is where Weaver records installed and operational state. Weaver uses it for load, test and health.</p>
 
           <div class="cards three">
             <div class="card">
@@ -158,15 +158,15 @@
       <section class="section">
         <div class="wrap">
           <h2>4. Load</h2>
-          <p class="lede">Load runs the data work from what build installed, not from your repository.</p>
-          <p>It reads the Catalogue, rebuilds the dependency graph from the rows already there, and runs each loadable object in order. From those rows it knows:</p>
+          <p class="lede">Load runs the data work from installed state, not from the repository.</p>
+          <p>Weaver reads the Catalogue, rebuilds the dependency graph from the stored rows, and runs each loadable object in order. The Catalogue specifies:</p>
           <ul>
             <li>Which objects are loadable, and which are views that materialise nothing</li>
             <li>What depends on what, across Fabric items as well as inside them</li>
             <li>How far each object has already processed</li>
             <li>What happened to each one last time</li>
           </ul>
-          <p>Name an item and Weaver loads everything it owns, in dependency order. Name none and it loads every installed item. Items are a hard boundary either way: a dependency never drags in an item you did not ask for.</p>
+          <p>When you name an item, Weaver loads everything it owns in dependency order. Without an item name, Weaver loads every installed item. Items are a hard boundary either way: a dependency never adds an item that was not selected.</p>
           <p><a href="#advanced">The mechanics underneath</a> cover incremental loading, row-level change handling, rejected rows and recovery after failure.</p>
         </div>
       </section>
@@ -194,8 +194,8 @@
       <section class="section">
         <div class="wrap">
           <h2>6. Health</h2>
-          <p class="lede">Health tells you where the estate stands now, not how the last command went.</p>
-          <p>It reads the Catalogue across the whole installed estate, so it can flag an object that loaded perfectly well and is stale anyway, because something it reads loaded again afterwards. To answer that you need the dependency graph, not just the last run's exit code.</p>
+          <p class="lede">Health reports the estate's current state, not only the outcome of the last command.</p>
+          <p>Weaver reads the Catalogue across the installed estate and uses the dependency graph to flag objects that are stale because an upstream dependency loaded again.</p>
           <p>It reports:</p>
           <ul>
             <li>Objects whose last load failed or was blocked upstream</li>
@@ -249,12 +249,12 @@
             <pre><span class="c-key">logical:</span>
   Warehouse/Curated/Sales.Customer: Lakehouse/Landing/Tables/Sales.Customer</pre>
           </div>
-          <p>Your Warehouse object then selects from <code>[Sales].[Customer]</code> as though it were local. Both sides are logical names, and Weaver resolves them through the Catalogue, so neither item needs to know where the other is physically built. Build creates the shortcut; load runs the Warehouse object after the Lakehouse table it reads.</p>
+          <p>Your Warehouse object then selects from <code>[Sales].[Customer]</code> as though it were local. Both sides are logical names, and Weaver resolves them through the Catalogue. Build creates the shortcut, and the dependency graph places the Warehouse object after the Lakehouse table it references.</p>
 
           <h3>Incremental load and bookmarks</h3>
-          <p>Weaver remembers how far each object got as a bookmark: one row per loadable table or folder, holding the UTC instant just before its most recent clean load began.</p>
+          <p>Weaver records each object's load position as a bookmark: one row per loadable table or folder, holding the UTC instant just before its most recent clean load began.</p>
           <div class="callout green">
-            <p><strong>A bookmark advances only after a clean load.</strong> A run that rejects rows leaves it where it was, and so does a run that fails. Drop and rebuild an object and it loses its bookmark entirely, so the next load reads everything.</p>
+            <p><strong>A bookmark advances only after a clean load.</strong> Rejected rows and failed loads leave the bookmark unchanged. Dropping and rebuilding an object removes its bookmark, so the next load reads everything.</p>
             <p>Leave a bookmark behind and you replay some data. Move it too far and you skip data without noticing, so Weaver only moves it after a clean load.</p>
           </div>
           <p>In a Lakehouse you read the bookmark yourself and decide what to do with it.</p>
@@ -264,14 +264,14 @@
     <span class="c-dim"># Files changed after the last clean load, and when.</span>
     <span class="c-key">return</span> Source__Export(self).files_since(self.bookmark())</pre>
           </div>
-          <p>There is a matching <code>deleted_since(bookmark)</code> for files that have been retired. An object with no bookmark row reads as an instant far in the past, so your first run is a full load and you write no special case for it.</p>
+          <p>There is a matching <code>deleted_since(bookmark)</code> for files that have been retired. Without a bookmark row, Weaver uses an instant far in the past, so the first run is a full load with no special case.</p>
           <div class="callout amber">
-            <p><strong>Warehouse tables work differently.</strong> Weaver keeps a bookmark for every loadable Warehouse table and uses it to tell whether a <code>Static</code> table has already loaded, but your T-SQL does not read a bookmark window of its own. For a Warehouse table, incremental means something else, which is what a missing key tells you.</p>
+            <p><strong>Warehouse tables work differently.</strong> Weaver records a bookmark for every loadable Warehouse table and determines whether a <code>Static</code> table has already loaded from that state, but T-SQL does not read a bookmark window. For a Warehouse table, incremental loading changes the semantics of a missing key.</p>
           </div>
           <p><code>Incremental: true</code> changes what a missing key means. Without it, Weaver treats your source as the whole truth, so a key that is absent retires the target row. With it, the source is only a window, and a key it does not carry says nothing at all about the target. You need a primary key either way, because otherwise there is nothing to reconcile against.</p>
 
           <h3>Change handling</h3>
-          <p>When a keyed table loads, Weaver works out whether each incoming row is an insert, an update or a delete before it writes anything. That answer is a relation it can query, so the load can look at the whole change before applying any of it.</p>
+          <p>When a keyed table loads, Weaver classifies each incoming row as an insert, update or delete before writing. The resulting relation allows Weaver to evaluate the whole change before applying it.</p>
           <div class="cards two">
             <div class="card">
               <h3>A bad incoming row</h3>

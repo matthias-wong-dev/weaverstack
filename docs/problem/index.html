@@ -72,11 +72,12 @@
       <section class="section">
         <div class="wrap">
           <h2>Coordinating Fabric components</h2>
+          <p class="lede">The complexity starts when those components form one pipeline.</p>
 
           <div class="cards two">
             <div class="card">
               <h3>Two engines, two languages</h3>
-              <p>Your Lakehouse runs Spark and Python; your Warehouse runs T-SQL. They belong to the same pipeline, but Fabric keeps their dependency graphs apart, so you maintain the running order yourself.</p>
+              <p>Your Lakehouse runs Spark and Python; your Warehouse runs T-SQL. Fabric has separate dependency graphs for the two engines, so their execution order requires separate coordination.</p>
             </div>
             <div class="card">
               <h3>Several Fabric items</h3>
@@ -92,7 +93,7 @@
             </div>
             <div class="card">
               <h3>Logical against physical</h3>
-              <p>Your development Lakehouse and your production Lakehouse are separate Fabric items with different names. Something has to know which one a given piece of code means today.</p>
+              <p>Your development Lakehouse and your production Lakehouse are separate Fabric items with different names. Each logical code reference must be resolved to the correct physical item for its environment.</p>
             </div>
             <div class="card">
               <h3>Source control</h3>
@@ -111,8 +112,8 @@
 
           <ul>
             <li><strong>Incremental position.</strong> Reading a full source on every run becomes impractical as volumes grow. A bookmark records how far each object processed.</li>
-            <li><strong>Current operational state.</strong> The estate needs to distinguish objects that are current, behind their sources or never loaded.</li>
-            <li><strong>Recovery after failure.</strong> A run records which objects succeeded, failed or were blocked, and which can be retried.</li>
+            <li><strong>Current operational state.</strong> Current state distinguishes objects that are up to date, behind their sources or never loaded.</li>
+            <li><strong>Recovery after failure.</strong> Weaver records which objects succeeded, failed or were blocked, and which can be retried.</li>
             <li><strong>Staleness relative to dependencies.</strong> A table can load successfully and become stale when an upstream object loads again.</li>
             <li><strong>Metadata and lineage.</strong> Descriptions, keys, foreign keys and lineage identify an object's meaning and dependencies.</li>
             <li><strong>Validation state.</strong> A completed query does not establish that its output is valid.</li>

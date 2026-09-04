@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
     <title>Weaver: Microsoft Fabric, made easier.</title>
-    <meta name="description" content="Weaver helps you build and operate data pipelines across Microsoft Fabric from one repository. Write normal Python and T-SQL; Weaver works out what depends on what.">
+    <meta name="description" content="Weaver helps you build and operate data pipelines across Microsoft Fabric from one repository. Write normal Python and T-SQL; Weaver derives dependencies from the code.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="author" content="Weaver contributors">
     <link rel="canonical" href="https://weaverstack.dev/">
@@ -80,7 +80,7 @@
       <section class="page-head">
         <div class="wrap">
           <h1>Microsoft Fabric, made easier.</h1>
-          <p class="lead">Weaver brings your Lakehouse and Warehouse work into one repository, and you keep writing Python and T-SQL as you already do. It reads your code to work out what depends on what, builds the Fabric objects, and keeps track of what has run.</p>
+          <p class="lead">Weaver brings your Lakehouse and Warehouse work into one repository, and you keep writing Python and T-SQL as you already do. It derives dependencies from the code, builds Fabric objects, and records operational state.</p>
           <p style="margin-top: 26px;">
             <a class="button blue" href="get-started/index.html">Get started</a>
             <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack" style="margin-left: 8px;">View on GitHub <span class="arrow" aria-hidden="true">↗</span></a>
@@ -127,11 +127,11 @@
             </div>
             <div class="card">
               <h3>Natural development</h3>
-              <p>Write Python and T-SQL as you normally would. Weaver works out the dependencies from your imports and your SQL references.</p>
+              <p>Write Python and T-SQL as you normally would. Weaver derives dependencies from your imports and SQL references.</p>
             </div>
             <div class="card">
               <h3>Ready for scale</h3>
-              <p>Weaver keeps one dependency graph across the whole estate, builds only what changed, and remembers how far each object got between runs.</p>
+              <p>Weaver keeps one dependency graph across the whole estate, builds only what changed, and records each object's load position between runs.</p>
             </div>
             <div class="card">
               <h3>Free and open source</h3>
@@ -172,12 +172,12 @@ compose.yml
           <p>Each file sits under the Fabric item that owns it. Weaver derives execution order from the dependencies in the Python and SQL.</p>
 
           <h3>The dependency graph</h3>
-          <p>Weaver reads the files and works the graph out for you. The Python table reads the export folder, the Warehouse join reads those customers through a shortcut and its regions from a local table, and each check hangs off whatever it validates.</p>
+          <p>Weaver derives the graph from the source files. The Python table depends on the export folder; the Warehouse join depends on the customer shortcut and a local region table; each validation depends on its target.</p>
 
           <figure>
             <svg class="dag" viewBox="0 0 850 336" role="img" aria-labelledby="home-dag-title home-dag-desc">
               <title id="home-dag-title">The Sales example as one dependency graph</title>
-              <desc id="home-dag-desc">In Lakehouse Landing, the Customers file folder feeds the Customer Delta table, which feeds the CustomerValid assumption. A shortcut carries the Customer table into Warehouse Curated, where it and the Region table feed CustomerByRegion, which feeds the CustomerByRegionValid assumption.</desc>
+              <desc id="home-dag-desc">The graph contains dependency edges from the Customers file folder to the Customer Delta table, from Customer to CustomerValid and a Warehouse shortcut, from the shortcut and Region to CustomerByRegion, and from CustomerByRegion to CustomerByRegionValid.</desc>
               <defs>
                 <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                   <path d="M0 0 L8 4 L0 8 z" class="arrow-head"></path>
@@ -242,7 +242,7 @@ compose.yml
               <li><i class="shortcut" aria-hidden="true"></i> Shortcut</li>
               <li><i class="validation" aria-hidden="true"></i> Assumption</li>
             </ul>
-            <figcaption>The Warehouse join waits for the Lakehouse table it reads, even though the objects are in different Fabric items.</figcaption>
+            <figcaption>The dependency graph places the Warehouse join after the Lakehouse table it reads, even though the objects are in different Fabric items.</figcaption>
           </figure>
 
           <p><a class="text-link" href="get-started/index.html">Build this example against your own workspace <span class="arrow" aria-hidden="true">→</span></a></p>

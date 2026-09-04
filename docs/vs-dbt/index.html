@@ -57,7 +57,7 @@
             <div class="card">
               <h3>Fabric-native</h3>
               <p>dbt reaches Fabric through adapters. Weaver models Lakehouses, Warehouses, OneLake, shortcuts, Fabric Environments, Spark and T-SQL directly.</p>
-              <p>A dbt project runs against one adapter and one connection, so your Lakehouse and your Warehouse are separate targets and no single graph spans them. In Weaver they are two items in the same graph.</p>
+              <p>dbt uses one adapter and one connection per project, so a Lakehouse and a Warehouse are separate targets and no single graph spans them. Weaver represents them as two items in the same graph.</p>
             </div>
             <div class="card">
               <h3>Natural development</h3>
@@ -72,7 +72,7 @@
             <div class="card">
               <h3>Operational state is first class</h3>
               <p>Weaver keeps each object's installed and operational state inside Fabric: how far it loaded, whether its checks passed, and what the last load changed.</p>
-              <p>dbt writes run artifacts such as the manifest and run results, and selects on state by comparing against a previous manifest. Weaver keeps that state in the data platform, where the next command reads it directly.</p>
+              <p>dbt writes run artifacts such as the manifest and run results, and selects on state by comparing against a previous manifest. Weaver keeps that state in the data platform, where subsequent Weaver commands use it directly.</p>
             </div>
           </div>
         </div>
@@ -285,7 +285,7 @@
           <p>A load can be structurally valid while representing an implausibly large change. Weaver measures the change before writing and stops it when it exceeds the declared threshold.</p>
 
           <h3>Partial failure</h3>
-          <p>Source availability and capacity can cause partial failures. A run records:</p>
+          <p>Source availability and capacity can cause partial failures. Weaver records:</p>
           <ul>
             <li>Which objects succeeded</li>
             <li>Which failed, and for what reason</li>
@@ -303,7 +303,7 @@
           <h3>Python programs</h3>
           <p>Weaver supports Python programs for API acquisition, SFTP collection, archive extraction, spreadsheet parsing and source-specific incremental rules.</p>
           <p>These programs produce outputs for downstream stages rather than returning relations from model functions.</p>
-          <p>In Weaver that is a Folder: a Python class with a <code>read()</code> method that gets a staging directory and fills it however it likes. Weaver puts its output in the graph, and the Delta table downstream depends on it like anything else.</p>
+          <p>In Weaver, this is a Folder: a Python class with a <code>read()</code> method. Weaver provides a staging directory, and the method writes its output there. Weaver adds that output to the graph, and downstream Delta tables depend on it like any other object.</p>
 
           <h3>Pipelines cross engines</h3>
           <div class="flow">
