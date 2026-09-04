@@ -166,13 +166,6 @@ def status_of(result) -> str:
 
 
 def _messages(node, result) -> tuple:
-    """What to say about a result that reported itself, where it said anything.
-
-    A failure carrying no ``error_message`` is a validation that ran and found
-    something: an Assumption with violations, a Test with discrepancies. The
-    counts are on the result, and the report and ``_.Log`` read them from there.
-    """
-
     if result.succeeded:
         return ()
     if getattr(result, "rows_rejected", 0):

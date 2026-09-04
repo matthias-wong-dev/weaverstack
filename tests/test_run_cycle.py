@@ -213,12 +213,7 @@ def test_a_reported_failure_says_what_the_primitive_said():
 
 @weaver_test()
 def test_a_failure_carrying_no_message_composes_none():
-    """An Assumption with violations fails and carries counts, not a message.
-
-    Composing one from an absent ``error_message`` put
-    ``reported failure: None`` in front of the counts, in the report and in
-    ``_.Log``. The status says it failed and the result says what it found.
-    """
+    """A validation result fails with counts and no ``error_message``."""
 
     from weaver.runtime.validation_result import AssumptionResult
 

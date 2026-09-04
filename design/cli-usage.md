@@ -731,11 +731,10 @@ weaver test Lakehouse/Sales --workspace-config examples/weaver_example.yml
 ```
 
 The output is the verdict. A Test or an Assumption may pass, fail, or be unable
-to run, and each of those is reported and recorded. None of them is a failure of
-the command: a run that produced a report exits zero, so a pasted block or a
-composition carries on to the next command. `--json` emits the whole report, and
-`status` in it carries the verdict. A command that could not get that far, an
-unusable `--name` or an estate it could not read, exits non-zero.
+to run, and none of those is a failure of the command: a run that produced a
+report exits zero, so a pasted block or a composition carries on to the next
+command. A command that produced no report, an unusable `--name` or an estate it
+could not read, exits non-zero. `--json` emits the whole report.
 
 A whole-item run reports **counts only**. Diagnostic rows may be large and may
 carry sensitive business data, so they are never transferred and never logged;

@@ -6,10 +6,8 @@ operation is faked, because what the operation does is proved where it is
 implemented and re-proving it here would put two copies of the claim in the
 suite.
 
-The verdict is the output. A Test or an Assumption may pass, fail, or be unable
-to run, and each of those is a validation outcome the report carries. None of
-them is a failure of the command, so a run that produced a report exits zero and
-whatever runs next still runs.
+The report status is the validation verdict. It is not the process status: a run
+that produced a report exits zero.
 """
 
 from __future__ import annotations
@@ -147,12 +145,6 @@ def test_dry_run_is_passed_through(captured, capsys):
 
 
 # --- the verdict --------------------------------------------------------------
-#
-# A validation's verdict is what the command produced, not whether it ran. The
-# report says passed, failed or could not run, and the command that produced it
-# succeeded either way. What exits non-zero is a command that never got a report:
-# an unusable selection, a workspace it could not resolve, an estate it could not
-# read.
 
 
 @weaver_test()
@@ -162,8 +154,6 @@ def test_a_passing_run_exits_zero(captured, capsys):
 
 @weaver_test()
 def test_a_failing_run_exits_zero(captured, capsys):
-    """A discrepancy is a finding. The command that found it worked."""
-
     captured["report"] = ValidationRunReport(
         status=FAILED,
         nodes=(
@@ -181,9 +171,6 @@ def test_a_failing_run_exits_zero(captured, capsys):
 
 @weaver_test()
 def test_a_run_that_could_not_answer_exits_zero(captured, capsys):
-    """One validation that could not be evaluated is reported, and the run that
-    reported it completed."""
-
     captured["report"] = ValidationRunReport(
         status=INVALID,
         nodes=(
@@ -201,8 +188,6 @@ def test_a_run_that_could_not_answer_exits_zero(captured, capsys):
 
 @weaver_test()
 def test_a_mixed_run_exits_zero_and_still_reports_what_it_found(captured, capsys):
-    """The acceptance case: some passed, one failed, one could not run."""
-
     captured["report"] = ValidationRunReport(
         status=FAILED,
         nodes=(
@@ -235,8 +220,6 @@ def test_a_mixed_run_exits_zero_and_still_reports_what_it_found(captured, capsys
 def test_a_command_that_produced_no_report_exits_non_zero(
     captured, monkeypatch, capsys
 ):
-    """`--name` naming nothing installed is an unusable selection, not a verdict."""
-
     from weaver.errors import ValidationError
 
     def refuse(items, **kwargs):

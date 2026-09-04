@@ -1432,14 +1432,9 @@ def _test_once(args: argparse.Namespace) -> int:
     The same host boundary ``load`` crosses, and for the same reason: a
     validation reads the data, so it runs where the data is.
 
-    A validation's verdict is output, not the command's status. A run that
-    produced a report ran, so this exits zero whether the report is passed,
-    failed or invalid, and the report says which. A command that could not get
-    that far, an unusable selection or an estate it could not read, exits
-    non-zero as every other command does.
-
-    ``_until_fixed`` is therefore not on this path. It offers another attempt
-    after a task failure, and a validation that found something is not one.
+    The report status is the validation verdict. It is not the process status:
+    a run that produced a report exits zero, and a command that could not
+    produce one exits non-zero.
     """
 
     import json

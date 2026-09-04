@@ -378,12 +378,7 @@ def test_the_prompt_instructs_nothing(args, monkeypatch, capsys):
 @weaver_test()
 def test_every_retryable_command_offers_the_same_prompt():
     """Read off the wiring, so a fourth command cannot acquire wording of its
-    own without somebody deciding to give it one.
-
-    ``test`` is not among them. A validation that failed or could not be
-    evaluated is a finding the report carries, so there is nothing for a retry
-    to fix and nothing to be asked about.
-    """
+    own without somebody deciding to give it one."""
 
     import inspect
 
@@ -508,13 +503,6 @@ def test_a_repository_the_parse_rejects_is_offered_another_attempt(monkeypatch, 
 @pytest.mark.parametrize("status", ["failed", "invalid"])
 @weaver_test()
 def test_a_validation_report_is_never_offered_a_retry(monkeypatch, capsys, status):
-    """A Test that failed, and one that could not run, are both findings.
-
-    Retry is for a Task that failed and an edit can fix. A validation reporting
-    what it found is the command working, so `weaver test` runs once, exits
-    zero, and whatever was pasted after it still runs.
-    """
-
     import weaver
     from weaver.runtime.validation_result import TestResult
     from weaver.test_report import ValidationNodeReport, ValidationRunReport
