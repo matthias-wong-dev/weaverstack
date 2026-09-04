@@ -1423,7 +1423,7 @@ def _print_load(report) -> None:
 
 def handle_test(args: argparse.Namespace) -> int:
     _refuse_retired_target(args)
-    return _until_fixed(args, lambda: _test_once(args))
+    return _test_once(args)
 
 
 def _test_once(args: argparse.Namespace) -> int:
@@ -1432,9 +1432,14 @@ def _test_once(args: argparse.Namespace) -> int:
     The same host boundary ``load`` crosses, and for the same reason: a
     validation reads the data, so it runs where the data is.
 
-    A failing validation exits non-zero. That is what makes ``weaver test``
-    usable in a pipeline: the report is the evidence and the exit code is the
-    verdict. It is why the API returns a report where this returns a status.
+    A validation's verdict is output, not the command's status. A run that
+    produced a report ran, so this exits zero whether the report is passed,
+    failed or invalid, and the report says which. A command that could not get
+    that far, an unusable selection or an estate it could not read, exits
+    non-zero as every other command does.
+
+    ``_until_fixed`` is therefore not on this path. It offers another attempt
+    after a task failure, and a validation that found something is not one.
     """
 
     import json
@@ -1459,7 +1464,7 @@ def _test_once(args: argparse.Namespace) -> int:
         print(json.dumps(report.to_mapping(), indent=2))
     else:
         _print_test(report)
-    return 0 if report.succeeded else 1
+    return 0
 
 
 def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):

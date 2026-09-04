@@ -203,6 +203,36 @@ def test_a_reported_failure_stops_what_depends_on_it():
 
 
 @weaver_test()
+def test_a_reported_failure_says_what_the_primitive_said():
+    dispatch = controlled({"a": Outcome(status=FAILED, message="no such column")})
+
+    result = runner(nodes=[node("a")]).run(dispatch=dispatch)
+
+    assert "no such column" in result.by_node["a"].messages[0].message
+
+
+@weaver_test()
+def test_a_failure_carrying_no_message_composes_none():
+    """An Assumption with violations fails and carries counts, not a message.
+
+    Composing one from an absent ``error_message`` put
+    ``reported failure: None`` in front of the counts, in the report and in
+    ``_.Log``. The status says it failed and the result says what it found.
+    """
+
+    from weaver.runtime.validation_result import AssumptionResult
+
+    dispatch = controlled({"a": AssumptionResult(violation_count=2)})
+
+    result = runner(nodes=[node("a")]).run(dispatch=dispatch)
+
+    outcome = result.by_node["a"]
+    assert outcome.status == FAILED
+    assert outcome.messages == ()
+    assert outcome.result.violation_count == 2
+
+
+@weaver_test()
 def test_an_exception_from_dispatch_is_a_failed_node_not_a_crash():
     dispatch = controlled({"a": RuntimeError("the engine said no")})
 

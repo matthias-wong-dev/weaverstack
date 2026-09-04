@@ -730,9 +730,12 @@ Run the installed Tests and Assumptions the named items own:
 weaver test Lakehouse/Sales --workspace-config examples/weaver_example.yml
 ```
 
-The exit code is the verdict — non-zero when anything failed or could not be
-evaluated — and the output is the evidence, which is what makes the command
-usable in a pipeline. `--json` emits the whole report.
+The output is the verdict. A Test or an Assumption may pass, fail, or be unable
+to run, and each of those is reported and recorded. None of them is a failure of
+the command: a run that produced a report exits zero, so a pasted block or a
+composition carries on to the next command. `--json` emits the whole report, and
+`status` in it carries the verdict. A command that could not get that far, an
+unusable `--name` or an estate it could not read, exits non-zero.
 
 A whole-item run reports **counts only**. Diagnostic rows may be large and may
 carry sensitive business data, so they are never transferred and never logged;
@@ -845,10 +848,10 @@ missing key. Publish it as a daily health artefact.
 
 ```python
 report = weaver.health()
-report.status            # "green" | "amber" | "red"
+report.status  # "green" | "amber" | "red"
 report.load.status
-report.tests.findings    # each with a stable `code`
-report.to_mapping()      # what --json prints
+report.tests.findings  # each with a stable `code`
+report.to_mapping()  # what --json prints
 ```
 
 ## Wipe

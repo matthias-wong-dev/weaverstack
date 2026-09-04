@@ -166,6 +166,13 @@ def status_of(result) -> str:
 
 
 def _messages(node, result) -> tuple:
+    """What to say about a result that reported itself, where it said anything.
+
+    A failure carrying no ``error_message`` is a validation that ran and found
+    something: an Assumption with violations, a Test with discrepancies. The
+    counts are on the result, and the report and ``_.Log`` read them from there.
+    """
+
     if result.succeeded:
         return ()
     if getattr(result, "rows_rejected", 0):
@@ -177,10 +184,13 @@ def _messages(node, result) -> tuple:
                 source=node.primitive_kind,
             ),
         )
+    reported = getattr(result, "error_message", None)
+    if not reported:
+        return ()
     return (
         error(
             _failure_code(node),
-            f"{node.node_id} reported failure: {result.error_message}",
+            f"{node.node_id} reported failure: {reported}",
             source=node.primitive_kind,
         ),
     )

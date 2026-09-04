@@ -6,8 +6,10 @@ operation is faked, because what the operation does is proved where it is
 implemented and re-proving it here would put two copies of the claim in the
 suite.
 
-The verdict is the exit code and the evidence is the output, which is what makes
-``weaver test`` usable in a pipeline.
+The verdict is the output. A Test or an Assumption may pass, fail, or be unable
+to run, and each of those is a validation outcome the report carries. None of
+them is a failure of the command, so a run that produced a report exits zero and
+whatever runs next still runs.
 """
 
 from __future__ import annotations
@@ -145,6 +147,12 @@ def test_dry_run_is_passed_through(captured, capsys):
 
 
 # --- the verdict --------------------------------------------------------------
+#
+# A validation's verdict is what the command produced, not whether it ran. The
+# report says passed, failed or could not run, and the command that produced it
+# succeeded either way. What exits non-zero is a command that never got a report:
+# an unusable selection, a workspace it could not resolve, an estate it could not
+# read.
 
 
 @weaver_test()
@@ -153,7 +161,9 @@ def test_a_passing_run_exits_zero(captured, capsys):
 
 
 @weaver_test()
-def test_a_failing_run_exits_non_zero(captured, capsys):
+def test_a_failing_run_exits_zero(captured, capsys):
+    """A discrepancy is a finding. The command that found it worked."""
+
     captured["report"] = ValidationRunReport(
         status=FAILED,
         nodes=(
@@ -166,11 +176,14 @@ def test_a_failing_run_exits_non_zero(captured, capsys):
         ),
     )
 
-    assert _run("Lakehouse/Sales") == 1
+    assert _run("Lakehouse/Sales") == 0
 
 
 @weaver_test()
-def test_a_run_that_could_not_answer_exits_non_zero(captured, capsys):
+def test_a_run_that_could_not_answer_exits_zero(captured, capsys):
+    """One validation that could not be evaluated is reported, and the run that
+    reported it completed."""
+
     captured["report"] = ValidationRunReport(
         status=INVALID,
         nodes=(
@@ -183,7 +196,56 @@ def test_a_run_that_could_not_answer_exits_non_zero(captured, capsys):
         ),
     )
 
-    assert _run("Lakehouse/Sales") == 1
+    assert _run("Lakehouse/Sales") == 0
+
+
+@weaver_test()
+def test_a_mixed_run_exits_zero_and_still_reports_what_it_found(captured, capsys):
+    """The acceptance case: some passed, one failed, one could not run."""
+
+    captured["report"] = ValidationRunReport(
+        status=FAILED,
+        nodes=(
+            _node("Sales.OrdersReconcile", "Test", PASSED, TestResult()),
+            _node(
+                "Sales.NoOrphans",
+                "Assumption",
+                FAILED,
+                AssumptionResult(violation_count=2),
+            ),
+            _node(
+                "Sales.Totals",
+                "Test",
+                INVALID,
+                TestResult.failed_to_run("not installed"),
+                messages=("not installed",),
+            ),
+        ),
+    )
+
+    assert _run("Lakehouse/Sales") == 0
+
+    printed = capsys.readouterr().out
+    assert "1 passed, 1 failed, 1 could not run" in printed
+    assert "2 violation(s)" in printed
+    assert "not installed" in printed
+
+
+@weaver_test()
+def test_a_command_that_produced_no_report_exits_non_zero(
+    captured, monkeypatch, capsys
+):
+    """`--name` naming nothing installed is an unusable selection, not a verdict."""
+
+    from weaver.errors import ValidationError
+
+    def refuse(items, **kwargs):
+        raise ValidationError("no validation named 'Sales.Nope' is installed")
+
+    monkeypatch.setattr(weaver, "test", refuse)
+
+    assert _run("Lakehouse/Sales", "--name", "Sales.Nope") == 1
+    assert "Sales.Nope" in capsys.readouterr().err
 
 
 # --- what it prints -----------------------------------------------------------
@@ -231,7 +293,7 @@ def test_an_invalid_validation_prints_its_error_without_counts(captured, capsys)
         ),
     )
 
-    assert _run("Lakehouse/Sales") == 1
+    assert _run("Lakehouse/Sales") == 0
 
     printed = capsys.readouterr().out
     assert "not installed" in printed
@@ -255,7 +317,7 @@ def test_a_generic_dispatch_failure_does_not_break_test_rendering(captured, caps
         ),
     )
 
-    assert _run("Lakehouse/Sales") == 1
+    assert _run("Lakehouse/Sales") == 0
 
     printed = capsys.readouterr().out
     assert "LivyError: session unavailable" in printed
@@ -374,7 +436,7 @@ def test_a_planned_file_run_exits_zero(captured, capsys):
 
 
 @weaver_test()
-def test_a_failing_file_run_exits_non_zero(captured, capsys):
+def test_a_failing_file_run_exits_zero(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
         nodes=(
@@ -387,7 +449,7 @@ def test_a_failing_file_run_exits_non_zero(captured, capsys):
         ),
     )
 
-    assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql") == 1
+    assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql") == 0
 
 
 @weaver_test()
