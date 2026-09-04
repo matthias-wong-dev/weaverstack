@@ -207,6 +207,10 @@ _UNENCRYPTABLE = ("allow_unencrypted_storage", "Cache encryption is impossible")
 #: for. Matched on the message, because the type it raises is `RuntimeError`.
 _UNSUPPORTED = "Unsupported platform"
 
+#: The library that holds the token, and the only missing import that says this
+#: machine cannot keep one.
+_EXTENSIONS = "msal_extensions"
+
 
 def _is_cache_unavailable(exc: BaseException) -> bool:
     """Whether this failure is the token cache rather than the sign-in.
@@ -223,14 +227,18 @@ def _is_cache_unavailable(exc: BaseException) -> bool:
         ValueError naming the option       Linux with no usable libsecret
         NotImplementedError                a platform azure-identity has no store for
         RuntimeError naming the platform   the same, from msal_extensions
-        ImportError                        msal_extensions is not installed
+        ImportError for msal_extensions    the library holding the token is absent
     """
 
-    if isinstance(exc, (NotImplementedError, ImportError)):
+    if isinstance(exc, NotImplementedError):
         return True
     if _is_persistence_error(exc):
         return True
     message = str(exc)
+    if isinstance(exc, ImportError):
+        # Only the library that holds the token. Any other missing import is a
+        # broken installation, and signing in again would not mend it.
+        return getattr(exc, "name", None) == _EXTENSIONS or _EXTENSIONS in message
     if isinstance(exc, ValueError):
         return any(naming in message for naming in _UNENCRYPTABLE)
     if isinstance(exc, RuntimeError):

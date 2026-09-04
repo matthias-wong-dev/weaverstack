@@ -409,7 +409,7 @@ def test_an_unencrypted_cache_is_never_asked_for():
         UNENCRYPTABLE,
         NotImplementedError("A persistent cache is not available in this environment."),
         RuntimeError("Unsupported platform: sunos"),
-        ImportError("No module named 'msal_extensions'"),
+        ImportError("No module named 'msal_extensions'", name="msal_extensions"),
     ],
     ids=["no-libsecret", "no-store", "unsupported-platform", "no-msal-extensions"],
 )
@@ -496,3 +496,48 @@ def test_a_bare_value_error_is_not_a_missing_keyring(monkeypatch, capsys):
 
     assert made == [True]
     assert "no secure place" not in capsys.readouterr().err
+
+
+@weaver_test()
+def test_an_unrelated_missing_import_is_not_a_missing_keyring(monkeypatch, capsys):
+    """A broken installation is not mended by signing in again."""
+
+    made: list[bool] = []
+    broken = _NoSecureStorage(
+        raising=ImportError("No module named 'something_else'", name="something_else")
+    )
+
+    monkeypatch.setattr(
+        auth, "_interactive_browser", lambda *, cached: made.append(cached) or broken
+    )
+    monkeypatch.setattr(auth, "_warned", False)
+
+    with pytest.raises(ImportError, match="something_else"):
+        auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert made == [True]
+    assert broken.calls == 1
+    assert "no secure place" not in capsys.readouterr().err
+
+
+@weaver_test()
+def test_the_library_that_holds_the_token_is_recognised_by_name(monkeypatch, capsys):
+    """`ImportError.name` where Python set it, and the message where it did not."""
+
+    for raised in (
+        ImportError("No module named 'msal_extensions'", name="msal_extensions"),
+        ImportError("cannot import name 'PersistedTokenCache' from msal_extensions"),
+    ):
+        made: list[bool] = []
+        working = _Working()
+        refusing = _NoSecureStorage(raising=raised)
+
+        monkeypatch.setattr(
+            auth,
+            "_interactive_browser",
+            lambda *, cached: made.append(cached) or (refusing if cached else working),
+        )
+        monkeypatch.setattr(auth, "_warned", False)
+
+        assert auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE).token == "a-token"
+        assert made == [True, False]
