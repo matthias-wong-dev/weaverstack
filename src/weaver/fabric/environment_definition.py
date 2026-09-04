@@ -233,15 +233,36 @@ def weaver_requirement(entries: Iterable[str]) -> str | None:
     return None
 
 
-def released_external_libraries(text: str, *, source: str) -> str:
-    """The list with one effective PyPI ``weaverstack`` requirement.
+def released_requirement(version: str | None = None) -> str:
+    """The Weaver PyPI requirement for the installed client version.
 
-    An existing Weaver requirement keeps the specifier it was written with, so
-    ``weaverstack==0.4.0`` stays pinned and a bare name stays unpinned.
+    Released versions are pinned; development builds are unpinned, because they
+    have no PyPI counterpart.
     """
 
-    written = weaver_requirement(pip_entries(text, source=source))
-    return _edit_pip(text, drop=(), ensure=(written or DISTRIBUTION,), source=source)
+    from packaging.version import InvalidVersion, Version
+
+    if version is None:
+        from .. import __version__ as version
+
+    try:
+        parsed = Version(version)
+    except InvalidVersion:  # pragma: no cover - metadata is written by the build
+        return DISTRIBUTION
+    return (
+        DISTRIBUTION
+        if parsed.is_prerelease or parsed.is_devrelease
+        else (f"{DISTRIBUTION}=={parsed}")
+    )
+
+
+def released_external_libraries(
+    text: str, *, source: str, version: str | None = None
+) -> str:
+    """Replace any Weaver requirement with the requirement for this client."""
+
+    wanted = released_requirement(version)
+    return _edit_pip(text, drop=(DISTRIBUTION,), ensure=(wanted,), source=source)
 
 
 def development_external_libraries(

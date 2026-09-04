@@ -1,42 +1,25 @@
-"""A deterministic, Fabric-safe wheel version derived from source identity.
+"""The wheel version for this checkout.
 
-Read by Hatch's ``code`` version source (``[tool.hatch.version]`` in
-``pyproject.toml``) via :func:`compute_version`.
+`VERSION` is the authored base version. A clean checkout tagged `v<VERSION>`
+builds that version; anything else builds a deterministic
+`<VERSION>.dev<fingerprint>` covering the commit and the working source.
 
-Three constraints shape the scheme:
-
-* **Moves when the source moves.** No hand-edited version string; a changed
-  checkout builds a differently-named wheel on its own.
-* **Stable when the source is unchanged.** The same checkout produces the same
-  version on every build and on every machine, so ``weaver install`` can skip a
-  five-minute republish and a console can compare itself with the published
-  wheel for exact equality.
-* **No PEP 440 local segment.** Fabric rejects a ``+`` in an uploaded wheel
-  filename, so the source identity is encoded as a public decimal dev number.
-
-The result is content-addressed, deliberately not chronological::
-
-    clean checkout exactly on tag v0.1.0   -> 0.1.0
-    ahead of, or dirtier than, that tag    -> 0.1.1.dev<fingerprint>
-
-The fingerprint covers the commit and a canonical Git tree of every tracked or
-non-ignored source path. The temporary tree makes staging irrelevant and applies
-the repository's clean filters, so CRLF on Windows and LF on macOS identify the
-same source. Compare these versions for equality, never to infer which source
-state is newer.
+See design/releasing.md.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
-import re
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Mapping
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+
+VERSION_FILE = "VERSION"
+TAG_PREFIX = "v"
 
 
 def _git(
@@ -58,12 +41,40 @@ def _git(
     return result.stdout if result.returncode == 0 else b""
 
 
+def declared_version() -> str:
+    """Read and validate the version declared in ``VERSION``."""
+
+    path = PROJECT_ROOT / VERSION_FILE
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        raise RuntimeError(
+            f"{VERSION_FILE} is missing from {PROJECT_ROOT}. It holds the one "
+            "authored Weaver version, for example 0.9.0."
+        ) from None
+
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        parsed = Version(text)
+    except InvalidVersion:
+        raise RuntimeError(
+            f"{VERSION_FILE} does not hold a PEP 440 version: {text!r}"
+        ) from None
+    if str(parsed) != text:
+        raise RuntimeError(
+            f"{VERSION_FILE} holds {text!r}, which PEP 440 spells {str(parsed)!r}. "
+            "Write the canonical spelling, so the release tag and the wheel "
+            "cannot disagree."
+        )
+    return text
+
+
 def _source_tree() -> bytes:
     """Git tree identity for the working source, independent of index state."""
 
-    # A private index lets Git canonicalise the whole working tree without
-    # changing the developer's real staging area. This folds tracked, untracked,
-    # deleted, binary, file-mode and clean-filtered content into one tree id.
+    # A private index canonicalises the working tree without touching the
+    # developer's staging area, and applies the repository's clean filters.
     with tempfile.TemporaryDirectory(prefix="weaver-version-") as directory:
         env = os.environ.copy()
         env["GIT_INDEX_FILE"] = str(Path(directory) / "index")
@@ -84,18 +95,25 @@ def _fingerprint(*, head: bytes, source_tree: bytes) -> str:
     digest.update(b"\0source-tree\0")
     digest.update(source_tree)
 
-    # Sixty-four bits keeps the public version compact while leaving collision
-    # risk negligible for the number of source states this project can produce.
+    # Decimal, not a PEP 440 local segment: Fabric rejects '+' in a wheel name.
     return str(int.from_bytes(digest.digest()[:8], "big"))
 
 
-def _bump_patch(base: str) -> str:
-    major, minor, patch = (int(part) for part in base.split("."))
-    return f"{major}.{minor}.{patch + 1}"
+def _release_tags_at_head() -> tuple[str, ...]:
+    """Every ``v*`` tag pointing at HEAD."""
+
+    listed = _git("tag", "--points-at", "HEAD", "--list", f"{TAG_PREFIX}*")
+    return tuple(
+        line.strip()
+        for line in listed.decode("utf-8", errors="replace").splitlines()
+        if line.strip()
+    )
 
 
 def compute_version() -> str:
-    """The deterministic version for the current checkout state."""
+    """The version this checkout builds."""
+
+    declared = declared_version()
 
     head = _git("rev-parse", "HEAD").strip()
     head_tree = _git("rev-parse", "HEAD^{tree}").strip()
@@ -103,22 +121,18 @@ def compute_version() -> str:
         raise RuntimeError("building a Weaver version needs a Git checkout")
     source_tree = _source_tree()
 
-    described = (
-        _git("describe", "--tags", "--long", "--dirty", "--match", "v*")
-        .decode("ascii", errors="replace")
-        .strip()
-    )
-    # e.g. "v0.1.0-0-g7148d2d" (clean at tag) or
-    # "v0.1.0-3-gabcdef1-dirty".
-    match = re.match(
-        r"^v(?P<base>\d+\.\d+\.\d+)-(?P<distance>\d+)-g[0-9a-f]+(?P<dirty>-dirty)?$",
-        described,
-    )
-    if not match:
-        # A shallow checkout may have no reachable tag but still has exact
-        # source identity through HEAD and the working tree.
-        return f"0.0.0.dev{_fingerprint(head=head, source_tree=source_tree)}"
-    if int(match.group("distance")) == 0 and source_tree == head_tree:
-        return match.group("base")
-    fingerprint = _fingerprint(head=head, source_tree=source_tree)
-    return f"{_bump_patch(match.group('base'))}.dev{fingerprint}"
+    # A release requires a clean checkout.
+    if source_tree == head_tree:
+        tags = _release_tags_at_head()
+        expected = f"{TAG_PREFIX}{declared}"
+        if expected in tags:
+            return declared
+        if tags:
+            raise RuntimeError(
+                f"{VERSION_FILE} says {declared}, so the release tag here would "
+                f"be {expected}. This commit is tagged {', '.join(sorted(tags))}."
+                "\n\n"
+                f"Correct {VERSION_FILE} or the tag so the two agree."
+            )
+
+    return f"{declared}.dev{_fingerprint(head=head, source_tree=source_tree)}"

@@ -504,12 +504,33 @@ token is invalid.
 ```text
 weaverstack/
 ├── pyproject.toml
+├── VERSION           the one authored version
 ├── AGENTS.md
 ├── src/
 │   ├── weaver/       the core framework
 │   └── weaver_cli/   the optional desktop CLI
+├── tools/            release and website generators
 └── tests/
 ```
+
+## Versioning
+
+`VERSION` holds the release line and is the only authored version in the
+repository. A build derives the wheel version from it: an ordinary checkout
+gets `0.9.0.dev<fingerprint>`, and a clean checkout tagged `v0.9.0` gets
+`0.9.0`. A tag on a checkout whose `VERSION` says something else is a hard
+build failure, so a tag can never move the release line.
+
+Releasing is one command, and it publishes nothing itself:
+
+```bash
+python tools/release.py
+```
+
+It tags `v<VERSION>` and pushes. Pushing that tag is the release event, and
+GitHub Actions checks the tag against `VERSION`, builds, verifies both
+artefacts carry that exact version, publishes to PyPI and creates the GitHub
+Release. See [releasing](design/releasing.md).
 
 ## Dependencies
 

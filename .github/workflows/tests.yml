@@ -37,8 +37,8 @@ jobs:
 
       # Mechanical hygiene first: it is seconds, and a lint failure should not
       # wait behind three minutes of tests to be reported.
-      - run: ruff check src tests examples
-      - run: ruff format --check src tests examples
+      - run: ruff check src tests examples tools hatch_build.py
+      - run: ruff format --check src tests examples tools hatch_build.py
 
       # No -m: the marker expression lives in pyproject's addopts, and repeating
       # it here let the two drift — CI's copy omitted `not provision`, so it
