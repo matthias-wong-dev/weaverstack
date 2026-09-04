@@ -29,6 +29,7 @@ boundaries covered by the writing uplift.
 | [How Weaver build works](how-does-build-work.md) | How-to | The build lifecycle and its generated bundle. |
 | [CLI usage](cli-usage.md) | How-to | Workspace resolution, sessions, commands, and control-plane tasks. |
 | [Adding an artefact](how-to-add-an-artefact.md) | How-to | Extending Weaver with a new runtime artefact. |
+| [Releasing](releasing.md) | How-to | The one authored version, `tools/release.py`, and what the tag triggers. |
 
 ## Testing
 

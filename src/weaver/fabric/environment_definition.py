@@ -7,10 +7,11 @@ directory holds the same paths, and the REST API carries them as InlineBase64.
 
 Two things are Weaver's and nothing else is: the ``weaverstack`` requirement in
 the external library list, and ``weaverstack-*.whl`` among the custom libraries.
-Released mode owns the first and removes the second. Development mode owns the
-second, removes the first, and names Weaver's Fabric requirements so the wheel's
-imports resolve, because a Fabric custom wheel does not pull its own transitive
-dependencies.
+Released mode owns the first and removes the second, pinning the requirement to
+the publishing Weaver's own version so the Environment says which Weaver it
+holds. Development mode owns the second, removes the first, and names Weaver's
+Fabric requirements so the wheel's imports resolve, because a Fabric custom
+wheel does not pull its own transitive dependencies.
 
 The external library list is edited as text. A YAML round trip would drop the
 comments and the layout the file was written with, and pip options such as
@@ -233,15 +234,48 @@ def weaver_requirement(entries: Iterable[str]) -> str | None:
     return None
 
 
-def released_external_libraries(text: str, *, source: str) -> str:
-    """The list with one effective PyPI ``weaverstack`` requirement.
+def released_requirement(version: str | None = None) -> str:
+    """The PyPI requirement a released publication installs.
 
-    An existing Weaver requirement keeps the specifier it was written with, so
-    ``weaverstack==0.4.0`` stays pinned and a bare name stays unpinned.
+    A released Weaver pins itself, so an Environment says which Weaver it holds
+    and a client can tell whether that is the Weaver it is. The version comes
+    from the installed distribution's own metadata, which a build derived from
+    ``VERSION``, so nothing here reads a version out of a source checkout.
+
+    A development build has no PyPI counterpart to pin, so it asks for the
+    distribution unpinned. That is the case for ``weaver initialise`` run from a
+    checkout, where the Environment should get the published Weaver.
     """
 
-    written = weaver_requirement(pip_entries(text, source=source))
-    return _edit_pip(text, drop=(), ensure=(written or DISTRIBUTION,), source=source)
+    from packaging.version import InvalidVersion, Version
+
+    if version is None:
+        from .. import __version__ as version
+
+    try:
+        parsed = Version(version)
+    except InvalidVersion:  # pragma: no cover - metadata is written by the build
+        return DISTRIBUTION
+    return (
+        DISTRIBUTION
+        if parsed.is_prerelease or parsed.is_devrelease
+        else (f"{DISTRIBUTION}=={parsed}")
+    )
+
+
+def released_external_libraries(
+    text: str, *, source: str, version: str | None = None
+) -> str:
+    """The list with one PyPI ``weaverstack`` requirement, pinned to this Weaver.
+
+    Whatever specifier the file carried is replaced, because the point of the
+    pin is that the Environment and the client agree on one version. A
+    development Weaver has nothing on PyPI to pin to and leaves the requirement
+    bare.
+    """
+
+    wanted = released_requirement(version)
+    return _edit_pip(text, drop=(DISTRIBUTION,), ensure=(wanted,), source=source)
 
 
 def development_external_libraries(

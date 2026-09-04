@@ -161,25 +161,40 @@ def test_an_unrelated_pip_list_is_preserved(tmp_path):
     "written", ["weaverstack==0.4.0", "weaverstack>=0.4", "weaverstack"]
 )
 @weaver_test()
-def test_an_authored_weaver_specifier_is_kept(written):
-    """The file's spelling wins, so a pinned requirement is not widened."""
+def test_an_authored_weaver_specifier_becomes_this_weavers_pin(written):
+    """Whatever the file asked for, the Environment gets the publishing Weaver."""
 
     text = f"dependencies:\n  - pip:\n      - {written}\n"
 
-    result = released_external_libraries(text, source="x")
+    result = released_external_libraries(text, source="x", version="0.9.0")
 
-    assert pip_entries(result, source="x") == (written,)
+    assert pip_entries(result, source="x") == ("weaverstack==0.9.0",)
+
+
+@weaver_test()
+def test_a_development_weaver_pins_nothing():
+    """A dev build has no PyPI counterpart, so the Environment gets the release."""
+
+    text = "dependencies:\n  - pip:\n      - numpy\n"
+
+    result = released_external_libraries(
+        text, source="x", version="0.9.0.dev8780952731552341090"
+    )
+
+    assert pip_entries(result, source="x") == ("numpy", "weaverstack")
 
 
 @weaver_test()
 def test_a_weaver_requirement_is_never_added_twice():
     text = "dependencies:\n  - pip:\n      - WeaverStack>=0.4\n"
 
-    entries = pip_entries(released_external_libraries(text, source="x"), source="x")
+    entries = pip_entries(
+        released_external_libraries(text, source="x", version="0.9.0"), source="x"
+    )
 
     # PEP 503 compares distribution names case-insensitively, so this entry is
-    # the Weaver requirement.
-    assert entries == ("WeaverStack>=0.4",)
+    # the Weaver requirement and is replaced rather than joined.
+    assert entries == ("weaverstack==0.9.0",)
 
 
 @weaver_test()
@@ -288,7 +303,7 @@ def test_custom_libraries_are_listed_by_filename():
 
 
 @weaver_test()
-def test_duplicate_weaver_requirements_collapse_to_the_authored_spelling():
+def test_duplicate_weaver_requirements_collapse_to_one_pin():
     """Two entries for one distribution leave which version installs to pip."""
 
     text = (
@@ -299,9 +314,11 @@ def test_duplicate_weaver_requirements_collapse_to_the_authored_spelling():
         "      - weaverstack>=0.2\n"
     )
 
-    entries = pip_entries(released_external_libraries(text, source="x"), source="x")
+    entries = pip_entries(
+        released_external_libraries(text, source="x", version="0.9.0"), source="x"
+    )
 
-    assert entries == ("weaverstack==0.4.0", "numpy")
+    assert entries == ("numpy", "weaverstack==0.9.0")
 
 
 @weaver_test()
@@ -402,11 +419,9 @@ def test_released_finds_a_quoted_or_annotated_weaver_requirement(written):
 
     text = f"dependencies:\n  - pip:\n      - {written}\n      - numpy\n"
 
-    result = released_external_libraries(text, source="x")
+    result = released_external_libraries(text, source="x", version="0.9.0")
 
-    assert pip_entries(result, source="x") == ("weaverstack>=0.4", "numpy")
-    # The line is kept as authored, so the quoting and the note survive.
-    assert written in result
+    assert pip_entries(result, source="x") == ("numpy", "weaverstack==0.9.0")
 
 
 @pytest.mark.parametrize(
@@ -512,3 +527,96 @@ def test_what_cannot_be_proved_is_left_alone(written):
     )
 
     assert entries == (written,)
+
+
+# --- an Environment is ready only for the Weaver it holds ----------------------
+
+
+def _holding(*, entries=(), wheels=()):
+    """One Environment definition carrying these pip entries and custom wheels."""
+
+    from weaver.fabric.environment_definition import (
+        CUSTOM_LIBRARIES,
+        EXTERNAL_LIBRARIES,
+        EnvironmentDefinition,
+    )
+
+    listed = "".join(f"      - {entry}\n" for entry in entries)
+    parts = {EXTERNAL_LIBRARIES: f"dependencies:\n  - pip:\n{listed}".encode()}
+    for name in wheels:
+        parts[f"{CUSTOM_LIBRARIES}{name}"] = b""
+    return EnvironmentDefinition(parts=parts)
+
+
+@pytest.mark.parametrize(
+    "written, ready",
+    [
+        ("weaverstack==0.9.0", True),
+        ("weaverstack == 0.9.0", True),
+        ("weaverstack==0.9.1", False),
+        ("weaverstack==0.8.0", False),
+        ("weaverstack>=0.9.0", False),
+        ("weaverstack", False),
+    ],
+)
+@weaver_test()
+def test_a_released_client_is_ready_only_for_its_own_pin(monkeypatch, written, ready):
+    """An Environment holding another Weaver is republished, not accepted."""
+
+    from importlib import import_module
+
+    from weaver.fabric import environment_definition
+
+    initialise = import_module("weaver.initialise")
+
+    monkeypatch.setattr(
+        environment_definition, "released_requirement", lambda: "weaverstack==0.9.0"
+    )
+
+    assert initialise._names_weaver(_holding(entries=(written,))) is ready
+
+
+@pytest.mark.parametrize("written", ["weaverstack", "weaverstack==0.4.0"])
+@weaver_test()
+def test_a_development_client_accepts_any_named_weaver(monkeypatch, written):
+    """A dev build pins nothing, so it asks only that Weaver is named."""
+
+    from importlib import import_module
+
+    from weaver.fabric import environment_definition
+
+    initialise = import_module("weaver.initialise")
+
+    monkeypatch.setattr(
+        environment_definition, "released_requirement", lambda: "weaverstack"
+    )
+
+    assert initialise._names_weaver(_holding(entries=(written,))) is True
+
+
+@weaver_test()
+def test_a_custom_wheel_is_taken_as_it_is(monkeypatch):
+    """Development publication installs the checkout's wheel, whatever its version."""
+
+    from importlib import import_module
+
+    from weaver.fabric import environment_definition
+
+    initialise = import_module("weaver.initialise")
+
+    monkeypatch.setattr(
+        environment_definition, "released_requirement", lambda: "weaverstack==0.9.0"
+    )
+
+    definition = _holding(wheels=("weaverstack-0.9.0.dev1-py3-none-any.whl",))
+
+    assert initialise._names_weaver(definition) is True
+
+
+@weaver_test()
+def test_an_environment_naming_no_weaver_is_not_ready():
+    from importlib import import_module
+
+    initialise = import_module("weaver.initialise")
+
+    assert initialise._names_weaver(_holding(entries=("numpy",))) is False

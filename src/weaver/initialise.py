@@ -485,15 +485,48 @@ def _state_of(item, *, client) -> str:
 
 
 def _names_weaver(definition) -> bool:
-    """Whether a definition carries Weaver, as a requirement or as a wheel."""
+    """Whether a definition carries the Weaver this client is.
+
+    A custom wheel is a development publication and is taken as it is: the
+    checkout's own wheel is the Weaver installed there, and its version moves
+    with the source rather than with PyPI.
+
+    A PyPI requirement has to name this Weaver. An Environment holding
+    ``weaverstack==0.9.1`` is not ready for a ``0.9.0`` client, so it is
+    reported unprepared and the ordinary Environment machinery republishes it.
+    A development client pins nothing, so it asks only that Weaver is named.
+    """
 
     from .fabric.environment import is_weaver_wheel
-    from .fabric.environment_definition import pip_entries, weaver_requirement
+    from .fabric.environment_definition import (
+        pip_entries,
+        released_requirement,
+        weaver_requirement,
+    )
 
     if any(is_weaver_wheel(name) for name in definition.custom_libraries()):
         return True
     entries = pip_entries(definition.external_libraries(), source="the Environment")
-    return weaver_requirement(entries) is not None
+    written = weaver_requirement(entries)
+    if written is None:
+        return False
+
+    wanted = released_requirement()
+    if "==" not in wanted:
+        return True
+    return _same_requirement(written, wanted)
+
+
+def _same_requirement(written: str, wanted: str) -> bool:
+    """Whether an authored entry asks for exactly the requirement Weaver wants."""
+
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    try:
+        authored = Requirement(written)
+    except InvalidRequirement:
+        return False
+    return str(authored.specifier) == str(Requirement(wanted).specifier)
 
 
 #: What this run will do about the Environment. Not a status: the status says
