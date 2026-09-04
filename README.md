@@ -15,8 +15,6 @@ describe objects in one repository; Weaver routes them to the physical targets
 you name, builds one global dependency graph across all three forms, and
 certifies each object in the central catalogue only once it has built.
 
-> **Status: pre-alpha.**
-
 ## Installation
 
 ```bash
@@ -190,4 +188,4 @@ wipe and unbind.
 
 ## Licence
 
-Apache 2.0. See [LICENSE](LICENSE).
+Mozilla Public License 2.0. See [LICENSE](LICENSE).

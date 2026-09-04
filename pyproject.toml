@@ -8,12 +8,12 @@ dynamic = ["version"]
 description = "Central-catalogue data engineering runtime for Microsoft Fabric Lakehouses and Warehouses."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "Apache-2.0"
+license = "MPL-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Matthias Wong" }]
 keywords = ["fabric", "onelake", "lakehouse", "delta", "warehouse", "etl"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -49,7 +49,9 @@ dev = [
 weaver = "weaver_cli:main"
 
 [project.urls]
-Homepage = "https://github.com/matthias-wong-dev/weaverstack"
+Homepage = "https://weaverstack.dev"
+Source = "https://github.com/matthias-wong-dev/weaverstack"
+Issues = "https://github.com/matthias-wong-dev/weaverstack/issues"
 
 # Version comes from Git, not a hand-edited string, so every changed checkout
 # builds an identifiable wheel. The scheme (see hatch_build.py) is a public,
