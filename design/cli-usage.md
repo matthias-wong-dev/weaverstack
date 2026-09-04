@@ -10,7 +10,54 @@ pip install weaverstack
 weaver --help
 ```
 
-Commands use the identity from `az login`.
+## Signing in
+
+Weaver uses the Azure CLI identity where `az login` has produced one, and
+otherwise opens Microsoft sign-in in a browser. The browser token is cached on
+disk under `weaverstack`, so later commands sign in without opening anything.
+
+A chain, not a probe: the Azure CLI is tried inside the token acquisition a
+command was going to make anyway, so a signed-in user pays nothing to have the
+fallback available. There is no `weaver auth` command: signing in is how Weaver
+reaches Fabric.
+
+The choice belongs to the CLI. The importable core accepts a credential and
+installs none, and the Fabric test suite pins the Azure CLI explicitly, so an
+unattended run can never be sent to a browser.
+
+## Checking that Weaver can connect
+
+```bash
+weaver doctor
+```
+
+Proves sign-in and the Fabric REST API together: a workspace listing that comes
+back means a token was issued and the control plane accepted it.
+
+```bash
+weaver doctor --workspace Analytics
+weaver doctor --workspace-config workspace-config.yml
+```
+
+A workspace is resolved as well. A configuration names the items, so each
+endpoint that project is reached through is opened and no others:
+
+```text
+  Fabric REST                       OK
+  Workspace Analytics               OK
+  Warehouse/Control TDS             OK
+  Warehouse/Reporting TDS           OK
+  Lakehouse/Sales OneLake           OK
+  Spark session                     OK
+```
+
+A Warehouse-only project starts no Spark session. A Lakehouse-only project still
+opens TDS, because the Weaver catalogue is a Warehouse. Checking a Lakehouse
+starts a Fabric Spark session, which takes a minute.
+
+A failed check prints the reason and a next action on stderr, and the command
+exits non-zero. It is a connectivity check: what the estate holds is
+`weaver health`, and whether a repository parses is `weaver check`.
 
 ## Setting a project up
 

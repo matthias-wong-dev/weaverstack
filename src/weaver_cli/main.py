@@ -37,6 +37,17 @@ and test the project straight away.
 Run `weaver initialise` to get started.\
 """
 
+#: What doctor is for, said before anybody has a project to point it at.
+DOCTOR_DESCRIPTION = """\
+Check that Weaver can reach Microsoft Fabric.
+
+Name a workspace configuration to also check the endpoints that project uses:
+TDS for a Warehouse, OneLake and Livy for a Lakehouse. From a project directory
+it reads workspace-config.yml beside it.
+
+Checking a Lakehouse starts a Fabric Spark session, which takes a minute.\
+"""
+
 
 # --- what each command will want ----------------------------------------------
 #
@@ -186,6 +197,29 @@ def _requires_rest(args) -> frozenset[str]:
     from weaver.sessions.requirements import AUTH, RESOLVER, requirements
 
     return requirements(AUTH, RESOLVER)
+
+
+def _requires_doctor(args) -> frozenset[str]:
+    """What proving the crossings will want.
+
+    Naming nothing, this reaches Fabric REST and stops there. Naming a workspace
+    or a configuration, it declares the same superset a run declares: what a
+    configuration turns out to hold is read after this, so arguments alone
+    cannot narrow it.
+    """
+
+    from weaver.sessions.requirements import (
+        AUTH,
+        LIVY,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
+    )
+
+    if not workspace_supplied(args):
+        return requirements(AUTH, RESOLVER)
+    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
 
 
 def _requires_initialise(args) -> frozenset[str]:
@@ -347,6 +381,16 @@ def build_parser() -> argparse.ArgumentParser:
         initialise.set_defaults(
             handler=handle_initialise, requires=_requires_initialise
         )
+
+    doctor = subcommands.add_parser(
+        "doctor",
+        help="Check that Weaver can reach Microsoft Fabric.",
+        description=DOCTOR_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    doctor.add_argument("--json", action="store_true", help="emit the result as JSON")
+    _add_workspace_args(doctor, include_environment=False)
+    doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
 
     check = subcommands.add_parser(
         "check", help="Check your repository source without contacting Fabric."
@@ -940,18 +984,21 @@ def _add_workspace_args(
 
 
 def _prefer_desktop_credential() -> None:
-    """Pin the Azure CLI credential for desktop commands.
+    """Choose how a desktop command signs in, and install that choice.
 
-    Credential choice is the CLI's policy, not the core's. Best-effort, because
-    if the Fabric extra is not installed there is nothing to pin, and a local
-    never needs it.
+    Credential choice is the CLI's policy, not the core's. The Azure CLI where it
+    can issue a token, and Microsoft browser sign-in where it cannot, so
+    `pip install weaverstack` is the whole prerequisite.
+
+    Best-effort, because with the Fabric extra absent there is nothing to sign in
+    to.
     """
 
     try:
-        from weaver.fabric.auth import prefer_cli_credential
+        from weaver.fabric.auth import desktop_credential, use_credential
     except ImportError:
         return
-    prefer_cli_credential()
+    use_credential(desktop_credential())
 
 
 def _desktop_store(workspace):
@@ -1823,6 +1870,29 @@ def _initialise_once(args: argparse.Namespace, *, session):
         session=session,
         **named,
     )
+
+
+def handle_doctor(args: argparse.Namespace) -> int:
+    """Report which Fabric crossings this installation can make."""
+
+    import json
+
+    from weaver.operations.doctor import doctor
+
+    from .doctor import render
+
+    _prefer_desktop_credential()
+    report = doctor(
+        workspace=args.workspace,
+        workspace_config=args.workspace_config,
+        catalogue=args.catalogue,
+        session=_session(args),
+    )
+    if args.json:
+        print(json.dumps(report.to_mapping(), indent=2))
+    else:
+        render(report)
+    return 0 if report.succeeded else 1
 
 
 def handle_check(args: argparse.Namespace) -> int:

@@ -35,9 +35,10 @@ NOT_IN_A_SESSION = {
     "initialize": "run it from a shell, not a session",
 }
 
-# Source checking and bundle installation remain usable at the prompt, but the
-# session banner introduces the core lifecycle rather than every available seam.
-SECONDARY_SESSION_COMMANDS = {"check", "install"}
+# Source checking, connectivity checking and bundle installation remain usable at
+# the prompt, but the session banner introduces the core lifecycle rather than
+# every available seam.
+SECONDARY_SESSION_COMMANDS = {"check", "doctor", "install"}
 
 EXITS = {"exit", "quit"}
 HELP = {"help", "?"}

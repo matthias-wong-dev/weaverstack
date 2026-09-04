@@ -1,0 +1,253 @@
+"""How a desktop command signs in, and what that costs when it is already signed in.
+
+`pip install weaverstack` is the whole prerequisite. A user who has run
+`az login` keeps that identity; one who has not is sent to Microsoft sign-in in
+a browser, and the token is cached on disk so the next command opens nothing.
+
+The choice is a chain, not a probe. `ChainedTokenCredential` tries the Azure CLI
+inside the token acquisition a command was going to make anyway and remembers
+which credential answered, so a signed-in user pays nothing to have a fallback
+available.
+
+The choice is the CLI's. Core accepts an installed credential and never installs
+one, and the Fabric suite stays explicitly Azure-CLI based, so an unattended run
+can never be sent to a browser.
+"""
+
+from __future__ import annotations
+
+import pytest
+from support.weaver_test import weaver_test
+
+from weaver.errors import ConfigError
+from weaver.fabric import auth
+
+#: The real resolver, captured before the suite-wide guard replaces it. Nothing
+#: here asks Azure for anything: the library default is replaced too, so what is
+#: exercised is the choice rather than a credential.
+REAL_CREDENTIAL = auth.credential
+
+
+class _Token:
+    token = "a-token"
+    expires_on = 4102444800
+
+
+class _Working:
+    """A credential that answers."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def get_token(self, *scopes, **_):
+        self.calls += 1
+        return _Token()
+
+
+class _Unavailable:
+    """A credential that reports it cannot be used here."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def get_token(self, *scopes, **_):
+        from azure.identity import CredentialUnavailableError
+
+        self.calls += 1
+        raise CredentialUnavailableError("Please run 'az login'")
+
+
+class _LibraryDefault:
+    """Stands in for ``DefaultAzureCredential``, which is never built here."""
+
+    def get_token(self, *scopes, **_):
+        return _Token()
+
+
+@pytest.fixture(autouse=True)
+def uninstalled(monkeypatch):
+    """Leave the process as this test found it, and reach no real credential.
+
+    The suite refuses a real credential outside `-m fabric`. These tests are
+    about which credential is chosen, so the resolver is restored and the
+    library default replaced, and nothing asks Azure anything.
+    """
+
+    monkeypatch.setattr(auth, "credential", REAL_CREDENTIAL)
+    monkeypatch.setattr("azure.identity.DefaultAzureCredential", _LibraryDefault)
+
+    before = auth._installed
+    chain = auth._desktop_chain
+    yield
+    auth._installed = before
+    auth._desktop_chain = chain
+
+
+@pytest.fixture
+def credentials(monkeypatch):
+    """The two halves of the chain, each recording what was asked of it."""
+
+    cli = _Working()
+    browser = _Working()
+    auth._desktop_chain = None
+    monkeypatch.setattr("azure.identity.AzureCliCredential", lambda *a, **k: cli)
+    monkeypatch.setattr(auth, "_browser_credential", lambda: browser)
+    return type("Credentials", (), {"cli": cli, "browser": browser})
+
+
+# --- installing a choice -------------------------------------------------------
+
+
+@weaver_test()
+def test_core_installs_nothing_of_its_own():
+    """Importing Weaver imposes no credential on the process that imported it.
+
+    In a process of its own, because what is claimed is a property of the import
+    and this one has already run tests that install one.
+    """
+
+    import subprocess
+    import sys
+
+    probe = (
+        "import weaver, weaver.fabric.auth as auth;"
+        "print(auth._installed, auth._desktop_chain)"
+    )
+    answered = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    )
+
+    assert answered.stdout.strip() == "None None"
+
+
+@weaver_test()
+def test_an_installed_credential_is_what_core_then_uses():
+    supplied = _Working()
+
+    auth.use_credential(supplied)
+
+    assert auth.credential() is supplied
+
+
+@weaver_test()
+def test_installing_nothing_restores_the_library_default():
+    auth.use_credential(_Working())
+    auth.use_credential(None)
+
+    assert isinstance(auth.credential(), _LibraryDefault)
+
+
+@weaver_test()
+def test_an_object_that_is_not_a_credential_is_refused_here():
+    with pytest.raises(ConfigError, match="get_token"):
+        auth.use_credential(object())
+
+
+# --- choosing between the two --------------------------------------------------
+
+
+@weaver_test()
+def test_the_azure_cli_answers_where_it_can(credentials):
+    chosen = auth.desktop_credential()
+
+    assert chosen.get_token(auth.FABRIC_SCOPE).token == "a-token"
+    assert credentials.cli.calls == 1
+    assert credentials.browser.calls == 0
+
+
+@weaver_test()
+def test_the_browser_answers_where_the_azure_cli_cannot(monkeypatch):
+    unavailable = _Unavailable()
+    browser = _Working()
+    auth._desktop_chain = None
+    monkeypatch.setattr(
+        "azure.identity.AzureCliCredential", lambda *a, **k: unavailable
+    )
+    monkeypatch.setattr(auth, "_browser_credential", lambda: browser)
+
+    token = auth.desktop_credential().get_token(auth.FABRIC_SCOPE)
+
+    assert token.token == "a-token"
+    assert unavailable.calls == 1
+    assert browser.calls == 1
+
+
+@weaver_test()
+def test_neither_answering_raises_rather_than_returning_nothing(monkeypatch):
+    auth._desktop_chain = None
+    monkeypatch.setattr(
+        "azure.identity.AzureCliCredential", lambda *a, **k: _Unavailable()
+    )
+    monkeypatch.setattr(auth, "_browser_credential", _Unavailable)
+
+    from azure.core.exceptions import ClientAuthenticationError
+
+    with pytest.raises(ClientAuthenticationError):
+        auth.desktop_credential().get_token(auth.FABRIC_SCOPE)
+
+
+@weaver_test()
+def test_the_chain_is_built_once_for_the_process(credentials):
+    """The browser credential holds the token cache, and a second one signs in again."""
+
+    first = auth.desktop_credential()
+    second = auth.desktop_credential()
+
+    assert first is second
+
+
+@weaver_test()
+def test_a_signed_in_user_is_never_sent_to_a_browser(credentials):
+    """Several commands in one process ask the Azure CLI and stop there."""
+
+    chosen = auth.desktop_credential()
+    for _ in range(3):
+        chosen.get_token(auth.FABRIC_SCOPE)
+
+    assert credentials.browser.calls == 0
+
+
+# --- what the CLI does with it -------------------------------------------------
+
+
+@weaver_test()
+def test_the_desktop_cli_installs_the_chain(credentials):
+    from weaver_cli.main import _prefer_desktop_credential
+
+    _prefer_desktop_credential()
+
+    assert auth.credential() is auth.desktop_credential()
+
+
+# --- what the Fabric suite does ------------------------------------------------
+
+
+@weaver_test()
+def test_the_fabric_suite_stays_pinned_to_the_azure_cli(monkeypatch):
+    """An unattended run must never be able to open a browser."""
+
+    monkeypatch.delenv(auth.CREDENTIAL_ENV, raising=False)
+
+    assert auth.prefer_cli_credential() == "AzureCliCredential"
+
+    import os
+
+    assert os.environ[auth.CREDENTIAL_ENV] == "AzureCliCredential"
+
+
+@weaver_test()
+def test_the_fabric_conftest_asks_for_the_azure_cli_and_nothing_else():
+    """Source-level, because what it guards is a line nobody meant to change.
+
+    A fixture that reached for the desktop policy would put an interactive
+    sign-in inside an unattended suite, and the failure would be a run that
+    hangs waiting for a browser nobody is watching.
+    """
+
+    from pathlib import Path
+
+    conftest = Path(__file__).resolve().parent / "fabric" / "conftest.py"
+    source = conftest.read_text(encoding="utf-8")
+
+    assert "prefer_cli_credential" in source
+    assert "desktop_credential" not in source

@@ -112,5 +112,9 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "check",
         "CheckResult",
         "install",
+        # Connectivity is a desktop question. A notebook is already inside the
+        # workspace it addresses, so it has nothing to ask.
+        "doctor",
+        "DoctorReport",
     }
     assert all(not hasattr(weaver, name) for name in internal)

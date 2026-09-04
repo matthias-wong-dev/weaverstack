@@ -61,6 +61,7 @@ initialise      resolve request → read the workspace's items → create the
 build           resolve request → read BuildState → Builder → Installer
 load / test     resolve request → read RunState   → Runner
 health          resolve request → read Catalogue  → HealthReport
+doctor          acquire a credential → cross each surface a project uses
 
 Fabric          Resolver, REST, OneLake, Livy, TDS
 ```
@@ -149,9 +150,17 @@ means the abstraction is broken. Fix it in the factories, or in the CLI that doe
 the crossing.
 
 **Credential choice belongs to the caller.** Core accepts an injected credential
-and otherwise uses the library default without pinning the chain. The CLI and the
-Fabric test infrastructure call `prefer_cli_credential()` themselves. Importing
-or using the core imposes no credential choice.
+and otherwise uses the library default without pinning the chain. Importing or
+using the core imposes no credential choice.
+
+The desktop CLI installs one for its process through
+`weaver.fabric.auth.use_credential`, so it reaches the clients an operation
+constructs for itself as well as the ones it is handed. What it installs is
+`desktop_credential()`: the Azure CLI where it can issue a token, and
+`InteractiveBrowserCredential` with a persistent cache where it cannot, as one
+`ChainedTokenCredential` built once per process. The Fabric test infrastructure
+calls `prefer_cli_credential()` instead, which pins the chain through
+`AZURE_TOKEN_CREDENTIALS`, so an unattended run can never open a browser.
 
 ### Fabric is the reference
 

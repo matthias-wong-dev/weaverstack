@@ -10,9 +10,14 @@ does not always settle on the identity you are signed in as, so on a machine
 where ``az`` works a OneLake write can still fail
 ``401 Access token validation failed``. ``azure-identity`` 1.23 honours
 ``AZURE_TOKEN_CREDENTIALS`` to pin the chain, and :func:`prefer_cli_credential`
-sets it to ``AzureCliCredential``. A caller invokes that: the desktop CLI does,
-and so does the Fabric test infrastructure. Core never sets it as a side
-effect of asking for a token.
+sets it to ``AzureCliCredential``. The Fabric test infrastructure invokes that.
+Core never sets it as a side effect of asking for a token.
+
+A pinned chain names one credential type and cannot express a fallback, so the
+desktop CLI installs an object instead: :func:`desktop_credential` answers the
+Azure CLI where it works and Microsoft browser sign-in where it does not, and
+:func:`use_credential` makes it this process's default. That reaches every
+client, including the ones an operation constructs for itself.
 """
 
 from __future__ import annotations
@@ -30,13 +35,17 @@ SQL_SCOPE = "https://database.windows.net/.default"
 CREDENTIAL_ENV = "AZURE_TOKEN_CREDENTIALS"
 DEFAULT_CREDENTIAL = "AzureCliCredential"
 
+#: Where browser sign-in keeps its tokens between commands. Without a name on
+#: disk every Weaver command would open a browser window of its own.
+TOKEN_CACHE_NAME = "weaverstack"
+
 
 def prefer_cli_credential() -> str:
     """Pin the credential chain to the Azure CLI, unless already chosen.
 
-    Policy, so a caller invokes it: the desktop CLI before a Fabric command, the
-    test infrastructure before the Fabric suite. Core never calls
-    it, so importing or using the core imposes no credential choice.
+    Policy, so a caller invokes it: the Fabric test infrastructure does, before
+    its suite. Core never calls it, so importing or using the core imposes no
+    credential choice.
     """
 
     existing = os.environ.get(CREDENTIAL_ENV)
@@ -71,12 +80,78 @@ def checked_credential(supplied):
     return supplied
 
 
+#: The credential a caller installed for this process, or None for the library
+#: default. Core never writes this; :func:`use_credential` is caller policy.
+_installed = None
+
+
+def use_credential(supplied):
+    """Make one credential this process's default. Caller policy, not core's.
+
+    An injected credential reaches only what receives it, and an operation
+    constructs clients of its own, so a desktop policy that has to hold
+    everywhere is installed here. Passing ``None`` restores the library default.
+    """
+
+    global _installed
+    _installed = checked_credential(supplied)
+    return _installed
+
+
 def credential():
-    """A default credential. Callers that want a specific one inject it instead."""
+    """The installed credential, or the library default where none was installed."""
+
+    if _installed is not None:
+        return _installed
 
     from azure.identity import DefaultAzureCredential
 
     return DefaultAzureCredential()
+
+
+#: The desktop chain, built at most once for this process.
+_desktop_chain = None
+
+
+def desktop_credential():
+    """The Azure CLI where it can issue a token, and browser sign-in where it cannot.
+
+    A desktop user who has run ``az login`` keeps that identity. One who has not
+    is sent to Microsoft sign-in in a browser, and the token is cached on disk
+    under :data:`TOKEN_CACHE_NAME`, so the next command signs in without opening
+    anything.
+
+    ``ChainedTokenCredential`` tries the Azure CLI inside the token acquisition a
+    command was going to make anyway, moves on when it reports itself
+    unavailable, and remembers which one answered. The Azure CLI is therefore
+    asked once per process, and no command pays a round trip of its own to
+    settle the policy.
+
+    Built once per process, because the browser credential holds the token cache
+    and a second one would sign in again.
+    """
+
+    global _desktop_chain
+    if _desktop_chain is not None:
+        return _desktop_chain
+
+    from azure.identity import AzureCliCredential, ChainedTokenCredential
+
+    _desktop_chain = ChainedTokenCredential(AzureCliCredential(), _browser_credential())
+    return _desktop_chain
+
+
+def _browser_credential():
+    """Microsoft sign-in in a browser, remembered between commands."""
+
+    from azure.identity import (
+        InteractiveBrowserCredential,
+        TokenCachePersistenceOptions,
+    )
+
+    return InteractiveBrowserCredential(
+        cache_persistence_options=TokenCachePersistenceOptions(name=TOKEN_CACHE_NAME)
+    )
 
 
 def get_token(scope: str, cred=None) -> str:

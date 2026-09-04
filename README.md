@@ -128,6 +128,32 @@ weaver test
 Each reads `workspace-config.yml` beside it. `--workspace` and
 `--workspace-config` still win where you give them.
 
+## Signing in
+
+`pip install weaverstack` is the whole prerequisite. Weaver uses your Azure CLI
+sign-in where you have one, and otherwise opens Microsoft sign-in in a browser
+and remembers it, so the next command opens nothing.
+
+If something cannot connect:
+
+```bash
+weaver doctor
+```
+
+That proves sign-in and the Fabric REST API. From a project directory it also
+checks the endpoints that project uses:
+
+```text
+  Fabric REST                       OK
+  Workspace My Fabric Workspace     OK
+  Warehouse/Catalogue TDS           OK
+  Lakehouse/Landing OneLake         OK
+  Spark session                     OK
+```
+
+Checking a Lakehouse starts a Fabric Spark session, which takes a minute.
+`weaver check` is the other half: it reads your repository and contacts nothing.
+
 ## CLI lifecycle
 
 One Workspace configuration can abbreviate the full desktop lifecycle:

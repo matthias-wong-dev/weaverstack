@@ -544,6 +544,7 @@ load
 
 | Command | Concern |
 |---------|---------|
+| `doctor` | Whether the crossings can be made at all |
 | `initialise` | Fabric item provisioning and project generation |
 | `wipe` | Physical state |
 | `build` | Deployment and installation |
