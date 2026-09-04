@@ -2,7 +2,11 @@
 
 `pip install weaverstack` is the whole prerequisite. A user who has run
 `az login` keeps that identity; one who has not is sent to Microsoft sign-in in
-a browser, and the token is cached on disk so the next command opens nothing.
+a browser once, and later commands reuse it.
+
+Reuse across processes needs both halves. The encrypted persistent token cache
+holds the refresh token, and the AuthenticationRecord names the account it
+belongs to; `azure-identity` writes the first and Weaver writes the second.
 
 The choice is a chain, not a probe. `ChainedTokenCredential` tries the Azure CLI
 inside the token acquisition a command was going to make anyway and remembers
@@ -65,7 +69,7 @@ class _LibraryDefault:
 
 
 @pytest.fixture(autouse=True)
-def uninstalled(monkeypatch):
+def uninstalled(monkeypatch, tmp_path):
     """Leave the process as this test found it, and reach no real credential.
 
     The suite refuses a real credential outside `-m fabric`. These tests are
@@ -75,6 +79,11 @@ def uninstalled(monkeypatch):
 
     monkeypatch.setattr(auth, "credential", REAL_CREDENTIAL)
     monkeypatch.setattr("azure.identity.DefaultAzureCredential", _LibraryDefault)
+    # Nothing here may read or write the developer's own remembered sign-in.
+    monkeypatch.setattr(
+        auth, "_authentication_record_path", lambda: tmp_path / "record.json"
+    )
+    monkeypatch.setattr(auth, "_warned", set())
 
     before = auth._installed
     chain = auth._desktop_chain
@@ -253,6 +262,261 @@ def test_the_fabric_conftest_asks_for_the_azure_cli_and_nothing_else():
     assert "desktop_credential" not in source
 
 
+# --- signing in once, and not again -------------------------------------------
+#
+# The regression this section exists for is the second process. A user without
+# the Azure CLI signed in, the command finished, and the next command opened a
+# browser again: the refresh token was in the Keychain and nothing on the
+# machine said which account it belonged to.
+
+
+def _Record(username: str):
+    """A real AuthenticationRecord, because a real one is what is written.
+
+    Its own serialisation is what `_save_authentication_record` writes and
+    `_load_authentication_record` reads back, and a convenient shape here would
+    prove nothing about the round trip.
+    """
+
+    from azure.identity import AuthenticationRecord
+
+    return AuthenticationRecord(
+        "a-tenant",
+        "a-client",
+        "login.microsoftonline.com",
+        f"home-{username}",
+        username,
+    )
+
+
+class _Browser:
+    """The library's browser credential as `disable_automatic_authentication`
+    makes it behave: silent where it has the account and Entra renews the token,
+    and `AuthenticationRequiredError` otherwise.
+
+    It is constructed with whatever record was loaded, which is the subject of
+    this section: a credential handed one answers without opening anything, and
+    one handed None cannot.
+    """
+
+    def __init__(self, record, *, signs_in_as, renews):
+        self.record = record
+        self.authenticated = []
+        self.tokens = 0
+        self._signs_in_as = signs_in_as
+        self._renews = renews
+
+    def get_token(self, *scopes, **kwargs):
+        from azure.identity import AuthenticationRequiredError
+
+        if self.record is None or not self._renews:
+            raise AuthenticationRequiredError(
+                scopes=list(scopes), claims=kwargs.get("claims")
+            )
+        self.tokens += 1
+        return _Token()
+
+    def authenticate(self, **kwargs):
+        self.authenticated.append(kwargs)
+        self.record = _Record(self._signs_in_as)
+        # Interactive sign-in is what Entra asked for, and it renews from here.
+        self._renews = True
+        return self.record
+
+
+class _Browsers(list):
+    """Every browser credential built, and what the next one will do."""
+
+    renews = True
+    signs_in_as = "someone@example.com"
+
+    def build(self, *, cached: bool, record=None):
+        made = _Browser(record, signs_in_as=self.signs_in_as, renews=self.renews)
+        made.cached = cached
+        self.append(made)
+        return made
+
+
+@pytest.fixture
+def browsers(monkeypatch):
+    built = _Browsers()
+    monkeypatch.setattr(auth, "_interactive_browser", built.build)
+    return built
+
+
+@weaver_test()
+def test_a_first_sign_in_opens_a_browser_and_keeps_the_account(browsers):
+    """Nothing is remembered, so the silent attempt cannot name an account."""
+
+    token = auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert token.token == "a-token"
+    assert len(browsers[0].authenticated) == 1
+    assert auth._load_authentication_record().username == "someone@example.com"
+
+
+@weaver_test()
+def test_a_later_process_reuses_the_sign_in_and_opens_nothing(browsers):
+    """The regression. A fresh `BrowserSignIn` stands in for a new command.
+
+    Which is what a second `weaver doctor` is: a new process, the same machine,
+    the Azure CLI still unavailable, and no browser.
+    """
+
+    auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    later = auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert later.token == "a-token"
+    assert browsers[1].record is not None, "the credential was built without an account"
+    assert browsers[1].tokens == 1
+    assert browsers[1].authenticated == [], "a browser opened in the second process"
+
+
+@weaver_test()
+def test_a_sign_in_entra_will_not_renew_reaches_the_browser_once(browsers):
+    """A record does not authenticate the account for ever."""
+
+    auth._save_authentication_record(_Record("someone@example.com"))
+    browsers.renews = False
+
+    token = auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert token.token == "a-token"
+    assert len(browsers) == 1, "the credential was rebuilt rather than authenticated"
+    assert len(browsers[0].authenticated) == 1
+    assert browsers[0].tokens == 1
+
+
+@weaver_test()
+def test_the_account_a_reauthentication_settles_on_replaces_the_old_one(browsers):
+    """Signing in as somebody else makes them Weaver's remembered identity."""
+
+    auth._save_authentication_record(_Record("first@example.com"))
+    browsers.renews = False
+    browsers.signs_in_as = "second@example.com"
+
+    auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert auth._load_authentication_record().username == "second@example.com"
+
+
+@weaver_test()
+def test_the_refused_request_is_what_the_sign_in_asks_for(browsers):
+    """Scopes, a claims challenge, the tenant and CAE all reach `authenticate`.
+
+    A sign-in that dropped them would come back with a token for something
+    other than what the caller asked for.
+    """
+
+    browsers.renews = False
+    claims = '{"access_token":{"nbf":{"essential":true}}}'
+
+    auth.BrowserSignIn().get_token(
+        auth.FABRIC_SCOPE, claims=claims, tenant_id="a-tenant", enable_cae=True
+    )
+
+    asked = browsers[0].authenticated[0]
+    assert asked["scopes"] == [auth.FABRIC_SCOPE]
+    assert asked["claims"] == claims
+    assert asked["tenant_id"] == "a-tenant"
+    assert asked["enable_cae"] is True
+
+
+@weaver_test()
+def test_a_record_that_cannot_be_read_is_replaced(browsers, capsys):
+    """Convenience state, so an unusable one is signed in over rather than raised."""
+
+    path = auth._authentication_record_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{ this is not a record", encoding="utf-8")
+
+    token = auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert token.token == "a-token"
+    assert len(browsers[0].authenticated) == 1
+    assert auth._load_authentication_record().username == "someone@example.com"
+    assert "could not be read" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_record_that_cannot_be_written_costs_the_reuse_and_not_the_token(
+    browsers, monkeypatch, capsys
+):
+    """The sign-in already happened, and failing the command after it would
+    throw away a browser round trip somebody has just completed."""
+
+    def refuse(*arguments, **keywords):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(auth.Path, "mkdir", refuse)
+
+    token = auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert token.token == "a-token"
+    assert "could not remember this sign-in" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_half_written_record_is_never_left_behind(monkeypatch):
+    """Moved into place, so an interrupted command leaves the previous account."""
+
+    replaced = []
+    monkeypatch.setattr(
+        auth.os, "replace", lambda source, into: replaced.append(source)
+    )
+
+    auth._save_authentication_record(_Record("someone@example.com"))
+
+    written = replaced[0]
+    assert str(written) != str(auth._authentication_record_path())
+    assert not auth._authentication_record_path().exists()
+
+
+@weaver_test()
+def test_the_record_is_owner_only_where_the_platform_has_such_a_mode():
+    import os
+    import sys
+
+    auth._save_authentication_record(_Record("someone@example.com"))
+
+    if sys.platform == "win32":  # pragma: no cover - the mode has no meaning there
+        return
+    mode = os.stat(auth._authentication_record_path()).st_mode & 0o777
+    assert mode == 0o600
+
+
+@weaver_test()
+def test_the_record_carries_no_token(browsers):
+    """Identity metadata is what is written. Secrets stay in the secure store."""
+
+    auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    kept = auth._authentication_record_path().read_text(encoding="utf-8")
+    assert "a-token" not in kept
+    assert "refresh" not in kept.casefold()
+    assert "secret" not in kept.casefold()
+
+
+@weaver_test()
+def test_a_signed_in_user_never_reads_the_remembered_account(credentials, monkeypatch):
+    """The Azure CLI answers, so `BrowserSignIn` is never built or asked.
+
+    Which is also why the file is not read: it is read where a browser sign-in
+    is being constructed, and there is none.
+    """
+
+    def refuse():
+        raise AssertionError("the remembered account was read for a CLI sign-in")
+
+    monkeypatch.setattr(auth, "_load_authentication_record", refuse)
+
+    auth.desktop_credential().get_token(auth.FABRIC_SCOPE)
+
+    assert credentials.cli.calls == 1
+    assert credentials.browser.calls == 0
+
+
 # --- a machine with nowhere to keep a sign-in ----------------------------------
 #
 # The token is kept where the platform keeps secrets. A headless Linux box with
@@ -294,12 +558,12 @@ def browser(monkeypatch):
     with_a_cache = _NoSecureStorage()
     without_one = _Working()
 
-    def build(*, cached: bool):
+    def build(*, cached: bool, record=None):
         made.append(cached)
         return with_a_cache if cached else without_one
 
     monkeypatch.setattr(auth, "_interactive_browser", build)
-    monkeypatch.setattr(auth, "_warned", False)
+    monkeypatch.setattr(auth, "_warned", set())
     return type(
         "Browser",
         (),
@@ -316,6 +580,17 @@ def test_a_machine_with_no_secure_storage_still_signs_in(browser, capsys):
     assert browser.cached.calls == 1
     assert browser.uncached.calls == 1
     assert "no secure place to keep a sign-in" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_machine_with_no_secure_storage_remembers_nothing(browser):
+    """Without the token cache there is no refresh token for a later process to
+    reconstruct a sign-in from, so a remembered account would promise a silent
+    command that cannot happen."""
+
+    auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert not auth._authentication_record_path().exists()
 
 
 @weaver_test()
@@ -344,7 +619,7 @@ def test_a_secure_machine_keeps_the_cache(monkeypatch, capsys):
     made: list[bool] = []
     working = _Working()
 
-    def build(*, cached: bool):
+    def build(*, cached: bool, record=None):
         made.append(cached)
         return working
 
@@ -368,7 +643,7 @@ def test_a_refused_sign_in_is_reported_rather_than_retried(monkeypatch):
         def get_token(self, *scopes, **_):
             raise ClientAuthenticationError("the user cancelled")
 
-    def build(*, cached: bool):
+    def build(*, cached: bool, record=None):
         made.append(cached)
         return _Refused()
 
@@ -421,12 +696,12 @@ def test_each_way_a_platform_says_it_cannot_keep_a_token_falls_back(
     refusing = _NoSecureStorage(raising=raised)
     working = _Working()
 
-    def build(*, cached: bool):
+    def build(*, cached: bool, record=None):
         made.append(cached)
         return refusing if cached else working
 
     monkeypatch.setattr(auth, "_interactive_browser", build)
-    monkeypatch.setattr(auth, "_warned", False)
+    monkeypatch.setattr(auth, "_warned", set())
 
     assert auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE).token == "a-token"
     assert made == [True, False]
@@ -443,12 +718,12 @@ def test_a_persistence_error_is_recognised_by_its_type(monkeypatch, capsys):
     refusing = _NoSecureStorage(raising=PersistenceEncryptionError(message="keychain"))
     working = _Working()
 
-    def build(*, cached: bool):
+    def build(*, cached: bool, record=None):
         made.append(cached)
         return refusing if cached else working
 
     monkeypatch.setattr(auth, "_interactive_browser", build)
-    monkeypatch.setattr(auth, "_warned", False)
+    monkeypatch.setattr(auth, "_warned", set())
 
     auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
 
@@ -464,12 +739,12 @@ def test_an_unrelated_failure_propagates_and_opens_no_second_browser(
     made: list[bool] = []
     broken = _NoSecureStorage(raising=RuntimeError("something else went wrong"))
 
-    def build(*, cached: bool):
+    def build(*, cached: bool, record=None):
         made.append(cached)
         return broken
 
     monkeypatch.setattr(auth, "_interactive_browser", build)
-    monkeypatch.setattr(auth, "_warned", False)
+    monkeypatch.setattr(auth, "_warned", set())
 
     with pytest.raises(RuntimeError, match="something else went wrong"):
         auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
@@ -487,9 +762,11 @@ def test_a_bare_value_error_is_not_a_missing_keyring(monkeypatch, capsys):
     broken = _NoSecureStorage(raising=ValueError("some other argument was wrong"))
 
     monkeypatch.setattr(
-        auth, "_interactive_browser", lambda *, cached: made.append(cached) or broken
+        auth,
+        "_interactive_browser",
+        lambda *, cached, record=None: made.append(cached) or broken,
     )
-    monkeypatch.setattr(auth, "_warned", False)
+    monkeypatch.setattr(auth, "_warned", set())
 
     with pytest.raises(ValueError, match="some other argument"):
         auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
@@ -508,9 +785,11 @@ def test_an_unrelated_missing_import_is_not_a_missing_keyring(monkeypatch, capsy
     )
 
     monkeypatch.setattr(
-        auth, "_interactive_browser", lambda *, cached: made.append(cached) or broken
+        auth,
+        "_interactive_browser",
+        lambda *, cached, record=None: made.append(cached) or broken,
     )
-    monkeypatch.setattr(auth, "_warned", False)
+    monkeypatch.setattr(auth, "_warned", set())
 
     with pytest.raises(ImportError, match="something_else"):
         auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
@@ -535,9 +814,11 @@ def test_the_library_that_holds_the_token_is_recognised_by_name(monkeypatch, cap
         monkeypatch.setattr(
             auth,
             "_interactive_browser",
-            lambda *, cached: made.append(cached) or (refusing if cached else working),
+            lambda *, cached, record=None: (
+                made.append(cached) or (refusing if cached else working)
+            ),
         )
-        monkeypatch.setattr(auth, "_warned", False)
+        monkeypatch.setattr(auth, "_warned", set())
 
         assert auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE).token == "a-token"
         assert made == [True, False]
