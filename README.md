@@ -132,7 +132,9 @@ Each reads `workspace-config.yml` beside it. `--workspace` and
 
 `pip install weaverstack` is the whole prerequisite. Weaver uses your Azure CLI
 sign-in where you have one, and otherwise opens Microsoft sign-in in a browser
-and remembers it, so the next command opens nothing.
+and remembers it, so the next command opens nothing. On a machine with no
+keyring it signs in each time instead, rather than leaving the token on disk in
+the clear.
 
 If something cannot connect:
 

@@ -13,8 +13,11 @@ weaver --help
 ## Signing in
 
 Weaver uses the Azure CLI identity where `az login` has produced one, and
-otherwise opens Microsoft sign-in in a browser. The browser token is cached on
-disk under `weaverstack`, so later commands sign in without opening anything.
+otherwise opens Microsoft sign-in in a browser. The browser token is kept where
+the machine keeps secrets, a Keychain item on macOS, libsecret on Linux, DPAPI
+on Windows, so later commands sign in without opening anything. A machine with
+none of those signs in each time and says so once; the token is never written to
+disk in the clear.
 
 A chain, not a probe: the Azure CLI is tried inside the token acquisition a
 command was going to make anyway, so a signed-in user pays nothing to have the

@@ -142,16 +142,88 @@ def desktop_credential():
 
 
 def _browser_credential():
-    """Microsoft sign-in in a browser, remembered between commands."""
+    """Microsoft sign-in in a browser, remembered where the machine can keep it."""
+
+    return BrowserSignIn()
+
+
+class BrowserSignIn:
+    """Microsoft sign-in in a browser, with the token cache made optional.
+
+    The token is kept where the machine keeps secrets: a Keychain item on macOS,
+    libsecret on Linux, DPAPI on Windows. ``azure-identity`` builds that cache
+    when the first token is asked for, not when the credential is made, so the
+    absence of secure storage surfaces here and is answered by signing in
+    without a cache.
+
+    Falling back to an unencrypted file is not offered. A refresh token sitting
+    on disk in the clear is a worse trade than signing in again, and
+    ``pip install weaverstack`` still has to be the whole prerequisite on a
+    machine with no keyring at all.
+    """
+
+    def __init__(self) -> None:
+        self._credential = None
+        self._cached = True
+
+    def get_token(self, *scopes, **kwargs):
+        """One token, from the cached credential or from one without a cache."""
+
+        from azure.core.exceptions import ClientAuthenticationError
+        from azure.identity import CredentialUnavailableError
+
+        credential = self._acquire()
+        try:
+            return credential.get_token(*scopes, **kwargs)
+        except (ClientAuthenticationError, CredentialUnavailableError):
+            # An answer about the sign-in itself, which is this credential's own
+            # to report. Only the storage underneath it is worked around here.
+            raise
+        except Exception as exc:
+            if not self._cached:
+                raise
+            _warn_once(
+                "This machine has no secure place to keep a sign-in "
+                f"({type(exc).__name__}), so Weaver will ask you to sign in "
+                "again next time."
+            )
+            self._credential = _interactive_browser(cached=False)
+            self._cached = False
+            return self._credential.get_token(*scopes, **kwargs)
+
+    def _acquire(self):
+        if self._credential is None:
+            self._credential = _interactive_browser(cached=self._cached)
+        return self._credential
+
+
+def _interactive_browser(*, cached: bool):
+    """The library's browser credential, with or without a persistent cache."""
 
     from azure.identity import (
         InteractiveBrowserCredential,
         TokenCachePersistenceOptions,
     )
 
+    if not cached:
+        return InteractiveBrowserCredential()
     return InteractiveBrowserCredential(
         cache_persistence_options=TokenCachePersistenceOptions(name=TOKEN_CACHE_NAME)
     )
+
+
+#: Said once per process. A warning repeated per command is noise nobody reads.
+_warned = False
+
+
+def _warn_once(message: str) -> None:
+    global _warned
+    if _warned:
+        return
+    _warned = True
+    import sys
+
+    print(f"warning: {message}", file=sys.stderr)
 
 
 def get_token(scope: str, cred=None) -> str:

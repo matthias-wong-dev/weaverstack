@@ -251,3 +251,130 @@ def test_the_fabric_conftest_asks_for_the_azure_cli_and_nothing_else():
 
     assert "prefer_cli_credential" in source
     assert "desktop_credential" not in source
+
+
+# --- a machine with nowhere to keep a sign-in ----------------------------------
+#
+# The token is kept where the platform keeps secrets. A headless Linux box with
+# no keyring has none, and `pip install weaverstack` still has to be the whole
+# prerequisite there, so the sign-in works without a cache and says so once.
+
+
+class _NoSecureStorage:
+    """The browser credential azure-identity builds when a cache was asked for.
+
+    The cache is built when the first token is asked for, not when the
+    credential is made, so this is where the absence of secure storage lands.
+    """
+
+    def __init__(self):
+        self.calls = 0
+
+    def get_token(self, *scopes, **_):
+        self.calls += 1
+        raise ValueError("Persistence not found")
+
+
+@pytest.fixture
+def browser(monkeypatch):
+    """The library's browser credential, cached and uncached, each recorded."""
+
+    made: list[bool] = []
+    with_a_cache = _NoSecureStorage()
+    without_one = _Working()
+
+    def build(*, cached: bool):
+        made.append(cached)
+        return with_a_cache if cached else without_one
+
+    monkeypatch.setattr(auth, "_interactive_browser", build)
+    monkeypatch.setattr(auth, "_warned", False)
+    return type(
+        "Browser",
+        (),
+        {"made": made, "cached": with_a_cache, "uncached": without_one},
+    )
+
+
+@weaver_test()
+def test_a_machine_with_no_secure_storage_still_signs_in(browser, capsys):
+    token = auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert token.token == "a-token"
+    assert browser.made == [True, False]
+    assert browser.cached.calls == 1
+    assert browser.uncached.calls == 1
+    assert "no secure place to keep a sign-in" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_the_uncached_warning_is_said_once(browser, capsys):
+    sign_in = auth.BrowserSignIn()
+    sign_in.get_token(auth.FABRIC_SCOPE)
+    sign_in.get_token(auth.FABRIC_SCOPE)
+
+    assert capsys.readouterr().err.count("no secure place") == 1
+
+
+@weaver_test()
+def test_the_cache_is_dropped_once_and_not_probed_again(browser):
+    sign_in = auth.BrowserSignIn()
+    sign_in.get_token(auth.FABRIC_SCOPE)
+    sign_in.get_token(auth.FABRIC_SCOPE)
+
+    assert browser.made == [True, False]
+    assert browser.cached.calls == 1
+
+
+@weaver_test()
+def test_a_secure_machine_keeps_the_cache(monkeypatch, capsys):
+    """Nothing is worked around where the platform can hold a token."""
+
+    made: list[bool] = []
+    working = _Working()
+
+    def build(*, cached: bool):
+        made.append(cached)
+        return working
+
+    monkeypatch.setattr(auth, "_interactive_browser", build)
+
+    auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert made == [True]
+    assert capsys.readouterr().err == ""
+
+
+@weaver_test()
+def test_a_refused_sign_in_is_reported_rather_than_retried(monkeypatch):
+    """An answer about the sign-in is not a reason to sign in again."""
+
+    from azure.core.exceptions import ClientAuthenticationError
+
+    made: list[bool] = []
+
+    class _Refused:
+        def get_token(self, *scopes, **_):
+            raise ClientAuthenticationError("the user cancelled")
+
+    def build(*, cached: bool):
+        made.append(cached)
+        return _Refused()
+
+    monkeypatch.setattr(auth, "_interactive_browser", build)
+
+    with pytest.raises(ClientAuthenticationError):
+        auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert made == [True]
+
+
+@weaver_test()
+def test_an_unencrypted_cache_is_never_asked_for():
+    """A refresh token in the clear is a worse trade than signing in again."""
+
+    from pathlib import Path
+
+    source = (Path(auth.__file__).resolve()).read_text(encoding="utf-8")
+
+    assert "allow_unencrypted_storage" not in source
