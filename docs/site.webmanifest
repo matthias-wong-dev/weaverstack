@@ -1,17 +1,11 @@
 {
-  "name": "Weaver — Fabric, declared.",
+  "name": "Weaver: Microsoft Fabric, made easier.",
   "short_name": "Weaver",
-  "description": "The open-source control plane for declaring, building and orchestrating a Microsoft Fabric data estate.",
+  "description": "Build and operate data pipelines across Microsoft Fabric from one repository.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f4f1e8",
-  "theme_color": "#f4f1e8",
-  "icons": [
-    {
-      "src": "/favicon.png",
-      "sizes": "128x128",
-      "type": "image/png"
-    }
-  ]
+  "background_color": "#f7f7f6",
+  "theme_color": "#f7f7f6",
+  "icons": [{ "src": "/favicon.png", "sizes": "128x128", "type": "image/png" }]
 }

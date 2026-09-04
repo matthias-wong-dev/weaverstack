@@ -1,32 +1,32 @@
 <!doctype html>
-<html lang="en">
+<html lang="en-AU">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f4f1e8">
-    <meta name="description" content="Weaver is the open-source control plane for declaring, building and orchestrating a Microsoft Fabric data estate.">
-    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
-    <meta name="googlebot" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+    <meta name="theme-color" content="#f7f7f6">
+    <title>Weaver: Microsoft Fabric, made easier.</title>
+    <meta name="description" content="Weaver helps you build and operate data pipelines across Microsoft Fabric from one repository. Write normal Python and T-SQL; Weaver derives dependencies from the code.">
+    <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="author" content="Weaver contributors">
+    <link rel="canonical" href="https://weaverstack.dev/">
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://weaverstack.dev/">
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
-    <meta property="og:title" content="Weaver — Fabric, declared.">
-    <meta property="og:description" content="One repository for your whole Microsoft Fabric data estate.">
+    <meta property="og:title" content="Weaver: Microsoft Fabric, made easier.">
+    <meta property="og:description" content="Build and operate data on Microsoft Fabric from one repository.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta property="og:image:width" content="1536">
     <meta property="og:image:height" content="1024">
-    <meta property="og:image:alt" content="Weaver — Fabric, declared. One repository, many Fabric items, one dependency graph.">
+    <meta property="og:image:alt" content="The Weaver home page: Microsoft Fabric, made easier.">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Weaver — Fabric, declared.">
-    <meta name="twitter:description" content="One repository for your whole Microsoft Fabric data estate.">
+    <meta name="twitter:title" content="Weaver: Microsoft Fabric, made easier.">
+    <meta name="twitter:description" content="Build and operate data on Microsoft Fabric from one repository.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
-    <link rel="canonical" href="https://weaverstack.dev/">
-    <link rel="sitemap" type="application/xml" href="https://weaverstack.dev/sitemap.xml">
     <link rel="icon" type="image/png" sizes="128x128" href="favicon.png">
     <link rel="manifest" href="site.webmanifest">
-    <title>Weaver — Fabric, declared.</title>
+    <link rel="sitemap" type="application/xml" href="sitemap.xml">
+    <link rel="stylesheet" href="assets/site.css">
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
@@ -37,7 +37,7 @@
             "url": "https://weaverstack.dev/",
             "name": "Weaver",
             "alternateName": "weaverstack",
-            "description": "The open-source control plane for declaring, building and orchestrating a Microsoft Fabric data estate.",
+            "description": "A data-engineering framework for Microsoft Fabric, built around a central catalogue.",
             "inLanguage": "en-AU"
           },
           {
@@ -45,10 +45,10 @@
             "@id": "https://weaverstack.dev/#software",
             "name": "Weaver",
             "alternateName": "weaverstack",
-            "description": "A central-catalogue data engineering runtime for Microsoft Fabric Lakehouses and Warehouses.",
+            "description": "Build and operate data pipelines across Microsoft Fabric Lakehouses and Warehouses from one repository.",
             "url": "https://weaverstack.dev/",
             "codeRepository": "https://github.com/matthias-wong-dev/weaverstack",
-            "license": "https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE",
+            "license": "https://www.mozilla.org/en-US/MPL/2.0/",
             "programmingLanguage": ["Python", "SQL"],
             "runtimePlatform": "Microsoft Fabric",
             "isAccessibleForFree": true,
@@ -57,497 +57,85 @@
         ]
       }
     </script>
-    <style>
-      :root {
-        --ink: #111b27;
-        --muted: #59636e;
-        --paper: #f4f1e8;
-        --paper-deep: #e9e4d8;
-        --white: #fffefa;
-        --blue: #315cf4;
-        --blue-dark: #1739a6;
-        --blue-soft: #dce4ff;
-        --orange: #ff6b35;
-        --green: #14805e;
-        --line: rgba(17, 27, 39, .16);
-        --line-strong: rgba(17, 27, 39, .32);
-        --shadow: 0 22px 70px rgba(31, 38, 52, .11);
-        --radius: 18px;
-        --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace;
-        --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-
-      * { box-sizing: border-box; }
-      html { scroll-behavior: smooth; }
-      body {
-        margin: 0;
-        color: var(--ink);
-        background:
-          linear-gradient(rgba(17,27,39,.027) 1px, transparent 1px),
-          linear-gradient(90deg, rgba(17,27,39,.027) 1px, transparent 1px),
-          var(--paper);
-        background-size: 48px 48px;
-        font-family: var(--sans);
-        line-height: 1.6;
-        -webkit-font-smoothing: antialiased;
-      }
-      a { color: inherit; }
-      button, summary { font: inherit; }
-      ::selection { color: var(--white); background: var(--blue); }
-      .wrap { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
-      .mono { font-family: var(--mono); }
-
-      .skip-link {
-        position: fixed; left: 16px; top: -80px; z-index: 100;
-        padding: 10px 14px; color: white; background: var(--ink); border-radius: 8px;
-      }
-      .skip-link:focus { top: 16px; }
-
-      .site-header {
-        position: sticky; top: 0; z-index: 20;
-        background: color-mix(in srgb, var(--paper) 88%, transparent);
-        border-bottom: 1px solid rgba(17,27,39,.09);
-        backdrop-filter: blur(16px);
-      }
-      .nav { height: 72px; display: flex; align-items: center; gap: 30px; }
-      .brand { display: inline-flex; align-items: center; gap: 11px; text-decoration: none; font-size: 20px; font-weight: 760; letter-spacing: -.03em; }
-      .weave-mark { position: relative; width: 28px; height: 25px; flex: 0 0 auto; }
-      .weave-mark i { position: absolute; top: 1px; width: 5px; height: 24px; background: var(--ink); border-radius: 9px; transform: rotate(-22deg); }
-      .weave-mark i:nth-child(1) { left: 3px; }
-      .weave-mark i:nth-child(2) { left: 10px; transform: rotate(22deg); background: var(--blue); }
-      .weave-mark i:nth-child(3) { left: 16px; }
-      .weave-mark i:nth-child(4) { left: 22px; transform: rotate(22deg); background: var(--blue); }
-      .nav-links { display: flex; align-items: center; gap: 25px; margin-left: auto; }
-      .nav-links a { color: var(--muted); text-decoration: none; font-size: 14px; font-weight: 650; }
-      .nav-links a:hover, .nav-links a:focus-visible { color: var(--blue); }
-      .button {
-        display: inline-flex; min-height: 46px; align-items: center; justify-content: center; gap: 9px;
-        padding: 0 18px; border: 1px solid var(--ink); border-radius: 9px;
-        color: var(--white); background: var(--ink); text-decoration: none; font-size: 14px; font-weight: 750;
-        transition: transform .18s ease, box-shadow .18s ease, background .18s ease;
-      }
-      .button:hover { transform: translateY(-2px); box-shadow: 0 9px 22px rgba(17,27,39,.18); }
-      .button:focus-visible, summary:focus-visible, a:focus-visible { outline: 3px solid rgba(49,92,244,.32); outline-offset: 3px; }
-      .button.blue { background: var(--blue); border-color: var(--blue); }
-      .button.ghost { color: var(--ink); background: transparent; border-color: var(--line-strong); }
-      .button.small { min-height: 38px; padding: 0 14px; font-size: 13px; }
-      .arrow { font-family: var(--mono); font-size: 1.05em; }
-
-      .hero { padding: 78px 0 48px; overflow: hidden; }
-      .hero-grid { display: grid; grid-template-columns: .9fr 1.1fr; align-items: center; gap: 70px; }
-      .status {
-        display: inline-flex; align-items: center; gap: 9px; margin-bottom: 26px; padding: 8px 11px;
-        border: 1px solid rgba(49,92,244,.24); border-radius: 999px; color: var(--blue-dark); background: var(--blue-soft);
-        font-family: var(--mono); font-size: 12px; font-weight: 760; letter-spacing: .02em;
-      }
-      .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 5px rgba(49,92,244,.11); }
-      .eyebrow { margin: 0 0 16px; color: var(--blue); font-family: var(--mono); font-size: 12px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
-      .hero h1 { margin: 0; font-size: clamp(78px, 9vw, 128px); line-height: .82; letter-spacing: -.085em; font-weight: 790; }
-      .hero h2 { margin: 31px 0 18px; font-size: clamp(34px, 4.4vw, 64px); line-height: 1; letter-spacing: -.06em; font-weight: 650; }
-      .hero-lead { max-width: 580px; margin: 0; color: #2e3945; font-size: 20px; line-height: 1.55; letter-spacing: -.015em; }
-      .hero-copy { margin: 16px 0 0; color: var(--muted); font-size: 16px; max-width: 600px; }
-      .actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 30px; }
-      .text-link { display: inline-flex; align-items: center; gap: 7px; padding: 10px 2px; color: var(--blue-dark); font-weight: 750; text-decoration-thickness: 1px; text-underline-offset: 4px; }
-
-      .system-map { position: relative; padding: 22px; border: 1px solid var(--line); border-radius: 28px; background: rgba(255,254,250,.7); box-shadow: var(--shadow); }
-      .system-map::before { content: ""; position: absolute; inset: 8px; border: 1px dashed rgba(49,92,244,.18); border-radius: 21px; pointer-events: none; }
-      .map-superhead { position: relative; z-index: 2; display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-      .map-superhead strong { font: 850 10px var(--mono); letter-spacing: .13em; text-transform: uppercase; }
-      .map-superhead span { padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font: 9px var(--mono); }
-      .architecture-flow { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) 32px minmax(0, 1.08fr); align-items: stretch; gap: 6px; }
-      .architecture-stage { min-width: 0; padding: 9px; border: 1px solid var(--line); border-radius: 11px; background: var(--white); }
-      .stage-head { min-height: 34px; margin-bottom: 8px; padding-bottom: 7px; border-bottom: 1px solid var(--line); }
-      .stage-head span { display: block; color: var(--blue); font: 850 7px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
-      .stage-head strong { display: block; margin-top: 2px; font: 780 10px var(--mono); }
-      .repo-tree { padding: 1px 2px; color: var(--muted); font: 7.5px/1.58 var(--mono); }
-      .tree-folder { position: relative; display: block; color: var(--ink); font-weight: 800; white-space: nowrap; }
-      .tree-folder::before { content: "▾ "; color: var(--blue); }
-      .tree-folder.closed::before { content: "▸ "; color: #98a0a8; }
-      .tree-depth-1 { padding-left: 10px; }
-      .tree-depth-2 { padding-left: 21px; }
-      .tree-depth-3 { padding-left: 32px; }
-      .tree-file { --track: var(--blue); position: relative; display: block; overflow: hidden; margin: 1px 0; padding: 2px 3px 2px 48px; border: 1px solid transparent; border-radius: 4px; color: var(--ink); text-overflow: ellipsis; white-space: nowrap; opacity: .78; animation: trace-object 10s ease-in-out infinite; }
-      .tree-file::before { content: "├─ " attr(data-id); position: absolute; left: 22px; color: var(--track); font-weight: 850; }
-      .tree-depth-3.tree-file::before { left: 32px; }
-      .fabric-items { display: grid; gap: 6px; }
-      .fabric-item { padding: 6px; border: 1px solid rgba(17,27,39,.12); border-radius: 7px; background: #f9f8f3; }
-      .fabric-item-head { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
-      .fabric-item-head strong { display: block; font: 800 7.5px var(--mono); }
-      .fabric-item-head small { display: block; color: var(--muted); font: 5.5px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-      .fabric-icon { position: relative; width: 20px; height: 20px; flex: 0 0 auto; color: var(--blue); }
-      .lakehouse-icon::before { content: ""; position: absolute; left: 2px; right: 2px; top: 3px; height: 13px; border: 1.5px solid currentColor; border-radius: 50% / 22%; background: linear-gradient(to bottom, transparent 42%, currentColor 43%, currentColor 49%, transparent 50%); }
-      .lakehouse-icon::after { content: ""; position: absolute; left: 5px; top: 1px; width: 7px; height: 5px; border: 1.5px solid currentColor; border-bottom: 0; border-radius: 3px 3px 0 0; background: var(--white); }
-      .warehouse-icon { border: 1.5px solid currentColor; border-radius: 3px; background: repeating-linear-gradient(90deg, transparent 0 4px, currentColor 4px 5px), repeating-linear-gradient(0deg, transparent 0 4px, currentColor 4px 5px); }
-      .fabric-objects { display: grid; gap: 2px; }
-      .fabric-object { --track: var(--blue); position: relative; overflow: hidden; padding: 2px 3px 2px 19px; border: 1px solid transparent; border-radius: 4px; color: var(--ink); font: 6.5px/1.25 var(--mono); text-overflow: ellipsis; white-space: nowrap; opacity: .78; animation: trace-object 10s ease-in-out infinite; }
-      .fabric-object::before { content: attr(data-id); position: absolute; left: 3px; color: var(--track); font-weight: 850; }
-      .object-2 { --track: #14805e; animation-delay: 2s; }
-      .object-3 { --track: #7862d8; animation-delay: 4s; }
-      .object-4 { --track: #dd5b2d; animation-delay: 6s; }
-      .object-5 { --track: #1739a6; animation-delay: 8s; }
-      @keyframes trace-object { 0%, 15%, 100% { opacity: .78; border-color: rgba(17,27,39,.1); background: #f9f8f3; } 4%, 11% { opacity: 1; border-color: color-mix(in srgb, var(--track) 52%, transparent); background: color-mix(in srgb, var(--track) 10%, var(--white)); } }
-      .stage-transition { display: flex; min-width: 0; flex-direction: column; align-items: center; justify-content: center; color: var(--blue); }
-      .stage-transition > small { margin-bottom: 9px; color: var(--muted); font: 700 6px var(--mono); letter-spacing: .02em; text-align: center; }
-      .mapping-arrows { display: grid; gap: 17px; font: 850 12px var(--mono); }
-      .dag-transition b { font: 850 20px var(--mono); }
-      .dag-transition small { writing-mode: vertical-rl; transform: rotate(180deg); }
-      .dag-stage { position: relative; min-height: 293px; overflow: hidden; background-color: var(--white); background-image: radial-gradient(rgba(49,92,244,.18) 1px, transparent 1px); background-size: 12px 12px; }
-      .dag-stage .stage-head { position: relative; z-index: 3; }
-      .complex-dag { position: absolute; inset: 52px 7px 7px; }
-      .dag-node { --track: var(--blue); position: absolute; z-index: 2; display: grid; width: 70px; min-height: 38px; place-items: center; padding: 5px; border: 1px solid color-mix(in srgb, var(--track) 45%, var(--line)); border-radius: 7px; background: var(--white); box-shadow: 0 5px 12px rgba(31,38,52,.08); text-align: center; font-family: var(--mono); opacity: .82; animation: trace-object 10s ease-in-out infinite; }
-      .dag-node small { color: var(--muted); font-size: 5.5px; }
-      .dag-node strong { font-size: 6.5px; line-height: 1.1; }
-      .node-export { left: 2%; top: 2%; }
-      .node-customer { right: 2%; top: 18%; }
-      .node-clean { left: 12%; top: 41%; }
-      .node-prediction { right: 1%; top: 62%; }
-      .node-forecast { left: 23%; bottom: 0; }
-      .dag-edge { position: absolute; z-index: 1; height: 1px; background: var(--blue); transform-origin: left center; }
-      .dag-edge::after { content: ""; position: absolute; right: -1px; top: -3px; border-width: 3px 0 3px 5px; border-style: solid; border-color: transparent transparent transparent var(--blue); }
-      .dag-edge.e1 { left: 32%; top: 12%; width: 40%; transform: rotate(12deg); }
-      .dag-edge.e2 { left: 75%; top: 31%; width: 55%; transform: rotate(151deg); }
-      .dag-edge.e3 { left: 36%; top: 52%; width: 45%; transform: rotate(16deg); }
-      .dag-edge.e4 { left: 34%; top: 54%; width: 39%; transform: rotate(67deg); }
-      .dag-edge.e5 { left: 72%; top: 70%; width: 42%; transform: rotate(137deg); }
-      .map-legend { position: relative; z-index: 2; display: flex; justify-content: space-between; gap: 12px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font: 8px var(--mono); }
-      .map-legend strong { color: var(--blue-dark); }
-      .map-caption { position: absolute; right: -25px; top: 50%; padding: 7px 9px; color: var(--white); background: var(--orange); border-radius: 6px; font-family: var(--mono); font-size: 9px; font-weight: 800; transform: rotate(90deg) translateX(50%); transform-origin: 100% 50%; }
-
-      .manifesto { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(255,254,250,.62); }
-      .manifesto-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
-      .manifesto p { margin: 0; padding: 23px 22px; border-left: 1px solid var(--line); font-size: 15px; font-weight: 790; letter-spacing: -.02em; }
-      .manifesto p:first-child { border-left: 0; }
-      .manifesto span { display: block; margin-bottom: 4px; color: var(--blue); font-family: var(--mono); font-size: 10px; letter-spacing: .1em; }
-
-      .section { padding: 120px 0; border-bottom: 1px solid var(--line); }
-      .section-head { max-width: 780px; margin-bottom: 55px; }
-      .section h2 { margin: 0; max-width: 900px; font-size: clamp(42px, 6vw, 76px); line-height: 1.02; letter-spacing: -.055em; }
-      .section-intro { max-width: 690px; margin: 22px 0 0; color: var(--muted); font-size: 19px; }
-      .pull { display: inline-block; margin-top: 21px; padding: 7px 10px; color: var(--blue-dark); background: var(--blue-soft); border-radius: 6px; font-family: var(--mono); font-size: 13px; font-weight: 800; }
-      .split { display: grid; grid-template-columns: 1.03fr .97fr; gap: 44px; align-items: center; }
-      .panel { border: 1px solid var(--line); border-radius: var(--radius); background: var(--white); box-shadow: 0 16px 44px rgba(31,38,52,.07); overflow: hidden; }
-      .panel-bar { display: flex; align-items: center; justify-content: space-between; min-height: 44px; padding: 0 15px; border-bottom: 1px solid var(--line); background: #eeece5; color: var(--muted); font-family: var(--mono); font-size: 10px; }
-      .panel-dots { display: flex; gap: 5px; }
-      .panel-dots i { width: 7px; height: 7px; border-radius: 50%; background: #c4c2bb; }
-      .panel pre { margin: 0; padding: 23px; overflow: auto; color: #d7e1fb; background: #101927; font: 12px/1.75 var(--mono); }
-      .code-blue { color: #82a3ff; }
-      .code-orange { color: #ff9b75; }
-      .code-green { color: #7cd9ba; }
-      .code-dim { color: #7d899c; }
-      .prose h3 { margin: 0 0 15px; font-size: 31px; line-height: 1.15; letter-spacing: -.04em; }
-      .prose p { margin: 0 0 17px; color: var(--muted); font-size: 17px; }
-      .prose strong { color: var(--ink); }
-      .number-list { display: grid; gap: 13px; margin-top: 28px; }
-      .number-item { display: grid; grid-template-columns: 36px 1fr; gap: 12px; align-items: start; }
-      .number-item b { display: grid; width: 32px; height: 32px; place-items: center; color: var(--blue); border: 1px solid rgba(49,92,244,.28); border-radius: 50%; font-family: var(--mono); font-size: 11px; }
-      .number-item span { padding-top: 3px; color: var(--muted); }
-
-      .graph-panel { position: relative; min-height: 460px; padding: 24px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--white); box-shadow: var(--shadow); overflow: hidden; }
-      .graph-panel::before { content: ""; position: absolute; inset: 0; opacity: .45; background-image: radial-gradient(rgba(49,92,244,.25) 1px, transparent 1px); background-size: 18px 18px; }
-      .graph-groups { position: relative; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; height: 100%; align-items: stretch; }
-      .graph-group { padding: 15px; border: 1px dashed rgba(17,27,39,.25); border-radius: 11px; background: rgba(255,254,250,.85); }
-      .graph-group h4 { margin: 0 0 22px; font: 800 10px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
-      .graph-group:nth-child(2) { margin-top: 74px; }
-      .graph-group:nth-child(3) { margin-top: 145px; }
-      .graph-object { position: relative; margin: 0 0 34px; padding: 10px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--white); font: 750 10px var(--mono); }
-      .graph-object small { display: block; margin-top: 3px; color: var(--muted); font-size: 8px; }
-      .graph-object::after { content: "↓"; position: absolute; bottom: -27px; left: 50%; color: var(--blue); transform: translateX(-50%); }
-      .graph-object:last-child::after { display: none; }
-      .cross-edge { position: absolute; z-index: 3; height: 1px; background: var(--orange); transform-origin: left center; }
-      .cross-edge::after { content: ""; position: absolute; right: -1px; top: -3px; border-width: 3px 0 3px 5px; border-style: solid; border-color: transparent transparent transparent var(--orange); }
-      .edge-one { width: 157px; left: 29%; top: 52%; transform: rotate(-13deg); }
-      .edge-two { width: 320px; left: 29%; top: 52%; transform: rotate(15deg); }
-      .edge-three { width: 159px; left: 62%; top: 51%; transform: rotate(19deg); }
-      .graph-note { position: absolute; left: 24px; bottom: 18px; margin: 0; color: var(--muted); font: 9px var(--mono); }
-
-      .pipeline { position: relative; display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 52px; }
-      .pipeline::before { content: ""; position: absolute; top: 34px; left: 5%; right: 5%; border-top: 1px dashed var(--blue); }
-      .pipe-stage { position: relative; text-align: center; }
-      .pipe-icon { display: grid; width: 68px; height: 68px; margin: 0 auto 14px; place-items: center; border: 1px solid var(--line); border-radius: 14px; color: var(--blue); background: var(--white); box-shadow: 0 8px 24px rgba(31,38,52,.08); font: 800 17px var(--mono); }
-      .pipe-stage b { display: block; font-size: 12px; line-height: 1.25; }
-      .pipe-stage small { display: block; margin-top: 4px; color: var(--muted); font: 9px var(--mono); }
-      .big-statement { max-width: 900px; margin: 66px auto 0; text-align: center; font-size: clamp(28px, 4vw, 50px); font-weight: 720; line-height: 1.12; letter-spacing: -.045em; }
-      .big-statement span { color: var(--blue); }
-
-      .dark-section { color: #edf2ff; background: #101927; }
-      .dark-section .eyebrow { color: #8da8ff; }
-      .dark-section .section-intro, .dark-section .prose p { color: #aeb9ca; }
-      .dark-section .split { align-items: stretch; }
-      .plan-panel { border: 1px solid rgba(255,255,255,.15); border-radius: var(--radius); background: #162235; overflow: hidden; }
-      .plan-panel .panel-bar { border-color: rgba(255,255,255,.12); color: #aeb9ca; background: #1d2a40; }
-      .plan-panel pre { background: transparent; }
-      .architecture-list { display: grid; gap: 1px; margin-top: 32px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.12); }
-      .architecture-list div { display: flex; align-items: baseline; gap: 14px; padding: 14px 16px; background: #101927; }
-      .architecture-list b { width: 24px; color: #82a3ff; font: 800 11px var(--mono); }
-      .architecture-list span { color: #c5cede; font-size: 14px; }
-
-      .science-flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; align-items: stretch; }
-      .science-node { position: relative; min-height: 136px; padding: 17px; border: 1px solid var(--line); border-radius: 12px; background: var(--white); }
-      .science-node:not(:last-child)::after { content: "→"; position: absolute; z-index: 2; right: -20px; top: 50%; color: var(--blue); font: 800 20px var(--mono); transform: translateY(-50%); }
-      .science-node .tech { color: var(--blue); font: 800 10px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
-      .science-node b { display: block; margin-top: 28px; font-size: 14px; }
-      .science-node small { display: block; margin-top: 4px; color: var(--muted); }
-      .maturity { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
-      .maturity span { padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: rgba(255,254,250,.7); font: 10px var(--mono); }
-      .maturity .done::before, .maturity .active::before, .maturity .planned::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; }
-      .maturity .done::before { background: var(--green); }
-      .maturity .active::before { background: var(--blue); }
-      .maturity .planned::before { border: 1px solid #89919a; }
-
-      .feature-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-      .feature-card { min-height: 190px; padding: 22px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,254,250,.78); transition: transform .2s ease, border-color .2s ease; }
-      .feature-card:hover { transform: translateY(-4px); border-color: rgba(49,92,244,.45); }
-      .feature-card .index { color: var(--blue); font: 800 10px var(--mono); }
-      .feature-card h3 { margin: 36px 0 8px; font-size: 18px; letter-spacing: -.03em; }
-      .feature-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
-
-      .steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0; margin-top: 55px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--white); overflow: hidden; }
-      .step { position: relative; min-height: 230px; padding: 23px 20px; border-left: 1px solid var(--line); }
-      .step:first-child { border-left: 0; }
-      .step:not(:last-child)::after { content: "→"; position: absolute; z-index: 2; right: -11px; top: 42px; display: grid; width: 22px; height: 22px; place-items: center; color: var(--blue); background: var(--white); font: 800 13px var(--mono); }
-      .step-num { color: var(--blue); font: 800 10px var(--mono); }
-      .step h3 { margin: 46px 0 8px; font-size: 21px; letter-spacing: -.035em; }
-      .step p { margin: 0; color: var(--muted); font-size: 13px; }
-
-      .faq-layout { display: grid; grid-template-columns: 300px 1fr; gap: 65px; align-items: start; }
-      .faq-sticky { position: sticky; top: 112px; }
-      .faq-sticky h2 { font-size: 60px; }
-      .faq-sticky p { color: var(--muted); }
-      .faq { border-top: 1px solid var(--line-strong); }
-      .faq details { border-bottom: 1px solid var(--line-strong); }
-      .faq summary { position: relative; padding: 25px 48px 25px 0; cursor: pointer; list-style: none; font-size: 18px; font-weight: 740; letter-spacing: -.02em; }
-      .faq summary::-webkit-details-marker { display: none; }
-      .faq summary::after { content: "+"; position: absolute; right: 4px; top: 22px; color: var(--blue); font: 500 24px var(--mono); transition: transform .2s ease; }
-      .faq details[open] summary::after { transform: rotate(45deg); }
-      .answer { padding: 0 42px 27px 0; color: var(--muted); }
-      .answer p { margin: 0 0 13px; }
-      .answer strong { color: var(--ink); }
-      .answer code { padding: 2px 5px; border-radius: 4px; color: var(--blue-dark); background: var(--blue-soft); font: 12px var(--mono); }
-      .answer pre { padding: 16px; overflow-x: auto; border-radius: 9px; color: #d7e1fb; background: #101927; font: 11px/1.7 var(--mono); }
-      .compare { display: grid; grid-template-columns: 1fr 1.5fr; gap: 1px; margin: 18px 0; border: 1px solid var(--line); background: var(--line); }
-      .compare span { padding: 9px 11px; color: var(--muted); background: var(--white); font-size: 12px; }
-      .compare strong { color: var(--ink); font-family: var(--mono); }
-
-      .final-cta { padding: 110px 0 54px; color: var(--white); background: var(--blue); }
-      .final-cta h2 { max-width: 900px; margin: 0; font-size: clamp(52px, 8vw, 100px); line-height: .95; letter-spacing: -.07em; }
-      .final-cta p { max-width: 630px; margin: 25px 0 0; color: #dce4ff; font-size: 19px; }
-      .final-cta .button { color: var(--ink); background: var(--white); border-color: var(--white); }
-      .final-cta .button.ghost { color: var(--white); background: transparent; border-color: rgba(255,255,255,.55); }
-      .final-cta footer .weave-mark i:nth-child(1), .final-cta footer .weave-mark i:nth-child(3) { background: var(--ink); }
-      .final-cta footer .weave-mark i:nth-child(2), .final-cta footer .weave-mark i:nth-child(4) { background: var(--white); }
-      .final-note { margin-top: 34px !important; font: 11px var(--mono); }
-      footer { margin-top: 80px; padding-top: 25px; border-top: 1px solid rgba(255,255,255,.25); display: flex; justify-content: space-between; gap: 25px; color: #dce4ff; font-size: 12px; }
-      footer a { text-underline-offset: 3px; }
-
-      @media (max-width: 980px) {
-        .nav-links a:not(.button) { display: none; }
-        .hero-grid, .split { grid-template-columns: 1fr; }
-        .hero-grid { gap: 52px; }
-        .hero-copy-wrap { max-width: 760px; }
-        .system-map { max-width: 720px; margin: 0 auto; }
-        .manifesto-grid, .feature-grid { grid-template-columns: repeat(2, 1fr); }
-        .manifesto p:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
-        .manifesto p:nth-child(4) { border-top: 1px solid var(--line); }
-        .pipeline { grid-template-columns: repeat(4, 1fr); row-gap: 30px; }
-        .pipeline::before { display: none; }
-        .science-flow { grid-template-columns: repeat(2, 1fr); }
-        .science-node:nth-child(2)::after { display: none; }
-        .steps { grid-template-columns: repeat(5, minmax(190px, 1fr)); overflow-x: auto; }
-        .faq-layout { grid-template-columns: 1fr; gap: 30px; }
-        .faq-sticky { position: static; }
-      }
-
-      @media (max-width: 650px) {
-        .wrap { width: min(100% - 26px, 1180px); }
-        .nav { height: 62px; }
-        .nav .button { min-height: 36px; padding: 0 12px; }
-        .hero { padding-top: 54px; }
-        .hero h1 { font-size: 74px; }
-        .hero h2 { margin-top: 25px; font-size: 40px; }
-        .hero-lead { font-size: 18px; }
-        .status { align-items: flex-start; border-radius: 10px; }
-        .system-map { padding: 16px; border-radius: 20px; }
-        .map-caption { display: none; }
-        .architecture-flow { grid-template-columns: 1fr; }
-        .architecture-stage { padding: 12px; }
-        .repo-tree { font-size: 9px; line-height: 1.7; }
-        .fabric-item-head strong { font-size: 9px; }
-        .fabric-item-head small { font-size: 6.5px; }
-        .fabric-object { font-size: 8px; }
-        .stage-transition { min-height: 48px; }
-        .stage-transition > small { margin: 0 0 3px; writing-mode: initial; transform: none; }
-        .mapping-arrows span:not(:first-child) { display: none; }
-        .mapping-arrows { display: block; transform: rotate(90deg); }
-        .dag-transition b { transform: rotate(90deg); }
-        .dag-stage { min-height: 330px; }
-        .map-legend { flex-direction: column; }
-        .manifesto-grid, .feature-grid { grid-template-columns: 1fr; }
-        .manifesto p { border-left: 0; border-top: 1px solid var(--line); }
-        .manifesto p:first-child { border-top: 0; }
-        .section { padding: 82px 0; }
-        .section h2 { font-size: 43px; }
-        .section-intro { font-size: 17px; }
-        .panel pre { font-size: 10px; padding: 17px; }
-        .graph-panel { min-height: 690px; padding: 16px; }
-        .graph-groups { grid-template-columns: 1fr; }
-        .graph-group:nth-child(2), .graph-group:nth-child(3) { margin-top: 0; }
-        .graph-object { margin-bottom: 23px; }
-        .cross-edge { display: none; }
-        .pipeline { grid-template-columns: repeat(2, 1fr); }
-        .pipe-icon { width: 58px; height: 58px; }
-        .science-flow { grid-template-columns: 1fr; }
-        .science-node:not(:last-child)::after { display: block; content: "↓"; right: auto; left: 50%; top: auto; bottom: -23px; transform: translateX(-50%); }
-        .feature-card { min-height: 160px; }
-        .feature-card h3 { margin-top: 23px; }
-        .faq-sticky h2 { font-size: 48px; }
-        .faq summary { font-size: 16px; }
-        .answer { padding-right: 0; font-size: 14px; }
-        .compare { grid-template-columns: 1fr; }
-        .final-cta { padding-top: 80px; }
-        footer { flex-direction: column; margin-top: 60px; }
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        html { scroll-behavior: auto; }
-        *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-      }
-    </style>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
+
     <header class="site-header">
-      <nav class="nav wrap" aria-label="Primary navigation">
-        <a class="brand" href="#top" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
-        <div class="nav-links">
-          <a href="#why">Why Weaver</a>
-          <a href="#questions">Questions</a>
-          <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">View on GitHub <span class="arrow">↗</span></a>
+      <nav class="nav wrap" aria-label="Primary">
+        <a class="brand" href="index.html" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+        <div class="nav-links" id="nav-links">
+          <a href="get-started/index.html">Get started</a>
+          <a href="problem/index.html">The problem</a>
+          <a href="how-it-works/index.html">How it works</a>
+          <a href="scale/index.html">Built for scale</a>
+          <a href="vs-dbt/index.html">Weaver vs dbt</a>
+          <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
         </div>
       </nav>
     </header>
 
     <main id="main">
-      <section class="hero" id="top">
-        <div class="wrap hero-grid">
-          <div class="hero-copy-wrap">
-            <div class="status"><span class="status-dot" aria-hidden="true"></span>Weaver is under active development</div>
-            <h1>Weaver</h1>
-            <h2>Fabric, declared.</h2>
-            <p class="hero-lead"><strong>One repository for your whole Microsoft Fabric data estate.</strong></p>
-            <p class="hero-copy">Declare Lakehouse ingestion, Spark transformations, Warehouse models and cross-item dependencies together. Weaver builds and orchestrates them incrementally, with metadata, lineage and operational controls built in.</p>
-            <div class="actions">
-              <a class="button blue" href="#why">Explore Weaver <span class="arrow">↓</span></a>
-              <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack">View on GitHub <span class="arrow">↗</span></a>
-              <a class="text-link" href="https://github.com/matthias-wong-dev/weaverstack/blob/main/design/weaver-architecture.md">Read the architecture <span class="arrow">↗</span></a>
-            </div>
-          </div>
-
-          <div class="system-map" aria-label="A repository declaration materialises one-to-one into a Microsoft Fabric estate, whose objects form a branching cross-item dependency graph">
-            <div class="map-superhead"><strong>Declaration → estate → orchestration</strong><span>one control plane</span></div>
-            <div class="architecture-flow">
-              <div class="architecture-stage repo-stage">
-                <div class="stage-head"><span>01 / Code</span><strong>Weaver repository</strong></div>
-                <div class="repo-tree">
-                  <span class="tree-folder">Lakehouse/</span>
-                  <span class="tree-folder tree-depth-1">Raw/</span>
-                  <span class="tree-folder tree-depth-2">Files/</span>
-                  <span class="tree-file tree-depth-3 object-1" data-id="01">Sales__Export.py</span>
-                  <span class="tree-folder tree-depth-2">Tables/</span>
-                  <span class="tree-file tree-depth-3 object-2" data-id="02">Sales__Customer.py</span>
-                  <span class="tree-file tree-depth-3 object-3" data-id="03">Sales.Clean.sql</span>
-                  <span class="tree-folder tree-depth-1">ML/</span>
-                  <span class="tree-folder tree-depth-2 closed">Files/</span>
-                  <span class="tree-folder tree-depth-2">Tables/</span>
-                  <span class="tree-file tree-depth-3 object-4" data-id="04">Sales__Prediction.py</span>
-                  <span class="tree-folder">Warehouse/</span>
-                  <span class="tree-folder tree-depth-1">Reporting/</span>
-                  <span class="tree-file tree-depth-2 object-5" data-id="05">Sales.Forecast.sql</span>
-                </div>
-              </div>
-              <div class="stage-transition mapping-transition" aria-hidden="true"><small>weaver<br>build</small><div class="mapping-arrows"><span>→</span><span>→</span><span>→</span><span>→</span><span>→</span></div></div>
-              <div class="architecture-stage fabric-stage">
-                <div class="stage-head"><span>02 / Materialised</span><strong>Fabric workspace</strong></div>
-                <div class="fabric-items">
-                  <div class="fabric-item">
-                    <div class="fabric-item-head"><span class="fabric-icon lakehouse-icon" aria-hidden="true"></span><span><strong>Raw Lakehouse</strong><small>Files + Delta</small></span></div>
-                    <div class="fabric-objects"><span class="fabric-object object-1" data-id="01">Files/Sales/Export</span><span class="fabric-object object-2" data-id="02">Δ Sales.Customer</span><span class="fabric-object object-3" data-id="03">Δ Sales.Clean</span></div>
-                  </div>
-                  <div class="fabric-item">
-                    <div class="fabric-item-head"><span class="fabric-icon lakehouse-icon" aria-hidden="true"></span><span><strong>ML Lakehouse</strong><small>Files + Delta</small></span></div>
-                    <div class="fabric-objects"><span class="fabric-object object-4" data-id="04">Δ Sales.Prediction</span></div>
-                  </div>
-                  <div class="fabric-item">
-                    <div class="fabric-item-head"><span class="fabric-icon warehouse-icon" aria-hidden="true"></span><span><strong>Reporting Warehouse</strong><small>T-SQL</small></span></div>
-                    <div class="fabric-objects"><span class="fabric-object object-5" data-id="05">view Sales.Forecast</span></div>
-                  </div>
-                </div>
-              </div>
-              <div class="stage-transition dag-transition" aria-hidden="true"><small>dependencies</small><b>→</b></div>
-              <div class="architecture-stage dag-stage">
-                <div class="stage-head"><span>03 / Orchestrated</span><strong>Cross-item DAG</strong></div>
-                <div class="complex-dag">
-                  <span class="dag-edge e1"></span><span class="dag-edge e2"></span><span class="dag-edge e3"></span><span class="dag-edge e4"></span><span class="dag-edge e5"></span>
-                  <div class="dag-node node-export object-1"><small>Raw / Python</small><strong>01 · Export</strong></div>
-                  <div class="dag-node node-customer object-2"><small>Raw / Delta</small><strong>02 · Customer</strong></div>
-                  <div class="dag-node node-clean object-3"><small>Raw / Spark</small><strong>03 · Clean</strong></div>
-                  <div class="dag-node node-prediction object-4"><small>ML / Python</small><strong>04 · Prediction</strong></div>
-                  <div class="dag-node node-forecast object-5"><small>Reporting / T-SQL</small><strong>05 · Forecast</strong></div>
-                </div>
-              </div>
-            </div>
-            <div class="map-legend"><span><strong>01 → 02</strong> Every document becomes its Fabric artefact.</span><span><strong>02 → 03</strong> Those artefacts form one branching graph.</span></div>
-            <span class="map-caption">declaration → materialisation → orchestration</span>
-          </div>
+      <section class="page-head">
+        <div class="wrap">
+          <h1>Microsoft Fabric, made easier.</h1>
+          <p class="lead">Weaver brings your Lakehouse and Warehouse work into one repository, and you keep writing Python and T-SQL as you already do. It derives dependencies from the code, builds Fabric objects, and records operational state.</p>
+          <p style="margin-top: 26px;">
+            <a class="button blue" href="get-started/index.html">Get started</a>
+            <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack" style="margin-left: 8px;">View on GitHub <span class="arrow" aria-hidden="true">↗</span></a>
+          </p>
         </div>
       </section>
 
-      <aside class="manifesto" aria-label="Weaver in four statements">
-        <div class="wrap manifesto-grid">
-          <p><span>01</span>One repository.</p>
-          <p><span>02</span>One declared data estate.</p>
-          <p><span>03</span>Many Fabric items.</p>
-          <p><span>04</span>One dependency graph.</p>
-        </div>
-      </aside>
-
-      <section class="section" id="why">
+      <section class="section">
         <div class="wrap">
-          <div class="section-head">
-            <p class="eyebrow">01 / The declared estate</p>
-            <h2>Your Fabric estate belongs in source control.</h2>
-            <p class="section-intro">A Weaver repository describes the logical structure of the whole estate. Each document has an owner, every owner is a Fabric item, and the directory makes that architecture visible.</p>
-            <span class="pull">The directory is the architecture.</span>
+          <h2>Explore Weaver</h2>
+          <div class="cards two">
+            <a class="card" href="get-started/index.html">
+              <h3>Get started</h3>
+              <p>Install Weaver, set up a project against your Fabric workspace, and build, load and test a small example. You can start from a Fabric notebook or from the desktop CLI.</p>
+              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="problem/index.html">
+              <h3>The problem Weaver solves</h3>
+              <p>Fabric makes individual Lakehouses, Warehouses and notebooks straightforward. It gets harder once they all have to run together as one production platform.</p>
+              <span class="go">Learn more <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="how-it-works/index.html">
+              <h3>How it works</h3>
+              <p>What build, load, test and health each do, and how the Catalogue ties them together.</p>
+              <span class="go">How Weaver works <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="scale/index.html">
+              <h3>Built for scale</h3>
+              <p>Weaver works the same way on a handful of objects and on an estate spanning many Fabric items.</p>
+              <span class="go">Built for scale <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
           </div>
-          <div class="split">
-            <div class="panel" aria-label="Example Weaver repository tree">
-              <div class="panel-bar"><span>estate/</span><span class="panel-dots"><i></i><i></i><i></i></span></div>
-              <pre><span class="code-blue">Lakehouse/</span>
-├── <span class="code-orange">Raw/</span>
-│   ├── Files/
-│   │   └── <span class="code-green">Sales__Export.py</span>
-│   └── Tables/
-│       ├── <span class="code-green">Sales__Customer.py</span>
-│       └── <span class="code-green">Sales.Clean.sql</span>
-├── <span class="code-orange">ML/</span>
-│   └── Tables/
-│       └── <span class="code-green">Sales__Prediction.py</span>
-└── <span class="code-dim">_weaver/</span>
+          <p class="small muted">Comparing tools? See <a href="vs-dbt/index.html">Weaver vs dbt</a>.</p>
+        </div>
+      </section>
 
-<span class="code-blue">Warehouse/</span>
-└── <span class="code-orange">Reporting/</span>
-    ├── <span class="code-dim">shortcuts.yml</span>
-    ├── <span class="code-green">Sales.Customer.sql</span>
-    └── <span class="code-green">Sales.Forecast.sql</span></pre>
+      <section class="section">
+        <div class="wrap">
+          <h2>Why Weaver</h2>
+          <div class="cards four">
+            <div class="card">
+              <h3>Fabric-native</h3>
+              <p>Weaver is built for Microsoft Fabric alone. It models Lakehouses, Warehouses, OneLake, Spark, T-SQL, shortcuts and Fabric Environments directly.</p>
             </div>
-            <div class="prose">
-              <h3>Logical identity. Physical choice.</h3>
-              <p>The repository describes <strong>what the estate is</strong>. Workspace configuration decides where it is installed.</p>
-              <p>Bind the same logical Lakehouses and Warehouses to different development, test or production workspaces without changing their authored identity.</p>
-              <div class="number-list">
-                <div class="number-item"><b>01</b><span>Organise documents beneath the Fabric items that own them.</span></div>
-                <div class="number-item"><b>02</b><span>Resolve typed, explicit bindings for each physical destination.</span></div>
-                <div class="number-item"><b>03</b><span>Materialise the estate from one inspectable declaration.</span></div>
-              </div>
+            <div class="card">
+              <h3>Natural development</h3>
+              <p>Write Python and T-SQL as you normally would. Weaver derives dependencies from your imports and SQL references.</p>
+            </div>
+            <div class="card">
+              <h3>Ready for scale</h3>
+              <p>Weaver keeps one dependency graph across the whole estate, builds only what changed, and records each object's load position between runs.</p>
+            </div>
+            <div class="card">
+              <h3>Free and open source</h3>
+              <p><strong>Free and open source, forever.</strong> Weaver is licensed under the Mozilla Public License 2.0, with no Weaver subscription or hosted service required.</p>
             </div>
           </div>
         </div>
@@ -555,194 +143,156 @@
 
       <section class="section">
         <div class="wrap">
-          <div class="section-head">
-            <p class="eyebrow">02 / Cross-item orchestration</p>
-            <h2>Many items. One graph.</h2>
-            <p class="section-intro">Dependencies do not stop at item boundaries. Neither does Weaver. Lakehouse Python, Delta, Spark SQL and Warehouse T-SQL take their place in the same dependency graph.</p>
+          <h2>What a Weaver project looks like</h2>
+          <p class="lede">This is the Sales example <code>weaver initialise</code> can write for you. A folder of exported customers, a Delta table built from it, a Warehouse table joining those customers to regions, and a check on each side.</p>
+
+          <div class="code plain" style="max-width: 640px;">
+            <div class="code-bar"><span>my-project/</span></div>
+            <!-- example-tree -->
+            <pre>workspace-config.yml
+compose.yml
+
+<span class="c-key">Lakehouse/Landing/</span>
+├── Files/
+│   └── <span class="c-fn">Sales__Customers.py</span>
+├── Tables/
+│   └── <span class="c-fn">Sales__Customer.py</span>
+└── assumptions/
+    └── <span class="c-fn">Sales__CustomerValid.py</span>
+
+<span class="c-key">Warehouse/Curated/</span>
+├── <span class="c-dim">shortcuts.yml</span>
+├── <span class="c-fn">Sales.Region.sql</span>
+├── <span class="c-fn">Sales.CustomerByRegion.sql</span>
+└── assumptions/
+    └── <span class="c-fn">Sales.CustomerByRegionValid.sql</span></pre>
+            <!-- /example-tree -->
           </div>
-          <div class="graph-panel" aria-label="Cross-item dependency graph spanning a Raw Lakehouse, ML Lakehouse and Reporting Warehouse">
-            <div class="graph-groups">
-              <div class="graph-group">
-                <h4>Raw Lakehouse</h4>
-                <div class="graph-object">Sales.Export<small>Python ingestion</small></div>
-                <div class="graph-object">Sales.Customer<small>Delta table</small></div>
-                <div class="graph-object">Sales.Clean<small>Spark SQL</small></div>
-              </div>
-              <div class="graph-group">
-                <h4>ML Lakehouse</h4>
-                <div class="graph-object">Sales.Prediction<small>Python + Delta</small></div>
-              </div>
-              <div class="graph-group">
-                <h4>Reporting Warehouse</h4>
-                <div class="graph-object">Sales.Customer<small>T-SQL table</small></div>
-                <div class="graph-object">Sales.Forecast<small>T-SQL view</small></div>
-              </div>
-            </div>
-            <span class="cross-edge edge-one" aria-hidden="true"></span><span class="cross-edge edge-two" aria-hidden="true"></span><span class="cross-edge edge-three" aria-hidden="true"></span>
-            <p class="graph-note">Item boundaries are visible. They are not execution boundaries.</p>
-          </div>
+
+          <p>Each file sits under the Fabric item that owns it. Weaver derives execution order from the dependencies in the Python and SQL.</p>
+
+          <h3>The dependency graph</h3>
+          <p>Weaver derives the graph from the source files. The Python table depends on the export folder; the Warehouse join depends on the customer shortcut and a local region table; each validation depends on its target.</p>
+
+          <figure>
+            <svg class="dag" viewBox="0 0 850 336" role="img" aria-labelledby="home-dag-title home-dag-desc">
+              <title id="home-dag-title">The Sales example as one dependency graph</title>
+              <desc id="home-dag-desc">The graph contains dependency edges from the Customers file folder to the Customer Delta table, from Customer to CustomerValid and a Warehouse shortcut, from the shortcut and Region to CustomerByRegion, and from CustomerByRegion to CustomerByRegionValid.</desc>
+              <defs>
+                <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0 L8 4 L0 8 z" class="arrow-head"></path>
+                </marker>
+                <marker id="ah-s" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0 L8 4 L0 8 z" class="arrow-head shortcut"></path>
+                </marker>
+              </defs>
+
+              <rect class="lane" x="6" y="22" width="600" height="94" rx="10"></rect>
+              <text class="lane-label" x="20" y="41">LAKEHOUSE / LANDING</text>
+              <rect class="lane" x="6" y="140" width="838" height="188" rx="10"></rect>
+              <text class="lane-label" x="20" y="159">WAREHOUSE / CURATED</text>
+
+              <path class="edge" d="M182 76 H210" marker-end="url(#ah)"></path>
+              <path class="edge" d="M376 76 H404" marker-end="url(#ah)"></path>
+              <path class="edge shortcut" d="M294 98 V166" marker-end="url(#ah-s)"></path>
+              <path class="edge" d="M376 190 C404 190 404 230 426 230" marker-end="url(#ah)"></path>
+              <path class="edge" d="M376 274 C404 274 404 230 426 230" marker-end="url(#ah)"></path>
+              <path class="edge" d="M616 230 H642" marker-end="url(#ah)"></path>
+
+              <g class="kind-file">
+                <rect class="n-box" x="22" y="54" width="160" height="44"></rect>
+                <text class="n-title" x="34" y="73">Customers</text>
+                <text class="n-sub" x="34" y="88">Files/Sales · Python folder</text>
+              </g>
+              <g>
+                <rect class="n-box" x="214" y="54" width="162" height="44"></rect>
+                <text class="n-title" x="226" y="73">Customer</text>
+                <text class="n-sub" x="226" y="88">Sales · Delta table</text>
+              </g>
+              <g class="kind-validation">
+                <rect class="n-box" x="406" y="54" width="176" height="44"></rect>
+                <text class="n-title" x="418" y="73">CustomerValid</text>
+                <text class="n-sub" x="418" y="88">Sales · Assumption</text>
+              </g>
+
+              <g class="kind-shortcut">
+                <rect class="n-box" x="214" y="168" width="162" height="44"></rect>
+                <text class="n-title" x="226" y="187">Customer</text>
+                <text class="n-sub" x="226" y="202">Sales · Shortcut</text>
+              </g>
+              <g>
+                <rect class="n-box" x="214" y="252" width="162" height="44"></rect>
+                <text class="n-title" x="226" y="271">Region</text>
+                <text class="n-sub" x="226" y="286">Sales · Table, T-SQL</text>
+              </g>
+              <g>
+                <rect class="n-box" x="428" y="208" width="188" height="44"></rect>
+                <text class="n-title" x="440" y="227">CustomerByRegion</text>
+                <text class="n-sub" x="440" y="242">Sales · Table, T-SQL</text>
+              </g>
+              <g class="kind-validation">
+                <rect class="n-box" x="644" y="208" width="188" height="44"></rect>
+                <text class="n-title" x="656" y="227">CustomerByRegionValid</text>
+                <text class="n-sub" x="656" y="242">Sales · Assumption</text>
+              </g>
+            </svg>
+            <ul class="legend">
+              <li><i class="file" aria-hidden="true"></i> Files</li>
+              <li><i aria-hidden="true"></i> Tables</li>
+              <li><i class="shortcut" aria-hidden="true"></i> Shortcut</li>
+              <li><i class="validation" aria-hidden="true"></i> Assumption</li>
+            </ul>
+            <figcaption>The dependency graph places the Warehouse join after the Lakehouse table it reads, even though the objects are in different Fabric items.</figcaption>
+          </figure>
+
+          <p><a class="text-link" href="get-started/index.html">Build this example against your own workspace <span class="arrow" aria-hidden="true">→</span></a></p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <div class="section-head">
-            <p class="eyebrow">03 / End-to-end engineering</p>
-            <h2>Not just the transform layer.</h2>
-            <p class="section-intro">Weaver is designed for the complete path from source ingestion to analytics publication—without splitting one engineering system into disconnected platforms.</p>
+          <h2>Get started</h2>
+          <p class="lede">One install gives you the library and the <code>weaver</code> command. The same package runs in a Fabric notebook and on your own machine.</p>
+          <div class="code" style="max-width: 480px;">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre>pip install weaverstack
+weaver initialise</pre>
           </div>
-          <div class="pipeline" aria-label="Pipeline from source data to published analytics">
-            <div class="pipe-stage"><span class="pipe-icon">{ }</span><b>API / files</b><small>sources</small></div>
-            <div class="pipe-stage"><span class="pipe-icon">Py</span><b>Python</b><small>ingestion</small></div>
-            <div class="pipe-stage"><span class="pipe-icon">F/</span><b>Lakehouse</b><small>files</small></div>
-            <div class="pipe-stage"><span class="pipe-icon">Δ</span><b>Delta</b><small>tables</small></div>
-            <div class="pipe-stage"><span class="pipe-icon">Sp</span><b>Spark SQL</b><small>transform</small></div>
-            <div class="pipe-stage"><span class="pipe-icon">SQL</span><b>Warehouse</b><small>models</small></div>
-            <div class="pipe-stage"><span class="pipe-icon">↗</span><b>Analytics</b><small>publication</small></div>
-          </div>
-          <p class="big-statement">Python, Spark and T-SQL are parts of <span>one pipeline</span>—not separate platforms.</p>
-        </div>
-      </section>
-
-      <section class="section dark-section">
-        <div class="wrap">
-          <div class="section-head">
-            <p class="eyebrow">04 / Production engineering</p>
-            <h2>Production engineering without the platform project.</h2>
-            <p class="section-intro">The structural and operational foundations are consequences of the architecture—not a collection of bolt-on features.</p>
-          </div>
-          <div class="split">
-            <div class="prose">
-              <h3>What Weaver plans is what Weaver executes.</h3>
-              <p>Weaver interprets the repository, bindings, target state and dependencies once. It compiles them into an inspectable build plan containing the exact actions and execution order.</p>
-              <div class="architecture-list">
-                <div><b>01</b><span>Incremental builds from deterministic plans</span></div>
-                <div><b>02</b><span>Dependency-safe execution and failure recovery</span></div>
-                <div><b>03</b><span>Central catalogue, metadata and lineage</span></div>
-                <div><b>04</b><span>Target reconciliation and installation history</span></div>
-              </div>
-            </div>
-            <div class="plan-panel" aria-label="Example Weaver build plan">
-              <div class="panel-bar"><span>build-plan.yml</span><span>inspectable</span></div>
-              <pre><span class="code-blue">selection:</span>
-  <span class="code-green">new:</span>
-    - Lakehouse/ML/Tables/Sales.Prediction
-  <span class="code-orange">changed:</span>
-    - Warehouse/Reporting/Sales.Forecast
-
-<span class="code-blue">actions:</span>
-  - reconcile catalogue
-  - build Sales.Prediction
-  - rebuild Sales.Forecast
-  - publish metadata
-  - certify Registry</pre>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <div class="section-head">
-            <p class="eyebrow">05 / Data science</p>
-            <h2>Data science is part of the pipeline.</h2>
-            <p class="section-intro">Train or score models in a Lakehouse, declare prediction outputs as Weaver documents, and connect them to downstream Warehouse models through the same graph.</p>
-            <span class="pull">No separate ML side pipeline.</span>
-          </div>
-          <div class="science-flow" aria-label="Data science workflow">
-            <div class="science-node"><span class="tech">Warehouse</span><b>Training data</b><small>Curated features</small></div>
-            <div class="science-node"><span class="tech">Lakehouse / Python</span><b>Model execution</b><small>Train or score</small></div>
-            <div class="science-node"><span class="tech">Lakehouse / Delta</span><b>Predictions</b><small>Declared output</small></div>
-            <div class="science-node"><span class="tech">Warehouse / T-SQL</span><b>Reporting model</b><small>Published analytics</small></div>
-          </div>
-          <div class="maturity" aria-label="Capability maturity">
-            <span class="done">Build, repository, Workspace and catalogue foundations</span>
-            <span class="active">End-to-end load orchestration — active development</span>
-            <span class="planned">Additional ML workflows — planned</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="section" id="questions">
-        <div class="wrap faq-layout">
-          <div class="faq-sticky">
-            <p class="eyebrow">Straight answers</p>
-            <h2>Questions</h2>
-            <p>Weaver has a deliberately specific place in the modern data stack.</p>
-          </div>
-          <div class="faq">
-            <details open>
-              <summary>How is Weaver different from Fivetran, dbt, Prefect and similar tools?</summary>
-              <div class="answer"><p>Those tools specialise in important concerns across many technologies. Weaver specialises in the <strong>whole engineering lifecycle on Microsoft Fabric</strong>.</p><div class="compare"><strong>Fivetran</strong><span>ingestion</span><strong>dbt</strong><span>SQL transformation</span><strong>Prefect</strong><span>general-purpose orchestration</span><strong>Weaver</strong><span>the declared Fabric data estate</span></div><p>Weaver can also coordinate with tools already present in an estate; it does not require every team to replace them.</p></div>
-            </details>
-            <details>
-              <summary>How does Weaver differ from dbt?</summary>
-              <div class="answer"><p>dbt is an excellent SQL transformation framework. Weaver treats transformation as one stage in a larger Fabric lifecycle that also includes Lakehouse Python, files, Delta, Spark SQL, multiple Lakehouses and Warehouses, cross-item dependencies, physical bindings, ingestion and execution metadata.</p><p><strong>Not just the transform layer.</strong></p></div>
-            </details>
-            <details>
-              <summary>How does Weaver differ from Prefect?</summary>
-              <div class="answer"><p>Prefect is a general-purpose orchestration platform. In Weaver, the dependency graph comes from the same declarations that define the data estate—there is no second orchestration model to keep aligned.</p><p><code>declare objects → declare dependencies → build the DAG → execute</code></p></div>
-            </details>
-            <details>
-              <summary>Why focus only on Microsoft Fabric?</summary>
-              <div class="answer"><p>Because first-class support matters. Weaver treats Lakehouses, Warehouses, Delta, Spark, T-SQL, Fabric Environments, OneLake, workspace bindings and Fabric execution as native architectural elements—not a lowest-common-denominator abstraction.</p></div>
-            </details>
-            <details>
-              <summary>How hard is it to get started?</summary>
-              <div class="answer"><p>Install Weaver into a Fabric Environment or local Python environment, begin with a Weaver repository, and bind its logical items to your workspace.</p><pre>pip install weaverstack
-pip install "weaverstack[cli]"  # optional desktop CLI</pre></div>
-            </details>
-            <details>
-              <summary>Can I use Weaver directly inside Fabric?</summary>
-              <div class="answer"><p>Yes. The ordinary product path runs Weaver inside a Fabric Environment-backed session. Weaver reads the uploaded repository, prepares target and catalogue state, generates the build bundle and installs it in that same session.</p><pre>from weaver import build_uploaded_item_repository
-
-result = build_uploaded_item_repository(
-    repository_root=repository_root,
-    bindings=bindings,
-    environment=environment,
-    control_lakehouse=control_lakehouse,
-)</pre><p>The supporting values are resolved Weaver objects.</p></div>
-            </details>
-            <details>
-              <summary>Can I use Weaver from my desktop?</summary>
-              <div class="answer"><p>Yes. Publish Weaver to a Fabric Environment, then use the CLI to validate and build repositories for selected Weaver items. An ordinary build creates and maintains Weaver's own catalogue.</p><pre>weaver fabric environment publish weaver --workspace-config workspace.yml
-weaver push ./estate --workspace-config workspace.yml
-weaver build --workspace-config workspace.yml \
-  --item Lakehouse/Sales \
-  --item Warehouse/Reporting</pre></div>
-            </details>
-            <details>
-              <summary>Is Weaver desktop software or a cloud service?</summary>
-              <div class="answer"><p>Your choice. Weaver is an open-source Python runtime and optional CLI—not a hosted SaaS control plane. It can run inside Fabric, from the desktop CLI, against the local Lakehouse emulator, from CI/CD, and through notebooks and Fabric Environments.</p></div>
-            </details>
-            <details>
-              <summary>What does Weaver cost?</summary>
-              <div class="answer"><p><strong>Weaver is free and open source.</strong> There are no Weaver licence fees, hosted tiers, per-user charges or Weaver usage limits. Microsoft Fabric remains a paid service, and Weaver workloads use the Fabric capacity and infrastructure you control.</p></div>
-            </details>
-            <details>
-              <summary>Is Weaver ready for production?</summary>
-              <div class="answer"><p>Weaver is under active development. The build, repository, Workspace and catalogue foundations are already substantial, while end-to-end load orchestration and additional Fabric capabilities are evolving. Follow the <a href="https://github.com/matthias-wong-dev/weaverstack">repository</a>, <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/design/weaver_master_cli_plan.md">current design</a>, <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/design/backlog.md">roadmap</a> and <a href="https://github.com/matthias-wong-dev/weaverstack/issues">issues</a>.</p></div>
-            </details>
-          </div>
-        </div>
-      </section>
-
-      <section class="final-cta">
-        <div class="wrap">
-          <h2>Declare your Fabric estate.</h2>
-          <p>Build Lakehouse ingestion, Warehouse models and cross-item workflows as one coherent engineering system.</p>
-          <div class="actions">
-            <a class="button" href="https://github.com/matthias-wong-dev/weaverstack">View on GitHub <span class="arrow">↗</span></a>
-            <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack/blob/main/design/weaver_master_cli_plan.md">Read the design <span class="arrow">↗</span></a>
-            <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack#readme">Explore documentation <span class="arrow">↗</span></a>
-          </div>
-          <p class="final-note">Weaver is under active development. Follow the project and help shape the platform.</p>
-          <footer>
-            <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
-            <span>Open source · Built for Microsoft Fabric · <a href="https://github.com/matthias-wong-dev/weaverstack">weaverstack on GitHub</a></span>
-          </footer>
+          <p>
+            <a class="button blue" href="get-started/index.html">Read the walkthrough</a>
+          </p>
         </div>
       </section>
     </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-grid">
+        <div class="footer-note">
+          <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
+          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+          <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
+        </div>
+        <div class="footer-links">
+          <ul>
+            <strong>Site</strong>
+            <li><a href="get-started/index.html">Get started</a></li>
+            <li><a href="problem/index.html">The problem</a></li>
+            <li><a href="how-it-works/index.html">How it works</a></li>
+            <li><a href="scale/index.html">Built for scale</a></li>
+            <li><a href="vs-dbt/index.html">Weaver vs dbt</a></li>
+          </ul>
+          <ul>
+            <strong>Project</strong>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">Design notes</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li>
+            <li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <script src="assets/site.js" defer></script>
   </body>
 </html>

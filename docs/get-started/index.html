@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en-AU">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f7f6">
+    <title>Get started with Weaver</title>
+    <meta name="description" content="Install Weaver, set up a project against your Fabric workspace, and build, load and test a small Sales example. Two paths: a Fabric notebook, or your desktop.">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://weaverstack.dev/get-started/">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://weaverstack.dev/get-started/">
+    <meta property="og:site_name" content="Weaver">
+    <meta property="og:locale" content="en_AU">
+    <meta property="og:title" content="Get started with Weaver">
+    <meta property="og:description" content="From nothing to a built, loaded and tested Sales example in your own Fabric workspace.">
+    <meta property="og:image" content="https://weaverstack.dev/og.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Get started with Weaver">
+    <meta name="twitter:description" content="From nothing to a built, loaded and tested Sales example in your own Fabric workspace.">
+    <meta name="twitter:image" content="https://weaverstack.dev/og.png">
+    <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
+    <link rel="manifest" href="../site.webmanifest">
+    <link rel="stylesheet" href="../assets/site.css">
+    <script>document.documentElement.className += " js";</script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav wrap" aria-label="Primary">
+        <a class="brand" href="../index.html" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+        <div class="nav-links" id="nav-links">
+          <a href="../get-started/index.html" aria-current="page">Get started</a>
+          <a href="../problem/index.html">The problem</a>
+          <a href="../how-it-works/index.html">How it works</a>
+          <a href="../scale/index.html">Built for scale</a>
+          <a href="../vs-dbt/index.html">Weaver vs dbt</a>
+          <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-head">
+        <div class="wrap">
+          <h1>Get started</h1>
+          <p class="lead">By the end of this page you will have a Weaver project in your own Fabric workspace, with a small Sales example built, loaded and tested.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Before you begin</h2>
+          <p>You need:</p>
+          <ul>
+            <li><strong>A Microsoft Fabric workspace</strong> you can reach, on a running capacity.</li>
+            <li><strong>Python 3.11 or later</strong> if you are working from your own machine. A Fabric notebook already provides it.</li>
+            <li><strong>Azure authentication</strong> through the Azure CLI or Microsoft sign-in in a browser.</li>
+          </ul>
+          <p>Setup can reuse existing Lakehouses, Warehouses and Environments. Creating a new Fabric item requires the relevant workspace permission.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Choose how you want to work</h2>
+          <p class="lede">Start from a Fabric notebook or from the desktop CLI. You get the same project either way, and the rest of this page applies to both.</p>
+
+          <div class="cards two">
+            <div class="path-card">
+              <span class="tag">Option A</span>
+              <h3>From a Fabric notebook</h3>
+              <p>Open a notebook in your workspace, install Weaver into it and set the project up from there. Weaver uses whichever workspace the notebook is already running in, so you do not have to name one.</p>
+              <div class="code">
+                <div class="code-bar"><span>notebook cell</span></div>
+                <pre>%pip install weaverstack</pre>
+              </div>
+              <div class="code">
+                <div class="code-bar"><span>notebook cell</span></div>
+                <pre><span class="c-key">from</span> pathlib <span class="c-key">import</span> Path
+<span class="c-key">import</span> weaver
+
+weaver.<span class="c-fn">initialise</span>(
+    Path(<span class="c-str">"builtin"</span>) / <span class="c-str">"repository"</span>,
+    catalogue=<span class="c-str">"Catalogue"</span>,
+    environment=<span class="c-str">"Weaver"</span>,
+    lakehouse=<span class="c-str">"Landing"</span>,
+    warehouse=<span class="c-str">"Curated"</span>,
+    example=<span class="c-key">True</span>,
+)</pre>
+              </div>
+              <p class="small">Add <code>install_weaver=True</code> if the Environment does not exist yet, or exists without Weaver in it. That is the same confirmation the desktop prompt asks you for, and it takes about five minutes.</p>
+            </div>
+
+            <div class="path-card">
+              <span class="tag">Option B</span>
+              <h3>From the desktop CLI</h3>
+              <p>Work from VS Code, a terminal, or wherever you keep your repositories. One install gives you the library and the <code>weaver</code> command.</p>
+              <div class="code">
+                <div class="code-bar"><span>terminal</span></div>
+                <pre>pip install weaverstack
+weaver initialise</pre>
+              </div>
+              <p>Run <code>weaver initialise</code> with no arguments. Weaver collects the project settings before creating any missing Fabric items.</p>
+              <p class="small">The desktop CLI tries Azure CLI credentials first and opens Microsoft sign-in in a browser when needed.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Setting the project up</h2>
+          <p class="lede">Weaver asks for the workspace, Catalogue, Environment and destination items.</p>
+
+          <div class="code">
+            <div class="code-bar"><span>weaver initialise</span></div>
+            <pre>Set up a Weaver project.
+
+You'll use your Fabric workspace and choose the items you want for this project.
+Any missing items will be created automatically.
+
+Fabric workspace: My Fabric Workspace
+Catalogue [Catalogue]:
+
+Fabric Environment:
+  1. Use an existing Environment
+  2. Create a new Environment
+
+Choose [1/2]: 2
+Environment name [Weaver]:
+
+Lakehouse [skip]: Landing
+Warehouse [skip]: Curated
+Would you like to create and run a small Sales example? [Y/n]:</pre>
+          </div>
+
+          <h3>What you are choosing</h3>
+          <ul>
+            <li><strong>Workspace.</strong> A Fabric workspace. This is the one thing that has to be there already.</li>
+            <li><strong>Catalogue.</strong> The Warehouse where Weaver keeps its own tables, in the <code>_</code> schema. Give it one of its own, or use a Warehouse you already have, since Weaver owns <code>_</code> and nothing else in there.</li>
+            <li><strong>Environment.</strong> The Fabric Environment your project runs against, with Weaver installed in it. Use one you already have, or make a new one.</li>
+            <li><strong>Lakehouse and Warehouse.</strong> Where your objects are built. Choose a Lakehouse, a Warehouse, or both. Weaver requires at least one destination item.</li>
+            <li><strong>The Sales example.</strong> A small working project you can build, load and test straight away.</li>
+          </ul>
+
+          <p>Setup can select existing items or create new ones. Run <code>weaver initialise</code> again after an interrupted attempt; Weaver reuses items already created. Add <code>--dry-run</code> to see what setup would create without changing anything.</p>
+
+          <div class="callout amber">
+            <p><strong>Installing Weaver into a Fabric Environment takes about five minutes.</strong> Weaver asks for confirmation first:</p>
+          </div>
+
+          <div class="code">
+            <div class="code-bar"><span>weaver initialise</span></div>
+            <pre>Environment 'Weaver' will be created and Weaver will be installed in it.
+
+Installing Weaver in Fabric can take about 5 minutes.
+
+Would you like to continue? [Y/n]:</pre>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>The generated project</h2>
+          <p class="lede">You get the project configuration, and the Sales example if you asked for it.</p>
+
+          <div class="code plain" style="max-width: 640px;">
+            <div class="code-bar"><span>my-project/</span></div>
+            <pre>workspace-config.yml
+compose.yml
+
+<span class="c-key">Lakehouse/Landing/</span>
+├── Files/
+│   └── <span class="c-fn">Sales__Customers.py</span>
+├── Tables/
+│   └── <span class="c-fn">Sales__Customer.py</span>
+└── assumptions/
+    └── <span class="c-fn">Sales__CustomerValid.py</span>
+
+<span class="c-key">Warehouse/Curated/</span>
+├── <span class="c-dim">shortcuts.yml</span>
+├── <span class="c-fn">Sales.Region.sql</span>
+├── <span class="c-fn">Sales.CustomerByRegion.sql</span>
+└── assumptions/
+    └── <span class="c-fn">Sales.CustomerByRegionValid.sql</span></pre>
+          </div>
+
+          <p>Two files describe the project itself. <code>workspace-config.yml</code> says which Fabric workspace and items to use:</p>
+
+          <div class="code">
+            <div class="code-bar"><span>workspace-config.yml</span></div>
+            <!-- example:workspace-config.yml -->
+            <pre># One file describes one Fabric workspace.
+#
+# Weaver items are the keys under targets:, and each value is the Fabric
+# item it is built into. Point the project at another workspace by
+# copying this file and changing the names.
+workspace: My Fabric Workspace
+environment: Weaver
+
+# Weaver keeps its own tables in the _ schema of this Warehouse, and
+# owns nothing else in it.
+catalogue: Warehouse/Catalogue
+
+targets:
+  Lakehouse/Landing: Landing
+  Warehouse/Curated: Curated</pre>
+            <!-- /example -->
+          </div>
+
+          <p>To point at a different workspace, copy that file and change the names. Your objects do not move. <code>Lakehouse/Landing</code> stays what it is, and only the Fabric item behind it changes.</p>
+
+          <p><code>compose.yml</code> names a sequence you can run as one command:</p>
+
+          <div class="code">
+            <div class="code-bar"><span>compose.yml</span></div>
+            <!-- example:compose.yml -->
+            <pre># A named sequence, run in one session:
+#
+#   weaver compose full
+#
+# Each entry takes the workspace the composition resolved, so none of
+# them names it again. Naming no item builds, loads and tests every
+# item workspace-config.yml declares.
+compose:
+  full:
+    - build
+    - load
+    - test</pre>
+            <!-- /example -->
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>The example code</h2>
+          <p class="lede">The example does not declare execution order separately. Weaver derives it from the Python imports, SQL references and shortcut declaration.</p>
+
+          <div class="tabs no-js">
+            <div class="tab-strip" role="tablist" aria-label="Example source files">
+              <button type="button" role="tab" id="tab-folder" aria-controls="panel-folder" aria-selected="true">Python folder</button>
+              <button type="button" role="tab" id="tab-table" aria-controls="panel-table" aria-selected="false">Python table</button>
+              <button type="button" role="tab" id="tab-sql" aria-controls="panel-sql" aria-selected="false">Warehouse SQL</button>
+              <button type="button" role="tab" id="tab-shortcut" aria-controls="panel-shortcut" aria-selected="false">Shortcut</button>
+              <button type="button" role="tab" id="tab-assumption" aria-controls="panel-assumption" aria-selected="false">Assumption</button>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-folder" aria-labelledby="tab-folder">
+              <div class="code">
+                <div class="code-bar"><span>Lakehouse/Landing/Files/Sales__Customers.py</span></div>
+                <!-- example:Lakehouse/Landing/Files/Sales__Customers.py -->
+                <pre>&quot;&quot;&quot;
+Folder ID: Sales.Customers
+
+Description: Customer records as the sales system exports them.
+
+Lineage: Stands in for the nightly export from the sales system.
+
+File key: &quot;*.csv&quot;
+
+Incremental: false
+
+Notes: |
+  A real deployment fetches the export here, over SFTP or from an API. This one
+  writes the file itself, so the project loads with nothing set up beside it.
+&quot;&quot;&quot;
+
+from weaver import Folder
+
+#: The export this example stands in for.
+CUSTOMERS = &quot;&quot;&quot;\
+Customer id,Customer name,Region code
+C001,Harbour Freight Pty Ltd,NSW
+C002,Riverside Grocers,VIC
+C003,Tablelands Coffee Roasters,QLD
+C004,Coastal Marine Supplies,NSW
+&quot;&quot;&quot;
+
+
+class Sales__Customers(Folder):
+    def read(self):
+        # Weaver supplies an empty staging directory before read() runs. This
+        # method writes the export there and returns the directory.
+        with self.staging_folder() as staging:
+            (staging.path / &quot;customers.csv&quot;).write_text(CUSTOMERS, encoding=&quot;utf-8&quot;)
+        return staging, []</pre>
+                <!-- /example -->
+              </div>
+              <p class="caption">A Folder brings files in. This one writes the export itself so the example runs with nothing else set up; a real one would fetch over SFTP or from an API. Weaver creates an empty staging directory before <code>read()</code> runs.</p>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-table" aria-labelledby="tab-table">
+              <div class="code">
+                <div class="code-bar"><span>Lakehouse/Landing/Tables/Sales__Customer.py</span></div>
+                <!-- example:Lakehouse/Landing/Tables/Sales__Customer.py -->
+                <pre>&quot;&quot;&quot;
+Table ID: Sales.Customer
+
+Description: One row per customer in the sales system.
+
+Lineage: $Files/Sales.Customers
+
+Primary key: Customer id
+
+Comparison columns: Customer name, Region code
+
+Schema:
+  Customer id: string
+  Customer name: string
+  Region code: string
+
+Notes: |
+  Read from the export folder, so the table can be rebuilt from files that were
+  kept.
+&quot;&quot;&quot;
+
+from Files.Sales__Customers import Sales__Customers
+
+from weaver import Table
+
+
+class Sales__Customer(Table):
+    def read(self):
+        # spark_path() is the abfss:// form Spark reads. path() is the mounted
+        # pathlib.Path for ordinary Python.
+        exported = Sales__Customers(self).spark_path()
+        return (
+            self.spark.read.option(&quot;header&quot;, True)
+            .csv(exported)
+            .selectExpr(&quot;`Customer id`&quot;, &quot;`Customer name`&quot;, &quot;`Region code`&quot;)
+            .dropDuplicates([&quot;Customer id&quot;])
+        )</pre>
+                <!-- /example -->
+              </div>
+              <p class="caption">A Delta table built with Spark. The import at the top, <code>from Files.Sales__Customers import Sales__Customers</code>, creates the dependency on the folder, so Weaver loads the folder first.</p>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-sql" aria-labelledby="tab-sql">
+              <div class="code">
+                <div class="code-bar"><span>Warehouse/Curated/Sales.CustomerByRegion.sql</span></div>
+                <!-- example:Warehouse/Curated/Sales.CustomerByRegion.sql -->
+                <pre>/*
+Table ID: Sales.CustomerByRegion
+
+Description: Customers with the name of the region they belong to.
+
+Lineage: $Sales.Customer
+
+Primary key: Customer id
+
+Comparison columns: Customer name, Region name
+
+Schema:
+  Customer id: varchar(50)
+  Customer name: varchar(200)
+  Region name: varchar(100)
+
+Notes: |
+  Weaver reads the dependencies out of the query, so this table loads after both
+  the customers and the regions it selects from.
+*/
+
+select c.[Customer id]
+     , c.[Customer name]
+     , r.[Region name]
+  from [Sales].[Customer] c
+  join [Sales].[Region] r on r.[Region code] = c.[Region code];</pre>
+                <!-- /example -->
+              </div>
+              <p class="caption">Ordinary T-SQL, with no Jinja, macros or <code>ref()</code>. Weaver reads the query and loads this table after both the customers and the regions it selects from.</p>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-shortcut" aria-labelledby="tab-shortcut">
+              <div class="code">
+                <div class="code-bar"><span>Warehouse/Curated/shortcuts.yml</span></div>
+                <!-- example:Warehouse/Curated/shortcuts.yml -->
+                <pre># A Lakehouse table, made addressable inside the Warehouse.
+#
+# The Warehouse cannot read Delta files; it reads the Lakehouse&#x27;s SQL endpoint.
+# Declaring the shortcut lets a Warehouse object select from a Lakehouse object
+# while Weaver resolves the logical names to physical Fabric items.
+logical:
+  Warehouse/Curated/Sales.Customer: Lakehouse/Landing/Tables/Sales.Customer</pre>
+                <!-- /example -->
+              </div>
+              <p class="caption">A Warehouse cannot read Delta files, so this shortcut makes the Lakehouse table addressable inside it. Weaver resolves the logical names to physical Fabric items when it builds the shortcut.</p>
+            </div>
+
+            <div class="tab-panel" role="tabpanel" id="panel-assumption" aria-labelledby="tab-assumption">
+              <div class="code">
+                <div class="code-bar"><span>Warehouse/Curated/assumptions/Sales.CustomerByRegionValid.sql</span></div>
+                <!-- example:Warehouse/Curated/assumptions/Sales.CustomerByRegionValid.sql -->
+                <pre>/*
+Assumption ID: Sales.CustomerByRegionValid
+
+Description: Every customer landed in a region the estate declares.
+
+Notes: |
+  A T-SQL validation compiles to a procedure anyone can run without Weaver:
+
+      exec [_].[Assumption Sales.CustomerByRegionValid];
+*/
+
+select [Customer id]
+     , [Customer name]
+  from [Sales].[CustomerByRegion]
+ where [Region name] is null;</pre>
+                <!-- /example -->
+              </div>
+              <p class="caption">An Assumption returns the rows that break a condition you are relying on, so it passes when it returns nothing. This one compiles to a stored procedure you can run without Weaver.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Build, load and test</h2>
+          <p class="lede">Run these commands from the project directory. Weaver reads <code>workspace-config.yml</code> automatically, so you do not need to pass the workspace or item names again.</p>
+
+          <div class="code">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre>weaver build
+weaver load
+weaver test</pre>
+          </div>
+
+          <ol class="steps">
+            <li>
+              <h3>Build</h3>
+              <p>Build creates the schemas, folders, Delta tables, Warehouse tables and views, shortcuts and runnable load code, and records all of it in the Catalogue. It changes structure and moves no data.</p>
+            </li>
+            <li>
+              <h3>Load</h3>
+              <p>Weaver loads the example in dependency order: it creates the export files, loads the Delta table from them, exposes the customer table to the Warehouse through the shortcut, and then runs the Warehouse join.</p>
+            </li>
+            <li>
+              <h3>Test</h3>
+              <p>The two Assumptions validate the data just loaded. Weaver prints the results and records them in the Catalogue.</p>
+            </li>
+          </ol>
+
+          <p>The generated <code>compose.yml</code> defines a sequence that runs all three in one session:</p>
+          <div class="code">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre>weaver compose full</pre>
+          </div>
+
+          <h3>In a notebook</h3>
+          <p>The same operations are available as Python functions and use the same project configuration:</p>
+          <div class="code">
+            <div class="code-bar"><span>notebook cell</span></div>
+            <pre><span class="c-key">import</span> weaver
+
+weaver.<span class="c-fn">build</span>()
+weaver.<span class="c-fn">load</span>()
+weaver.<span class="c-fn">test</span>()</pre>
+          </div>
+
+          <h3>Estate health</h3>
+          <p>Once everything is installed and loaded, check where the estate stands:</p>
+          <div class="code">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre>weaver health</pre>
+          </div>
+          <p><a class="text-link" href="../how-it-works/index.html">How build, load, test and health work <span class="arrow" aria-hidden="true">→</span></a></p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>The dependency graph</h2>
+          <p class="lede">The example does not contain a separate execution-order definition. Weaver derives one dependency graph from the Python imports, SQL references and shortcut declaration. It includes files, tables, shortcuts, Warehouse SQL and validations.</p>
+
+          <figure>
+            <svg class="dag" viewBox="0 0 850 336" role="img" aria-labelledby="gs-dag-title gs-dag-desc">
+              <title id="gs-dag-title">The generated Sales example as one dependency graph</title>
+              <desc id="gs-dag-desc">The graph contains dependency edges from the Customers file folder to the Customer Delta table, from Customer to CustomerValid and a Warehouse shortcut, from the shortcut and Region to CustomerByRegion, and from CustomerByRegion to CustomerByRegionValid.</desc>
+              <defs>
+                <marker id="gs-ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0 L8 4 L0 8 z" class="arrow-head"></path>
+                </marker>
+                <marker id="gs-ah-s" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0 L8 4 L0 8 z" class="arrow-head shortcut"></path>
+                </marker>
+              </defs>
+
+              <rect class="lane" x="6" y="22" width="600" height="94" rx="10"></rect>
+              <text class="lane-label" x="20" y="41">LAKEHOUSE / LANDING</text>
+              <rect class="lane" x="6" y="140" width="838" height="188" rx="10"></rect>
+              <text class="lane-label" x="20" y="159">WAREHOUSE / CURATED</text>
+
+              <path class="edge" d="M182 76 H210" marker-end="url(#gs-ah)"></path>
+              <path class="edge" d="M376 76 H404" marker-end="url(#gs-ah)"></path>
+              <path class="edge shortcut" d="M294 98 V166" marker-end="url(#gs-ah-s)"></path>
+              <path class="edge" d="M376 190 C404 190 404 230 426 230" marker-end="url(#gs-ah)"></path>
+              <path class="edge" d="M376 274 C404 274 404 230 426 230" marker-end="url(#gs-ah)"></path>
+              <path class="edge" d="M616 230 H642" marker-end="url(#gs-ah)"></path>
+
+              <g class="kind-file">
+                <rect class="n-box" x="22" y="54" width="160" height="44"></rect>
+                <text class="n-title" x="34" y="73">Customers</text>
+                <text class="n-sub" x="34" y="88">Files/Sales · Python folder</text>
+              </g>
+              <g>
+                <rect class="n-box" x="214" y="54" width="162" height="44"></rect>
+                <text class="n-title" x="226" y="73">Customer</text>
+                <text class="n-sub" x="226" y="88">Sales · Delta table</text>
+              </g>
+              <g class="kind-validation">
+                <rect class="n-box" x="406" y="54" width="176" height="44"></rect>
+                <text class="n-title" x="418" y="73">CustomerValid</text>
+                <text class="n-sub" x="418" y="88">Sales · Assumption</text>
+              </g>
+
+              <g class="kind-shortcut">
+                <rect class="n-box" x="214" y="168" width="162" height="44"></rect>
+                <text class="n-title" x="226" y="187">Customer</text>
+                <text class="n-sub" x="226" y="202">Sales · Shortcut</text>
+              </g>
+              <g>
+                <rect class="n-box" x="214" y="252" width="162" height="44"></rect>
+                <text class="n-title" x="226" y="271">Region</text>
+                <text class="n-sub" x="226" y="286">Sales · Table, T-SQL</text>
+              </g>
+              <g>
+                <rect class="n-box" x="428" y="208" width="188" height="44"></rect>
+                <text class="n-title" x="440" y="227">CustomerByRegion</text>
+                <text class="n-sub" x="440" y="242">Sales · Table, T-SQL</text>
+              </g>
+              <g class="kind-validation">
+                <rect class="n-box" x="644" y="208" width="188" height="44"></rect>
+                <text class="n-title" x="656" y="227">CustomerByRegionValid</text>
+                <text class="n-sub" x="656" y="242">Sales · Assumption</text>
+              </g>
+            </svg>
+            <ul class="legend">
+              <li><i class="file" aria-hidden="true"></i> Files</li>
+              <li><i aria-hidden="true"></i> Tables</li>
+              <li><i class="shortcut" aria-hidden="true"></i> Shortcut</li>
+              <li><i class="validation" aria-hidden="true"></i> Assumption</li>
+            </ul>
+            <figcaption>Every edge came from the code: the Python import, the <code>from [Sales].[Customer]</code> in the SQL, the entry in <code>shortcuts.yml</code>, and the import inside each Assumption.</figcaption>
+          </figure>
+
+          <p>Weaver uses the dependency graph to determine load order, identify the objects affected by a rebuild, and check whether objects are behind their sources.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Troubleshooting</h2>
+          <p class="lede">If a command cannot reach Fabric, run <code>weaver doctor</code>.</p>
+
+          <div class="code">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre>weaver doctor</pre>
+          </div>
+
+          <p><code>weaver doctor</code> checks authentication and access to the Fabric REST API. From a project directory, Weaver also tests the endpoints configured for that project: TDS for each Warehouse, OneLake for each Lakehouse, and a Spark session where a Lakehouse is configured.</p>
+
+          <div class="code plain">
+            <div class="code-bar"><span>weaver doctor</span></div>
+            <pre>  Fabric REST                       OK
+  Workspace My Fabric Workspace     OK
+  Warehouse/Catalogue TDS           OK
+  Lakehouse/Landing OneLake         OK
+  Spark session                     OK
+
+Everything checked is reachable.</pre>
+          </div>
+
+          <p>For a failed check, Weaver reports the error and the suggested action. Checking a Lakehouse starts a Fabric Spark session and can take about a minute.</p>
+
+          <div class="callout">
+            <p><strong>For repository errors rather than connection errors,</strong> use <code>weaver check</code>. It validates the repository locally and does not connect to Fabric.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Where to next</h2>
+          <div class="cards three">
+            <a class="card" href="../how-it-works/index.html">
+              <h3>How Weaver works</h3>
+              <p>What build, load, test and health each do, and how the Catalogue ties them together.</p>
+              <span class="go">Learn more <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="../how-it-works/index.html#advanced">
+              <h3>The mechanics</h3>
+              <p>Dependency discovery, shortcuts, validations, incremental loading and bookmarks, and what happens after a failure.</p>
+              <span class="go">Learn more <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">
+              <h3>Design notes</h3>
+              <p>The implementation detail lives on GitHub while we write the developer documentation.</p>
+              <span class="go">Open on GitHub <span class="arrow" aria-hidden="true">↗</span></span>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-grid">
+        <div class="footer-note">
+          <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
+          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+          <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
+        </div>
+        <div class="footer-links">
+          <ul>
+            <strong>Site</strong>
+            <li><a href="../get-started/index.html">Get started</a></li>
+            <li><a href="../problem/index.html">The problem</a></li>
+            <li><a href="../how-it-works/index.html">How it works</a></li>
+            <li><a href="../scale/index.html">Built for scale</a></li>
+            <li><a href="../vs-dbt/index.html">Weaver vs dbt</a></li>
+          </ul>
+          <ul>
+            <strong>Project</strong>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">Design notes</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li>
+            <li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <script src="../assets/site.js" defer></script>
+  </body>
+</html>

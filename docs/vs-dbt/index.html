@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en-AU">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f7f6">
+    <title>Weaver vs dbt</title>
+    <meta name="description" content="dbt is an excellent transformation framework. Weaver starts from a broader question: what does it take to engineer and operate mature data pipelines on Microsoft Fabric?">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://weaverstack.dev/vs-dbt/">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://weaverstack.dev/vs-dbt/">
+    <meta property="og:site_name" content="Weaver">
+    <meta property="og:locale" content="en_AU">
+    <meta property="og:title" content="Weaver vs dbt">
+    <meta property="og:description" content="dbt starts with the transformation model. Weaver starts with the operational data estate.">
+    <meta property="og:image" content="https://weaverstack.dev/og.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Weaver vs dbt">
+    <meta name="twitter:description" content="dbt starts with the transformation model. Weaver starts with the operational data estate.">
+    <meta name="twitter:image" content="https://weaverstack.dev/og.png">
+    <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
+    <link rel="manifest" href="../site.webmanifest">
+    <link rel="stylesheet" href="../assets/site.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav wrap" aria-label="Primary">
+        <a class="brand" href="../index.html" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+        <div class="nav-links" id="nav-links">
+          <a href="../get-started/index.html">Get started</a>
+          <a href="../problem/index.html">The problem</a>
+          <a href="../how-it-works/index.html">How it works</a>
+          <a href="../scale/index.html">Built for scale</a>
+          <a href="../vs-dbt/index.html" aria-current="page">Weaver vs dbt</a>
+          <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-head">
+        <div class="wrap">
+          <h1>Weaver vs dbt</h1>
+          <p class="lead">dbt is a transformation framework. Weaver covers the wider operational lifecycle of data engineering on Microsoft Fabric: physical structure, loading, operational state and dependencies that cross Fabric items.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>How Weaver differs from dbt</h2>
+
+          <div class="cards two">
+            <div class="card">
+              <h3>Fabric-native</h3>
+              <p>dbt reaches Fabric through adapters. Weaver models Lakehouses, Warehouses, OneLake, shortcuts, Fabric Environments, Spark and T-SQL directly.</p>
+              <p>dbt uses one adapter and one connection per project, so a Lakehouse and a Warehouse are separate targets and no single graph spans them. Weaver represents them as two items in the same graph.</p>
+            </div>
+            <div class="card">
+              <h3>Natural development</h3>
+              <p>In dbt you declare dependencies with <code>ref()</code> and <code>source()</code>. Weaver reads them out of your Python imports and your SQL references.</p>
+              <p>Python remains Python and T-SQL remains T-SQL. Weaver derives the graph from the code rather than from a separate set of dependency declarations.</p>
+            </div>
+            <div class="card">
+              <h3>Build and load are separate</h3>
+              <p>In dbt, materialising a model and populating it are the same act. Weaver splits them into two commands.</p>
+              <p>Build can install a platform's structure into a fresh workspace before loading data, and deploy schema changes without moving rows.</p>
+            </div>
+            <div class="card">
+              <h3>Operational state is first class</h3>
+              <p>Weaver keeps each object's installed and operational state inside Fabric: how far it loaded, whether its checks passed, and what the last load changed.</p>
+              <p>dbt writes run artifacts such as the manifest and run results, and selects on state by comparing against a previous manifest. Weaver keeps that state in the data platform, where subsequent Weaver commands use it directly.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Feature comparison</h2>
+          <p class="small muted"><span class="mark yes">✓</span> yes &nbsp; <span class="mark part">◐</span> partly, see the note &nbsp; <span class="mark no">✕</span> no &nbsp; <span class="mark soon">Coming</span> planned</p>
+
+          <div class="table-scroll">
+            <table class="matrix">
+              <thead>
+                <tr><th scope="col">Capability</th><th scope="col"><span class="who weaver"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span></th><th scope="col"><span class="who dbt">dbt</span></th></tr>
+              </thead>
+              <tbody>
+                <tr class="group"><th scope="row" colspan="3">Platform</th></tr>
+                <tr>
+                  <th scope="row">Fabric Lakehouse and Warehouse in one project</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">a project targets a single adapter</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">One dependency graph across several Fabric items</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Fabric shortcuts declared as dependencies</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">not represented as dbt graph nodes</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Logical objects bound to physical Fabric items</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">targets switch database and schema</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Fabric semantic models</th>
+                  <td class="v-soon"><span class="mark soon">Coming</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
+                </tr>
+
+                <tr class="group"><th scope="row" colspan="3">Development</th></tr>
+                <tr>
+                  <th scope="row">Ordinary T-SQL, with no templating needed for references</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">references are written as <code>ref()</code></span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Dependencies read from the SQL itself</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">declared through <code>ref()</code> and <code>source()</code></span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Python dataframe transformations</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">Python models, though not in Microsoft's Fabric adapter</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">General-purpose Python programs: APIs, SFTP, archives, files</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">Python models are designed around relation-producing model functions</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Dependencies read from Python imports</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">declared with <code>dbt.ref()</code> inside the model</span></td>
+                </tr>
+
+                <tr class="group"><th scope="row" colspan="3">Lifecycle</th></tr>
+                <tr>
+                  <th scope="row">Deploy physical structure without loading data</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Build and load as separate commands</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Incremental selection of what to rebuild</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note"><code>state:modified</code> against a previous manifest</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Installed state persisted in the data platform</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">state is held in run artifacts rather than in the platform</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Estate health as a command</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note"><code>source freshness</code> covers sources</span></td>
+                </tr>
+
+                <tr class="group"><th scope="row" colspan="3">Loading and change handling</th></tr>
+                <tr>
+                  <th scope="row">Load position recorded per object between runs</th>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">bookmarks</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">derived at run time by querying the target</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Row audit datetimes maintained for you</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">added by the model author</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">A key absent from the source retires the target row</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">through snapshots or a custom incremental strategy</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Insert, update and delete counts recorded</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">rows affected in run results, depending on the adapter</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Duplicate-key rows refused and set aside with a reason</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span> <span class="note">detected by a test after the load</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Null-violation rows refused and set aside with a reason</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">A threshold that stops an unusually large change</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Independent branches continue after a failure</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">the default, with descendants skipped</span></td>
+                </tr>
+
+                <tr class="group"><th scope="row" colspan="3">Quality and metadata</th></tr>
+                <tr>
+                  <th scope="row">Data tests against what is in the platform</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Assumptions held apart from Tests as a distinct kind</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-no"><span class="mark no">✕</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Validation results persisted in the data platform</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">failing rows can be written to a table with <code>store_failures</code></span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Table and column descriptions written into the platform</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note"><code>persist_docs</code></span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Primary and unique key metadata</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">model contracts</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Foreign-key metadata</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span> <span class="note">model contracts</span></td>
+                </tr>
+                <tr>
+                  <th scope="row">Lineage metadata</th>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                  <td class="v-yes"><span class="mark yes">✓</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Operational data engineering</h2>
+          <p class="lede">Transformation is the most visible part of data engineering, and the part most worth getting right. A production pipeline also has physical structure to deploy, state to carry between runs, bad rows to deal with and failures to survive.</p>
+
+          <h3>Physical structure</h3>
+          <p>Lakehouses, Warehouses, schemas, folders, tables, views, shortcuts and Fabric Environments have a lifecycle independent of data loading. They are created, altered and rebuilt on a different rhythm from data arrival.</p>
+          <p>Deploying structure and data together makes every structural change a data event. A column addition can require a reload, and a fresh workspace cannot be checked until it has loaded.</p>
+          <p>Build makes Fabric match the repository and load moves data. The two commands can run independently.</p>
+
+          <h3>Operational state</h3>
+          <p>Operational state persists between runs:</p>
+          <ul>
+            <li>What loaded, and when</li>
+            <li>How far each object processed</li>
+            <li>What changed since the previous run</li>
+            <li>What failed, and what was blocked as a result</li>
+            <li>Which tables are still current</li>
+            <li>What should happen on the next run</li>
+          </ul>
+          <p>Current state depends on outcomes from multiple runs and the dependency graph connecting them. A table can become stale when an upstream source loads again.</p>
+          <p>Weaver keeps it in the platform: bookmarks, current load and validation outcomes, load statistics and an append-only history. It holds current state and history apart, because rebuilding an object ends its current state while its history stays where it is.</p>
+
+          <h3>Data quality requires handling as well as detection</h3>
+          <p>Post-load validation and row-handling policy are different concerns. A uniqueness failure detected after loading does not determine how the invalid rows are handled.</p>
+          <p>Post-load tests run after rows have entered the target table, so row-handling policy must apply during the load.</p>
+          <p>Weaver classifies every incoming row as an insert, update or delete before writing, and refuses rows it cannot take: a blank primary key, a null in a column declared not null, a duplicate primary key or a duplicate unique key. Each refused row is recorded with one reason, and <code>--fault-tolerant</code> controls whether the valid rows continue or the load stops.</p>
+          <p>A load can be structurally valid while representing an implausibly large change. Weaver measures the change before writing and stops it when it exceeds the declared threshold.</p>
+
+          <h3>Partial failure</h3>
+          <p>Source availability and capacity can cause partial failures. Weaver records:</p>
+          <ul>
+            <li>Which objects succeeded</li>
+            <li>Which failed, and for what reason</li>
+            <li>Which were blocked because a dependency did not load</li>
+            <li>Where incremental state was allowed to advance</li>
+            <li>Where it must not advance, so the next run reads the window again</li>
+          </ul>
+          <p>Weaver records which objects succeeded, failed or were blocked, and only advances a bookmark where the object completed cleanly. A run that succeeded while rejecting rows leaves its bookmark alone, because it has not read the whole window.</p>
+
+          <h3>Metadata is operational</h3>
+          <p>Weaver uses descriptions, columns, keys, foreign keys and lineage for execution as well as documentation.</p>
+          <p>A primary key enables a keyed load. Without it, Weaver cannot identify updates, duplicates or deletes. Comparison columns define changes, thresholds constrain change size, and lineage determines run order and staleness.</p>
+          <p>The Catalogue holds metadata and operational state for the same object.</p>
+
+          <h3>Python programs</h3>
+          <p>Weaver supports Python programs for API acquisition, SFTP collection, archive extraction, spreadsheet parsing and source-specific incremental rules.</p>
+          <p>These programs produce outputs for downstream stages rather than returning relations from model functions.</p>
+          <p>In Weaver, this is a Folder: a Python class with a <code>read()</code> method. Weaver provides a staging directory, and the method writes its output there. Weaver adds that output to the graph, and downstream Delta tables depend on it like any other object.</p>
+
+          <h3>Pipelines cross engines</h3>
+          <div class="flow">
+            <div class="flow-step"><b>API</b><small>a source system</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>Files</b><small>Lakehouse, OneLake</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>Python</b><small>Spark</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>Delta</b><small>Lakehouse table</small></div>
+          </div>
+          <div class="flow">
+            <div class="flow-step"><b>Shortcut</b><small>across items</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>Warehouse</b><small>T-SQL</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>Assumption</b><small>a check that holds</small></div>
+          </div>
+
+          <p>This pipeline crosses two engines, two languages, two Fabric items and a storage boundary. Its execution requires one dependency graph and shared operational state.</p>
+          <p>A graph limited to one engine leaves cross-engine coordination to an orchestrator or scheduled trigger.</p>
+
+          <h3>Overlap and emphasis</h3>
+          <p>dbt and Weaver overlap substantially. dbt is centred on transformation and modelling across data platforms. Weaver covers a broader part of a Fabric pipeline, including loading, cross-item dependencies and persistent operational state.</p>
+          <div class="keyline">
+            <p>dbt starts with the transformation model. Weaver starts with the operational data estate.</p>
+          </div>
+
+          <div class="cards two">
+            <a class="card" href="../get-started/index.html">
+              <h3>Get started</h3>
+              <p>One install and one command gives you a working example to read and run.</p>
+              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="../how-it-works/index.html">
+              <h3>How Weaver works</h3>
+              <p>Build, the Catalogue, load, test and health, and the mechanics beneath them.</p>
+              <span class="go">How it works <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+          </div>
+
+          <p class="small muted">Checked against the dbt documentation in September 2026: incremental strategies, model contracts and constraints, failure handling defaults, and the Microsoft and community Fabric adapters. If something here is out of date, <a href="https://github.com/matthias-wong-dev/weaverstack/issues">open an issue</a>.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-grid">
+        <div class="footer-note">
+          <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
+          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+          <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
+        </div>
+        <div class="footer-links">
+          <ul>
+            <strong>Site</strong>
+            <li><a href="../get-started/index.html">Get started</a></li>
+            <li><a href="../problem/index.html">The problem</a></li>
+            <li><a href="../how-it-works/index.html">How it works</a></li>
+            <li><a href="../scale/index.html">Built for scale</a></li>
+            <li><a href="../vs-dbt/index.html">Weaver vs dbt</a></li>
+          </ul>
+          <ul>
+            <strong>Project</strong>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">Design notes</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li>
+            <li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <script src="../assets/site.js" defer></script>
+  </body>
+</html>

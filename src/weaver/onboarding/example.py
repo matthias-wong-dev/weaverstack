@@ -58,8 +58,8 @@ CUSTOMERS = """\\
 
 class Sales__Customers(Folder):
     def read(self):
-        # Weaver issues the staging directory and empties it before read() runs,
-        # so a folder fills what it was given and returns it.
+        # Weaver supplies an empty staging directory before read() runs. This
+        # method writes the export there and returns the directory.
         with self.staging_folder() as staging:
             (staging.path / "customers.csv").write_text(CUSTOMERS, encoding="utf-8")
         return staging, []
@@ -236,7 +236,7 @@ _SHORTCUTS = """\
 #
 # The Warehouse cannot read Delta files; it reads the Lakehouse's SQL endpoint.
 # Declaring the shortcut lets a Warehouse object select from a Lakehouse object
-# without either item knowing where the other is built.
+# while Weaver resolves the logical names to physical Fabric items.
 logical:
   {warehouse_item}/{schema}.Customer: {lakehouse_item}/Tables/{schema}.Customer
 """

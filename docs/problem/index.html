@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en-AU">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f7f6">
+    <title>The problem Weaver solves</title>
+    <meta name="description" content="Building one thing in Fabric is straightforward. Coordinating a whole data platform is harder. Where the difficulty actually comes from, and what a pipeline needs once it is in production.">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://weaverstack.dev/problem/">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://weaverstack.dev/problem/">
+    <meta property="og:site_name" content="Weaver">
+    <meta property="og:locale" content="en_AU">
+    <meta property="og:title" content="The problem Weaver solves">
+    <meta property="og:description" content="Building one thing in Fabric is straightforward. Coordinating a whole data platform is harder.">
+    <meta property="og:image" content="https://weaverstack.dev/og.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="The problem Weaver solves">
+    <meta name="twitter:description" content="Building one thing in Fabric is straightforward. Coordinating a whole data platform is harder.">
+    <meta name="twitter:image" content="https://weaverstack.dev/og.png">
+    <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
+    <link rel="manifest" href="../site.webmanifest">
+    <link rel="stylesheet" href="../assets/site.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav wrap" aria-label="Primary">
+        <a class="brand" href="../index.html" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+        <div class="nav-links" id="nav-links">
+          <a href="../get-started/index.html">Get started</a>
+          <a href="../problem/index.html" aria-current="page">The problem</a>
+          <a href="../how-it-works/index.html">How it works</a>
+          <a href="../scale/index.html">Built for scale</a>
+          <a href="../vs-dbt/index.html">Weaver vs dbt</a>
+          <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-head">
+        <div class="wrap">
+          <p class="eyebrow">The problem</p>
+          <h1>Building one thing in Fabric is straightforward</h1>
+          <p class="lead">Fabric makes it straightforward to work with a Lakehouse, a Warehouse, a notebook or a SQL workload on its own. It gets harder once you need all of them running together as one production platform.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Fabric starts simple</h2>
+          <p>You create a Lakehouse, land a file in it, then read that file with Spark in a notebook and write a Delta table. A Warehouse gives you T-SQL over the same estate. Each step is documented, and each one works on its own.</p>
+
+          <div class="flow">
+            <div class="flow-step"><b>Files</b><small>in a Lakehouse</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>Python</b><small>Spark, in a notebook</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>Delta table</b><small>in the Lakehouse</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>T-SQL</b><small>in a Warehouse</small></div>
+          </div>
+
+          <p>Fabric does not provide one dependency model across these components, so their execution order must be coordinated separately.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Coordinating Fabric components</h2>
+          <p class="lede">The complexity starts when those components form one pipeline.</p>
+
+          <div class="cards two">
+            <div class="card">
+              <h3>Two engines, two languages</h3>
+              <p>Your Lakehouse runs Spark and Python; your Warehouse runs T-SQL. Fabric has separate dependency graphs for the two engines, so their execution order requires separate coordination.</p>
+            </div>
+            <div class="card">
+              <h3>Several Fabric items</h3>
+              <p>Most estates hold several Lakehouses and Warehouses. A table in one item can depend on a table in another exactly as it would on a local one, but Fabric does not treat the two cases the same way.</p>
+            </div>
+            <div class="card">
+              <h3>Shortcuts</h3>
+              <p>A Warehouse cannot read Delta files, so it reaches a Lakehouse through a shortcut to its SQL endpoint. You usually configure that shortcut somewhere other than the pipeline code that relies on it.</p>
+            </div>
+            <div class="card">
+              <h3>Environments</h3>
+              <p>Your Spark code needs libraries, and those come from a Fabric Environment. You then have to keep the right Environment published, with the right versions in it, matching whatever the code assumes.</p>
+            </div>
+            <div class="card">
+              <h3>Logical against physical</h3>
+              <p>Your development Lakehouse and your production Lakehouse are separate Fabric items with different names. Each logical code reference must be resolved to the correct physical item for its environment.</p>
+            </div>
+            <div class="card">
+              <h3>Source control</h3>
+              <p>Notebooks, SQL scripts, pipeline definitions, shortcut configuration and item settings all live in different places and version at different rates. One change to the platform touches several of them, and you review them separately.</p>
+            </div>
+          </div>
+
+          <p>Fabric's breadth and the freedom to combine its components can create dependencies and operating conventions spread across Lakehouses, Warehouses, notebooks, shortcuts, Environments and orchestration as an estate grows.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>A pipeline becomes a production system</h2>
+          <p class="lede">Production pipelines require durable operational state across runs.</p>
+
+          <ul>
+            <li><strong>Incremental position.</strong> Reading a full source on every run becomes impractical as volumes grow. A bookmark records how far each object processed.</li>
+            <li><strong>Current operational state.</strong> Current state distinguishes objects that are up to date, behind their sources or never loaded.</li>
+            <li><strong>Recovery after failure.</strong> Weaver records which objects succeeded, failed or were blocked, and which can be retried.</li>
+            <li><strong>Staleness relative to dependencies.</strong> A table can load successfully and become stale when an upstream object loads again.</li>
+            <li><strong>Metadata and lineage.</strong> Descriptions, keys, foreign keys and lineage identify an object's meaning and dependencies.</li>
+            <li><strong>Validation state.</strong> A completed query does not establish that its output is valid.</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Operational data handling</h2>
+          <p class="lede">Incremental state, rejected rows, stability controls and partial failures need a consistent operating model across the estate.</p>
+
+          <div class="cards two">
+            <div class="card">
+              <h3>Incremental position</h3>
+              <p>A bookmark records the position of the last clean load and advances only when processing completes successfully. Advancing it after a partial load can leave data permanently unprocessed.</p>
+            </div>
+            <div class="card">
+              <h3>Changed rows</h3>
+              <p>A load has to tell new rows from changed ones, and both from rows that have gone. A missing key means something different when the source sends you everything than when it sends today's batch.</p>
+            </div>
+            <div class="card">
+              <h3>Duplicate keys</h3>
+              <p>Duplicate primary and unique keys are refused and set aside with a reason. A consistent policy prevents different loads from handling the same data condition differently.</p>
+            </div>
+            <div class="card">
+              <h3>Null violations</h3>
+              <p>Null violations need a defined load policy. Weaver rejects and records rows with nulls in columns declared not null.</p>
+            </div>
+            <div class="card">
+              <h3>Rejected rows</h3>
+              <p>Rejected rows are persisted with their rejection reason for investigation and recovery.</p>
+            </div>
+            <div class="card">
+              <h3>Unexpectedly large changes</h3>
+              <p>A load can be structurally valid while representing an implausibly large change. Stability thresholds can stop the change before it is applied.</p>
+            </div>
+            <div class="card">
+              <h3>Load statistics</h3>
+              <p>Weaver records inserted, updated and deleted row counts for each load so they can be compared across runs.</p>
+            </div>
+            <div class="card">
+              <h3>Continuing after a failure</h3>
+              <p>Independent branches can continue after a failure, while descendants of the failed object remain blocked.</p>
+            </div>
+          </div>
+
+          <p>Fabric spreads these concerns across multiple engines and items, which makes a common operating model more valuable as the estate grows.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Where Weaver comes in</h2>
+          <p class="lede">Weaver coordinates Fabric's existing data-engineering surfaces through one repository, dependency graph and Catalogue.</p>
+
+          <p>The repository defines dependencies and logical-to-physical bindings across Fabric items. The Catalogue records installed state, bookmarks, load and test outcomes, and operational history. Execution remains on Fabric's native engines.</p>
+
+          <div class="cards two">
+            <a class="card" href="../how-it-works/index.html">
+              <h3>How Weaver works</h3>
+              <p>Repository, build, Catalogue, load, test and health, and the mechanics beneath them.</p>
+              <span class="go">Learn more <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="../get-started/index.html">
+              <h3>Get started</h3>
+              <p>Set up a project against your own workspace and run a small example through build, load and test.</p>
+              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-grid">
+        <div class="footer-note">
+          <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
+          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+          <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
+        </div>
+        <div class="footer-links">
+          <ul>
+            <strong>Site</strong>
+            <li><a href="../get-started/index.html">Get started</a></li>
+            <li><a href="../problem/index.html">The problem</a></li>
+            <li><a href="../how-it-works/index.html">How it works</a></li>
+            <li><a href="../scale/index.html">Built for scale</a></li>
+            <li><a href="../vs-dbt/index.html">Weaver vs dbt</a></li>
+          </ul>
+          <ul>
+            <strong>Project</strong>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">Design notes</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li>
+            <li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <script src="../assets/site.js" defer></script>
+  </body>
+</html>

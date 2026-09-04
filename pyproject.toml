@@ -5,19 +5,25 @@ build-backend = "hatchling.build"
 [project]
 name = "weaverstack"
 dynamic = ["version"]
-description = "Central-catalogue data engineering runtime for Microsoft Fabric Lakehouses and Warehouses."
+description = "Build and operate data pipelines across Microsoft Fabric from one repository."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "Apache-2.0"
+license = "MPL-2.0"
 license-files = ["LICENSE"]
 authors = [{ name = "Matthias Wong" }]
 keywords = ["fabric", "onelake", "lakehouse", "delta", "warehouse", "etl"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Database",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 
 # What installed Weaver needs to run. Environment publication reads this list,
@@ -49,7 +55,10 @@ dev = [
 weaver = "weaver_cli:main"
 
 [project.urls]
-Homepage = "https://github.com/matthias-wong-dev/weaverstack"
+Homepage = "https://weaverstack.dev"
+Documentation = "https://weaverstack.dev/get-started/"
+Source = "https://github.com/matthias-wong-dev/weaverstack"
+Issues = "https://github.com/matthias-wong-dev/weaverstack/issues"
 
 # Version comes from Git, not a hand-edited string, so every changed checkout
 # builds an identifiable wheel. The scheme (see hatch_build.py) is a public,

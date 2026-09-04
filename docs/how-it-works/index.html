@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en-AU">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f7f6">
+    <title>How Weaver works</title>
+    <meta name="description" content="Build turns your repository into an installed Fabric estate. The Catalogue is Weaver's understanding of that estate, and load, test and health all operate from it.">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://weaverstack.dev/how-it-works/">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://weaverstack.dev/how-it-works/">
+    <meta property="og:site_name" content="Weaver">
+    <meta property="og:locale" content="en_AU">
+    <meta property="og:title" content="How Weaver works">
+    <meta property="og:description" content="Repository, build, Catalogue, load, test and health, and the mechanics underneath them.">
+    <meta property="og:image" content="https://weaverstack.dev/og.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="How Weaver works">
+    <meta name="twitter:description" content="Repository, build, Catalogue, load, test and health, and the mechanics underneath them.">
+    <meta name="twitter:image" content="https://weaverstack.dev/og.png">
+    <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
+    <link rel="manifest" href="../site.webmanifest">
+    <link rel="stylesheet" href="../assets/site.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav wrap" aria-label="Primary">
+        <a class="brand" href="../index.html" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+        <div class="nav-links" id="nav-links">
+          <a href="../get-started/index.html">Get started</a>
+          <a href="../problem/index.html">The problem</a>
+          <a href="../how-it-works/index.html" aria-current="page">How it works</a>
+          <a href="../scale/index.html">Built for scale</a>
+          <a href="../vs-dbt/index.html">Weaver vs dbt</a>
+          <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-head">
+        <div class="wrap">
+          <h1>How Weaver works</h1>
+          <p class="lead">Build installs your repository into Fabric and records what it did in the Catalogue. Load, test and health all work from there.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Build, load, test and health</h2>
+          <p class="lede">You build, then load, then test. Health reports the estate's current state afterwards.</p>
+
+          <div class="flow">
+            <div class="flow-step"><b>build</b><small>make Fabric match your repository</small></div>
+            <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+            <div class="flow-step"><b>load</b><small>run the data work</small></div>
+            <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+            <div class="flow-step"><b>test</b><small>run your checks</small></div>
+            <span class="flow-arrow" aria-hidden="true">&#8594;</span>
+            <div class="flow-step"><b>health</b><small>report estate state</small></div>
+          </div>
+
+          <p>Build creates the tables, views, shortcuts and load code your repository describes, and records them in the Catalogue. Weaver uses the installed state for load and test operations, and uses the same records to assess whether the estate is current.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>1. The repository</h2>
+          <p class="lede">Your repository describes the estate logically. A separate file, <code>workspace-config.yml</code>, says which Fabric resources those logical items map to.</p>
+          <p>You put each object under the Fabric item that owns it. A Lakehouse item holds Python folders, Delta tables and Spark SQL; a Warehouse item holds T-SQL tables and views. Either can hold Tests and Assumptions. Alongside them you declare shortcuts, schema and folder documents, and the metadata each object carries in its header: description, lineage, primary key, column types and thresholds.</p>
+          <p>Because the workspace configuration sits in its own file, you can point the same repository at development or production without touching a single object.</p>
+          <div class="callout">
+            <p><strong>A Weaver item is logical; a target is physical.</strong> You write against <code>Lakehouse/Landing</code>, and Weaver might build it into a Fabric Lakehouse called <code>Landing_Dev</code>. During build, Weaver reads this binding from the workspace configuration. Load, test and health use the binding recorded in the Catalogue, so the same commands run against either environment.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>2. Build</h2>
+          <p class="lede">Build compares your repository with what is in Fabric now, and applies the difference. It creates and maintains:</p>
+          <ul>
+            <li>Schemas and folders</li>
+            <li>Delta tables in a Lakehouse</li>
+            <li>Tables and views in a Warehouse</li>
+            <li>Shortcuts between items</li>
+            <li>The runnable load code for each object, as a Python module or a T-SQL procedure</li>
+            <li>The Catalogue records that make all of it known</li>
+          </ul>
+
+          <div class="keyline"><p>Build changes structure without loading data, so schema and object changes deploy independently from data movement.</p></div>
+
+          <p>Weaver keeps these apart because they change at different times. You can install the shape of an entire platform into a fresh workspace and load nothing, or change a column type and rebuild without moving a row.</p>
+
+          <p>Builds are incremental, and Weaver compares against what is really there rather than a cached model. It reads the Catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's objects from storage, and a Warehouse over TDS.</p>
+
+          <p>Weaver certifies objects one at a time. When you rebuild, it un-certifies what you selected and everything downstream, then certifies each one again as it builds.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>3. The Catalogue</h2>
+          <p class="lede">The Catalogue is where Weaver records installed and operational state. Weaver uses it for load, test and health.</p>
+
+          <div class="cards three">
+            <div class="card">
+              <h3>The repository</h3>
+              <p>The estate you want, as files in source control. It changes when you write code.</p>
+            </div>
+            <div class="card">
+              <h3>Fabric</h3>
+              <p>The real thing: actual Delta files, Warehouse tables and shortcuts. It changes when you build or load.</p>
+            </div>
+            <div class="card">
+              <h3>The Catalogue</h3>
+              <p>What Weaver knows about the other two. It changes whenever either of them does.</p>
+            </div>
+          </div>
+
+          <p>Weaver keeps it as ordinary tables in the <code>_</code> schema of a Fabric Warehouse you name. Give it a Warehouse of its own, or use one you already have, because Weaver owns <code>_</code> and nothing else in there.</p>
+
+          <h3>What it holds</h3>
+          <div class="cards two">
+            <div class="card">
+              <h3>What is installed</h3>
+              <ul>
+                <li>Every installed object, its role and its type</li>
+                <li>What depends on what</li>
+                <li>Shortcuts between items</li>
+                <li>Which physical Fabric item each logical item is bound to</li>
+                <li>Descriptions, columns, keys and foreign keys</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>How it is running</h3>
+              <ul>
+                <li>How far each object has loaded, as a bookmark</li>
+                <li>The current load outcome for each object</li>
+                <li>The current validation outcome for each object</li>
+                <li>Row counts for every insert, update and delete a load made</li>
+                <li>An append-only history of what has happened</li>
+              </ul>
+            </div>
+          </div>
+
+          <p>Weaver treats current state and history differently. A current-state row describes the object as it exists now, so if you drop and rebuild it that row ends with it, because the new table has loaded nothing. History is append-only, and a rebuild leaves it alone.</p>
+
+          <p>Because the Catalogue lives in a Warehouse, reading it is just a TDS query. A Warehouse-only project therefore never starts a Spark session.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>4. Load</h2>
+          <p class="lede">Load runs the data work from installed state, not from the repository.</p>
+          <p>Weaver reads the Catalogue, rebuilds the dependency graph from the stored rows, and runs each loadable object in order. The Catalogue specifies:</p>
+          <ul>
+            <li>Which objects are loadable, and which are views that materialise nothing</li>
+            <li>What depends on what, across Fabric items as well as inside them</li>
+            <li>How far each object has already processed</li>
+            <li>What happened to each one last time</li>
+          </ul>
+          <p>When you name an item, Weaver loads everything it owns in dependency order. Without an item name, Weaver loads every installed item. Items are a hard boundary either way: a dependency never adds an item that was not selected.</p>
+          <p><a href="#advanced">The mechanics underneath</a> cover incremental loading, row-level change handling, rejected rows and recovery after failure.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>5. Test</h2>
+          <p class="lede">Tests and Assumptions are installed with the objects they validate, participate in the dependency graph, and have their results recorded in the Catalogue.</p>
+          <p>You write a Test or an Assumption under the item it belongs to. Weaver discovers it like any other object, compiles it during a build and installs it alongside the tables it reads.</p>
+          <div class="cards two">
+            <div class="card">
+              <h3>Test</h3>
+              <p>A Test compares what you expect with what is actually there, and passes when the two match exactly. It tells you what is missing and what turned up that should not have.</p>
+            </div>
+            <div class="card">
+              <h3>Assumption</h3>
+              <p>An Assumption returns the rows that break a condition you are relying on, so it passes when it returns nothing. There is no second side to line up against, so it declares no primary key.</p>
+            </div>
+          </div>
+          <p>Both compile to something you can run on your own. A T-SQL validation becomes a stored procedure, and you can execute it without Weaver.</p>
+          <p>Neither one materialises anything. A Test carries an ordinary <code>Schema.Object</code> identity so Weaver can name it and record it, but Weaver holds it apart from the documents an item materialises, so it never turns into table or view DDL. Weaver goes by an artefact's declared role rather than guessing from its file type, which is why <code>weaver load</code> leaves your validations alone.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>6. Health</h2>
+          <p class="lede">Health reports the estate's current state, not only the outcome of the last command.</p>
+          <p>Weaver reads the Catalogue across the installed estate and uses the dependency graph to flag objects that are stale because an upstream dependency loaded again.</p>
+          <p>It reports:</p>
+          <ul>
+            <li>Objects whose last load failed or was blocked upstream</li>
+            <li>Objects behind their sources, where an ancestor has loaded more recently</li>
+            <li>Objects with no settled load recent enough to count as current</li>
+            <li>Validations that are currently failing</li>
+            <li>Certified objects that are not physically there</li>
+          </ul>
+          <p>By default anything that has not settled a load in the last 24 hours counts as stale. Use <code>--as-of</code> to move that line.</p>
+        </div>
+      </section>
+
+      <section class="section" id="advanced">
+        <div class="wrap">
+          <h2>The mechanics underneath</h2>
+          <p class="lede">How Weaver handles dependency discovery, shortcuts, incremental state and failure.</p>
+
+          <h3>Dependency discovery</h3>
+
+          <h4>Python dependencies</h4>
+          <p>Weaver reads your imports and the symbols you use.</p>
+          <div class="code">
+            <div class="code-bar"><span>Lakehouse/Landing/Tables/Sales__Customer.py</span></div>
+            <pre><span class="c-dim"># The dependency is this line. Nothing else declares it.</span>
+<span class="c-key">from</span> Files.Sales__Customers <span class="c-key">import</span> Sales__Customers
+
+<span class="c-key">from</span> weaver <span class="c-key">import</span> Table
+
+
+<span class="c-key">class</span> <span class="c-fn">Sales__Customer</span>(Table):
+    <span class="c-key">def</span> <span class="c-fn">read</span>(self):
+        exported = Sales__Customers(self).spark_path()
+        <span class="c-key">return</span> self.spark.read.option(<span class="c-str">"header"</span>, <span class="c-key">True</span>).csv(exported)</pre>
+          </div>
+          <h4>T-SQL dependencies</h4>
+          <p>Weaver reads the relations your query selects from. No Jinja, no macros, no <code>ref()</code>.</p>
+          <div class="code">
+            <div class="code-bar"><span>Warehouse/Curated/Sales.CustomerByRegion.sql</span></div>
+            <pre><span class="c-key">select</span> c.[Customer id]
+     , c.[Customer name]
+     , r.[Region name]
+  <span class="c-key">from</span> [Sales].[Customer] c
+  <span class="c-key">join</span> [Sales].[Region] r <span class="c-key">on</span> r.[Region code] = c.[Region code];</pre>
+          </div>
+          <p>Weaver never imports your object modules to find this out. It reads them statically, so working out the graph runs none of your code and needs no Fabric session.</p>
+
+          <h3>Shortcuts</h3>
+          <p>A Warehouse cannot read Delta files, so it reaches a Lakehouse through its SQL endpoint. You declare that shortcut in the repository, and Weaver puts it in the dependency graph like anything else.</p>
+          <div class="code">
+            <div class="code-bar"><span>Warehouse/Curated/shortcuts.yml</span></div>
+            <pre><span class="c-key">logical:</span>
+  Warehouse/Curated/Sales.Customer: Lakehouse/Landing/Tables/Sales.Customer</pre>
+          </div>
+          <p>Your Warehouse object then selects from <code>[Sales].[Customer]</code> as though it were local. Both sides are logical names, and Weaver resolves them through the Catalogue. Build creates the shortcut, and the dependency graph places the Warehouse object after the Lakehouse table it references.</p>
+
+          <h3>Incremental load and bookmarks</h3>
+          <p>Weaver records each object's load position as a bookmark: one row per loadable table or folder, holding the UTC instant just before its most recent clean load began.</p>
+          <div class="callout green">
+            <p><strong>A bookmark advances only after a clean load.</strong> Rejected rows and failed loads leave the bookmark unchanged. Dropping and rebuilding an object removes its bookmark, so the next load reads everything.</p>
+            <p>Leave a bookmark behind and you replay some data. Move it too far and you skip data without noticing, so Weaver only moves it after a clean load.</p>
+          </div>
+          <p>In a Lakehouse you read the bookmark yourself and decide what to do with it.</p>
+          <div class="code">
+            <div class="code-bar"><span>an incremental folder read</span></div>
+            <pre><span class="c-key">def</span> <span class="c-fn">read</span>(self):
+    <span class="c-dim"># Files changed after the last clean load, and when.</span>
+    <span class="c-key">return</span> Source__Export(self).files_since(self.bookmark())</pre>
+          </div>
+          <p>There is a matching <code>deleted_since(bookmark)</code> for files that have been retired. Without a bookmark row, Weaver uses an instant far in the past, so the first run is a full load with no special case.</p>
+          <div class="callout amber">
+            <p><strong>Warehouse tables work differently.</strong> Weaver records a bookmark for every loadable Warehouse table and determines whether a <code>Static</code> table has already loaded from that state, but T-SQL does not read a bookmark window. For a Warehouse table, incremental loading changes the semantics of a missing key.</p>
+          </div>
+          <p><code>Incremental: true</code> changes what a missing key means. Without it, Weaver treats your source as the whole truth, so a key that is absent retires the target row. With it, the source is only a window, and a key it does not carry says nothing at all about the target. You need a primary key either way, because otherwise there is nothing to reconcile against.</p>
+
+          <h3>Change handling</h3>
+          <p>When a keyed table loads, Weaver classifies each incoming row as an insert, update or delete before writing. The resulting relation allows Weaver to evaluate the whole change before applying it.</p>
+          <div class="cards two">
+            <div class="card">
+              <h3>A bad incoming row</h3>
+              <p>Recoverable. Weaver refuses the row, records why, and sets it aside: a blank primary key, a null in a column you declared not null, a duplicate primary key or a duplicate unique key. Pass <code>--fault-tolerant</code> and the surviving rows load anyway; leave it off and the whole load stops.</p>
+            </div>
+            <div class="card">
+              <h3>A change that would leave the target invalid</h3>
+              <p>Not recoverable. No single row is at fault, so the load stops before writing anything. <code>--fault-tolerant</code> will not get you past this one: it governs incoming rows, and this is about the target itself.</p>
+            </div>
+          </div>
+          <p>A load can be structurally valid while representing an implausibly large change. You declare the movement a table treats as normal, and Weaver stops a load that would delete more than 5% or update more than 20% of the target by default. It skips this check below one million rows, so the default thresholds apply only above 50,000 deleted rows or 200,000 updated rows.</p>
+          <p>All of these run before Weaver writes anything, so refusing a load means never starting it, not unwinding it afterwards.</p>
+
+          <h3>Failure and recovery</h3>
+          <p>Partial failures require durable state for recovery.</p>
+          <ul>
+            <li><strong>Outcome.</strong> Each object's outcome is recorded in the Catalogue.</li>
+            <li><strong>Blocked dependencies.</strong> If an object's source does not load, Weaver marks the object blocked rather than failed.</li>
+            <li><strong>Bookmark position.</strong> A bookmark advances only after a clean load, so a partial run cannot skip unprocessed data on the next run.</li>
+            <li><strong>Retry.</strong> The next run reads the window the previous run left unprocessed.</li>
+          </ul>
+          <p>By default a load stops at the first failure. <code>--fault-tolerant</code> continues independent branches.</p>
+          <p><code>weaver health</code> reads this state and reports the current condition of the estate.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Where to next</h2>
+          <div class="cards three">
+            <a class="card" href="../get-started/index.html">
+              <h3>Get started</h3>
+              <p>Set up a project against your own workspace and run a small example through the full lifecycle.</p>
+              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="../scale/index.html">
+              <h3>Built for scale</h3>
+              <p>How the same dependency and operational model applies as an estate grows.</p>
+              <span class="go">Learn more <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="../vs-dbt/index.html">
+              <h3>Weaver vs dbt</h3>
+              <p>How the two tools differ on structure, dependencies, loading and operational state.</p>
+              <span class="go">Compare <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-grid">
+        <div class="footer-note">
+          <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
+          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+          <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
+        </div>
+        <div class="footer-links">
+          <ul>
+            <strong>Site</strong>
+            <li><a href="../get-started/index.html">Get started</a></li>
+            <li><a href="../problem/index.html">The problem</a></li>
+            <li><a href="../how-it-works/index.html">How it works</a></li>
+            <li><a href="../scale/index.html">Built for scale</a></li>
+            <li><a href="../vs-dbt/index.html">Weaver vs dbt</a></li>
+          </ul>
+          <ul>
+            <strong>Project</strong>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">Design notes</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li>
+            <li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <script src="../assets/site.js" defer></script>
+  </body>
+</html>
