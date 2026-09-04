@@ -55,7 +55,7 @@
           <div class="cards two">
             <div class="card">
               <h3>One dependency graph</h3>
-              <p>Weaver keeps every object in one graph, across Lakehouses, Warehouses, Python, Spark SQL and T-SQL. It reads that graph to work out what runs in which order and what a change affects, so adding another item gives you nothing new to coordinate.</p>
+              <p>Weaver keeps every object in one graph, across Lakehouses, Warehouses, Python, Spark SQL and T-SQL. The same dependency and operating model extends across additional Fabric items.</p>
             </div>
             <div class="card">
               <h3>Incremental builds</h3>
@@ -63,7 +63,7 @@
             </div>
             <div class="card">
               <h3>Loads sized by the change</h3>
-              <p>A keyed load works out its inserts, updates and deletes before it writes anything, and an incremental object reads only the window since its last clean load. So a load does work in proportion to what changed, not to how big the table is.</p>
+              <p>Bookmarks and incremental loading can limit the source data processed on each run, while keyed loads classify the incoming change before writing.</p>
             </div>
             <div class="card">
               <h3>Persistent operational state</h3>

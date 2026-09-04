@@ -51,7 +51,7 @@
 
       <section class="section">
         <div class="wrap">
-          <h2>The four commands</h2>
+          <h2>Build, load, test and health</h2>
           <p class="lede">You build, then load, then test. Health tells you where the estate stands afterwards.</p>
 
           <div class="flow">
@@ -108,7 +108,6 @@
           <h2>3. The Catalogue</h2>
           <p class="lede">The Catalogue is where Weaver records what it installed and how it is running. Load, test and health all read it.</p>
 
-          <p>It helps to keep three things apart: your repository, Fabric itself, and the Catalogue.</p>
           <div class="cards three">
             <div class="card">
               <h3>The repository</h3>
@@ -168,16 +167,15 @@
             <li>What happened to each one last time</li>
           </ul>
           <p>Name an item and Weaver loads everything it owns, in dependency order. Name none and it loads every installed item. Items are a hard boundary either way: a dependency never drags in an item you did not ask for.</p>
-          <p>There is more going on underneath. Incremental loading, row-level change handling, rejected rows and recovery after a failure are all in <a href="#advanced">the mechanics</a> below.</p>
+          <p><a href="#advanced">The mechanics underneath</a> cover incremental loading, row-level change handling, rejected rows and recovery after failure.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <h2>5. Test</h2>
-          <p class="lede">Your checks live in the estate, not beside it.</p>
-          <p>You write a Test or an Assumption under the item it belongs to. Weaver discovers it like any other object, compiles it during a build and installs it alongside the tables it reads. It lands in the same dependency graph, and Weaver records the result in the Catalogue rather than only printing it.</p>
-          <p>There are two kinds, and Weaver keeps them distinct.</p>
+          <p class="lede">Tests and Assumptions are installed with the objects they validate, participate in the dependency graph, and have their results recorded in the Catalogue.</p>
+          <p>You write a Test or an Assumption under the item it belongs to. Weaver discovers it like any other object, compiles it during a build and installs it alongside the tables it reads.</p>
           <div class="cards two">
             <div class="card">
               <h3>Test</h3>
@@ -274,7 +272,6 @@
 
           <h3>Change handling</h3>
           <p>When a keyed table loads, Weaver works out whether each incoming row is an insert, an update or a delete before it writes anything. That answer is a relation it can query, so the load can look at the whole change before applying any of it.</p>
-          <p>Two kinds of problem come up, and Weaver treats them differently.</p>
           <div class="cards two">
             <div class="card">
               <h3>A bad incoming row</h3>
@@ -285,19 +282,19 @@
               <p>Not recoverable. No single row is at fault, so the load stops before writing anything. <code>--fault-tolerant</code> will not get you past this one: it governs incoming rows, and this is about the target itself.</p>
             </div>
           </div>
-          <p>Then there is the case where every row is fine and the change is still far too big. You declare how much movement a table treats as normal, and by default Weaver stops a load that would delete more than 5% or update more than 20% of the target. It skips the check on small tables entirely: below a million rows it does not ask, so at the defaults a load has to remove more than 50,000 rows or change more than 200,000 before the question comes up.</p>
+          <p>A load can be structurally valid while representing an implausibly large change. You declare the movement a table treats as normal, and Weaver stops a load that would delete more than 5% or update more than 20% of the target by default. It skips this check below one million rows, so the default thresholds apply only above 50,000 deleted rows or 200,000 updated rows.</p>
           <p>All of these run before Weaver writes anything, so refusing a load means never starting it, not unwinding it afterwards.</p>
 
           <h3>Failure and recovery</h3>
-          <p>Things fail, and on a large estate they fail regularly. What matters is what you find the next morning.</p>
+          <p>Partial failures require durable state for recovery.</p>
           <ul>
-            <li><strong>Weaver records what happened.</strong> Each object's outcome goes into the Catalogue, where the next command and the next person can both read it.</li>
-            <li><strong>Dependent work does not run.</strong> If an object's source never loaded, Weaver marks it blocked, which is not the same as having failed on its own account.</li>
-            <li><strong>Weaver only advances state that was earned.</strong> A bookmark moves after a clean load and nothing else, so a partial run cannot convince the next one that it read a window it never read.</li>
-            <li><strong>You pick up where it stopped.</strong> The next run reads what the last one left behind and carries on from there.</li>
+            <li><strong>Outcome.</strong> Each object's outcome is recorded in the Catalogue.</li>
+            <li><strong>Blocked dependencies.</strong> If an object's source does not load, Weaver marks the object blocked rather than failed.</li>
+            <li><strong>Bookmark position.</strong> A bookmark advances only after a clean load, so a partial run cannot skip unprocessed data on the next run.</li>
+            <li><strong>Retry.</strong> The next run reads the window the previous run left unprocessed.</li>
           </ul>
-          <p>By default a load stops at the first failure. <code>--fault-tolerant</code> keeps going down the branches that do not depend on it, which is usually what you want overnight, when you would rather load most of the estate and deal with one broken source in the morning.</p>
-          <p>When you do come back to it, <code>weaver health</code> reads that state and tells you what is wrong now, so you are not reconstructing it from logs.</p>
+          <p>By default a load stops at the first failure. <code>--fault-tolerant</code> continues independent branches.</p>
+          <p><code>weaver health</code> reads this state and reports the current condition of the estate.</p>
         </div>
       </section>
 

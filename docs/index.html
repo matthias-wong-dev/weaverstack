@@ -169,7 +169,7 @@ compose.yml
             <!-- /example-tree -->
           </div>
 
-          <p>Each file sits under the Fabric item that owns it. None of them says what runs first.</p>
+          <p>Each file sits under the Fabric item that owns it. Weaver derives execution order from the dependencies in the Python and SQL.</p>
 
           <h3>The dependency graph</h3>
           <p>Weaver reads the files and works the graph out for you. The Python table reads the export folder, the Warehouse join reads those customers through a shortcut and its regions from a local table, and each check hangs off whatever it validates.</p>
@@ -242,7 +242,7 @@ compose.yml
               <li><i class="shortcut" aria-hidden="true"></i> Shortcut</li>
               <li><i class="validation" aria-hidden="true"></i> Assumption</li>
             </ul>
-            <figcaption>Item boundaries are not execution boundaries: the Warehouse join waits for the Lakehouse table it reads.</figcaption>
+            <figcaption>The Warehouse join waits for the Lakehouse table it reads, even though the objects are in different Fabric items.</figcaption>
           </figure>
 
           <p><a class="text-link" href="get-started/index.html">Build this example against your own workspace <span class="arrow" aria-hidden="true">→</span></a></p>

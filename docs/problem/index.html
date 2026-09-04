@@ -52,9 +52,7 @@
 
       <section class="section">
         <div class="wrap">
-          <p class="eyebrow">Part one</p>
           <h2>Fabric starts simple</h2>
-          <p class="lede">The engines are all there and they work.</p>
           <p>You create a Lakehouse, land a file in it, then read that file with Spark in a notebook and write a Delta table. A Warehouse gives you T-SQL over the same estate. Each step is documented, and each one works on its own.</p>
 
           <div class="flow">
@@ -67,15 +65,13 @@
             <div class="flow-step"><b>T-SQL</b><small>in a Warehouse</small></div>
           </div>
 
-          <p>The pipeline works, as long as somebody runs the steps in the right order.</p>
+          <p>Fabric does not provide one dependency model across these components, so their execution order must be coordinated separately.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <p class="eyebrow">Part two</p>
-          <h2>The pieces have to work together</h2>
-          <p class="lede">The trouble starts at the boundaries between them.</p>
+          <h2>Coordinating Fabric components</h2>
 
           <div class="cards two">
             <div class="card">
@@ -104,41 +100,35 @@
             </div>
           </div>
 
-          <p>Fabric hands you each of these separately. A production pipeline has to run them as one system.</p>
+          <p>Fabric's breadth and the freedom to combine its components can create dependencies and operating conventions spread across Lakehouses, Warehouses, notebooks, shortcuts, Environments and orchestration as an estate grows.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <p class="eyebrow">Part three</p>
           <h2>A pipeline becomes a production system</h2>
-          <p class="lede">Once a pipeline runs every night, you need to know more than whether last night worked.</p>
-
-          <p>The data arrives on its own schedule, and you start needing answers to questions like these:</p>
+          <p class="lede">Production pipelines require durable operational state across runs.</p>
 
           <ul>
-            <li><strong>How much do you reload?</strong> Reading the whole source every night stops being practical as volumes grow, so the pipeline has to remember how far it got last time.</li>
-            <li><strong>Where does the estate stand?</strong> Which objects are up to date, which are behind their sources, and which never ran.</li>
-            <li><strong>What happens after a failure?</strong> Which objects succeeded, which the failure blocked, and which you can safely retry.</li>
-            <li><strong>Is this table still current?</strong> It can load perfectly well and still be stale, because something it reads loaded again afterwards.</li>
-            <li><strong>What does this column mean?</strong> You need descriptions, keys, foreign keys and lineage as soon as somebody other than the author picks the pipeline up.</li>
-            <li><strong>Is the data right?</strong> Whether the query ran is a different question from whether the answer means what you think it does.</li>
+            <li><strong>Incremental position.</strong> Reading a full source on every run becomes impractical as volumes grow. A bookmark records how far each object processed.</li>
+            <li><strong>Current operational state.</strong> The estate needs to distinguish objects that are current, behind their sources or never loaded.</li>
+            <li><strong>Recovery after failure.</strong> A run records which objects succeeded, failed or were blocked, and which can be retried.</li>
+            <li><strong>Staleness relative to dependencies.</strong> A table can load successfully and become stale when an upstream object loads again.</li>
+            <li><strong>Metadata and lineage.</strong> Descriptions, keys, foreign keys and lineage identify an object's meaning and dependencies.</li>
+            <li><strong>Validation state.</strong> A completed query does not establish that its output is valid.</li>
           </ul>
-
-          <p>Answering any of these means keeping something between runs. A pipeline that only knows about the run it is in cannot tell you.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <p class="eyebrow">Part four</p>
           <h2>Operational data handling</h2>
-          <p class="lede">You also need consistent handling for incremental state, rejected rows, unexpected changes and partial failures. Most teams build all of this by hand, and most teams build it more than once.</p>
+          <p class="lede">Incremental state, rejected rows, stability controls and partial failures need a consistent operating model across the estate.</p>
 
           <div class="cards two">
             <div class="card">
               <h3>Incremental position</h3>
-              <p>A bookmark records how far the last clean load reached, and you need rules for when it moves. Advance it after a partial run and you skip data silently, which nobody notices for a while.</p>
+              <p>A bookmark records the position of the last clean load and advances only when processing completes successfully. Advancing it after a partial load can leave data permanently unprocessed.</p>
             </div>
             <div class="card">
               <h3>Changed rows</h3>
@@ -146,40 +136,40 @@
             </div>
             <div class="card">
               <h3>Duplicate keys</h3>
-              <p>The source sends you the same customer twice. You decide whether to fail the load, keep one row, or set both aside and carry on, and then you write that decision down somewhere the pipeline can read it.</p>
+              <p>Duplicate primary and unique keys are refused and set aside with a reason. A consistent policy prevents different loads from handling the same data condition differently.</p>
             </div>
             <div class="card">
               <h3>Null violations</h3>
-              <p>Spotting a null where you do not allow one is easy. Deciding what the load then does with that row is the part you have to design.</p>
+              <p>Null violations need a defined load policy. Weaver rejects and records rows with nulls in columns declared not null.</p>
             </div>
             <div class="card">
               <h3>Rejected rows</h3>
-              <p>Once a load starts refusing rows, they have to go somewhere, with the reason attached, so somebody can look at them tomorrow.</p>
+              <p>Rejected rows are persisted with their rejection reason for investigation and recovery.</p>
             </div>
             <div class="card">
               <h3>Unexpectedly large changes</h3>
-              <p>The source comes in short and the load is about to delete most of a table. Nothing is technically wrong, so you want a threshold that stops the delete before it lands.</p>
+              <p>A load can be structurally valid while representing an implausibly large change. Stability thresholds can stop the change before it is applied.</p>
             </div>
             <div class="card">
               <h3>Load statistics</h3>
-              <p>How many rows were inserted, updated and deleted, kept as data you can read back later and compare across runs.</p>
+              <p>Weaver records inserted, updated and deleted row counts for each load so they can be compared across runs.</p>
             </div>
             <div class="card">
               <h3>Continuing after a failure</h3>
-              <p>One source is down, and half the estate has nothing to do with it. You want the run to carry on down the branches that do not touch it, and stop everything that does.</p>
+              <p>Independent branches can continue after a failure, while descendants of the failed object remain blocked.</p>
             </div>
           </div>
 
-          <p>Data engineering has needed all of this for a long time. What Fabric changes is that you now assemble it across two engines and several items, on a platform that gives you the engines and leaves the rest to you.</p>
+          <p>Fabric spreads these concerns across multiple engines and items, which makes a common operating model more valuable as the estate grows.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <h2>Where Weaver comes in</h2>
-          <p class="lede">Weaver replaces none of it. Your Delta tables are still Delta tables, your Warehouse is still a Warehouse, and your Spark still runs on Fabric Spark.</p>
+          <p class="lede">Weaver coordinates Fabric's existing data-engineering surfaces through one repository, dependency graph and Catalogue.</p>
 
-          <p>What Weaver adds is the coordination and the memory. You describe the whole estate in one repository, and Weaver builds one dependency graph across it, whichever engine runs an object and whichever item holds it. It records what is installed, how far each object has loaded and what happened along the way. Everything in the list above you declare once, instead of writing it again for every project.</p>
+          <p>The repository defines dependencies and logical-to-physical bindings across Fabric items. The Catalogue records installed state, bookmarks, load and test outcomes, and operational history. Execution remains on Fabric's native engines.</p>
 
           <div class="cards two">
             <a class="card" href="../how-it-works/index.html">
