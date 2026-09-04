@@ -91,13 +91,10 @@ class FabricResolver:
             )
         return self._items[key]
 
-    def _rest_client(self) -> FabricClient:
-        return self.client
-
     def refresh_sql_endpoint(self, item: ItemRef) -> dict:
         """Refresh the SQL analytics endpoint paired with a named Lakehouse."""
 
-        client = self._rest_client()
+        client = self.client
         endpoint = find_item(
             self.workspace,
             item.name,
@@ -194,7 +191,7 @@ class FabricResolver:
             name=name,
             source=resolved_source,
             source_path=source_path,
-            client=self._rest_client(),
+            client=self.client,
         )
 
     def external_item(self, name: str, *, item_type: str, workspace: str | None = None):
@@ -211,7 +208,7 @@ class FabricResolver:
             return self.resolve(ItemRef(name), item_type=item_type)
         # Through this host's own REST client, as every other crossing here is:
         # inside Fabric that is the session's identity, not a desktop credential.
-        client = self._rest_client()
+        client = self.client
         return find_item(
             find_workspace(workspace, client=client),
             name,
@@ -237,7 +234,7 @@ class FabricResolver:
         from .shortcuts import list_shortcuts
 
         return list_shortcuts(
-            self.resolve(item, item_type=LAKEHOUSE), client=self._rest_client()
+            self.resolve(item, item_type=LAKEHOUSE), client=self.client
         )
 
     def remove_onelake_shortcut(self, item: ItemRef, *, path: str, name: str) -> None:
@@ -252,7 +249,7 @@ class FabricResolver:
             self.resolve(item, item_type=LAKEHOUSE),
             path=path,
             name=name,
-            client=self._rest_client(),
+            client=self.client,
         )
 
     def sql_endpoint(self, target: WarehouseTarget):
