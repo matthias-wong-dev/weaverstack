@@ -227,10 +227,10 @@ def initialise(
         rest = client if client is not None else opened.resolver(addressed).client
         state, found = _read_the_workspace(request, client=rest)
 
-        # The definition is written where this run creates the Environment. An
-        # Environment the workspace already has is not this project's to define,
-        # and writing one would describe it wrongly.
-        files = _generated_files(request, define_environment=state == MISSING)
+        files = _generated_files(
+            request,
+            define_environment=_defines_environment(destination, request, state),
+        )
         configured = _parse_generated(files, request)
         _refuse_edited_files(destination, files)
 
@@ -314,6 +314,29 @@ def _workspace_name(workspace: str | None, *, session) -> str:
 
 
 # --- the files -----------------------------------------------------------------
+
+
+def _defines_environment(
+    destination: Path, request: ProjectRequest, state: str
+) -> bool:
+    """Whether this project carries the definition of its own Environment.
+
+    Two ways to be the project's: the Environment is not in Fabric yet, so this
+    run creates it from a definition it writes; or the project already holds one
+    under `Environment/`, which says a previous run created it.
+
+    The second is what keeps a rerun writing the same files. Reading it off
+    Fabric alone would drop the definition from the generated set as soon as the
+    first run succeeded, leaving a file in the project that initialise no longer
+    recognised and `_refuse_edited_files` no longer protected.
+
+    An Environment the workspace already had, and that this project never
+    defined, stays somebody else's: no definition is generated for it.
+    """
+
+    if state == MISSING:
+        return True
+    return (destination / environment_directory(request.environment)).is_dir()
 
 
 def _generated_files(

@@ -523,3 +523,76 @@ def test_no_workspace_outside_fabric_says_how_to_give_one(
     assert "A Fabric workspace could not be found." in message
     assert '--workspace "My Fabric Workspace"' in message
     assert "inside a Fabric notebook" in message
+
+
+@weaver_test()
+def test_a_project_keeps_the_environment_it_created(tmp_path, fabric):
+    """A successful first run must not change what the second run generates.
+
+    Reading ownership off Fabric alone would drop the definition from the
+    generated set the moment the Environment existed, leaving a file in the
+    project that initialise no longer recognised and `_refuse_edited_files` no
+    longer protected.
+    """
+
+    _environment(fabric, present=False)
+
+    first = _initialise(tmp_path, fabric)
+    second = _initialise(tmp_path, fabric)
+
+    definition = "Environment/Weaver.Environment/.platform"
+    assert definition in first.files
+    assert definition in second.files
+    assert first.files == second.files
+    assert (tmp_path / definition).is_file()
+
+
+@weaver_test()
+def test_a_rerun_writes_the_same_bytes(tmp_path, fabric, operations):
+    """Same request, same project: the second run finds every file identical."""
+
+    _environment(fabric, present=False)
+
+    _initialise(tmp_path, fabric, example=True)
+    written = {
+        path.relative_to(tmp_path).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(tmp_path.rglob("*"))
+        if path.is_file()
+    }
+
+    _initialise(tmp_path, fabric, example=True)
+
+    assert {
+        path.relative_to(tmp_path).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(tmp_path.rglob("*"))
+        if path.is_file()
+    } == written
+
+
+@weaver_test()
+def test_a_rerun_installs_weaver_no_second_time(tmp_path, fabric):
+    """The Environment is ready after the first run, so nothing is published."""
+
+    _environment(fabric, present=False)
+
+    _initialise(tmp_path, fabric)
+    fabric.published.clear()
+    second = _initialise(tmp_path, fabric)
+
+    assert fabric.published == []
+    assert _status(second, "Environment") == READY
+    assert _action(second, "Environment") == UNCHANGED
+
+
+@weaver_test()
+def test_an_environment_the_project_never_defined_stays_undefined(tmp_path, fabric):
+    """One the workspace supplied is somebody else's, on the first run and after."""
+
+    _environment(fabric, present=True, weaver=True)
+
+    first = _initialise(tmp_path, fabric)
+    second = _initialise(tmp_path, fabric)
+
+    assert not [path for path in first.files if path.startswith("Environment/")]
+    assert first.files == second.files
+    assert not (tmp_path / "Environment").exists()
