@@ -29,11 +29,16 @@ HISTORY_ENV = "WEAVER_SESSION_HISTORY"
 NOT_IN_A_SESSION = {
     "session": "already in a session",
     "fabric": "run it from a shell, not a session",
+    # A session is open on a workspace already. Setting a project up is what
+    # comes before one, and it creates Fabric items, which a session does not.
+    "initialise": "run it from a shell, not a session",
+    "initialize": "run it from a shell, not a session",
 }
 
-# Source checking and bundle installation remain usable at the prompt, but the
-# session banner introduces the core lifecycle rather than every available seam.
-SECONDARY_SESSION_COMMANDS = {"check", "install"}
+# Source checking, connectivity checking and bundle installation remain usable at
+# the prompt, but the session banner introduces the core lifecycle rather than
+# every available seam.
+SECONDARY_SESSION_COMMANDS = {"check", "doctor", "install"}
 
 EXITS = {"exit", "quit"}
 HELP = {"help", "?"}
@@ -283,14 +288,20 @@ def _history_path():
 def _default_workspace(args: argparse.Namespace):
     """Return the default workspace when the invocation defines one.
 
-    An invocation that named none has none, and that is a state. An invocation
-    that named a configuration file raises the ``ConfigError`` that file
+    An invocation names one on the command line, or by being run from a project
+    directory: `workspace-config.yml` beside it is what a composition of bare
+    entries runs in, and what a session with no arguments opens on. An
+    invocation with neither has none, and that is a state.
+
+    A configuration file that cannot be read raises the ``ConfigError`` it
     carries, naming the field that is wrong.
     """
 
+    from weaver.config import discovered_workspace_config
+
     from .main import _resolve_workspace, workspace_supplied
 
-    if not workspace_supplied(args):
+    if not workspace_supplied(args) and discovered_workspace_config() is None:
         return None
     return _resolve_workspace(args)
 

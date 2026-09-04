@@ -25,8 +25,13 @@ def _operation_workspace(
         an explicit workspace name
           → a workspace configuration file
             → the Session's own workspace
-              → the workspace the notebook runs in
-                → a configuration error naming what is missing
+              → workspace-config.yml in the working directory
+                → the workspace the notebook runs in
+                  → a configuration error naming what is missing
+
+    The discovered file is what lets ``weaver.build()`` run from a project's own
+    directory with nothing else supplied. It sits below the Session, so a command
+    inside ``weaver session`` still runs in the session's workspace.
 
     The Session's default context lets a command inside ``weaver session`` omit
     what the session already holds:
@@ -61,7 +66,7 @@ def _operation_workspace(
         )
     else:
         inherited = getattr(session, "workspace", None)
-        base = inherited if inherited is not None else _current_fabric_workspace()
+        base = inherited if inherited is not None else _discovered_or_current()
 
     changes = {}
     if catalogue is not None and base.catalogue != catalogue:
@@ -127,12 +132,28 @@ def current_workspace() -> Workspace:
     return _operation_workspace(workspace=None, workspace_config=None)
 
 
+def _discovered_or_current() -> Workspace:
+    """The project in the working directory, or the workspace this runs in.
+
+    A notebook's working directory is the driver's, and a generated project sits
+    under Notebook Resources, so the two do not collide.
+    """
+
+    from ..config import discovered_workspace_config, load_workspace
+
+    discovered = discovered_workspace_config()
+    if discovered is not None:
+        return load_workspace(discovered)
+    return _current_fabric_workspace()
+
+
 def _current_fabric_workspace() -> Workspace:
     try:
         from notebookutils import runtime
     except ImportError as exc:
         raise CommandError(
-            "give workspace or workspace_config outside a Fabric notebook"
+            "give workspace or workspace_config outside a Fabric notebook, or "
+            "run from a project directory holding workspace-config.yml"
         ) from exc
     context = runtime.context
     if callable(context):

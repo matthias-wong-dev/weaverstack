@@ -24,6 +24,30 @@ CAPACITY_ACTIONS = ("status", "resume", "suspend")
 #: building the parser stays free of everything ``compose`` pulls in.
 COMPOSE_DEFAULT_FILE = "compose.yml"
 
+#: The first thing a new user reads. Product words, and no implementation.
+INITIALISE_DESCRIPTION = """\
+Set up a new Weaver project and the Fabric items it needs.
+
+You can choose a Catalogue, Environment, Lakehouse and/or Warehouse.
+If an item doesn't exist yet, it will be created automatically.
+
+You can also include a small Sales example so you can build, load
+and test the project straight away.
+
+Run `weaver initialise` to get started.\
+"""
+
+#: What doctor is for, said before anybody has a project to point it at.
+DOCTOR_DESCRIPTION = """\
+Check that Weaver can reach Microsoft Fabric.
+
+Name a workspace configuration to also check the endpoints that project uses:
+TDS for a Warehouse, OneLake and Livy for a Lakehouse. From a project directory
+it reads workspace-config.yml beside it.
+
+Checking a Lakehouse starts a Fabric Spark session, which takes a minute.\
+"""
+
 
 # --- what each command will want ----------------------------------------------
 #
@@ -175,6 +199,52 @@ def _requires_rest(args) -> frozenset[str]:
     return requirements(AUTH, RESOLVER)
 
 
+def _requires_doctor(args) -> frozenset[str]:
+    """What proving the crossings will want.
+
+    Naming nothing, and run from no project, this reaches Fabric REST and stops
+    there. With a workspace, a configuration or a project directory, it declares
+    the same superset a run declares: what a configuration turns out to hold is
+    read after this, so arguments alone cannot narrow it.
+    """
+
+    from weaver.config import discovered_workspace_config
+    from weaver.sessions.requirements import (
+        AUTH,
+        LIVY,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
+    )
+
+    if not workspace_supplied(args) and discovered_workspace_config() is None:
+        return requirements(AUTH, RESOLVER)
+    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+
+
+def _requires_initialise(args) -> frozenset[str]:
+    """What setting a project up will want.
+
+    Creating the items is control-plane work alone. The example is an ordinary
+    build, load and test, so it declares what those declare, and the Lakehouse
+    half of it is only known once the questions have been answered.
+    """
+
+    from weaver.sessions.requirements import (
+        AUTH,
+        LIVY,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
+    )
+
+    if getattr(args, "example", None) is False:
+        return requirements(AUTH, RESOLVER)
+    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+
+
 def _requires_install(args) -> frozenset[str]:
     """A frozen bundle may contain any target kind, so declare the coarse set."""
 
@@ -292,8 +362,39 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_args(compose)
     compose.set_defaults(handler=handle_compose)
 
+    for name in ("initialise", "initialize"):
+        # One command, spelled both ways. The command list carries the first,
+        # and the second is registered without help text, which is what keeps it
+        # out of that list: argparse renders whatever `help` holds, including
+        # SUPPRESS.
+        listed = (
+            {"help": "Set up a new Weaver project and the Fabric items it needs."}
+            if name == "initialise"
+            else {}
+        )
+        initialise = subcommands.add_parser(
+            name,
+            description=INITIALISE_DESCRIPTION,
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            **listed,
+        )
+        _add_initialise_args(initialise)
+        initialise.set_defaults(
+            handler=handle_initialise, requires=_requires_initialise
+        )
+
+    doctor = subcommands.add_parser(
+        "doctor",
+        help="Check that Weaver can reach Microsoft Fabric.",
+        description=DOCTOR_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    doctor.add_argument("--json", action="store_true", help="emit the result as JSON")
+    _add_workspace_args(doctor, include_environment=False)
+    doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
+
     check = subcommands.add_parser(
-        "check", help="Check repository source without contacting Fabric."
+        "check", help="Check your repository source without contacting Fabric."
     )
     check.add_argument(
         "repository",
@@ -805,6 +906,62 @@ def handle_capacity(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
+    """The names a project is set up with, and how the missing ones are found."""
+
+    parser.add_argument(
+        "repository",
+        nargs="?",
+        help="Where to write the project. Defaults to the current directory.",
+    )
+    parser.add_argument("--workspace", help="Fabric workspace name. It must exist.")
+    parser.add_argument(
+        "--catalogue",
+        help="Warehouse for Weaver's own tables. Defaults to Catalogue.",
+    )
+    parser.add_argument(
+        "--environment",
+        help=(
+            "Fabric Environment this project runs against. It may be one the "
+            "workspace already has. Defaults to Weaver."
+        ),
+    )
+    parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
+    parser.add_argument("--warehouse", help="Warehouse for SQL tables and views.")
+    parser.add_argument(
+        "--example",
+        dest="example",
+        action="store_true",
+        default=None,
+        help="Include a small Sales example, and build, load and test it.",
+    )
+    parser.add_argument(
+        "--no-example",
+        dest="example",
+        action="store_false",
+        help="Leave the example out.",
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Ask for the optional names too, not only the ones a run needs.",
+    )
+    parser.add_argument(
+        "--no-input",
+        action="store_true",
+        help="Never ask. A missing name is an error, which suits automation.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be set up, and change nothing.",
+    )
+    parser.add_argument("--json", action="store_true", help="emit the result as JSON")
+    #: Consent to the one slow thing a run does. Collected at the prompt, never
+    #: given as an option: a run that cannot ask stops and says what to do.
+    parser.set_defaults(install_weaver=False)
+
+
 def _add_workspace_args(
     parser: argparse.ArgumentParser,
     *,
@@ -828,18 +985,21 @@ def _add_workspace_args(
 
 
 def _prefer_desktop_credential() -> None:
-    """Pin the Azure CLI credential for desktop commands.
+    """Choose how a desktop command signs in, and install that choice.
 
-    Credential choice is the CLI's policy, not the core's. Best-effort, because
-    if the Fabric extra is not installed there is nothing to pin, and a local
-    never needs it.
+    Credential choice is the CLI's policy, not the core's. The Azure CLI where it
+    can issue a token, and Microsoft browser sign-in where it cannot, so
+    `pip install weaverstack` is the whole prerequisite.
+
+    Best-effort, because with the Fabric extra absent there is nothing to sign in
+    to.
     """
 
     try:
-        from weaver.fabric.auth import prefer_cli_credential
+        from weaver.fabric.auth import desktop_credential, use_credential
     except ImportError:
         return
-    prefer_cli_credential()
+    use_credential(desktop_credential())
 
 
 def _desktop_store(workspace):
@@ -1611,6 +1771,129 @@ def _build_once(args: argparse.Namespace) -> int:
             print()
             print(_indented(error.describe()), file=sys.stderr)
     return 0 if result.succeeded else 1
+
+
+def handle_initialise(args: argparse.Namespace) -> int:
+    """Collect the names, set the project up, and say what to run next.
+
+    The Environment questions have Fabric answers behind them, so a Session is
+    open before they are asked and the operation runs in the same one. The
+    questions collect; the operation decides.
+    """
+
+    from .initialise import (
+        collect,
+        collect_workspace,
+    )
+
+    if args.interactive and args.no_input:
+        raise CommandError("--interactive asks and --no-input never does.")
+    _prefer_desktop_credential()
+
+    # The workspace first: which Environments there are, and whether Weaver is
+    # installed in one, are questions about a workspace, and a Session is opened
+    # on it to ask them.
+    asked = collect_workspace(args, ask=not args.no_input)
+    if args.no_input:
+        collect(args, ask=False)
+        return _report(
+            args, _initialise_once(args, session=_session(args)), asked=False
+        )
+
+    from weaver.config import resolve_workspace
+
+    if not args.workspace:
+        collect(args, ask=False)  # says which options a run with no terminal needs
+    with _running_session(args, resolve_workspace(workspace=args.workspace)) as opened:
+        from weaver.initialise import available_environments, environment_state
+
+        client = opened.resolver().client
+        asked = (
+            collect(
+                args,
+                environments=lambda: available_environments(
+                    args.workspace, client=client
+                ),
+                state_of=lambda name: environment_state(
+                    args.workspace, name, client=client
+                ),
+            )
+            or asked
+        )
+        report = _initialise_once(args, session=opened)
+    return _report(args, report, asked=asked)
+
+
+def _report(args: argparse.Namespace, report, *, asked: bool) -> int:
+    """Show one initialise result in the form this command line asked for."""
+
+    import json
+
+    from .initialise import equivalent_command, render, render_dry_run
+
+    if args.json:
+        print(json.dumps(report.to_mapping(), indent=2))
+    elif args.dry_run:
+        render_dry_run(report)
+    else:
+        render(report)
+        if asked:
+            print()
+            print("You can set this up again with:")
+            print()
+            print(f"  {equivalent_command(args)}")
+    return 0 if report.succeeded else 1
+
+
+def _initialise_once(args: argparse.Namespace, *, session):
+    """Adapt command-line values to :func:`weaver.initialise`.
+
+    The catalogue and Environment defaults belong to the operation, so an option
+    nobody gave is left out of the call.
+    """
+
+    named = {
+        keyword: value
+        for keyword, value in (
+            ("catalogue", args.catalogue),
+            ("environment", args.environment),
+        )
+        if value
+    }
+    return weaver.initialise(
+        args.repository,
+        workspace=args.workspace,
+        lakehouse=args.lakehouse,
+        warehouse=args.warehouse,
+        example=bool(args.example),
+        install_weaver=args.install_weaver,
+        dry_run=args.dry_run,
+        session=session,
+        **named,
+    )
+
+
+def handle_doctor(args: argparse.Namespace) -> int:
+    """Report which Fabric crossings this installation can make."""
+
+    import json
+
+    from weaver.operations.doctor import doctor
+
+    from .doctor import render
+
+    _prefer_desktop_credential()
+    report = doctor(
+        workspace=args.workspace,
+        workspace_config=args.workspace_config,
+        catalogue=args.catalogue,
+        session=_session(args),
+    )
+    if args.json:
+        print(json.dumps(report.to_mapping(), indent=2))
+    else:
+        render(report)
+    return 0 if report.succeeded else 1
 
 
 def handle_check(args: argparse.Namespace) -> int:

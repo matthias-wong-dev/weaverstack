@@ -38,8 +38,12 @@ RETIRED_SPELLINGS = (
     "weaver unbind ",
     "weaver capacity ",
     "weaver notebook ",
-    "weaver doctor",
 )
+
+#: `weaver doctor` was retired here when it meant "is local Spark, Delta and a
+#: JDK available", which stopped being a question once the local emulator went.
+#: The name is back for a different one: can Weaver reach Fabric. Un-retired
+#: with that change, so an example may teach it again.
 
 
 #: Every file an example presents. The Environment directory holds a built wheel and

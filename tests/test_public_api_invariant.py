@@ -26,6 +26,11 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         # The reusable context every operation accepts. A callable rather than
         # the session package, which is why that package is `weaver.sessions`.
         "session",
+        # Setting a project up: the operation, and what it reports doing.
+        "initialise",
+        "InitialiseReport",
+        "FabricItemOutcome",
+        "ExampleOutcome",
         "build",
         "BuildResult",
         "wipe",
@@ -91,8 +96,6 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "wipe_sql_target",
         "generate_item_build_bundle",
         "install_bundle_archive",
-        "prepare_catalogue",
-        "initialise_catalogue",
         # Load planning, resolution, dispatch and logging stay in their owning
         # modules: what the namespace exposes is the operation and what it
         # returns, never how it decided.
@@ -109,5 +112,9 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "check",
         "CheckResult",
         "install",
+        # Connectivity is a desktop question. A notebook is already inside the
+        # workspace it addresses, so it has nothing to ask.
+        "doctor",
+        "DoctorReport",
     }
     assert all(not hasattr(weaver, name) for name in internal)

@@ -55,9 +55,13 @@ Session         ConsoleSession   desktop → Fabric
                 NotebookSession  already in Fabric
                 TestSession      records the same contract
 
+initialise      resolve request → read the workspace's items → create the
+                missing ones → write the project → publish the Environment
+
 build           resolve request → read BuildState → Builder → Installer
 load / test     resolve request → read RunState   → Runner
 health          resolve request → read Catalogue  → HealthReport
+doctor          acquire a credential → cross each surface a project uses
 
 Fabric          Resolver, REST, OneLake, Livy, TDS
 ```
@@ -66,6 +70,11 @@ There is one workspace type, one build, one place a workspace is resolved, one
 conversion into the physical target vocabulary, one implementation of graph
 mechanics, and one installed graph. Anything more complicated needs a concrete
 reason.
+
+`initialise` is the only operation that creates a Fabric item. A build's
+preflight reads and never creates, so the two do not overlap. A command naming
+no workspace and inheriting none reads `workspace-config.yml` in the directory
+it was run from, which is the last resort in `weaver.config.resolve_workspace`.
 
 `weaver.graph.Graph` is the topology. The authored repository graphs, the
 installed estate graph and the runtime graph each carry their own node metadata
@@ -141,9 +150,18 @@ means the abstraction is broken. Fix it in the factories, or in the CLI that doe
 the crossing.
 
 **Credential choice belongs to the caller.** Core accepts an injected credential
-and otherwise uses the library default without pinning the chain. The CLI and the
-Fabric test infrastructure call `prefer_cli_credential()` themselves. Importing
-or using the core imposes no credential choice.
+and otherwise uses the library default without pinning the chain. Importing or
+using the core imposes no credential choice.
+
+The desktop CLI installs one for its process through
+`weaver.fabric.auth.use_credential`, so it reaches the clients an operation
+constructs for itself as well as the ones it is handed. What it installs is
+`desktop_credential()`: the Azure CLI where it can issue a token, and browser
+sign-in where it cannot, as one `ChainedTokenCredential` built once per process.
+The browser half keeps its token in the platform's secure store and signs in per
+command where there is none. An unencrypted cache is never asked for. The Fabric test infrastructure
+calls `prefer_cli_credential()` instead, which pins the chain through
+`AZURE_TOKEN_CREDENTIALS`, so an unattended run can never open a browser.
 
 ### Fabric is the reference
 

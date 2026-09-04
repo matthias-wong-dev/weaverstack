@@ -10,7 +10,146 @@ pip install weaverstack
 weaver --help
 ```
 
-Commands use the identity from `az login`.
+## Signing in
+
+Weaver uses the Azure CLI identity where `az login` has produced one, and
+otherwise opens Microsoft sign-in in a browser. The browser token is kept where
+the machine keeps secrets, a Keychain item on macOS, libsecret on Linux, DPAPI
+on Windows, so later commands sign in without opening anything. A machine with
+none of those signs in each time and says so once; the token is never written to
+disk in the clear. Only the recognised ways a platform reports having nowhere
+secure are worked around. Any other failure is reported as itself.
+
+A chain, not a probe: the Azure CLI is tried inside the token acquisition a
+command was going to make anyway, so a signed-in user pays nothing to have the
+fallback available. There is no `weaver auth` command: signing in is how Weaver
+reaches Fabric.
+
+The choice belongs to the CLI. The importable core accepts a credential and
+installs none, and the Fabric test suite pins the Azure CLI explicitly, so an
+unattended run can never be sent to a browser.
+
+## Checking that Weaver can connect
+
+```bash
+weaver doctor
+```
+
+Proves sign-in and the Fabric REST API together: a workspace listing that comes
+back means a token was issued and the control plane accepted it.
+
+```bash
+weaver doctor --workspace Analytics
+weaver doctor --workspace-config workspace-config.yml
+```
+
+A workspace is resolved as well. A configuration names the items, so each
+endpoint that project is reached through is opened and no others:
+
+```text
+  Fabric REST                       OK
+  Workspace Analytics               OK
+  Warehouse/Control TDS             OK
+  Warehouse/Reporting TDS           OK
+  Lakehouse/Sales OneLake           OK
+  Spark session                     OK
+```
+
+A Warehouse-only project starts no Spark session. A Lakehouse-only project still
+opens TDS, because the Weaver catalogue is a Warehouse. Checking a Lakehouse
+starts a Fabric Spark session, which takes a minute.
+
+A failed check prints the reason and a next action on stderr, and the command
+exits non-zero. It is a connectivity check: what the estate holds is
+`weaver health`, and whether a repository parses is `weaver check`.
+
+## Setting a project up
+
+```bash
+weaver initialise
+```
+
+Creates a Weaver project and the Fabric items it needs. The workspace must
+already exist; a Catalogue, Environment, Lakehouse or Warehouse that does not is
+created. Naming an item is the request to have it, so nothing is asked per item.
+
+Options are collected at a prompt when a terminal is there to answer and a
+required value is missing. `--interactive` asks for the optional names too,
+`--no-input` never asks and names the options a run is short of, and `--dry-run`
+shows what would be set up without changing anything.
+
+### The Fabric Environment
+
+Every project runs against a Fabric Environment with Weaver installed in it. The
+prompt offers the choice, because a name on its own does not say which is meant:
+
+```text
+Fabric Environment:
+  1. Use an existing Environment
+  2. Create a new Environment
+```
+
+Choosing the first lists the Environments the workspace has. Either way, where
+Weaver is not installed there yet, one question is asked before anything changes:
+
+```text
+Weaver needs to be installed in the Fabric Environment 'Data Engineering'
+before this project can run.
+
+Installing Weaver in Fabric can take about 5 minutes.
+
+Would you like to install it now? [Y/n]:
+```
+
+An existing Environment keeps everything else it declares. Only Weaver's own
+libraries are added.
+
+A run that cannot ask settles nothing implicitly. `--no-input`, and any run with
+no terminal, stops before mutation and says what to do:
+
+```text
+The Fabric Environment 'Data Engineering' does not have Weaver installed.
+
+Run `weaver initialise` interactively to install Weaver in this Environment,
+or prepare the Environment before running this command again.
+```
+
+```bash
+weaver initialise ./project \
+  --workspace Analytics \
+  --catalogue Catalogue \
+  --environment Weaver \
+  --lakehouse Landing \
+  --warehouse Curated \
+  --example
+```
+
+`--example` writes a small Sales example and runs `build`, `load` and `test`
+against it, so a successful run means the chosen items have actually built,
+loaded and tested.
+
+What is written:
+
+```text
+project/
+├── workspace-config.yml
+├── compose.yml
+├── Environment/Weaver.Environment/
+├── Lakehouse/Landing/{Files,Tables}/
+└── Warehouse/Curated/
+```
+
+The catalogue Warehouse gets no authored folder. Weaver owns the `_` schema
+there and the first ordinary build creates its tables, so `Warehouse/Catalogue/`
+would invite authoring into the item Weaver keeps its own tables in.
+
+A new Environment is created from a definition written into the project, at
+`Environment/<Name>.Environment`. One the workspace already has is not the
+project's to describe, so no definition is written for it.
+
+Provisioning is initialise's, and building is `build`'s. A build performs a
+read-only preflight and creates no Fabric item, so a missing target is a build
+failure naming the item.
 
 ## Workspace resolution
 
@@ -90,6 +229,20 @@ targets['Lakehouse/Sales'].name must be a non-empty string, got 7
 workspace.** `--workspace-config bad.yml` reports the key that is wrong. Naming
 no workspace at all is a state, and a command or composition that can proceed
 without one proceeds.
+
+**A command naming no workspace reads `workspace-config.yml` beside it.** From a
+project directory the ordinary commands need nothing else:
+
+```bash
+cd project
+weaver build
+weaver load
+weaver test
+```
+
+The file is the last resort. `--workspace`, `--workspace-config` and the
+workspace a `weaver session` is open on are each consulted first, so a command
+already naming one reads no file it was not given.
 
 ## Session
 
