@@ -25,6 +25,10 @@ def render(report) -> None:
         print("Everything checked is reachable.")
         return
 
+    # The table is the result and goes to stdout; the reasons go to stderr so a
+    # script reads one and a person reads both. Two streams to one terminal
+    # arrive in the order they were flushed, so the table is flushed first.
+    sys.stdout.flush()
     for check in report.failures:
         print(file=sys.stderr)
         print(f"{check.name} failed.", file=sys.stderr)

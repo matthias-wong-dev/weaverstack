@@ -202,12 +202,13 @@ def _requires_rest(args) -> frozenset[str]:
 def _requires_doctor(args) -> frozenset[str]:
     """What proving the crossings will want.
 
-    Naming nothing, this reaches Fabric REST and stops there. Naming a workspace
-    or a configuration, it declares the same superset a run declares: what a
-    configuration turns out to hold is read after this, so arguments alone
-    cannot narrow it.
+    Naming nothing, and run from no project, this reaches Fabric REST and stops
+    there. With a workspace, a configuration or a project directory, it declares
+    the same superset a run declares: what a configuration turns out to hold is
+    read after this, so arguments alone cannot narrow it.
     """
 
+    from weaver.config import discovered_workspace_config
     from weaver.sessions.requirements import (
         AUTH,
         LIVY,
@@ -217,7 +218,7 @@ def _requires_doctor(args) -> frozenset[str]:
         requirements,
     )
 
-    if not workspace_supplied(args):
+    if not workspace_supplied(args) and discovered_workspace_config() is None:
         return requirements(AUTH, RESOLVER)
     return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
 
