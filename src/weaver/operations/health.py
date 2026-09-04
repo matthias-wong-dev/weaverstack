@@ -1,8 +1,8 @@
 """Public ``weaver.health(...)`` entry point.
 
 Gathers what :mod:`weaver.health` evaluates: the installed catalogue including
-its current status tables, one bounded window of ``_.Log`` and
-``_.LoadStatistic``, and the physical inventory of each selected Lakehouse or
+its current status tables, the ``_.LoadStatistic`` rows behind current
+``_.LoadStatus`` state, and the physical inventory of each selected Lakehouse or
 Warehouse.
 
 Every read is over TDS or OneLake. Health executes no authored load or test
@@ -44,8 +44,8 @@ from .workspace import operation_workspace
 #: reads what is declared and not certified.
 #:
 #: The dictionaries describing an object's columns and keys are absent. Nothing
-#: health decides consults one. So are the history tables, which grow with the
-#: estate's age and are read as one bounded window instead.
+#: health decides consults one. So is ``_.LoadStatistic``, which accumulates
+#: and is read only where it matches current ``_.LoadStatus`` state.
 HEALTH_TABLES = (
     INSTALLATION,
     REGISTRY,
@@ -131,7 +131,7 @@ def run_health(
 
     connection = catalogue_connection(session, workspace)
     with session.step("Read catalogue"):
-        # Current state and the bounded window of recent activity, in one read.
+        # Current state and the statistics explaining it, in one read.
         # Everything below reasons from this catalogue and asks the Warehouse
         # nothing further.
         catalogue = read_installed_catalogue(

@@ -156,25 +156,73 @@ ordinary command error path rather than fabricating a finding. See
 
 ---
 
-## Bounded history
+## Current state, and the history that explains it
 
-`_.Log` and `_.LoadStatistic` grow with the estate's age, so health reads one
-window: the most recent load workflow, and the statistics that workflow's loads
-appended. The engine does the filtering and the limiting, so the cost is one
-workflow's worth however long the estate has been running.
+Health is a view of current state, so its history read starts from current
+state and never infers current state from history.
+
+`_.LoadStatus` is the current state: one row per loadable object, holding how
+that object's load ended, when, and the workflow that ran it. The whole summary
+comes from that table alone.
+
+```text
+_.LoadStatus                     the current-state summary
+    counts
+    workflow_ids
+    started_at
+    completed_at
+```
+
+It has to be that table alone, because not every current state has a statistic.
+A Blocked load settles a `_.LoadStatus` row and appends no `_.LoadStatistic`
+row, so a summary built from the statistics would omit exactly the objects an
+operator most needs counted.
+
+`_.LoadStatistic` then enriches those states with what each load moved, matched
+on the workflow and the object's four-part logical identity:
+
+```text
+_.LoadStatus
+    + Workflow ID
+    + Item type
+    + Item name
+    + Schema name
+    + Object name
+         ↓
+_.LoadStatistic              what those loads moved
+```
+
+All five, because neither half identifies a load on its own. The workflow alone
+carries every other object that workflow loaded. The object alone carries every
+historical execution of it, and `_.LoadStatistic` accumulates them.
+
+Current state spans as many workflows as it took to reach. A workflow that loads
+84 objects, followed by one that loads 2 of them, leaves 82 objects explained by
+the first and 2 by the second, and health reports all 84. Reading the globally
+latest workflow out of `_.Log` and taking its statistics would discard the 82,
+because a later partial load is not a later account of the whole estate.
+`CurrentLoad.workflow_ids` therefore holds every workflow behind current state.
+They are sorted, which is an order for reading and not a chronology. Health
+reads `_.Log` for nothing.
+
+`_.LoadStatistic` accumulates, so it is never read whole. The match is what
+bounds it, rendered as a semi-join in the statement so the engine does the work:
+one row per current loadable object at most, whatever the estate's age. There is
+no row cap and no prefix, so `load_activity` is every statistic behind current
+state. A semi-join rather than an inner one, because `_.LoadStatus` is keyed by
+the object and the read stays one table's projection.
 
 The window is acquired behind `read_installed_catalogue(..., load_history=True)`
 and carried on the catalogue as `Catalogue.load_history`. It sits apart from
 `rows`, because `Catalogue.table_rows` answers for a materialised table and a
-window is not one. `LoadHistory.is_truncated` says when what it holds is a
-prefix.
+window is not one.
 
 ```text
 Warehouse
     │
     read_installed_catalogue(...)
     ├─ current catalogue state
-    └─ bounded latest-load history
+    └─ the statistics behind it
     │
 Catalogue
     ├─ dag()

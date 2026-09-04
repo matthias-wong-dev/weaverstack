@@ -1421,10 +1421,10 @@ def _health_section(area: str, section, report) -> list[str]:
     from weaver.health import BUILD, LOAD
 
     lines = []
-    if area == LOAD and report.latest_load is not None:
-        latest = report.latest_load
+    if area == LOAD and report.current_load is not None:
+        current = report.current_load
         lines.append(
-            f"  Last load activity   {_ago(latest.completed_at, report.generated_at)}"
+            f"  Last load activity   {_ago(current.completed_at, report.generated_at)}"
         )
     counts = " · ".join(
         f"{count} {word}" for word, count in sorted(section.counts.items())
@@ -1446,7 +1446,7 @@ _ID_WIDTH = 42
 
 
 def _health_activity(report) -> list[str]:
-    """The slowest loads and the rows that moved, from the bounded window."""
+    """The slowest loads and the rows that moved, across current state."""
 
     lines = []
     slowest = report.slowest()

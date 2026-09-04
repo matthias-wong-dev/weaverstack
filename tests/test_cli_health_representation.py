@@ -23,11 +23,11 @@ from weaver.health import (
     GREEN,
     RED,
     TEST_FAILED,
+    CurrentLoad,
     HealthFinding,
     HealthReport,
     HealthSection,
     LoadActivity,
-    LoadWorkflow,
 )
 from weaver_cli import main
 
@@ -223,8 +223,8 @@ def test_a_consistent_estate_says_so(captured, capsys):
 @weaver_test()
 def test_the_last_load_activity_is_reported_as_an_age(captured, capsys):
     captured["report"] = _report(
-        latest_load=LoadWorkflow(
-            workflow_id="workflow-1",
+        current_load=CurrentLoad(
+            workflow_ids=("workflow-1",),
             started_at=NOW - timedelta(hours=6, minutes=20),
             completed_at=NOW - timedelta(hours=6, minutes=14),
         )
@@ -339,7 +339,7 @@ def test_json_stdout_is_json_and_nothing_else(captured, capsys):
 
     payload = json.loads(capsys.readouterr().out)
 
-    assert payload["format_version"] == 1
+    assert payload["format_version"] == 2
     assert payload["status"] == RED
     assert payload["sections"]["tests"]["status"] == RED
     assert payload["sections"]["load"]["status"] == GREEN

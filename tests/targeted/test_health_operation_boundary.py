@@ -1,12 +1,13 @@
 """What ``weaver.health`` reads, and what it does not.
 
-Health answers from the catalogue, one bounded window of its history tables, and
-each selected target's physical state. It runs no authored code, so it opens no
+Health answers from the catalogue, the statistics behind its current load
+state, and each selected target's physical state. It runs no authored code, so it opens no
 Livy session, and these hold it to that against a `TestSession`, which records
 every crossing a host was asked to make.
 
-The bounded reads are their own claim: ``_.Log`` and ``_.LoadStatistic`` grow
-with the estate's age, so what health asks of them is one workflow's worth.
+The bounded read is its own claim: ``_.LoadStatistic`` accumulates, so what
+health asks of it is the rows behind current ``_.LoadStatus`` state and no
+more.
 """
 
 from __future__ import annotations
@@ -18,12 +19,18 @@ from factories import document_id, installation_row, registry_row
 from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
-from weaver.catalogue.history import DEFAULT_LIMIT, LOAD_TASK, read_load_history
+from weaver.catalogue.history import read_load_history
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import INSTALLATION, LOAD_STATISTIC, LOG, REGISTRY
+from weaver.catalogue.tables import (
+    INSTALLATION,
+    LOAD_STATISTIC,
+    LOAD_STATUS,
+    LOG,
+    REGISTRY,
+)
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
-from weaver.health import latest_load, load_activity
+from weaver.health import current_load, load_activity
 from weaver.operations.health import HEALTH_TABLES, _as_of, run_health
 from weaver.sessions.testing import TestSession
 from weaver.targets import PhysicalTargetRef
@@ -173,98 +180,126 @@ class _Connection:
         return found[0]
 
 
-def _history_connection(*, statistics=(), workflow="workflow-1", results=()):
-    """A Warehouse holding one load workflow and its statistics."""
+def _history_connection(*, statistics=(), workflow="workflow-1", statuses=()):
+    """A Warehouse holding current load state and the statistics behind it."""
 
     return _Connection(
-        shape=(LOG, LOAD_STATISTIC),
+        shape=(LOAD_STATUS, LOAD_STATISTIC),
         rows=[
-            ("SELECT TOP 1", [{"workflow_id": workflow}]),
+            ("GROUP BY", list(statuses) or [_status(workflow=workflow)]),
             (
-                "GROUP BY",
-                list(results)
-                or [
-                    {
-                        "result": "Succeeded",
-                        "row_count": 1,
-                        "started_datetime": NOW - timedelta(minutes=6),
-                        "completed_datetime": NOW,
-                    }
-                ],
+                LOAD_STATISTIC.name,
+                list(statistics) or [_statistic("Sales", "Order", workflow=workflow)],
             ),
-            (LOAD_STATISTIC.name, list(statistics)),
         ],
     )
 
 
+def _status(
+    *, result="Succeeded", workflow="workflow-1", rows=1, started=None, completed=None
+):
+    """One grouped ``_.LoadStatus`` row, as the summary aggregate returns it."""
+
+    return {
+        "result": result,
+        "workflow_id": workflow,
+        "row_count": rows,
+        "started_datetime": started,
+        "completed_datetime": completed,
+    }
+
+
 @weaver_test()
-def test_an_absent_log_table_reads_as_no_activity():
-    """Bootstrap: nothing has ever run, so there is nothing to report."""
+def test_an_absent_status_table_reads_as_no_activity():
+    """Bootstrap: nothing has settled a load, so there is nothing to report."""
 
     assert read_load_history(_Connection()) is None
 
 
 @weaver_test()
-def test_the_latest_workflow_is_chosen_by_its_completion_instant():
-    connection = _history_connection(workflow="workflow-2")
+def test_current_state_spanning_two_workflows_carries_both():
+    """A later partial load explains its own objects and not the rest."""
 
-    history = read_load_history(connection)
-
-    assert history.workflow_id == "workflow-2"
-    latest = connection.asked_for("SELECT TOP 1")
-    assert "ORDER BY" in latest
-    assert LOAD_TASK in latest
-
-
-@weaver_test()
-def test_the_window_spans_the_workflow_and_counts_its_results():
     connection = _history_connection(
-        results=[
-            {
-                "result": "Succeeded",
-                "row_count": 18,
-                "started_datetime": NOW - timedelta(minutes=6),
-                "completed_datetime": NOW - timedelta(minutes=1),
-            },
-            {
-                "result": "Rejected",
-                "row_count": 2,
-                "started_datetime": NOW - timedelta(minutes=4),
-                "completed_datetime": NOW,
-            },
+        statuses=[
+            _status(workflow="workflow-2"),
+            _status(workflow="workflow-1"),
         ]
     )
 
-    window = latest_load(read_load_history(connection))
+    history = read_load_history(connection)
 
-    assert window.workflow_id == "workflow-1"
-    assert window.counts == {"succeeded": 18, "rejected": 2}
+    assert history.workflow_ids == ("workflow-1", "workflow-2")
+
+
+@weaver_test()
+def test_the_summary_comes_from_current_state_and_not_from_the_statistics():
+    """A Blocked load settles a status row and appends no statistic."""
+
+    connection = _history_connection(
+        statuses=[
+            _status(
+                result="Succeeded",
+                rows=18,
+                started=NOW - timedelta(minutes=6),
+                completed=NOW - timedelta(minutes=1),
+            ),
+            _status(
+                result="Blocked",
+                rows=2,
+                started=NOW - timedelta(minutes=4),
+                completed=NOW,
+            ),
+        ],
+        statistics=[_statistic("Sales", "Order")],
+    )
+
+    window = current_load(read_load_history(connection))
+
+    assert window.counts == {"succeeded": 18, "blocked": 2}
     assert window.started_at == NOW - timedelta(minutes=6)
     assert window.completed_at == NOW
 
 
 @weaver_test()
-def test_the_engine_scopes_the_statistics_to_one_workflow():
-    """The predicate is in the statement: nothing reads the table whole."""
+def test_one_result_across_two_workflows_counts_once_per_result():
+    connection = _history_connection(
+        statuses=[
+            _status(result="Succeeded", workflow="workflow-1", rows=18),
+            _status(result="Succeeded", workflow="workflow-2", rows=2),
+        ]
+    )
 
-    connection = _history_connection(workflow="workflow-7")
+    window = current_load(read_load_history(connection))
+
+    assert window.counts == {"succeeded": 20}
+    assert window.workflow_ids == ("workflow-1", "workflow-2")
+
+
+@weaver_test()
+def test_the_engine_matches_the_statistics_against_current_state():
+    """The five-column match is in the statement: nothing reads the table whole."""
+
+    connection = _history_connection()
 
     read_load_history(connection)
 
     statement = connection.asked_for(LOAD_STATISTIC.name)
-    assert "WHERE" in statement
-    assert "'workflow-7'" in statement
+    assert "WHERE EXISTS" in statement
+    for name in ("workflow_id", "item_type", "item_name", "schema_name", "object_name"):
+        assert f"[{LOAD_STATUS.public_name_of(name)}]" in statement
 
 
 @weaver_test()
-def test_the_engine_bounds_and_orders_the_statistics():
+def test_the_statistics_are_ordered_and_uncapped():
+    """The match is the bound, so nothing takes a prefix of the estate."""
+
     connection = _history_connection()
 
-    read_load_history(connection, limit=5)
+    read_load_history(connection)
 
     statement = connection.asked_for(LOAD_STATISTIC.name)
-    assert "TOP 5" in statement
-    assert "ORDER BY" in statement
+    assert "TOP" not in statement
     assert statement.index("ORDER BY") > statement.index("WHERE")
 
 
@@ -274,25 +309,6 @@ def test_a_bounded_read_needs_an_order_to_be_the_same_prefix_twice():
 
     with pytest.raises(ValueError, match="needs an order"):
         read_table(_Connection(shape=(LOAD_STATISTIC,)), LOAD_STATISTIC, top=5)
-
-
-@weaver_test()
-def test_a_full_window_says_it_is_a_prefix():
-    connection = _history_connection(
-        statistics=[_statistic("Sales", f"Object{index:04d}") for index in range(5)]
-    )
-
-    history = read_load_history(connection, limit=5)
-
-    assert history.is_truncated
-    assert DEFAULT_LIMIT > 5
-
-
-@weaver_test()
-def test_a_window_within_its_limit_is_whole():
-    connection = _history_connection(statistics=[_statistic("Sales", "Order")])
-
-    assert not read_load_history(connection, limit=5).is_truncated
 
 
 @weaver_test()
@@ -324,11 +340,20 @@ def test_a_null_duration_survives_the_conversion():
 
 @weaver_test()
 def test_a_catalogue_read_with_no_window_reports_no_activity():
-    assert latest_load(None) is None
+    assert current_load(None) is None
     assert load_activity(None) == ()
 
 
-def _statistic(schema, name, *, workflow="workflow-1", read=0, duration=1200):
+def _statistic(
+    schema,
+    name,
+    *,
+    workflow="workflow-1",
+    read=0,
+    duration=1200,
+    started=None,
+    completed=None,
+):
     """One ``_.LoadStatistic`` row, keyed as a Lakehouse table is keyed."""
 
     schema = f"Tables/{schema}"
@@ -339,8 +364,8 @@ def _statistic(schema, name, *, workflow="workflow-1", read=0, duration=1200):
         "item_name": "Raw",
         "schema_name": schema,
         "object_name": name,
-        "started_datetime": None,
-        "completed_datetime": None,
+        "started_datetime": started,
+        "completed_datetime": completed,
         "duration_milliseconds": duration,
         "rows_read": read,
         "rows_inserted": None,

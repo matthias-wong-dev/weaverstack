@@ -957,8 +957,8 @@ def test_a_loaded_and_validated_estate_reports_green(acceptance):
     assert report.build.status == "green", report.to_mapping()
     assert report.status == "green"
 
-    # The bounded window found the load that ran, and it moved rows.
-    assert report.latest_load is not None
+    # Current state found the load that ran, and it moved rows.
+    assert report.current_load is not None
     assert report.load_activity
     assert any(each.rows_read for each in report.load_activity)
 
@@ -1079,7 +1079,7 @@ def test_the_json_report_is_a_publishable_artefact(acceptance):
 
     payload = json.loads(json.dumps(report.to_mapping()))
 
-    assert payload["format_version"] == 1
+    assert payload["format_version"] == 2
     assert payload["status"] == "green"
     assert set(payload["sections"]) == {"load", "tests", "build"}
     assert payload["as_of"].endswith("+00:00")
