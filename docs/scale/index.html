@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f5f2ea">
+    <meta name="theme-color" content="#f7f7f6">
     <title>Built for scale</title>
     <meta name="description" content="Weaver uses one dependency and operational model across the estate, whether a project holds a few objects or many Fabric items and dependency layers.">
     <meta name="robots" content="index, follow, max-image-preview:large">
@@ -45,7 +45,7 @@
       <section class="page-head">
         <div class="wrap">
           <h1>Built for scale</h1>
-          <p class="lead">Weaver uses one dependency and operational model across the estate, whether a project contains a small number of objects or many Fabric items and dependency layers. Incremental builds limit structural changes to the affected objects, while bookmarks and persistent operational state allow data processing to continue from previous runs.</p>
+          <p class="lead">Weaver works the same way whether your project holds a handful of objects or spans many Fabric items and dependency layers. It builds only what changed, and it remembers how far each object got last time, so a large estate does not mean a large rebuild or a full reload.</p>
         </div>
       </section>
 
@@ -55,19 +55,19 @@
           <div class="cards two">
             <div class="card">
               <h3>One dependency graph</h3>
-              <p>Every object sits in a single graph spanning Lakehouses, Warehouses, Python, Spark SQL and T-SQL. Ordering, layering and impact analysis all read from it, so adding items does not add coordination work.</p>
+              <p>Weaver keeps every object in one graph, across Lakehouses, Warehouses, Python, Spark SQL and T-SQL. It reads that graph to work out what runs in which order and what a change affects, so adding another item gives you nothing new to coordinate.</p>
             </div>
             <div class="card">
               <h3>Incremental builds</h3>
-              <p>A build compares the repository against the installed estate and applies only the difference. Changing one object removes certification from its descendants, and the rest of the estate is left alone.</p>
+              <p>Build compares your repository against what is already installed and applies the difference. When you change one object, Weaver un-certifies it and everything downstream of it, and leaves the rest of the estate alone.</p>
             </div>
             <div class="card">
               <h3>Loads sized by the change</h3>
-              <p>A keyed load classifies inserts, updates and deletes before writing, and bookmarks let an incremental object read only the window since its last clean load. Load cost follows the size of the change rather than the size of the table.</p>
+              <p>A keyed load works out its inserts, updates and deletes before it writes anything, and an incremental object reads only the window since its last clean load. So a load does work in proportion to what changed, not to how big the table is.</p>
             </div>
             <div class="card">
               <h3>Persistent operational state</h3>
-              <p>The Catalogue records how far each object loaded, what failed and what is behind its sources. As an estate grows, that state is what makes targeted recovery possible instead of a full rerun.</p>
+              <p>Weaver records how far each object loaded, what failed and what is now behind its sources. On a large estate that is what lets you rerun the part that broke instead of the whole thing.</p>
             </div>
           </div>
         </div>
@@ -76,7 +76,7 @@
       <section class="section">
         <div class="wrap">
           <h2>Performance testing</h2>
-          <p class="lede">Large-estate performance and incremental-build benchmarks are in preparation and will be published here.</p>
+          <p class="lede">We are preparing large-estate performance and incremental-build benchmarks, and will publish them here.</p>
           <p><a class="text-link" href="../get-started/index.html">Start with the small example <span class="arrow" aria-hidden="true">→</span></a></p>
         </div>
       </section>

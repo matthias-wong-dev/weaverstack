@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f5f2ea">
+    <meta name="theme-color" content="#f7f7f6">
     <title>Get started with Weaver</title>
     <meta name="description" content="Install Weaver, set up a project against your Fabric workspace, and build, load and test a small Sales example. Two paths: a Fabric notebook, or your desktop.">
     <meta name="robots" content="index, follow, max-image-preview:large">
@@ -46,7 +46,7 @@
       <section class="page-head">
         <div class="wrap">
           <h1>Get started</h1>
-          <p class="lead">This page takes you from an empty directory to a Weaver project in your own Fabric workspace, with a small Sales example built, loaded and tested.</p>
+          <p class="lead">By the end of this page you will have a Weaver project in your own Fabric workspace, with a small Sales example built, loaded and tested.</p>
         </div>
       </section>
 
@@ -66,13 +66,13 @@
       <section class="section">
         <div class="wrap">
           <h2>Choose how you want to work</h2>
-          <p class="lede">You can start from a Fabric notebook or from the desktop CLI. Both create the same Weaver project and follow the same build, load and test workflow.</p>
+          <p class="lede">Start from a Fabric notebook or from the desktop CLI. You get the same project either way, and the rest of this page applies to both.</p>
 
           <div class="cards two">
             <div class="path-card">
               <span class="tag">Option A</span>
               <h3>From a Fabric notebook</h3>
-              <p>Open a notebook in your workspace, install Weaver into it and set the project up from there. Weaver uses the workspace the notebook is running in, so there is no workspace to name.</p>
+              <p>Open a notebook in your workspace, install Weaver into it and set the project up from there. Weaver uses whichever workspace the notebook is already running in, so you do not have to name one.</p>
               <div class="code">
                 <div class="code-bar"><span>notebook cell</span></div>
                 <pre>%pip install weaverstack</pre>
@@ -91,20 +91,20 @@ weaver.<span class="c-fn">initialise</span>(
     example=<span class="c-key">True</span>,
 )</pre>
               </div>
-              <p class="small">Add <code>install_weaver=True</code> if the Environment does not exist yet, or exists without Weaver installed. This is the same confirmation the desktop prompt asks for, and it takes about five minutes.</p>
+              <p class="small">Add <code>install_weaver=True</code> if the Environment does not exist yet, or exists without Weaver in it. That is the same confirmation the desktop prompt asks you for, and it takes about five minutes.</p>
             </div>
 
             <div class="path-card">
               <span class="tag">Option B</span>
               <h3>From the desktop CLI</h3>
-              <p>Work from VS Code, a terminal or wherever you keep your repositories. A single install provides both the library and the <code>weaver</code> command.</p>
+              <p>Work from VS Code, a terminal, or wherever you keep your repositories. One install gives you the library and the <code>weaver</code> command.</p>
               <div class="code">
                 <div class="code-bar"><span>terminal</span></div>
                 <pre>pip install weaverstack
 weaver initialise</pre>
               </div>
-              <p>Run <code>weaver initialise</code> without arguments for an interactive setup. Weaver collects the project settings first, then creates any missing Fabric items.</p>
-              <p class="small">Weaver uses your Azure CLI sign-in if you have one. Otherwise it opens Microsoft sign-in in your browser and remembers the result, so later commands sign in without prompting.</p>
+              <p>Run <code>weaver initialise</code> with no arguments and it asks you what you want, one question at a time. It collects every answer first, then creates whatever is missing.</p>
+              <p class="small">Weaver uses your Azure CLI sign-in if you have one. If you do not, it opens Microsoft sign-in in your browser and remembers it, so later commands do not ask again.</p>
             </div>
           </div>
         </div>
@@ -113,7 +113,7 @@ weaver initialise</pre>
       <section class="section">
         <div class="wrap">
           <h2>Setting the project up</h2>
-          <p class="lede">The interactive setup asks for each part of the project in turn.</p>
+          <p class="lede">Here is what it asks, and what each answer decides.</p>
 
           <div class="code">
             <div class="code-bar"><span>weaver initialise</span></div>
@@ -139,17 +139,17 @@ Would you like to create and run a small Sales example? [Y/n]:</pre>
 
           <h3>What you are choosing</h3>
           <ul>
-            <li><strong>Workspace.</strong> An existing Fabric workspace, which must already exist.</li>
-            <li><strong>Catalogue.</strong> The Warehouse where Weaver keeps its own tables, in the <code>_</code> schema. It can be dedicated to Weaver or one you already use, because Weaver owns the <code>_</code> schema and nothing else in it.</li>
-            <li><strong>Environment.</strong> The Fabric Environment the project runs against, with Weaver installed in it. You can use an existing Environment or create a new one.</li>
-            <li><strong>Lakehouse and Warehouse.</strong> Where your objects are built. Choose either or both, since a project needs at least one destination.</li>
+            <li><strong>Workspace.</strong> A Fabric workspace. This is the one thing that has to be there already.</li>
+            <li><strong>Catalogue.</strong> The Warehouse where Weaver keeps its own tables, in the <code>_</code> schema. Give it one of its own, or use a Warehouse you already have, since Weaver owns <code>_</code> and nothing else in there.</li>
+            <li><strong>Environment.</strong> The Fabric Environment your project runs against, with Weaver installed in it. Use one you already have, or make a new one.</li>
+            <li><strong>Lakehouse and Warehouse.</strong> Where your objects get built. Pick one or both; a project with neither has nowhere to go.</li>
             <li><strong>The Sales example.</strong> A small working project you can build, load and test straight away.</li>
           </ul>
 
-          <p>If a named item already exists, Weaver uses it. Otherwise it creates it. Initialisation is designed to be safe to run again if an earlier attempt was interrupted.</p>
+          <p>Name an item and Weaver uses it if it exists, or creates it if it does not. That also means you can run <code>initialise</code> again after an interrupted attempt, and it will pick up whatever the first run left.</p>
 
           <div class="callout amber">
-            <p><strong>Installing Weaver into a Fabric Environment takes about five minutes.</strong> Weaver asks before starting it:</p>
+            <p><strong>Installing Weaver into a Fabric Environment takes about five minutes.</strong> It is the one real wait, so Weaver checks with you first:</p>
           </div>
 
           <div class="code">
@@ -173,15 +173,15 @@ Would you like to continue? [Y/n]:</pre>
   --warehouse Curated \
   --example</pre>
           </div>
-          <p>Nothing is prompted for in this form, so the Environment must already have Weaver installed. Either run <code>weaver initialise</code> interactively or prepare the Environment first.</p>
-          <p>Add <code>--dry-run</code> to see what would be created without changing anything.</p>
+          <p>Written out like this, Weaver asks you nothing, so the Environment already needs Weaver in it. Run <code>weaver initialise</code> interactively, or prepare the Environment first.</p>
+          <p>Add <code>--dry-run</code> to see what it would create without changing anything.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <h2>The generated project</h2>
-          <p class="lede">Initialisation writes the project configuration, and adds the Sales example if you asked for it.</p>
+          <p class="lede">You get the project configuration, and the Sales example if you asked for it.</p>
 
           <div class="code plain" style="max-width: 640px;">
             <div class="code-bar"><span>my-project/</span></div>
@@ -204,7 +204,7 @@ compose.yml
     └── <span class="c-fn">Sales.CustomerByRegionValid.sql</span></pre>
           </div>
 
-          <p>Two files describe the project itself. <code>workspace-config.yml</code> names the Fabric workspace and items to use:</p>
+          <p>Two files describe the project itself. <code>workspace-config.yml</code> says which Fabric workspace and items to use:</p>
 
           <div class="code">
             <div class="code-bar"><span>workspace-config.yml</span></div>
@@ -227,9 +227,9 @@ targets:
             <!-- /example -->
           </div>
 
-          <p>To target a different workspace, copy that file and change the names. The objects stay the same, because <code>Lakehouse/Landing</code> remains the logical item and only the Fabric item it maps to changes.</p>
+          <p>To point at a different workspace, copy that file and change the names. Your objects do not move. <code>Lakehouse/Landing</code> stays what it is, and only the Fabric item behind it changes.</p>
 
-          <p><code>compose.yml</code> defines a sequence you can run as a single command:</p>
+          <p><code>compose.yml</code> names a sequence you can run as one command:</p>
 
           <div class="code">
             <div class="code-bar"><span>compose.yml</span></div>
@@ -254,7 +254,7 @@ compose:
       <section class="section">
         <div class="wrap">
           <h2>The example code</h2>
-          <p class="lede">The example uses a small set of Python, SQL and shortcut files. Dependencies are discovered from the code, so there is no separate execution order to maintain.</p>
+          <p class="lede">Six small files. None of them says what runs first, because Weaver works that out from the code itself.</p>
 
           <div class="tabs no-js">
             <div class="tab-strip" role="tablist" aria-label="Example source files">
@@ -306,7 +306,7 @@ class Sales__Customers(Folder):
         return staging, []</pre>
                 <!-- /example -->
               </div>
-              <p class="caption">A Folder brings files into the estate. This one writes the export itself so the example runs with nothing else set up, while a real one would fetch over SFTP or from an API. Weaver provides the staging directory and empties it before <code>read()</code> runs.</p>
+              <p class="caption">A Folder brings files in. This one writes the export itself so the example runs with nothing else set up; a real one would fetch over SFTP or from an API. Weaver hands you the staging directory and empties it before <code>read()</code> runs.</p>
             </div>
 
             <div class="tab-panel" role="tabpanel" id="panel-table" aria-labelledby="tab-table">
@@ -352,7 +352,7 @@ class Sales__Customer(Table):
         )</pre>
                 <!-- /example -->
               </div>
-              <p class="caption">A Delta table built with Spark. Weaver reads the import at the top, <code>from Files.Sales__Customers import Sales__Customers</code>, and orders this table after that folder.</p>
+              <p class="caption">A Delta table built with Spark. Weaver sees the import at the top, <code>from Files.Sales__Customers import Sales__Customers</code>, and runs this table after that folder.</p>
             </div>
 
             <div class="tab-panel" role="tabpanel" id="panel-sql" aria-labelledby="tab-sql">
@@ -387,7 +387,7 @@ select c.[Customer id]
   join [Sales].[Region] r on r.[Region code] = c.[Region code];</pre>
                 <!-- /example -->
               </div>
-              <p class="caption">Ordinary T-SQL, with no Jinja, macros or <code>ref()</code>. Weaver reads the dependencies from the query, so this table loads after both the customers and the regions it selects from.</p>
+              <p class="caption">Ordinary T-SQL, with no Jinja, macros or <code>ref()</code>. Weaver reads the query and loads this table after both the customers and the regions it selects from.</p>
             </div>
 
             <div class="tab-panel" role="tabpanel" id="panel-shortcut" aria-labelledby="tab-shortcut">
@@ -403,7 +403,7 @@ logical:
   Warehouse/Curated/Sales.Customer: Lakehouse/Landing/Tables/Sales.Customer</pre>
                 <!-- /example -->
               </div>
-              <p class="caption">A Warehouse cannot read Delta files directly, so the shortcut makes the Lakehouse table addressable inside the Warehouse. Neither item needs to know where the other is physically built.</p>
+              <p class="caption">A Warehouse cannot read Delta files, so this shortcut makes the Lakehouse table addressable inside it. Neither item needs to know where the other is physically built.</p>
             </div>
 
             <div class="tab-panel" role="tabpanel" id="panel-assumption" aria-labelledby="tab-assumption">
@@ -427,7 +427,7 @@ select [Customer id]
  where [Region name] is null;</pre>
                 <!-- /example -->
               </div>
-              <p class="caption">An Assumption returns the rows that contradict a condition the pipeline relies on, so it passes when the result is empty. This one compiles to a stored procedure that can be run without Weaver.</p>
+              <p class="caption">An Assumption returns the rows that break a condition you are relying on, so it passes when it returns nothing. This one compiles to a stored procedure you can run without Weaver.</p>
             </div>
           </div>
         </div>
@@ -436,7 +436,7 @@ select [Customer id]
       <section class="section">
         <div class="wrap">
           <h2>Build, load and test</h2>
-          <p class="lede">Run these three commands from the project directory. Each reads the <code>workspace-config.yml</code> beside it, so no other arguments are needed.</p>
+          <p class="lede">Three commands, from the project directory. Each one reads the <code>workspace-config.yml</code> sitting beside it, so there is nothing else to pass.</p>
 
           <div class="code">
             <div class="code-bar"><span>terminal</span></div>
@@ -448,15 +448,15 @@ weaver test</pre>
           <ol class="steps">
             <li>
               <h3>Build</h3>
-              <p>Build creates the schemas, folders, Delta tables, Warehouse tables and views, shortcuts and runnable load code, and registers them in the Catalogue. It changes structure without moving data.</p>
+              <p>Build creates the schemas, folders, Delta tables, Warehouse tables and views, shortcuts and runnable load code, and records all of it in the Catalogue. It changes structure and moves no data.</p>
             </li>
             <li>
               <h3>Load</h3>
-              <p>Load reads the installed graph and runs each object in dependency order. The export folder fills first, the Delta table reads it, the shortcut makes those customers visible in the Warehouse, and the join runs last.</p>
+              <p>Load reads the graph build installed and runs each object in order. The export folder fills first, the Delta table reads it, the shortcut makes those customers visible in the Warehouse, and the join runs last.</p>
             </li>
             <li>
               <h3>Test</h3>
-              <p>The two Assumptions run against the data just loaded, and their results are recorded in the Catalogue as well as printed.</p>
+              <p>Your two Assumptions run against what just loaded. Weaver prints the results and records them in the Catalogue.</p>
             </li>
           </ol>
 
@@ -467,7 +467,7 @@ weaver test</pre>
           </div>
 
           <h3>In a notebook</h3>
-          <p>The same three operations are available as functions, and read the project in the same way:</p>
+          <p>The same three operations, as functions. They read the project the same way:</p>
           <div class="code">
             <div class="code-bar"><span>notebook cell</span></div>
             <pre><span class="c-key">import</span> weaver
@@ -478,7 +478,7 @@ weaver.<span class="c-fn">test</span>()</pre>
           </div>
 
           <h3>Estate health</h3>
-          <p>Once the project is installed and loaded, check the current state of the estate with:</p>
+          <p>Once everything is installed and loaded, check where the estate stands:</p>
           <div class="code">
             <div class="code-bar"><span>terminal</span></div>
             <pre>weaver health</pre>
@@ -490,7 +490,7 @@ weaver.<span class="c-fn">test</span>()</pre>
       <section class="section">
         <div class="wrap">
           <h2>The dependency graph</h2>
-          <p class="lede">None of the example files declares an execution order. Weaver derives the graph from the Python imports, the SQL relations and the shortcut declaration, and files, tables, shortcuts, Warehouse SQL and validations all appear in it.</p>
+          <p class="lede">You wrote six files and none of them said what runs first. Weaver read your Python imports, your SQL relations and your shortcut declaration, and built one graph out of them. Files, tables, shortcuts, Warehouse SQL and validations are all in it.</p>
 
           <figure>
             <svg class="dag" viewBox="0 0 850 336" role="img" aria-labelledby="gs-dag-title gs-dag-desc">
@@ -560,24 +560,24 @@ weaver.<span class="c-fn">test</span>()</pre>
               <li><i class="shortcut" aria-hidden="true"></i> Shortcut</li>
               <li><i class="validation" aria-hidden="true"></i> Assumption</li>
             </ul>
-            <figcaption>Each edge comes from the code: the Python import, the <code>from [Sales].[Customer]</code> in the SQL, the entry in <code>shortcuts.yml</code>, and the import inside each Assumption.</figcaption>
+            <figcaption>Every edge came from the code: the Python import, the <code>from [Sales].[Customer]</code> in the SQL, the entry in <code>shortcuts.yml</code>, and the import inside each Assumption.</figcaption>
           </figure>
 
-          <p>Weaver uses this graph for everything that follows. Load walks it in order, a rebuild uses it to determine what a change affects, and health uses it to identify objects that are behind their sources.</p>
+          <p>Weaver uses this graph for everything afterwards. Load walks it in order, a rebuild follows it to see what your change affects, and health follows it to find objects that are behind their sources.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <h2>Troubleshooting</h2>
-          <p class="lede">Use <code>weaver doctor</code> to check Fabric connectivity.</p>
+          <p class="lede">If a command cannot reach Fabric, run <code>weaver doctor</code>.</p>
 
           <div class="code">
             <div class="code-bar"><span>terminal</span></div>
             <pre>weaver doctor</pre>
           </div>
 
-          <p>On its own it verifies your sign-in and the Fabric REST API. Run it from a project directory and it also checks the endpoints that project uses: TDS for each Warehouse, OneLake for each Lakehouse, and a Spark session where a Lakehouse is configured.</p>
+          <p>On its own it proves your sign-in and the Fabric REST API. Run it from a project directory and it also checks the endpoints that project actually uses: TDS for each Warehouse, OneLake for each Lakehouse, and a Spark session where you have configured a Lakehouse.</p>
 
           <div class="code plain">
             <div class="code-bar"><span>weaver doctor</span></div>
@@ -590,10 +590,10 @@ weaver.<span class="c-fn">test</span>()</pre>
 Everything checked is reachable.</pre>
           </div>
 
-          <p>A failed check reports the reason and the suggested next step. Checking a Lakehouse starts a Fabric Spark session, which takes about a minute.</p>
+          <p>When a check fails it tells you why and what to do about it. Checking a Lakehouse starts a Fabric Spark session, so give that one about a minute.</p>
 
           <div class="callout">
-            <p><strong>For repository problems rather than connectivity,</strong> use <code>weaver check</code>. It reads your source without contacting Fabric, which is useful when a build reports a problem with something you wrote.</p>
+            <p><strong>If the problem is your repository rather than the connection,</strong> use <code>weaver check</code>. It reads your source and contacts Fabric not at all, which is what you want when a build complains about something you wrote.</p>
           </div>
         </div>
       </section>
@@ -604,17 +604,17 @@ Everything checked is reachable.</pre>
           <div class="cards three">
             <a class="card" href="../how-it-works/index.html">
               <h3>How Weaver works</h3>
-              <p>What build, load, test and health each do, and how the Catalogue connects them.</p>
+              <p>What build, load, test and health each do, and how the Catalogue ties them together.</p>
               <span class="go">Learn more <span class="arrow" aria-hidden="true">→</span></span>
             </a>
             <a class="card" href="../how-it-works/index.html#advanced">
               <h3>The mechanics</h3>
-              <p>Dependency discovery, shortcuts, validations, incremental loading and bookmarks, and failure handling.</p>
+              <p>Dependency discovery, shortcuts, validations, incremental loading and bookmarks, and what happens after a failure.</p>
               <span class="go">Learn more <span class="arrow" aria-hidden="true">→</span></span>
             </a>
             <a class="card" href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">
               <h3>Design notes</h3>
-              <p>Implementation detail is on GitHub while the developer documentation is being written.</p>
+              <p>The implementation detail lives on GitHub while we write the developer documentation.</p>
               <span class="go">Open on GitHub <span class="arrow" aria-hidden="true">↗</span></span>
             </a>
           </div>

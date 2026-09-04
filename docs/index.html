@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f5f2ea">
+    <meta name="theme-color" content="#f7f7f6">
     <title>Weaver: Microsoft Fabric, made easier.</title>
     <meta name="description" content="Weaver helps you build and operate data pipelines across Microsoft Fabric from one repository. Write normal Python and T-SQL; Weaver works out what depends on what.">
     <meta name="robots" content="index, follow, max-image-preview:large">
@@ -80,7 +80,7 @@
       <section class="page-head">
         <div class="wrap">
           <h1>Microsoft Fabric, made easier.</h1>
-          <p class="lead">Weaver brings Lakehouse and Warehouse data engineering into one repository, while letting you work directly in Python and T-SQL. It discovers dependencies from your code, builds the Fabric objects and keeps the operational state together in one Catalogue.</p>
+          <p class="lead">Weaver brings your Lakehouse and Warehouse work into one repository, and you keep writing Python and T-SQL as you already do. It reads your code to work out what depends on what, builds the Fabric objects, and keeps track of what has run.</p>
           <p style="margin-top: 26px;">
             <a class="button blue" href="get-started/index.html">Get started</a>
             <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack" style="margin-left: 8px;">View on GitHub <span class="arrow" aria-hidden="true">↗</span></a>
@@ -99,17 +99,17 @@
             </a>
             <a class="card" href="problem/index.html">
               <h3>The problem Weaver solves</h3>
-              <p>Fabric makes individual Lakehouses, Warehouses and notebooks straightforward. The complexity appears when they have to operate together as one production platform.</p>
+              <p>Fabric makes individual Lakehouses, Warehouses and notebooks straightforward. It gets harder once they all have to run together as one production platform.</p>
               <span class="go">Learn more <span class="arrow" aria-hidden="true">→</span></span>
             </a>
             <a class="card" href="how-it-works/index.html">
               <h3>How it works</h3>
-              <p>What build, load, test and health each do, and how the Catalogue records the installed estate they all work from.</p>
+              <p>What build, load, test and health each do, and how the Catalogue ties them together.</p>
               <span class="go">How Weaver works <span class="arrow" aria-hidden="true">→</span></span>
             </a>
             <a class="card" href="scale/index.html">
               <h3>Built for scale</h3>
-              <p>One dependency and operational model, whether a project holds a handful of objects or many Fabric items and dependency layers.</p>
+              <p>Weaver works the same way on a handful of objects and on an estate spanning many Fabric items.</p>
               <span class="go">Built for scale <span class="arrow" aria-hidden="true">→</span></span>
             </a>
           </div>
@@ -123,15 +123,15 @@
           <div class="cards four">
             <div class="card">
               <h3>Fabric-native</h3>
-              <p>Weaver is built specifically for Microsoft Fabric, with Lakehouses, Warehouses, OneLake, Spark, T-SQL, shortcuts and Fabric Environments treated as first-class concepts.</p>
+              <p>Weaver is built for Microsoft Fabric alone. It models Lakehouses, Warehouses, OneLake, Spark, T-SQL, shortcuts and Fabric Environments directly.</p>
             </div>
             <div class="card">
               <h3>Natural development</h3>
-              <p>Write Python and T-SQL as usual, and Weaver discovers dependencies from Python imports and SQL references.</p>
+              <p>Write Python and T-SQL as you normally would. Weaver works out the dependencies from your imports and your SQL references.</p>
             </div>
             <div class="card">
               <h3>Ready for scale</h3>
-              <p>Weaver keeps one dependency graph across the estate, with incremental builds, cross-item dependencies and operational state that persists between runs.</p>
+              <p>Weaver keeps one dependency graph across the whole estate, builds only what changed, and remembers how far each object got between runs.</p>
             </div>
             <div class="card">
               <h3>Free and open source</h3>
@@ -144,7 +144,7 @@
       <section class="section">
         <div class="wrap">
           <h2>What a Weaver project looks like</h2>
-          <p class="lede">The Sales example that <code>weaver initialise</code> can write for you: a folder of exported customers, a Delta table built from it, a Warehouse table joining customers to regions, and a check on each side.</p>
+          <p class="lede">This is the Sales example <code>weaver initialise</code> can write for you. A folder of exported customers, a Delta table built from it, a Warehouse table joining those customers to regions, and a check on each side.</p>
 
           <div class="code plain" style="max-width: 640px;">
             <div class="code-bar"><span>my-project/</span></div>
@@ -169,10 +169,10 @@ compose.yml
             <!-- /example-tree -->
           </div>
 
-          <p>Each file sits under the Fabric item that owns it, and none of them declares an execution order.</p>
+          <p>Each file sits under the Fabric item that owns it. None of them says what runs first.</p>
 
           <h3>The dependency graph</h3>
-          <p>Weaver derives the graph from the files themselves. The Python table reads the export folder, the Warehouse join reads customers through a shortcut and regions from its own table, and each check depends on the object it validates.</p>
+          <p>Weaver reads the files and works the graph out for you. The Python table reads the export folder, the Warehouse join reads those customers through a shortcut and its regions from a local table, and each check hangs off whatever it validates.</p>
 
           <figure>
             <svg class="dag" viewBox="0 0 850 336" role="img" aria-labelledby="home-dag-title home-dag-desc">
@@ -242,7 +242,7 @@ compose.yml
               <li><i class="shortcut" aria-hidden="true"></i> Shortcut</li>
               <li><i class="validation" aria-hidden="true"></i> Assumption</li>
             </ul>
-            <figcaption>Item boundaries are not execution boundaries. The Warehouse join runs after the Lakehouse table it reads.</figcaption>
+            <figcaption>Item boundaries are not execution boundaries: the Warehouse join waits for the Lakehouse table it reads.</figcaption>
           </figure>
 
           <p><a class="text-link" href="get-started/index.html">Build this example against your own workspace <span class="arrow" aria-hidden="true">→</span></a></p>
@@ -252,7 +252,7 @@ compose.yml
       <section class="section">
         <div class="wrap">
           <h2>Get started</h2>
-          <p class="lede">One install provides both the library and the <code>weaver</code> command, and the same package runs in a Fabric notebook and on your own machine.</p>
+          <p class="lede">One install gives you the library and the <code>weaver</code> command. The same package runs in a Fabric notebook and on your own machine.</p>
           <div class="code" style="max-width: 480px;">
             <div class="code-bar"><span>terminal</span></div>
             <pre>pip install weaverstack

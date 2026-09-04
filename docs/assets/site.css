@@ -1,12 +1,12 @@
-/* Weaver site. Warm paper, dark ink, one restrained blue accent.
+/* Weaver site. Near-white ground, dark ink, one restrained blue accent.
    Sizes step down from the old single-page site so headings guide rather than shout. */
 
 :root {
   --ink: #0c1520;
   --ink-soft: #232e3a;
   --muted: #4b5661;
-  --paper: #f5f2ea;
-  --paper-deep: #eae5d9;
+  --paper: #f7f7f6;
+  --paper-deep: #ececea;
   --white: #ffffff;
   --blue: #1d44d4;
   --blue-dark: #112a76;
@@ -15,7 +15,7 @@
   --red: #cf1d1d;
   --green-soft: #e2f4ea;
   --amber: #8a5300;
-  --amber-soft: #fbeed2;
+  --amber-soft: #fbf0d8;
   --line: rgba(12, 21, 32, .2);
   --line-strong: rgba(12, 21, 32, .42);
   --shadow: 0 18px 50px rgba(31, 38, 52, .09);
