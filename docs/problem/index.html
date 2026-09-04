@@ -46,16 +46,16 @@
         <div class="wrap">
           <p class="eyebrow">The problem</p>
           <h1>Building one thing in Fabric is straightforward</h1>
-          <p class="lead">Coordinating a whole data platform is harder. This page walks through where that difficulty actually comes from. It starts with things you will recognise from your first week in Fabric, and ends with the parts that only show up once real data is flowing.</p>
+          <p class="lead">Fabric makes it straightforward to work with individual Lakehouses, Warehouses, notebooks and SQL workloads. The complexity appears when those parts need to operate together as a production data platform.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <p class="eyebrow">Part one</p>
-          <h2>Fabric really does start simple</h2>
-          <p class="lede">The engines are good. That is not the problem.</p>
-          <p>You make a Lakehouse. You drop a file in it. You open a notebook, read the file with Spark, write a Delta table. You make a Warehouse and write some T-SQL. Every one of those steps is well documented and works the first time.</p>
+          <h2>Fabric starts simple</h2>
+          <p class="lede">Fabric already provides strong execution engines.</p>
+          <p>You create a Lakehouse, land a file in it, then read that file with Spark in a notebook and write a Delta table. A Warehouse gives you T-SQL over the same estate. Each of these steps is well documented and works on its own.</p>
 
           <div class="flow">
             <div class="flow-step"><b>Files</b><small>in a Lakehouse</small></div>
@@ -67,50 +67,44 @@
             <div class="flow-step"><b>T-SQL</b><small>in a Warehouse</small></div>
           </div>
 
-          <p>Four steps, four good tools. If that were the whole job, you would not need Weaver and this page would be shorter.</p>
+          <p>Each step uses a capable tool, and the pipeline works as long as somebody runs the steps in the right order.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <p class="eyebrow">Part two</p>
-          <h2>Then the pieces have to work together</h2>
-          <p class="lede">The difficulty is not in any one Fabric feature. It is in the joins between them.</p>
-
-          <p>Here is what starts to accumulate:</p>
+          <h2>The pieces have to work together</h2>
+          <p class="lede">The complexity appears at the boundaries between Fabric components.</p>
 
           <div class="cards two">
             <div class="card">
               <h3>Two engines, two languages</h3>
-              <p>The Lakehouse is Spark and Python. The Warehouse is T-SQL. Both belong in the same pipeline, and nothing joins their dependency graphs. What runs first is something you have to know and remember.</p>
+              <p>The Lakehouse runs Spark and Python while the Warehouse runs T-SQL. Both belong to the same pipeline, but their dependency graphs are separate, so execution order has to be maintained by hand.</p>
             </div>
             <div class="card">
               <h3>Several Fabric items</h3>
-              <p>Real estates have more than one Lakehouse and more than one Warehouse. A dependency that crosses between them is the same kind of dependency as one that does not, but it is not treated as one.</p>
+              <p>Most estates hold several Lakehouses and Warehouses. A dependency that crosses between two items is no different in principle from one inside a single item, but Fabric does not treat it the same way.</p>
             </div>
             <div class="card">
               <h3>Shortcuts</h3>
-              <p>A Warehouse cannot read Delta files. It reads a Lakehouse's SQL endpoint through a shortcut. That is a real constraint, and it usually becomes a configuration task that lives somewhere other than your pipeline code.</p>
+              <p>A Warehouse cannot read Delta files directly, so it reads a Lakehouse through its SQL endpoint using a shortcut. That shortcut is usually configured outside the pipeline code that depends on it.</p>
             </div>
             <div class="card">
               <h3>Environments</h3>
-              <p>Spark code needs libraries. Libraries come from a Fabric Environment. Which Environment, published when, containing what version, is another thing to keep aligned with the code that assumes it.</p>
+              <p>Spark code needs libraries, which come from a Fabric Environment. The Environment, its published state and its library versions all have to stay aligned with the code that assumes them.</p>
             </div>
             <div class="card">
               <h3>Logical against physical</h3>
-              <p>Your development Lakehouse and your production Lakehouse are different Fabric items with different names. Something has to know which one a given piece of code means, today.</p>
+              <p>Development and production Lakehouses are separate Fabric items with different names, so something has to resolve which physical item a given piece of code refers to.</p>
             </div>
             <div class="card">
               <h3>Source control</h3>
-              <p>Notebooks, SQL scripts, pipeline definitions, shortcut configuration and item settings live in different places and version at different rates. Reviewing a change to the platform means reviewing several of them at once.</p>
+              <p>Notebooks, SQL scripts, pipeline definitions, shortcut configuration and item settings are stored separately and versioned at different rates, which makes a single platform change hard to review as one unit.</p>
             </div>
           </div>
 
-          <div class="keyline">
-            <p>The complexity comes from coordination, not from any one Fabric feature.</p>
-          </div>
-
-          <p>None of this is a criticism of Fabric. A platform that gives you a Lakehouse, a Warehouse, Spark, T-SQL, OneLake and shortcuts is giving you a lot. But it gives them to you as separate things, and a data platform is one thing.</p>
+          <p>Fabric provides these capabilities separately, while a production pipeline needs to coordinate them as one system.</p>
         </div>
       </section>
 
@@ -118,94 +112,84 @@
         <div class="wrap">
           <p class="eyebrow">Part three</p>
           <h2>A pipeline becomes a production system</h2>
-          <div class="keyline"><p>The hard parts show up after the first successful run.</p></div>
+          <p class="lede">As a pipeline moves into regular production, it needs to keep track of more than whether the latest run succeeded.</p>
 
-          <p class="lede">The first run is a demo. The hundredth run is a system, and a system has questions the demo never asked.</p>
-
-          <p>Once the same pipeline runs every night, on data that arrives on its own schedule, you start needing answers to things like:</p>
+          <p>Once the same pipeline runs every night against data that arrives on its own schedule, it has to answer questions like these:</p>
 
           <ul>
-            <li><strong>How much do I reload?</strong> Reading the whole source every night stops being sensible somewhere around the point it starts taking hours. So the pipeline needs to know how far it got last time.</li>
-            <li><strong>What happened last night?</strong> Not the log file. The current state: which objects are up to date, which are behind, which have not run at all.</li>
-            <li><strong>Something failed. Now what?</strong> What succeeded, what did not run because of it, what should be retried, and what must not be retried because it half-ran.</li>
-            <li><strong>Is this table still trustworthy?</strong> It loaded fine, but the table it reads from loaded again afterwards. Being successful and being current are different things.</li>
-            <li><strong>What is this column?</strong> Descriptions, keys, foreign keys and lineage stop being nice-to-have the moment somebody other than the author has to work on it.</li>
-            <li><strong>Is the data right?</strong> Not "did the query run" but "does the result mean what we think it means".</li>
+            <li><strong>How much needs reloading?</strong> Reading the whole source every night stops being practical as volumes grow, so the pipeline needs to know how far it got last time.</li>
+            <li><strong>What is the current state?</strong> Which objects are up to date, which are behind their sources and which have not run at all.</li>
+            <li><strong>What happens after a failure?</strong> Which objects succeeded, which were blocked by the failure, and which can safely be retried.</li>
+            <li><strong>Is this table still current?</strong> A table can load successfully and still be stale, because a table it reads from loaded again afterwards.</li>
+            <li><strong>What does this column mean?</strong> Descriptions, keys, foreign keys and lineage become necessary as soon as somebody other than the author maintains the pipeline.</li>
+            <li><strong>Is the data correct?</strong> Whether the query ran is a different question from whether the result means what it is supposed to.</li>
           </ul>
 
-          <p>Every one of those needs somewhere to keep an answer between runs. A pipeline that only knows what happened during the current invocation cannot answer any of them.</p>
+          <p>Each of these needs state that persists between runs. A pipeline that only knows about its current invocation cannot answer them.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <p class="eyebrow">Part four</p>
-          <h2>And then the properly awkward parts</h2>
-          <p class="lede">These are the ones people build by hand, again, in every organisation. They are not glamorous and they are not optional.</p>
+          <h2>Operational data handling</h2>
+          <p class="lede">Production pipelines also need consistent handling for incremental state, rejected rows, unexpected changes and partial failures. These are usually built by hand in each organisation.</p>
 
           <div class="cards two">
             <div class="card">
-              <h3>Knowing how far you got</h3>
-              <p>A bookmark that says where the last clean load reached, and rules about when it is allowed to move. Advance it after a run that half-worked and you will silently skip data. Advancing too eagerly is the failure mode nobody notices for a month.</p>
+              <h3>Incremental position</h3>
+              <p>A bookmark records how far the last clean load reached, along with rules for when it may advance. Advancing it after a partial run silently skips data, which is a failure that can go unnoticed for a long time.</p>
             </div>
             <div class="card">
-              <h3>Rows that change, not just rows that arrive</h3>
-              <p>Which rows are new, which changed, which disappeared, and what "disappeared" even means when your source only sent you today's batch.</p>
+              <h3>Changed rows</h3>
+              <p>A load needs to know which rows are new, which changed and which are gone. Absence means something different when the source sends a full extract than when it sends today's batch.</p>
             </div>
             <div class="card">
               <h3>Duplicate keys</h3>
-              <p>The source sent you the same customer twice. Do you fail the load, take one arbitrarily, or set both aside and carry on? Somebody has to decide, and the decision has to be written down somewhere the pipeline can read.</p>
+              <p>When a source sends the same key twice, the pipeline needs a policy: fail the load, keep one row, or set the duplicates aside and continue. That policy has to be recorded somewhere the pipeline can read it.</p>
             </div>
             <div class="card">
-              <h3>Nulls where there should not be nulls</h3>
-              <p>Same question, different shape. Detecting it is easy. Deciding what the pipeline does about it is the actual work.</p>
+              <h3>Null violations</h3>
+              <p>Detecting a null in a column that should not allow one is straightforward. Deciding what the load does with the offending row is the part that needs designing.</p>
             </div>
             <div class="card">
               <h3>Rejected rows</h3>
-              <p>Once you decide to set bad rows aside, they have to go somewhere, with the reason, so somebody can look at them tomorrow.</p>
+              <p>Rows that a load refuses need to be stored somewhere along with the reason, so they can be reviewed later.</p>
             </div>
             <div class="card">
-              <h3>Changes that are too big</h3>
-              <p>The load is about to delete 80% of a table. Nothing is technically wrong: the source just came in short. A pipeline that does not notice this is a pipeline that will one day empty a table on a Sunday.</p>
+              <h3>Unexpectedly large changes</h3>
+              <p>A short extract can produce a load that deletes most of a table without anything being technically wrong. Stability thresholds can stop unexpectedly large deletes or updates before they are applied.</p>
             </div>
             <div class="card">
               <h3>Load statistics</h3>
-              <p>How many rows were inserted, updated and deleted. Not as a log line, but as a number you can read later and compare.</p>
+              <p>Insert, update and delete counts recorded as data, so they can be read back and compared across runs.</p>
             </div>
             <div class="card">
-              <h3>Carrying on after a failure</h3>
-              <p>One source is down. Half the estate has nothing to do with it. A nightly run that stops dead at the first problem wastes a night; one that ploughs on regardless corrupts things downstream.</p>
+              <h3>Continuing after a failure</h3>
+              <p>When one source is unavailable, the rest of the estate often has no dependency on it. A run should be able to continue on independent branches while blocking anything downstream of the failure.</p>
             </div>
           </div>
 
-          <div class="keyline">
-            <p>Making Fabric easier also means making the hard parts boring.</p>
-          </div>
-
-          <p>None of this is exotic. It is what data engineering has needed for thirty years. What changes with Fabric is that you now have to assemble it yourself, across two engines and several items, on top of a platform that gives you the engines and leaves the assembly to you.</p>
+          <p>These requirements are long established in data engineering. What changes with Fabric is that they have to be assembled across two execution engines and several items, on a platform that supplies the engines and leaves the coordination to you.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <h2>Where Weaver comes in</h2>
-          <p class="lede">Weaver does not replace anything in Fabric. Your Delta tables are Delta tables, your Warehouse is a Warehouse, your Spark runs on Fabric Spark.</p>
+          <p class="lede">Weaver does not replace anything in Fabric. Delta tables remain Delta tables, Warehouses remain Warehouses, and Spark runs on Fabric Spark.</p>
 
-          <p>What Weaver adds is the coordination and the memory. One repository describing the whole estate. One dependency graph across every object in it, regardless of which engine runs it or which item holds it. One place recording what is installed, how far each thing has loaded, and what happened. And sensible, declarable answers to the awkward parts, so you are configuring them rather than writing them again.</p>
-
-          <div class="keyline">
-            <p>Fabric already provides the engines. Weaver makes them easier to engineer as one data platform.</p>
-          </div>
+          <p>What Weaver adds is coordination and persistent state. One repository describes the whole estate, and one dependency graph covers every object in it regardless of which engine runs it or which item holds it. The Catalogue records what is installed, how far each object has loaded and what happened on the way. The operational behaviours above become declarations rather than code you write again for each project.</p>
 
           <div class="cards two">
             <a class="card" href="../how-it-works/index.html">
-              <h3>See how it works</h3>
-              <p>Repository, build, Catalogue, load, test and health, and the mechanics underneath them.</p>
-              <span class="go">Read on <span class="arrow" aria-hidden="true">→</span></span>
+              <h3>How Weaver works</h3>
+              <p>Repository, build, Catalogue, load, test and health, and the mechanics beneath them.</p>
+              <span class="go">Learn more <span class="arrow" aria-hidden="true">→</span></span>
             </a>
             <a class="card" href="../get-started/index.html">
-              <h3>Or just try it</h3>
-              <p>Set up a project against your own workspace and watch a small example build, load and test.</p>
+              <h3>Get started</h3>
+              <p>Set up a project against your own workspace and run a small example through build, load and test.</p>
               <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
             </a>
           </div>

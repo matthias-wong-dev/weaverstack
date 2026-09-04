@@ -12,7 +12,7 @@ The **Weaver catalogue** is Weaver's own operational metadata, under the `_`
 schema of a Fabric Warehouse you name. It may have a Warehouse to itself or sit
 alongside your own schemas in one you already have; Weaver owns `_` and nothing
 else there. Destination Lakehouses and Warehouses hold only materialised
-output — no copied runtime, no per-target catalogue, no attachment
+output, with no copied runtime, no per-target catalogue and no attachment
 requirements.
 
 Folder, Delta and SQL Warehouse are materialisation targets. You
@@ -185,9 +185,9 @@ wipe and unbind.
 ## Documentation
 
 - [Design documentation map](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/README.md)
-- [How Weaver build works](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/how-does-build-work.md) — incremental selection, bundle order and certification
-- [Where your Weaver document repository lives](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/weaver-repository.md) — a folder of files, and how it reaches Fabric
-- [CLI usage](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/cli-usage.md) — signing in, workspaces, capacity, wipe
+- [How Weaver build works](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/how-does-build-work.md): incremental selection, bundle order and certification
+- [Where your Weaver document repository lives](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/weaver-repository.md): a folder of files, and how it reaches Fabric
+- [CLI usage](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/cli-usage.md): signing in, workspaces, capacity, wipe
 - [Fabric integration tests](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/fabric-testing.md)
 - [Agent guide](https://github.com/matthias-wong-dev/weaverstack/blob/main/AGENTS.md)
 
