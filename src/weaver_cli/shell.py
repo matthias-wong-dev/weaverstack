@@ -29,6 +29,10 @@ HISTORY_ENV = "WEAVER_SESSION_HISTORY"
 NOT_IN_A_SESSION = {
     "session": "already in a session",
     "fabric": "run it from a shell, not a session",
+    # A session is open on a workspace already. Setting a project up is what
+    # comes before one, and it creates Fabric items, which a session does not.
+    "initialise": "run it from a shell, not a session",
+    "initialize": "run it from a shell, not a session",
 }
 
 # Source checking and bundle installation remain usable at the prompt, but the

@@ -4,4 +4,4 @@
 # Declaring the shortcut is what lets a Warehouse object name a Lakehouse object
 # without either item knowing where the other is bound.
 logical:
-  Warehouse/Reporting/Reporting.OrderSummary: Lakehouse/Sales/Sales.OrderSummary
+  Warehouse/Reporting/Reporting.OrderSummary: Lakehouse/Sales/Tables/Sales.OrderSummary

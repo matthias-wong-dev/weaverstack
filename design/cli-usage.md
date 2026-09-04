@@ -12,6 +12,58 @@ weaver --help
 
 Commands use the identity from `az login`.
 
+## Setting a project up
+
+```bash
+weaver initialise
+```
+
+Creates a Weaver project and the Fabric items it needs. The workspace must
+already exist; a Catalogue, Environment, Lakehouse or Warehouse that does not is
+created. Naming an item is the request to have it, so nothing is asked per item.
+
+Options are collected at a prompt when a terminal is there to answer and a
+required value is missing. `--interactive` asks for every name, `--no-input`
+never asks and names the options a run is short of, and `--dry-run` shows what
+would be set up without changing anything.
+
+```bash
+weaver initialise ./project \
+  --workspace Analytics \
+  --catalogue Catalogue \
+  --environment Weaver \
+  --lakehouse Landing \
+  --warehouse Curated \
+  --example
+```
+
+`--example` writes a small Sales example and runs `build`, `load` and `test`
+against it, so a successful run means the chosen items have actually built,
+loaded and tested.
+
+What is written:
+
+```text
+project/
+├── workspace-config.yml
+├── compose.yml
+├── Environment/Weaver.Environment/
+├── Lakehouse/Landing/{Files,Tables}/
+└── Warehouse/Curated/
+```
+
+The catalogue Warehouse gets no authored folder. Weaver owns the `_` schema
+there and the first ordinary build creates its tables, so `Warehouse/Catalogue/`
+would invite authoring into the item Weaver keeps its own tables in.
+
+The Environment definition is published from a desktop and written without
+publishing inside a Fabric session, where `%pip install weaverstack` has already
+supplied Weaver. `--no-publish-environment` declines it either way.
+
+Provisioning is initialise's, and building is `build`'s. A build performs a
+read-only preflight and creates no Fabric item, so a missing target is a build
+failure naming the item.
+
 ## Workspace resolution
 
 Commands accept the applicable subset of:
@@ -90,6 +142,20 @@ targets['Lakehouse/Sales'].name must be a non-empty string, got 7
 workspace.** `--workspace-config bad.yml` reports the key that is wrong. Naming
 no workspace at all is a state, and a command or composition that can proceed
 without one proceeds.
+
+**A command naming no workspace reads `workspace-config.yml` beside it.** From a
+project directory the ordinary commands need nothing else:
+
+```bash
+cd project
+weaver build
+weaver load
+weaver test
+```
+
+The file is the last resort. `--workspace`, `--workspace-config` and the
+workspace a `weaver session` is open on are each consulted first, so a command
+already naming one reads no file it was not given.
 
 ## Session
 

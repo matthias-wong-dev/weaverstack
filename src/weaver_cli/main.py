@@ -24,6 +24,19 @@ CAPACITY_ACTIONS = ("status", "resume", "suspend")
 #: building the parser stays free of everything ``compose`` pulls in.
 COMPOSE_DEFAULT_FILE = "compose.yml"
 
+#: The first thing a new user reads. Product words, and no implementation.
+INITIALISE_DESCRIPTION = """\
+Set up a new Weaver project and the Fabric items it needs.
+
+You can choose a Catalogue, Environment, Lakehouse and/or Warehouse.
+If an item doesn't exist yet, it will be created automatically.
+
+You can also include a small Sales example so you can build, load
+and test the project straight away.
+
+Run `weaver initialise` to get started.\
+"""
+
 
 # --- what each command will want ----------------------------------------------
 #
@@ -175,6 +188,28 @@ def _requires_rest(args) -> frozenset[str]:
     return requirements(AUTH, RESOLVER)
 
 
+def _requires_initialise(args) -> frozenset[str]:
+    """What setting a project up will want.
+
+    Creating the items is control-plane work alone. The example is an ordinary
+    build, load and test, so it declares what those declare, and the Lakehouse
+    half of it is only known once the questions have been answered.
+    """
+
+    from weaver.sessions.requirements import (
+        AUTH,
+        LIVY,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
+    )
+
+    if getattr(args, "example", None) is False:
+        return requirements(AUTH, RESOLVER)
+    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+
+
 def _requires_install(args) -> frozenset[str]:
     """A frozen bundle may contain any target kind, so declare the coarse set."""
 
@@ -292,8 +327,29 @@ def build_parser() -> argparse.ArgumentParser:
     _add_workspace_args(compose)
     compose.set_defaults(handler=handle_compose)
 
+    for name in ("initialise", "initialize"):
+        # One command, spelled both ways. The command list carries the first,
+        # and the second is registered without help text, which is what keeps it
+        # out of that list: argparse renders whatever `help` holds, including
+        # SUPPRESS.
+        listed = (
+            {"help": "Set up a new Weaver project and the Fabric items it needs."}
+            if name == "initialise"
+            else {}
+        )
+        initialise = subcommands.add_parser(
+            name,
+            description=INITIALISE_DESCRIPTION,
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            **listed,
+        )
+        _add_initialise_args(initialise)
+        initialise.set_defaults(
+            handler=handle_initialise, requires=_requires_initialise
+        )
+
     check = subcommands.add_parser(
-        "check", help="Check repository source without contacting Fabric."
+        "check", help="Check your repository source without contacting Fabric."
     )
     check.add_argument(
         "repository",
@@ -803,6 +859,66 @@ def handle_capacity(args: argparse.Namespace) -> int:
     if args.action == "resume" and not result.running:
         print("  The capacity is starting. Run `capacity status` to confirm its state.")
     return 0
+
+
+def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
+    """The names a project is set up with, and how the missing ones are found."""
+
+    parser.add_argument(
+        "repository",
+        nargs="?",
+        help="Where to write the project. Defaults to the current directory.",
+    )
+    parser.add_argument("--workspace", help="Fabric workspace name. It must exist.")
+    parser.add_argument(
+        "--catalogue",
+        help="Warehouse for Weaver's own tables. Defaults to Catalogue.",
+    )
+    parser.add_argument(
+        "--environment",
+        help="Fabric Environment for running Weaver. Defaults to Weaver.",
+    )
+    parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
+    parser.add_argument("--warehouse", help="Warehouse for SQL tables and views.")
+    parser.add_argument(
+        "--example",
+        dest="example",
+        action="store_true",
+        default=None,
+        help="Include a small Sales example, and build, load and test it.",
+    )
+    parser.add_argument(
+        "--no-example",
+        dest="example",
+        action="store_false",
+        help="Leave the example out.",
+    )
+    parser.add_argument(
+        "--no-publish-environment",
+        dest="publish_environment",
+        action="store_false",
+        default=None,
+        help=(
+            "Write the Environment definition without publishing it. Publishing "
+            "is the default from a desktop, and inside Fabric it is not."
+        ),
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Ask for every name, even ones already given.",
+    )
+    parser.add_argument(
+        "--no-input",
+        action="store_true",
+        help="Never ask. A missing name is an error, which suits automation.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be set up, and change nothing.",
+    )
+    parser.add_argument("--json", action="store_true", help="emit the result as JSON")
 
 
 def _add_workspace_args(
@@ -1611,6 +1727,54 @@ def _build_once(args: argparse.Namespace) -> int:
             print()
             print(_indented(error.describe()), file=sys.stderr)
     return 0 if result.succeeded else 1
+
+
+def handle_initialise(args: argparse.Namespace) -> int:
+    """Collect the names, set the project up, and say what to run next."""
+
+    import json
+
+    from .initialise import collect, equivalent_command, render, render_dry_run
+
+    if args.interactive and args.no_input:
+        raise CommandError("--interactive asks and --no-input never does.")
+    asked = collect(args, ask=not args.no_input)
+    _prefer_desktop_credential()
+
+    # The catalogue and Environment defaults belong to the operation, so an
+    # option nobody gave is left out of the call.
+    named = {
+        keyword: value
+        for keyword, value in (
+            ("catalogue", args.catalogue),
+            ("environment", args.environment),
+        )
+        if value
+    }
+    report = weaver.initialise(
+        args.repository,
+        workspace=args.workspace,
+        lakehouse=args.lakehouse,
+        warehouse=args.warehouse,
+        example=bool(args.example),
+        publish_environment=args.publish_environment,
+        dry_run=args.dry_run,
+        session=_session(args),
+        **named,
+    )
+
+    if args.json:
+        print(json.dumps(report.to_mapping(), indent=2))
+    elif args.dry_run:
+        render_dry_run(report)
+    else:
+        render(report)
+        if asked:
+            print()
+            print("You can set this up again with:")
+            print()
+            print(f"  {equivalent_command(args)}")
+    return 0 if report.succeeded else 1
 
 
 def handle_check(args: argparse.Namespace) -> int:

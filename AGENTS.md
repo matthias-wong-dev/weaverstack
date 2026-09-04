@@ -55,6 +55,9 @@ Session         ConsoleSession   desktop → Fabric
                 NotebookSession  already in Fabric
                 TestSession      records the same contract
 
+initialise      resolve request → read the workspace's items → create the
+                missing ones → write the project → publish the Environment
+
 build           resolve request → read BuildState → Builder → Installer
 load / test     resolve request → read RunState   → Runner
 health          resolve request → read Catalogue  → HealthReport
@@ -66,6 +69,11 @@ There is one workspace type, one build, one place a workspace is resolved, one
 conversion into the physical target vocabulary, one implementation of graph
 mechanics, and one installed graph. Anything more complicated needs a concrete
 reason.
+
+`initialise` is the only operation that creates a Fabric item. A build's
+preflight reads and never creates, so the two do not overlap. A command naming
+no workspace and inheriting none reads `workspace-config.yml` in the directory
+it was run from, which is the last resort in `weaver.config.resolve_workspace`.
 
 `weaver.graph.Graph` is the topology. The authored repository graphs, the
 installed estate graph and the runtime graph each carry their own node metadata

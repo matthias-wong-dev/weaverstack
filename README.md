@@ -32,6 +32,79 @@ Requires Python 3.11 or later. Tested on macOS, Linux and Windows across Python
 No JDK and no Spark install: Fabric supplies Spark where authored runtime code
 executes, and a desktop reaches it through the Session.
 
+## Getting started
+
+From a desktop, with a Fabric workspace you can already reach:
+
+```bash
+weaver initialise
+```
+
+It asks which items you want, creates the ones that are missing, writes the
+project, and can build, load and test a small Sales example so you can see the
+whole thing work:
+
+```text
+Fabric workspace: My Fabric Workspace
+Catalogue [Catalogue]:
+Environment [Weaver]:
+Lakehouse [skip]: Landing
+Warehouse [skip]: Curated
+Would you like to create and run a small Sales example? [Y/n]:
+```
+
+The same run, written out, which is the form to keep in a script:
+
+```bash
+weaver initialise \
+  --workspace "My Fabric Workspace" \
+  --catalogue Catalogue \
+  --environment Weaver \
+  --lakehouse Landing \
+  --warehouse Curated \
+  --example
+```
+
+`--dry-run` shows what would be set up and changes nothing. Naming an item is
+the request to have it, so a missing one is created; a rerun reuses whatever is
+already there.
+
+From a Fabric notebook the project is the same, and the workspace is the one the
+notebook is running in:
+
+```python
+%pip install weaverstack
+```
+
+```python
+from pathlib import Path
+import weaver
+
+weaver.initialise(
+    Path("builtin") / "repository",
+    catalogue="Catalogue",
+    environment="Weaver",
+    lakehouse="Landing",
+    warehouse="Curated",
+    example=True,
+)
+```
+
+The Environment definition is written there and not published, because a
+notebook already has Weaver from `%pip install`. Publish it when you first drive
+the project from a desktop.
+
+From the project directory, the ordinary commands need nothing else:
+
+```bash
+weaver build
+weaver load
+weaver test
+```
+
+Each reads `workspace-config.yml` beside it. `--workspace` and
+`--workspace-config` still win where you give them.
+
 ## CLI lifecycle
 
 One Workspace configuration can abbreviate the full desktop lifecycle:

@@ -168,7 +168,12 @@ def create_lakehouse(
 def create_warehouse(
     workspace: WorkspaceItem, name: str, *, client: FabricClient | None = None
 ) -> Item:
-    """Create a disposable Warehouse, returning an existing typed match."""
+    """Create a Warehouse, returning an existing typed match under that name.
+
+    A general provisioning primitive. `weaver initialise` creates a project's
+    catalogue and destination Warehouses through it, and the Fabric test estate
+    fills in an item a tenant has not got yet.
+    """
 
     client = client or FabricClient()
     try:

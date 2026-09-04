@@ -516,6 +516,13 @@ The Weaver CLI exposes the lifecycle of a declared workspace. Each command
 operates at a different architectural layer.
 
 ```text
+initialise
+
+    Create the Fabric items a project names.
+    Write the project.
+
+↓
+
 wipe
 
     Remove physical objects from one or more targets.
@@ -537,9 +544,16 @@ load
 
 | Command | Concern |
 |---------|---------|
+| `initialise` | Fabric item provisioning and project generation |
 | `wipe` | Physical state |
 | `build` | Deployment and installation |
 | `load` | Runtime execution |
+
+Provisioning belongs to `initialise` alone. A build's preflight reads the
+workspace and creates nothing, so a missing Catalogue, Lakehouse, Warehouse or
+Environment is a build failure naming the item. The `_` catalogue tables divide
+between the two: `initialise` creates the Warehouse that holds them, and the
+first ordinary build creates the tables.
 
 ---
 
@@ -556,6 +570,12 @@ A Workspace is one Microsoft Fabric workspace, and identifies:
 
 It says where the resources are. Where Weaver's own code runs is a Session
 question, not a property of the Workspace.
+
+A command naming no workspace, and inheriting none from a Session, reads
+`workspace-config.yml` in the directory it was run from. That is what lets a
+generated project answer to `weaver build`, `weaver load` and `weaver test` from
+its own root. It is the last resort in the order, so nothing that already names
+a workspace begins reading a file.
 
 `targets:` is deployment configuration, so it is a build's input. A load and a
 test read where an item is installed from the catalogue instead. See

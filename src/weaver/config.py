@@ -74,6 +74,23 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
         raise ConfigError(f"Workspace configuration is invalid: {exc}") from exc
 
 
+#: The configuration file a project keeps in its own root.
+DEFAULT_FILE = "workspace-config.yml"
+
+
+def discovered_workspace_config(directory: str | Path | None = None) -> Path | None:
+    """The project's own configuration file, when the working directory holds one.
+
+    What lets ``weaver build`` run from a project root with nothing else on the
+    command line. It is the last resort: an explicit ``--workspace`` or
+    ``--workspace-config``, and a Session's own workspace, are all consulted
+    first.
+    """
+
+    candidate = Path(directory or Path.cwd()) / DEFAULT_FILE
+    return candidate if candidate.is_file() else None
+
+
 def resolve_workspace(
     *,
     workspace: str | None = None,
@@ -83,6 +100,8 @@ def resolve_workspace(
 ) -> Workspace:
     """Apply CLI-over-configuration precedence and return one Workspace."""
 
+    if workspace is None and workspace_config is None:
+        workspace_config = discovered_workspace_config()
     configured = load_workspace(workspace_config) if workspace_config else None
     resolved_identity = (
         workspace
@@ -91,7 +110,8 @@ def resolve_workspace(
     )
     if resolved_identity is None:
         raise ConfigError(
-            "A Workspace is required. Use --workspace or --workspace-config."
+            f"A Workspace is required. Use --workspace or --workspace-config, "
+            f"or run from a project directory holding {DEFAULT_FILE}."
         )
 
     common = {
