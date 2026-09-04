@@ -17,21 +17,12 @@ otherwise opens Microsoft sign-in in a browser. On a machine with secure
 credential storage, later commands reuse that sign-in until Microsoft requires
 you to authenticate again.
 
-Reuse is two things kept apart, and one alone reconstructs nothing:
-
-```text
-the refresh token   the platform's secure store: Keychain on macOS,
-                    libsecret on Linux, DPAPI on Windows
-the account         ~/.weaver/authentication-record.json, which names the
-                    identity that token belongs to and holds no secret
-```
-
-`azure-identity` writes the first and Weaver writes the second, so a new process
-reads both and opens nothing. A machine with no secure store signs in each time
-and says so once; the token is never written to disk in the clear. Only the
-recognised ways a platform reports having nowhere secure are worked around. Any
-other failure is reported as itself. A remembered account that cannot be read or
-written costs the reuse and never the command.
+The refresh token goes to the platform's secure store, a Keychain item on macOS,
+libsecret on Linux, DPAPI on Windows, and the account it belongs to goes to
+`~/.weaver/authentication-record.json`, which holds no secret. A machine with no
+secure store signs in each time and says so once; the token is never written to
+disk in the clear. Only the recognised ways a platform reports having nowhere
+secure are worked around. Any other failure is reported as itself.
 
 A chain, not a probe: the Azure CLI is tried inside the token acquisition a
 command was going to make anyway, so a signed-in user pays nothing to have the

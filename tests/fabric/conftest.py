@@ -73,16 +73,31 @@ def _timed_session_run(session, label: str, body: str, *, phase: str | None = No
 
 
 @pytest.fixture(scope="session")
-def fabric_workspace_item():
-    """The suite's workspace: ``PYTEST_WORKSPACE`` unless one is named."""
+def fabric_credential():
+    """The desktop chain, installed for this process. Caller policy, not core's.
+
+    The same chain a `weaver` command uses: the Azure CLI where `az login` has
+    produced an identity, and Weaver's persisted browser sign-in where it has
+    not. A machine with neither cannot run this suite.
+    """
 
     pytest.importorskip("azure.identity", reason="pip install weaverstack")
     pytest.importorskip("requests", reason="pip install weaverstack")
 
-    # Credential choice is caller policy, not core's; the test infra is a caller.
-    from weaver.fabric.auth import prefer_cli_credential
+    from weaver.fabric.auth import desktop_credential, use_credential
 
-    prefer_cli_credential()
+    return use_credential(desktop_credential())
+
+
+def _asked_for_fabric(config) -> bool:
+    """Whether this run named the fabric marker on the command line."""
+
+    return "fabric" in (config.getoption("-m") or "")
+
+
+@pytest.fixture(scope="session")
+def fabric_workspace_item(request, fabric_credential):
+    """The suite's workspace: ``PYTEST_WORKSPACE`` unless one is named."""
 
     name = os.environ.get(WORKSPACE_ENV, DEFAULT_WORKSPACE)
 
@@ -91,11 +106,13 @@ def fabric_workspace_item():
     try:
         return find_workspace(name)
     except Exception as exc:
-        # Any reason at all: no credential, no network, no such workspace. Every
-        # one of them means "this machine cannot run the Fabric suite", which is a
-        # skip, only a WeaverError was caught before, so an unauthenticated
-        # machine raised azure's ClientAuthenticationError and errored instead.
-        pytest.skip(f"cannot reach workspace {name!r}: {type(exc).__name__}: {exc}")
+        # Any reason at all: no credential, no network, no such workspace. A run
+        # that did not ask for `-m fabric` skips. A run that did asked for these
+        # tests, so not reaching the estate is a harness failure.
+        unreachable = f"cannot reach workspace {name!r}: {type(exc).__name__}: {exc}"
+        if _asked_for_fabric(request.config):
+            pytest.fail(unreachable, pytrace=False)
+        pytest.skip(unreachable)
 
 
 @pytest.fixture(scope="session")
@@ -324,14 +341,8 @@ def fabric_shortcut_lakehouses(fabric_workspace_item, fabric_client):
 
 
 @pytest.fixture(scope="session")
-def fabric_external_workspace_item():
+def fabric_external_workspace_item(fabric_credential):
     """The external workspace, or a skip when this tenant has not got one."""
-
-    pytest.importorskip("azure.identity", reason="pip install weaverstack")
-
-    from weaver.fabric.auth import prefer_cli_credential
-
-    prefer_cli_credential()
 
     name = os.environ.get(
         external_estate.WORKSPACE_ENV, external_estate.DEFAULT_WORKSPACE

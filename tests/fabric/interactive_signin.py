@@ -9,27 +9,17 @@ The Azure CLI is made unavailable inside this process alone, by replacing what
 `az logout`, no rename of `~/.azure`, no environment variable that outlives the
 run. The developer stays signed in.
 
-What it proves, in two processes:
-
-    the Azure CLI reports itself unavailable
-        → the chain falls through to browser sign-in
-            → a browser opens, and a person signs in
-                → Fabric REST answers, and the account is remembered
-
-    a second process, the Azure CLI still unavailable
-        → the remembered account and the secure token cache are read
-            → Fabric REST answers, and nothing opens
-
-Usage:
+Two processes, the second proving the first is reused:
 
     python -m tests.fabric.interactive_signin --forget --workspace "..."
-    python -m tests.fabric.interactive_signin --expect-cached --workspace "..."
+        → a browser opens, a person signs in, Fabric REST answers
 
-Reuse needs both halves: the encrypted token cache under `weaverstack` holds the
-refresh token, and `~/.weaver/authentication-record.json` names the account it
-belongs to. `--forget` removes both. `--expect-cached` makes the interactive
-sign-in fail on the spot, so the second run proves reuse rather than a browser
-window nobody was watching.
+    python -m tests.fabric.interactive_signin --expect-cached --workspace "..."
+        → nothing opens, Fabric REST answers
+
+`--forget` removes the token cache and the AuthenticationRecord. In
+`--expect-cached` an interactive sign-in fails on the spot, so the second run
+cannot pass by opening a browser somebody happened to answer.
 """
 
 from __future__ import annotations
@@ -58,12 +48,11 @@ def _make_the_azure_cli_unavailable() -> None:
 
 
 def _forget_the_sign_in() -> None:
-    """Drop both halves, so sign-in is interactive again.
+    """Drop the token cache and the record, so sign-in is interactive again.
 
-    Where the token cache lives is the platform's choice. Linux and Windows keep
-    a file, and macOS keeps a Keychain item, which this does not touch: delete
-    ``weaverstack`` from the login keychain by hand to see the browser there.
-    The remembered account is Weaver's own file and is removed here either way.
+    Linux and Windows keep the cache in a file. macOS keeps a Keychain item,
+    which this does not touch: delete ``weaverstack`` from the login keychain by
+    hand to see the browser there.
     """
 
     removed = []
@@ -88,12 +77,7 @@ def _forget_the_sign_in() -> None:
 
 
 def _refuse_interactive_sign_in() -> None:
-    """Make a browser sign-in a failure rather than a window.
-
-    What ``--expect-cached`` is for. Success then means the token cache and the
-    remembered account reconstructed the sign-in, which a browser opening for
-    somebody who is watching would otherwise hide.
-    """
+    """Make a browser sign-in a failure, so ``--expect-cached`` proves reuse."""
 
     from azure.identity import InteractiveBrowserCredential
 
@@ -152,9 +136,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.expect_cached:
         print("\nThe remembered sign-in reached Fabric, and nothing opened.")
-        record = auth._authentication_record_path()
-        print(f"  token cache   {auth.TOKEN_CACHE_NAME}")
-        print(f"  account       {record}")
         return 0
     print("\nBrowser sign-in reached Fabric.")
     print(f"The account is remembered in {auth._authentication_record_path()}.")

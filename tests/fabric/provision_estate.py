@@ -47,7 +47,7 @@ from weaver.fabric import (
     find_item,
     find_workspace,
 )
-from weaver.fabric.auth import prefer_cli_credential
+from weaver.fabric.auth import desktop_credential, use_credential
 
 DEFAULT_WORKSPACE = "PYTEST_WORKSPACE"
 
@@ -289,7 +289,10 @@ def provision_external(client: FabricClient, host_workspace) -> list[str]:
 
 
 def main() -> int:
-    prefer_cli_credential()
+    # The chain a `weaver` command uses, as the suite installs: the Azure CLI
+    # where `az login` has produced an identity, and the persisted browser
+    # sign-in where it has not.
+    use_credential(desktop_credential())
 
     workspace_name = os.environ.get(
         "WEAVER_FABRIC_WORKSPACE",

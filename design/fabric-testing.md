@@ -125,13 +125,18 @@ flushing, so later execution retains the semantic context that caused it.
 
 ## Workspace setup
 
-Install the development dependencies and sign in with Azure CLI:
+Install the development dependencies and sign in:
 
 ```bash
-az login
 python3.11 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
+az login                # or `weaver doctor`, which signs in through a browser
 ```
+
+The suite installs `desktop_credential()`, the chain a `weaver` command uses, so
+either sign-in runs it. Where the estate cannot be reached, `-m fabric` fails.
+A run that named the marker asked for these tests, so a skip there is a pass
+reporting nothing.
 
 The default fixed workspace is named `PYTEST_WORKSPACE`. Override it when
 needed:

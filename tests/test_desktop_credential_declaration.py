@@ -4,10 +4,6 @@
 `az login` keeps that identity; one who has not is sent to Microsoft sign-in in
 a browser once, and later commands reuse it.
 
-Reuse across processes needs both halves. The encrypted persistent token cache
-holds the refresh token, and the AuthenticationRecord names the account it
-belongs to; `azure-identity` writes the first and Weaver writes the second.
-
 The choice is a chain, not a probe. `ChainedTokenCredential` tries the Azure CLI
 inside the token acquisition a command was going to make anyway and remembers
 which credential answered, so a signed-in user pays nothing to have a fallback
@@ -232,8 +228,8 @@ def test_the_desktop_cli_installs_the_chain(credentials):
 
 
 @weaver_test()
-def test_the_fabric_suite_stays_pinned_to_the_azure_cli(monkeypatch):
-    """An unattended run must never be able to open a browser."""
+def test_pinning_the_chain_to_the_azure_cli_is_still_available(monkeypatch):
+    """Caller policy, so it stays offered. Core never calls it."""
 
     monkeypatch.delenv(auth.CREDENTIAL_ENV, raising=False)
 
@@ -245,38 +241,34 @@ def test_the_fabric_suite_stays_pinned_to_the_azure_cli(monkeypatch):
 
 
 @weaver_test()
-def test_the_fabric_conftest_asks_for_the_azure_cli_and_nothing_else():
-    """Source-level, because what it guards is a line nobody meant to change.
-
-    A fixture that reached for the desktop policy would put an interactive
-    sign-in inside an unattended suite, and the failure would be a run that
-    hangs waiting for a browser nobody is watching.
-    """
+def test_the_fabric_suite_installs_the_desktop_chain():
+    """The same chain a `weaver` command uses, so a browser sign-in the user
+    already performed runs the suite."""
 
     from pathlib import Path
 
     conftest = Path(__file__).resolve().parent / "fabric" / "conftest.py"
     source = conftest.read_text(encoding="utf-8")
 
-    assert "prefer_cli_credential" in source
-    assert "desktop_credential" not in source
+    assert "use_credential(desktop_credential())" in source
+
+
+@weaver_test()
+def test_an_unreachable_estate_fails_a_run_that_asked_for_fabric():
+    from pathlib import Path
+
+    conftest = Path(__file__).resolve().parent / "fabric" / "conftest.py"
+    source = conftest.read_text(encoding="utf-8")
+
+    assert "if _asked_for_fabric(request.config):" in source
+    assert "pytest.fail(unreachable, pytrace=False)" in source
 
 
 # --- signing in once, and not again -------------------------------------------
-#
-# The regression this section exists for is the second process. A user without
-# the Azure CLI signed in, the command finished, and the next command opened a
-# browser again: the refresh token was in the Keychain and nothing on the
-# machine said which account it belonged to.
 
 
 def _Record(username: str):
-    """A real AuthenticationRecord, because a real one is what is written.
-
-    Its own serialisation is what `_save_authentication_record` writes and
-    `_load_authentication_record` reads back, and a convenient shape here would
-    prove nothing about the round trip.
-    """
+    """A real record, so the serialise and deserialise round trip is exercised."""
 
     from azure.identity import AuthenticationRecord
 
@@ -290,25 +282,24 @@ def _Record(username: str):
 
 
 class _Browser:
-    """The library's browser credential as `disable_automatic_authentication`
-    makes it behave: silent where it has the account and Entra renews the token,
-    and `AuthenticationRequiredError` otherwise.
+    """The library's browser credential under `disable_automatic_authentication`:
+    silent with a record Entra will renew, `AuthenticationRequiredError` without
+    one."""
 
-    It is constructed with whatever record was loaded, which is the subject of
-    this section: a credential handed one answers without opening anything, and
-    one handed None cannot.
-    """
-
-    def __init__(self, record, *, signs_in_as, renews):
+    def __init__(self, record, *, signs_in_as, renews, cache_fails_late=False):
         self.record = record
         self.authenticated = []
         self.tokens = 0
         self._signs_in_as = signs_in_as
         self._renews = renews
+        #: The cache is built lazily, so it can be this call that finds it gone.
+        self._cache_fails_late = cache_fails_late
 
     def get_token(self, *scopes, **kwargs):
         from azure.identity import AuthenticationRequiredError
 
+        if self._cache_fails_late and self.authenticated:
+            raise UNENCRYPTABLE
         if self.record is None or not self._renews:
             raise AuthenticationRequiredError(
                 scopes=list(scopes), claims=kwargs.get("claims")
@@ -329,9 +320,15 @@ class _Browsers(list):
 
     renews = True
     signs_in_as = "someone@example.com"
+    cache_fails_late = False
 
     def build(self, *, cached: bool, record=None):
-        made = _Browser(record, signs_in_as=self.signs_in_as, renews=self.renews)
+        made = _Browser(
+            record,
+            signs_in_as=self.signs_in_as,
+            renews=self.renews,
+            cache_fails_late=cached and self.cache_fails_late,
+        )
         made.cached = cached
         self.append(made)
         return made
@@ -346,8 +343,6 @@ def browsers(monkeypatch):
 
 @weaver_test()
 def test_a_first_sign_in_opens_a_browser_and_keeps_the_account(browsers):
-    """Nothing is remembered, so the silent attempt cannot name an account."""
-
     token = auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
 
     assert token.token == "a-token"
@@ -357,11 +352,7 @@ def test_a_first_sign_in_opens_a_browser_and_keeps_the_account(browsers):
 
 @weaver_test()
 def test_a_later_process_reuses_the_sign_in_and_opens_nothing(browsers):
-    """The regression. A fresh `BrowserSignIn` stands in for a new command.
-
-    Which is what a second `weaver doctor` is: a new process, the same machine,
-    the Azure CLI still unavailable, and no browser.
-    """
+    """A fresh `BrowserSignIn` stands in for a new process."""
 
     auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
 
@@ -375,8 +366,6 @@ def test_a_later_process_reuses_the_sign_in_and_opens_nothing(browsers):
 
 @weaver_test()
 def test_a_sign_in_entra_will_not_renew_reaches_the_browser_once(browsers):
-    """A record does not authenticate the account for ever."""
-
     auth._save_authentication_record(_Record("someone@example.com"))
     browsers.renews = False
 
@@ -389,9 +378,7 @@ def test_a_sign_in_entra_will_not_renew_reaches_the_browser_once(browsers):
 
 
 @weaver_test()
-def test_the_account_a_reauthentication_settles_on_replaces_the_old_one(browsers):
-    """Signing in as somebody else makes them Weaver's remembered identity."""
-
+def test_signing_in_as_another_account_replaces_the_record(browsers):
     auth._save_authentication_record(_Record("first@example.com"))
     browsers.renews = False
     browsers.signs_in_as = "second@example.com"
@@ -402,13 +389,28 @@ def test_the_account_a_reauthentication_settles_on_replaces_the_old_one(browsers
 
 
 @weaver_test()
-def test_the_refused_request_is_what_the_sign_in_asks_for(browsers):
-    """Scopes, a claims challenge, the tenant and CAE all reach `authenticate`.
+def test_a_cache_lost_after_authenticating_remembers_nothing(browsers, capsys):
+    """The record is written after the cached token, so the fallback leaves none.
 
-    A sign-in that dropped them would come back with a token for something
-    other than what the caller asked for.
+    `authenticate` succeeds, and the `get_token` behind it is where the platform
+    reports it has nowhere to keep a token. The uncached credential then answers,
+    and a record written before that would name an account with no cached refresh
+    token behind it.
     """
 
+    browsers.cache_fails_late = True
+
+    token = auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert token.token == "a-token"
+    assert [made.cached for made in browsers] == [True, False]
+    assert len(browsers[1].authenticated) == 1
+    assert not auth._authentication_record_path().exists()
+    assert "no secure place to keep a sign-in" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_the_refused_request_is_what_the_sign_in_asks_for(browsers):
     browsers.renews = False
     claims = '{"access_token":{"nbf":{"essential":true}}}'
 
@@ -425,8 +427,6 @@ def test_the_refused_request_is_what_the_sign_in_asks_for(browsers):
 
 @weaver_test()
 def test_a_record_that_cannot_be_read_is_replaced(browsers, capsys):
-    """Convenience state, so an unusable one is signed in over rather than raised."""
-
     path = auth._authentication_record_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{ this is not a record", encoding="utf-8")
@@ -443,9 +443,6 @@ def test_a_record_that_cannot_be_read_is_replaced(browsers, capsys):
 def test_a_record_that_cannot_be_written_costs_the_reuse_and_not_the_token(
     browsers, monkeypatch, capsys
 ):
-    """The sign-in already happened, and failing the command after it would
-    throw away a browser round trip somebody has just completed."""
-
     def refuse(*arguments, **keywords):
         raise OSError("read-only file system")
 
@@ -459,8 +456,6 @@ def test_a_record_that_cannot_be_written_costs_the_reuse_and_not_the_token(
 
 @weaver_test()
 def test_a_half_written_record_is_never_left_behind(monkeypatch):
-    """Moved into place, so an interrupted command leaves the previous account."""
-
     replaced = []
     monkeypatch.setattr(
         auth.os, "replace", lambda source, into: replaced.append(source)
@@ -488,8 +483,6 @@ def test_the_record_is_owner_only_where_the_platform_has_such_a_mode():
 
 @weaver_test()
 def test_the_record_carries_no_token(browsers):
-    """Identity metadata is what is written. Secrets stay in the secure store."""
-
     auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
 
     kept = auth._authentication_record_path().read_text(encoding="utf-8")
@@ -500,12 +493,6 @@ def test_the_record_carries_no_token(browsers):
 
 @weaver_test()
 def test_a_signed_in_user_never_reads_the_remembered_account(credentials, monkeypatch):
-    """The Azure CLI answers, so `BrowserSignIn` is never built or asked.
-
-    Which is also why the file is not read: it is read where a browser sign-in
-    is being constructed, and there is none.
-    """
-
     def refuse():
         raise AssertionError("the remembered account was read for a CLI sign-in")
 
@@ -584,9 +571,7 @@ def test_a_machine_with_no_secure_storage_still_signs_in(browser, capsys):
 
 @weaver_test()
 def test_a_machine_with_no_secure_storage_remembers_nothing(browser):
-    """Without the token cache there is no refresh token for a later process to
-    reconstruct a sign-in from, so a remembered account would promise a silent
-    command that cannot happen."""
+    """A record with no cached refresh token behind it reuses nothing."""
 
     auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
 

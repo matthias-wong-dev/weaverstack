@@ -29,8 +29,8 @@ for:
 https://database.windows.net/.default
 ```
 
-Core never calls `prefer_cli_credential()`. The desktop CLI and Fabric pytest
-infrastructure own that policy.
+Core installs no credential. The desktop CLI and the Fabric pytest
+infrastructure own that policy, and both install `desktop_credential()`.
 
 ## Fabric within-workspace mode
 
