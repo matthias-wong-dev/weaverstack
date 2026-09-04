@@ -17,7 +17,7 @@ from support.weaver_test import register_session, weaver_test
 
 import weaver
 from weaver.config import load_workspace
-from weaver.initialise import CREATED, EXISTING
+from weaver.initialise import CREATED, EXISTING, READY
 from weaver.sessions import ConsoleSession
 
 
@@ -31,9 +31,9 @@ def estate(
 ):
     """The fixed items this tenant already holds, named as initialise takes them.
 
-    The Environment is named too. Initialise creates the item a project declares,
-    and this suite creates no Fabric item, so every name here is one the estate
-    already has.
+    The Environment is named too. Initialise creates the one a project declares
+    where the workspace has none, and this suite creates no Fabric item, so every
+    name here is one the estate already has, with Weaver already installed in it.
     """
 
     return {
@@ -51,8 +51,8 @@ def test_a_dry_run_reports_the_items_the_workspace_already_holds(
     """The read that decides create against reuse, asked of real Fabric.
 
     Through the suite's own Session, which is what attributes the crossing.
-    Initialise reads the workspace through the Session's client rather than one
-    of its own, so the control-plane work it does is counted.
+    Initialise reads the workspace through the Session's client, so the
+    control-plane work it does is counted where the rest of Weaver's is.
     """
 
     report = weaver.initialise(
@@ -82,14 +82,13 @@ def test_a_project_is_written_against_items_that_are_reused(
         catalogue=estate["catalogue"],
         environment=estate["environment"],
         lakehouse=estate["lakehouse"],
-        publish_environment=False,
         session=rest_session,
     )
 
     assert report.created == ()
     assert _status(report, "Catalogue") == EXISTING
     assert _status(report, "Lakehouse") == EXISTING
-    assert _status(report, "Environment") == EXISTING
+    assert _status(report, "Environment") == READY
 
     configured = load_workspace(tmp_path / "workspace-config.yml")
     assert configured.workspace == estate["workspace"]
@@ -113,7 +112,6 @@ def test_a_rerun_converges(estate, tmp_path, rest_session):
         catalogue=estate["catalogue"],
         environment=estate["environment"],
         lakehouse=estate["lakehouse"],
-        publish_environment=False,
         session=rest_session,
     )
     second = weaver.initialise(
@@ -122,7 +120,6 @@ def test_a_rerun_converges(estate, tmp_path, rest_session):
         catalogue=estate["catalogue"],
         environment=estate["environment"],
         lakehouse=estate["lakehouse"],
-        publish_environment=False,
         session=rest_session,
     )
 
@@ -156,7 +153,6 @@ def test_a_generated_warehouse_project_builds_loads_and_tests(
             environment=environment_name,
             warehouse=emptied_disposable_warehouse.item.name,
             example=True,
-            publish_environment=False,
             session=session,
         )
 

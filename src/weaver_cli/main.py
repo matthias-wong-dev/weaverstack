@@ -876,7 +876,10 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--environment",
-        help="Fabric Environment for running Weaver. Defaults to Weaver.",
+        help=(
+            "Fabric Environment this project runs against. It may be one the "
+            "workspace already has. Defaults to Weaver."
+        ),
     )
     parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
     parser.add_argument("--warehouse", help="Warehouse for SQL tables and views.")
@@ -894,19 +897,9 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
         help="Leave the example out.",
     )
     parser.add_argument(
-        "--no-publish-environment",
-        dest="publish_environment",
-        action="store_false",
-        default=None,
-        help=(
-            "Write the Environment definition without publishing it. Publishing "
-            "is the default from a desktop, and inside Fabric it is not."
-        ),
-    )
-    parser.add_argument(
         "--interactive",
         action="store_true",
-        help="Ask for every name, even ones already given.",
+        help="Ask for the optional names too, not only the ones a run needs.",
     )
     parser.add_argument(
         "--no-input",
@@ -919,6 +912,9 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
         help="Show what would be set up, and change nothing.",
     )
     parser.add_argument("--json", action="store_true", help="emit the result as JSON")
+    #: Consent to the one slow thing a run does. Collected at the prompt, never
+    #: given as an option: a run that cannot ask stops and says what to do.
+    parser.set_defaults(install_weaver=False)
 
 
 def _add_workspace_args(
@@ -1730,38 +1726,62 @@ def _build_once(args: argparse.Namespace) -> int:
 
 
 def handle_initialise(args: argparse.Namespace) -> int:
-    """Collect the names, set the project up, and say what to run next."""
+    """Collect the names, set the project up, and say what to run next.
 
-    import json
+    The Environment questions have Fabric answers behind them, so a Session is
+    open before they are asked and the operation runs in the same one. The
+    questions collect; the operation decides.
+    """
 
-    from .initialise import collect, equivalent_command, render, render_dry_run
+    from .initialise import (
+        collect,
+        collect_workspace,
+    )
 
     if args.interactive and args.no_input:
         raise CommandError("--interactive asks and --no-input never does.")
-    asked = collect(args, ask=not args.no_input)
     _prefer_desktop_credential()
 
-    # The catalogue and Environment defaults belong to the operation, so an
-    # option nobody gave is left out of the call.
-    named = {
-        keyword: value
-        for keyword, value in (
-            ("catalogue", args.catalogue),
-            ("environment", args.environment),
+    # The workspace first: which Environments there are, and whether Weaver is
+    # installed in one, are questions about a workspace, and a Session is opened
+    # on it to ask them.
+    asked = collect_workspace(args, ask=not args.no_input)
+    if args.no_input:
+        collect(args, ask=False)
+        return _report(
+            args, _initialise_once(args, session=_session(args)), asked=False
         )
-        if value
-    }
-    report = weaver.initialise(
-        args.repository,
-        workspace=args.workspace,
-        lakehouse=args.lakehouse,
-        warehouse=args.warehouse,
-        example=bool(args.example),
-        publish_environment=args.publish_environment,
-        dry_run=args.dry_run,
-        session=_session(args),
-        **named,
-    )
+
+    from weaver.config import resolve_workspace
+
+    if not args.workspace:
+        collect(args, ask=False)  # says which options a run with no terminal needs
+    with _running_session(args, resolve_workspace(workspace=args.workspace)) as opened:
+        from weaver.initialise import available_environments, environment_state
+
+        client = opened.resolver().client
+        asked = (
+            collect(
+                args,
+                environments=lambda: available_environments(
+                    args.workspace, client=client
+                ),
+                state_of=lambda name: environment_state(
+                    args.workspace, name, client=client
+                ),
+            )
+            or asked
+        )
+        report = _initialise_once(args, session=opened)
+    return _report(args, report, asked=asked)
+
+
+def _report(args: argparse.Namespace, report, *, asked: bool) -> int:
+    """Show one initialise result in the form this command line asked for."""
+
+    import json
+
+    from .initialise import equivalent_command, render, render_dry_run
 
     if args.json:
         print(json.dumps(report.to_mapping(), indent=2))
@@ -1775,6 +1795,34 @@ def handle_initialise(args: argparse.Namespace) -> int:
             print()
             print(f"  {equivalent_command(args)}")
     return 0 if report.succeeded else 1
+
+
+def _initialise_once(args: argparse.Namespace, *, session):
+    """Adapt command-line values to :func:`weaver.initialise`.
+
+    The catalogue and Environment defaults belong to the operation, so an option
+    nobody gave is left out of the call.
+    """
+
+    named = {
+        keyword: value
+        for keyword, value in (
+            ("catalogue", args.catalogue),
+            ("environment", args.environment),
+        )
+        if value
+    }
+    return weaver.initialise(
+        args.repository,
+        workspace=args.workspace,
+        lakehouse=args.lakehouse,
+        warehouse=args.warehouse,
+        example=bool(args.example),
+        install_weaver=args.install_weaver,
+        dry_run=args.dry_run,
+        session=session,
+        **named,
+    )
 
 
 def handle_check(args: argparse.Namespace) -> int:

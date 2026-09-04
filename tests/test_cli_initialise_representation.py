@@ -19,13 +19,21 @@ from weaver.errors import CommandError
 from weaver.initialise import (
     CREATED,
     EXISTING,
+    MISSING,
     PLANNED,
-    PUBLISHED,
+    READY,
+    UNPREPARED,
     ExampleOutcome,
     FabricItemOutcome,
     InitialiseReport,
 )
-from weaver_cli.initialise import collect, equivalent_command, render, render_dry_run
+from weaver_cli.initialise import (
+    collect,
+    collect_workspace,
+    equivalent_command,
+    render,
+    render_dry_run,
+)
 from weaver_cli.main import build_parser
 
 
@@ -103,12 +111,25 @@ def test_a_complete_command_line_asks_nothing():
     assert collect(args, stdin=stdin) is False
 
 
+ENVIRONMENTS = ("Analytics", "Data Engineering")
+
+
+def _ready(name):
+    return READY
+
+
+def _lists():
+    return ENVIRONMENTS
+
+
 @weaver_test()
 def test_the_questions_fill_in_what_is_missing():
-    args = _parse()
-    stdin = _Typed("Weaver Example\n\n\nLanding\nCurated\n\n")
+    """Workspace, catalogue, the Environment choice, the items, the example."""
 
-    assert collect(args, stdin=stdin) is True
+    args = _parse()
+    stdin = _Typed("Weaver Example\n\n2\n\nLanding\nCurated\n\n")
+
+    assert collect(args, stdin=stdin, environments=_lists, state_of=_ready) is True
     assert args.workspace == "Weaver Example"
     assert args.catalogue == "Catalogue"
     assert args.environment == "Weaver"
@@ -120,9 +141,9 @@ def test_the_questions_fill_in_what_is_missing():
 @weaver_test()
 def test_an_empty_answer_skips_an_optional_item():
     args = _parse()
-    stdin = _Typed("Weaver Example\n\n\n\nCurated\nn\n")
+    stdin = _Typed("Weaver Example\n\n2\n\n\nCurated\nn\n")
 
-    collect(args, stdin=stdin)
+    collect(args, stdin=stdin, environments=_lists, state_of=_ready)
 
     assert args.lakehouse is None
     assert args.warehouse == "Curated"
@@ -131,22 +152,29 @@ def test_an_empty_answer_skips_an_optional_item():
 
 @weaver_test()
 def test_a_value_already_given_is_not_asked_for_again():
-    args = _parse("--workspace", "Weaver Example")
-    stdin = _Typed("\n\nLanding\n\n\n")
+    args = _parse("--workspace", "Weaver Example", "--environment", "Weaver")
+    stdin = _Typed("\nLanding\n\n\n")
 
-    collect(args, stdin=stdin)
+    collect(args, stdin=stdin, state_of=_ready)
 
     assert args.workspace == "Weaver Example"
     assert args.lakehouse == "Landing"
 
 
 @weaver_test()
-def test_interactive_asks_even_when_nothing_is_missing():
-    args = _parse("--workspace", "Weaver Example", "--lakehouse", "Landing")
+def test_interactive_asks_for_the_optional_names_too():
+    args = _parse(
+        "--workspace",
+        "Weaver Example",
+        "--environment",
+        "Weaver",
+        "--lakehouse",
+        "Landing",
+    )
     args.interactive = True
-    stdin = _Typed("\n\nCurated\n\n")
+    stdin = _Typed("\nCurated\n\n")
 
-    assert collect(args, stdin=stdin) is True
+    assert collect(args, stdin=stdin, state_of=_ready) is True
     assert args.warehouse == "Curated"
 
 
@@ -188,7 +216,12 @@ def test_a_project_needs_a_lakehouse_or_a_warehouse():
 @weaver_test()
 def test_the_equivalent_command_repeats_the_answers():
     args = _parse()
-    collect(args, stdin=_Typed("Weaver Example\n\n\nLanding\nCurated\ny\n"))
+    collect(
+        args,
+        stdin=_Typed("Weaver Example\n\n2\n\nLanding\nCurated\ny\n"),
+        environments=_lists,
+        state_of=_ready,
+    )
 
     assert equivalent_command(args) == (
         'weaver initialise --workspace "Weaver Example" --catalogue Catalogue '
@@ -205,7 +238,7 @@ def _report(**kwargs):
         "workspace": "Weaver Example",
         "resources": (
             FabricItemOutcome("Catalogue", "Catalogue", CREATED),
-            FabricItemOutcome("Environment", "Weaver", PUBLISHED),
+            FabricItemOutcome("Environment", "Weaver", READY, action=CREATED),
             FabricItemOutcome("Lakehouse", "Landing", EXISTING),
             FabricItemOutcome("Warehouse", "Curated", CREATED),
         ),
@@ -230,6 +263,7 @@ def test_the_summary_reads_as_a_person_would_say_it(capsys):
     assert "Everything is ready." in shown
     assert "Your Weaver project is in ./repository." in shown
     assert "  Catalogue     Catalogue          created" in shown
+    assert "  Environment   Weaver             ready" in shown
     assert "  Lakehouse     Landing            already exists" in shown
     assert "built, loaded, tested" in shown
     assert "weaver build\n" in shown
@@ -244,7 +278,16 @@ def test_the_summary_uses_no_implementation_words(capsys):
     render(_report())
 
     shown = capsys.readouterr().out.lower()
-    for word in ("topology", "provision", "bootstrap", "native definition", "artefact"):
+    for word in (
+        "topology",
+        "provision",
+        "bootstrap",
+        "native definition",
+        "publication",
+        "staged librar",
+        "desired state",
+        "artefact",
+    ):
         assert word not in shown
 
 
@@ -296,7 +339,7 @@ class _Item:
 class _Credential:
     """A credential the Session can hold. Nothing here asks it for a token.
 
-    The suite refuses a real one outside `-m fabric`, and the command opens a
+    The suite declines a real one outside `-m fabric`, and the command opens a
     Session of its own, which acquires whatever `credential()` answers at
     construction.
     """
@@ -305,16 +348,26 @@ class _Credential:
         raise AssertionError("this test asks Fabric for nothing")
 
 
+class _Ready:
+    """An Environment definition with Weaver in it."""
+
+    def custom_libraries(self):
+        return ()
+
+    def external_libraries(self):
+        return "dependencies:\n  - pip:\n      - weaverstack\n"
+
+
 @pytest.fixture
-def workspace_holding_nothing(monkeypatch):
-    """A reachable workspace with no items in it."""
+def workspace(monkeypatch):
+    """A reachable workspace holding an Environment with Weaver installed."""
 
     from weaver.fabric import resources
 
     monkeypatch.setattr("weaver.fabric.auth.credential", _Credential)
 
     created: list[str] = []
-    held: list[_Item] = []
+    held: list[_Item] = [_Item("Weaver", resources.ENVIRONMENT)]
 
     monkeypatch.setattr(
         resources, "find_workspace", lambda name, client=None: _Workspace()
@@ -322,7 +375,25 @@ def workspace_holding_nothing(monkeypatch):
     monkeypatch.setattr(
         resources,
         "list_items",
-        lambda workspace, item_type=None, client=None: tuple(held),
+        lambda workspace, item_type=None, client=None: tuple(
+            item for item in held if item_type is None or item.type == item_type
+        ),
+    )
+    monkeypatch.setattr(
+        resources,
+        "find_item",
+        lambda workspace, name, *, item_type=None, client=None: (
+            next(
+                (
+                    item
+                    for item in held
+                    if item.name == name
+                    and (item_type is None or item.type == item_type)
+                ),
+                None,
+            )
+            or _raise_missing(name)
+        ),
     )
 
     def create(kind):
@@ -336,17 +407,29 @@ def workspace_holding_nothing(monkeypatch):
     monkeypatch.setattr(resources, "create_lakehouse", create(resources.LAKEHOUSE))
     monkeypatch.setattr(resources, "create_warehouse", create(resources.WAREHOUSE))
     monkeypatch.setattr(
+        "weaver.fabric.environment.read_definition",
+        lambda item, *, client=None: _Ready(),
+    )
+    monkeypatch.setattr(
+        "weaver.fabric.environment.publish_state",
+        lambda item, *, client=None: "Success",
+    )
+    monkeypatch.setattr(
         "weaver.fabric.publish_environment",
-        lambda *args, **kwargs: type("Published", (), {"published": True})(),
+        lambda *args, **kwargs: type("Published", (), {"action": "created"})(),
         raising=False,
     )
-    return created
+    return type("Workspace", (), {"created": created, "held": held})
+
+
+def _raise_missing(name):
+    from weaver.fabric.resources import ItemNotFoundError
+
+    raise ItemNotFoundError(f"{name!r} was not found")
 
 
 @weaver_test()
-def test_the_explicit_command_sets_a_project_up(
-    tmp_path, workspace_holding_nothing, capsys
-):
+def test_the_explicit_command_sets_a_project_up(tmp_path, workspace, capsys):
     from weaver_cli.main import main
 
     status = main(
@@ -362,13 +445,13 @@ def test_the_explicit_command_sets_a_project_up(
     )
 
     assert status == 0
-    assert workspace_holding_nothing == ["Warehouse/Catalogue", "Lakehouse/Landing"]
+    assert workspace.created == ["Warehouse/Catalogue", "Lakehouse/Landing"]
     assert (tmp_path / "workspace-config.yml").is_file()
     assert "Everything is ready." in capsys.readouterr().out
 
 
 @weaver_test()
-def test_a_dry_run_command_changes_nothing(tmp_path, workspace_holding_nothing, capsys):
+def test_a_dry_run_command_changes_nothing(tmp_path, workspace, capsys):
     from weaver_cli.main import main
 
     status = main(
@@ -385,15 +468,13 @@ def test_a_dry_run_command_changes_nothing(tmp_path, workspace_holding_nothing, 
     )
 
     assert status == 0
-    assert workspace_holding_nothing == []
+    assert workspace.created == []
     assert list(tmp_path.iterdir()) == []
     assert "No changes were made." in capsys.readouterr().out
 
 
 @weaver_test()
-def test_the_json_form_carries_the_whole_result(
-    tmp_path, workspace_holding_nothing, capsys
-):
+def test_the_json_form_carries_the_whole_result(tmp_path, workspace, capsys):
     import json
 
     from weaver_cli.main import main
@@ -450,3 +531,229 @@ def test_the_command_list_carries_one_spelling(capsys):
     assert "Set up a new Weaver project and the Fabric items it needs." in listed
     assert "initialize" not in listed
     assert "SUPPRESS" not in listed
+
+
+# --- choosing the Environment --------------------------------------------------
+#
+# A name on its own does not say whether it is one the workspace has or one to
+# make, so the choice comes first. Installing Weaver in it is the one slow thing
+# a run does, so it is one question asked before anything changes.
+
+
+@weaver_test()
+def test_an_existing_environment_is_chosen_from_the_workspaces_own():
+    args = _parse("--workspace", "Weaver Example", "--lakehouse", "Landing")
+    args.interactive = True
+    stdin = _Typed("\n\n1\n2\n\n\n\n")
+
+    collect(args, stdin=stdin, environments=_lists, state_of=_ready)
+
+    assert args.environment == "Data Engineering"
+    assert args.install_weaver is False
+
+
+@weaver_test()
+def test_a_new_environment_is_named(capsys):
+    args = _parse("--workspace", "Weaver Example", "--lakehouse", "Landing")
+    args.interactive = True
+    stdin = _Typed("\n\n2\nAnalytics Runtime\n\n\n")
+
+    collect(args, stdin=stdin, environments=_lists, state_of=_ready)
+
+    assert args.environment == "Analytics Runtime"
+    shown = capsys.readouterr().out
+    assert "1. Use an existing Environment" in shown
+    assert "2. Create a new Environment" in shown
+
+
+@weaver_test()
+def test_a_workspace_with_no_environments_offers_only_a_new_one(capsys):
+    args = _parse("--workspace", "Weaver Example", "--lakehouse", "Landing")
+    args.interactive = True
+    stdin = _Typed("\n\n\n\n\n")
+
+    collect(args, stdin=stdin, environments=lambda: (), state_of=_ready)
+
+    assert args.environment == "Weaver"
+    assert "no Environments yet" in capsys.readouterr().out
+
+
+@weaver_test()
+def test_installing_weaver_is_one_question_asked_once(capsys):
+    args = _parse(
+        "--workspace", "Weaver Example", "--environment", "Weaver", "--lakehouse", "L"
+    )
+    stdin = _Typed("y\n")
+
+    collect(args, stdin=stdin, state_of=lambda name: MISSING)
+
+    assert args.install_weaver is True
+    shown = capsys.readouterr().out
+    assert "Environment 'Weaver' will be created and Weaver will be installed" in shown
+    assert "about 5 minutes" in shown
+    assert shown.count("[Y/n]") == 1
+
+
+@weaver_test()
+def test_an_environment_without_weaver_says_what_is_needed(capsys):
+    args = _parse(
+        "--workspace",
+        "Weaver Example",
+        "--environment",
+        "Data Engineering",
+        "--lakehouse",
+        "L",
+    )
+
+    collect(args, stdin=_Typed("y\n"), state_of=lambda name: UNPREPARED)
+
+    shown = capsys.readouterr().out
+    assert "Weaver needs to be installed in the Fabric Environment" in shown
+    assert "about 5 minutes" in shown
+
+
+@weaver_test()
+def test_declining_the_installation_leaves_the_run_without_consent():
+    args = _parse(
+        "--workspace", "Weaver Example", "--environment", "Weaver", "--lakehouse", "L"
+    )
+
+    collect(args, stdin=_Typed("n\n"), state_of=lambda name: MISSING)
+
+    assert args.install_weaver is False
+
+
+@weaver_test()
+def test_a_ready_environment_is_not_asked_about(capsys):
+    args = _parse(
+        "--workspace", "Weaver Example", "--environment", "Weaver", "--lakehouse", "L"
+    )
+
+    assert collect(args, stdin=_Typed(""), state_of=_ready) is False
+    assert capsys.readouterr().out == ""
+
+
+@weaver_test()
+def test_a_dry_run_asks_nothing_about_installing(capsys):
+    """It changes nothing, so the installation is reported and not asked about."""
+
+    args = _parse(
+        "--workspace",
+        "Weaver Example",
+        "--environment",
+        "Weaver",
+        "--lakehouse",
+        "L",
+        "--dry-run",
+    )
+
+    assert collect(args, stdin=_Typed(""), state_of=lambda name: MISSING) is False
+    assert args.install_weaver is False
+
+
+@weaver_test()
+def test_the_workspace_is_asked_for_before_anything_that_needs_it():
+    """Which Environments there are is a question about a workspace."""
+
+    args = _parse()
+
+    assert collect_workspace(args, stdin=_Typed("Weaver Example\n")) is True
+    assert args.workspace == "Weaver Example"
+
+
+@weaver_test()
+def test_no_input_leaves_the_workspace_unasked():
+    args = _parse()
+
+    assert collect_workspace(args, ask=False, stdin=_Typed("Weaver Example\n")) is False
+    assert args.workspace is None
+
+
+@weaver_test()
+def test_publishing_is_not_a_command_line_option():
+    """The user chooses an Environment; how Weaver gets into it is Weaver's."""
+
+    listed = build_parser().format_help()
+
+    assert "--no-publish-environment" not in listed
+    assert "publish" not in _initialise_help()
+
+
+def _initialise_help() -> str:
+    import contextlib
+    import io
+
+    parser = build_parser()
+    initialise = parser._subparsers._group_actions[0].choices["initialise"]
+    stream = io.StringIO()
+    with contextlib.redirect_stdout(stream):
+        initialise.print_help()
+    return stream.getvalue()
+
+
+@weaver_test()
+def test_a_missing_environment_without_a_terminal_fails_before_anything_changes(
+    tmp_path, workspace, capsys
+):
+    from weaver_cli.main import main
+
+    workspace.held.clear()
+
+    status = main(
+        [
+            "initialise",
+            str(tmp_path),
+            "--workspace",
+            "Weaver Example",
+            "--warehouse",
+            "Curated",
+            "--no-example",
+            "--no-input",
+        ]
+    )
+
+    assert status == 1
+    assert workspace.created == []
+    assert list(tmp_path.iterdir()) == []
+    assert "does not exist" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_list_of_one_is_taken_rather_than_asked(capsys):
+    """A workspace with one Environment is not offered a choice between them."""
+
+    args = _parse("--workspace", "Weaver Example", "--lakehouse", "Landing")
+    args.interactive = True
+    stdin = _Typed("\n\n1\n\n\n")
+
+    collect(args, stdin=stdin, environments=lambda: ("weaver",), state_of=_ready)
+
+    assert args.environment == "weaver"
+    shown = capsys.readouterr().out
+    assert "Choose an Environment: 1" in shown
+    assert "Choose an Environment [1]" not in shown
+
+
+@weaver_test()
+def test_running_out_of_answers_stops_rather_than_asking_again():
+    """End of input is not an answer, so the same question is not repeated."""
+
+    args = _parse()
+    args.interactive = True
+
+    with pytest.raises(CommandError) as raised:
+        collect(args, stdin=_Typed("Weaver Example\n"), state_of=_ready)
+
+    assert "answers ran out" in str(raised.value)
+
+
+@weaver_test()
+def test_interactive_asks_even_where_there_is_no_terminal():
+    """`--interactive` is the forcing flag, so it reads whatever it was given."""
+
+    args = _parse()
+    args.interactive = True
+
+    collect_workspace(args, stdin=io.StringIO("Weaver Example\n"))
+
+    assert args.workspace == "Weaver Example"

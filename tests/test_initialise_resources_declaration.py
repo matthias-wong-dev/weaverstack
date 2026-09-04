@@ -19,9 +19,11 @@ from weaver.fabric import resources
 from weaver.initialise import (
     CREATED,
     EXISTING,
+    INSTALL,
     PLANNED,
-    PUBLISHED,
+    READY,
     UNCHANGED,
+    UPDATED,
     InitialiseError,
 )
 
@@ -44,8 +46,23 @@ class _Item:
 class _Publication:
     """What `publish_environment` answers, reduced to what initialise reads."""
 
-    def __init__(self, published: bool) -> None:
-        self.published = published
+    def __init__(self, action: str = CREATED) -> None:
+        self.action = action
+
+
+class _Definition:
+    """An Environment definition, as much of one as readiness is read from."""
+
+    def __init__(self, *, weaver: bool) -> None:
+        self._weaver = weaver
+
+    def custom_libraries(self):
+        return ()
+
+    def external_libraries(self):
+        return "dependencies:\n  - pip:\n" + (
+            "      - weaverstack\n" if self._weaver else ""
+        )
 
 
 class _Resolver:
@@ -67,7 +84,8 @@ def fabric(monkeypatch):
     held: list[_Item] = []
     created: list[str] = []
     published: list[str] = []
-    environments: list[str] = []
+    #: Whether the workspace's Environment already carries Weaver.
+    weaver_installed = [True]
 
     def find_workspace(name, *, client=None):
         return _Workspace()
@@ -88,13 +106,13 @@ def fabric(monkeypatch):
         return held[-1]
 
     def publish_environment(workspace_name, environment=None, *, path=None, **kwargs):
-        published.append(str(path))
-        return _Publication(published=True)
-
-    def create_with_definition(workspace, name, definition, *, client=None):
-        environments.append(name)
-        held.append(_Item(name, resources.ENVIRONMENT))
-        return held[-1]
+        published.append(environment if environment is not None else str(path))
+        # Fabric now holds it with Weaver in it, which is what a rerun finds.
+        weaver_installed[0] = True
+        if environment is None:
+            held.append(_Item("Weaver", resources.ENVIRONMENT))
+            return _Publication(action=CREATED)
+        return _Publication(action=UPDATED)
 
     monkeypatch.setattr(resources, "find_workspace", find_workspace)
     monkeypatch.setattr(resources, "list_items", list_items)
@@ -104,7 +122,12 @@ def fabric(monkeypatch):
         "weaver.fabric.publish_environment", publish_environment, raising=False
     )
     monkeypatch.setattr(
-        "weaver.fabric.environment.create_with_definition", create_with_definition
+        "weaver.fabric.environment.read_definition",
+        lambda item, *, client=None: _Definition(weaver=weaver_installed[0]),
+    )
+    monkeypatch.setattr(
+        "weaver.fabric.environment.publish_state",
+        lambda item, *, client=None: "Success" if weaver_installed[0] else "",
     )
 
     from weaver.sessions.testing import TestSession
@@ -117,7 +140,7 @@ def fabric(monkeypatch):
             "held": held,
             "created": created,
             "published": published,
-            "environments": environments,
+            "weaver_installed": weaver_installed,
             "session": session,
         },
     )
@@ -129,6 +152,7 @@ def _initialise(tmp_path, fabric, **kwargs):
         "lakehouse": "Landing",
         "warehouse": "Curated",
         "example": False,
+        "install_weaver": True,
         "session": fabric.session,
     }
     defaults.update(kwargs)
@@ -137,6 +161,10 @@ def _initialise(tmp_path, fabric, **kwargs):
 
 def _status(report, role: str) -> str:
     return next(outcome.status for outcome in report.resources if outcome.role == role)
+
+
+def _action(report, role: str) -> str | None:
+    return next(outcome.action for outcome in report.resources if outcome.role == role)
 
 
 @weaver_test()
@@ -181,6 +209,7 @@ def test_a_rerun_creates_nothing_twice(tmp_path, fabric):
     assert len(fabric.created) == 3
     assert first.created == (
         "Catalogue/Catalogue",
+        "Environment/Weaver",
         "Lakehouse/Landing",
         "Warehouse/Curated",
     )
@@ -231,52 +260,115 @@ def test_a_failed_creation_names_what_fabric_said(tmp_path, fabric, monkeypatch)
     assert "run `weaver initialise` again" in message
 
 
+# --- the Fabric Environment ----------------------------------------------------
+#
+# Every project runs against one with Weaver installed in it. Three states, and
+# one action that moves the first two to the third. Installing takes minutes, so
+# a run that was not given consent stops before anything changes.
+
+
+def _environment(fabric, *, present: bool, weaver: bool = True):
+    """Put the workspace's Environment into one of the three states."""
+
+    fabric.weaver_installed[0] = weaver
+    if present:
+        fabric.held.append(_Item("Weaver", resources.ENVIRONMENT))
+
+
 @weaver_test()
-def test_the_environment_is_published_from_a_desktop(tmp_path, fabric):
+def test_an_environment_with_weaver_in_it_is_used_as_it_is(tmp_path, fabric):
+    _environment(fabric, present=True, weaver=True)
+
+    report = _initialise(tmp_path, fabric)
+
+    assert fabric.published == []
+    assert _status(report, "Environment") == READY
+    assert _action(report, "Environment") == UNCHANGED
+
+
+@weaver_test()
+def test_an_environment_without_weaver_has_weaver_installed_in_it(tmp_path, fabric):
+    """Only Weaver's own libraries change: the Environment is somebody else's."""
+
+    _environment(fabric, present=True, weaver=False)
+
+    report = _initialise(tmp_path, fabric)
+
+    assert fabric.published == ["Weaver"]
+    assert _status(report, "Environment") == READY
+    assert _action(report, "Environment") == UPDATED
+    assert not (tmp_path / "Environment").exists()
+
+
+@weaver_test()
+def test_a_missing_environment_is_created_from_the_generated_definition(
+    tmp_path, fabric
+):
+    _environment(fabric, present=False)
+
     report = _initialise(tmp_path, fabric)
 
     assert fabric.published == [str(tmp_path / "Environment" / "Weaver.Environment")]
-    assert _status(report, "Environment") == PUBLISHED
+    assert _status(report, "Environment") == READY
+    assert _action(report, "Environment") == CREATED
+    assert (tmp_path / "Environment" / "Weaver.Environment" / ".platform").is_file()
+    assert "Environment/Weaver" in report.created
 
 
 @weaver_test()
-def test_an_unchanged_environment_reports_no_publication(tmp_path, fabric, monkeypatch):
-    monkeypatch.setattr(
-        "weaver.fabric.publish_environment",
-        lambda *args, **kwargs: _Publication(published=False),
-        raising=False,
-    )
+def test_no_definition_is_written_for_an_environment_the_workspace_has(
+    tmp_path, fabric
+):
+    """That Environment is not this project's to describe."""
+
+    _environment(fabric, present=True, weaver=True)
 
     report = _initialise(tmp_path, fabric)
 
-    assert _status(report, "Environment") == UNCHANGED
+    assert not [path for path in report.files if path.startswith("Environment/")]
+    assert not (tmp_path / "Environment").exists()
 
 
 @weaver_test()
-def test_publishing_can_be_declined(tmp_path, fabric):
-    """What a notebook run does: the item is made, and no publication is waited on.
+def test_a_missing_environment_without_consent_stops_before_anything_changes(
+    tmp_path, fabric
+):
+    _environment(fabric, present=False)
 
-    The item still has to exist. A generated project names an Environment, and a
-    desktop build proves its targets are there before it opens anything, so a
-    project naming one the workspace has not got would refuse to build.
-    """
+    with pytest.raises(InitialiseError) as raised:
+        _initialise(tmp_path, fabric, install_weaver=False)
 
-    report = _initialise(tmp_path, fabric, publish_environment=False)
+    message = str(raised.value)
+    assert "The Fabric Environment 'Weaver' does not exist." in message
+    assert "interactively" in message
+    assert fabric.created == []
+    assert list(tmp_path.iterdir()) == []
 
+
+@weaver_test()
+def test_an_unprepared_environment_without_consent_says_what_to_do(tmp_path, fabric):
+    _environment(fabric, present=True, weaver=False)
+
+    with pytest.raises(InitialiseError) as raised:
+        _initialise(tmp_path, fabric, install_weaver=False)
+
+    message = str(raised.value)
+    assert "does not have Weaver installed" in message
+    assert "prepare the Environment" in message
+    assert fabric.created == []
+    assert list(tmp_path.iterdir()) == []
+
+
+@weaver_test()
+def test_a_dry_run_shows_the_installation_without_consent(tmp_path, fabric):
+    """A dry run changes nothing, so it needs no consent and asks for none."""
+
+    _environment(fabric, present=True, weaver=False)
+
+    report = _initialise(tmp_path, fabric, install_weaver=False, dry_run=True)
+
+    assert _status(report, "Environment") == INSTALL
     assert fabric.published == []
-    assert fabric.environments == ["Weaver"]
-    assert _status(report, "Environment") == CREATED
-    assert (tmp_path / "Environment" / "Weaver.Environment" / ".platform").is_file()
-
-
-@weaver_test()
-def test_an_environment_that_is_there_is_not_made_again(tmp_path, fabric):
-    fabric.held.append(_Item("Weaver", resources.ENVIRONMENT))
-
-    report = _initialise(tmp_path, fabric, publish_environment=False)
-
-    assert fabric.environments == []
-    assert _status(report, "Environment") == EXISTING
 
 
 @weaver_test()
@@ -327,7 +419,7 @@ class _Passed:
 
 @pytest.fixture
 def operations(monkeypatch):
-    """Build, load and test, recorded rather than run."""
+    """Build, load and test, each recording that it was called."""
 
     ran: list[str] = []
 

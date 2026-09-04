@@ -279,41 +279,17 @@ def test_the_build_succeeds_against_an_empty_lakehouse_with_no_prior_preparation
     assert result.report.status == "succeeded"
 
 
-# --- no build path reaches a second initialisation lifecycle ------------------
+# --- setting a project up owns no catalogue lifecycle -------------------------
 
 
 @weaver_test()
-def test_no_build_module_reaches_the_initialisation_wrapper():
-    """`initialise` is a compatibility shell; build must not route through it.
+def test_initialise_owns_no_catalogue_ddl_or_publication():
+    """`weaver initialise` provisions the Warehouse; the build fills it.
 
-    Source-level because the failure it guards is a reintroduced call, and the
-    cheapest honest statement of "build does not do this" is that the build
-    modules do not name it. A behavioural version would have to stand up each of
-    the three platform paths to prove a negative about all of them.
+    Source-level, because what it guards is a reintroduced shortcut, and the
+    cheapest honest statement of "initialise does not do this" is that its module
+    does not name it.
     """
-
-    core = Path(__file__).resolve().parents[2] / "src" / "weaver"
-    build_modules = [
-        *sorted((core / "operations").rglob("*.py")),
-        *sorted((core / "build_bundle").rglob("*.py")),
-    ]
-
-    offenders = [
-        module.name
-        for module in build_modules
-        if "initialise_catalogue" in module.read_text(encoding="utf-8")
-        or "prepare_catalogue" in module.read_text(encoding="utf-8")
-    ]
-
-    assert not offenders, (
-        "these build modules call the initialisation wrapper; the catalogue is "
-        f"created by the ordinary plan instead: {offenders}"
-    )
-
-
-@weaver_test()
-def test_the_initialisation_wrapper_owns_no_catalogue_ddl_or_publication():
-    """Thin means thin: it selects the built-in item and delegates."""
 
     source = (
         Path(__file__).resolve().parents[2] / "src" / "weaver" / "initialise.py"
@@ -329,6 +305,7 @@ def test_the_initialisation_wrapper_owns_no_catalogue_ddl_or_publication():
         "read_target_inventories",
     ):
         assert forbidden not in source, (
-            f"initialise.py names {forbidden!r}; it must delegate the whole "
-            "lifecycle to the ordinary build path"
+            f"initialise.py names {forbidden!r}; the catalogue tables are the "
+            "ordinary build's, and setting a project up creates the Warehouse "
+            "they live in"
         )

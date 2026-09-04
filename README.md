@@ -47,10 +47,29 @@ whole thing work:
 ```text
 Fabric workspace: My Fabric Workspace
 Catalogue [Catalogue]:
-Environment [Weaver]:
+
+Fabric Environment:
+  1. Use an existing Environment
+  2. Create a new Environment
+
+Choose [1/2]: 2
+Environment name [Weaver]:
+
 Lakehouse [skip]: Landing
 Warehouse [skip]: Curated
 Would you like to create and run a small Sales example? [Y/n]:
+```
+
+Every project runs against a Fabric Environment with Weaver installed in it. You
+can use one your workspace already has or create a new one; where Weaver is not
+in it yet, you are asked once before anything changes:
+
+```text
+Environment 'Weaver' will be created and Weaver will be installed in it.
+
+Installing Weaver in Fabric can take about 5 minutes.
+
+Would you like to continue? [Y/n]:
 ```
 
 The same run, written out, which is the form to keep in a script:
@@ -68,6 +87,10 @@ weaver initialise \
 `--dry-run` shows what would be set up and changes nothing. Naming an item is
 the request to have it, so a missing one is created; a rerun reuses whatever is
 already there.
+
+Written out like that, nothing is asked, so the Environment has to be one that
+already has Weaver in it. Run `weaver initialise` on its own to be asked, or
+prepare the Environment first.
 
 From a Fabric notebook the project is the same, and the workspace is the one the
 notebook is running in:
@@ -90,9 +113,9 @@ weaver.initialise(
 )
 ```
 
-The Environment definition is written there and not published, because a
-notebook already has Weaver from `%pip install`. Publish it when you first drive
-the project from a desktop.
+The workspace is the notebook's own. Pass `install_weaver=True` where the
+Environment is missing or has no Weaver in it yet, which is the same consent the
+prompt asks for and takes about five minutes.
 
 From the project directory, the ordinary commands need nothing else:
 

@@ -96,8 +96,6 @@ def test_internal_composition_seams_are_not_top_level_attributes():
         "wipe_sql_target",
         "generate_item_build_bundle",
         "install_bundle_archive",
-        "prepare_catalogue",
-        "initialise_catalogue",
         # Load planning, resolution, dispatch and logging stay in their owning
         # modules: what the namespace exposes is the operation and what it
         # returns, never how it decided.

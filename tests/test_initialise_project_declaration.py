@@ -2,8 +2,8 @@
 
 A generated project is a reference implementation: it is the first Weaver
 repository most users see, and the shape they copy. So every generated file is
-parsed here by the reader a user's own project goes through, and the three
-topologies are each checked for the things that would teach the wrong thing.
+parsed here by the same parser a user's own project goes through, and each of
+the three shapes is checked for what it would otherwise teach.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.config import load_workspace
-from weaver.errors import CommandError
+from weaver.errors import CommandError, IdentityError
 from weaver.fabric.environment_definition import (
     environment_name_from_path,
     read_environment_definition,
@@ -41,9 +41,9 @@ def _request(shape: str, *, example: bool) -> ProjectRequest:
     )
 
 
-def _project(tmp_path, shape: str, *, example: bool):
+def _project(tmp_path, shape: str, *, example: bool, define_environment: bool = True):
     request = _request(shape, example=example)
-    files = _generated_files(request)
+    files = _generated_files(request, define_environment=define_environment)
     _write(tmp_path, files)
     return request, files
 
@@ -98,7 +98,7 @@ def test_the_environment_definition_reads_and_names_itself(tmp_path):
 
 @weaver_test()
 def test_the_composition_runs_build_load_and_test(tmp_path):
-    """Read with the reader `weaver compose` uses, which lives in the CLI."""
+    """Parsed by `weaver compose`'s own loader, which lives in the CLI."""
 
     from weaver_cli.compose import load_composition
 
@@ -134,7 +134,7 @@ def test_lakehouse_tables_are_written_under_the_tables_area(tmp_path):
 
 @weaver_test()
 def test_no_schema_document_is_written(tmp_path):
-    """An authored object implies its schema, so `Sales.yml` would be noise."""
+    """An authored object implies its schema, so `Sales.yml` carries nothing."""
 
     _, files = _project(tmp_path, "both", example=True)
 
@@ -169,10 +169,10 @@ def test_a_warehouse_on_its_own_seeds_its_own_customers(tmp_path):
 @weaver_test()
 def test_generation_is_deterministic(tmp_path):
     """The same request twice writes the same bytes, which is what lets a rerun
-    converge instead of reporting every file as changed."""
+    converge. Nothing generated carries the day it was written."""
 
-    first = _generated_files(_request("both", example=True))
-    second = _generated_files(_request("both", example=True))
+    first = _generated_files(_request("both", example=True), define_environment=True)
+    second = _generated_files(_request("both", example=True), define_environment=True)
 
     assert first == second
 
@@ -192,3 +192,73 @@ def test_an_empty_item_keeps_its_folders(tmp_path):
     assert (tmp_path / "Lakehouse" / "Landing" / "Tables" / ".gitkeep").is_file()
     assert (tmp_path / "Lakehouse" / "Landing" / "Files" / ".gitkeep").is_file()
     assert (tmp_path / "Warehouse" / "Curated" / ".gitkeep").is_file()
+
+
+# --- names become paths, so they are validated before any path is built --------
+
+
+@pytest.mark.parametrize(
+    "name", ["../../outside", "a/b", "..", "", "  ", "with:colon", "star*"]
+)
+@pytest.mark.parametrize("field", ["lakehouse", "warehouse", "environment"])
+@weaver_test()
+def test_a_name_that_is_not_an_item_name_is_refused(tmp_path, field, name):
+    """Before generation, so nothing reaches a path built from it.
+
+    A generated project is written under the destination and parsed under a
+    temporary root, and the identity rules run where the request is made, before
+    either path exists.
+    """
+
+    values = {"workspace": WORKSPACE, "catalogue": "Catalogue", "environment": "Weaver"}
+    values.setdefault("lakehouse", "Landing")
+    values[field] = name
+
+    with pytest.raises(IdentityError):
+        ProjectRequest(**values)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@weaver_test()
+def test_a_path_like_name_writes_nothing_anywhere(tmp_path, monkeypatch):
+    """The whole claim: nothing in the destination, and nothing outside it.
+
+    Watched at the one call that writes, which sees every path a run produces
+    wherever it points.
+    """
+
+    import importlib
+
+    import weaver
+
+    operation = importlib.import_module("weaver.initialise")
+    written: list[str] = []
+    monkeypatch.setattr(
+        operation,
+        "_write",
+        lambda destination, files: written.extend(
+            str(destination / relative) for relative in files
+        ),
+    )
+
+    with pytest.raises(IdentityError):
+        weaver.initialise(tmp_path, workspace=WORKSPACE, lakehouse="../../outside")
+
+    assert written == []
+    assert list(tmp_path.iterdir()) == []
+
+
+@weaver_test()
+def test_a_name_is_taken_as_it_is_written_once_the_spaces_are_gone(tmp_path):
+    """Fabric display names hold spaces, so only the edges are trimmed."""
+
+    request = ProjectRequest(
+        workspace=" Weaver Example ",
+        catalogue="Catalogue",
+        environment="Weaver",
+        lakehouse=" Landing Zone ",
+    )
+
+    assert request.workspace == "Weaver Example"
+    assert request.lakehouse == "Landing Zone"

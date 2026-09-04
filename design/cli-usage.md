@@ -23,9 +23,45 @@ already exist; a Catalogue, Environment, Lakehouse or Warehouse that does not is
 created. Naming an item is the request to have it, so nothing is asked per item.
 
 Options are collected at a prompt when a terminal is there to answer and a
-required value is missing. `--interactive` asks for every name, `--no-input`
-never asks and names the options a run is short of, and `--dry-run` shows what
-would be set up without changing anything.
+required value is missing. `--interactive` asks for the optional names too,
+`--no-input` never asks and names the options a run is short of, and `--dry-run`
+shows what would be set up without changing anything.
+
+### The Fabric Environment
+
+Every project runs against a Fabric Environment with Weaver installed in it. The
+prompt offers the choice, because a name on its own does not say which is meant:
+
+```text
+Fabric Environment:
+  1. Use an existing Environment
+  2. Create a new Environment
+```
+
+Choosing the first lists the Environments the workspace has. Either way, where
+Weaver is not installed there yet, one question is asked before anything changes:
+
+```text
+Weaver needs to be installed in the Fabric Environment 'Data Engineering'
+before this project can run.
+
+Installing Weaver in Fabric can take about 5 minutes.
+
+Would you like to install it now? [Y/n]:
+```
+
+An existing Environment keeps everything else it declares. Only Weaver's own
+libraries are added.
+
+A run that cannot ask settles nothing implicitly. `--no-input`, and any run with
+no terminal, stops before mutation and says what to do:
+
+```text
+The Fabric Environment 'Data Engineering' does not have Weaver installed.
+
+Run `weaver initialise` interactively to install Weaver in this Environment,
+or prepare the Environment before running this command again.
+```
 
 ```bash
 weaver initialise ./project \
@@ -56,9 +92,9 @@ The catalogue Warehouse gets no authored folder. Weaver owns the `_` schema
 there and the first ordinary build creates its tables, so `Warehouse/Catalogue/`
 would invite authoring into the item Weaver keeps its own tables in.
 
-The Environment definition is published from a desktop and written without
-publishing inside a Fabric session, where `%pip install weaverstack` has already
-supplied Weaver. `--no-publish-environment` declines it either way.
+A new Environment is created from a definition written into the project, at
+`Environment/<Name>.Environment`. One the workspace already has is not the
+project's to describe, so no definition is written for it.
 
 Provisioning is initialise's, and building is `build`'s. A build performs a
 read-only preflight and creates no Fabric item, so a missing target is a build

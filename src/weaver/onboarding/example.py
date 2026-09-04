@@ -4,7 +4,7 @@ Three shapes, from the same parts. A Lakehouse holds a folder of exported
 customers, a Delta table built from it and an Assumption about that table. A
 Warehouse holds reference regions, a table joining customers to them and an
 Assumption. With both, the Warehouse reads the Lakehouse's customers through a
-logical shortcut instead of seeding its own.
+logical shortcut, and seeds no customers of its own.
 
 `Sales` is the business schema and is implied by the objects themselves, so no
 schema document is written. The Fabric item names are the ones the user chose.
@@ -18,8 +18,11 @@ from .project import ProjectRequest
 #: The schema every generated object belongs to.
 SCHEMA = "Sales"
 
-#: Written into the Revision notes of each generated document.
-CREATED_ON = "2026-09-04"
+
+#: Generated documents carry no `Revision notes:`. The key records what changed
+#: and when; a generated file has no history yet, and the same request has to
+#: produce the same bytes on any day, which is what lets a rerun converge.
+
 
 _CUSTOMERS_CSV = """\
 Customer id,Customer name,Region code
@@ -44,9 +47,6 @@ Incremental: false
 Notes: |
   A real deployment fetches the export here, over SFTP or from an API. This one
   writes the file itself, so the project loads with nothing set up beside it.
-
-Revision notes:
-  - {created} Created.
 """
 
 from weaver import Folder
@@ -69,7 +69,7 @@ _LAKEHOUSE_TABLE = '''\
 """
 Table ID: Sales.Customer
 
-Description: One row per customer the sales system knows about.
+Description: One row per customer in the sales system.
 
 Lineage: $Files/Sales.Customers
 
@@ -85,9 +85,6 @@ Schema:
 Notes: |
   Read from the export folder, so the table can be rebuilt from files that were
   kept.
-
-Revision notes:
-  - {created} Created.
 """
 
 from Files.Sales__Customers import Sales__Customers
@@ -117,9 +114,6 @@ Description: Every customer carries a name and a region.
 Notes: |
   An Assumption states something about the data on its own, and the rows it
   returns are what contradict the statement. Holding looks like an empty result.
-
-Revision notes:
-  - {created} Created.
 """
 
 from Tables.Sales__Customer import Sales__Customer
@@ -152,9 +146,6 @@ Comparison columns: Region name
 Schema:
   Region code: varchar(10)
   Region name: varchar(100)
-
-Revision notes:
-  - {created} Created.
 */
 
 select v.[Region code]
@@ -169,7 +160,7 @@ _WAREHOUSE_CUSTOMER = """\
 /*
 Table ID: Sales.Customer
 
-Description: One row per customer the sales system knows about.
+Description: One row per customer in the sales system.
 
 Lineage: Reference data, maintained in this project.
 
@@ -181,9 +172,6 @@ Schema:
   Customer id: varchar(50)
   Customer name: varchar(200)
   Region code: varchar(10)
-
-Revision notes:
-  - {created} Created.
 */
 
 select v.[Customer id]
@@ -216,9 +204,6 @@ Schema:
 Notes: |
   Weaver reads the dependencies out of the query, so this table loads after both
   the customers and the regions it selects from.
-
-Revision notes:
-  - {created} Created.
 */
 
 select c.[Customer id]
@@ -232,15 +217,12 @@ _WAREHOUSE_ASSUMPTION = """\
 /*
 Assumption ID: Sales.CustomerByRegionValid
 
-Description: Every customer landed in a region the estate knows.
+Description: Every customer landed in a region the estate declares.
 
 Notes: |
   A T-SQL validation compiles to a procedure anyone can run without Weaver:
 
       exec [_].[Assumption Sales.CustomerByRegionValid];
-
-Revision notes:
-  - {created} Created.
 */
 
 select [Customer id]
@@ -266,23 +248,15 @@ def example_files(request: ProjectRequest) -> dict[str, str]:
     files: dict[str, str] = {}
     if request.lakehouse:
         item = f"{LAKEHOUSE}/{request.lakehouse}"
-        files[f"{item}/Files/Sales__Customers.py"] = _FOLDER.format(
-            created=CREATED_ON, csv=_CUSTOMERS_CSV
-        )
-        files[f"{item}/Tables/Sales__Customer.py"] = _LAKEHOUSE_TABLE.format(
-            created=CREATED_ON
-        )
-        files[f"{item}/assumptions/Sales__CustomerValid.py"] = (
-            _LAKEHOUSE_ASSUMPTION.format(created=CREATED_ON)
-        )
+        files[f"{item}/Files/Sales__Customers.py"] = _FOLDER.format(csv=_CUSTOMERS_CSV)
+        files[f"{item}/Tables/Sales__Customer.py"] = _LAKEHOUSE_TABLE
+        files[f"{item}/assumptions/Sales__CustomerValid.py"] = _LAKEHOUSE_ASSUMPTION
     if request.warehouse:
         item = f"{WAREHOUSE}/{request.warehouse}"
-        files[f"{item}/Sales.Region.sql"] = _WAREHOUSE_REGION.format(created=CREATED_ON)
-        files[f"{item}/Sales.CustomerByRegion.sql"] = _WAREHOUSE_JOIN.format(
-            created=CREATED_ON
-        )
+        files[f"{item}/Sales.Region.sql"] = _WAREHOUSE_REGION
+        files[f"{item}/Sales.CustomerByRegion.sql"] = _WAREHOUSE_JOIN
         files[f"{item}/assumptions/Sales.CustomerByRegionValid.sql"] = (
-            _WAREHOUSE_ASSUMPTION.format(created=CREATED_ON)
+            _WAREHOUSE_ASSUMPTION
         )
         if request.lakehouse:
             # The customers come from the Lakehouse through a shortcut, so the
@@ -293,7 +267,5 @@ def example_files(request: ProjectRequest) -> dict[str, str]:
                 schema=SCHEMA,
             )
         else:
-            files[f"{item}/Sales.Customer.sql"] = _WAREHOUSE_CUSTOMER.format(
-                created=CREATED_ON
-            )
+            files[f"{item}/Sales.Customer.sql"] = _WAREHOUSE_CUSTOMER
     return files

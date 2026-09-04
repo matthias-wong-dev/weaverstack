@@ -10,6 +10,12 @@ Naming an item here is the request to have it, so nothing asks per item.
 whatever already exists, which is what makes a run that stopped part-way safe to
 repeat.
 
+Every project runs against a Fabric Environment with Weaver installed in it.
+Whether that Environment is one the workspace already has or one this run
+creates, installing Weaver there takes minutes, so ``install_weaver`` is the
+caller's consent to spend them. Without it, an Environment that is not ready is
+a failure reported before anything changes.
+
 The Weaver catalogue's own ``_`` tables are not created here. This provisions the
 Warehouse they live in, and the first ordinary build creates them.
 """
@@ -21,14 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .build_bundle.models import BuildPlan
-from .build_bundle.report import InstallationReport
-from .build_bundle.targets import ItemBinding, ItemBindings, WarehouseBinding
-from .build_bundle.workflow import build_item_repository_source
-from .catalogue.tables import CATALOGUE_TABLES
-from .declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
-from .errors import CommandError, WeaverError
-from .locations import Location
+from .declaration.model import LAKEHOUSE, WAREHOUSE
+from .errors import WeaverError
 from .onboarding import (
     WORKSPACE_CONFIG_FILE,
     ProjectRequest,
@@ -37,8 +37,6 @@ from .onboarding import (
     project_files,
 )
 from .onboarding.environment import environment_directory
-from .store import FilesystemStore, Store
-from .targets import ItemRef
 
 #: The names a caller may leave to the defaults.
 DEFAULT_CATALOGUE = "Catalogue"
@@ -47,9 +45,16 @@ DEFAULT_ENVIRONMENT = "Weaver"
 #: What this run did to one Fabric item. The CLI turns these into display text.
 CREATED = "created"
 EXISTING = "existing"
-PUBLISHED = "published"
-UNCHANGED = "unchanged"
 PLANNED = "planned"
+#: The Environment is there with Weaver installed in it.
+READY = "ready"
+#: Weaver will be installed in the Environment, which is the slow part.
+INSTALL = "install"
+
+#: What the Environment machinery did, kept beside the status: the status says
+#: Weaver is installed there, and this says whether the item was made.
+UPDATED = "updated"
+UNCHANGED = "unchanged"
 
 #: What each requested item is to the project.
 CATALOGUE_ROLE = "Catalogue"
@@ -62,14 +67,24 @@ class InitialiseError(WeaverError):
 
 @dataclass(frozen=True)
 class FabricItemOutcome:
-    """One requested Fabric item, and what this run did about it."""
+    """One requested Fabric item, and what this run did about it.
+
+    ``status`` is what a person reads. ``action`` is what the Fabric machinery
+    reported underneath it, for an Environment: created, updated or unchanged.
+    """
 
     role: str
     name: str
     status: str
+    action: str | None = None
 
-    def to_mapping(self) -> dict[str, str]:
-        return {"role": self.role, "name": self.name, "status": self.status}
+    def to_mapping(self) -> dict[str, str | None]:
+        return {
+            "role": self.role,
+            "name": self.name,
+            "status": self.status,
+            "action": self.action,
+        }
 
 
 @dataclass(frozen=True)
@@ -117,13 +132,14 @@ class InitialiseReport:
         """Every Fabric item this run made, in the order it made them.
 
         What a run that stopped part-way leaves behind, so the next one is read
-        against what is already there.
+        against what is already there. An Environment reports what it did as its
+        action, because its status says whether Weaver is installed there.
         """
 
         return tuple(
             f"{outcome.role}/{outcome.name}"
             for outcome in self.resources
-            if outcome.status == CREATED
+            if CREATED in (outcome.status, outcome.action)
         )
 
     @property
@@ -162,7 +178,7 @@ def initialise(
     lakehouse: str | None = None,
     warehouse: str | None = None,
     example: bool = False,
-    publish_environment: bool | None = None,
+    install_weaver: bool = False,
     dry_run: bool = False,
     session=None,
     client=None,
@@ -178,11 +194,14 @@ def initialise(
     ``environment``, ``lakehouse`` and ``warehouse`` are plain item names, and
     each one that does not exist yet is created.
 
+    ``environment`` names the Fabric Environment this project runs against. It
+    may be one the workspace already has. Weaver has to be installed there, and
+    installing it takes minutes, so ``install_weaver`` is the consent to do so.
+    Without it, an Environment that is missing or has no Weaver in it is
+    reported before anything changes.
+
     ``example`` writes a small Sales example and runs build, load and test
-    against it. ``publish_environment`` decides whether the Environment is
-    published as well as written, and defaults to publishing from a desktop and
-    to writing alone inside a Fabric session, where Weaver is already installed.
-    ``dry_run`` reports what a run would do and changes nothing.
+    against it. ``dry_run`` reports what a run would do and changes nothing.
     """
 
     destination = Path.cwd() if repository is None else Path(repository)
@@ -194,55 +213,55 @@ def initialise(
         warehouse=warehouse,
         example=example,
     )
-    files = _generated_files(request)
-    configured = _parse_generated(files, request)
-    _refuse_edited_files(destination, files)
 
-    from .fabric.resources import find_workspace
-    from .sessions.host import inside_fabric_session, use_or_create_session
+    from .sessions.host import use_or_create_session
 
-    if publish_environment is None:
-        # Inside the Fabric session being addressed, Weaver is already installed
-        # by the notebook's own %pip install, and the Environment is what a later
-        # desktop run needs. Publishing is the slowest step, so it waits.
-        publish_environment = not inside_fabric_session(configured)
-
+    addressed = _bare(request)
     resources = []
-    with use_or_create_session(session, workspace=configured) as opened:
+    with use_or_create_session(session, workspace=addressed) as opened:
         # Every crossing goes through the Session's own client, so what this
         # asked of Fabric is attributed and counted where the rest of Weaver's
         # is. Constructing one here would leave the control-plane reads
-        # invisible to the Session that owns them.
-        rest = client if client is not None else opened.resolver(configured).client
-        physical = find_workspace(request.workspace, client=rest)
-        found = _inspect(physical, request, client=rest)
+        # invisible to the Session that owns them. The workspace is named,
+        # because a borrowed Session may be open on another one.
+        rest = client if client is not None else opened.resolver(addressed).client
+        state, found = _read_the_workspace(request, client=rest)
+
+        # The definition is written where this run creates the Environment. An
+        # Environment the workspace already has is not this project's to define,
+        # and writing one would describe it wrongly.
+        files = _generated_files(request, define_environment=state == MISSING)
+        configured = _parse_generated(files, request)
+        _refuse_edited_files(destination, files)
+
         if dry_run:
             return InitialiseReport(
                 repository=str(destination),
                 workspace=request.workspace,
-                resources=_planned(request, found),
+                resources=_planned(request, found, state),
                 files=tuple(sorted(files)),
                 example=ExampleOutcome(generated=request.example),
                 dry_run=True,
             )
 
+        decision = _decide_environment(request, state, install_weaver=install_weaver)
         with opened.task("Setting up your Weaver project", request.workspace):
             resources.extend(
-                _create_missing(physical, request, found, session=opened, client=rest)
+                _create_missing(request, found, session=opened, client=rest)
             )
             with opened.step("Writing the project files", str(destination)):
                 _write(destination, files)
             resources.append(
-                _environment_outcome(
+                _prepared_environment(
                     request,
                     destination,
-                    publish=publish_environment,
+                    decision=decision,
                     session=opened,
                     client=rest,
                 )
             )
             outcome = (
-                _run_example(request, destination, session=opened)
+                _run_example(request, destination, configured, session=opened)
                 if request.example
                 else ExampleOutcome()
             )
@@ -255,6 +274,18 @@ def initialise(
         example=outcome,
         dry_run=False,
     )
+
+
+def _bare(request: ProjectRequest):
+    """The workspace this run addresses, before the project describes it.
+
+    Enough to open a Session on and to reach Fabric's control plane through.
+    What the project declares is read back from the file it writes.
+    """
+
+    from .workspaces import Workspace
+
+    return Workspace(workspace=request.workspace)
 
 
 def _workspace_name(workspace: str | None, *, session) -> str:
@@ -282,11 +313,17 @@ def _workspace_name(workspace: str | None, *, session) -> str:
     )
 
 
-def _generated_files(request: ProjectRequest) -> dict[str, str]:
+# --- the files -----------------------------------------------------------------
+
+
+def _generated_files(
+    request: ProjectRequest, *, define_environment: bool
+) -> dict[str, str]:
     """Every file this request writes, as project-relative path to text."""
 
     files = dict(project_files(request))
-    files.update(environment_definition_files(request.environment))
+    if define_environment:
+        files.update(environment_definition_files(request.environment))
     if request.example:
         files.update(example_files(request))
     return files
@@ -298,21 +335,21 @@ def _parse_generated(files: dict[str, str], request: ProjectRequest):
     A temporary copy, so a project that would not parse is reported before any
     Fabric item is created and before anything is written where it was asked
     for. The configuration it reads is also the Workspace the run then uses, so
-    the session runs against the file the project was given.
+    the example builds against the file the project was given.
     """
 
     from .config import load_workspace
     from .fabric.environment_definition import read_environment_definition
     from .operations.check import check
 
+    directory = environment_directory(request.environment)
     with tempfile.TemporaryDirectory(prefix="weaver-initialise-") as temporary:
         root = Path(temporary)
         _write(root, files)
         try:
             configured = load_workspace(root / WORKSPACE_CONFIG_FILE)
-            read_environment_definition(
-                root / environment_directory(request.environment)
-            )
+            if (root / directory).is_dir():
+                read_environment_definition(root / directory)
             check(root)
         except WeaverError as exc:
             raise InitialiseError(
@@ -358,7 +395,163 @@ def _write(destination: Path, files: dict[str, str]) -> None:
         path.write_text(text, encoding="utf-8")
 
 
-# --- the Fabric items ----------------------------------------------------------
+# --- the Fabric Environment ----------------------------------------------------
+#
+# Every Weaver project runs against a Fabric Environment, and Weaver has to be
+# installed in it before what the project builds can run. Three states, and one
+# action that moves the first two to the third.
+
+
+#: No Environment of that name in the workspace.
+MISSING = "missing"
+#: The Environment is there, and Weaver is not installed in it.
+UNPREPARED = "unprepared"
+
+#: What Fabric calls a publication that finished.
+_PUBLISHED = frozenset({"success", "succeeded"})
+
+
+def available_environments(workspace: str, *, client=None) -> tuple[str, ...]:
+    """Every Fabric Environment in a workspace, by name, for a caller to offer."""
+
+    from .fabric.resources import ENVIRONMENT, find_workspace, list_items
+
+    physical = find_workspace(workspace, client=client)
+    return tuple(
+        sorted(
+            item.name
+            for item in list_items(physical, item_type=ENVIRONMENT, client=client)
+        )
+    )
+
+
+def environment_state(workspace: str, name: str, *, client=None) -> str:
+    """Whether this Environment is there, and whether Weaver is installed in it.
+
+    Installed means both halves: the library list names Weaver, and Fabric has
+    published it. A definition naming Weaver that was never published resolves
+    no imports, so a session attached to it still cannot ``import weaver``.
+    """
+
+    from .fabric.resources import (
+        ENVIRONMENT,
+        ItemNotFoundError,
+        find_item,
+        find_workspace,
+    )
+
+    physical = find_workspace(workspace, client=client)
+    try:
+        item = find_item(physical, name, item_type=ENVIRONMENT, client=client)
+    except ItemNotFoundError:
+        return MISSING
+    return _state_of(item, client=client)
+
+
+def _state_of(item, *, client) -> str:
+    from .fabric.client import FabricClient
+    from .fabric.environment import publish_state, read_definition
+
+    reachable = client if client is not None else FabricClient()
+    if not _names_weaver(read_definition(item, client=reachable)):
+        return UNPREPARED
+    published = publish_state(item, client=reachable).casefold()
+    return READY if published in _PUBLISHED else UNPREPARED
+
+
+def _names_weaver(definition) -> bool:
+    """Whether a definition carries Weaver, as a requirement or as a wheel."""
+
+    from .fabric.environment import is_weaver_wheel
+    from .fabric.environment_definition import pip_entries, weaver_requirement
+
+    if any(is_weaver_wheel(name) for name in definition.custom_libraries()):
+        return True
+    entries = pip_entries(definition.external_libraries(), source="the Environment")
+    return weaver_requirement(entries) is not None
+
+
+def _decide_environment(
+    request: ProjectRequest, state: str, *, install_weaver: bool
+) -> str:
+    """What this run will do about the Environment, decided before anything moves.
+
+    An Environment that is ready is used as it is. One that is missing or has no
+    Weaver in it needs the installation, which takes minutes, so a run that was
+    not given consent stops here and says how to give it.
+    """
+
+    if state == READY:
+        return READY
+    if not install_weaver:
+        raise InitialiseError(_unprepared(request.environment, state))
+    return CREATED if state == MISSING else INSTALL
+
+
+def _unprepared(name: str, state: str) -> str:
+    """What to do about an Environment this run may not prepare itself."""
+
+    if state == MISSING:
+        return (
+            f"The Fabric Environment '{name}' does not exist.\n"
+            "\n"
+            "Run `weaver initialise` interactively if you'd like to create it,\n"
+            "or provide the name of an existing Environment."
+        )
+    return (
+        f"The Fabric Environment '{name}' does not have Weaver installed.\n"
+        "\n"
+        "Run `weaver initialise` interactively to install Weaver in this "
+        "Environment,\n"
+        "or prepare the Environment before running this command again."
+    )
+
+
+def _prepared_environment(
+    request: ProjectRequest,
+    destination: Path,
+    *,
+    decision: str,
+    session,
+    client,
+) -> FabricItemOutcome:
+    """The Environment, with Weaver installed in it.
+
+    Creating one sends the generated definition whole. Installing into one the
+    workspace already has touches Weaver's own libraries and leaves everything
+    else in it alone, because that Environment belongs to whoever made it.
+    """
+
+    name = request.environment
+    if decision == READY:
+        return FabricItemOutcome(ENVIRONMENT_ROLE, name, READY, action=UNCHANGED)
+
+    from .fabric import publish_environment
+
+    directory = destination / environment_directory(name)
+    try:
+        with session.step("Installing Weaver in Fabric", name):
+            result = publish_environment(
+                request.workspace,
+                None if decision == CREATED else name,
+                path=directory if decision == CREATED else None,
+                session=session,
+                client=client,
+            )
+    except WeaverError as exc:
+        raise InitialiseError(
+            f"Weaver could not be installed in the Fabric Environment "
+            f"'{name}'.\n"
+            "\n"
+            f"Fabric returned: {exc}\n"
+            "\n"
+            "The project has been written. Fix that and run `weaver initialise`\n"
+            "again."
+        ) from exc
+    return FabricItemOutcome(ENVIRONMENT_ROLE, name, READY, action=result.action)
+
+
+# --- the items -----------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -371,11 +564,11 @@ class _Requested:
 
 
 def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
-    """Every item this project needs, in the order they are created.
+    """Every item this project needs, in the order they are set up.
 
     The catalogue Warehouse first, because a project without it has nowhere to
-    record what it built. The Environment last, because publishing it is the
-    slowest step and nothing before it depends on the result.
+    record what it built. The Environment last, because installing Weaver in it
+    is the slowest step and nothing before it depends on the result.
     """
 
     from .fabric.resources import ENVIRONMENT
@@ -391,16 +584,23 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
     return tuple(wanted)
 
 
-def _inspect(physical, request: ProjectRequest, *, client) -> dict[str, bool]:
-    """Which requested items the workspace already holds, read in one listing.
+def _read_the_workspace(request: ProjectRequest, *, client):
+    """What the workspace holds, and what state its Environment is in.
 
-    A name held by an item of another type is refused here, before anything is
-    created. A Lakehouse's generated SQL endpoint shares its display name, and
-    is not a conflict.
+    One listing answers every item's existence, and the Environment needs two
+    further reads to say whether Weaver is installed in it. Both happen before
+    anything is decided, so a run that cannot proceed says so having changed
+    nothing.
     """
 
-    from .fabric.resources import FACET_TYPES, list_items
+    from .fabric.resources import (
+        ENVIRONMENT,
+        FACET_TYPES,
+        find_workspace,
+        list_items,
+    )
 
+    physical = find_workspace(request.workspace, client=client)
     held = [
         item
         for item in list_items(physical, client=client)
@@ -410,7 +610,7 @@ def _inspect(physical, request: ProjectRequest, *, client) -> dict[str, bool]:
     for item in held:
         by_name.setdefault(item.name, set()).add(item.type)
 
-    present: dict[str, bool] = {}
+    found: dict[str, bool] = {}
     for wanted in _requested(request):
         types = by_name.get(wanted.name, set())
         if types and wanted.item_type not in types:
@@ -422,12 +622,20 @@ def _inspect(physical, request: ProjectRequest, *, client) -> dict[str, bool]:
                 f"Choose another name for the {wanted.role}, or name an item\n"
                 "that is already there."
             )
-        present[wanted.role] = bool(types)
-    return present
+        found[wanted.role] = bool(types)
+
+    if not found[ENVIRONMENT_ROLE]:
+        return MISSING, found
+    environment = next(
+        item
+        for item in held
+        if item.name == request.environment and item.type == ENVIRONMENT
+    )
+    return _state_of(environment, client=client), found
 
 
 def _planned(
-    request: ProjectRequest, found: dict[str, bool]
+    request: ProjectRequest, found: dict[str, bool], state: str
 ) -> tuple[FabricItemOutcome, ...]:
     """What a run would do to each requested item, having changed nothing.
 
@@ -439,24 +647,33 @@ def _planned(
         FabricItemOutcome(
             role=wanted.role,
             name=wanted.name,
-            status=EXISTING if found[wanted.role] else PLANNED,
+            status=_planned_status(wanted, found, state),
         )
         for wanted in _requested(request)
     )
 
 
+def _planned_status(wanted: _Requested, found: dict[str, bool], state: str) -> str:
+    if wanted.role != ENVIRONMENT_ROLE:
+        return EXISTING if found[wanted.role] else PLANNED
+    if state == READY:
+        return READY
+    return PLANNED if state == MISSING else INSTALL
+
+
 def _create_missing(
-    physical, request: ProjectRequest, found: dict[str, bool], *, session, client
+    request: ProjectRequest, found: dict[str, bool], *, session, client
 ) -> tuple[FabricItemOutcome, ...]:
     """Create the requested items the workspace does not hold, and reuse the rest.
 
-    The Environment is not created here. Publishing its definition creates it,
-    and that runs once the project has been written.
+    The Environment is not created here. Installing Weaver creates it where the
+    workspace has none, and that runs once the project has been written.
     """
 
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
-    from .fabric.resources import create_lakehouse, create_warehouse
+    from .fabric.resources import create_lakehouse, create_warehouse, find_workspace
 
+    physical = find_workspace(request.workspace, client=client)
     made = []
     for wanted in _requested(request):
         if wanted.role == ENVIRONMENT_ROLE:
@@ -483,103 +700,8 @@ def _create_missing(
     return tuple(made)
 
 
-def _environment_outcome(
-    request: ProjectRequest,
-    destination: Path,
-    *,
-    publish: bool,
-    session,
-    client,
-) -> FabricItemOutcome:
-    """Publish the generated Environment definition, or create the item alone.
-
-    Publishing sends the definition whole, creates the Environment where the
-    workspace has none, stages Weaver's libraries and waits for Fabric to
-    resolve them. That last part is the minutes.
-
-    Not publishing still creates the item, because the generated configuration
-    names an Environment and a build proves its targets exist before it opens
-    anything. What is skipped is the library publication, which is what a
-    notebook already has from `%pip install weaverstack`.
-    """
-
-    if not publish:
-        return _created_environment(
-            request, destination, session=session, client=client
-        )
-
-    from .fabric import publish_environment as publish_definition
-
-    directory = destination / environment_directory(request.environment)
-    try:
-        with session.step("Publishing the Environment", request.environment):
-            result = publish_definition(
-                request.workspace,
-                path=directory,
-                session=session,
-                client=client,
-            )
-    except WeaverError as exc:
-        raise InitialiseError(
-            f"The Environment '{request.environment}' could not be published.\n"
-            "\n"
-            f"Fabric returned: {exc}\n"
-            "\n"
-            "The project has been written. Fix that and run `weaver initialise`\n"
-            "again, or publish it on its own with\n"
-            f"`weaver fabric environment publish --path {directory}`."
-        ) from exc
-    return FabricItemOutcome(
-        ENVIRONMENT_ROLE,
-        request.environment,
-        UNCHANGED if not result.published else PUBLISHED,
-    )
-
-
-def _created_environment(
-    request: ProjectRequest, destination: Path, *, session, client
-) -> FabricItemOutcome:
-    """The Environment item, made from the generated definition and not published."""
-
-    from .fabric.environment import create_with_definition
-    from .fabric.environment_definition import read_environment_definition
-    from .fabric.resources import (
-        ENVIRONMENT,
-        ItemNotFoundError,
-        find_item,
-        find_workspace,
-    )
-
-    physical = find_workspace(request.workspace, client=client)
-    try:
-        find_item(physical, request.environment, item_type=ENVIRONMENT, client=client)
-        return FabricItemOutcome(ENVIRONMENT_ROLE, request.environment, EXISTING)
-    except ItemNotFoundError:
-        pass
-
-    directory = destination / environment_directory(request.environment)
-    try:
-        with session.step("Creating the Environment", request.environment):
-            create_with_definition(
-                physical,
-                request.environment,
-                read_environment_definition(directory),
-                client=client,
-            )
-    except WeaverError as exc:
-        raise InitialiseError(
-            f"The Environment '{request.environment}' could not be created.\n"
-            "\n"
-            f"Fabric returned: {exc}\n"
-            "\n"
-            "Fix that and run `weaver initialise` again. Items that already\n"
-            "exist are reused."
-        ) from exc
-    return FabricItemOutcome(ENVIRONMENT_ROLE, request.environment, CREATED)
-
-
 def _run_example(
-    request: ProjectRequest, destination: Path, *, session
+    request: ProjectRequest, destination: Path, configured, *, session
 ) -> ExampleOutcome:
     """Build, load and test the generated example, stopping at the first failure.
 
@@ -626,164 +748,3 @@ def _in_role_order(resources) -> tuple[FabricItemOutcome, ...]:
 
 def _article(noun: str) -> str:
     return "an" if noun[:1].upper() in "AEIOU" else "a"
-
-
-# --- the Warehouse the catalogue lives in --------------------------------------
-
-
-@dataclass(frozen=True)
-class CatalogueBuildResult:
-    """What building the package-owned catalogue item did.
-
-    Internal to this module and to the Fabric test estate that stands a
-    catalogue up. A caller setting a project up reads
-    :class:`InitialiseReport` instead.
-    """
-
-    item: str
-    catalogue: str
-    plan: BuildPlan
-    report: InstallationReport
-
-    @property
-    def succeeded(self) -> bool:
-        return self.report.status == "succeeded"
-
-    @property
-    def tables(self) -> tuple[str, ...]:
-        """Every ``_`` table this created, however each one is maintained."""
-
-        return tuple(table.qualified for table in CATALOGUE_TABLES)
-
-    def to_mapping(self) -> dict[str, Any]:
-        return {
-            "item": self.item,
-            "catalogue": self.catalogue,
-            "bundle_id": self.plan.bundle_id,
-            "status": self.report.status,
-            "tables": list(self.tables),
-        }
-
-
-@dataclass(frozen=True)
-class PreparedCatalogueHost:
-    """The Warehouse the catalogue will live in, and whether this made it."""
-
-    workspace: str
-    catalogue: str
-    created: bool
-
-
-def prepare_catalogue(
-    workspace,
-    *,
-    store: Store | None = None,
-    client=None,
-) -> PreparedCatalogueHost:
-    """Find or create the Warehouse the Weaver catalogue lives in.
-
-    An existing Warehouse is the ordinary case rather than a collision: Weaver
-    owns the ``_`` schema of its host and nothing else, so a Warehouse already
-    holding a user's schemas is a perfectly good catalogue host. What is
-    distinguished here is only whether the Warehouse existed. Whether its `_`
-    tables are there is the build's question, answered by reading them.
-    """
-
-    if not workspace.catalogue:
-        raise CommandError("initialise requires a configured Weaver catalogue")
-    name = workspace.catalogue_item.name
-    from .fabric.resources import (
-        WAREHOUSE,
-        ItemNotFoundError,
-        create_warehouse,
-        find_item,
-        find_workspace,
-    )
-
-    physical_workspace = find_workspace(workspace.workspace, client=client)
-    try:
-        find_item(physical_workspace, name, item_type=WAREHOUSE, client=client)
-        created = False
-    except ItemNotFoundError:
-        create_warehouse(physical_workspace, name, client=client)
-        created = True
-    return PreparedCatalogueHost(workspace.workspace, name, created)
-
-
-def _session_around(workspace, *, spark, store):
-    """A Session wrapped around resources the caller already holds.
-
-    Both are given, so the Session closes neither. This is how a caller that
-    is already inside its own Spark session, such as a notebook or a test holding
-    one open for a module, reaches the build path without the build acquiring a
-    second one.
-    """
-
-    from .sessions import ConsoleSession
-
-    return ConsoleSession(workspace=workspace, spark=spark, store=store)
-
-
-def initialise_catalogue(
-    *,
-    catalogue: ItemRef,
-    workspace,
-    store: Store,
-    spark: Any = None,
-    output: Location | None = None,
-    session=None,
-) -> CatalogueBuildResult:
-    """Build the built-in Weaver item alone, through the ordinary build path.
-
-    A compatibility wrapper and nothing more. It owns no catalogue DDL, no
-    catalogue publication and no control-plane preparation: it selects no
-    authored item, and the built-in ``Warehouse/_weaver`` that every build
-    composes in is therefore the whole of what it builds.
-
-    Ordinary builds compose in and bind the same Item directly.
-
-    An empty source directory is the input because the built-in item is composed
-    into a parsed repository rather than authored into one: there is nothing
-    for a caller to supply, and supplying a real repository here would silently
-    ignore it.
-    """
-
-    control = WarehouseBinding(warehouse=catalogue)
-    bindings = ItemBindings(
-        (
-            ItemBinding(
-                WeaverItemId.parse("Warehouse/_weaver"),
-                control,
-            ),
-        )
-    )
-    from .sessions.host import use_or_create_session
-
-    # A Session built around what this caller already holds: the Spark it is
-    # running in and the store it reads through are given, so nothing here
-    # acquires or closes a resource it did not open.
-    owned = (
-        None
-        if session is not None
-        else _session_around(workspace, spark=spark, store=store)
-    )
-    with use_or_create_session(session or owned, workspace=workspace) as opened:
-        with tempfile.TemporaryDirectory(prefix="weaver-initialise-") as temporary:
-            repository_root = Path(temporary) / "repository"
-            repository_root.mkdir()
-            result = build_item_repository_source(
-                Location(repository_root.as_posix()),
-                source_store=FilesystemStore(),
-                bindings=bindings,
-                session=opened,
-                workspace=workspace,
-                catalogue_binding=control,
-                output=output,
-            )
-
-    return CatalogueBuildResult(
-        item="Warehouse/_weaver",
-        catalogue=catalogue.name,
-        plan=result.plan,
-        report=result.report,
-    )

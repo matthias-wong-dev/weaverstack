@@ -878,11 +878,12 @@ def fabric_empty_lakehouse(
 def fabric_initialise_catalogue(fabric_workspace, weaver_session):
     """Build the package-owned catalogue Item after a fixture reset."""
 
+    from support.catalogue import build_catalogue_item
+
     from weaver.fabric import OneLakeDfsClient
-    from weaver.initialise import initialise_catalogue
 
     def initialise():
-        result = initialise_catalogue(
+        result = build_catalogue_item(
             catalogue=fabric_workspace.catalogue_item,
             workspace=fabric_workspace,
             store=OneLakeDfsClient(),

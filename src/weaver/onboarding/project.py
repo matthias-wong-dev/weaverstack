@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from ..declaration.model import LAKEHOUSE, WAREHOUSE
 from ..errors import CommandError
+from ..targets import validate_name
 
 #: The project files a generated repository is described by.
 WORKSPACE_CONFIG_FILE = "workspace-config.yml"
@@ -42,13 +43,22 @@ class ProjectRequest:
     example: bool = False
 
     def __post_init__(self) -> None:
-        for field, value in (
-            ("workspace", self.workspace),
-            ("catalogue", self.catalogue),
-            ("environment", self.environment),
-        ):
-            if not isinstance(value, str) or not value.strip():
-                raise CommandError(f"{field} must be a name")
+        """Validate every supplied name before a path is built from any of them.
+
+        These names become Fabric items and directories under the destination,
+        so they go through the identity rules first. A name carrying a separator
+        would otherwise reach the filesystem before the generated project was
+        parsed and refused.
+        """
+
+        for field in ("workspace", "catalogue", "environment"):
+            object.__setattr__(
+                self, field, validate_name(getattr(self, field), what=field)
+            )
+        for field in ("lakehouse", "warehouse"):
+            value = getattr(self, field)
+            if value is not None:
+                object.__setattr__(self, field, validate_name(value, what=field))
         if self.lakehouse is None and self.warehouse is None:
             raise CommandError(
                 "Choose a Lakehouse, a Warehouse, or both. A project with "
