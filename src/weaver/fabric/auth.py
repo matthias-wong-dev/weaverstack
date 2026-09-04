@@ -180,7 +180,7 @@ class BrowserSignIn:
             # to report. Only the storage underneath it is worked around here.
             raise
         except Exception as exc:
-            if not self._cached:
+            if not self._cached or not _is_cache_unavailable(exc):
                 raise
             _warn_once(
                 "This machine has no secure place to keep a sign-in "
@@ -195,6 +195,57 @@ class BrowserSignIn:
         if self._credential is None:
             self._credential = _interactive_browser(cached=self._cached)
         return self._credential
+
+
+#: What `azure-identity` says on Linux when it will not encrypt the cache and was
+#: not allowed to write it in the clear. The message is the only signal: the
+#: `ValueError` it raises carries the libsecret failure as its cause, and that
+#: cause is an arbitrary platform exception.
+_UNENCRYPTABLE = ("allow_unencrypted_storage", "Cache encryption is impossible")
+
+#: `msal_extensions.build_encrypted_persistence` on a platform it has no store
+#: for. Matched on the message, because the type it raises is `RuntimeError`.
+_UNSUPPORTED = "Unsupported platform"
+
+
+def _is_cache_unavailable(exc: BaseException) -> bool:
+    """Whether this failure is the token cache rather than the sign-in.
+
+    Only the recognised ways a platform says it has nowhere secure to keep a
+    token. Anything else is a defect somewhere else and propagates, because
+    signing in a second time would neither fix it nor say so honestly.
+
+    The cases, in the order a machine meets them:
+
+    .. code-block:: text
+
+        msal_extensions.PersistenceError   Keychain, DPAPI or libsecret refused
+        ValueError naming the option       Linux with no usable libsecret
+        NotImplementedError                a platform azure-identity has no store for
+        RuntimeError naming the platform   the same, from msal_extensions
+        ImportError                        msal_extensions is not installed
+    """
+
+    if isinstance(exc, (NotImplementedError, ImportError)):
+        return True
+    if _is_persistence_error(exc):
+        return True
+    message = str(exc)
+    if isinstance(exc, ValueError):
+        return any(naming in message for naming in _UNENCRYPTABLE)
+    if isinstance(exc, RuntimeError):
+        return _UNSUPPORTED in message
+    return False
+
+
+def _is_persistence_error(exc: BaseException) -> bool:
+    """Whether msal_extensions raised one of its own storage failures."""
+
+    try:
+        from msal_extensions.persistence import PersistenceError
+    except ImportError:  # pragma: no cover - msal_extensions ships with the extra
+        return False
+    return isinstance(exc, PersistenceError)
 
 
 def _interactive_browser(*, cached: bool):

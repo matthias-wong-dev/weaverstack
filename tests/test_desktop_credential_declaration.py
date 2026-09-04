@@ -260,6 +260,16 @@ def test_the_fabric_conftest_asks_for_the_azure_cli_and_nothing_else():
 # prerequisite there, so the sign-in works without a cache and says so once.
 
 
+#: What azure-identity raises on a Linux box with no usable libsecret, in the
+#: words it uses. The message is the signal: the ValueError carries the
+#: platform's own failure as its cause, and that could be anything.
+UNENCRYPTABLE = ValueError(
+    "Cache encryption is impossible because libsecret dependencies are not "
+    'installed or are unusable. Specify "allow_unencrypted_storage=True" to '
+    "store the cache unencrypted instead of raising this exception."
+)
+
+
 class _NoSecureStorage:
     """The browser credential azure-identity builds when a cache was asked for.
 
@@ -267,12 +277,13 @@ class _NoSecureStorage:
     credential is made, so this is where the absence of secure storage lands.
     """
 
-    def __init__(self):
+    def __init__(self, raising=None):
         self.calls = 0
+        self._raising = raising if raising is not None else UNENCRYPTABLE
 
     def get_token(self, *scopes, **_):
         self.calls += 1
-        raise ValueError("Persistence not found")
+        raise self._raising
 
 
 @pytest.fixture
@@ -371,10 +382,117 @@ def test_a_refused_sign_in_is_reported_rather_than_retried(monkeypatch):
 
 @weaver_test()
 def test_an_unencrypted_cache_is_never_asked_for():
-    """A refresh token in the clear is a worse trade than signing in again."""
+    """A refresh token in the clear is a worse trade than signing in again.
+
+    The option is named in this module, in the message azure-identity uses to
+    say it will not write one. What must never appear is the request for it.
+    """
 
     from pathlib import Path
 
     source = (Path(auth.__file__).resolve()).read_text(encoding="utf-8")
 
-    assert "allow_unencrypted_storage" not in source
+    assert "allow_unencrypted_storage=True" not in source
+    assert "allow_unencrypted_storage=" not in source
+
+
+# --- only the cache is worked around -------------------------------------------
+#
+# A second browser window is a real cost, and a warning about secure storage is
+# a wrong answer for a defect somewhere else. So the fallback recognises the
+# ways a platform says it has nowhere to keep a token, and nothing else.
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        UNENCRYPTABLE,
+        NotImplementedError("A persistent cache is not available in this environment."),
+        RuntimeError("Unsupported platform: sunos"),
+        ImportError("No module named 'msal_extensions'"),
+    ],
+    ids=["no-libsecret", "no-store", "unsupported-platform", "no-msal-extensions"],
+)
+@weaver_test()
+def test_each_way_a_platform_says_it_cannot_keep_a_token_falls_back(
+    monkeypatch, capsys, raised
+):
+    made: list[bool] = []
+    refusing = _NoSecureStorage(raising=raised)
+    working = _Working()
+
+    def build(*, cached: bool):
+        made.append(cached)
+        return refusing if cached else working
+
+    monkeypatch.setattr(auth, "_interactive_browser", build)
+    monkeypatch.setattr(auth, "_warned", False)
+
+    assert auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE).token == "a-token"
+    assert made == [True, False]
+    assert "no secure place to keep a sign-in" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_persistence_error_is_recognised_by_its_type(monkeypatch, capsys):
+    """msal_extensions raises its own type, whatever the platform said."""
+
+    from msal_extensions.persistence import PersistenceEncryptionError
+
+    made: list[bool] = []
+    refusing = _NoSecureStorage(raising=PersistenceEncryptionError(message="keychain"))
+    working = _Working()
+
+    def build(*, cached: bool):
+        made.append(cached)
+        return refusing if cached else working
+
+    monkeypatch.setattr(auth, "_interactive_browser", build)
+    monkeypatch.setattr(auth, "_warned", False)
+
+    auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert made == [True, False]
+
+
+@weaver_test()
+def test_an_unrelated_failure_propagates_and_opens_no_second_browser(
+    monkeypatch, capsys
+):
+    """The inverse claim: a defect elsewhere is not read as a missing keyring."""
+
+    made: list[bool] = []
+    broken = _NoSecureStorage(raising=RuntimeError("something else went wrong"))
+
+    def build(*, cached: bool):
+        made.append(cached)
+        return broken
+
+    monkeypatch.setattr(auth, "_interactive_browser", build)
+    monkeypatch.setattr(auth, "_warned", False)
+
+    with pytest.raises(RuntimeError, match="something else went wrong"):
+        auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert made == [True]
+    assert broken.calls == 1
+    assert "no secure place" not in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_bare_value_error_is_not_a_missing_keyring(monkeypatch, capsys):
+    """The message is the signal, so a ValueError from elsewhere still propagates."""
+
+    made: list[bool] = []
+    broken = _NoSecureStorage(raising=ValueError("some other argument was wrong"))
+
+    monkeypatch.setattr(
+        auth, "_interactive_browser", lambda *, cached: made.append(cached) or broken
+    )
+    monkeypatch.setattr(auth, "_warned", False)
+
+    with pytest.raises(ValueError, match="some other argument"):
+        auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE)
+
+    assert made == [True]
+    assert "no secure place" not in capsys.readouterr().err
