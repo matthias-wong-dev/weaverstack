@@ -29,10 +29,14 @@ DISPLAY = {
     "install": "install Weaver",
 }
 
-#: Column widths for the item table. The role fits "Environment" and the name
-#: is given room for an ordinary Fabric display name.
+#: The narrowest the item table's columns go. The role fits "Environment" and
+#: the name an ordinary Fabric display name. A longer name widens its column
+#: for every row, so the outcomes stay in one column and never run into a name.
 ROLE_WIDTH = 14
 NAME_WIDTH = 19
+
+#: Kept between a name and its outcome however wide the name is.
+GAP = 2
 
 INTRODUCTION = (
     "Set up a Weaver project.\n"
@@ -368,9 +372,12 @@ def render_dry_run(report) -> None:
 
 
 def _table(report) -> None:
+    width = max(
+        [NAME_WIDTH, *(len(outcome.name) + GAP for outcome in report.resources)]
+    )
     for outcome in report.resources:
         role = outcome.role.ljust(ROLE_WIDTH)
-        name = outcome.name.ljust(NAME_WIDTH)
+        name = outcome.name.ljust(width)
         print(f"  {role}{name}{DISPLAY.get(outcome.status, outcome.status)}")
     if report.example.ran:
         stages = ", ".join(
@@ -382,5 +389,5 @@ def _table(report) -> None:
             )
             if status is not None
         )
-        print(f"  {'Sales example'.ljust(ROLE_WIDTH + NAME_WIDTH)}{stages}")
+        print(f"  {'Sales example'.ljust(ROLE_WIDTH + width)}{stages}")
     print()

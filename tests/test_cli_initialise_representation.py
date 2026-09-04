@@ -757,3 +757,28 @@ def test_interactive_asks_even_where_there_is_no_terminal():
     collect_workspace(args, stdin=io.StringIO("Weaver Example\n"))
 
     assert args.workspace == "Weaver Example"
+
+
+@weaver_test()
+def test_a_long_name_widens_its_column_rather_than_running_into_the_outcome(capsys):
+    """A Fabric display name can be longer than the column it was given."""
+
+    render(
+        _report(
+            resources=(
+                FabricItemOutcome("Catalogue", "Catalogue", CREATED),
+                FabricItemOutcome(
+                    "Environment", "WEAVER_ONBOARDING_TMP", READY, action=CREATED
+                ),
+            )
+        )
+    )
+
+    shown = capsys.readouterr().out
+    assert "  Environment   WEAVER_ONBOARDING_TMP  ready" in shown
+    lines = [
+        line
+        for line in shown.splitlines()
+        if line.startswith("  Catalogue") or line.startswith("  Environment")
+    ]
+    assert len({len(line) - len(line.split("  ")[-1]) for line in lines}) == 1

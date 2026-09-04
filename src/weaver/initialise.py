@@ -227,10 +227,10 @@ def initialise(
         rest = client if client is not None else opened.resolver(addressed).client
         state, found = _read_the_workspace(request, client=rest)
 
-        files = _generated_files(
-            request,
-            define_environment=_defines_environment(destination, request, state),
-        )
+        # Ownership decides both what is written and which publication mode
+        # applies, so it is read once and carried into both.
+        owned = _defines_environment(destination, request, state)
+        files = _generated_files(request, define_environment=owned)
         configured = _parse_generated(files, request)
         _refuse_edited_files(destination, files)
 
@@ -244,7 +244,9 @@ def initialise(
                 dry_run=True,
             )
 
-        decision = _decide_environment(request, state, install_weaver=install_weaver)
+        decision = _decide_environment(
+            request, state, install_weaver=install_weaver, owned=owned
+        )
         with opened.task("Setting up your Weaver project", request.workspace):
             resources.extend(
                 _create_missing(request, found, session=opened, client=rest)
@@ -494,21 +496,44 @@ def _names_weaver(definition) -> bool:
     return weaver_requirement(entries) is not None
 
 
+#: What this run will do about the Environment. Not a status: the status says
+#: what a person reads afterwards, and these say which call gets made.
+REUSE = "reuse"
+#: The project's own definition is authoritative, and is sent whole.
+FROM_DEFINITION = "from-definition"
+#: Somebody else's Environment, which keeps everything it declares. Only
+#: Weaver's own libraries are added.
+OVERLAY = "overlay"
+
+
 def _decide_environment(
-    request: ProjectRequest, state: str, *, install_weaver: bool
+    request: ProjectRequest, state: str, *, install_weaver: bool, owned: bool
 ) -> str:
     """What this run will do about the Environment, decided before anything moves.
 
     An Environment that is ready is used as it is. One that is missing or has no
     Weaver in it needs the installation, which takes minutes, so a run that was
     not given consent stops here and says how to give it.
+
+    Ownership decides which of the two publication modes applies, and it decides
+    it for a rerun as much as for a first run. A project that created its
+    Environment keeps its definition authoritative afterwards, so a run
+    interrupted between creating the item and finishing the publication is
+    finished from the definition rather than overlaid into a half-made item.
+
+    .. code-block:: text
+
+        missing                     → create from the project's definition
+        unprepared, project's own   → publish the project's definition again
+        unprepared, somebody else's → add Weaver's libraries and nothing else
+        ready                       → reuse
     """
 
     if state == READY:
-        return READY
+        return REUSE
     if not install_weaver:
         raise InitialiseError(_unprepared(request.environment, state))
-    return CREATED if state == MISSING else INSTALL
+    return FROM_DEFINITION if owned else OVERLAY
 
 
 def _unprepared(name: str, state: str) -> str:
@@ -540,24 +565,27 @@ def _prepared_environment(
 ) -> FabricItemOutcome:
     """The Environment, with Weaver installed in it.
 
-    Creating one sends the generated definition whole. Installing into one the
-    workspace already has touches Weaver's own libraries and leaves everything
-    else in it alone, because that Environment belongs to whoever made it.
+    A definition the project owns is sent whole, which creates the item where
+    Fabric has none and updates it where a previous run left one half-made.
+    Installing into one the workspace already had touches Weaver's own libraries
+    and leaves everything else in it alone, because that Environment belongs to
+    whoever made it.
     """
 
     name = request.environment
-    if decision == READY:
+    if decision == REUSE:
         return FabricItemOutcome(ENVIRONMENT_ROLE, name, READY, action=UNCHANGED)
 
     from .fabric import publish_environment
 
+    from_definition = decision == FROM_DEFINITION
     directory = destination / environment_directory(name)
     try:
         with session.step("Installing Weaver in Fabric", name):
             result = publish_environment(
                 request.workspace,
-                None if decision == CREATED else name,
-                path=directory if decision == CREATED else None,
+                None if from_definition else name,
+                path=directory if from_definition else None,
                 session=session,
                 client=client,
             )

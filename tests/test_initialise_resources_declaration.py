@@ -106,7 +106,9 @@ def fabric(monkeypatch):
         return held[-1]
 
     def publish_environment(workspace_name, environment=None, *, path=None, **kwargs):
-        published.append(environment if environment is not None else str(path))
+        # The two modes the publisher offers, kept apart: a path means the local
+        # definition is authoritative, a name means the Fabric item is.
+        published.append(str(path) if path is not None else environment)
         # Fabric now holds it with Weaver in it, which is what a rerun finds.
         weaver_installed[0] = True
         if environment is None:
@@ -595,4 +597,47 @@ def test_an_environment_the_project_never_defined_stays_undefined(tmp_path, fabr
 
     assert not [path for path in first.files if path.startswith("Environment/")]
     assert first.files == second.files
+    assert not (tmp_path / "Environment").exists()
+
+
+@weaver_test()
+def test_a_run_interrupted_before_the_installation_finished_is_finished_from_the_project(
+    tmp_path, fabric
+):
+    """The item exists, the publication did not finish, and the project owns it.
+
+    The publisher has two modes: a path sends the local definition whole, and a
+    name adds Weaver's libraries to whatever the Fabric Environment already
+    declares. A project-created Environment stays the project's, so the rerun
+    that finishes it sends the definition rather than overlaying into a
+    half-made item.
+    """
+
+    _environment(fabric, present=False)
+    _initialise(tmp_path, fabric)
+
+    # What a publication that stopped part-way leaves: the item is there and
+    # Weaver is not installed in it.
+    fabric.weaver_installed[0] = False
+    fabric.published.clear()
+
+    report = _initialise(tmp_path, fabric)
+
+    definition = str(tmp_path / "Environment" / "Weaver.Environment")
+    assert fabric.published == [definition]
+    assert "Weaver" not in fabric.published
+    assert _status(report, "Environment") == READY
+
+
+@weaver_test()
+def test_an_environment_the_workspace_supplied_is_overlaid_not_replaced(
+    tmp_path, fabric
+):
+    """It keeps everything it declares. Only Weaver's own libraries are added."""
+
+    _environment(fabric, present=True, weaver=False)
+
+    _initialise(tmp_path, fabric)
+
+    assert fabric.published == ["Weaver"]
     assert not (tmp_path / "Environment").exists()
