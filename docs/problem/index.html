@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en-AU">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f5f2ea">
+    <title>The problem Weaver solves</title>
+    <meta name="description" content="Building one thing in Fabric is straightforward. Coordinating a whole data platform is harder. Where the difficulty actually comes from, and what a pipeline needs once it is in production.">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="https://weaverstack.dev/problem/">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://weaverstack.dev/problem/">
+    <meta property="og:site_name" content="Weaver">
+    <meta property="og:locale" content="en_AU">
+    <meta property="og:title" content="The problem Weaver solves">
+    <meta property="og:description" content="Building one thing in Fabric is straightforward. Coordinating a whole data platform is harder.">
+    <meta property="og:image" content="https://weaverstack.dev/og.png">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="The problem Weaver solves">
+    <meta name="twitter:description" content="Building one thing in Fabric is straightforward. Coordinating a whole data platform is harder.">
+    <meta name="twitter:image" content="https://weaverstack.dev/og.png">
+    <link rel="icon" type="image/png" sizes="128x128" href="/favicon.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="stylesheet" href="/assets/site.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <nav class="nav wrap" aria-label="Primary">
+        <a class="brand" href="/" aria-label="Weaver home"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-links" hidden>Menu</button>
+        <div class="nav-links" id="nav-links">
+          <a href="/get-started/">Get started</a>
+          <a href="/problem/" aria-current="page">The problem</a>
+          <a href="/how-it-works/">How it works</a>
+          <a href="/scale/">Built for scale</a>
+          <a href="/vs-dbt/">Weaver vs dbt</a>
+          <a class="button small" href="https://github.com/matthias-wong-dev/weaverstack">GitHub <span class="arrow" aria-hidden="true">↗</span></a>
+        </div>
+      </nav>
+    </header>
+
+    <main id="main">
+      <section class="page-head">
+        <div class="wrap">
+          <p class="eyebrow">The problem</p>
+          <h1>Building one thing in Fabric is straightforward</h1>
+          <p class="lead">Coordinating a whole data platform is harder. This page walks through where that difficulty actually comes from. It starts with things you will recognise from your first week in Fabric, and ends with the parts that only show up once real data is flowing.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <p class="eyebrow">Part one</p>
+          <h2>Fabric really does start simple</h2>
+          <p class="lede">The engines are good. That is not the problem.</p>
+          <p>You make a Lakehouse. You drop a file in it. You open a notebook, read the file with Spark, write a Delta table. You make a Warehouse and write some T-SQL. Every one of those steps is well documented and works the first time.</p>
+
+          <div class="flow">
+            <div class="flow-step"><b>Files</b><small>in a Lakehouse</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>Python</b><small>Spark, in a notebook</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>Delta table</b><small>in the Lakehouse</small></div>
+            <span class="flow-arrow" aria-hidden="true">→</span>
+            <div class="flow-step"><b>T-SQL</b><small>in a Warehouse</small></div>
+          </div>
+
+          <p>Four steps, four good tools. If that were the whole job, you would not need Weaver and this page would be shorter.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <p class="eyebrow">Part two</p>
+          <h2>Then the pieces have to work together</h2>
+          <p class="lede">The difficulty is not in any one Fabric feature. It is in the joins between them.</p>
+
+          <p>Here is what starts to accumulate:</p>
+
+          <div class="cards two">
+            <div class="card">
+              <h3>Two engines, two languages</h3>
+              <p>The Lakehouse is Spark and Python. The Warehouse is T-SQL. Both belong in the same pipeline, and nothing joins their dependency graphs. What runs first is something you have to know and remember.</p>
+            </div>
+            <div class="card">
+              <h3>Several Fabric items</h3>
+              <p>Real estates have more than one Lakehouse and more than one Warehouse. A dependency that crosses between them is the same kind of dependency as one that does not, but it is not treated as one.</p>
+            </div>
+            <div class="card">
+              <h3>Shortcuts</h3>
+              <p>A Warehouse cannot read Delta files. It reads a Lakehouse's SQL endpoint through a shortcut. That is a real constraint, and it usually becomes a configuration task that lives somewhere other than your pipeline code.</p>
+            </div>
+            <div class="card">
+              <h3>Environments</h3>
+              <p>Spark code needs libraries. Libraries come from a Fabric Environment. Which Environment, published when, containing what version, is another thing to keep aligned with the code that assumes it.</p>
+            </div>
+            <div class="card">
+              <h3>Logical against physical</h3>
+              <p>Your development Lakehouse and your production Lakehouse are different Fabric items with different names. Something has to know which one a given piece of code means, today.</p>
+            </div>
+            <div class="card">
+              <h3>Source control</h3>
+              <p>Notebooks, SQL scripts, pipeline definitions, shortcut configuration and item settings live in different places and version at different rates. Reviewing a change to the platform means reviewing several of them at once.</p>
+            </div>
+          </div>
+
+          <div class="keyline">
+            <p>The complexity comes from coordination, not from any one Fabric feature.</p>
+          </div>
+
+          <p>None of this is a criticism of Fabric. A platform that gives you a Lakehouse, a Warehouse, Spark, T-SQL, OneLake and shortcuts is giving you a lot. But it gives them to you as separate things, and a data platform is one thing.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <p class="eyebrow">Part three</p>
+          <h2>A pipeline becomes a production system</h2>
+          <div class="keyline"><p>The hard parts show up after the first successful run.</p></div>
+
+          <p class="lede">The first run is a demo. The hundredth run is a system, and a system has questions the demo never asked.</p>
+
+          <p>Once the same pipeline runs every night, on data that arrives on its own schedule, you start needing answers to things like:</p>
+
+          <ul>
+            <li><strong>How much do I reload?</strong> Reading the whole source every night stops being sensible somewhere around the point it starts taking hours. So the pipeline needs to know how far it got last time.</li>
+            <li><strong>What happened last night?</strong> Not the log file. The current state: which objects are up to date, which are behind, which have not run at all.</li>
+            <li><strong>Something failed. Now what?</strong> What succeeded, what did not run because of it, what should be retried, and what must not be retried because it half-ran.</li>
+            <li><strong>Is this table still trustworthy?</strong> It loaded fine, but the table it reads from loaded again afterwards. Being successful and being current are different things.</li>
+            <li><strong>What is this column?</strong> Descriptions, keys, foreign keys and lineage stop being nice-to-have the moment somebody other than the author has to work on it.</li>
+            <li><strong>Is the data right?</strong> Not "did the query run" but "does the result mean what we think it means".</li>
+          </ul>
+
+          <p>Every one of those needs somewhere to keep an answer between runs. A pipeline that only knows what happened during the current invocation cannot answer any of them.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <p class="eyebrow">Part four</p>
+          <h2>And then the properly awkward parts</h2>
+          <p class="lede">These are the ones people build by hand, again, in every organisation. They are not glamorous and they are not optional.</p>
+
+          <div class="cards two">
+            <div class="card">
+              <h3>Knowing how far you got</h3>
+              <p>A bookmark that says where the last clean load reached, and rules about when it is allowed to move. Advance it after a run that half-worked and you will silently skip data. Advancing too eagerly is the failure mode nobody notices for a month.</p>
+            </div>
+            <div class="card">
+              <h3>Rows that change, not just rows that arrive</h3>
+              <p>Which rows are new, which changed, which disappeared, and what "disappeared" even means when your source only sent you today's batch.</p>
+            </div>
+            <div class="card">
+              <h3>Duplicate keys</h3>
+              <p>The source sent you the same customer twice. Do you fail the load, take one arbitrarily, or set both aside and carry on? Somebody has to decide, and the decision has to be written down somewhere the pipeline can read.</p>
+            </div>
+            <div class="card">
+              <h3>Nulls where there should not be nulls</h3>
+              <p>Same question, different shape. Detecting it is easy. Deciding what the pipeline does about it is the actual work.</p>
+            </div>
+            <div class="card">
+              <h3>Rejected rows</h3>
+              <p>Once you decide to set bad rows aside, they have to go somewhere, with the reason, so somebody can look at them tomorrow.</p>
+            </div>
+            <div class="card">
+              <h3>Changes that are too big</h3>
+              <p>The load is about to delete 80% of a table. Nothing is technically wrong: the source just came in short. A pipeline that does not notice this is a pipeline that will one day empty a table on a Sunday.</p>
+            </div>
+            <div class="card">
+              <h3>Load statistics</h3>
+              <p>How many rows were inserted, updated and deleted. Not as a log line, but as a number you can read later and compare.</p>
+            </div>
+            <div class="card">
+              <h3>Carrying on after a failure</h3>
+              <p>One source is down. Half the estate has nothing to do with it. A nightly run that stops dead at the first problem wastes a night; one that ploughs on regardless corrupts things downstream.</p>
+            </div>
+          </div>
+
+          <div class="keyline">
+            <p>Making Fabric easier also means making the hard parts boring.</p>
+          </div>
+
+          <p>None of this is exotic. It is what data engineering has needed for thirty years. What changes with Fabric is that you now have to assemble it yourself, across two engines and several items, on top of a platform that gives you the engines and leaves the assembly to you.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Where Weaver comes in</h2>
+          <p class="lede">Weaver does not replace anything in Fabric. Your Delta tables are Delta tables, your Warehouse is a Warehouse, your Spark runs on Fabric Spark.</p>
+
+          <p>What Weaver adds is the coordination and the memory. One repository describing the whole estate. One dependency graph across every object in it, regardless of which engine runs it or which item holds it. One place recording what is installed, how far each thing has loaded, and what happened. And sensible, declarable answers to the awkward parts, so you are configuring them rather than writing them again.</p>
+
+          <div class="keyline">
+            <p>Fabric already provides the engines. Weaver makes them easier to engineer as one data platform.</p>
+          </div>
+
+          <div class="cards two">
+            <a class="card" href="/how-it-works/">
+              <h3>See how it works</h3>
+              <p>Repository, build, Catalogue, load, test and health, and the mechanics underneath them.</p>
+              <span class="go">Read on <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="/get-started/">
+              <h3>Or just try it</h3>
+              <p>Set up a project against your own workspace and watch a small example build, load and test.</p>
+              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-grid">
+        <div class="footer-note">
+          <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
+          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+          <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
+        </div>
+        <div class="footer-links">
+          <ul>
+            <strong>Site</strong>
+            <li><a href="/get-started/">Get started</a></li>
+            <li><a href="/problem/">The problem</a></li>
+            <li><a href="/how-it-works/">How it works</a></li>
+            <li><a href="/scale/">Built for scale</a></li>
+            <li><a href="/vs-dbt/">Weaver vs dbt</a></li>
+          </ul>
+          <ul>
+            <strong>Project</strong>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">Design notes</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li>
+            <li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <script src="/assets/site.js" defer></script>
+  </body>
+</html>

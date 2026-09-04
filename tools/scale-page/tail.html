@@ -1,0 +1,121 @@
+            </div>
+          </div>
+
+          <div class="dag-side">
+            <ul class="legend">
+              <li><i class="file" aria-hidden="true"></i> Files</li>
+              <li><i aria-hidden="true"></i> Tables</li>
+              <li><i class="view" aria-hidden="true"></i> Views</li>
+              <li><i class="shortcut" aria-hidden="true"></i> Shortcuts</li>
+              <li><i class="validation" aria-hidden="true"></i> Tests and assumptions</li>
+            </ul>
+            <div id="dag-panel" class="dag-panel"><p class="hint">Select any object to trace what it reads and what reads it.</p></div>
+          </div>
+
+          <p class="small muted">Real estate from <a href="https://ilovegov.datawithoutguessing.com">ilovegov.datawithoutguessing.com</a>, built and operated with Weaver. Item names are that project's own. Scroll the graph to move around it, and select a node to trace its lineage. Weaver's own catalogue tables are left out, because they say nothing about the size of the estate.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>What the picture is showing you</h2>
+          <div class="cards two">
+            <div class="card">
+              <h3>One graph, not two</h3>
+              <p>The Lakehouse and the Warehouse are separate Fabric items with separate engines. The dashed lines running between them are shortcuts, and they are dependencies like any other. Load walks the whole thing in one order.</p>
+            </div>
+            <div class="card">
+              <h3>Layers came out of the code</h3>
+              <p>Nobody assigned those ten layers. They fell out of the Python imports and the relations the T-SQL selects from. Add a join to a query and the layer changes on the next build.</p>
+            </div>
+            <div class="card">
+              <h3>Files are first-class</h3>
+              <p>The green nodes on the left of the Lakehouse are folders: Python programs that fetch spreadsheets, JSON and PDFs from real sources. They are graph nodes, so the tables downstream of them wait for them.</p>
+            </div>
+            <div class="card">
+              <h3>Checks hang off the estate</h3>
+              <p>The violet nodes are Tests and Assumptions, installed alongside the objects they read. Their results go into the Catalogue, so health can answer questions about them later.</p>
+            </div>
+          </div>
+
+          <p>This is also the graph Weaver plans against. When you rebuild one object, its descendants are the ones that stop being certified. When you ask for health, "is this table behind its sources" is answered by walking the ancestry above. Selecting a node above will show you how far that reaches.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Performance benchmarks coming</h2>
+          <div class="callout amber">
+            <p><strong>We have not published performance numbers yet, and we are not going to make any up.</strong> Large-estate performance, no-op build and incremental-change benchmarks are being prepared and will be published here when they mean something.</p>
+          </div>
+
+          <p>When they arrive, they will be measuring the things that actually matter at this size:</p>
+          <ul>
+            <li><strong>Work avoided.</strong> How long a build takes when nothing has changed, which for most days is the real number.</li>
+            <li><strong>Small-change rebuilds.</strong> One object edited in an estate of a thousand, and how much gets touched.</li>
+            <li><strong>Descendant selection.</strong> How precisely a change is scoped to what it actually affects.</li>
+            <li><strong>Structural churn avoided.</strong> How much of the physical estate a build leaves alone.</li>
+            <li><strong>Recovery.</strong> What the second run costs after a failed first one.</li>
+            <li><strong>Large incremental loads,</strong> and how they scale with the size of the change rather than the size of the table.</li>
+          </ul>
+
+          <p>Rows per second will not be the headline. It is the least interesting number a mature pipeline produces, because the fastest way to process a row is not to have to.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Where to next</h2>
+          <div class="cards three">
+            <a class="card" href="/get-started/">
+              <h3>Start small</h3>
+              <p>The Sales example is six files and runs in minutes. It is the same model as the graph above.</p>
+              <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="/how-it-works/">
+              <h3>How the graph is built</h3>
+              <p>Dependency discovery, the Catalogue, and how load planning reads it.</p>
+              <span class="go">Read on <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+            <a class="card" href="/vs-dbt/">
+              <h3>Weaver vs dbt</h3>
+              <p>Why the graph spans Fabric items, and what that buys at this size.</p>
+              <span class="go">Compare <span class="arrow" aria-hidden="true">→</span></span>
+            </a>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-grid">
+        <div class="footer-note">
+          <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
+          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
+          <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
+        </div>
+        <div class="footer-links">
+          <ul>
+            <strong>Site</strong>
+            <li><a href="/get-started/">Get started</a></li>
+            <li><a href="/problem/">The problem</a></li>
+            <li><a href="/how-it-works/">How it works</a></li>
+            <li><a href="/scale/">Built for scale</a></li>
+            <li><a href="/vs-dbt/">Weaver vs dbt</a></li>
+          </ul>
+          <ul>
+            <strong>Project</strong>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack">Source on GitHub</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/tree/main/design">Design notes</a></li>
+            <li><a href="https://github.com/matthias-wong-dev/weaverstack/issues">Issues</a></li>
+            <li><a href="https://pypi.org/project/weaverstack/">weaverstack on PyPI</a></li>
+          </ul>
+        </div>
+      </div>
+    </footer>
+
+    <script src="/assets/site.js" defer></script>
+    <script src="/assets/scale-dag.js" defer></script>
+  </body>
+</html>
