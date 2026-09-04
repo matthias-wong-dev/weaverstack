@@ -3,6 +3,11 @@
 A data-engineering runtime for Microsoft Fabric, built around a central
 catalogue.
 
+**[weaverstack.dev](https://weaverstack.dev)** has the guided introduction:
+[get started](https://weaverstack.dev/get-started/),
+[how it works](https://weaverstack.dev/how-it-works/), and
+[Weaver vs dbt](https://weaverstack.dev/vs-dbt/).
+
 The **Weaver catalogue** is Weaver's own operational metadata, under the `_`
 schema of a Fabric Warehouse you name. It may have a Warehouse to itself or sit
 alongside your own schemas in one you already have; Weaver owns `_` and nothing
@@ -174,18 +179,18 @@ reads the target from workspace configuration, the rest read it from the Weaver
 catalogue. So one sequence runs against development and production, and only
 `--workspace-config` changes.
 
-See [CLI usage](design/cli-usage.md) for the full syntax, repository sources,
+See [CLI usage](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/cli-usage.md) for the full syntax, repository sources,
 wipe and unbind.
 
 ## Documentation
 
-- [Design documentation map](design/README.md)
-- [How Weaver build works](design/how-does-build-work.md) — incremental selection, bundle order and certification
-- [Where your Weaver document repository lives](design/weaver-repository.md) — a folder of files, and how it reaches Fabric
-- [CLI usage](design/cli-usage.md) — signing in, workspaces, capacity, wipe
-- [Fabric integration tests](design/fabric-testing.md)
-- [Agent guide](AGENTS.md)
+- [Design documentation map](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/README.md)
+- [How Weaver build works](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/how-does-build-work.md) — incremental selection, bundle order and certification
+- [Where your Weaver document repository lives](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/weaver-repository.md) — a folder of files, and how it reaches Fabric
+- [CLI usage](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/cli-usage.md) — signing in, workspaces, capacity, wipe
+- [Fabric integration tests](https://github.com/matthias-wong-dev/weaverstack/blob/main/design/fabric-testing.md)
+- [Agent guide](https://github.com/matthias-wong-dev/weaverstack/blob/main/AGENTS.md)
 
 ## Licence
 
-Mozilla Public License 2.0. See [LICENSE](LICENSE).
+Mozilla Public License 2.0. See [LICENSE](https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE).
