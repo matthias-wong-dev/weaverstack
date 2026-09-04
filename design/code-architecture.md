@@ -76,14 +76,7 @@ session.resolver(workspace)  # names → physical items
 Domain code does not access `session.livy`; doing so would couple it to Fabric
 transport.
 
-A resolver's `client` is one of those capabilities. It is the usable Fabric REST
-client for that resolver, and it means the same on both: the desktop resolver's
-injected or default client, and inside Fabric a client on the identity
-`notebookutils.credentials` serves. A caller holding a Session reads it and
-passes it on, which is what `initialise` does with the Fabric resource helpers
-and `weaver.fabric.livy` with an Environment's owning workspace. Each of those
-answers a `None` with a plain `FabricClient`, so a resolver that held `None`
-until something asked put a desktop credential inside Fabric.
+A resolver's `client` is the Fabric REST client appropriate to its host.
 
 Commands say up front what they will need, coarsely, and the Session starts those
 in the background:

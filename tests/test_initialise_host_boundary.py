@@ -1,27 +1,8 @@
 """``weaver.initialise()`` reaches Fabric through the Session, as build does.
 
-The documented notebook call names no workspace, no client and no credential:
-
-.. code-block:: python
-
-    weaver.initialise(
-        Path("builtin") / "repository",
-        catalogue="Catalogue",
-        environment="Weaver",
-        lakehouse="Landing",
-        warehouse="Curated",
-        example=True,
-    )
-
-Inside Fabric that has to run on the notebook's own identity. It reached
-``DefaultAzureCredential`` instead, because the session resolver's REST client
-was built on first use and ``initialise`` read the raw field before anything had
-built one. It passed the ``None`` on, and each Fabric resource helper answers a
-``None`` with a plain ``FabricClient``.
-
-So the claim here is the boundary rather than the credential: `initialise` asks
-the resolver for its REST capability, and inside Fabric the resolver answers
-with the notebook's identity. Nothing here reaches Fabric.
+Inside a Fabric notebook the documented call names no workspace, no client and
+no credential, and has to run on the notebook's own identity. Nothing here
+reaches Fabric.
 """
 
 from __future__ import annotations
@@ -56,12 +37,7 @@ class _Definition:
 
 @pytest.fixture
 def notebook(monkeypatch):
-    """A process running inside the Fabric workspace it addresses.
-
-    ``notebookutils`` is what says so, and every host decision below reads it:
-    the workspace `initialise` discovers, the Session `session_for` selects, and
-    the identity the session resolver's REST client carries.
-    """
+    """A process running inside the Fabric workspace it addresses."""
 
     tokens = []
     module = types.ModuleType("notebookutils")
@@ -88,12 +64,8 @@ def notebook(monkeypatch):
 
 @pytest.fixture
 def fabric(monkeypatch, notebook):
-    """A workspace already holding everything, so nothing is created.
-
-    Each helper records the client it was handed, which is the subject: a
-    ``None`` reaching one of these is what built a desktop credential inside
-    Fabric.
-    """
+    """A workspace already holding everything, recording the client each
+    control-plane helper was handed."""
 
     seen = []
     held = [
@@ -126,11 +98,9 @@ def fabric(monkeypatch, notebook):
 
 @pytest.fixture
 def no_desktop_credential(monkeypatch):
-    """Anything reaching for the library default fails the test where it did."""
-
     def refuse(*arguments, **keywords):
         raise AssertionError(
-            "DefaultAzureCredential was constructed inside a Fabric session"
+            "a desktop credential was constructed inside a Fabric session"
         )
 
     monkeypatch.setattr("azure.identity.DefaultAzureCredential", refuse)
@@ -155,17 +125,11 @@ def _initialise(tmp_path, **kwargs):
 def test_a_notebook_run_uses_the_notebook_identity(
     tmp_path, fabric, notebook, no_desktop_credential
 ):
-    """The regression, as a user meets it: no workspace, no client, no credential."""
-
     report = _initialise(tmp_path)
 
     assert report.workspace == WORKSPACE
-    assert fabric.seen, "no Fabric control-plane read happened"
-    assert all(client is not None for client in fabric.seen), (
-        "a helper was handed None and built a client of its own"
-    )
-    # The client is built once and asks for a token per request, so the identity
-    # it carries is read from it rather than from a crossing nothing made here.
+    assert fabric.seen and all(client is not None for client in fabric.seen)
+    # A token is asked for per request, so the identity is read off the client.
     assert fabric.seen[0]._token_source() == "notebook-token"
     assert notebook.tokens == ["pbi"]
 
@@ -174,8 +138,6 @@ def test_a_notebook_run_uses_the_notebook_identity(
 def test_a_notebook_run_selects_the_notebook_session(
     tmp_path, fabric, notebook, monkeypatch
 ):
-    """`initialise` opens the Session the host offers, as build and load do."""
-
     from weaver.sessions.notebook import NotebookSession
 
     opened = []
@@ -193,10 +155,7 @@ def test_a_notebook_run_selects_the_notebook_session(
 
 
 @weaver_test()
-def test_every_helper_is_handed_the_session_resolver_client(tmp_path, fabric, notebook):
-    """One client for the whole run, so what it asked of Fabric is counted
-    against the Session that owns it."""
-
+def test_every_helper_is_handed_the_same_client(tmp_path, fabric, notebook):
     _initialise(tmp_path)
 
     assert len({id(client) for client in fabric.seen}) == 1
@@ -204,11 +163,9 @@ def test_every_helper_is_handed_the_session_resolver_client(tmp_path, fabric, no
 
 @weaver_test()
 def test_an_injected_client_still_wins(tmp_path, fabric, notebook):
-    """A caller who supplied one is not overridden by the host's."""
-
     supplied = object()
 
     _initialise(tmp_path, client=supplied)
 
     assert set(fabric.seen) == {supplied}
-    assert notebook.tokens == [], "a session client was built beside the injected one"
+    assert notebook.tokens == []

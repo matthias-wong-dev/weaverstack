@@ -121,18 +121,7 @@ class FabricSessionResolver(FabricResolver):
 
     @property
     def client(self):
-        """Fabric REST using the identity of this Fabric session.
-
-        The same thing ``FabricResolver.client`` is: the usable REST client for
-        this resolver. Built on first use, because a Warehouse-only workflow
-        inside a notebook reaches no control plane at all.
-
-        Callers read it: ``initialise`` passes it to the Fabric resource helpers
-        and ``weaver.fabric.livy`` resolves an Environment's owning workspace
-        with it. Each of those constructs a plain ``FabricClient`` on
-        ``DefaultAzureCredential`` for a ``None``, and inside Fabric the identity
-        to use is the session's.
-        """
+        """Fabric REST on this session's identity. Built on first use."""
 
         if self._client is None:
             credentials = self._credentials

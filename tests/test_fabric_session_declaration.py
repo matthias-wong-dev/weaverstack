@@ -94,11 +94,6 @@ def test_a_lakehouse_resolves_to_what_authored_code_addresses():
 
 
 # --- the REST capability ------------------------------------------------------
-#
-# `.client` means the same thing on both resolvers: the usable Fabric REST
-# client for this one. A caller holding a Session reads it and hands it on, so
-# a `None` here reaches the resource helpers and becomes a plain `FabricClient`
-# on `DefaultAzureCredential`, walking a credential chain inside Fabric.
 
 
 @weaver_test()
@@ -121,9 +116,6 @@ def test_the_session_resolver_answers_rest_with_the_session_identity():
 
 @weaver_test()
 def test_the_session_resolver_builds_its_client_once():
-    """One per resolver, as the desktop resolver's is: a Session owns one
-    resolver for its lifetime and the client holds the token it renews."""
-
     resolver = FabricSessionResolver(
         Workspace(workspace="Analytics"),
         runtime=_runtime(),
