@@ -66,11 +66,13 @@ class _Session:
     workspace = None
     closed = False
 
-    def __init__(self, *, failing=()):
+    def __init__(self, *, failing=(), client=None):
         self.tsql: list[str] = []
         self.spark: list[str] = []
         self.files: list[str] = []
         self.failing = set(failing)
+        #: What this Session's resolver answers REST with.
+        self.client = client if client is not None else _Client()
 
     def query_tsql(self, statement, *, target, workspace=None, parameters=None):
         name = str(target.warehouse.name)
@@ -216,6 +218,49 @@ def test_a_project_is_checked_on_every_endpoint_it_uses(
     assert session.tsql == ["Catalogue", "Curated"]
     assert session.spark == ["select 1"]
     assert report.succeeded is True
+
+
+@weaver_test()
+def test_the_session_client_is_what_reaches_fabric_rest(monkeypatch):
+    """A caller holding a Session must not construct a client of its own.
+
+    The Session's carries its renewing token and its telemetry, and inside
+    Fabric it is the notebook identity.
+    """
+
+    from weaver.fabric import resources
+
+    session = _Session()
+    seen = []
+    monkeypatch.setattr(
+        resources, "find_workspace", lambda name, client=None: seen.append(client)
+    )
+
+    doctor(workspace="Weaver Example", session=session)
+
+    assert session.client.paths == ["workspaces"]
+    assert seen == [session.client]
+
+
+@weaver_test()
+def test_a_session_with_no_workspace_still_proves_sign_in(monkeypatch):
+    """`doctor` runs before a workspace is known, and a Session without one has
+    no resolver to ask."""
+
+    built = _Client()
+
+    class _Unscoped(_Session):
+        def resolver(self, workspace=None):
+            raise CommandError("A Workspace is required for this command.")
+
+    monkeypatch.setattr(module, "FabricClient", lambda *a, **k: built, raising=False)
+    monkeypatch.setattr("weaver.fabric.client.FabricClient", lambda *a, **k: built)
+
+    report = doctor(session=_Unscoped())
+
+    assert report.checks[0].name == "Fabric REST"
+    assert report.checks[0].passed
+    assert built.paths == ["workspaces"]
 
 
 @weaver_test()
