@@ -28,7 +28,7 @@ from pathlib import Path
 
 import weaver
 
-#: The repository this example builds, relative to the repository root.
+#: The project this example builds, relative to the Git repository root.
 ESTATE = (
     Path(__file__).resolve().parent
     / "workspaces"
