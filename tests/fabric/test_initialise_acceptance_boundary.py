@@ -17,7 +17,7 @@ from support.weaver_test import register_session, weaver_test
 
 import weaver
 from weaver.config import load_workspace
-from weaver.initialise import CREATED, EXISTING, READY
+from weaver.initialise import CREATED, EXISTING
 from weaver.sessions import ConsoleSession
 
 
@@ -88,7 +88,7 @@ def test_a_project_is_written_against_items_that_are_reused(
     assert report.created == ()
     assert _status(report, "Catalogue") == EXISTING
     assert _status(report, "Lakehouse") == EXISTING
-    assert _status(report, "Environment") == READY
+    assert _status(report, "Environment") == EXISTING
 
     configured = load_workspace(tmp_path / "workspace-config.yml")
     assert configured.workspace == estate["workspace"]
@@ -156,7 +156,34 @@ def test_a_generated_warehouse_project_builds_loads_and_tests(
             session=session,
         )
 
-    assert report.example.build == "succeeded"
-    assert report.example.load == "succeeded"
-    assert report.example.test == "passed"
-    assert report.succeeded is True
+        assert report.example.generated and report.environment_publication == "deferred"
+        configuration = tmp_path / "workspace-config.yml"
+        built = weaver.build(tmp_path, workspace_config=configuration, session=session)
+        loaded = weaver.load(workspace_config=configuration, session=session)
+        tested = weaver.test(workspace_config=configuration, session=session)
+    assert built.succeeded and loaded.succeeded and tested.succeeded
+
+
+@weaver_test(hosted=True)
+def test_notebook_initialise_writes_source_with_different_project_settings(
+    estate, livy_session
+):
+    import json
+
+    result = livy_session.run(
+        "import tempfile\n"
+        "from pathlib import Path\n"
+        "import weaver\n"
+        "from weaver.sessions.notebook import NotebookSession\n"
+        "from weaver.workspaces import Workspace\n"
+        f"choices = {json.dumps(estate)}\n"
+        "attached = Workspace(workspace=choices['workspace'],\n"
+        "                     catalogue='Warehouse/OtherCatalogue', environment='OtherRuntime')\n"
+        "with tempfile.TemporaryDirectory() as directory:\n"
+        "    with NotebookSession(workspace=attached) as session:\n"
+        "        report = weaver.initialise(Path(directory), example=True, session=session, **choices)\n"
+        "    emit(report.to_mapping())\n"
+    ).payload
+    assert result["example_added"]
+    assert result["environment_publication"] == "deferred"
+    assert all(item["status"] == "existing" for item in result["resources"])

@@ -34,16 +34,16 @@ If an item doesn't exist yet, it will be created automatically.
 You can also include a small Sales example so you can build, load
 and test the project straight away.
 
-Run `weaver initialise` to get started.\
+Run `weaver initialise my-project` to get started.\
 """
 
 #: What doctor is for, said before anybody has a project to point it at.
 DOCTOR_DESCRIPTION = """\
 Check that Weaver can reach Microsoft Fabric.
 
-Name a workspace configuration to also check the endpoints that project uses:
-TDS for a Warehouse, OneLake and Livy for a Lakehouse. From a project directory
-it reads workspace-config.yml beside it.
+Name a workspace to discover and probe its Fabric items:
+TDS for a Warehouse, OneLake and Livy for a Lakehouse.
+Doctor reads no project configuration.
 
 Checking a Lakehouse starts a Fabric Spark session, which takes a minute.\
 """
@@ -200,15 +200,8 @@ def _requires_rest(args) -> frozenset[str]:
 
 
 def _requires_doctor(args) -> frozenset[str]:
-    """What proving the crossings will want.
+    """Doctor discovers the items used to probe each Fabric transport."""
 
-    Naming nothing, and run from no project, this reaches Fabric REST and stops
-    there. With a workspace, a configuration or a project directory, it declares
-    the same superset a run declares: what a configuration turns out to hold is
-    read after this, so arguments alone cannot narrow it.
-    """
-
-    from weaver.config import discovered_workspace_config
     from weaver.sessions.requirements import (
         AUTH,
         LIVY,
@@ -218,31 +211,15 @@ def _requires_doctor(args) -> frozenset[str]:
         requirements,
     )
 
-    if not workspace_supplied(args) and discovered_workspace_config() is None:
-        return requirements(AUTH, RESOLVER)
     return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
 
 
 def _requires_initialise(args) -> frozenset[str]:
-    """What setting a project up will want.
+    """Project setup reads and creates items through Fabric REST."""
 
-    Creating the items is control-plane work alone. The example is an ordinary
-    build, load and test, so it declares what those declare, and the Lakehouse
-    half of it is only known once the questions have been answered.
-    """
+    from weaver.sessions.requirements import AUTH, RESOLVER, requirements
 
-    from weaver.sessions.requirements import (
-        AUTH,
-        LIVY,
-        ONELAKE,
-        RESOLVER,
-        TDS,
-        requirements,
-    )
-
-    if getattr(args, "example", None) is False:
-        return requirements(AUTH, RESOLVER)
-    return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+    return requirements(AUTH, RESOLVER)
 
 
 def _requires_install(args) -> frozenset[str]:
@@ -383,6 +360,12 @@ def build_parser() -> argparse.ArgumentParser:
             handler=handle_initialise, requires=_requires_initialise
         )
 
+    example = subcommands.add_parser(
+        "add-example", help="Add Sales example source to a project."
+    )
+    example.add_argument("repository", nargs="?", default=".")
+    example.set_defaults(handler=handle_add_example, requires=lambda args: frozenset())
+
     doctor = subcommands.add_parser(
         "doctor",
         help="Check that Weaver can reach Microsoft Fabric.",
@@ -390,7 +373,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     doctor.add_argument("--json", action="store_true", help="emit the result as JSON")
-    _add_workspace_args(doctor, include_environment=False)
+    doctor.add_argument("--workspace", required=True, help="Fabric workspace to check.")
     doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
 
     check = subcommands.add_parser(
@@ -594,7 +577,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     wipe.add_argument(
         "targets",
-        nargs="+",
+        nargs="*",
         metavar="TARGET",
         help="Lakehouse/Name[/Files|/Tables] or Warehouse/Name",
     )
@@ -911,8 +894,7 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
 
     parser.add_argument(
         "repository",
-        nargs="?",
-        help="Where to write the project. Defaults to the current directory.",
+        help="Project directory to create or reuse. Use . for the current directory.",
     )
     parser.add_argument("--workspace", help="Fabric workspace name. It must exist.")
     parser.add_argument(
@@ -933,7 +915,7 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
         dest="example",
         action="store_true",
         default=None,
-        help="Include a small Sales example, and build, load and test it.",
+        help="Add Sales example source files.",
     )
     parser.add_argument(
         "--no-example",
@@ -957,9 +939,11 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
         help="Show what would be set up, and change nothing.",
     )
     parser.add_argument("--json", action="store_true", help="emit the result as JSON")
-    #: Consent to the one slow thing a run does. Collected at the prompt, never
-    #: given as an option: a run that cannot ask stops and says what to do.
-    parser.set_defaults(install_weaver=False)
+    parser.add_argument(
+        "--publish-environment",
+        action="store_true",
+        help="Publish the project Environment after setup.",
+    )
 
 
 def _add_workspace_args(
@@ -1805,7 +1789,7 @@ def handle_initialise(args: argparse.Namespace) -> int:
     if not args.workspace:
         collect(args, ask=False)  # says which options a run with no terminal needs
     with _running_session(args, resolve_workspace(workspace=args.workspace)) as opened:
-        from weaver.initialise import available_environments, environment_state
+        from weaver.initialise import available_environments, available_items
 
         client = opened.resolver().client
         asked = (
@@ -1814,12 +1798,13 @@ def handle_initialise(args: argparse.Namespace) -> int:
                 environments=lambda: available_environments(
                     args.workspace, client=client
                 ),
-                state_of=lambda name: environment_state(
-                    args.workspace, name, client=client
-                ),
+                items=lambda kind: available_items(args.workspace, kind, client=client),
             )
             or asked
         )
+        if getattr(args, "cancelled", False):
+            print("Project setup cancelled.")
+            return 0
         report = _initialise_once(args, session=opened)
     return _report(args, report, asked=asked)
 
@@ -1866,11 +1851,22 @@ def _initialise_once(args: argparse.Namespace, *, session):
         lakehouse=args.lakehouse,
         warehouse=args.warehouse,
         example=bool(args.example),
-        install_weaver=args.install_weaver,
+        publish_environment=args.publish_environment,
         dry_run=args.dry_run,
         session=session,
         **named,
     )
+
+
+def handle_add_example(args: argparse.Namespace) -> int:
+    """Write the example through the public source generator."""
+
+    from weaver.initialise import add_example
+
+    files = add_example(args.repository)
+    print(f"Added Sales example source in {args.repository} ({len(files)} files).")
+    print("Run weaver build, weaver load and weaver test from the project directory.")
+    return 0
 
 
 def handle_doctor(args: argparse.Namespace) -> int:
@@ -1885,8 +1881,6 @@ def handle_doctor(args: argparse.Namespace) -> int:
     _prefer_desktop_credential()
     report = doctor(
         workspace=args.workspace,
-        workspace_config=args.workspace_config,
-        catalogue=args.catalogue,
         session=_session(args),
     )
     if args.json:

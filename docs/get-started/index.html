@@ -91,7 +91,7 @@ weaver.<span class="c-fn">initialise</span>(
     example=<span class="c-key">True</span>,
 )</pre>
               </div>
-              <p class="small">Add <code>install_weaver=True</code> if the Environment does not exist yet, or exists without Weaver in it. That is the same confirmation the desktop prompt asks you for, and it takes about five minutes.</p>
+              <p class="small">Initialise writes source and creates or reuses items. Publication is deferred by default. Pass <code>publish_environment=True</code> to publish after setup. Build, load and test run separately.</p>
             </div>
 
             <div class="path-card">
@@ -101,9 +101,9 @@ weaver.<span class="c-fn">initialise</span>(
               <div class="code">
                 <div class="code-bar"><span>terminal</span></div>
                 <pre>pip install weaverstack
-weaver initialise</pre>
+weaver initialise my-project</pre>
               </div>
-              <p>Run <code>weaver initialise</code> with no arguments. Weaver collects the project settings before creating any missing Fabric items.</p>
+              <p>Run <code>weaver initialise my-project</code> to create or reuse that folder. Weaver collects the project settings before creating any missing Fabric items.</p>
               <p class="small">The desktop CLI tries Azure CLI credentials first and opens Microsoft sign-in in a browser when needed. On a machine with secure credential storage, later commands reuse that sign-in until Microsoft requires you to authenticate again.</p>
             </div>
           </div>
@@ -116,25 +116,49 @@ weaver initialise</pre>
           <p class="lede">Weaver asks for the workspace, Catalogue, Environment and destination items.</p>
 
           <div class="code">
-            <div class="code-bar"><span>weaver initialise</span></div>
+            <div class="code-bar"><span>weaver initialise my-project</span></div>
             <pre>Set up a Weaver project.
+Project folder: my-project
+Fabric workspace: Analytics
 
-You'll use your Fabric workspace and choose the items you want for this project.
-Any missing items will be created automatically.
+Catalogue
+The Catalogue is a Warehouse where Weaver keeps its build, load and test state.
+Catalogue name [Catalogue]:
 
-Fabric workspace: My Fabric Workspace
-Catalogue [Catalogue]:
-
-Fabric Environment:
-  1. Use an existing Environment
-  2. Create a new Environment
-
+Environment
+Weaver uses a Fabric Environment for Python work. Its definition is kept in this project so you can add packages later.
+1. Use an existing Environment
+2. Create a new Environment
 Choose [1/2]: 2
 Environment name [Weaver]:
 
-Lakehouse [skip]: Landing
-Warehouse [skip]: Curated
-Would you like to create and run a small Sales example? [Y/n]:</pre>
+Lakehouse (optional)
+Use a Lakehouse for files and Python/Delta tables.
+Press Enter if this project does not need one.
+Existing: Landing
+Examples: Landing, Bronze
+Lakehouse: Landing
+
+Warehouse (optional)
+Use a Warehouse for SQL tables and views.
+Press Enter if this project does not need one.
+Examples: Curated, Reporting
+Warehouse: Curated
+Add the Sales example to this project? [y/N]: y
+
+Project
+  Folder        my-project
+  Workspace     Analytics
+  Catalogue     Catalogue
+  Environment   Weaver
+  Lakehouse     Landing
+  Warehouse     Curated
+  Sales example Yes
+
+1. Continue
+2. Change an answer
+3. Cancel
+Choose [1/2/3]: 1</pre>
           </div>
 
           <h3>What you are choosing</h3>
@@ -146,20 +170,12 @@ Would you like to create and run a small Sales example? [Y/n]:</pre>
             <li><strong>The Sales example.</strong> A small working project you can build, load and test straight away.</li>
           </ul>
 
-          <p>Setup can select existing items or create new ones. Run <code>weaver initialise</code> again after an interrupted attempt; Weaver reuses items already created. Add <code>--dry-run</code> to see what setup would create without changing anything.</p>
+          <p>Setup can select existing items or create new ones. Run <code>weaver initialise my-project</code> again after an interrupted attempt; Weaver reuses items already created. Add <code>--dry-run</code> to see what setup would create without changing anything.</p>
 
-          <div class="callout amber">
-            <p><strong>Installing Weaver into a Fabric Environment takes about five minutes.</strong> Weaver asks for confirmation first:</p>
-          </div>
-
-          <div class="code">
-            <div class="code-bar"><span>weaver initialise</span></div>
-            <pre>Environment 'Weaver' will be created and Weaver will be installed in it.
-
-Installing Weaver in Fabric can take about 5 minutes.
-
-Would you like to continue? [Y/n]:</pre>
-          </div>
+          <p>The review allows each answer to be changed. Continue accepts the choices before any Fabric items are created.</p>
+          <pre>Publishing a Fabric Environment can take about 5 minutes.
+Publish the Environment now? [y/N]:</pre>
+          <p>Press Enter to defer publication. Setup still creates the project and its declared items.</p>
 
         </div>
       </section>
@@ -171,8 +187,10 @@ Would you like to continue? [Y/n]:</pre>
 
           <div class="code plain" style="max-width: 640px;">
             <div class="code-bar"><span>my-project/</span></div>
-            <pre>workspace-config.yml
+            <pre>README.md
+workspace-config.yml
 compose.yml
+Environment/Weaver.Environment/
 
 <span class="c-key">Lakehouse/Landing/</span>
 ├── Files/
@@ -190,21 +208,13 @@ compose.yml
     └── <span class="c-fn">Sales.CustomerByRegionValid.sql</span></pre>
           </div>
 
-          <p>Two files describe the project itself. <code>workspace-config.yml</code> says which Fabric workspace and items to use:</p>
+          <p>README.md explains the local workflow. The Environment directory contains packages and compute settings, including those imported from an existing Environment. <code>workspace-config.yml</code> says which Fabric workspace and items to use:</p>
 
           <div class="code">
             <div class="code-bar"><span>workspace-config.yml</span></div>
             <!-- example:workspace-config.yml -->
-            <pre># One file describes one Fabric workspace.
-#
-# Weaver items are the keys under targets:, and each value is the Fabric
-# item it is built into. Point the project at another workspace by
-# copying this file and changing the names.
-workspace: My Fabric Workspace
+            <pre>workspace: My Fabric Workspace
 environment: Weaver
-
-# Weaver keeps its own tables in the _ schema of this Warehouse, and
-# owns nothing else in it.
 catalogue: Warehouse/Catalogue
 
 targets:
@@ -220,20 +230,39 @@ targets:
           <div class="code">
             <div class="code-bar"><span>compose.yml</span></div>
             <!-- example:compose.yml -->
-            <pre># A named sequence, run in one session:
-#
-#   weaver compose full
-#
-# Each entry takes the workspace the composition resolved, so none of
-# them names it again. Naming no item builds, loads and tests every
-# item workspace-config.yml declares.
-compose:
+            <pre>compose:
   full:
     - build
     - load
-    - test</pre>
+    - test
+    - health
+  load-only:
+    - load
+    - test
+    - health
+  build-only:
+    - build
+  wipe-all:
+    - wipe</pre>
             <!-- /example -->
           </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Publish the Environment</h2>
+          <p>From the project directory, publish before running Python work and after changing packages:</p>
+          <pre>cd my-project
+weaver fabric environment publish --path Environment/Weaver.Environment</pre>
+          <p>Publication can take several minutes. Spark SQL needs a Lakehouse. Remote Python importing Weaver additionally needs the published Environment.</p>
+          <h2>Add the example</h2>
+          <p>If setup omitted the example, add its source later:</p>
+          <pre>weaver add-example</pre>
+          <p>This writes files only. An unchanged example can be added again; conflicting edited files are refused.</p>
+          <h2>Work in a session</h2>
+          <pre>weaver session</pre>
+          <p>Commands in the session reuse Fabric connections and Spark.</p>
         </div>
       </section>
 
@@ -556,31 +585,22 @@ weaver.<span class="c-fn">test</span>()</pre>
       <section class="section">
         <div class="wrap">
           <h2>Troubleshooting</h2>
-          <p class="lede">If a command cannot reach Fabric, run <code>weaver doctor</code>.</p>
+          <pre>weaver doctor --workspace Analytics</pre>
+          <p>Doctor checks this machine and identity against the named workspace from any directory. It reads no project configuration and needs no Catalogue or Environment.</p>
+          <pre>Authentication                     OK
+  Azure CLI
+Fabric REST                        OK
+  7 workspaces visible
+Workspace Analytics                OK
+OneLake                            OK
+  via Lakehouse/Landing
+Warehouse TDS                      OK
+  via Warehouse/Curated
+Fabric Spark / Livy                OK
+  via Lakehouse/Landing</pre>
+          <p>Doctor discovers one Lakehouse and Warehouse for its probes. A missing item is MISSING, a rejected probe is FAILED and a transport or runtime failure is ERROR. Missing probe items do not fail the command. Spark startup can take a minute.</p>
+          <p>Use <code>weaver check</code> for repository errors and <code>weaver health</code> for installed state.</p>
 
-          <div class="code">
-            <div class="code-bar"><span>terminal</span></div>
-            <pre>weaver doctor</pre>
-          </div>
-
-          <p><code>weaver doctor</code> checks authentication and access to the Fabric REST API. From a project directory, Weaver also tests the endpoints configured for that project: TDS for each Warehouse, OneLake for each Lakehouse, and a Spark session where a Lakehouse is configured.</p>
-
-          <div class="code plain">
-            <div class="code-bar"><span>weaver doctor</span></div>
-            <pre>  Fabric REST                       OK
-  Workspace My Fabric Workspace     OK
-  Warehouse/Catalogue TDS           OK
-  Lakehouse/Landing OneLake         OK
-  Spark session                     OK
-
-Everything checked is reachable.</pre>
-          </div>
-
-          <p>For a failed check, Weaver reports the error and the suggested action. Checking a Lakehouse starts a Fabric Spark session and can take about a minute.</p>
-
-          <div class="callout">
-            <p><strong>For repository errors rather than connection errors,</strong> use <code>weaver check</code>. It validates the repository locally and does not connect to Fabric.</p>
-          </div>
         </div>
       </section>
 

@@ -550,6 +550,17 @@ load
 | `build` | Deployment and installation |
 | `load` | Runtime execution |
 
+Initialise validates the destination with generated files overlaid before any
+Fabric mutation. Every project carries an Environment definition, imported from
+Fabric when an existing Environment is selected. Publication is optional and
+uses the ordinary local-definition publish path. Example selection writes source
+only; build, load and test are subsequent operations.
+
+Doctor requires a workspace name and reads no project configuration. It reports
+authentication and REST independently, discovers one Lakehouse and Warehouse,
+and probes OneLake, TDS and Spark through the Session. Missing probe items are
+reported separately from rejected probes and transport errors.
+
 Provisioning belongs to `initialise` alone. A build's preflight reads the
 workspace and creates nothing, so a missing Catalogue, Lakehouse, Warehouse or
 Environment is a build failure naming the item. The `_` catalogue tables divide
@@ -650,7 +661,8 @@ weaver wipe \
     --workspace-config workspace.yml \
 ```
 
-The command accepts multiple targets.
+The command accepts multiple targets. With none named it uses only physical
+targets declared by the resolved project configuration, with the same confirmation.
 
 ```bash
 weaver wipe \

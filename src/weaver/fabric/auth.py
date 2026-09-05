@@ -143,8 +143,37 @@ def desktop_credential():
 
     from azure.identity import AzureCliCredential, ChainedTokenCredential
 
-    _desktop_chain = ChainedTokenCredential(AzureCliCredential(), _browser_credential())
+    diagnostic = {}
+    _desktop_chain = ChainedTokenCredential(
+        DiagnosticCredential(AzureCliCredential(), "Azure CLI", diagnostic),
+        DiagnosticCredential(_browser_credential(), "Browser sign-in", diagnostic),
+    )
+    _desktop_chain.diagnostic = diagnostic
     return _desktop_chain
+
+
+class DiagnosticCredential:
+    """Record the successful credential path without retaining token contents."""
+
+    def __init__(self, wrapped, name, diagnostic):
+        self.wrapped = wrapped
+        self.name = name
+        self.diagnostic = diagnostic
+
+    def get_token(self, *scopes, **kwargs):
+        token = self.wrapped.get_token(*scopes, **kwargs)
+        self.diagnostic.clear()
+        self.diagnostic["path"] = self.name
+        identity = getattr(self.wrapped, "identity", {})
+        self.diagnostic.update(
+            {key: identity[key] for key in ("account", "tenant") if identity.get(key)}
+        )
+        return token
+
+    def close(self):
+        close = getattr(self.wrapped, "close", None)
+        if close is not None:
+            close()
 
 
 def _browser_credential():
@@ -234,6 +263,7 @@ class BrowserSignIn:
     def __init__(self) -> None:
         self._credential = None
         self._cached = True
+        self.identity = {}
 
     def get_token(self, *scopes, **kwargs):
         from azure.identity import AuthenticationRequiredError
@@ -250,6 +280,7 @@ class BrowserSignIn:
 
         def authenticate(credential):
             record = credential.authenticate(**arguments)
+            self._record_identity(record)
             token = credential.get_token(*required.scopes, **kwargs)
             # After the token: this call is where a lazy cache can still report
             # itself unavailable, and the record is only usable beside the cache
@@ -291,11 +322,16 @@ class BrowserSignIn:
 
     def _acquire(self):
         if self._credential is None:
-            self._credential = _interactive_browser(
-                cached=self._cached,
-                record=_load_authentication_record() if self._cached else None,
-            )
+            record = _load_authentication_record() if self._cached else None
+            self._record_identity(record)
+            self._credential = _interactive_browser(cached=self._cached, record=record)
         return self._credential
+
+    def _record_identity(self, record):
+        self.identity = {
+            "account": getattr(record, "username", None),
+            "tenant": getattr(record, "tenant_id", None),
+        }
 
 
 def _authenticate_arguments(required, kwargs) -> dict:
@@ -451,6 +487,13 @@ class TokenProvider:
         if self._cred is None:
             self._cred = credential()
         return self._cred
+
+    @property
+    def diagnostic(self) -> dict:
+        credential = self._credential()
+        return dict(
+            getattr(credential, "diagnostic", {"path": type(credential).__name__})
+        )
 
     def __call__(self) -> str:
         import time

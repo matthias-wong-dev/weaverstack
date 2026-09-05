@@ -30,6 +30,7 @@ from .resources import (
     Item,
     find_item,
     find_workspace,
+    list_items,
     refresh_sql_endpoint_metadata,
 )
 
@@ -54,6 +55,18 @@ class FabricResolver:
         #: cache is worth, and a hit is the absence of a call, which nothing
         #: above the cache can observe for itself.
         self.cache_hits = 0
+
+    def discover(self, *, workspaces=None, client=None):
+        """List workspace items and retain their typed identities for resolution."""
+
+        rest = client if client is not None else self.client
+        physical = find_workspace(
+            self.configuration.workspace, client=rest, workspaces=workspaces
+        )
+        items = list_items(physical, client=rest)
+        self._workspace = physical
+        self._items.update({f"{item.name}:{item.type}": item for item in items})
+        return items
 
     # --- level four -------------------------------------------------------
 

@@ -17,7 +17,13 @@ from .errors import (
     WeaverError,
 )
 from .health import HealthFinding, HealthReport, HealthSection, LoadActivity
-from .initialise import ExampleOutcome, FabricItemOutcome, InitialiseReport, initialise
+from .initialise import (
+    ExampleOutcome,
+    FabricItemOutcome,
+    InitialiseReport,
+    add_example,
+    initialise,
+)
 from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
 from .load_report import LoadMessage, LoadNodeReport, LoadResult, LoadRunReport
 from .objects import (
@@ -59,6 +65,7 @@ __all__ = [
     "__version__",
     # ordinary operations and results
     "initialise",
+    "add_example",
     "InitialiseReport",
     "FabricItemOutcome",
     "ExampleOutcome",

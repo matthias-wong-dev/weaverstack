@@ -807,3 +807,21 @@ def test_the_library_that_holds_the_token_is_recognised_by_name(monkeypatch, cap
 
         assert auth.BrowserSignIn().get_token(auth.FABRIC_SCOPE).token == "a-token"
         assert made == [True, False]
+
+
+@weaver_test()
+def test_authentication_diagnostic_names_the_successful_path(credentials):
+    provider = auth.TokenProvider(auth.FABRIC_SCOPE, auth.desktop_credential())
+    provider()
+    assert provider.diagnostic == {"path": "Azure CLI"}
+    assert "a-token" not in str(provider.diagnostic)
+
+
+@weaver_test()
+def test_authentication_diagnostic_reports_browser_fallback(monkeypatch):
+    auth._desktop_chain = None
+    monkeypatch.setattr("azure.identity.AzureCliCredential", lambda: _Unavailable())
+    monkeypatch.setattr(auth, "_browser_credential", _Working)
+    provider = auth.TokenProvider(auth.FABRIC_SCOPE, auth.desktop_credential())
+    provider()
+    assert provider.diagnostic == {"path": "Browser sign-in"}
