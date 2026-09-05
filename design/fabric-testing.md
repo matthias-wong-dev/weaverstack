@@ -125,13 +125,26 @@ flushing, so later execution retains the semantic context that caused it.
 
 ## Workspace setup
 
-Install the development dependencies and sign in with Azure CLI:
+Install the development dependencies and sign in:
 
 ```bash
-az login
 python3.11 -m venv .venv
 .venv/bin/pip install -e '.[dev]'
+.venv/bin/weaver doctor --workspace "PYTEST_WORKSPACE"
 ```
+
+The suite installs `desktop_credential()`, the chain a `weaver` command uses, so
+the browser sign-in that command performs is what later runs reuse. The Azure
+CLI is not required: it answers where `az login` has produced an identity, and
+reports itself unavailable where it has not.
+
+An `az login` that belongs to another identity is worth knowing about, because
+the chain settles on the first credential that answers. A service principal with
+no workspaces issues tokens and reaches nothing, and `az logout` is what hands
+the suite back to the browser identity.
+
+Where the estate cannot be reached, `-m fabric` fails. A run that named the
+marker asked for these tests, so a skip there is a pass reporting nothing.
 
 The default fixed workspace is named `PYTEST_WORKSPACE`. Override it when
 needed:

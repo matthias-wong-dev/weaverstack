@@ -177,10 +177,13 @@ def _messages(node, result) -> tuple:
                 source=node.primitive_kind,
             ),
         )
+    reported = getattr(result, "error_message", None)
+    if not reported:
+        return ()
     return (
         error(
             _failure_code(node),
-            f"{node.node_id} reported failure: {result.error_message}",
+            f"{node.node_id} reported failure: {reported}",
             source=node.primitive_kind,
         ),
     )

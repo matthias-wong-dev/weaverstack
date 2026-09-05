@@ -76,6 +76,8 @@ session.resolver(workspace)  # names → physical items
 Domain code does not access `session.livy`; doing so would couple it to Fabric
 transport.
 
+A resolver's `client` is the Fabric REST client appropriate to its host.
+
 Commands say up front what they will need, coarsely, and the Session starts those
 in the background:
 

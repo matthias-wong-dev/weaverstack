@@ -384,9 +384,10 @@ def test_every_retryable_command_offers_the_same_prompt():
 
     source = inspect.getsource(_cli())
 
-    for command in ("_build_once", "_load_once", "_test_once"):
+    for command in ("_build_once", "_load_once"):
         assert f"_until_fixed(args, lambda: {command}(args))" in source
     assert "_retry_until_fixed(lambda: _check_once(args))" in source
+    assert "_until_fixed(args, lambda: _test_once(args))" not in source
 
 
 # --- the keyboard itself ------------------------------------------------------
@@ -494,3 +495,49 @@ def test_a_repository_the_parse_rejects_is_offered_another_attempt(monkeypatch, 
     assert _cli().handle_build(parsed) == 1
     assert terminal.presses == 1
     assert "Sales__Order.py: refused" in capsys.readouterr().err
+
+
+# --- what is not offered a retry ----------------------------------------------
+
+
+@pytest.mark.parametrize("status", ["failed", "invalid"])
+@weaver_test()
+def test_a_validation_report_is_never_offered_a_retry(monkeypatch, capsys, status):
+    import weaver
+    from weaver.runtime.validation_result import TestResult
+    from weaver.test_report import ValidationNodeReport, ValidationRunReport
+    from weaver.workspaces import Workspace
+
+    result = (
+        TestResult(missing_count=2)
+        if status == "failed"
+        else TestResult.failed_to_run("not installed")
+    )
+    report = ValidationRunReport(
+        status=status,
+        nodes=(
+            ValidationNodeReport(
+                logical_id="Lakehouse/Sales/Sales.OrdersReconcile",
+                kind="Test",
+                physical_target="Lakehouse/Sales_LH",
+                primitive_kind="python_validation",
+                dispatch_location="tests/x.py",
+                status=status,
+                executed=True,
+                result=result,
+            ),
+        ),
+    )
+    runs = []
+
+    monkeypatch.setattr(
+        _cli(), "_resolve_workspace", lambda args: Workspace(workspace="Analytics")
+    )
+    terminal = _Terminal(monkeypatch, keys=[ENTER])
+    monkeypatch.setattr(weaver, "test", lambda *a, **k: runs.append(1) or report)
+    parsed = _cli().build_parser().parse_args(["test", "Lakehouse/Sales"])
+    parsed.session = _Session()
+
+    assert _cli().handle_test(parsed) == 0
+    assert runs == [1]
+    assert terminal.presses == 0

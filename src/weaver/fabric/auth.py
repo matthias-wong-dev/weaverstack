@@ -23,6 +23,7 @@ client, including the ones an operation constructs for itself.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from ..errors import ConfigError
 
@@ -38,6 +39,12 @@ DEFAULT_CREDENTIAL = "AzureCliCredential"
 #: Where browser sign-in keeps its tokens between commands. Without a name on
 #: disk every Weaver command would open a browser window of its own.
 TOKEN_CACHE_NAME = "weaverstack"
+
+#: This user's Weaver directory, outside any repository.
+WEAVER_DIRECTORY = ".weaver"
+
+#: Identity metadata for the cached account. No token, no secret.
+AUTHENTICATION_RECORD_FILE = "authentication-record.json"
 
 
 def prefer_cli_credential() -> str:
@@ -117,9 +124,8 @@ def desktop_credential():
     """The Azure CLI where it can issue a token, and browser sign-in where it cannot.
 
     A desktop user who has run ``az login`` keeps that identity. One who has not
-    is sent to Microsoft sign-in in a browser, and the token is cached on disk
-    under :data:`TOKEN_CACHE_NAME`, so the next command signs in without opening
-    anything.
+    is sent to Microsoft sign-in in a browser once. See :class:`BrowserSignIn`
+    for what a later command reuses.
 
     ``ChainedTokenCredential`` tries the Azure CLI inside the token acquisition a
     command was going to make anyway, moves on when it reports itself
@@ -147,19 +153,82 @@ def _browser_credential():
     return BrowserSignIn()
 
 
+# The record is convenience state. Every failure below opens the browser instead.
+
+
+def _authentication_record_path() -> Path:
+    return Path.home() / WEAVER_DIRECTORY / AUTHENTICATION_RECORD_FILE
+
+
+def _load_authentication_record():
+    from azure.identity import AuthenticationRecord
+
+    path = _authentication_record_path()
+    try:
+        serialised = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        _warn_once(f"Weaver could not read {path} ({type(exc).__name__}).")
+        return None
+    try:
+        return AuthenticationRecord.deserialize(serialised)
+    except Exception as exc:  # noqa: BLE001 - an unusable record is replaced
+        _warn_once(
+            f"The sign-in Weaver remembered in {path} could not be read "
+            f"({type(exc).__name__}), so it will ask you to sign in again."
+        )
+        return None
+
+
+def _save_authentication_record(record) -> None:
+    """Replace the record, through a temporary file and :func:`os.replace`."""
+
+    path = _authentication_record_path()
+    temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary.write_text(record.serialize(), encoding="utf-8")
+        _restrict(temporary)
+        os.replace(temporary, path)
+    except OSError as exc:
+        _warn_once(
+            f"Weaver could not remember this sign-in in {path} "
+            f"({type(exc).__name__}), so it will ask you to sign in again."
+        )
+        try:
+            temporary.unlink()
+        except OSError:
+            pass
+
+
+def _restrict(path: Path) -> None:
+    """Owner-only, where the platform has such a mode. Windows has not."""
+
+    try:
+        os.chmod(path, 0o600)
+    except (OSError, NotImplementedError):
+        pass
+
+
 class BrowserSignIn:
-    """Microsoft sign-in in a browser, with the token cache made optional.
+    """Microsoft sign-in in a browser, reused across commands.
 
-    The token is kept where the machine keeps secrets: a Keychain item on macOS,
-    libsecret on Linux, DPAPI on Windows. ``azure-identity`` builds that cache
-    when the first token is asked for, not when the credential is made, so the
-    absence of secure storage surfaces here and is answered by signing in
-    without a cache.
+    Cross-process reuse needs both halves:
 
-    Falling back to an unencrypted file is not offered. A refresh token sitting
-    on disk in the clear is a worse trade than signing in again, and
-    ``pip install weaverstack`` still has to be the whole prerequisite on a
-    machine with no keyring at all.
+    .. code-block:: text
+
+        the encrypted token cache   the refresh token, in the platform's store
+        the AuthenticationRecord    which account that token is for
+
+    ``azure-identity`` writes the first and never the second, so Weaver keeps
+    the record under :func:`_authentication_record_path` and constructs the
+    credential with it. ``disable_automatic_authentication`` puts the transition
+    into the browser here, which is what makes the record capturable.
+
+    The cache is a Keychain item on macOS, libsecret on Linux, DPAPI on Windows,
+    and is built when the first token is asked for. A machine with none of them
+    signs in per command. An unencrypted cache is never asked for.
     """
 
     def __init__(self) -> None:
@@ -167,14 +236,43 @@ class BrowserSignIn:
         self._cached = True
 
     def get_token(self, *scopes, **kwargs):
-        """One token, from the cached credential or from one without a cache."""
+        from azure.identity import AuthenticationRequiredError
+
+        try:
+            return self._through_the_cache(
+                lambda credential: credential.get_token(*scopes, **kwargs)
+            )
+        except AuthenticationRequiredError as required:
+            return self._sign_in(required, **kwargs)
+
+    def _sign_in(self, required, **kwargs):
+        arguments = _authenticate_arguments(required, kwargs)
+
+        def authenticate(credential):
+            record = credential.authenticate(**arguments)
+            token = credential.get_token(*required.scopes, **kwargs)
+            # After the token: this call is where a lazy cache can still report
+            # itself unavailable, and the record is only usable beside the cache
+            # holding the refresh token.
+            if self._cached:
+                _save_authentication_record(record)
+            return token
+
+        return self._through_the_cache(authenticate)
+
+    def _through_the_cache(self, use):
+        """One call on the credential, dropping the cache where the platform
+        reports it has nowhere to keep a token.
+
+        ``get_token`` and ``authenticate`` both reach the lazily built cache, so
+        either can be the call that finds it missing.
+        """
 
         from azure.core.exceptions import ClientAuthenticationError
         from azure.identity import CredentialUnavailableError
 
-        credential = self._acquire()
         try:
-            return credential.get_token(*scopes, **kwargs)
+            return use(self._acquire())
         except (ClientAuthenticationError, CredentialUnavailableError):
             # An answer about the sign-in itself, which is this credential's own
             # to report. Only the storage underneath it is worked around here.
@@ -187,14 +285,32 @@ class BrowserSignIn:
                 f"({type(exc).__name__}), so Weaver will ask you to sign in "
                 "again next time."
             )
-            self._credential = _interactive_browser(cached=False)
             self._cached = False
-            return self._credential.get_token(*scopes, **kwargs)
+            self._credential = _interactive_browser(cached=False, record=None)
+            return use(self._credential)
 
     def _acquire(self):
         if self._credential is None:
-            self._credential = _interactive_browser(cached=self._cached)
+            self._credential = _interactive_browser(
+                cached=self._cached,
+                record=_load_authentication_record() if self._cached else None,
+            )
         return self._credential
+
+
+def _authenticate_arguments(required, kwargs) -> dict:
+    """Scopes and claims from the refused request, tenant and CAE from kwargs."""
+
+    arguments = {"scopes": list(required.scopes)}
+    claims = getattr(required, "claims", None)
+    if claims:
+        arguments["claims"] = claims
+    tenant = kwargs.get("tenant_id")
+    if tenant:
+        arguments["tenant_id"] = tenant
+    if kwargs.get("enable_cae"):
+        arguments["enable_cae"] = True
+    return arguments
 
 
 #: What `azure-identity` says on Linux when it will not encrypt the cache and was
@@ -256,7 +372,7 @@ def _is_persistence_error(exc: BaseException) -> bool:
     return isinstance(exc, PersistenceError)
 
 
-def _interactive_browser(*, cached: bool):
+def _interactive_browser(*, cached: bool, record=None):
     """The library's browser credential, with or without a persistent cache."""
 
     from azure.identity import (
@@ -265,21 +381,22 @@ def _interactive_browser(*, cached: bool):
     )
 
     if not cached:
-        return InteractiveBrowserCredential()
+        return InteractiveBrowserCredential(disable_automatic_authentication=True)
     return InteractiveBrowserCredential(
-        cache_persistence_options=TokenCachePersistenceOptions(name=TOKEN_CACHE_NAME)
+        authentication_record=record,
+        cache_persistence_options=TokenCachePersistenceOptions(name=TOKEN_CACHE_NAME),
+        disable_automatic_authentication=True,
     )
 
 
-#: Said once per process. A warning repeated per command is noise nobody reads.
-_warned = False
+#: What has already been said this process. There is more than one message.
+_warned: set = set()
 
 
 def _warn_once(message: str) -> None:
-    global _warned
-    if _warned:
+    if message in _warned:
         return
-    _warned = True
+    _warned.add(message)
     import sys
 
     print(f"warning: {message}", file=sys.stderr)

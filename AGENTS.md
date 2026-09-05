@@ -158,10 +158,11 @@ The desktop CLI installs one for its process through
 constructs for itself as well as the ones it is handed. What it installs is
 `desktop_credential()`: the Azure CLI where it can issue a token, and browser
 sign-in where it cannot, as one `ChainedTokenCredential` built once per process.
-The browser half keeps its token in the platform's secure store and signs in per
-command where there is none. An unencrypted cache is never asked for. The Fabric test infrastructure
-calls `prefer_cli_credential()` instead, which pins the chain through
-`AZURE_TOKEN_CREDENTIALS`, so an unattended run can never open a browser.
+Reusing a browser sign-in in a later process needs the platform's secure token
+cache and the `AuthenticationRecord` naming the cached account, so `BrowserSignIn`
+keeps the second in `~/.weaver/authentication-record.json`. An unencrypted cache
+is never asked for. The Fabric suite installs the same `desktop_credential()`
+chain, so a sign-in performed by `weaver doctor` runs it.
 
 ### Fabric is the reference
 

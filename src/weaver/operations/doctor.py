@@ -93,7 +93,7 @@ def doctor(
     through.
     """
 
-    checks = [_rest_check(client=client)]
+    checks = [_rest_check(client=_rest_client(session, client))]
     if not checks[0].passed:
         return DoctorReport(checks=tuple(checks))
 
@@ -101,7 +101,9 @@ def doctor(
     if configured is None:
         return DoctorReport(checks=tuple(checks))
 
-    checks.append(_workspace_check(configured, client=client))
+    checks.append(
+        _workspace_check(configured, client=_rest_client(session, client, configured))
+    )
     if not checks[-1].passed:
         return DoctorReport(checks=tuple(checks), workspace=configured.workspace)
 
@@ -134,6 +136,31 @@ def _configured(workspace, workspace_config, catalogue, session):
     return resolve_workspace(
         workspace=workspace, catalogue=catalogue, workspace_config=workspace_config
     )
+
+
+def _rest_client(session, client, workspace=None):
+    """Fabric REST through the Session that owns it, where there is one.
+
+    A Session builds its client with its own renewing token and telemetry, so a
+    crossing made here costs no second token and is counted where the Session's
+    others are. Inside Fabric it is also the session identity, and a client
+    constructed here would reach for a desktop credential.
+
+    A Session with no workspace has no resolver, and the sign-in check runs
+    before a workspace is known, so that case answers with no client and
+    :func:`_rest_check` uses one of its own.
+    """
+
+    if client is not None:
+        return client
+    if session is None:
+        return None
+    from ..errors import CommandError
+
+    try:
+        return session.resolver(workspace).client
+    except CommandError:
+        return None
 
 
 def _rest_check(*, client) -> Check:

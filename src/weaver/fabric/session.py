@@ -64,7 +64,7 @@ class FabricSessionResolver(FabricResolver):
         self._workspace = WorkspaceItem(id=str(workspace_id), name=str(workspace_name))
         self._lakehouse_utils = lakehouse
         self._credentials = credentials
-        self.client = client
+        self._client = client
         self._items: dict[str, Item] = {}
 
     @property
@@ -83,7 +83,7 @@ class FabricSessionResolver(FabricResolver):
                     self.workspace,
                     item.name,
                     item_type=WAREHOUSE,
-                    client=self._rest_client(),
+                    client=self.client,
                 )
             return self._items[key]
         if item_type != LAKEHOUSE:
@@ -119,21 +119,19 @@ class FabricSessionResolver(FabricResolver):
 
         return Location(abfss_root(item.workspace_id, item.id))
 
-    def sql_endpoint(self, target):
-        self.client = self._rest_client()
-        return super().sql_endpoint(target)
+    @property
+    def client(self):
+        """Fabric REST on this session's identity. Built on first use."""
 
-    def _rest_client(self):
-        """Fabric REST using the identity of this Fabric session."""
-
-        if self.client is None:
+        if self._client is None:
             credentials = self._credentials
             if credentials is None:
                 try:
                     from notebookutils import credentials as notebook_credentials
                 except ImportError as exc:
                     raise CommandError(
-                        "Warehouse resolution is available only inside a Fabric session"
+                        "Fabric REST from a session is available only inside a "
+                        "Fabric session"
                     ) from exc
                 credentials = notebook_credentials
             from .client import FabricClient
@@ -142,5 +140,5 @@ class FabricSessionResolver(FabricResolver):
             # expires like any other, and an install running inside Fabric can
             # outlive one. NotebookUtils serves from its own cache, so asking per
             # request is cheap.
-            self.client = FabricClient(token=lambda: credentials.getToken("pbi"))
-        return self.client
+            self._client = FabricClient(token=lambda: credentials.getToken("pbi"))
+        return self._client

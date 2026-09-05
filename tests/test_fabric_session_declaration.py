@@ -93,6 +93,64 @@ def test_a_lakehouse_resolves_to_what_authored_code_addresses():
     assert lakehouse.qualify("Sales", "Order") == "`Analytics`.`Sales`.`Sales`.`Order`"
 
 
+# --- the REST capability ------------------------------------------------------
+
+
+@weaver_test()
+def test_the_session_resolver_answers_rest_with_the_session_identity():
+    asked = []
+    resolver = FabricSessionResolver(
+        Workspace(workspace="Analytics"),
+        runtime=_runtime(),
+        lakehouse=_LakehouseUtils(),
+        credentials=SimpleNamespace(
+            getToken=lambda audience: asked.append(audience) or "session-token"
+        ),
+    )
+
+    client = resolver.client
+
+    assert client._token_source() == "session-token"
+    assert asked == ["pbi"], "the client asked NotebookUtils for the session token"
+
+
+@weaver_test()
+def test_the_session_resolver_builds_its_client_once():
+    resolver = FabricSessionResolver(
+        Workspace(workspace="Analytics"),
+        runtime=_runtime(),
+        lakehouse=_LakehouseUtils(),
+        credentials=SimpleNamespace(getToken=lambda audience: "session-token"),
+    )
+
+    assert resolver.client is resolver.client
+
+
+@weaver_test()
+def test_an_injected_client_is_what_the_session_resolver_answers():
+    supplied = object()
+    resolver = FabricSessionResolver(
+        Workspace(workspace="Analytics"),
+        runtime=_runtime(),
+        lakehouse=_LakehouseUtils(),
+        client=supplied,
+    )
+
+    assert resolver.client is supplied
+
+
+@weaver_test()
+def test_rest_outside_a_fabric_session_says_so():
+    resolver = FabricSessionResolver(
+        Workspace(workspace="Analytics"),
+        runtime=_runtime(),
+        lakehouse=_LakehouseUtils(),
+    )
+
+    with pytest.raises(CommandError, match="only inside a Fabric session"):
+        resolver.client
+
+
 @weaver_test()
 def test_session_resolution_refuses_a_different_configured_workspace():
     with pytest.raises(CommandError, match="not configured Workspace"):

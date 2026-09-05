@@ -13,10 +13,14 @@ weaver --help
 ## Signing in
 
 Weaver uses the Azure CLI identity where `az login` has produced one, and
-otherwise opens Microsoft sign-in in a browser. The browser token is kept where
-the machine keeps secrets, a Keychain item on macOS, libsecret on Linux, DPAPI
-on Windows, so later commands sign in without opening anything. A machine with
-none of those signs in each time and says so once; the token is never written to
+otherwise opens Microsoft sign-in in a browser. On a machine with secure
+credential storage, later commands reuse that sign-in until Microsoft requires
+you to authenticate again.
+
+The refresh token goes to the platform's secure store, a Keychain item on macOS,
+libsecret on Linux, DPAPI on Windows, and the account it belongs to goes to
+`~/.weaver/authentication-record.json`, which holds no secret. A machine with no
+secure store signs in each time and says so once; the token is never written to
 disk in the clear. Only the recognised ways a platform reports having nowhere
 secure are worked around. Any other failure is reported as itself.
 
@@ -730,9 +734,11 @@ Run the installed Tests and Assumptions the named items own:
 weaver test Lakehouse/Sales --workspace-config examples/weaver_example.yml
 ```
 
-The exit code is the verdict — non-zero when anything failed or could not be
-evaluated — and the output is the evidence, which is what makes the command
-usable in a pipeline. `--json` emits the whole report.
+The output is the verdict. A Test or an Assumption may pass, fail, or be unable
+to run, and none of those is a failure of the command: a run that produced a
+report exits zero, so a pasted block or a composition carries on to the next
+command. A command that produced no report, an unusable `--name` or an estate it
+could not read, exits non-zero. `--json` emits the whole report.
 
 A whole-item run reports **counts only**. Diagnostic rows may be large and may
 carry sensitive business data, so they are never transferred and never logged;
@@ -845,10 +851,10 @@ missing key. Publish it as a daily health artefact.
 
 ```python
 report = weaver.health()
-report.status            # "green" | "amber" | "red"
+report.status  # "green" | "amber" | "red"
 report.load.status
-report.tests.findings    # each with a stable `code`
-report.to_mapping()      # what --json prints
+report.tests.findings  # each with a stable `code`
+report.to_mapping()  # what --json prints
 ```
 
 ## Wipe
