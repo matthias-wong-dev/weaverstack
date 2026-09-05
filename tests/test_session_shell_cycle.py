@@ -45,7 +45,7 @@ def recorded(monkeypatch):
         parser = argparse.ArgumentParser(prog="weaver")
         commands = parser.add_subparsers(dest="command")
         one = commands.add_parser("build")
-        one.add_argument("repository", nargs="?")
+        one.add_argument("source", nargs="?")
         one.add_argument("--fail", action="store_true")
         one.set_defaults(handler=handler)
         return parser
@@ -189,7 +189,7 @@ def test_quoted_arguments_survive_the_prompt(every_command):
 
 
 @pytest.mark.parametrize(
-    "line, repository",
+    "line, source",
     [
         (r"weaver build C:\Users\Matthias\repo", r"C:\Users\Matthias\repo"),
         (
@@ -199,14 +199,14 @@ def test_quoted_arguments_survive_the_prompt(every_command):
     ],
 )
 @weaver_test()
-def test_a_windows_path_reaches_the_handler_intact(line, repository, every_command):
+def test_a_windows_path_reaches_the_handler_intact(line, source, every_command):
     """The line copied out of PowerShell is the line that runs."""
 
     calls, factory = every_command
 
     _run(f"{line}\nexit\n", factory)
 
-    assert calls[0].repository == repository
+    assert calls[0].source == source
 
 
 @weaver_test()
@@ -359,7 +359,7 @@ def test_an_unexpected_defect_does_not_discard_the_session(capsys):
         parser = argparse.ArgumentParser(prog="weaver")
         commands = parser.add_subparsers(dest="command")
         one = commands.add_parser("build")
-        one.add_argument("repository", nargs="?")
+        one.add_argument("source", nargs="?")
         one.set_defaults(handler=handler)
         return parser
 
@@ -382,7 +382,7 @@ def test_an_interrupted_command_leaves_the_session_usable(capsys):
         parser = argparse.ArgumentParser(prog="weaver")
         commands = parser.add_subparsers(dest="command")
         one = commands.add_parser("build")
-        one.add_argument("repository", nargs="?")
+        one.add_argument("source", nargs="?")
         one.set_defaults(handler=handler)
         return parser
 

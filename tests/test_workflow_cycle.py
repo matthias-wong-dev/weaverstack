@@ -38,7 +38,7 @@ DEV = """\
 workflows:
   dev:
     - weaver wipe Lakehouse/Sales_LH Warehouse/Curated_WH
-    - weaver build ./repository --item Lakehouse/Sales=Lakehouse/Sales_LH
+    - weaver build ./project --item Lakehouse/Sales=Lakehouse/Sales_LH
     - weaver load Warehouse/Curated
     - weaver test Warehouse/Curated
 """
@@ -385,7 +385,7 @@ def test_every_command_runs_in_order_with_its_arguments(
     assert status == 0
     assert len(calls) == 4
     assert calls[0].targets == ["Lakehouse/Sales_LH", "Warehouse/Curated_WH"]
-    assert calls[1].repository == "./repository"
+    assert calls[1].source == "./project"
     assert calls[1].items == ["Lakehouse/Sales=Lakehouse/Sales_LH"]
     assert calls[2].items == ["Warehouse/Curated"]
     assert calls[3].items == ["Warehouse/Curated"]

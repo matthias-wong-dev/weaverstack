@@ -24,12 +24,12 @@ def parse(*args):
 
 @weaver_test()
 def test_project_folder_is_optional_for_wizard_and_explicit_for_unattended_setup():
-    assert parse().repository is None
-    assert parse("--project-folder", ".").repository == "."
+    assert parse().project_folder is None
+    assert parse("--project-folder", ".").project_folder == "."
     assert (
         build_parser()
         .parse_args(["initialize", "--project-folder", "project"])
-        .repository
+        .project_folder
         == "project"
     )
     with pytest.raises(SystemExit):
@@ -165,7 +165,7 @@ def test_equivalent_command_includes_publication_and_is_parseable():
     )
     replay = build_parser().parse_args(shlex.split(equivalent_command(args))[1:])
     assert (
-        replay.repository == "my project"
+        replay.project_folder == "my project"
         and replay.publish_environment
         and replay.no_input
     )
@@ -175,7 +175,7 @@ def test_equivalent_command_includes_publication_and_is_parseable():
 def test_deferred_render_names_normal_publish_and_next_commands(capsys):
     render(
         InitialiseReport(
-            repository="project",
+            project_folder="project",
             workspace="Analytics",
             resources=(FabricItemOutcome("Environment", "Weaver", "created"),),
         )
@@ -200,7 +200,7 @@ def test_cli_passes_source_and_publication_flags_to_core(monkeypatch, tmp_path, 
         "initialise",
         lambda path, **kwargs: (
             calls.append((path, kwargs))
-            or InitialiseReport(repository=str(path), workspace="Analytics")
+            or InitialiseReport(project_folder=str(path), workspace="Analytics")
         ),
     )
     args = parse(
@@ -318,7 +318,7 @@ def test_workspace_review_change_rediscovers_and_recollects_targets(
             (args.workspace, args.environment, args.lakehouse, args.warehouse)
         )
         return InitialiseReport(
-            repository=args.repository,
+            project_folder=args.project_folder,
             workspace=args.workspace,
             resources=(FabricItemOutcome("Environment", args.environment, "existing"),),
         )
@@ -333,7 +333,7 @@ def test_workspace_review_change_rediscovers_and_recollects_targets(
     ]
     text = capsys.readouterr().out
     assert text.count("Set up a Weaver project.") == 1
-    assert args.repository == expected_folder
+    assert args.project_folder == expected_folder
     assert text.index("Fabric workspace:") < text.index("Project folder [UAT]:")
     assert text.count("Project folder [Production]:") == (0 if folder_answer else 1)
     final_review = text.rsplit("\nProject\n", 1)[1]
@@ -350,7 +350,7 @@ def test_add_example_is_not_a_public_command():
 def test_workspace_option_starts_at_project_folder(capsys):
     args = parse("--workspace", "Analytics")
     collect(args, stdin=Typed("\n\n\nLanding\n\n\n1\n\n"))
-    assert args.repository == "Analytics"
+    assert args.project_folder == "Analytics"
     text = capsys.readouterr().out
     assert text.count("Set up a Weaver project.") == 1
     assert "Fabric workspace:" not in text

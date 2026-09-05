@@ -34,7 +34,7 @@ def test_version_reports_the_distribution(capsys):
 #
 # The three lifecycle verbs name logical Weaver items. `load` and `test` name
 # them positionally, and `build` with a repeated `--item`, because a build's
-# positional is the repository source and a build item may carry an `=`.
+# positional is the build source and a build item may carry an `=`.
 # `wipe` keeps physical positionals: it empties a physical resource whether or
 # not an installation exists, so it has no logical item to name.
 
@@ -100,7 +100,7 @@ def test_both_run_item_spellings_are_one_selection(command):
 
 @weaver_test()
 def test_a_build_repeats_one_item_option():
-    """A build's positional is the repository, so its items stay an option."""
+    """A build's positional is the source, so its items stay an option."""
 
     from weaver_cli.main import build_parser
 
@@ -217,10 +217,10 @@ def _parsed_build(monkeypatch):
     ["DiscoveryError", "GraphError", "IdentityError", "MetadataError"],
 )
 @weaver_test()
-def test_a_rejected_repository_is_a_failed_build(error, monkeypatch, capsys):
-    """The four errors a repository parse raises, and one answer to them.
+def test_a_rejected_project_is_a_failed_build(error, monkeypatch, capsys):
+    """The four errors a project parse raises, and one answer to them.
 
-    Each is cleared by editing the repository, and the next attempt re-reads the
+    Each is cleared by editing the project, and the next attempt re-reads the
     tree, so the build renders the error and returns a failure. That failure is
     what the retry prompt offers to run again.
     """

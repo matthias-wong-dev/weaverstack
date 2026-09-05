@@ -489,9 +489,14 @@ the relevant design document instead of adding a competing explanation elsewhere
 
 Use the established name for each public concept: Workspace, Environment, Weaver
 catalogue, catalogue Warehouse, Lakehouse, Warehouse, target, logical target,
-physical target, repository, catalogue, registry, session, workflow, build,
-load, test, assumption. Do not invent synonyms in UI text when a defined term
-exists.
+physical target, project, project folder, source, repository, catalogue,
+registry, session, workflow, build, load, test, assumption. Do not invent
+synonyms in UI text when a defined term exists.
+
+A project is what a user authors. `project_folder` is the local directory
+holding it, and user-facing text calls that a project folder. `source` is a
+build's input, which may be a folder or an `abfss` location. `repository` and
+`WeaverRepository` are the parsed authored model. Git repository means Git.
 
 ### GitHub publishing
 

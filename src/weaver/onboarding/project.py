@@ -19,7 +19,7 @@ from ..declaration.model import LAKEHOUSE, WAREHOUSE
 from ..errors import CommandError
 from ..targets import validate_name
 
-#: The project files a generated repository is described by.
+#: The project files a generated project is described by.
 WORKSPACE_CONFIG_FILE = "workspace-config.yml"
 WORKFLOW_FILE = "workflow.yml"
 
@@ -155,7 +155,7 @@ This project describes data objects in the Microsoft Fabric workspace
 ## The important files
 
 `workspace-config.yml` names the workspace, catalogue Warehouse, Environment
-and the physical target for each repository item.
+and the physical target for each project item.
 
 `Environment/{request.environment}.Environment` defines the Python runtime.
 Add packages to `Libraries/PublicLibraries/environment.yml` there. Fabric
@@ -180,7 +180,7 @@ Or run the sequence in one session:
 weaver workflow full
 ```
 
-Build makes Fabric structures match the repository. Load runs the data work.
+Build makes Fabric structures match the project. Load runs the data work.
 A build can be run independently.
 
 ## The Catalogue

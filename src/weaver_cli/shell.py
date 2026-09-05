@@ -24,7 +24,7 @@ PROMPT = "weaver> "
 HISTORY_ENV = "WEAVER_SESSION_HISTORY"
 
 #: Commands unavailable from an interactive session. A session holds one
-#: workspace open for repository and bundle work; Fabric estate management is
+#: workspace open for project and bundle work; Fabric estate management is
 #: done from a shell.
 NOT_IN_A_SESSION = {
     "session": "already in a session",

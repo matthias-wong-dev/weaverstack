@@ -1,7 +1,7 @@
 """What `weaver initialise` writes, read back by the parsers that read a project.
 
 A generated project is a reference implementation: it is the first Weaver
-repository most users see, and the shape they copy. So every generated file is
+project most users see, and the shape they copy. So every generated file is
 parsed here by the same parser a user's own project goes through, and each of
 the three shapes is checked for what it would otherwise teach.
 """
@@ -52,7 +52,7 @@ def _project(tmp_path, shape: str, *, example: bool):
 @pytest.mark.parametrize("example", [False, True])
 @weaver_test()
 def test_a_generated_project_parses(tmp_path, shape, example):
-    """The repository reader is the one a user's own project goes through."""
+    """The project reader is the one a user's own project goes through."""
 
     _project(tmp_path, shape, example=example)
 

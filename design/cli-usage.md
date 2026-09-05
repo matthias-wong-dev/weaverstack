@@ -42,7 +42,7 @@ weaver doctor --workspace Analytics
 Doctor checks this machine and identity against the named workspace. It acquires
 an authentication token, reports the successful credential path, lists visible
 workspaces through Fabric REST and resolves the requested workspace. It reads no
-repository or workspace configuration.
+project or workspace configuration.
 Authentication also shows the account and tenant when those non-secret fields
 are available.
 
@@ -60,7 +60,7 @@ Missing probe items do not fail the command. A missing workspace, authentication
 failure, empty workspace listing or failed probe produces a nonzero exit code.
 `--json` includes the authentication path, workspace listing and all checks.
 
-Use `weaver health` for installed state and `weaver check` for repository syntax.
+Use `weaver health` for installed state and `weaver check` for project syntax.
 
 ## Setting a project up
 
@@ -445,7 +445,7 @@ Commands declare resources; the Session prepares them without taking ownership
 of build or run planning.
 
 Declarations are coarse and are a **superset** — arguments cannot know what a
-repository or a catalogue turns out to contain. Exact routing comes later, from
+project or a catalogue turns out to contain. Exact routing comes later, from
 the BuildBundle or the RunGraph. So **preparing is not using**: a declaration
 gives a head start to an acquisition that is coming anyway and never causes one.
 A run that declares `livy` and turns out to be all T-SQL opens no Spark session
@@ -573,7 +573,7 @@ With `--path`, a local `<Name>.Environment` directory is authoritative. The
 directory names the Environment, so `Sales.Environment` publishes `Sales`
 whatever workspace configuration names, and the definition is sent whole. A
 missing Environment is created from it. The directory is never written to.
-`Environment/` is a repository convention; the path may point anywhere.
+`Environment/` is a project convention; the path may point anywhere.
 
 Released publication leaves exactly one effective PyPI `weaverstack`
 requirement in the external library list and removes any Weaver custom wheel. An
@@ -663,7 +663,7 @@ Configuration may map two items to one target, which a constrained environment
 does. Only one of them is installed there at a time: a build into a target
 another item is installed to is refused, and `wipe` then `unbind` releases it.
 
-So one repository, one set of logical names and one command sequence run against
+So one project, one set of logical names and one command sequence run against
 development and production, and the only thing that changes is the workspace
 configuration:
 
@@ -695,7 +695,7 @@ builds every logical item the configuration declares.
 
 Every build adds the implicit binding from `Warehouse/_weaver` to the configured
 catalogue Warehouse. Catalogue publication is mandatory and registry certification
-is last. Every build treats the repository as authoritative: a document removed
+is last. Every build treats the project as authoritative: a document removed
 from it loses its catalogue claims and its physical object is pruned. The build
 planner compares effective signatures with the reconciled Registry.
 Unchanged objects receive no physical action; selected changes use an explicit
@@ -725,7 +725,7 @@ weaver build ./estate --bundle-only --bundle-path ./dist/estate-bundle
 weaver install ./dist/estate-bundle --workspace-config examples/weaver_example.yml
 ```
 
-`weaver check [repository]` is also available for agents, CI and editor tooling
+`weaver check [project-folder]` is also available for agents, CI and editor tooling
 that need to validate source without contacting Fabric. It is not a prerequisite
 for `weaver build`, which always checks source itself.
 

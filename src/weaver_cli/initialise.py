@@ -53,8 +53,8 @@ def collect(
     if not args.workspace:
         args.workspace = _answer(stream, "Fabric workspace")
     suggested_folder = False
-    if not args.repository:
-        args.repository, suggested_folder = _project_folder(stream, args.workspace)
+    if not args.project_folder:
+        args.project_folder, suggested_folder = _project_folder(stream, args.workspace)
     if not args.catalogue:
         print(
             "\nCatalogue\nThe Catalogue is a Warehouse where Weaver keeps its build, load and test state."
@@ -66,7 +66,7 @@ def collect(
     if args.example is None:
         args.example = _yes(stream, "Add the Sales example to this project?")
     fields = (
-        ("repository", "Project folder"),
+        ("project_folder", "Project folder"),
         ("workspace", "Workspace"),
         ("catalogue", "Catalogue"),
         ("environment", "Environment"),
@@ -105,13 +105,13 @@ def collect(
             )
         else:
             value = _answer(stream, label)
-        if field == "repository":
+        if field == "project_folder":
             suggested_folder = False
         changed_workspace = field == "workspace" and value != args.workspace
         setattr(args, field, value)
         if changed_workspace:
             if suggested_folder:
-                args.repository, suggested_folder = _project_folder(
+                args.project_folder, suggested_folder = _project_folder(
                     stream, args.workspace
                 )
             args.environment = args.lakehouse = args.warehouse = None
@@ -174,7 +174,7 @@ def _project_folder(stream, workspace):
 def _validate(args):
     if not args.workspace:
         raise CommandError("Provide --workspace.")
-    if not args.repository:
+    if not args.project_folder:
         raise CommandError("Provide --project-folder for unattended setup.")
     ProjectRequest(
         workspace=args.workspace,
@@ -242,7 +242,7 @@ def equivalent_command(args):
         "--workspace",
         args.workspace,
         "--project-folder",
-        str(args.repository),
+        str(args.project_folder),
     ]
     for field in ("catalogue", "environment", "lakehouse", "warehouse"):
         value = getattr(args, field)
@@ -272,8 +272,8 @@ def render(report):
     from weaver.onboarding.environment import environment_directory
 
     _table(report)
-    print(f"\nYour Weaver project is ready in {report.repository}.")
-    print(f"\nNext:\n\n  cd {shlex.quote(report.repository)}")
+    print(f"\nYour Weaver project is ready in {report.project_folder}.")
+    print(f"\nNext:\n\n  cd {shlex.quote(report.project_folder)}")
     if report.environment_publication == "deferred":
         name = next(
             item.name for item in report.resources if item.role == "Environment"
@@ -289,7 +289,7 @@ def render(report):
 
 def render_dry_run(report):
     _table(report)
-    print(f"Project files will be created in {report.repository}.")
+    print(f"Project files will be created in {report.project_folder}.")
     if report.example.generated:
         print("Sales example source will be added.")
     print("No changes were made.")

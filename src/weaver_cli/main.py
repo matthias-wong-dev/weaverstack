@@ -55,7 +55,7 @@ Checking a Lakehouse starts a Fabric Spark session, which takes a minute.\
 # would be a second place deciding what an operation does. So commands declare
 # and the Session prepares.
 #
-# These are a superset, because arguments cannot know what a repository or a
+# These are a superset, because arguments cannot know what a project or a
 # catalogue turns out to contain. `load Lakehouse/Sales` says Livy may be needed
 # because a Lakehouse usually holds Python primitives, not because this estate
 # does. Exact routing comes later, from the BuildBundle or the RunGraph, and
@@ -140,7 +140,7 @@ def _requires_build(args) -> frozenset[str]:
     minute and the capacity's only slot.
 
     Naming no item gets the superset: items can come from workspace
-    configuration, and what a repository holds is not knowable from arguments.
+    configuration, and what a project holds is not knowable from arguments.
     """
 
     from weaver.sessions.requirements import (
@@ -370,22 +370,24 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
 
     check = subcommands.add_parser(
-        "check", help="Check your repository source without contacting Fabric."
+        "check", help="Check your project folder without contacting Fabric."
     )
     check.add_argument(
-        "repository",
+        "project_folder",
+        metavar="PROJECT_FOLDER",
         nargs="?",
-        help="Repository folder. Defaults to the current directory.",
+        help="Project folder. Defaults to the current directory.",
     )
     check.set_defaults(handler=handle_check)
 
     build = subcommands.add_parser(
-        "build", help="Build repository objects into named items."
+        "build", help="Build a project's objects into named items."
     )
     build.add_argument(
-        "repository",
+        "source",
+        metavar="SOURCE",
         nargs="?",
-        help="Repository folder. Defaults to the current directory or Notebook Resources.",
+        help="Project folder. Defaults to the current directory or Notebook Resources.",
     )
     build.add_argument(
         "--item",
@@ -888,7 +890,7 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workspace", help="Fabric workspace name. It must exist.")
     parser.add_argument(
         "--project-folder",
-        dest="repository",
+        dest="project_folder",
         metavar="PATH",
         help="Project folder to create or reuse. Required for unattended setup.",
     )
@@ -1155,7 +1157,7 @@ def handle_workflow(args: argparse.Namespace) -> int:
 #: Retry controls for an interactive task failure.
 RETRY_PROMPT = "Enter to retry, Esc to exit."
 
-#: The errors a repository edit clears. Each attempt re-reads the source tree,
+#: The errors a project edit clears. Each attempt re-reads the source tree,
 #: so these become a failed attempt the retry prompt offers to run again.
 #: Workspace configuration, request errors, transports and installation stay
 #: raised: another attempt reads the same argument and reaches the same host.
@@ -1724,7 +1726,7 @@ def _build_once(args: argparse.Namespace) -> int:
     try:
         with _running_session(args, workspace) as opened:
             result = weaver.build(
-                args.repository,
+                args.source,
                 items=args.items,
                 bundle_only=args.bundle_only,
                 bundle_path=args.bundle_path,
@@ -1732,7 +1734,7 @@ def _build_once(args: argparse.Namespace) -> int:
                 **_command_context(workspace),
             )
     except SOURCE_ERRORS as exc:
-        # A repository the parse rejected. Reported as a failed attempt so the
+        # A project the parse rejected. Reported as a failed attempt so the
         # retry prompt offers the next one, which re-reads the edited tree.
         _render_error(exc)
         return 1
@@ -1844,7 +1846,7 @@ def _initialise_once(args: argparse.Namespace, *, session):
         if value
     }
     return weaver.initialise(
-        args.repository,
+        args.project_folder,
         workspace=args.workspace,
         lakehouse=args.lakehouse,
         warehouse=args.warehouse,
@@ -1885,11 +1887,11 @@ def _check_once(args: argparse.Namespace) -> int:
     from weaver.operations.check import check
 
     try:
-        check(args.repository)
+        check(args.project_folder)
     except WeaverError as exc:
         _render_error(exc)
         return 1
-    print("Repository valid.")
+    print("Project valid.")
     return 0
 
 
