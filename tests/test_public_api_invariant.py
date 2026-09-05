@@ -28,7 +28,6 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "session",
         # Setting a project up: the operation, and what it reports doing.
         "initialise",
-        "add_example",
         "InitialiseReport",
         "FabricItemOutcome",
         "ExampleOutcome",

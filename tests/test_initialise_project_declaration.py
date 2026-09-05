@@ -275,7 +275,6 @@ def test_generated_project_explains_itself_and_has_all_compositions(tmp_path):
         "Environment/Weaver.Environment",
         "compose.yml",
         "weaver session",
-        "weaver add-example",
         "weaver health",
     ):
         assert name in readme
@@ -291,3 +290,28 @@ def test_generated_project_explains_itself_and_has_all_compositions(tmp_path):
     }
     for name, commands in expected.items():
         assert load_composition(name, file=str(tmp_path / "compose.yml"))[0] == commands
+
+
+@weaver_test()
+def test_lakehouse_accepts_123_character_name():
+    from weaver.onboarding.project import validate_fabric_name
+
+    name = "L" * 123
+    assert validate_fabric_name(name, "Lakehouse") == name
+    assert (
+        ProjectRequest(
+            workspace=WORKSPACE,
+            catalogue="Catalogue",
+            environment="Weaver",
+            lakehouse=name,
+        ).lakehouse
+        == name
+    )
+
+
+@weaver_test()
+def test_lakehouse_rejects_124_character_name():
+    from weaver.onboarding.project import validate_fabric_name
+
+    with pytest.raises(CommandError, match="valid Fabric Lakehouse"):
+        validate_fabric_name("L" * 124, "Lakehouse")

@@ -34,7 +34,13 @@ def collect_workspace(args, *, ask=True, stdin=None):
 
 
 def collect(
-    args: argparse.Namespace, *, ask=True, stdin=None, environments=None, items=None
+    args: argparse.Namespace,
+    *,
+    ask=True,
+    stdin=None,
+    environments=None,
+    items=None,
+    introduced=False,
 ) -> bool:
     """Collect names, allow revisions, and record publication preference."""
 
@@ -43,8 +49,9 @@ def collect(
     if not interactive:
         _validate(args)
         return False
-    print(INTRODUCTION)
-    print(f"Project folder: {args.repository}")
+    if not introduced:
+        print(INTRODUCTION)
+        print(f"Project folder: {args.repository}")
     if not args.workspace:
         args.workspace = _answer(stream, "Fabric workspace")
     if not args.catalogue:
@@ -54,38 +61,7 @@ def collect(
         args.catalogue = _item_answer(
             stream, "Catalogue name", "Warehouse", default=DEFAULT_CATALOGUE
         )
-    if not args.environment:
-        print(
-            "\nEnvironment\nWeaver uses a Fabric Environment for Python work. Its definition is kept in this project so you can add packages later."
-        )
-        available = tuple(environments()) if environments else ()
-        print("1. Use an existing Environment\n2. Create a new Environment")
-        if available and _numbered(stream, "Choose", 2) == 1:
-            for number, name in enumerate(available, 1):
-                print(f"{number}. {name}")
-            args.environment = available[
-                _numbered(stream, "Choose an Environment", len(available)) - 1
-            ]
-        else:
-            if not available:
-                print("This workspace has no Environments yet.")
-            args.environment = _item_answer(
-                stream, "Environment name", "Environment", default=DEFAULT_ENVIRONMENT
-            )
-    for kind, purpose, examples in (
-        ("Lakehouse", "files and Python/Delta tables", "Landing, Bronze"),
-        ("Warehouse", "SQL tables and views", "Curated, Reporting"),
-    ):
-        if not getattr(args, kind.lower()):
-            print(f"\n{kind} (optional)\nUse a {kind} for {purpose}.")
-            print("Press Enter if this project does not need one.")
-            available = tuple(items(kind)) if items else ()
-            if available:
-                print(f"Existing: {', '.join(available)}")
-            print(f"Examples: {examples}")
-            setattr(
-                args, kind.lower(), _item_answer(stream, kind, kind, skippable=True)
-            )
+    _collect_workspace_items(args, stream, environments=environments, items=items)
     if args.example is None:
         args.example = _yes(stream, "Add the Sales example to this project?")
     fields = (
@@ -128,11 +104,54 @@ def collect(
             )
         else:
             value = _answer(stream, label)
+        changed_workspace = field == "workspace" and value != args.workspace
         setattr(args, field, value)
+        if changed_workspace:
+            args.environment = args.lakehouse = args.warehouse = None
+            _collect_workspace_items(
+                args, stream, environments=environments, items=items
+            )
     if not args.dry_run and not getattr(args, "publish_environment", False):
         print(INSTALL_WARNING)
         args.publish_environment = _yes(stream, "Publish the Environment now?")
     return True
+
+
+def _collect_workspace_items(args, stream, *, environments, items):
+    """Collect Environment and target choices from the selected workspace."""
+
+    if not args.environment:
+        print(
+            "\nEnvironment\nWeaver uses a Fabric Environment for Python work. Its definition is kept in this project so you can add packages later."
+        )
+        available = tuple(environments(args.workspace)) if environments else ()
+        print("1. Use an existing Environment\n2. Create a new Environment")
+        if available and _numbered(stream, "Choose", 2) == 1:
+            for number, name in enumerate(available, 1):
+                print(f"{number}. {name}")
+            args.environment = available[
+                _numbered(stream, "Choose an Environment", len(available)) - 1
+            ]
+        else:
+            if not available:
+                print("This workspace has no Environments yet.")
+            args.environment = _item_answer(
+                stream, "Environment name", "Environment", default=DEFAULT_ENVIRONMENT
+            )
+    for kind, purpose, examples in (
+        ("Lakehouse", "files and Python/Delta tables", "Landing, Bronze"),
+        ("Warehouse", "SQL tables and views", "Curated, Reporting"),
+    ):
+        if not getattr(args, kind.lower()):
+            print(f"\n{kind} (optional)\nUse a {kind} for {purpose}.")
+            print("Press Enter if this project does not need one.")
+            available = tuple(items(args.workspace, kind)) if items else ()
+            if available:
+                print(f"Existing: {', '.join(available)}")
+            print(f"Examples: {examples}")
+            setattr(
+                args, kind.lower(), _item_answer(stream, kind, kind, skippable=True)
+            )
 
 
 def _validate(args):

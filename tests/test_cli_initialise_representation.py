@@ -96,8 +96,10 @@ def test_existing_item_hints_and_environment_selection(capsys):
     collect(
         args,
         stdin=Typed("\n1\n1\nLanding\nCurated\ny\n1\nn\n"),
-        environments=lambda: ("Runtime",),
-        items=lambda kind: ("Landing",) if kind == "Lakehouse" else ("Curated",),
+        environments=lambda workspace: ("Runtime",),
+        items=lambda workspace, kind: (
+            ("Landing",) if kind == "Lakehouse" else ("Curated",)
+        ),
     )
     assert args.environment == "Runtime" and args.example
     assert "Existing: Landing" in capsys.readouterr().out
@@ -236,3 +238,79 @@ def test_cancel_in_handler_never_calls_initialise(monkeypatch, capsys):
     )
     assert cli.handle_initialise(args) == 0
     assert "cancelled" in capsys.readouterr().out
+
+
+@weaver_test()
+def test_workspace_review_change_rediscovers_and_recollects_targets(
+    monkeypatch, capsys
+):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from weaver.sessions.testing import TestSession
+
+    cli = importlib.import_module("weaver_cli.main")
+    args = parse("project")
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(
+        cli.sys,
+        "stdin",
+        Typed(
+            "UAT\n\n1\n1\nUatLanding\nUatReporting\nn\n"
+            "2\n2\nProduction\n1\n1\nProdLanding\nProdReporting\n1\nn\n"
+        ),
+    )
+    clients = {workspace: object() for workspace in ("UAT", "Production")}
+    opened = TestSession()
+    monkeypatch.setattr(
+        opened,
+        "resolver",
+        lambda workspace: SimpleNamespace(client=clients[workspace.workspace]),
+    )
+    monkeypatch.setattr(cli, "_running_session", lambda *a: nullcontext(opened))
+    discoveries = []
+
+    def environments(workspace, *, client):
+        assert client is clients[workspace]
+        discoveries.append((workspace, "Environment"))
+        return ("UatRuntime",) if workspace == "UAT" else ("ProdRuntime",)
+
+    def items(workspace, kind, *, client):
+        assert client is clients[workspace]
+        discoveries.append((workspace, kind))
+        return (f"{'Uat' if workspace == 'UAT' else 'Prod'}{kind}",)
+
+    onboarding = importlib.import_module("weaver.initialise")
+    monkeypatch.setattr(onboarding, "available_environments", environments)
+    monkeypatch.setattr(onboarding, "available_items", items)
+    requests = []
+
+    def initialise(args, *, session):
+        requests.append(
+            (args.workspace, args.environment, args.lakehouse, args.warehouse)
+        )
+        return InitialiseReport(
+            repository=args.repository,
+            workspace=args.workspace,
+            resources=(FabricItemOutcome("Environment", args.environment, "existing"),),
+        )
+
+    monkeypatch.setattr(cli, "_initialise_once", initialise)
+    assert cli.handle_initialise(args) == 0
+    assert requests == [("Production", "ProdRuntime", "ProdLanding", "ProdReporting")]
+    assert discoveries == [
+        (workspace, kind)
+        for workspace in ("UAT", "Production")
+        for kind in ("Environment", "Lakehouse", "Warehouse")
+    ]
+    text = capsys.readouterr().out
+    assert text.count("Set up a Weaver project.") == 1
+    assert text.count("Project folder: project") == 1
+    final_review = text.rsplit("\nProject\n", 1)[1]
+    assert "Uat" not in final_review
+
+
+@weaver_test()
+def test_add_example_is_not_a_public_command():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["add-example"])

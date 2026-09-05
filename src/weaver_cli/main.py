@@ -360,12 +360,6 @@ def build_parser() -> argparse.ArgumentParser:
             handler=handle_initialise, requires=_requires_initialise
         )
 
-    example = subcommands.add_parser(
-        "add-example", help="Add Sales example source to a project."
-    )
-    example.add_argument("repository", nargs="?", default=".")
-    example.set_defaults(handler=handle_add_example, requires=lambda args: frozenset())
-
     doctor = subcommands.add_parser(
         "doctor",
         help="Check that Weaver can reach Microsoft Fabric.",
@@ -1774,9 +1768,7 @@ def handle_initialise(args: argparse.Namespace) -> int:
         raise CommandError("--interactive asks and --no-input never does.")
     _prefer_desktop_credential()
 
-    # The workspace first: which Environments there are, and whether Weaver is
-    # installed in one, are questions about a workspace, and a Session is opened
-    # on it to ask them.
+    # Item discovery uses the selected workspace's Session client.
     asked = collect_workspace(args, ask=not args.no_input)
     if args.no_input:
         collect(args, ask=False)
@@ -1791,14 +1783,19 @@ def handle_initialise(args: argparse.Namespace) -> int:
     with _running_session(args, resolve_workspace(workspace=args.workspace)) as opened:
         from weaver.initialise import available_environments, available_items
 
-        client = opened.resolver().client
+        def client_for(workspace):
+            return opened.resolver(resolve_workspace(workspace=workspace)).client
+
         asked = (
             collect(
                 args,
-                environments=lambda: available_environments(
-                    args.workspace, client=client
+                introduced=asked,
+                environments=lambda workspace: available_environments(
+                    workspace, client=client_for(workspace)
                 ),
-                items=lambda kind: available_items(args.workspace, kind, client=client),
+                items=lambda workspace, kind: available_items(
+                    workspace, kind, client=client_for(workspace)
+                ),
             )
             or asked
         )
@@ -1856,17 +1853,6 @@ def _initialise_once(args: argparse.Namespace, *, session):
         session=session,
         **named,
     )
-
-
-def handle_add_example(args: argparse.Namespace) -> int:
-    """Write the example through the public source generator."""
-
-    from weaver.initialise import add_example
-
-    files = add_example(args.repository)
-    print(f"Added Sales example source in {args.repository} ({len(files)} files).")
-    print("Run weaver build, weaver load and weaver test from the project directory.")
-    return 0
 
 
 def handle_doctor(args: argparse.Namespace) -> int:

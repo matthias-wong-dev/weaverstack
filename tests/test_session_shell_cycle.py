@@ -239,7 +239,6 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
 
     assert _available(build_parser()) == ", ".join(expected)
     assert expected == [
-        "add-example",
         "build",
         "compose",
         "health",

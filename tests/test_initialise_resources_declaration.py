@@ -11,7 +11,7 @@ from weaver.fabric.environment_definition import (
     EXTERNAL_LIBRARIES,
     EnvironmentDefinition,
 )
-from weaver.initialise import InitialiseError, add_example
+from weaver.initialise import InitialiseError
 from weaver.sessions.testing import TestSession
 
 
@@ -144,18 +144,28 @@ def test_dry_run_writes_and_creates_nothing(tmp_path, fabric):
     assert not fabric.created and not fabric.published and not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize(
-    "path",
-    ["workspace-config.yml", "Environment/Weaver.Environment/" + EXTERNAL_LIBRARIES],
-)
+@pytest.mark.parametrize("path", ["workspace-config.yml", "compose.yml", "README.md"])
 @weaver_test()
-def test_edited_generated_files_are_protected(tmp_path, fabric, path):
+def test_existing_project_files_are_not_overwritten(tmp_path, fabric, path):
     setup(tmp_path, fabric)
-    (tmp_path / path).write_text("edited")
+    (tmp_path / path).write_text("user content")
     fabric.created.clear()
-    with pytest.raises(InitialiseError, match="edited"):
+    with pytest.raises(InitialiseError, match="Choose another project folder"):
         setup(tmp_path, fabric)
-    assert not fabric.created and (tmp_path / path).read_text() == "edited"
+    assert not fabric.created and (tmp_path / path).read_text() == "user content"
+
+
+@weaver_test()
+def test_edited_environment_is_preserved_without_ownership_tracking(tmp_path, fabric):
+    setup(tmp_path, fabric)
+    libraries = tmp_path / "Environment/Weaver.Environment" / EXTERNAL_LIBRARIES
+    content = libraries.read_text() + "      - numpy\n"
+    libraries.write_text(content)
+    fabric.created.clear()
+    report = setup(tmp_path, fabric)
+    assert report.succeeded and not fabric.created
+    assert libraries.read_text() == content
+    assert not (tmp_path / ".weaver-generated.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -180,9 +190,7 @@ def test_item_kind_collision_stops_before_creation(tmp_path, fabric):
 
 
 @weaver_test()
-def test_example_only_generates_source_and_add_example_is_idempotent(
-    tmp_path, fabric, monkeypatch
-):
+def test_example_only_generates_source(tmp_path, fabric, monkeypatch):
     def refuse(*a, **k):
         raise AssertionError("setup executed data work")
 
@@ -190,25 +198,7 @@ def test_example_only_generates_source_and_add_example_is_idempotent(
         monkeypatch.setattr(f"weaver.operations.{name}.{name}", refuse)
     report = setup(tmp_path, fabric, example=True)
     assert report.example.generated and report.succeeded
-    files = add_example(tmp_path)
-    assert add_example(tmp_path) == files
-    (tmp_path / files[0]).write_text("edited")
-    with pytest.raises(InitialiseError):
-        add_example(tmp_path)
-
-
-@weaver_test()
-def test_add_example_uses_logical_names_from_config(tmp_path, fabric):
-    setup(tmp_path, fabric)
-    config = tmp_path / "workspace-config.yml"
-    config.write_text(
-        config.read_text().replace(
-            "Lakehouse/Landing: Landing", "Lakehouse/Landing: OtherLanding"
-        )
-    )
-    files = add_example(tmp_path)
-    assert any(name.startswith("Lakehouse/Landing/") for name in files)
-    assert not any("OtherLanding" in name for name in files)
+    assert (tmp_path / "Lakehouse/Landing/Tables/Sales__Customer.py").is_file()
 
 
 @weaver_test()
@@ -254,3 +244,32 @@ def test_fabric_validation_fallback_hides_api_json(tmp_path, fabric, monkeypatch
         setup(tmp_path, fabric)
     assert "errorCode" not in str(failure.value)
     assert not fabric.created
+
+
+@weaver_test()
+def test_interrupted_file_write_continues_without_replacing_existing_files(
+    tmp_path, fabric, monkeypatch
+):
+    import importlib
+
+    module = importlib.import_module("weaver.initialise")
+    write = module._write
+    interrupted = []
+
+    def stop_once(destination, files):
+        if destination == tmp_path and not interrupted:
+            partial = dict(list(files.items())[:2])
+            write(destination, partial)
+            interrupted.extend(partial)
+            raise OSError("interrupted file write")
+        write(destination, files)
+
+    monkeypatch.setattr(module, "_write", stop_once)
+    with pytest.raises(OSError, match="interrupted file write"):
+        setup(tmp_path, fabric)
+    timestamps = {name: (tmp_path / name).stat().st_mtime_ns for name in interrupted}
+    report = setup(tmp_path, fabric)
+    assert report.succeeded and len(fabric.created) == 4
+    assert timestamps == {
+        name: (tmp_path / name).stat().st_mtime_ns for name in interrupted
+    }

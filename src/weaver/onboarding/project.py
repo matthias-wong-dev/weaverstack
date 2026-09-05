@@ -209,12 +209,9 @@ Commands inside the session reuse Fabric connections and the Spark session.
 
 ## Try the example
 
-```bash
-weaver add-example
-weaver compose full
-```
-
-Adding the example writes source files. Build, load and test run separately.
+Choose the Sales example during initialisation to include its source files.
+Build, load and test run separately with `weaver compose full`.
+To explore the starter example later, initialise another project folder.
 
 ## Check connectivity
 
@@ -241,7 +238,9 @@ def validate_fabric_name(name: str, kind: str) -> str:
     import re
 
     validate_name(name, what=f"Fabric {kind} name")
-    invalid = len(name) > 256 or any(ord(character) < 32 for character in name)
+    # Fabric's Lakehouse creation guide limits display names to 123 characters.
+    maximum = 123 if kind == "Lakehouse" else 256
+    invalid = len(name) > maximum or any(ord(character) < 32 for character in name)
     if kind == "Lakehouse":
         invalid = invalid or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) is None
     if invalid:

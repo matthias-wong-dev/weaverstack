@@ -68,12 +68,19 @@ The destination is required. `weaver initialise .` explicitly uses the current
 directory. The wizard explains each item, offers existing names and collects
 optional Lakehouse, Warehouse and Sales example choices. A project needs at
 least one target. Its review offers Continue, Change an answer and Cancel.
-No Fabric mutation occurs before Continue.
+No Fabric mutation occurs before Continue. Changing Workspace clears the
+Environment, Lakehouse and Warehouse choices and collects them again using
+item discovery in the new workspace.
+
+Lakehouse names begin with a letter, contain letters, digits and underscores,
+and have at most 123 characters, as specified by the
+[Fabric creation guide](https://learn.microsoft.com/en-us/fabric/data-engineering/create-lakehouse).
 
 The existing destination is copied into a temporary directory and overlaid with
-the generated files for validation. Conflicting structures and changed generated
-files are refused before creating items. An interrupted run can be repeated;
-existing items are reused and generated files are recorded by content hash.
+the generated files for validation. Project files belong to the user as soon as
+they are written. Initialise requires another folder when its files conflict with
+existing content. An interrupted run can continue when the
+existing files can be retained, reusing Fabric items already created.
 
 Every project contains:
 
@@ -118,9 +125,9 @@ weaver initialise my-project --workspace Analytics --lakehouse Landing --warehou
 ```
 
 `--publish-environment` requests publication. `--dry-run` changes nothing.
-`--example` writes source only. Add the same source later with
-`weaver add-example [PROJECT]`; untouched generated source is safe to add again,
-and edited files are protected.
+`--example` writes source only. The wizard offers the same onboarding choice:
+`Add the Sales example to this project? [y/N]`. To explore the starter example
+later, initialise another project folder.
 
 From the project directory run:
 

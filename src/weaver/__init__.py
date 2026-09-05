@@ -21,7 +21,6 @@ from .initialise import (
     ExampleOutcome,
     FabricItemOutcome,
     InitialiseReport,
-    add_example,
     initialise,
 )
 from .lakehouse import Lakehouse, default_lakehouse, lakehouse_for
@@ -65,7 +64,6 @@ __all__ = [
     "__version__",
     # ordinary operations and results
     "initialise",
-    "add_example",
     "InitialiseReport",
     "FabricItemOutcome",
     "ExampleOutcome",

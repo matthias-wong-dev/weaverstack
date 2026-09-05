@@ -155,8 +155,6 @@ def initialise(
         )
         publish_environment = publish_environment or install_weaver
     destination = Path(repository).resolve()
-    _check_destination_paths(destination, {_MANIFEST: ""})
-    _check_generated_manifest(destination)
     request = ProjectRequest(
         workspace=_workspace_name(workspace, session=session),
         catalogue=catalogue,
@@ -200,7 +198,7 @@ def initialise(
             for path in (destination / directory).rglob("*"):
                 if path.is_file():
                     files[path.relative_to(destination).as_posix()] = path.read_bytes()
-        _refuse_edited_files(destination, files)
+        _refuse_overwrites(destination, files)
         _check_destination_paths(destination, files)
         _parse_generated(files, request, destination=destination)
 
@@ -223,7 +221,6 @@ def initialise(
             )
             with opened.step("Writing the project files", str(destination)):
                 _write(destination, files)
-                _write_generated_manifest(destination, files)
             if state == MISSING:
                 from .fabric.environment import create_with_definition
                 from .fabric.environment_definition import read_environment_definition
@@ -365,13 +362,8 @@ def _parse_generated(files, request: ProjectRequest, *, destination=None):
     return configured
 
 
-def _refuse_edited_files(destination: Path, files: dict[str, str]) -> None:
-    """Refuse to overwrite a generated file whose content has been changed.
-
-    A rerun of the same request finds identical files and writes them again,
-    which is what makes repeating a stopped run safe. A file the project has
-    edited since is named here, and the run stops.
-    """
+def _refuse_overwrites(destination: Path, files: dict[str, str]) -> None:
+    """Refuse a destination where setup would replace existing content."""
 
     edited = sorted(
         relative
@@ -384,13 +376,8 @@ def _refuse_edited_files(destination: Path, files: dict[str, str]) -> None:
         return
     listed = "\n".join(f"  {relative}" for relative in edited)
     raise InitialiseError(
-        f"{destination} already holds a Weaver project, and these files have "
-        "been changed since they were written:\n"
-        "\n"
-        f"{listed}\n"
-        "\n"
-        "Set the project up in an empty directory, or move these files aside\n"
-        "and run it again."
+        f"Initialise would overwrite files in {destination}:\n{listed}\n"
+        "Choose another project folder."
     )
 
 
@@ -402,7 +389,9 @@ def _write(destination: Path, files: dict[str, str]) -> None:
         if path.resolve() != destination.resolve() / relative or path.is_symlink():
             raise InitialiseError(f"Generated path escapes the project: {relative}")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(text.encode("utf-8") if isinstance(text, str) else text)
+        content = text.encode("utf-8") if isinstance(text, str) else text
+        if not path.is_file() or path.read_bytes() != content:
+            path.write_bytes(content)
 
 
 # --- the Fabric Environment ----------------------------------------------------
@@ -556,58 +545,6 @@ def _article(noun: str) -> str:
     return "an" if noun[:1].upper() in "AEIOU" else "a"
 
 
-_MANIFEST = ".weaver-generated.json"
-
-
-def _check_generated_manifest(destination):
-    """Protect files recorded by an earlier initialisation."""
-
-    import hashlib
-    import json
-
-    path = destination / _MANIFEST
-    if not path.exists():
-        return
-    try:
-        recorded = json.loads(path.read_text())
-        if not isinstance(recorded, dict):
-            raise ValueError("expected an object")
-    except (ValueError, OSError) as exc:
-        raise InitialiseError("The generated-file record could not be read.") from exc
-    for relative, digest in recorded.items():
-        file = destination / relative
-        if not file.is_relative_to(destination) or ".." in Path(relative).parts:
-            raise InitialiseError("The generated-file record contains an invalid path.")
-        if (
-            not file.is_file()
-            or hashlib.sha256(file.read_bytes()).hexdigest() != digest
-        ):
-            raise InitialiseError(f"Generated file has been edited: {relative}")
-
-
-def _write_generated_manifest(destination, files):
-    import hashlib
-    import json
-
-    path = destination / _MANIFEST
-    recorded = json.loads(path.read_text()) if path.exists() else {}
-    recorded.update(
-        {
-            name: hashlib.sha256((destination / name).read_bytes()).hexdigest()
-            for name in files
-        }
-    )
-    with tempfile.NamedTemporaryFile(
-        mode="w", dir=destination, delete=False, encoding="utf-8"
-    ) as pending:
-        temporary = Path(pending.name)
-        pending.write(json.dumps(recorded, indent=2) + "\n")
-    try:
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
 def _check_destination_paths(destination, files):
     for relative in files:
         path = destination / relative
@@ -619,38 +556,6 @@ def _check_destination_paths(destination, files):
             raise InitialiseError(
                 f"This folder conflicts with a generated file: {relative}"
             )
-
-
-def add_example(repository=".") -> tuple[str, ...]:
-    """Add Sales source to the targets declared in a project's configuration."""
-
-    from .config import load_workspace
-
-    destination = Path(repository).resolve()
-    configured = load_workspace(destination / WORKSPACE_CONFIG_FILE)
-    chosen = {}
-    for kind in (LAKEHOUSE, WAREHOUSE):
-        names = sorted(
-            item.item_name for item in configured.targets if item.item_type == kind
-        )
-        if len(names) > 1:
-            raise InitialiseError(
-                f"The example requires one configured {kind}; found {len(names)}."
-            )
-        chosen[kind.lower()] = names[0] if names else None
-    request = ProjectRequest(
-        workspace=configured.workspace,
-        catalogue=configured.catalogue_item.name,
-        environment=str(configured.environment),
-        example=True,
-        **chosen,
-    )
-    files = example_files(request)
-    _refuse_edited_files(destination, files)
-    _check_destination_paths(destination, {**files, _MANIFEST: ""})
-    _write(destination, files)
-    _write_generated_manifest(destination, files)
-    return tuple(sorted(files))
 
 
 def available_items(workspace, kind, *, client=None):
