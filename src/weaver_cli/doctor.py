@@ -13,6 +13,10 @@ def render(report) -> None:
             print(f"    via {check.via}")
         if check.detail:
             print(f"    {check.detail}")
+        if check.name == "Authentication":
+            for key in ("account", "tenant"):
+                if value := report.authentication.get(key):
+                    print(f"    {key.capitalize()}: {value}")
         if check.remedy:
             print(f"    {check.remedy}")
         print()

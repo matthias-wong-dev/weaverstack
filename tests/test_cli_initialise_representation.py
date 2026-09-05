@@ -23,16 +23,27 @@ def parse(*args):
 
 
 @weaver_test()
-def test_destination_is_required_and_current_directory_is_explicit():
+def test_project_folder_is_optional_for_wizard_and_explicit_for_unattended_setup():
+    assert parse().repository is None
+    assert parse("--project-folder", ".").repository == "."
+    assert (
+        build_parser()
+        .parse_args(["initialize", "--project-folder", "project"])
+        .repository
+        == "project"
+    )
     with pytest.raises(SystemExit):
-        parse()
-    assert parse(".").repository == "."
-    assert build_parser().parse_args(["initialize", "project"]).repository == "project"
+        parse("project")
+    with pytest.raises(CommandError, match="--project-folder"):
+        collect(
+            parse("--workspace", "Analytics", "--warehouse", "Curated", "--no-input"),
+            ask=False,
+        )
 
 
 @weaver_test()
 def test_wizard_explains_choices_and_defaults_to_source_only_and_deferred(capsys):
-    args = parse("project", "--workspace", "Analytics")
+    args = parse("--project-folder", "project", "--workspace", "Analytics")
     collect(args, stdin=Typed("\n\nLanding\n\n\n1\n\n"))
     assert args.catalogue == "Catalogue" and args.environment == "Weaver"
     assert args.lakehouse == "Landing" and args.warehouse is None
@@ -52,6 +63,7 @@ def test_wizard_explains_choices_and_defaults_to_source_only_and_deferred(capsys
 @weaver_test()
 def test_wizard_can_edit_a_typo_before_continue():
     args = parse(
+        "--project-folder",
         "project",
         "--workspace",
         "Analytics",
@@ -73,6 +85,7 @@ def test_wizard_can_edit_a_typo_before_continue():
 @weaver_test()
 def test_cancel_returns_without_publication():
     args = parse(
+        "--project-folder",
         "project",
         "--workspace",
         "Analytics",
@@ -92,7 +105,7 @@ def test_cancel_returns_without_publication():
 
 @weaver_test()
 def test_existing_item_hints_and_environment_selection(capsys):
-    args = parse("project", "--workspace", "Analytics")
+    args = parse("--project-folder", "project", "--workspace", "Analytics")
     collect(
         args,
         stdin=Typed("\n1\n1\nLanding\nCurated\ny\n1\nn\n"),
@@ -107,7 +120,7 @@ def test_existing_item_hints_and_environment_selection(capsys):
 
 @weaver_test()
 def test_invalid_lakehouse_answer_is_retried(capsys):
-    args = parse("project", "--workspace", "Analytics")
+    args = parse("--project-folder", "project", "--workspace", "Analytics")
     collect(args, stdin=Typed("\n\n1\nLanding\n\n\n1\n\n"))
     assert args.lakehouse == "Landing"
     assert "not a valid Fabric Lakehouse name" in capsys.readouterr().out
@@ -116,18 +129,24 @@ def test_invalid_lakehouse_answer_is_retried(capsys):
 @weaver_test()
 def test_no_input_validates_without_prompts(capsys):
     args = parse(
-        "project", "--workspace", "Analytics", "--warehouse", "Curated", "--no-input"
+        "--project-folder",
+        "project",
+        "--workspace",
+        "Analytics",
+        "--warehouse",
+        "Curated",
+        "--no-input",
     )
     assert collect(args, ask=False) is False
     assert not capsys.readouterr().out
     with pytest.raises(CommandError):
-        collect(parse("project"), ask=False)
+        collect(parse("--project-folder", "project"), ask=False)
 
 
 @weaver_test()
 def test_exhausted_input_stops_the_wizard():
     with pytest.raises(CommandError, match="answers ran out"):
-        collect(parse("project"), stdin=Typed(""))
+        collect(parse("--project-folder", "project"), stdin=Typed(""))
 
 
 @weaver_test()
@@ -135,6 +154,7 @@ def test_equivalent_command_includes_publication_and_is_parseable():
     import shlex
 
     args = parse(
+        "--project-folder",
         "my project",
         "--workspace",
         "Analytics",
@@ -184,6 +204,7 @@ def test_cli_passes_source_and_publication_flags_to_core(monkeypatch, tmp_path, 
         ),
     )
     args = parse(
+        "--project-folder",
         str(tmp_path),
         "--workspace",
         "Analytics",
@@ -208,6 +229,7 @@ def test_cancel_in_handler_never_calls_initialise(monkeypatch, capsys):
 
     cli = importlib.import_module("weaver_cli.main")
     args = parse(
+        "--project-folder",
         "project",
         "--workspace",
         "Analytics",
@@ -240,9 +262,13 @@ def test_cancel_in_handler_never_calls_initialise(monkeypatch, capsys):
     assert "cancelled" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize(
+    "folder_answer,expected_folder",
+    [("", "Production"), ("custom", "custom"), ("UAT", "UAT")],
+)
 @weaver_test()
 def test_workspace_review_change_rediscovers_and_recollects_targets(
-    monkeypatch, capsys
+    monkeypatch, capsys, folder_answer, expected_folder
 ):
     from contextlib import nullcontext
     from types import SimpleNamespace
@@ -250,14 +276,16 @@ def test_workspace_review_change_rediscovers_and_recollects_targets(
     from weaver.sessions.testing import TestSession
 
     cli = importlib.import_module("weaver_cli.main")
-    args = parse("project")
+    args = parse()
     monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
     monkeypatch.setattr(
         cli.sys,
         "stdin",
         Typed(
-            "UAT\n\n1\n1\nUatLanding\nUatReporting\nn\n"
-            "2\n2\nProduction\n1\n1\nProdLanding\nProdReporting\n1\nn\n"
+            f"UAT\n{folder_answer}\n\n1\n1\nUatLanding\nUatReporting\nn\n"
+            "2\n2\nProduction\n"
+            + ("\n" if not folder_answer else "")
+            + "1\n1\nProdLanding\nProdReporting\n1\nn\n"
         ),
     )
     clients = {workspace: object() for workspace in ("UAT", "Production")}
@@ -305,7 +333,9 @@ def test_workspace_review_change_rediscovers_and_recollects_targets(
     ]
     text = capsys.readouterr().out
     assert text.count("Set up a Weaver project.") == 1
-    assert text.count("Project folder: project") == 1
+    assert args.repository == expected_folder
+    assert text.index("Fabric workspace:") < text.index("Project folder [UAT]:")
+    assert text.count("Project folder [Production]:") == (0 if folder_answer else 1)
     final_review = text.rsplit("\nProject\n", 1)[1]
     assert "Uat" not in final_review
 
@@ -314,3 +344,19 @@ def test_workspace_review_change_rediscovers_and_recollects_targets(
 def test_add_example_is_not_a_public_command():
     with pytest.raises(SystemExit):
         build_parser().parse_args(["add-example"])
+
+
+@weaver_test()
+def test_workspace_option_starts_at_project_folder(capsys):
+    args = parse("--workspace", "Analytics")
+    collect(args, stdin=Typed("\n\n\nLanding\n\n\n1\n\n"))
+    assert args.repository == "Analytics"
+    text = capsys.readouterr().out
+    assert text.count("Set up a Weaver project.") == 1
+    assert "Fabric workspace:" not in text
+    assert (
+        text.index("A project folder contains")
+        < text.index("Project folder [Analytics]:")
+        < text.index("Catalogue name")
+    )
+    assert "Examples: Curated, Silver" in text

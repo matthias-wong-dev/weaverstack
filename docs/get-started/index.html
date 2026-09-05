@@ -82,8 +82,10 @@
                 <pre><span class="c-key">from</span> pathlib <span class="c-key">import</span> Path
 <span class="c-key">import</span> weaver
 
+project_folder = Path(<span class="c-str">"builtin"</span>) / <span class="c-str">"Analytics"</span>
+
 weaver.<span class="c-fn">initialise</span>(
-    Path(<span class="c-str">"builtin"</span>) / <span class="c-str">"repository"</span>,
+    project_folder,
     catalogue=<span class="c-str">"Catalogue"</span>,
     environment=<span class="c-str">"Weaver"</span>,
     lakehouse=<span class="c-str">"Landing"</span>,
@@ -101,9 +103,9 @@ weaver.<span class="c-fn">initialise</span>(
               <div class="code">
                 <div class="code-bar"><span>terminal</span></div>
                 <pre>pip install weaverstack
-weaver initialise my-project</pre>
+weaver initialise --workspace Analytics</pre>
               </div>
-              <p>Run <code>weaver initialise my-project</code> to create or reuse that folder. Weaver collects the project settings before creating any missing Fabric items.</p>
+              <p>Run <code>weaver initialise --workspace Analytics</code> to choose a project folder and its Fabric items. Run <code>weaver initialise</code> to enter the workspace name in the wizard too.</p>
               <p class="small">The desktop CLI tries Azure CLI credentials first and opens Microsoft sign-in in a browser when needed. On a machine with secure credential storage, later commands reuse that sign-in until Microsoft requires you to authenticate again.</p>
             </div>
           </div>
@@ -116,10 +118,13 @@ weaver initialise my-project</pre>
           <p class="lede">The desktop wizard collects the workspace, Catalogue, Environment and destination items, then offers the Sales example. The notebook call above supplies these choices directly.</p>
 
           <div class="code">
-            <div class="code-bar"><span>weaver initialise my-project</span></div>
+            <div class="code-bar"><span>weaver initialise</span></div>
             <pre>Set up a Weaver project.
-Project folder: my-project
-Fabric workspace: My Fabric Workspace
+Fabric workspace: Analytics
+
+Project folder
+A project folder contains the local files that define your Weaver project: its Fabric items, data logic, tests and Environment.
+Project folder [Analytics]:
 
 Catalogue
 The Catalogue is a Warehouse where Weaver keeps its build, load and test state.
@@ -142,19 +147,19 @@ Lakehouse: Landing
 Warehouse (optional)
 Use a Warehouse for SQL tables and views.
 Press Enter if this project does not need one.
-Examples: Curated, Reporting
+Examples: Curated, Silver
 Warehouse: Curated
 Add the Sales example to this project? [y/N]: y
 
 Project
 
-  Folder        my-project
-  Workspace     My Fabric Workspace
-  Catalogue     Catalogue
-  Environment   Weaver
-  Lakehouse     Landing
-  Warehouse     Curated
-  Sales example Yes
+  Project folder  Analytics
+  Workspace       Analytics
+  Catalogue       Catalogue
+  Environment     Weaver
+  Lakehouse       Landing
+  Warehouse       Curated
+  Sales example   Yes
 
 1. Continue
 2. Change an answer
@@ -171,9 +176,9 @@ Choose [1/2/3]: 1</pre>
             <li><strong>The Sales example.</strong> Source files for a small project. Setup writes the files; build, load and test run separately after publication.</li>
           </ul>
 
-          <p>Start with a new or empty folder. After an interrupted attempt, repeat the same choices to retain matching files and reuse Fabric items already created. Conflicting files require another project folder. Add <code>--dry-run</code> to preview setup without changing files or Fabric items.</p>
+          <p>The Project folder prompt defaults to the workspace name. Press Enter to accept it, or enter a custom path. Start with a new or empty folder. After an interrupted attempt, repeat the same choices to retain matching files and reuse Fabric items already created. Conflicting files require another project folder. Add <code>--dry-run</code> to preview setup without changing files or Fabric items.</p>
 
-          <p>The review allows each answer to be changed. Changing Workspace collects Environment, Lakehouse and Warehouse choices again in the new workspace. Continue accepts the choices before any Fabric items are created.</p>
+          <p>The review allows each answer to be changed. Changing Workspace collects Environment, Lakehouse and Warehouse choices again in the new workspace. If you accepted the suggested project folder, its default is offered again using the new workspace name. A custom folder stays unchanged. Continue accepts the choices before any Fabric items are created. Progress then shows workspace checks, Environment reading and project-file validation before item creation.</p>
           <pre>Publishing a Fabric Environment can take about 5 minutes.
 Publish the Environment now? [y/N]:</pre>
           <p>Press Enter to defer publication. Setup still creates the project and its declared items.</p>
@@ -182,15 +187,15 @@ Publish the Environment now? [y/N]:</pre>
           <p>For setup without prompts, name the destination folder and pass the workspace and item choices. Include <code>--example</code> to generate the Sales source:</p>
           <div class="code">
             <div class="code-bar"><span>terminal</span></div>
-            <pre>weaver initialise my-project \
-  --workspace "My Fabric Workspace" \
+            <pre>weaver initialise --workspace Analytics \
+  --project-folder ./Analytics \
   --catalogue Catalogue \
   --environment Weaver \
   --lakehouse Landing \
   --warehouse Curated \
   --example --no-input</pre>
           </div>
-          <p>Publication is deferred here too. Add <code>--publish-environment</code> to publish during setup.</p>
+          <p><code>--no-input</code> requires <code>--project-folder</code>; it never selects the current directory automatically. Publication is deferred here too. Add <code>--publish-environment</code> to publish during setup.</p>
 
         </div>
       </section>
@@ -201,7 +206,7 @@ Publish the Environment now? [y/N]:</pre>
           <p class="lede">Every project includes configuration, a README and an Environment definition. Selecting the Sales example adds the Lakehouse and Warehouse source shown below.</p>
 
           <div class="code plain" style="max-width: 640px;">
-            <div class="code-bar"><span>my-project/</span></div>
+            <div class="code-bar"><span>Analytics/</span></div>
             <pre>README.md
 workspace-config.yml
 compose.yml
@@ -229,7 +234,7 @@ Environment/Weaver.Environment/
           <div class="code">
             <div class="code-bar"><span>workspace-config.yml</span></div>
             <!-- example:workspace-config.yml -->
-            <pre>workspace: My Fabric Workspace
+            <pre>workspace: Analytics
 environment: Weaver
 catalogue: Warehouse/Catalogue
 
@@ -269,7 +274,7 @@ targets:
         <div class="wrap">
           <h2>Publish the Environment</h2>
           <p>From the project directory, publish before running Python work and after changing packages:</p>
-          <pre>cd my-project
+          <pre>cd Analytics
 weaver fabric environment publish --path Environment/Weaver.Environment</pre>
           <p>Publication can take several minutes. Spark SQL needs a Lakehouse. Remote Python importing Weaver additionally needs the published Environment.</p>
           <h2>The onboarding example</h2>
@@ -500,10 +505,9 @@ weaver test</pre>
           <div class="code">
             <div class="code-bar"><span>notebook cell</span></div>
             <pre><span class="c-key">import</span> os
-<span class="c-key">from</span> pathlib <span class="c-key">import</span> Path
 <span class="c-key">import</span> weaver
 
-os.<span class="c-fn">chdir</span>(Path(<span class="c-str">"builtin"</span>) / <span class="c-str">"repository"</span>)
+os.<span class="c-fn">chdir</span>(project_folder)
 
 weaver.<span class="c-fn">build</span>()
 weaver.<span class="c-fn">load</span>()
@@ -616,6 +620,7 @@ Warehouse TDS                      OK
   via Warehouse/Curated
 Fabric Spark / Livy                OK
   via Lakehouse/Landing</pre>
+          <p>Authentication shows the credential path and, when available, the account and tenant. Tokens and secrets are excluded.</p>
           <p>Doctor discovers one Lakehouse and Warehouse for its probes. A missing item is MISSING, a rejected probe is FAILED and a transport or runtime failure is ERROR. Missing probe items do not fail the command. Spark startup can take a minute.</p>
           <p>Use <code>weaver check</code> for repository errors and <code>weaver health</code> for installed state.</p>
 

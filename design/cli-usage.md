@@ -43,6 +43,8 @@ Doctor checks this machine and identity against the named workspace. It acquires
 an authentication token, reports the successful credential path, lists visible
 workspaces through Fabric REST and resolves the requested workspace. It reads no
 repository or workspace configuration.
+Authentication also shows the account and tenant when those non-secret fields
+are available.
 
 From the workspace's items it selects the first Lakehouse and Warehouse in
 stable display-name order. OneLake reads the Lakehouse Files area, Warehouse TDS
@@ -52,6 +54,8 @@ the selected Lakehouse and needs no Environment for this SQL probe.
 Each result contains a status, diagnostic detail and the physical item used.
 `OK` means success, `MISSING` means the resource is absent, `FAILED` means the
 probe returned a negative result, and `ERROR` means it could not be evaluated.
+REST listing uses the same classification as endpoint probes: a 401, 403 or 404
+is `FAILED`; a transport or runtime failure is `ERROR`.
 Missing probe items do not fail the command. A missing workspace, authentication
 failure, empty workspace listing or failed probe produces a nonzero exit code.
 `--json` includes the authentication path, workspace listing and all checks.
@@ -61,16 +65,22 @@ Use `weaver health` for installed state and `weaver check` for repository syntax
 ## Setting a project up
 
 ```bash
-weaver initialise my-project
+weaver initialise --workspace Analytics
 ```
 
-The destination is required. `weaver initialise .` explicitly uses the current
-directory. The wizard explains each item, offers existing names and collects
-optional Lakehouse, Warehouse and Sales example choices. A project needs at
+Without `--workspace`, the wizard asks for the Fabric workspace first. It then
+explains Project folder and suggests the workspace name as its default.
+`--project-folder` supplies an explicit destination, including `.` for the current
+directory. Unattended setup requires that option. The wizard explains each item,
+offers existing names and collects optional Lakehouse, Warehouse and Sales
+example choices. A project needs at
 least one target. Its review offers Continue, Change an answer and Cancel.
 No Fabric mutation occurs before Continue. Changing Workspace clears the
 Environment, Lakehouse and Warehouse choices and collects them again using
-item discovery in the new workspace.
+item discovery in the new workspace. An accepted Project folder suggestion is
+re-offered with the new workspace name; an explicitly entered folder is retained.
+After Continue, the setup task reports workspace checks, Environment reading and
+project-file validation before creating items.
 
 Lakehouse names begin with a letter, contain letters, digits and underscores,
 and have at most 123 characters, as specified by the
@@ -85,7 +95,7 @@ existing files can be retained, reusing Fabric items already created.
 Every project contains:
 
 ```text
-my-project/
+Analytics/
 ├── README.md
 ├── workspace-config.yml
 ├── compose.yml
@@ -121,7 +131,7 @@ local definition again.
 For unattended setup:
 
 ```bash
-weaver initialise my-project --workspace Analytics --lakehouse Landing --warehouse Curated --example --no-input
+weaver initialise --workspace Analytics --project-folder ./Analytics --lakehouse Landing --warehouse Curated --example --no-input
 ```
 
 `--publish-environment` requests publication. `--dry-run` changes nothing.

@@ -103,20 +103,24 @@ def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
                 )
             )
             return report()
-        try:
+
+        def list_workspaces():
+            nonlocal visible
             visible = tuple(rest.paged("workspaces"))
-            checks.append(
-                Check(
-                    "Fabric REST",
-                    OK if visible else FAILED,
-                    f"{len(visible)} workspaces visible"
-                    if visible
-                    else "Fabric responded, but this identity cannot see any workspaces.",
-                )
-            )
-        except Exception as exc:
-            checks.append(Check("Fabric REST", ERROR, str(exc)))
+
+        rest_check = _attempt("Fabric REST", list_workspaces)
+        if not rest_check.passed:
+            checks.append(rest_check)
             return report()
+        checks.append(
+            Check(
+                "Fabric REST",
+                OK if visible else FAILED,
+                f"{len(visible)} workspaces visible"
+                if visible
+                else "Fabric responded, but this identity cannot see any workspaces.",
+            )
+        )
         if not visible:
             return report()
         if not any(item.get("displayName") == workspace for item in visible):

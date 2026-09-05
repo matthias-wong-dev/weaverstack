@@ -28,7 +28,6 @@ def collect_workspace(args, *, ask=True, stdin=None):
     if args.workspace or not ask or not (args.interactive or _can_ask(stream)):
         return False
     print(INTRODUCTION)
-    print(f"Project folder: {args.repository}")
     args.workspace = _answer(stream, "Fabric workspace")
     return True
 
@@ -51,9 +50,11 @@ def collect(
         return False
     if not introduced:
         print(INTRODUCTION)
-        print(f"Project folder: {args.repository}")
     if not args.workspace:
         args.workspace = _answer(stream, "Fabric workspace")
+    suggested_folder = False
+    if not args.repository:
+        args.repository, suggested_folder = _project_folder(stream, args.workspace)
     if not args.catalogue:
         print(
             "\nCatalogue\nThe Catalogue is a Warehouse where Weaver keeps its build, load and test state."
@@ -65,7 +66,7 @@ def collect(
     if args.example is None:
         args.example = _yes(stream, "Add the Sales example to this project?")
     fields = (
-        ("repository", "Folder"),
+        ("repository", "Project folder"),
         ("workspace", "Workspace"),
         ("catalogue", "Catalogue"),
         ("environment", "Environment"),
@@ -79,7 +80,7 @@ def collect(
             value = getattr(args, field)
             if field == "example":
                 value = "Yes" if value else "No"
-            print(f"  {label:14}{value or 'None'}")
+            print(f"  {label:16}{value or 'None'}")
         print("\n1. Continue\n2. Change an answer\n3. Cancel")
         choice = _numbered(stream, "Choose", 3)
         if choice == 3:
@@ -104,9 +105,15 @@ def collect(
             )
         else:
             value = _answer(stream, label)
+        if field == "repository":
+            suggested_folder = False
         changed_workspace = field == "workspace" and value != args.workspace
         setattr(args, field, value)
         if changed_workspace:
+            if suggested_folder:
+                args.repository, suggested_folder = _project_folder(
+                    stream, args.workspace
+                )
             args.environment = args.lakehouse = args.warehouse = None
             _collect_workspace_items(
                 args, stream, environments=environments, items=items
@@ -140,7 +147,7 @@ def _collect_workspace_items(args, stream, *, environments, items):
             )
     for kind, purpose, examples in (
         ("Lakehouse", "files and Python/Delta tables", "Landing, Bronze"),
-        ("Warehouse", "SQL tables and views", "Curated, Reporting"),
+        ("Warehouse", "SQL tables and views", "Curated, Silver"),
     ):
         if not getattr(args, kind.lower()):
             print(f"\n{kind} (optional)\nUse a {kind} for {purpose}.")
@@ -154,9 +161,21 @@ def _collect_workspace_items(args, stream, *, environments, items):
             )
 
 
+def _project_folder(stream, workspace):
+    """Return the folder and whether the workspace-derived suggestion was accepted."""
+
+    print(
+        "\nProject folder\nA project folder contains the local files that define your Weaver project: its Fabric items, data logic, tests and Environment."
+    )
+    typed = _read(stream, f"Project folder [{workspace}]: ")
+    return typed or workspace, not bool(typed)
+
+
 def _validate(args):
     if not args.workspace:
         raise CommandError("Provide --workspace.")
+    if not args.repository:
+        raise CommandError("Provide --project-folder for unattended setup.")
     ProjectRequest(
         workspace=args.workspace,
         catalogue=args.catalogue or DEFAULT_CATALOGUE,
@@ -217,8 +236,15 @@ def _yes(stream, question):
 def equivalent_command(args):
     import shlex
 
-    parts = ["weaver", "initialise", str(args.repository)]
-    for field in ("workspace", "catalogue", "environment", "lakehouse", "warehouse"):
+    parts = [
+        "weaver",
+        "initialise",
+        "--workspace",
+        args.workspace,
+        "--project-folder",
+        str(args.repository),
+    ]
+    for field in ("catalogue", "environment", "lakehouse", "warehouse"):
         value = getattr(args, field)
         if value:
             parts.extend(["--" + field, value])

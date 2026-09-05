@@ -31,10 +31,9 @@ Set up a new Weaver project and the Fabric items it needs.
 You can choose a Catalogue, Environment, Lakehouse and/or Warehouse.
 If an item doesn't exist yet, it will be created automatically.
 
-You can also include a small Sales example so you can build, load
-and test the project straight away.
+You can also include Sales example source to build, load and test afterwards.
 
-Run `weaver initialise my-project` to get started.\
+Run `weaver initialise --workspace Analytics` to get started.\
 """
 
 #: What doctor is for, said before anybody has a project to point it at.
@@ -886,11 +885,13 @@ def handle_capacity(args: argparse.Namespace) -> int:
 def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     """The names a project is set up with, and how the missing ones are found."""
 
-    parser.add_argument(
-        "repository",
-        help="Project directory to create or reuse. Use . for the current directory.",
-    )
     parser.add_argument("--workspace", help="Fabric workspace name. It must exist.")
+    parser.add_argument(
+        "--project-folder",
+        dest="repository",
+        metavar="PATH",
+        help="Project folder to create or reuse. Required for unattended setup.",
+    )
     parser.add_argument(
         "--catalogue",
         help="Warehouse for Weaver's own tables. Defaults to Catalogue.",

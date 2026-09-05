@@ -144,7 +144,7 @@ def initialise(
     """
 
     if repository is None:
-        raise InitialiseError("A project directory is required.")
+        raise InitialiseError("A project folder is required.")
     if install_weaver is not None:
         import warnings
 
@@ -169,51 +169,58 @@ def initialise(
     addressed = _bare(request)
     resources = []
     with use_or_create_session(session, workspace=addressed) as opened:
-        # The Session's client carries its identity and records REST telemetry.
-        rest = client if client is not None else opened.resolver(addressed).client
-        state, found, physical, environment_item = _read_the_workspace(
-            request, client=rest
-        )
-
-        files = _generated_files(request)
-        definition_status = "written"
-        directory = environment_directory(request.environment)
-        if state != MISSING and not (destination / directory).exists():
-            definition_status = "imported"
-            from .fabric.environment import overlay_weaver, read_definition
-
-            definition = overlay_weaver(
-                read_definition(environment_item, client=rest),
-                dev=False,
-                source=request.environment,
-            )
-            files.update(
-                {
-                    f"{directory}/{path}": content
-                    for path, content in definition.parts.items()
-                }
-            )
-        elif (destination / directory).is_dir():
-            # Preserve adopted packages and binary custom libraries on a rerun.
-            for path in (destination / directory).rglob("*"):
-                if path.is_file():
-                    files[path.relative_to(destination).as_posix()] = path.read_bytes()
-        _refuse_overwrites(destination, files)
-        _check_destination_paths(destination, files)
-        _parse_generated(files, request, destination=destination)
-
-        if dry_run:
-            return InitialiseReport(
-                repository=str(destination),
-                workspace=request.workspace,
-                resources=_planned(request, found),
-                files=tuple(sorted(files)),
-                example=ExampleOutcome(generated=request.example),
-                dry_run=True,
-                environment_definition=definition_status,
-            )
-
         with opened.task("Setting up your Weaver project", request.workspace):
+            with opened.step("Checking the workspace", request.workspace):
+                # The Session's client carries its identity and records REST telemetry.
+                rest = (
+                    client if client is not None else opened.resolver(addressed).client
+                )
+                state, found, physical, environment_item = _read_the_workspace(
+                    request, client=rest
+                )
+
+            with opened.step("Reading the Environment", request.environment):
+                files = _generated_files(request)
+                definition_status = "written"
+                directory = environment_directory(request.environment)
+                if state != MISSING and not (destination / directory).exists():
+                    definition_status = "imported"
+                    from .fabric.environment import overlay_weaver, read_definition
+
+                    definition = overlay_weaver(
+                        read_definition(environment_item, client=rest),
+                        dev=False,
+                        source=request.environment,
+                    )
+                    files.update(
+                        {
+                            f"{directory}/{path}": content
+                            for path, content in definition.parts.items()
+                        }
+                    )
+                elif (destination / directory).is_dir():
+                    # Preserve adopted packages and binary custom libraries on a rerun.
+                    for path in (destination / directory).rglob("*"):
+                        if path.is_file():
+                            files[path.relative_to(destination).as_posix()] = (
+                                path.read_bytes()
+                            )
+            with opened.step("Checking the project files", str(destination)):
+                _refuse_overwrites(destination, files)
+                _check_destination_paths(destination, files)
+                _parse_generated(files, request, destination=destination)
+
+            if dry_run:
+                return InitialiseReport(
+                    repository=str(destination),
+                    workspace=request.workspace,
+                    resources=_planned(request, found),
+                    files=tuple(sorted(files)),
+                    example=ExampleOutcome(generated=request.example),
+                    dry_run=True,
+                    environment_definition=definition_status,
+                )
+
             resources.extend(
                 _create_missing(
                     request, found, physical=physical, session=opened, client=rest

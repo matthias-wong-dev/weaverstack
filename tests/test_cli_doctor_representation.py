@@ -83,3 +83,27 @@ def test_cli_json_contains_the_whole_report_and_exit_status(
     assert cli.handle_doctor(args) == exit_code
     assert json.loads(capsys.readouterr().out) == report.to_mapping()
     assert set(calls[0]) == {"workspace", "session"}
+
+
+@weaver_test()
+def test_authentication_renders_only_known_identity_fields(capsys):
+    render(
+        DoctorReport(
+            checks=(
+                Check("Authentication", "ok", "Browser sign-in"),
+                Check("Fabric REST", "ok"),
+            ),
+            authentication={
+                "account": "user@example.com",
+                "tenant": "tenant-id",
+                "token": "secret-token",
+                "client_secret": "secret-password",
+            },
+        )
+    )
+    text = capsys.readouterr().out
+    authentication, _ = text.split("Fabric REST", 1)
+    assert "Browser sign-in" in authentication
+    assert "Account: user@example.com" in authentication
+    assert "Tenant: tenant-id" in authentication
+    assert "secret" not in text

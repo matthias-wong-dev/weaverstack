@@ -175,3 +175,25 @@ def test_json_retains_workspace_listing_and_whole_result():
         set(c) == {"name", "status", "detail", "via", "remedy"}
         for c in result["checks"]
     )
+
+
+@pytest.mark.parametrize(
+    "code,status",
+    [(401, FAILED), (403, FAILED), (404, FAILED), (500, ERROR), (None, ERROR)],
+)
+@weaver_test()
+def test_rest_listing_rejections_use_endpoint_classification(monkeypatch, code, status):
+    from weaver.fabric.client import FabricError
+
+    client = Client()
+    opened, files = session(client)
+
+    def reject(path):
+        raise FabricError("REST rejected", status_code=code)
+
+    monkeypatch.setattr(client, "paged", reject)
+    report = doctor(workspace="Analytics", session=opened)
+    assert report.checks[-1].name == "Fabric REST"
+    assert report.checks[-1].status == status
+    assert report.checks[0].status == OK
+    assert not files and not opened.calls

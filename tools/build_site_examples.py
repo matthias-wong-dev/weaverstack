@@ -31,7 +31,7 @@ DOCS = ROOT / "docs"
 #: The item names the website's walkthrough uses throughout.
 LAKEHOUSE = "Landing"
 WAREHOUSE = "Curated"
-WORKSPACE = "My Fabric Workspace"
+WORKSPACE = "Analytics"
 
 MARKER = re.compile(
     r"(<!-- example:(?P<path>[^\s]+) -->\s*)<pre>.*?</pre>(\s*<!-- /example -->)",

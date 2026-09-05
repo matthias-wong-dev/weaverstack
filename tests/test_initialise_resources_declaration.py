@@ -273,3 +273,38 @@ def test_interrupted_file_write_continues_without_replacing_existing_files(
     assert timestamps == {
         name: (tmp_path / name).stat().st_mtime_ns for name in interrupted
     }
+
+
+@weaver_test()
+def test_preflight_has_progress_before_any_item_creation(tmp_path, fabric, monkeypatch):
+    import importlib
+
+    module = importlib.import_module("weaver.initialise")
+    environment = importlib.import_module("weaver.fabric.environment")
+    fabric.held.append(resources.Item("env", "Weaver", "Environment", "ws"))
+    seen = []
+
+    def observe(owner, name, step):
+        original = getattr(owner, name)
+
+        def run(*args, **kwargs):
+            assert [frame.name for frame in fabric.session.frames] == [
+                "Setting up your Weaver project",
+                step,
+            ]
+            assert not fabric.created
+            seen.append(step)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(owner, name, run)
+
+    observe(module, "_read_the_workspace", "Checking the workspace")
+    observe(environment, "read_definition", "Reading the Environment")
+    observe(module, "_parse_generated", "Checking the project files")
+    assert setup(tmp_path, fabric).succeeded
+    assert seen == [
+        "Checking the workspace",
+        "Reading the Environment",
+        "Checking the project files",
+    ]
+    assert fabric.created and not fabric.session.frames
