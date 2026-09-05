@@ -1,7 +1,7 @@
 {
   "name": "Weaver: Microsoft Fabric, made easier.",
   "short_name": "Weaver",
-  "description": "Build and operate data pipelines across Microsoft Fabric from one repository.",
+  "description": "Build and operate data pipelines across Microsoft Fabric from one project.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

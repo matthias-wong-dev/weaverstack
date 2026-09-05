@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
     <title>How Weaver works</title>
-    <meta name="description" content="Build turns your repository into an installed Fabric estate. The Catalogue is Weaver's understanding of that estate, and load, test and health all operate from it.">
+    <meta name="description" content="Build turns your project into an installed Fabric estate. The Catalogue is Weaver's understanding of that estate, and load, test and health all operate from it.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/how-it-works/">
     <meta property="og:type" content="article">
@@ -13,11 +13,11 @@
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="How Weaver works">
-    <meta property="og:description" content="Repository, build, Catalogue, load, test and health, and the mechanics underneath them.">
+    <meta property="og:description" content="Project, build, Catalogue, load, test and health, and the mechanics underneath them.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="How Weaver works">
-    <meta name="twitter:description" content="Repository, build, Catalogue, load, test and health, and the mechanics underneath them.">
+    <meta name="twitter:description" content="Project, build, Catalogue, load, test and health, and the mechanics underneath them.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
     <link rel="manifest" href="../site.webmanifest">
@@ -45,7 +45,7 @@
       <section class="page-head">
         <div class="wrap">
           <h1>How Weaver works</h1>
-          <p class="lead">Build installs your repository into Fabric and records what it did in the Catalogue. Load, test and health all work from there.</p>
+          <p class="lead">Build installs your project into Fabric and records what it did in the Catalogue. Load, test and health all work from there.</p>
         </div>
       </section>
 
@@ -55,7 +55,7 @@
           <p class="lede">You build, then load, then test. Health reports the estate's current state afterwards.</p>
 
           <div class="flow">
-            <div class="flow-step"><b>build</b><small>make Fabric match your repository</small></div>
+            <div class="flow-step"><b>build</b><small>make Fabric match your project</small></div>
             <span class="flow-arrow" aria-hidden="true">&#8594;</span>
             <div class="flow-step"><b>load</b><small>run the data work</small></div>
             <span class="flow-arrow" aria-hidden="true">&#8594;</span>
@@ -64,16 +64,16 @@
             <div class="flow-step"><b>health</b><small>report estate state</small></div>
           </div>
 
-          <p>Build creates the tables, views, shortcuts and load code your repository describes, and records them in the Catalogue. Weaver uses the installed state for load and test operations, and uses the same records to assess whether the estate is current.</p>
+          <p>Build creates the tables, views, shortcuts and load code your project describes, and records them in the Catalogue. Weaver uses the installed state for load and test operations, and uses the same records to assess whether the estate is current.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>1. The repository</h2>
-          <p class="lede">Your repository describes the estate logically. A separate file, <code>workspace-config.yml</code>, says which Fabric resources those logical items map to.</p>
+          <h2>1. The project</h2>
+          <p class="lede">Your project describes the estate logically. A separate file, <code>workspace-config.yml</code>, says which Fabric resources those logical items map to.</p>
           <p>You put each object under the Fabric item that owns it. A Lakehouse item holds Python folders, Delta tables and Spark SQL; a Warehouse item holds T-SQL tables and views. Either can hold Tests and Assumptions. Alongside them you declare shortcuts, schema and folder documents, and the metadata each object carries in its header: description, lineage, primary key, column types and thresholds.</p>
-          <p>Because the workspace configuration sits in its own file, you can point the same repository at development or production without touching a single object.</p>
+          <p>Because the workspace configuration sits in its own file, you can point the same project at development or production without touching a single object.</p>
           <div class="callout">
             <p><strong>A Weaver item is logical; a target is physical.</strong> You write against <code>Lakehouse/Landing</code>, and Weaver might build it into a Fabric Lakehouse called <code>Landing_Dev</code>. During build, Weaver reads this binding from the workspace configuration. Load, test and health use the binding recorded in the Catalogue, so the same commands run against either environment.</p>
           </div>
@@ -83,7 +83,7 @@
       <section class="section">
         <div class="wrap">
           <h2>2. Build</h2>
-          <p class="lede">Build compares your repository with what is in Fabric now, and applies the difference. It creates and maintains:</p>
+          <p class="lede">Build compares your project with what is in Fabric now, and applies the difference. It creates and maintains:</p>
           <ul>
             <li>Schemas and folders</li>
             <li>Delta tables in a Lakehouse</li>
@@ -110,7 +110,7 @@
 
           <div class="cards three">
             <div class="card">
-              <h3>The repository</h3>
+              <h3>The project</h3>
               <p>The estate you want, as files in source control. It changes when you write code.</p>
             </div>
             <div class="card">
@@ -158,7 +158,7 @@
       <section class="section">
         <div class="wrap">
           <h2>4. Load</h2>
-          <p class="lede">Load runs the data work from installed state, not from the repository.</p>
+          <p class="lede">Load runs the data work from installed state, not from the project.</p>
           <p>Weaver reads the Catalogue, rebuilds the dependency graph from the stored rows, and runs each loadable object in order. The Catalogue specifies:</p>
           <ul>
             <li>Which objects are loadable, and which are views that materialise nothing</li>
@@ -243,7 +243,7 @@
           <p>Weaver never imports your object modules to find this out. It reads them statically, so working out the graph runs none of your code and needs no Fabric session.</p>
 
           <h3>Shortcuts</h3>
-          <p>A Warehouse cannot read Delta files, so it reaches a Lakehouse through its SQL endpoint. You declare that shortcut in the repository, and Weaver puts it in the dependency graph like anything else.</p>
+          <p>A Warehouse cannot read Delta files, so it reaches a Lakehouse through its SQL endpoint. You declare that shortcut in the project, and Weaver puts it in the dependency graph like anything else.</p>
           <div class="code">
             <div class="code-bar"><span>Warehouse/Curated/shortcuts.yml</span></div>
             <pre><span class="c-key">logical:</span>
