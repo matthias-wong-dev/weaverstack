@@ -15,7 +15,7 @@ explanations.
 
 | Area | Status | Surfaces | Owning modules |
 | --- | --- | --- |
-| CLI commands | Complete | Help, option help, summaries, confirmations, retry prompts | `weaver_cli.main`, `weaver_cli.compose`, `weaver_cli.shell` |
+| CLI commands | Complete | Help, option help, summaries, confirmations, retry prompts | `weaver_cli.main`, `weaver_cli.workflow`, `weaver_cli.shell` |
 | Configuration | Complete | Workspace configuration failures | `weaver.config` |
 | Sessions | Complete | Warnings, resource start state, timings | `weaver.session` |
 | Build, load, and test | Complete | Reports, status labels, log links, targeted diagnostics | `weaver.build_bundle.report`, `weaver.load_report`, `weaver.test_report`, `weaver_cli.main` |

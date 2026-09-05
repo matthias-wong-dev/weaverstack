@@ -39,7 +39,7 @@ def requirements(*names: str) -> frozenset[str]:
 def union(*declarations) -> frozenset[str]:
     """The maximum set a sequence of commands will want between them.
 
-    What `compose` warms before the first command runs: a sequence that ends in
+    What `workflow` warms before the first command runs: a sequence that ends in
     a load should not wait for Livy at the end of the build in front of it.
     """
 

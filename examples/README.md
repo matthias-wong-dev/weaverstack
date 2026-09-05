@@ -108,7 +108,7 @@ The resulting Fabric estate is identical to Notebook mode.
 ## The same lifecycle from Python
 
 The CLI is a thin adapter over the Python API, so a desktop script does what
-`weaver compose dev` does. [`lifecycle.py`](lifecycle.py) is that script — wipe,
+`weaver workflow dev` does. [`lifecycle.py`](lifecycle.py) is that script — wipe,
 build, load and test, through one Session:
 
 ``` bash

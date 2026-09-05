@@ -489,7 +489,7 @@ the relevant design document instead of adding a competing explanation elsewhere
 
 Use the established name for each public concept: Workspace, Environment, Weaver
 catalogue, catalogue Warehouse, Lakehouse, Warehouse, target, logical target,
-physical target, repository, catalogue, registry, session, composition, build,
+physical target, repository, catalogue, registry, session, workflow, build,
 load, test, assumption. Do not invent synonyms in UI text when a defined term
 exists.
 

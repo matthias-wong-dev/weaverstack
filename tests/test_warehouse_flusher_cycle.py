@@ -452,10 +452,10 @@ def test_run_logs_inherit_the_session_workflow():
     from weaver.run import open_run_record
 
     with _session() as session:
-        with session.workflow("compose-1"):
+        with session.workflow("workflow-1"):
             catalogue = catalogue_for(session, session.workspace)
             load = open_run_record(catalogue, task_type="load", session=session)
             test = open_run_record(catalogue, task_type="test", session=session)
 
-    assert load.workflow_id == "compose-1"
-    assert test.workflow_id == "compose-1"
+    assert load.workflow_id == "workflow-1"
+    assert test.workflow_id == "workflow-1"

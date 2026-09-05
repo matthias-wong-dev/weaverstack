@@ -21,7 +21,7 @@ from support.workspaces import given_workspace
 
 from weaver.errors import BuildError
 from weaver.sessions import ConsoleSession
-from weaver_cli.main import _resolve_workspace, _with_command_overrides, handle_compose
+from weaver_cli.main import _resolve_workspace, _with_command_overrides, handle_workflow
 from weaver_cli.shell import run_shell
 
 
@@ -240,11 +240,11 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
     assert _available(build_parser()) == ", ".join(expected)
     assert expected == [
         "build",
-        "compose",
         "health",
         "load",
         "test",
         "wipe",
+        "workflow",
     ]
     assert SECONDARY_SESSION_COMMANDS.isdisjoint(NOT_IN_A_SESSION)
 
@@ -261,11 +261,11 @@ def test_secondary_commands_remain_accepted_in_a_session():
     ]
 
 
-# --- a composition run from the prompt ---------------------------------------
+# --- a workflow run from the prompt ---------------------------------------
 
 
 COMPOSITION = """\
-compose:
+workflows:
   dev:
     - weaver build ./repository --item Lakehouse/Sales=Lakehouse/Sales_LH
     - weaver load --item Warehouse/Curated
@@ -273,10 +273,10 @@ compose:
 
 
 @weaver_test()
-def test_a_composition_runs_from_the_prompt_in_the_session_already_open(
+def test_a_workflow_runs_from_the_prompt_in_the_session_already_open(
     tmp_path, every_command, monkeypatch
 ):
-    """`weaver compose` is an ordinary command, and joins the open Session."""
+    """`weaver workflow` is an ordinary command, and joins the open Session."""
 
     from importlib import import_module
 
@@ -285,7 +285,7 @@ def test_a_composition_runs_from_the_prompt_in_the_session_already_open(
     # `weaver_cli.main` the module, not the `main` function the package exports.
     cli = import_module("weaver_cli.main")
     calls, factory = every_command
-    path = tmp_path / "compose.yml"
+    path = tmp_path / "workflow.yml"
     path.write_text(COMPOSITION, encoding="utf-8")
 
     opened = []
@@ -293,21 +293,21 @@ def test_a_composition_runs_from_the_prompt_in_the_session_already_open(
         host, "session_for", lambda workspace, **kwargs: opened.append(workspace)
     )
 
-    # `compose` keeps its own handler; the commands it names are recorded.
+    # `workflow` keeps its own handler; the commands it names are recorded.
     parser = factory()
-    parser._subparsers._group_actions[0].choices["compose"].set_defaults(
-        handler=handle_compose
+    parser._subparsers._group_actions[0].choices["workflow"].set_defaults(
+        handler=handle_workflow
     )
     monkeypatch.setattr(cli, "build_parser", lambda: parser)
     _run(
-        f'weaver compose dev --file "{path.as_posix()}" --yes\nexit\n',
+        f'weaver workflow dev --file "{path.as_posix()}" --yes\nexit\n',
         lambda: parser,
     )
 
     assert [parsed.command for parsed in calls] == ["build", "load"]
     assert len({id(parsed.session) for parsed in calls}) == 1
     assert isinstance(calls[0].session, ConsoleSession)
-    assert opened == [], "the composition opened no second Session"
+    assert opened == [], "the workflow opened no second Session"
 
 
 # --- an ordinary failure is not the end of the session -----------------------

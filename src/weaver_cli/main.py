@@ -21,8 +21,8 @@ from weaver.errors import (
 CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
 #: Named in help text. Spelled out here rather than imported at module scope so
-#: building the parser stays free of everything ``compose`` pulls in.
-COMPOSE_DEFAULT_FILE = "compose.yml"
+#: building the parser stays free of everything ``workflow`` pulls in.
+WORKFLOW_DEFAULT_FILE = "workflow.yml"
 
 #: The first thing a new user reads. Product words, and no implementation.
 INITIALISE_DESCRIPTION = """\
@@ -98,7 +98,7 @@ def run_items(parsed) -> tuple[str, ...]:
     """The items one ``load`` or ``test`` names, positional first then ``--item``.
 
     Two spellings of one selection: the positional form is what a command line
-    and a composition entry are written in, and ``--item`` is the older one. Both
+    and a workflow entry are written in, and ``--item`` is the older one. Both
     reach core, which parses and deduplicates them.
     """
 
@@ -284,7 +284,7 @@ def command_lakehouses(parsed) -> tuple[str, ...]:
 
     A load or a test declares none: it names logical items, and the operation
     offers the Lakehouse once the catalogue has answered. The CLI resolves
-    nothing, so one-shot, shell, compose and notebook paths cannot drift.
+    nothing, so one-shot, shell, workflow and notebook paths cannot drift.
     """
 
     declares = getattr(parsed, "lakehouses", None)
@@ -315,28 +315,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shell.set_defaults(handler=handle_session)
 
-    compose = subcommands.add_parser(
-        "compose",
-        help="Run a named composition in one session.",
+    workflow = subcommands.add_parser(
+        "workflow",
+        help="Run a named workflow in one session.",
     )
-    compose.add_argument("name", help="Composition name in compose.yml.")
-    compose.add_argument(
+    workflow.add_argument("name", help="Workflow name in workflow.yml.")
+    workflow.add_argument(
         "--file",
         metavar="PATH",
-        help=f"Composition file. Defaults to ./{COMPOSE_DEFAULT_FILE}.",
+        help=f"Workflow file. Defaults to ./{WORKFLOW_DEFAULT_FILE}.",
     )
-    compose.add_argument(
+    workflow.add_argument(
         "--timings",
         action="store_true",
-        help="Report time spent by transport after the composition finishes.",
+        help="Report time spent by transport after the workflow finishes.",
     )
-    compose.add_argument(
+    workflow.add_argument(
         "--yes",
         action="store_true",
         help="Run without asking. Also authorises each command in the sequence.",
     )
-    _add_workspace_args(compose)
-    compose.set_defaults(handler=handle_compose)
+    _add_workspace_args(workflow)
+    workflow.set_defaults(handler=handle_workflow)
 
     for name in ("initialise", "initialize"):
         # One command, spelled both ways. The command list carries the first,
@@ -1144,12 +1144,12 @@ def handle_session(args: argparse.Namespace) -> int:
     return run_shell(args)
 
 
-def handle_compose(args: argparse.Namespace) -> int:
+def handle_workflow(args: argparse.Namespace) -> int:
     """Show a named sequence, ask once, then run it in one Session."""
 
-    from .compose import run_composition
+    from .workflow import run_workflow
 
-    return run_composition(args)
+    return run_workflow(args)
 
 
 #: Retry controls for an interactive task failure.

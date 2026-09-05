@@ -1,6 +1,6 @@
 """Interactive Weaver session: ordinary CLI commands, one ConsoleSession.
 
-Commands are written as they are in a terminal, in ``compose.yml`` and in the
+Commands are written as they are in a terminal, in ``workflow.yml`` and in the
 documentation, ``weaver build .``, and are parsed by the top-level CLI parser
 and run by its handlers. The leading ``weaver`` is optional at the prompt, so
 ``build .`` and ``weaver build .`` are the same command. What the session adds
@@ -289,7 +289,7 @@ def _default_workspace(args: argparse.Namespace):
     """Return the default workspace when the invocation defines one.
 
     An invocation names one on the command line, or by being run from a project
-    directory: `workspace-config.yml` beside it is what a composition of bare
+    directory: `workspace-config.yml` beside it is what a workflow of bare
     entries runs in, and what a session with no arguments opens on. An
     invocation with neither has none, and that is a state.
 
