@@ -113,13 +113,13 @@ weaver initialise my-project</pre>
       <section class="section">
         <div class="wrap">
           <h2>Setting the project up</h2>
-          <p class="lede">Weaver asks for the workspace, Catalogue, Environment and destination items.</p>
+          <p class="lede">The desktop wizard collects the workspace, Catalogue, Environment and destination items, then offers the Sales example. The notebook call above supplies these choices directly.</p>
 
           <div class="code">
             <div class="code-bar"><span>weaver initialise my-project</span></div>
             <pre>Set up a Weaver project.
 Project folder: my-project
-Fabric workspace: Analytics
+Fabric workspace: My Fabric Workspace
 
 Catalogue
 The Catalogue is a Warehouse where Weaver keeps its build, load and test state.
@@ -147,8 +147,9 @@ Warehouse: Curated
 Add the Sales example to this project? [y/N]: y
 
 Project
+
   Folder        my-project
-  Workspace     Analytics
+  Workspace     My Fabric Workspace
   Catalogue     Catalogue
   Environment   Weaver
   Lakehouse     Landing
@@ -165,17 +166,31 @@ Choose [1/2/3]: 1</pre>
           <ul>
             <li><strong>Workspace.</strong> A Fabric workspace. This is the one thing that has to be there already.</li>
             <li><strong>Catalogue.</strong> The Warehouse where Weaver keeps its own tables, in the <code>_</code> schema. Give it one of its own, or use a Warehouse you already have, since Weaver owns <code>_</code> and nothing else in there.</li>
-            <li><strong>Environment.</strong> The Fabric Environment your project runs against, with Weaver installed in it. Use one you already have, or make a new one.</li>
+            <li><strong>Environment.</strong> The Fabric Environment for Python work. Select an existing Environment to import its packages and settings, or create a new one. Publish the project definition to install Weaver and its dependencies.</li>
             <li><strong>Lakehouse and Warehouse.</strong> Where your objects are built. Choose a Lakehouse, a Warehouse, or both. Weaver requires at least one destination item.</li>
-            <li><strong>The Sales example.</strong> A small working project you can build, load and test straight away.</li>
+            <li><strong>The Sales example.</strong> Source files for a small project. Setup writes the files; build, load and test run separately after publication.</li>
           </ul>
 
-          <p>Setup can select existing items or create new ones. Run <code>weaver initialise my-project</code> again after an interrupted attempt; Weaver reuses items already created. Add <code>--dry-run</code> to see what setup would create without changing anything.</p>
+          <p>Start with a new or empty folder. After an interrupted attempt, repeat the same choices to retain matching files and reuse Fabric items already created. Conflicting files require another project folder. Add <code>--dry-run</code> to preview setup without changing files or Fabric items.</p>
 
           <p>The review allows each answer to be changed. Changing Workspace collects Environment, Lakehouse and Warehouse choices again in the new workspace. Continue accepts the choices before any Fabric items are created.</p>
           <pre>Publishing a Fabric Environment can take about 5 minutes.
 Publish the Environment now? [y/N]:</pre>
           <p>Press Enter to defer publication. Setup still creates the project and its declared items.</p>
+
+          <h3>Supply the choices on the command line</h3>
+          <p>For setup without prompts, name the destination folder and pass the workspace and item choices. Include <code>--example</code> to generate the Sales source:</p>
+          <div class="code">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre>weaver initialise my-project \
+  --workspace "My Fabric Workspace" \
+  --catalogue Catalogue \
+  --environment Weaver \
+  --lakehouse Landing \
+  --warehouse Curated \
+  --example --no-input</pre>
+          </div>
+          <p>Publication is deferred here too. Add <code>--publish-environment</code> to publish during setup.</p>
 
         </div>
       </section>
@@ -183,7 +198,7 @@ Publish the Environment now? [y/N]:</pre>
       <section class="section">
         <div class="wrap">
           <h2>The generated project</h2>
-          <p class="lede">You get the project configuration, and the Sales example if you asked for it.</p>
+          <p class="lede">Every project includes configuration, a README and an Environment definition. Selecting the Sales example adds the Lakehouse and Warehouse source shown below.</p>
 
           <div class="code plain" style="max-width: 640px;">
             <div class="code-bar"><span>my-project/</span></div>
@@ -209,6 +224,7 @@ Environment/Weaver.Environment/
           </div>
 
           <p>README.md explains the local workflow. The Environment directory contains packages and compute settings, including those imported from an existing Environment. <code>workspace-config.yml</code> says which Fabric workspace and items to use:</p>
+          <p>These are your project files. Edit the configuration, compositions, README and Environment definition as your project develops.</p>
 
           <div class="code">
             <div class="code-bar"><span>workspace-config.yml</span></div>
@@ -473,17 +489,21 @@ weaver test</pre>
             </li>
           </ol>
 
-          <p>The generated <code>compose.yml</code> defines a sequence that runs all three in one session:</p>
+          <p>The generated <code>compose.yml</code> runs build, load, test and health in one session:</p>
           <div class="code">
             <div class="code-bar"><span>terminal</span></div>
             <pre>weaver compose full</pre>
           </div>
 
           <h3>In a notebook</h3>
-          <p>The same operations are available as Python functions and use the same project configuration:</p>
+          <p>In the notebook used for setup, change to the generated project directory so the Python functions read its configuration:</p>
           <div class="code">
             <div class="code-bar"><span>notebook cell</span></div>
-            <pre><span class="c-key">import</span> weaver
+            <pre><span class="c-key">import</span> os
+<span class="c-key">from</span> pathlib <span class="c-key">import</span> Path
+<span class="c-key">import</span> weaver
+
+os.<span class="c-fn">chdir</span>(Path(<span class="c-str">"builtin"</span>) / <span class="c-str">"repository"</span>)
 
 weaver.<span class="c-fn">build</span>()
 weaver.<span class="c-fn">load</span>()
