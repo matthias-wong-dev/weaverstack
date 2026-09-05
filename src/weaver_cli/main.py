@@ -387,7 +387,10 @@ def build_parser() -> argparse.ArgumentParser:
         "source",
         metavar="SOURCE",
         nargs="?",
-        help="Project folder. Defaults to the current directory or Notebook Resources.",
+        help=(
+            "Project folder, or an abfss location inside a Fabric session. "
+            "Defaults to the current directory or Notebook Resources."
+        ),
     )
     build.add_argument(
         "--item",

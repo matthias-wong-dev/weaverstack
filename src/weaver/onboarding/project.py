@@ -19,7 +19,7 @@ from ..declaration.model import LAKEHOUSE, WAREHOUSE
 from ..errors import CommandError
 from ..targets import validate_name
 
-#: The project files a generated project is described by.
+#: The two files a generated project is described by.
 WORKSPACE_CONFIG_FILE = "workspace-config.yml"
 WORKFLOW_FILE = "workflow.yml"
 
