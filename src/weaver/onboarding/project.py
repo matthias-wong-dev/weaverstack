@@ -59,6 +59,14 @@ class ProjectRequest:
             value = getattr(self, field)
             if value is not None:
                 object.__setattr__(self, field, validate_name(value, what=field))
+        for kind, value in (
+            ("Lakehouse", self.lakehouse),
+            ("Warehouse", self.warehouse),
+            ("Warehouse", self.catalogue),
+            ("Environment", self.environment),
+        ):
+            if value is not None:
+                validate_fabric_name(value, kind)
         if self.lakehouse is None and self.warehouse is None:
             raise CommandError(
                 "Choose a Lakehouse, a Warehouse, or both. A project with "
@@ -89,6 +97,7 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
     files = {
         WORKSPACE_CONFIG_FILE: _workspace_config(request),
         COMPOSE_FILE: _composition(),
+        "README.md": _readme(request),
     }
     if request.lakehouse and not request.example:
         files[f"{LAKEHOUSE}/{request.lakehouse}/Files/{KEEP_FILE}"] = ""
@@ -102,16 +111,8 @@ def _workspace_config(request: ProjectRequest) -> str:
     """The project's one workspace configuration file."""
 
     lines = [
-        "# One file describes one Fabric workspace.",
-        "#",
-        "# Weaver items are the keys under targets:, and each value is the Fabric",
-        "# item it is built into. Point the project at another workspace by",
-        "# copying this file and changing the names.",
         f"workspace: {_scalar(request.workspace)}",
         f"environment: {_scalar(request.environment)}",
-        "",
-        "# Weaver keeps its own tables in the _ schema of this Warehouse, and",
-        "# owns nothing else in it.",
         f"catalogue: {_scalar(request.catalogue_reference)}",
         "",
         "targets:",
@@ -126,20 +127,101 @@ def _workspace_config(request: ProjectRequest) -> str:
 def _composition() -> str:
     """The build, load and test sequence a new project runs as one command."""
 
-    return (
-        "# A named sequence, run in one session:\n"
-        "#\n"
-        f"#   weaver compose {COMPOSITION_NAME}\n"
-        "#\n"
-        "# Each entry takes the workspace the composition resolved, so none of\n"
-        "# them names it again. Naming no item builds, loads and tests every\n"
-        "# item workspace-config.yml declares.\n"
-        "compose:\n"
-        f"  {COMPOSITION_NAME}:\n"
-        "    - build\n"
-        "    - load\n"
-        "    - test\n"
-    )
+    return """compose:
+  full:
+    - build
+    - load
+    - test
+    - health
+  load-only:
+    - load
+    - test
+    - health
+  build-only:
+    - build
+  wipe-all:
+    - wipe
+"""
+
+
+def _readme(request: ProjectRequest) -> str:
+    """Local instructions for operating the generated project."""
+
+    return f"""# Welcome to Weaver
+
+This project describes data objects in the Microsoft Fabric workspace
+`{request.workspace}`.
+
+## The important files
+
+`workspace-config.yml` names the workspace, catalogue Warehouse, Environment
+and the physical target for each repository item.
+
+`Environment/{request.environment}.Environment` defines the Python runtime.
+Add packages to `Libraries/PublicLibraries/environment.yml` there. Fabric
+compute settings and custom libraries are kept beside it.
+
+`compose.yml` defines repeatable workflows: `full`, `load-only`, `build-only`
+and `wipe-all`. Wipe removes all user objects from the configured targets and
+asks for confirmation.
+
+## The basic workflow
+
+```bash
+weaver build
+weaver load
+weaver test
+weaver health
+```
+
+Or run the sequence in one session:
+
+```bash
+weaver compose full
+```
+
+Build makes Fabric structures match the repository. Load runs the data work.
+A build can be run independently.
+
+## The Catalogue
+
+Warehouse/{request.catalogue} holds Weaver's build, load and test state in its
+`_` schema. The first build creates those catalogue tables.
+
+## The Environment
+
+Publish before running Python work, and after changing packages:
+
+```bash
+weaver fabric environment publish --path Environment/{request.environment}.Environment
+```
+
+Publishing can take several minutes. Spark SQL needs a Lakehouse; Python work
+that imports Weaver also needs the published Environment.
+
+## Working interactively
+
+```bash
+weaver session
+```
+
+Commands inside the session reuse Fabric connections and the Spark session.
+
+## Try the example
+
+Choose the Sales example during initialisation to include its source files.
+Build, load and test run separately with `weaver compose full`.
+To explore the starter example later, initialise another project folder.
+
+## Check connectivity
+
+```bash
+weaver doctor --workspace "{request.workspace}"
+```
+
+Doctor checks authentication, REST, OneLake, TDS and Spark in the workspace.
+`weaver health` reports the installed project's state.
+"""
 
 
 def _scalar(value: str) -> str:
@@ -148,3 +230,21 @@ def _scalar(value: str) -> str:
     import yaml
 
     return yaml.safe_dump(value, default_flow_style=True).strip().rstrip("...").strip()
+
+
+def validate_fabric_name(name: str, kind: str) -> str:
+    """Validate known Fabric item-name constraints before provisioning."""
+
+    import re
+
+    validate_name(name, what=f"Fabric {kind} name")
+    # Fabric's Lakehouse creation guide limits display names to 123 characters.
+    maximum = 123 if kind == "Lakehouse" else 256
+    invalid = len(name) > maximum or any(ord(character) < 32 for character in name)
+    if kind == "Lakehouse":
+        invalid = invalid or re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) is None
+    if invalid:
+        raise CommandError(
+            f"{name!r} is not a valid Fabric {kind} name. Choose another {kind} name."
+        )
+    return name

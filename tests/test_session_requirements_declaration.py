@@ -294,3 +294,11 @@ def test_a_build_that_names_no_target_declares_the_superset():
     declared = _requires_build(SimpleNamespace(items=None))
 
     assert {LIVY, ONELAKE, TDS} <= declared
+
+
+@weaver_test()
+def test_spark_warmup_needs_a_lakehouse_but_no_environment(monkeypatch):
+    scope = _scope(monkeypatch, environment=None)
+    warmed = scope.warm({AUTH, LIVY})
+    assert scope.livy.started == 1
+    assert not warmed.skipped

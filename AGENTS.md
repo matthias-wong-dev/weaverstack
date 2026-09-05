@@ -56,12 +56,12 @@ Session         ConsoleSession   desktop → Fabric
                 TestSession      records the same contract
 
 initialise      resolve request → read the workspace's items → create the
-                missing ones → write the project → publish the Environment
+                missing ones → write the project → optionally publish the Environment
 
 build           resolve request → read BuildState → Builder → Installer
 load / test     resolve request → read RunState   → Runner
 health          resolve request → read Catalogue  → HealthReport
-doctor          acquire a credential → cross each surface a project uses
+doctor          authenticate → list workspaces → discover items → probe OneLake, TDS and Spark
 
 Fabric          Resolver, REST, OneLake, Livy, TDS
 ```

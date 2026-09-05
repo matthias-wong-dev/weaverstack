@@ -311,3 +311,36 @@ def test_public_wipe_uses_configured_control_catalogue_and_skips_it_when_wiped(
     # wipe leaves the catalogue standing and its claims are removed as usual.
     public_wipe("Lakehouse/Control", workspace="Demo", catalogue="Warehouse/Control")
     assert calls[-1] == ("Warehouse/Control", ("Lakehouse/Control",))
+
+
+@weaver_test()
+def test_unscoped_wipe_uses_only_declared_physical_targets(tmp_path, monkeypatch):
+    from weaver.sessions.testing import TestSession
+
+    configuration = tmp_path / "workspace-config.yml"
+    configuration.write_text(
+        "workspace: Analytics\ntargets:\n"
+        "  Warehouse/Sales: Shared\n"
+        "  Warehouse/Inventory: Shared\n"
+        "  Warehouse/Reporting: Output\n"
+    )
+    operations = __import__("weaver.operations.wipe", fromlist=["wipe"])
+    selected = []
+    monkeypatch.setattr(
+        operations,
+        "_wipe_one",
+        lambda target, *a, **k: selected.append(str(target)) or (),
+    )
+    result = public_wipe(
+        workspace_config=configuration, session=TestSession(), dry_run=True
+    )
+    assert selected == ["Warehouse/Shared", "Warehouse/Output"]
+    assert result.dry_run
+
+
+@weaver_test()
+def test_unscoped_wipe_refuses_a_workspace_with_no_declared_targets():
+    from weaver.sessions.testing import TestSession
+
+    with pytest.raises(CommandError, match="No physical targets"):
+        public_wipe(workspace="Analytics", session=TestSession())

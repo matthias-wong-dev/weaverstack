@@ -147,7 +147,7 @@
           <p class="lede">This is the Sales example <code>weaver initialise</code> can write for you. A folder of exported customers, a Delta table built from it, a Warehouse table joining those customers to regions, and a check on each side.</p>
 
           <div class="code plain" style="max-width: 640px;">
-            <div class="code-bar"><span>my-project/</span></div>
+            <div class="code-bar"><span>Analytics/</span></div>
             <!-- example-tree -->
             <pre>workspace-config.yml
 compose.yml
@@ -256,8 +256,9 @@ compose.yml
           <div class="code" style="max-width: 480px;">
             <div class="code-bar"><span>terminal</span></div>
             <pre>pip install weaverstack
-weaver initialise</pre>
+weaver initialise --workspace Analytics</pre>
           </div>
+          <p>Review the workspace and item choices, then select the Sales example to generate its source. From <code>Analytics</code>, publish the Environment and run <code>weaver compose full</code> to build, load, test and check health.</p>
           <p>
             <a class="button blue" href="get-started/index.html">Read the walkthrough</a>
           </p>

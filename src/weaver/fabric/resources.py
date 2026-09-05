@@ -52,19 +52,18 @@ class Item:
         return f"{self.type} {self.name} ({self.id})"
 
 
-def find_workspace(name: str, *, client: FabricClient | None = None) -> WorkspaceItem:
+def find_workspace(
+    name: str, *, client: FabricClient | None = None, workspaces=None
+) -> WorkspaceItem:
     """The workspace with this name."""
 
     client = client or FabricClient()
+    visible = list(client.paged("workspaces")) if workspaces is None else workspaces
     matches = [
-        workspace
-        for workspace in client.paged("workspaces")
-        if workspace.get("displayName") == name
+        workspace for workspace in visible if workspace.get("displayName") == name
     ]
     if not matches:
-        available = ", ".join(
-            sorted(w.get("displayName", "?") for w in client.paged("workspaces"))
-        )
+        available = ", ".join(sorted(w.get("displayName", "?") for w in visible))
         raise CommandError(
             f"Workspace {name!r} was not found. Available workspaces: {available or 'none'}."
         )

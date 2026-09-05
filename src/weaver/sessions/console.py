@@ -560,11 +560,6 @@ class ConsoleScope(WorkspaceScope):
     def _livy_cannot_start(self) -> str | None:
         """Why a Spark session could not be started yet, or None when it can."""
 
-        if not getattr(self.workspace, "environment", None):
-            return (
-                "this workspace names no Environment. Pass --environment, or set "
-                "one in workspace configuration."
-            )
         if self.spark_home is None and not getattr(
             self.workspace, "configured_lakehouses", None
         ):

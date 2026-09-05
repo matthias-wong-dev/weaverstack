@@ -1,40 +1,22 @@
-"""Showing which Fabric crossings this installation can make.
+"""Render workspace connectivity evidence."""
 
-One line per check, padded so the outcomes line up, and the reason underneath
-where one failed. An ordinary connectivity failure is a sentence and a next
-action, not a traceback.
-"""
-
-from __future__ import annotations
-
-import sys
-
-#: Wide enough for the longest name a configured project produces, which is a
-#: Warehouse reached over TDS.
 NAME_WIDTH = 34
 
 
 def render(report) -> None:
-    """Show every check, and what to do about the ones that failed."""
+    """Show each status with its diagnostic detail and probe item."""
 
+    width = max([NAME_WIDTH, *(len(check.name) + 2 for check in report.checks)])
     for check in report.checks:
-        print(f"  {check.name.ljust(NAME_WIDTH)}{'OK' if check.passed else 'FAILED'}")
-
-    if report.succeeded:
-        print()
-        print("Everything checked is reachable.")
-        return
-
-    # The table is the result and goes to stdout; the reasons go to stderr so a
-    # script reads one and a person reads both. Two streams to one terminal
-    # arrive in the order they were flushed, so the table is flushed first.
-    sys.stdout.flush()
-    for check in report.failures:
-        print(file=sys.stderr)
-        print(f"{check.name} failed.", file=sys.stderr)
+        print(f"  {check.name.ljust(width)}{check.status.upper()}")
+        if check.via:
+            print(f"    via {check.via}")
         if check.detail:
-            print(file=sys.stderr)
-            print(check.detail, file=sys.stderr)
+            print(f"    {check.detail}")
+        if check.name == "Authentication":
+            for key in ("account", "tenant"):
+                if value := report.authentication.get(key):
+                    print(f"    {key.capitalize()}: {value}")
         if check.remedy:
-            print(file=sys.stderr)
-            print(check.remedy, file=sys.stderr)
+            print(f"    {check.remedy}")
+        print()

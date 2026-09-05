@@ -36,124 +36,127 @@ unattended run can never be sent to a browser.
 ## Checking that Weaver can connect
 
 ```bash
-weaver doctor
-```
-
-Proves sign-in and the Fabric REST API together: a workspace listing that comes
-back means a token was issued and the control plane accepted it.
-
-```bash
 weaver doctor --workspace Analytics
-weaver doctor --workspace-config workspace-config.yml
 ```
 
-A workspace is resolved as well. A configuration names the items, so each
-endpoint that project is reached through is opened and no others:
+Doctor checks this machine and identity against the named workspace. It acquires
+an authentication token, reports the successful credential path, lists visible
+workspaces through Fabric REST and resolves the requested workspace. It reads no
+repository or workspace configuration.
+Authentication also shows the account and tenant when those non-secret fields
+are available.
 
-```text
-  Fabric REST                       OK
-  Workspace Analytics               OK
-  Warehouse/Control TDS             OK
-  Warehouse/Reporting TDS           OK
-  Lakehouse/Sales OneLake           OK
-  Spark session                     OK
-```
+From the workspace's items it selects the first Lakehouse and Warehouse in
+stable display-name order. OneLake reads the Lakehouse Files area, Warehouse TDS
+runs `SELECT 1`, and Spark runs `SELECT 1` through the Session. Spark attaches to
+the selected Lakehouse and needs no Environment for this SQL probe.
 
-A Warehouse-only project starts no Spark session. A Lakehouse-only project still
-opens TDS, because the Weaver catalogue is a Warehouse. Checking a Lakehouse
-starts a Fabric Spark session, which takes a minute.
+Each result contains a status, diagnostic detail and the physical item used.
+`OK` means success, `MISSING` means the resource is absent, `FAILED` means the
+probe returned a negative result, and `ERROR` means it could not be evaluated.
+REST listing uses the same classification as endpoint probes: a 401, 403 or 404
+is `FAILED`; a transport or runtime failure is `ERROR`.
+Missing probe items do not fail the command. A missing workspace, authentication
+failure, empty workspace listing or failed probe produces a nonzero exit code.
+`--json` includes the authentication path, workspace listing and all checks.
 
-A failed check prints the reason and a next action on stderr, and the command
-exits non-zero. It is a connectivity check: what the estate holds is
-`weaver health`, and whether a repository parses is `weaver check`.
+Use `weaver health` for installed state and `weaver check` for repository syntax.
 
 ## Setting a project up
 
 ```bash
-weaver initialise
+weaver initialise --workspace Analytics
 ```
 
-Creates a Weaver project and the Fabric items it needs. The workspace must
-already exist; a Catalogue, Environment, Lakehouse or Warehouse that does not is
-created. Naming an item is the request to have it, so nothing is asked per item.
+Without `--workspace`, the wizard asks for the Fabric workspace first. It then
+explains Project folder and suggests the workspace name as its default.
+`--project-folder` supplies an explicit destination, including `.` for the current
+directory. Unattended setup requires that option. The wizard explains each item,
+offers existing names and collects optional Lakehouse, Warehouse and Sales
+example choices. A project needs at
+least one target. Its review offers Continue, Change an answer and Cancel.
+No Fabric mutation occurs before Continue. Changing Workspace clears the
+Environment, Lakehouse and Warehouse choices and collects them again using
+item discovery in the new workspace. An accepted Project folder suggestion is
+re-offered with the new workspace name; an explicitly entered folder is retained.
+After Continue, the setup task reports workspace checks, Environment reading and
+project-file validation before creating items.
 
-Options are collected at a prompt when a terminal is there to answer and a
-required value is missing. `--interactive` asks for the optional names too,
-`--no-input` never asks and names the options a run is short of, and `--dry-run`
-shows what would be set up without changing anything.
+Lakehouse names begin with a letter, contain letters, digits and underscores,
+and have at most 123 characters, as specified by the
+[Fabric creation guide](https://learn.microsoft.com/en-us/fabric/data-engineering/create-lakehouse).
 
-### The Fabric Environment
+The existing destination is copied into a temporary directory and overlaid with
+the generated files for validation. Project files belong to the user as soon as
+they are written. Initialise requires another folder when its files conflict with
+existing content. An interrupted run can continue when the
+existing files can be retained, reusing Fabric items already created.
 
-Every project runs against a Fabric Environment with Weaver installed in it. The
-prompt offers the choice, because a name on its own does not say which is meant:
+Every project contains:
 
 ```text
-Fabric Environment:
-  1. Use an existing Environment
-  2. Create a new Environment
-```
-
-Choosing the first lists the Environments the workspace has. Either way, where
-Weaver is not installed there yet, one question is asked before anything changes:
-
-```text
-Weaver needs to be installed in the Fabric Environment 'Data Engineering'
-before this project can run.
-
-Installing Weaver in Fabric can take about 5 minutes.
-
-Would you like to install it now? [Y/n]:
-```
-
-An existing Environment keeps everything else it declares. Only Weaver's own
-libraries are added.
-
-A run that cannot ask settles nothing implicitly. `--no-input`, and any run with
-no terminal, stops before mutation and says what to do:
-
-```text
-The Fabric Environment 'Data Engineering' does not have Weaver installed.
-
-Run `weaver initialise` interactively to install Weaver in this Environment,
-or prepare the Environment before running this command again.
-```
-
-```bash
-weaver initialise ./project \
-  --workspace Analytics \
-  --catalogue Catalogue \
-  --environment Weaver \
-  --lakehouse Landing \
-  --warehouse Curated \
-  --example
-```
-
-`--example` writes a small Sales example and runs `build`, `load` and `test`
-against it, so a successful run means the chosen items have actually built,
-loaded and tested.
-
-What is written:
-
-```text
-project/
+Analytics/
+├── README.md
 ├── workspace-config.yml
 ├── compose.yml
 ├── Environment/Weaver.Environment/
-├── Lakehouse/Landing/{Files,Tables}/
+├── Lakehouse/Landing/
 └── Warehouse/Curated/
 ```
 
-The catalogue Warehouse gets no authored folder. Weaver owns the `_` schema
-there and the first ordinary build creates its tables, so `Warehouse/Catalogue/`
-would invite authoring into the item Weaver keeps its own tables in.
+The Catalogue is a Warehouse holding build, load and test state in `_`. Its
+tables are created by the first build. Lakehouse and Warehouse directories
+appear only for selected targets.
 
-A new Environment is created from a definition written into the project, at
-`Environment/<Name>.Environment`. One the workspace already has is not the
-project's to describe, so no definition is written for it.
+An existing Environment is adopted into `Environment/<Name>.Environment` with
+its packages, settings and custom libraries. The local definition includes the
+released Weaver dependency. Environment item creation and publication are
+separate. The wizard asks:
 
-Provisioning is initialise's, and building is `build`'s. A build performs a
-read-only preflight and creates no Fabric item, so a missing target is a build
-failure naming the item.
+```text
+Publishing a Fabric Environment can take about 5 minutes.
+Publish the Environment now? [y/N]:
+```
+
+Publication defaults to deferred. Publish later from the project:
+
+```bash
+weaver fabric environment publish --path Environment/Weaver.Environment
+```
+
+Spark SQL needs a Lakehouse. Remote Python that imports Weaver also needs an
+Environment with Weaver published. After changing project packages, publish the
+local definition again.
+
+For unattended setup:
+
+```bash
+weaver initialise --workspace Analytics --project-folder ./Analytics --lakehouse Landing --warehouse Curated --example --no-input
+```
+
+`--publish-environment` requests publication. `--dry-run` changes nothing.
+`--example` writes source only. The wizard offers the same onboarding choice:
+`Add the Sales example to this project? [y/N]`. To explore the starter example
+later, initialise another project folder.
+
+From the project directory run:
+
+```bash
+weaver build
+weaver load
+weaver test
+weaver health
+```
+
+`weaver compose full` runs those four commands in one Session. `load-only` runs
+load, test and health; `build-only` builds; `wipe-all` wipes the physical targets
+declared in this project's workspace configuration with the usual destructive
+confirmation. `weaver wipe` with no targets has that same project scope.
+
+In a Fabric notebook, pass an explicit filesystem destination, for example
+`Path("builtin") / "repository"`, to `weaver.initialise`. The notebook workspace
+is inherited when none is named. Different Catalogue or Environment settings
+within the same workspace are allowed. Example generation executes no data work.
 
 ## Workspace resolution
 

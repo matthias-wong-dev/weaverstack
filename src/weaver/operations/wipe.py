@@ -99,7 +99,7 @@ class WipeResult:
 
 
 def wipe(
-    targets: str | Iterable[str],
+    targets: str | Iterable[str] = (),
     *,
     workspace: str | None = None,
     catalogue: str | None = None,
@@ -124,8 +124,6 @@ def wipe(
 
     values = (targets,) if isinstance(targets, str) else tuple(targets)
     parsed = tuple(WipeTarget.parse(value) for value in values)
-    if not parsed:
-        raise CommandError("wipe needs at least one target")
     resolved_workspace = operation_workspace(
         "wipe",
         workspace=workspace,
@@ -137,6 +135,18 @@ def wipe(
         # resolves has its claims for the wiped targets removed as well.
         needs_catalogue=False,
     )
+    if not parsed:
+        parsed = tuple(
+            WipeTarget.parse(value)
+            for value in dict.fromkeys(
+                f"{item.item_type}/{declaration.physical}"
+                for item, declaration in resolved_workspace.targets.items()
+            )
+        )
+        if not parsed:
+            raise CommandError(
+                "No physical targets are declared in workspace configuration."
+            )
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:

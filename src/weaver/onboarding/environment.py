@@ -1,9 +1,8 @@
 """The Fabric Environment definition a new project ships.
 
 A `<Name>.Environment` directory in Microsoft Fabric's own format, holding
-`.platform` and the external library list. Publishing it adds `weaverstack` to
-that list, which is how a Livy session and a Fabric notebook attached to the
-Environment reach `import weaver`.
+`.platform` and the external library list. The library list includes `weaverstack`. Publishing installs the declared
+packages for Livy sessions and Fabric notebooks attached to the Environment.
 
 No `Setting/Sparkcompute.yml` is written. Fabric applies the workspace's Spark
 settings when a definition declares none, and Weaver pins no runtime version.
@@ -29,15 +28,7 @@ _PLATFORM_SCHEMA = (
     "platformProperties/2.0.0/schema.json"
 )
 
-_LIBRARIES = """\
-# Libraries Fabric installs into this Environment.
-#
-# `weaver fabric environment publish` adds weaverstack here, so a notebook or a
-# Livy session attached to this Environment can import weaver. Add your own
-# requirements to the same list.
-dependencies:
-  - pip:
-"""
+_LIBRARIES = "dependencies:\n  - pip:\n      - weaverstack\n"
 
 
 def environment_definition_files(name: str) -> dict[str, str]:

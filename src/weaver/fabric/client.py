@@ -124,6 +124,14 @@ class FabricClient:
         self.telemetry = telemetry
         self._token_source = token_source(token, scope=FABRIC_SCOPE)
 
+    def authenticate(self) -> dict:
+        """Acquire the REST token and return non-secret authentication metadata."""
+
+        self._token_source()
+        return dict(
+            getattr(self._token_source, "diagnostic", {"path": "Session identity"})
+        )
+
     @property
     def token(self) -> str:
         """A currently-valid bearer, renewed when it is close to expiring.

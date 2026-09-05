@@ -81,8 +81,7 @@ def test_the_catalogue_to_unbind_from_is_the_one_the_command_resolved():
 
 @weaver_test()
 def test_wipe_requires_a_typed_target():
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(["wipe", "--workspace", "Demo"])
+    assert build_parser().parse_args(["wipe", "--workspace", "Demo"]).targets == []
 
 
 @weaver_test()

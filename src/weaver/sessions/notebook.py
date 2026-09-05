@@ -11,7 +11,7 @@ from typing import Any, Sequence
 
 from ..errors import CommandError
 from ..workspaces import Workspace
-from .base import Session, WorkspaceScope, run_spark_statements, workspace_context
+from .base import Session, WorkspaceScope, run_spark_statements
 from .program import RemoteProgram
 from .resources import Resource
 
@@ -36,7 +36,7 @@ class NotebookSession(Session):
         self._given_resolver = resolver
 
     def _new_scope(self, workspace: Workspace) -> "NotebookScope":
-        if workspace_context(workspace) != workspace_context(self.workspace):
+        if workspace.workspace != self.workspace.workspace:
             raise CommandError(
                 f"this notebook is attached to {self.workspace.workspace}; it "
                 f"cannot execute against {getattr(workspace, 'workspace', workspace)}"

@@ -107,6 +107,11 @@ about the Session changing. `weaver_cli` passes what its command line settled on
 and refuses a command naming a workspace other than the Session's rather than
 resolving one it cannot run in.
 
+Notebook attachment checks compare the physical workspace name. Catalogue,
+Environment and target configuration remain operation settings within that
+workspace. Spark SQL readiness requires a workspace and Lakehouse; the remote
+Python import path additionally checks the Environment and Weaver package.
+
 ### Builder
 
 ```text

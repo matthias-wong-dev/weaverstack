@@ -139,8 +139,7 @@ def test_the_retired_target_option_says_what_replaced_it():
 def test_wipe_needs_at_least_one_target():
     from weaver_cli.main import build_parser
 
-    with pytest.raises(SystemExit):
-        build_parser().parse_args(["wipe"])
+    assert build_parser().parse_args(["wipe"]).targets == []
 
 
 @weaver_test()

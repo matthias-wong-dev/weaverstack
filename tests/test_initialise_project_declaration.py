@@ -41,9 +41,9 @@ def _request(shape: str, *, example: bool) -> ProjectRequest:
     )
 
 
-def _project(tmp_path, shape: str, *, example: bool, define_environment: bool = True):
+def _project(tmp_path, shape: str, *, example: bool):
     request = _request(shape, example=example)
-    files = _generated_files(request, define_environment=define_environment)
+    files = _generated_files(request)
     _write(tmp_path, files)
     return request, files
 
@@ -106,7 +106,7 @@ def test_the_composition_runs_build_load_and_test(tmp_path):
 
     entries, _path = load_composition("full", file=str(tmp_path / "compose.yml"))
 
-    assert entries == ["build", "load", "test"]
+    assert entries == ["build", "load", "test", "health"]
 
 
 @weaver_test()
@@ -171,8 +171,8 @@ def test_generation_is_deterministic(tmp_path):
     """The same request twice writes the same bytes, which is what lets a rerun
     converge. Nothing generated carries the day it was written."""
 
-    first = _generated_files(_request("both", example=True), define_environment=True)
-    second = _generated_files(_request("both", example=True), define_environment=True)
+    first = _generated_files(_request("both", example=True))
+    second = _generated_files(_request("both", example=True))
 
     assert first == second
 
@@ -257,8 +257,61 @@ def test_a_name_is_taken_as_it_is_written_once_the_spaces_are_gone(tmp_path):
         workspace=" Weaver Example ",
         catalogue="Catalogue",
         environment="Weaver",
-        lakehouse=" Landing Zone ",
+        lakehouse=" Landing_Zone ",
     )
 
     assert request.workspace == "Weaver Example"
-    assert request.lakehouse == "Landing Zone"
+    assert request.lakehouse == "Landing_Zone"
+
+
+@weaver_test()
+def test_generated_project_explains_itself_and_has_all_compositions(tmp_path):
+    from weaver_cli.compose import load_composition
+
+    _, files = _project(tmp_path, "both", example=False)
+    readme = files["README.md"]
+    for name in (
+        "workspace-config.yml",
+        "Environment/Weaver.Environment",
+        "compose.yml",
+        "weaver session",
+        "weaver health",
+    ):
+        assert name in readme
+    assert "--dev" not in readme
+    assert not any(
+        line.startswith("#") for line in files["workspace-config.yml"].splitlines()
+    )
+    expected = {
+        "full": ["build", "load", "test", "health"],
+        "load-only": ["load", "test", "health"],
+        "build-only": ["build"],
+        "wipe-all": ["wipe"],
+    }
+    for name, commands in expected.items():
+        assert load_composition(name, file=str(tmp_path / "compose.yml"))[0] == commands
+
+
+@weaver_test()
+def test_lakehouse_accepts_123_character_name():
+    from weaver.onboarding.project import validate_fabric_name
+
+    name = "L" * 123
+    assert validate_fabric_name(name, "Lakehouse") == name
+    assert (
+        ProjectRequest(
+            workspace=WORKSPACE,
+            catalogue="Catalogue",
+            environment="Weaver",
+            lakehouse=name,
+        ).lakehouse
+        == name
+    )
+
+
+@weaver_test()
+def test_lakehouse_rejects_124_character_name():
+    from weaver.onboarding.project import validate_fabric_name
+
+    with pytest.raises(CommandError, match="valid Fabric Lakehouse"):
+        validate_fabric_name("L" * 124, "Lakehouse")

@@ -238,7 +238,14 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
     )
 
     assert _available(build_parser()) == ", ".join(expected)
-    assert expected == ["build", "compose", "health", "load", "test", "wipe"]
+    assert expected == [
+        "build",
+        "compose",
+        "health",
+        "load",
+        "test",
+        "wipe",
+    ]
     assert SECONDARY_SESSION_COMMANDS.isdisjoint(NOT_IN_A_SESSION)
 
 

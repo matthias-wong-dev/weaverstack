@@ -25,14 +25,15 @@ class _Workspace:
     name = WORKSPACE
 
 
-class _Definition:
-    """An Environment definition with Weaver already in it."""
+def _Definition():
+    from weaver.fabric.environment_definition import (
+        EXTERNAL_LIBRARIES,
+        EnvironmentDefinition,
+    )
 
-    def custom_libraries(self):
-        return ()
-
-    def external_libraries(self):
-        return "dependencies:\n  - pip:\n      - weaverstack\n"
+    return EnvironmentDefinition(
+        {EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - weaverstack\n"}
+    )
 
 
 @pytest.fixture
@@ -88,10 +89,6 @@ def fabric(monkeypatch, notebook):
     monkeypatch.setattr(
         "weaver.fabric.environment.read_definition",
         lambda item, *, client=None: seen.append(client) or _Definition(),
-    )
-    monkeypatch.setattr(
-        "weaver.fabric.environment.publish_state",
-        lambda item, *, client=None: seen.append(client) or "Success",
     )
     return SimpleNamespace(seen=seen, held=held)
 
@@ -169,3 +166,34 @@ def test_an_injected_client_still_wins(tmp_path, fabric, notebook):
 
     assert set(fabric.seen) == {supplied}
     assert notebook.tokens == []
+
+
+@weaver_test()
+def test_notebook_initialise_allows_project_configuration_in_the_same_workspace(
+    tmp_path, fabric, notebook, no_desktop_credential
+):
+    from weaver.sessions.notebook import NotebookSession
+    from weaver.workspaces import Workspace
+
+    with NotebookSession(
+        workspace=Workspace(
+            workspace=WORKSPACE,
+            catalogue="Warehouse/OtherCatalogue",
+            environment="OtherRuntime",
+        )
+    ) as session:
+        report = _initialise(tmp_path, session=session, example=True)
+    assert report.example.generated
+    assert report.environment_publication == "deferred"
+    assert report.succeeded
+
+
+@weaver_test()
+def test_notebook_refuses_a_different_physical_workspace(notebook):
+    from weaver.errors import CommandError
+    from weaver.sessions.notebook import NotebookSession
+    from weaver.workspaces import Workspace
+
+    with NotebookSession(workspace=Workspace(workspace=WORKSPACE)) as session:
+        with pytest.raises(CommandError, match="cannot execute against"):
+            session.scope(Workspace(workspace="AnotherWorkspace"))
