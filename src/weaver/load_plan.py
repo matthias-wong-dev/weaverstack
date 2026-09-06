@@ -168,10 +168,10 @@ def load_dag(
     reaches one object.
 
     ``selection`` is an execution filter over logical loadable identities,
-    already decided by the caller. Only the loadables it names run, and the
-    ordinary traversal continues through the ones it leaves out, so two selected
-    loadables keep the order the graph gives them. ``None`` selects every
-    loadable the requested items own.
+    decided by the caller. Only the loadables it names run. The traversal
+    continues through the ones it leaves out, so two selected loadables keep the
+    order the graph gives them. ``None`` selects every loadable the requested
+    items own.
     """
 
     requested = tuple(dict.fromkeys(items))
@@ -259,7 +259,7 @@ class _Planner:
         return self._chosen(tuple(selected))
 
     def _chosen(self, nodes: tuple[InstalledNode, ...]) -> tuple[InstalledNode, ...]:
-        """The nodes the caller's selection filter keeps."""
+        """The nodes the selection keeps."""
 
         if self.selection is None:
             return nodes
@@ -450,10 +450,9 @@ class _Planner:
 
         Passing through non-loadable producers is what makes a view a conduit:
         it owns no load work, so it is not a node here, but a consumer still
-        depends on whatever fills the tables behind it. A loadable the
-        selection filter leaves out is crossed the same way, so two selected
-        loadables keep the order the graph gives them. The traversal stops at
-        the requested-item boundary even so.
+        depends on whatever fills the tables behind it. A loadable the selection
+        leaves out is crossed the same way. The traversal stops at the
+        requested-item boundary even so.
         """
 
         found: dict[str, tuple[InstalledNode, object]] = {}

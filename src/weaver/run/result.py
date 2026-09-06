@@ -315,9 +315,8 @@ def run_status(nodes, *, dry_run: bool = False) -> str:
 
     statuses = {node.status for node in nodes}
     if not statuses:
-        # A plan may legitimately select nothing, as a stale-only load of a
-        # healthy estate does. Nothing was asked of the target and nothing
-        # failed, so the run succeeded.
+        # A plan may select nothing, as a stale-only load of a green estate
+        # does. Nothing was asked of the target and nothing failed.
         return RUN_SUCCEEDED
     if dry_run:
         # Nothing ran, so "partially succeeded" would be a claim about work that

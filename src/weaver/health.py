@@ -468,11 +468,10 @@ def _count(row, name: str) -> int:
 
 @dataclass(frozen=True)
 class LoadSubjectHealth:
-    """One loadable's Load health: what the catalogue said, and what follows.
+    """One loadable, its ``_.LoadStatus`` row and its findings.
 
-    ``findings`` are the whole answer. A subject with none is Green, and a
-    subject with any is not. ``runtime_status`` is the ``_.LoadStatus`` row they
-    came from, carried for a report to render.
+    The findings are the answer. No findings is Green. ``runtime_status`` is
+    carried so a report can render what happened.
     """
 
     node: InstalledNode
@@ -492,9 +491,8 @@ class LoadSubjectHealth:
 class LoadAssessment:
     """Every loadable in scope, assessed once.
 
-    :func:`weaver.health.assess` renders it as the report's Load section, and
-    ``weaver load --stale-only`` runs the subjects it does not call Green. Both
-    read :class:`_LoadHealth`, which is the one implementation of those rules.
+    :func:`assess` renders it as the report's Load section, and
+    ``weaver load --stale-only`` runs the subjects it does not call Green.
     """
 
     subjects: tuple[LoadSubjectHealth, ...] = ()
@@ -504,7 +502,7 @@ class LoadAssessment:
         return worst(subject.severity for subject in self.subjects)
 
     def unsettled(self) -> tuple[LoadSubjectHealth, ...]:
-        """The subjects this assessment does not call Green, in subject order."""
+        """The subjects that are not Green, in subject order."""
 
         return tuple(subject for subject in self.subjects if subject.severity != GREEN)
 
@@ -531,11 +529,12 @@ class LoadAssessment:
 
 
 class _LoadHealth:
-    """The one implementation of what a loadable's Load health is.
+    """What a loadable's Load health is. The one implementation.
 
-    Two clocks. ``as_of`` against ``_.LoadStatus``'s completion instant answers
-    whether the object is overdue; ``_.Bookmark`` against its managed ancestors'
-    answers whether it is behind its sources. A Static object is asked neither.
+    Two clocks. ``as_of`` against ``_.LoadStatus``'s completion instant says
+    whether the object is overdue, and ``_.Bookmark`` against its managed
+    ancestors' says whether it is behind its sources. A Static object is asked
+    neither.
     """
 
     def __init__(
@@ -668,10 +667,10 @@ def assess_load(
 ) -> LoadAssessment:
     """Every installed loadable in scope, assessed once.
 
-    ``items`` bounds the subjects by logical item, which is how a load names its
-    scope; ``targets`` bounds them by physical target, which is how health names
-    its own. Managed ancestry outside either is still read, because whether a
-    subject is behind its sources is a question about the whole graph.
+    ``items`` bounds the subjects by logical item, as a load names its scope.
+    ``targets`` bounds them by physical target, as health names its own.
+    Ancestry outside the scope is read either way: whether a subject is behind
+    its sources is a question about the whole graph.
     """
 
     dag = catalogue.dag()
@@ -690,8 +689,8 @@ def resolve_as_of(value, *, started: datetime) -> datetime:
     """The instant a Load assessment measures freshness against, always UTC.
 
     Omitted, it is :data:`DEFAULT_AGE_HOURS` before the operation started. A
-    naive datetime is refused: an instant without a zone names a different
-    moment on every machine that reads it.
+    naive datetime is refused: an instant with no zone names a different moment
+    on every machine that reads it.
     """
 
     from .errors import CommandError

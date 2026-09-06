@@ -131,8 +131,7 @@ a dictionary row.
 
 ## One Load assessment, two consumers
 
-There is one implementation of Load health, and both operations that need it
-read the same one:
+`weaver health` and `weaver load --stale-only` read the same Load assessment:
 
 ```text
 Catalogue
@@ -144,33 +143,27 @@ LoadAssessment                     weaver.health.assess_load
     └── weaver load --stale-only   the subjects it does not call Green
 ```
 
-A `LoadSubjectHealth` holds one loadable, the `_.LoadStatus` row behind it and
-the findings that follow. The findings are the whole answer: a subject with none
-is Green, a subject with any is not. Stale-only selects on that and on nothing
-else, so it matches no finding code and re-reads no status row.
+A `LoadSubjectHealth` holds one loadable, its `_.LoadStatus` row and its
+findings. The findings are the answer: no findings is Green. Stale-only selects
+every subject that is not Green, and matches no finding code of its own.
 
-`assess_load` takes the scope in the grammar its caller uses. Health bounds
-subjects by physical target, which is how a report names them, and load bounds
-them by logical item, which is how a run names its scope. Managed ancestry
-outside either is still read.
+`assess_load` takes the scope its caller names in. Health scopes by physical
+target and load by logical item. Ancestry outside the scope is read either way.
 
-`resolve_as_of` is shared the same way. An explicit value is parsed as a zoned
-ISO-8601 instant and normalised to UTC; an omitted one is `DEFAULT_AGE_HOURS`
-before the operation started. For a load it is meaningful only with
-`--stale-only`, and a request naming one without the other is refused.
+`resolve_as_of` is shared too. An explicit value is a zoned ISO-8601 instant,
+normalised to UTC. An omitted one is `DEFAULT_AGE_HOURS` before the operation
+started. A load takes it only with `--stale-only`.
 
-A stale-only load widens the catalogue read it already makes to include
-`_.LoadStatus`. It performs no second read, calls no nested health operation,
-reads no inventories and runs neither the Test nor the Build assessment.
+A stale-only load widens its own catalogue read to include `_.LoadStatus`. There
+is no second read and no nested health operation, and it reads no inventories.
 
-The selection then leaves Health behind. It reaches the ordinary load planner as
-a set of logical loadable identities and nothing more, and the planner and the
-Runner apply their ordinary topology, barrier and readiness rules to it. Neither
-carries a stale rule. A loadable the selection leaves out is crossed the way a
-View is, so two selected loadables keep the order the graph gives them.
+The selection then leaves the health domain. It reaches `load_dag` as a set of
+logical loadable identities, and the planner and the Runner apply their ordinary
+topology, barrier and readiness rules over it. A loadable left out is crossed
+the way a View is, so two selected loadables keep the order the graph gives
+them.
 
-A stale-only load of a healthy estate selects nothing and succeeds. An empty
-valid run plan is a success wherever it comes from.
+An empty run plan is a success, so a green estate loads nothing and succeeds.
 
 ---
 

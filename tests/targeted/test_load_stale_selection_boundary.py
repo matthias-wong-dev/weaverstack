@@ -2,9 +2,8 @@
 
 There is one implementation of Load health, :func:`weaver.health.assess_load`.
 ``weaver health`` renders it and a stale-only load executes the subjects it does
-not call Green. These tests prove that reuse rather than restating the rules: the
-freshness matrix belongs to ``test_health_representation`` and is not repeated
-here.
+not call Green. These tests are about that reuse. The freshness matrix belongs to
+``test_health_representation``, which holds it.
 
 The estate is the one that module builds from rows, so both sides read the same
 catalogue and the comparison is between two consumers of one assessment.

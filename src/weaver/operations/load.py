@@ -70,11 +70,10 @@ def load(
     the authored load runs. It reaches what this request selected and nothing
     downstream.
 
-    ``stale_only`` runs the loadables whose Load health is not Green. The
-    subjects come from :func:`weaver.health.assess_load`, the assessment
-    ``weaver health`` renders. Selecting nothing is a success. ``as_of`` is that
-    assessment's freshness instant, and it is meaningful only with
-    ``stale_only``.
+    ``stale_only`` runs the loadables whose Load health is not Green, from the
+    same :func:`weaver.health.assess_load` ``weaver health`` renders. Selecting
+    nothing is a success. ``as_of`` is that assessment's freshness instant, and
+    it is taken only with ``stale_only``.
 
     ``workspace``, ``catalogue`` and ``environment`` are names, resolved as
     ``build`` resolves them; ``session`` is where an already-resolved
@@ -132,8 +131,7 @@ def _refuse_conflicting_modes(*, stale_only: bool, reload: bool, as_of) -> None:
     """Stop a request that names two loads at once.
 
     Reload reconstructs what it selected, and stale-only runs the loadables
-    whose Load health is not Green. One request holding both asks for the same
-    work to be forced and avoided.
+    whose Load health is not Green.
     """
 
     if stale_only and reload:
@@ -168,10 +166,9 @@ def run_load(
     physical Lakehouse to attach to is recorded there, and a missing installation
     is therefore refused before Livy starts.
 
-    ``stale_only`` turns the catalogue already read into a
-    :class:`weaver.health.LoadAssessment` and runs the subjects it does not call
-    Green. ``as_of`` is that assessment's freshness instant, resolved by the
-    caller.
+    ``stale_only`` assesses the catalogue already read and runs the subjects
+    that are not Green. ``as_of`` is that assessment's freshness instant,
+    resolved by the caller.
     """
 
     from ..run import (
@@ -209,8 +206,8 @@ def run_load(
 
     selected = None
     if stale_only:
-        # One assessment, the one `weaver health` renders. What it does not call
-        # Green is what runs, and nothing here reinterprets a finding.
+        # The assessment `weaver health` renders. What is not Green is what
+        # runs, and nothing here reinterprets a finding.
         selected = assess_load(
             catalogue,
             as_of=as_of if as_of is not None else resolve_as_of(None, started=started),

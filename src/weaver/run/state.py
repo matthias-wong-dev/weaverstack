@@ -45,7 +45,7 @@ def read_installed_catalogue(*, session, workspace=None, tables=None) -> Catalog
     Readable and writable: one catalogue answers what is installed and how far
     each object has been loaded, and carries the run's own rows back.
 
-    ``tables`` widens that read where an operation needs more of the catalogue in
+    ``tables`` widens the read where an operation needs more of the catalogue in
     the same round trip. With none, what an ordinary run consults.
     """
 
