@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Sequence
 
 from ..catalogue.tables import (
-    BOOKMARK,
     DEPENDENCY,
     FOLDER_DICTIONARY,
     INSTALLATION,
@@ -36,15 +35,14 @@ from .workspace import operation_workspace
 #: What health reads of the catalogue, table by table. Each one is read over
 #: TDS, so a table nothing consults is a round trip nobody needed.
 #:
-#: The installed graph is built from the first seven. ``_.Bookmark`` says how far
-#: each object has been loaded, and the two status tables how its most recent
-#: load and validation ended. ``_.TableDictionary`` and ``_.FolderDictionary``
+#: The installed graph is built from the first seven, and the two status tables
+#: hold current lifecycle state. ``_.TableDictionary`` and ``_.FolderDictionary``
 #: serve both: the graph reads whether an object is Static, and Build health
 #: reads what is declared and not certified.
 #:
-#: The dictionaries describing an object's columns and keys are absent. Nothing
-#: health decides consults one. So is ``_.LoadStatistic``, which accumulates
-#: and is read only where it matches current ``_.LoadStatus`` state.
+#: ``_.Bookmark`` is absent: it is the loader's execution cursor. So are the
+#: dictionaries describing columns and keys, and ``_.LoadStatistic``, read only
+#: as the window matching current ``_.LoadStatus`` state.
 HEALTH_TABLES = (
     INSTALLATION,
     REGISTRY,
@@ -53,7 +51,6 @@ HEALTH_TABLES = (
     TEST_DICTIONARY,
     DEPENDENCY,
     SHORTCUT,
-    BOOKMARK,
     LOAD_STATUS,
     TEST_STATUS,
 )

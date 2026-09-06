@@ -375,11 +375,11 @@ def test_which_runtime_tables_are_current_state_and_which_are_history():
 
 @weaver_test()
 def test_which_population_invalidates_each_current_state_table():
-    """A loadable object carries two; a validation carries one."""
+    """LoadStatus covers Views too; a bookmark belongs to a loadable alone."""
 
     assert {table.name: table.invalidated_by for table in CURRENT_STATE_TABLES} == {
         "Bookmark": "loadable",
-        "LoadStatus": "loadable",
+        "LoadStatus": "data_node",
         "TestStatus": "validation",
     }
 

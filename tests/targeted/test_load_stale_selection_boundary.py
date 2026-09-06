@@ -19,7 +19,7 @@ from support.workspaces import given_workspace
 from test_health_representation import CURATED, RAW, REPORTING, YESTERDAY, _Estate, at
 
 import weaver
-from weaver.catalogue.tables import LOAD_STATUS
+from weaver.catalogue.tables import BOOKMARK, LOAD_STATUS, PENDING
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.health import GREEN, assess_load
@@ -515,3 +515,121 @@ def test_an_ordinary_load_reads_the_catalogue_it_always_read(prepared, monkeypat
     run_load(session, workspace=workspace, items=(RAW_ITEM,), dry_run=True)
 
     assert seen["tables"] is None
+
+
+# --- the lifecycle state health reads -----------------------------------------
+
+
+@weaver_test()
+def test_a_view_carries_lifecycle_state_and_is_never_a_load_subject():
+    """A View is established by a build. It runs nothing, so it runs nothing."""
+
+    catalogue = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(48), moved=at(48))
+        .view(f"{RAW}/Tables/Sales.Live", loaded=at(1))
+        .reads(f"{RAW}/Tables/Sales.Live", "Sales.Order")
+        .catalogue()
+    )
+    assessment = assess_load(catalogue, as_of=YESTERDAY, items=(RAW_ITEM,))
+
+    assert [str(subject.identity) for subject in assessment.subjects] == [
+        f"{RAW}/Tables/Sales.Order"
+    ]
+    assert f"{RAW}/Tables/Sales.Live" not in stale_only_plan(
+        catalogue, items=(RAW_ITEM,)
+    )
+
+
+@weaver_test()
+def test_a_view_established_after_a_consumer_loaded_makes_it_stale():
+    catalogue = (
+        _Estate()
+        .view(f"{RAW}/Tables/Sales.Live", loaded=at(1))
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.Live")
+        .catalogue()
+    )
+
+    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == {f"{RAW}/Tables/Sales.B"}
+
+
+@weaver_test()
+def test_a_view_established_before_a_consumer_loaded_does_not():
+    catalogue = (
+        _Estate()
+        .view(f"{RAW}/Tables/Sales.Live", loaded=at(8))
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.Live")
+        .catalogue()
+    )
+
+    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == set()
+
+
+@weaver_test()
+def test_a_pending_ancestor_makes_a_loaded_descendant_non_green():
+    """The closure the whole model rests on: A rebuilt puts B and C behind."""
+
+    catalogue = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.A", result=PENDING)
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(1), moved=at(1))
+        .table(f"{RAW}/Tables/Sales.C", loaded=at(1), moved=at(1))
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
+        .reads(f"{RAW}/Tables/Sales.C", "Sales.B")
+        .catalogue()
+    )
+
+    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == {
+        f"{RAW}/Tables/Sales.A",
+        f"{RAW}/Tables/Sales.B",
+        f"{RAW}/Tables/Sales.C",
+    }
+
+
+@weaver_test()
+def test_a_missing_load_status_is_conservatively_non_green():
+    """An old catalogue that never wrote a row reads as unestablished."""
+
+    catalogue = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.A")
+        .table(f"{RAW}/Tables/Sales.B", loaded=at(1), moved=at(1))
+        .reads(f"{RAW}/Tables/Sales.B", "Sales.A")
+        .catalogue()
+    )
+
+    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == {
+        f"{RAW}/Tables/Sales.A",
+        f"{RAW}/Tables/Sales.B",
+    }
+
+
+@weaver_test()
+def test_the_assessment_needs_no_bookmark_materialised():
+    """Health reads lifecycle state. A catalogue with no Bookmark table answers."""
+
+    estate = (
+        _Estate()
+        .table(f"{RAW}/Tables/Sales.Order", loaded=at(48))
+        .table(f"{RAW}/Tables/Sales.Fresh", loaded=at(1))
+    )
+    catalogue = estate.catalogue()
+    for tables in catalogue.rows.values():
+        assert not tables.get(BOOKMARK.name)
+
+    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == {
+        f"{RAW}/Tables/Sales.Order"
+    }
+
+
+@weaver_test()
+def test_a_static_object_that_loaded_stays_green_with_no_bookmark_read():
+    catalogue = (
+        _Estate()
+        .table(f"{RAW}/Tables/Ref.Country", loaded=at(400), is_static=True)
+        .catalogue()
+    )
+
+    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == set()

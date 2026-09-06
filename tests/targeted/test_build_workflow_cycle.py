@@ -86,6 +86,9 @@ def estate(tmp_path):
             "tsql",
             "tsql_batch",
             "load_file",
+            # A build establishes explicit lifecycle state, so every build
+            # carries a reconciliation action.
+            "runtime_state",
         )
     }
     return {

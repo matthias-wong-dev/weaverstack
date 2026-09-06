@@ -9,7 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from ..catalogue.runtime_state import RuntimeStateInvalidation
+from ..catalogue.runtime_state import (
+    RuntimeStateEstablishment,
+    RuntimeStateInvalidation,
+)
 from .changes import TargetChange
 from .incremental import BuildSelection
 from .targets import BoundTarget
@@ -279,6 +282,7 @@ class BuildPlan:
     #: :class:`~weaver.catalogue.state.Catalogue` applying the plan in memory gets
     #: the decision without parsing DML.
     runtime_state: tuple[RuntimeStateInvalidation, ...] = ()
+    runtime_state_established: tuple[RuntimeStateEstablishment, ...] = ()
 
     def to_mapping(self) -> dict[str, Any]:
         mapping = {
@@ -294,6 +298,9 @@ class BuildPlan:
                 for target_id, changes in sorted(self.target_changes.items())
             },
             "runtime_state": [one.to_mapping() for one in self.runtime_state],
+            "runtime_state_established": [
+                one.to_mapping() for one in self.runtime_state_established
+            ],
         }
         mapping["selection"] = self.selection.to_mapping()
         return mapping
@@ -322,6 +329,10 @@ class BuildPlan:
             runtime_state=tuple(
                 RuntimeStateInvalidation.from_mapping(one)
                 for one in mapping.get("runtime_state", ())
+            ),
+            runtime_state_established=tuple(
+                RuntimeStateEstablishment.from_mapping(one)
+                for one in mapping.get("runtime_state_established", ())
             ),
         )
 

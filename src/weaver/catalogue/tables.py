@@ -932,7 +932,10 @@ MAINTENANCE = (HISTORY, CURRENT_STATE)
 #: carries a bookmark and a load status; a validation carries a test status.
 BY_LOADABLE = "loadable"
 BY_VALIDATION = "validation"
-INVALIDATED_BY = (BY_LOADABLE, BY_VALIDATION)
+#: Every node _.LoadStatus describes: the loadables, and the Views a build
+#: establishes.
+BY_DATA_NODE = "data_node"
+INVALIDATED_BY = (BY_DATA_NODE, BY_LOADABLE, BY_VALIDATION)
 
 
 @dataclass(frozen=True)
@@ -1115,12 +1118,11 @@ LOG = RuntimeTable(
 BOOKMARK = RuntimeTable(
     name="Bookmark",
     description=(
-        "How far each loadable object has been loaded: the UTC instant "
-        "immediately before its most recent clean load began. An incremental "
-        "read asks for source changes after it, and a Static object is skipped "
-        "once it holds anything other than the sentinel. Weaver's own build and "
-        "load lifecycle maintain it; no declaration projects it and no load "
-        "populates it."
+        "The loader's execution cursor: the UTC instant immediately before each "
+        "loadable object's most recent clean load began. An incremental read "
+        "asks for source changes after it, and a Static object is skipped once "
+        "it holds anything other than the sentinel. One row per installed "
+        "loadable; a View has none. Health does not read it."
     ),
     # The Registry's identity exactly, and for the reason a shared key exists at
     # all: a bookmark row and a Registry row describe the same installed object.
@@ -1175,15 +1177,15 @@ def _outcome(*, vocabulary) -> tuple[CatalogueColumn, ...]:
 LOAD_STATUS = RuntimeTable(
     name="LoadStatus",
     description=(
-        "How each loadable object's most recent load ended. One row per object "
-        "per physical incarnation: a rebuild ends the incarnation and the row "
-        "goes with it, so an absent row means no load has settled since the "
-        "object was last built. Logical identity only, because where it is "
+        "The current lifecycle state of each installed data object. One row per "
+        "object for as long as it is installed: a build writes Pending for a "
+        "rebuilt table or folder and Succeeded for a rebuilt View, and a load "
+        "settles the first. Logical identity only, because where it is "
         "physically installed is the Installation's to say."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     maintenance=CURRENT_STATE,
-    invalidated_by=BY_LOADABLE,
+    invalidated_by=BY_DATA_NODE,
     columns=(
         *_scope(),
         *_object(),

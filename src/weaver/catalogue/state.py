@@ -514,13 +514,16 @@ class Catalogue:
         The historical tables are untouched, because nothing invalidates them.
         """
 
-        from .runtime_state import without_invalidated
+        from .runtime_state import with_established, without_invalidated
 
         invalidation = tuple(getattr(plan, "runtime_state", ()))
-        if not invalidation:
+        establishment = tuple(getattr(plan, "runtime_state_established", ()))
+        if not invalidation and not establishment:
             return self
         return Catalogue(
-            rows=without_invalidated(self.rows, invalidation),
+            rows=with_established(
+                without_invalidated(self.rows, invalidation), establishment
+            ),
             materialised=self.materialised,
             load_history=self._load_history,
             writer=self._writer,

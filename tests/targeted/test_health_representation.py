@@ -51,6 +51,7 @@ from weaver.health import (
     CERTIFIED_MISSING,
     FORMAT_VERSION,
     GREEN,
+    LOAD_ANCESTOR_UNESTABLISHED,
     LOAD_FAILED,
     LOAD_PENDING,
     LOAD_REJECTED,
@@ -80,6 +81,9 @@ TARGET_FOR = {RAW: "Raw_LH", CURATED: "Curated_LH", REPORTING: "Reporting_WH"}
 
 NOW = datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc)
 YESTERDAY = NOW - timedelta(hours=24)
+
+#: When a View's definition was installed, unless a test says otherwise.
+VIEW_ESTABLISHED = NOW - timedelta(hours=100)
 
 
 def at(hours: float) -> datetime:
@@ -149,6 +153,13 @@ class _Estate:
         return self
 
     def view(self, identity: str, **how) -> "_Estate":
+        """A View, established by a build as one is.
+
+        ``loaded`` is when its definition was installed. It defaults to long
+        ago, so a View is only newer than a consumer where a test says so.
+        """
+
+        how.setdefault("loaded", VIEW_ESTABLISHED)
         return self.table(identity, object_type="view", loadable=False, **how)
 
     def declared_not_installed(self, identity: str) -> "_Estate":
@@ -555,15 +566,15 @@ def test_a_blocked_ancestor_is_not_newer_data():
 
 @weaver_test()
 def test_a_static_skip_does_not_make_its_descendants_stale():
-    """A Static object skipped keeps the bookmark it had, so its data stood still.
+    """A Static skip settles nothing, so it leaves its ``_.LoadStatus`` alone.
 
-    Its ``_.LoadStatus`` still says the load succeeded a moment ago, which is why
-    freshness reads the bookmark.
+    The row still names the load that established the reference data, which is
+    older than the consumer, so the consumer is not behind.
     """
 
     report = (
         _Estate()
-        .table(f"{RAW}/Tables/Sales.Reference", loaded=at(0.5), moved=at(40))
+        .table(f"{RAW}/Tables/Sales.Reference", loaded=at(40), is_static=True)
         .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
         .reads(f"{RAW}/Tables/Sales.B", "Sales.Reference")
         .report()
@@ -587,7 +598,7 @@ def test_target_filtering_reports_the_selection_and_reads_the_rest():
 
     assert report.targets == ("Warehouse/Reporting_WH",)
     assert report.load.subjects == 1
-    assert codes(report.load) == (LOAD_STALE_ANCESTOR,)
+    assert codes(report.load) == (LOAD_ANCESTOR_UNESTABLISHED,)
 
 
 # --- a Static object is loaded once -------------------------------------------

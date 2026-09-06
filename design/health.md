@@ -67,36 +67,40 @@ runs a subject, and the graph holds it beside the node rather than as one.
 
 ---
 
-## Two clocks
+## One signal
 
-Freshness is two questions, so health reads two instants.
-
-**Overdue** is a question about the wall clock. `as_of` is compared with
-`_.LoadStatus`'s completion instant, and a load that settled before it reads as
-stale. `as_of` defaults to 24 hours before the report started.
-
-**Behind its sources** is a question about data movement. `_.Bookmark` is
-compared instead, on both sides:
+`_.LoadStatus` is the current lifecycle state of every installed data node.
 
 ```text
-bookmark(ancestor) > bookmark(node)   →  the node is behind
+a build    Pending for a rebuilt table or folder, bookmark at the sentinel
+           Succeeded for a rebuilt View, dated by the build
+a load     settles a table or a folder
 ```
 
-A bookmark advances for a clean load that established an instant. A rejecting
-load keeps the one it had, and a Static skip moves nothing, so neither reads as
-newer data. A failed, errored or blocked load establishes nothing and advances
-nothing.
+An installed object always holds a row. `_.Bookmark` is the loader's execution
+cursor and health does not read it.
 
-That is why a Static object skipped at 09:00 does not make a descendant loaded
-at 08:00 stale: its `_.LoadStatus` says the load succeeded a moment ago, and its
-bookmark says its data stood still.
+**Overdue** compares `as_of` with the subject's completion instant.
 
-Ancestry is transitive over the whole managed graph, so it reaches through a
-View, through a logical shortcut, and across items.
+**Behind its sources** compares the same instant with its ancestors':
 
-A Test or Assumption is stale when managed data in its ancestry moved after it
-passed. Time alone does not make a validation stale: its freshness is tied to
-whether the data it reads moved.
+```text
+established(ancestor) > established(node)   the node is behind
+ancestor established nothing                the node is behind
+```
+
+Established means Succeeded or Rejected. Pending, Failed, Error and Blocked
+establish nothing, so a descendant of one is not green. A View participates
+because a build establishes it, so a changed View definition puts everything
+materialised from it behind. A View is never a load subject and
+`weaver load --stale-only` never selects one.
+
+Ancestry is transitive over the whole managed graph, so a rebuilt table puts its
+whole downstream chain behind in one pass. Nodes with no lifecycle state, such
+as a shortcut destination or a table Weaver does not load, are crossed.
+
+A Test or Assumption is stale when a lifecycle ancestor was established after it
+passed.
 
 ### Static objects
 
@@ -146,6 +150,7 @@ LoadAssessment                     weaver.health.assess_load
 A `LoadSubjectHealth` holds one loadable, its `_.LoadStatus` row and its
 findings. The findings are the answer: no findings is Green. Stale-only selects
 every subject that is not Green, and matches no finding code of its own.
+Subjects are loadables, so a View is never selected.
 
 `assess_load` takes the scope its caller names in. Health scopes by physical
 target and load by logical item. Ancestry outside the scope is read either way.
@@ -156,6 +161,7 @@ started. A load takes it only with `--stale-only`.
 
 A stale-only load widens its own catalogue read to include `_.LoadStatus`. There
 is no second read and no nested health operation, and it reads no inventories.
+Neither operation reads `_.Bookmark`.
 
 The selection then leaves the health domain. It reaches `load_dag` as a set of
 logical loadable identities, and the planner and the Runner apply their ordinary
@@ -290,7 +296,7 @@ consults and no others:
 
 ```text
 Installation  Registry  TableDictionary  FolderDictionary  TestDictionary
-Dependency    Shortcut  Bookmark         LoadStatus        TestStatus
+Dependency    Shortcut  LoadStatus       TestStatus
 ```
 
 The dictionaries describing an object's columns and keys are absent: nothing

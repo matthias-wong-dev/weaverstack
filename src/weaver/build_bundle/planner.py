@@ -58,6 +58,7 @@ from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
 from .runtime_tables import (
     render_runtime_state_reconciliation,
+    runtime_state_establishment,
     runtime_state_invalidation,
 )
 from .schemas import lakehouse_schema_stage, warehouse_schema_stage
@@ -212,8 +213,15 @@ def generate_item_build_bundle(
         selected_for_build=selected_for_build,
         catalogue=catalogue,
     )
+    established_state = runtime_state_establishment(
+        repository,
+        items=tuple(target_by_item),
+        selected_for_build=selected_for_build,
+    )
     reconciliation = render_runtime_state_reconciliation(
-        runtime_state, catalogue_target=catalogue_target
+        runtime_state,
+        catalogue_target=catalogue_target,
+        establishment=established_state,
     )
     if reconciliation is not None:
         stages.append(reconciliation)
@@ -283,6 +291,7 @@ def generate_item_build_bundle(
         ),
         target_changes=target_changes,
         runtime_state=runtime_state,
+        runtime_state_established=established_state,
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(

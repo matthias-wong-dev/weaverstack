@@ -532,6 +532,7 @@ def test_installer_never_reopens_or_interprets_source_repository(tmp_path):
             "tsql_batch": noop,
             "sql_endpoint_refresh": noop,
             "load_file": noop,
+            "runtime_state": noop,
         },
     )
     report = installer.install(reloaded)

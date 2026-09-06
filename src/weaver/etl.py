@@ -211,6 +211,41 @@ def item_bookmarkable_objects(
     return tuple(sorted(found, key=str))
 
 
+def item_view_objects(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    """The Views one item declares, and therefore what a build establishes.
+
+    A View owns no load. Its ``_.LoadStatus`` says when its current definition
+    was installed, so a consumer materialised from it can be measured.
+    """
+
+    from .declaration.metadata import VIEW
+
+    found = {
+        identity
+        for identity, source in repository.source_documents.items()
+        if identity.item == item and source.kind == VIEW
+    }
+    return tuple(sorted(found, key=str))
+
+
+def item_data_nodes(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    """Everything in one item that ``_.LoadStatus`` describes."""
+
+    return tuple(
+        sorted(
+            {
+                *item_bookmarkable_objects(repository, item=item),
+                *item_view_objects(repository, item=item),
+            },
+            key=str,
+        )
+    )
+
+
 def item_validated_objects(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[WeaverDocumentId, ...]:
