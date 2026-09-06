@@ -146,17 +146,22 @@ def runtime_state_establishment(
     *,
     items: Sequence[WeaverItemId],
     selected_for_build: Iterable[WeaverDocumentId],
+    holds_table=None,
 ) -> tuple[RuntimeStateEstablishment, ...]:
     """The lifecycle state this build writes.
 
     Bounded by ``selected_for_build``, so an object left alone keeps the state
-    it had.
+    it had. ``holds_table`` says whether the catalogue already has a table: the
+    build that creates them writes into none, because the reconciliation runs
+    ahead of the physical work that would make them.
     """
 
     scoped = sorted({item for item in items if not _is_builtin(item)}, key=str)
     selected = set(selected_for_build)
     established = []
     for table in CURRENT_STATE_TABLES:
+        if holds_table is not None and not holds_table(table):
+            continue
         rows = [
             row
             for item in scoped

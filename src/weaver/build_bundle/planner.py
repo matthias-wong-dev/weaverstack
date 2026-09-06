@@ -217,6 +217,7 @@ def generate_item_build_bundle(
         repository,
         items=tuple(target_by_item),
         selected_for_build=selected_for_build,
+        holds_table=_catalogue_holds(inventories),
     )
     reconciliation = render_runtime_state_reconciliation(
         runtime_state,
@@ -300,6 +301,23 @@ def generate_item_build_bundle(
         payloads=payloads,
         store=store,
     )
+
+
+def _catalogue_holds(inventories):
+    """Whether the catalogue target already holds one runtime table.
+
+    The reconciliation runs ahead of physical work, so the build that creates
+    the ``_`` schema has nothing to write into yet. Its objects reach explicit
+    state on the next build or the first load.
+    """
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+    from ..catalogue.tables import CATALOGUE_SCHEMA
+
+    inventory = inventories.get(BUILTIN_ITEM)
+    if inventory is None:
+        return lambda table: False
+    return lambda table: inventory.has_object(CATALOGUE_SCHEMA, table.name, "table")
 
 
 def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:

@@ -56,6 +56,7 @@ from sql_support import (
 )
 from support.weaver_test import weaver_test
 
+from weaver.catalogue.tables import BOOKMARK_SENTINEL
 from weaver.declaration import read_source_document
 from weaver.declaration.model import WAREHOUSE, WeaverItemId
 from weaver.declaration.tsql_load import (
@@ -1483,8 +1484,8 @@ def test_the_reload_lifecycle(reload_estate):
     target was empty when the body ran.
 
     The last state is a reload that did not settle. Its target is gone, so the
-    account of it as loaded has to be gone with it: the bookmark is back at the
-    sentinel, and the next run is a reload from zero again.
+    account of it as loaded goes with it: the bookmark is back at the sentinel,
+    and the next run reads the whole source again.
     """
 
     run = _reload_run(reload_estate)
@@ -1511,14 +1512,14 @@ def test_the_reload_lifecycle(reload_estate):
     # A clean reload settles like any other clean load, so the bookmark advances.
     assert reloaded["bookmark"] > grown["bookmark"]
 
-    # The reload that did not settle: emptied, refused, and left saying so. No
-    # bookmark row at all, which is what a build's invalidation leaves and what
-    # the next load reads as the sentinel.
+    # The reload that did not settle: emptied, refused, and left saying so. The
+    # bookmark stands at the sentinel, which is what a build's reconciliation
+    # leaves and what the next load reads as no cursor.
     assert "rejected" in run.extra["refusal"]
     assert run.contents == []
     assert run.extra["status"]["result"] == "Failed"
     assert run.extra["statistics"]["reload"] is True
-    assert run.extra["bookmark"] is None
+    assert run.extra["bookmark"] == BOOKMARK_SENTINEL
 
 
 def _static_reload_run(estate):
@@ -1565,7 +1566,7 @@ def _static_reload_run(estate):
 
 @weaver_test(remote=True, resources={"tds"})
 def test_a_failed_static_reload_leaves_the_next_load_to_run(static_estate):
-    """What closes the Static gate is a bookmark row, so a reload removes it.
+    """What closes the Static gate is a bookmark past the sentinel.
 
     Stored as a sentinel instead, the row would still be there and the gate would
     still close, over a table the reload had just emptied.
@@ -1581,7 +1582,7 @@ def test_a_failed_static_reload_leaves_the_next_load_to_run(static_estate):
     assert "rejected" in failed["refusal"]
     assert failed["contents"] == []
     assert failed["status"]["result"] == "Failed"
-    assert failed["bookmark"] is None
+    assert failed["bookmark"] == BOOKMARK_SENTINEL
 
     # The ordinary load that follows runs rather than skipping, and says so.
     assert run.contents == CLEAN
