@@ -2,17 +2,17 @@
 Table ID: _.LoadStatus
 
 Description: >-
-  How each loadable object's most recent load ended. One row per object per
-  physical incarnation: a rebuild ends the incarnation and the row goes with
-  it, so an absent row means no load has settled since the object was last
-  built. Logical identity only, because where it is physically installed is
+  The current lifecycle state of each installed data object. One row per
+  object for as long as it is installed: a build writes Pending for a rebuilt
+  table or folder and Succeeded for a rebuilt View, and a load settles the
+  first. Logical identity only, because where it is physically installed is
   the Installation's to say.
 
 Lineage: >-
-  Maintained by Weaver's own build and load lifecycle: a build removes the
-  rows of objects it rebuilds or no longer loads, and each settled load
-  records how it ended. Never authored, never projected from a declaration,
-  and never populated by a load's own query.
+  Maintained by Weaver's own build and load lifecycle: a build writes the
+  state of objects it rebuilds and removes the rows of objects it no longer
+  installs, and each settled load records how it ended. Never authored, never
+  projected from a declaration, and never populated by a load's own query.
 
 Dependencies: []
 

@@ -235,6 +235,18 @@ def _reset(estate: Estate) -> None:
     )
 
 
+def _is_sentinel(at) -> bool:
+    """Whether this bookmark is the sentinel.
+
+    TDS hands back a naive datetime and the constant is aware, so the
+    comparison drops the zone rather than pretending the row carries one.
+    """
+
+    return at is not None and at.replace(tzinfo=None) == BOOKMARK_SENTINEL.replace(
+        tzinfo=None
+    )
+
+
 def _bookmark(estate) -> object:
     """This object's bookmark, as the catalogue holds it, or None."""
 
@@ -1519,7 +1531,7 @@ def test_the_reload_lifecycle(reload_estate):
     assert run.contents == []
     assert run.extra["status"]["result"] == "Failed"
     assert run.extra["statistics"]["reload"] is True
-    assert run.extra["bookmark"] == BOOKMARK_SENTINEL
+    assert _is_sentinel(run.extra["bookmark"])
 
 
 def _static_reload_run(estate):
@@ -1582,7 +1594,7 @@ def test_a_failed_static_reload_leaves_the_next_load_to_run(static_estate):
     assert "rejected" in failed["refusal"]
     assert failed["contents"] == []
     assert failed["status"]["result"] == "Failed"
-    assert failed["bookmark"] == BOOKMARK_SENTINEL
+    assert _is_sentinel(failed["bookmark"])
 
     # The ordinary load that follows runs rather than skipping, and says so.
     assert run.contents == CLEAN

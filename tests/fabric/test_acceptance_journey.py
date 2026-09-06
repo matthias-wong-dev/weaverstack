@@ -1514,7 +1514,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     # the safety property: the next load reads the whole source rather than
     # reading almost nothing over a table that was replaced.
     assert _certifications(acceptance, REPLACED) == []
-    assert _bookmarks(acceptance, REPLACED) == []
+    assert _bookmarks(acceptance, REPLACED) == [SENTINEL]
 
     # And the protected table kept both. Its declaration changed in this same
     # revision, and `Prohibit rebuild` keeps it out of the selection, so there
@@ -1543,9 +1543,9 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     ]
 
     # The catalogue converged from what is physically there: certified again,
-    # and still no bookmark, because a build records how far nothing has loaded.
+    # and still at the sentinel, because a build establishes no cursor.
     assert len(_certifications(acceptance, REPLACED)) == 1
-    assert _bookmarks(acceptance, REPLACED) == []
+    assert _bookmarks(acceptance, REPLACED) == [SENTINEL]
 
     # No manual cleanup: the corrected build settles on the next attempt.
     settled = acceptance.step(

@@ -2,17 +2,18 @@
 Table ID: _.Bookmark
 
 Description: >-
-  How far each loadable object has been loaded: the UTC instant immediately
-  before its most recent clean load began. An incremental read asks for
-  source changes after it, and a Static object is skipped once it holds
-  anything other than the sentinel. Weaver's own build and load lifecycle
-  maintain it; no declaration projects it and no load populates it.
+  The loader's execution cursor: the UTC instant immediately before each
+  loadable object's most recent clean load began. An incremental read asks
+  for source changes after it, and a Static object is skipped once it holds
+  anything other than the sentinel. One row per installed loadable; a View
+  has none. Health does not read it.
 
 Lineage: >-
-  Maintained by Weaver's own build and load lifecycle: a build resets the
-  objects it rebuilds and removes the rows of objects it no longer loads,
-  and a clean load advances the object it loaded. Never authored, never
-  projected from a declaration, and never populated by a load.
+  Maintained by Weaver's own build and load lifecycle: a build returns the
+  objects it rebuilds to the sentinel and removes the rows of objects it no
+  longer loads, and a clean load advances the object it loaded. Never
+  authored, never projected from a declaration, and never populated by a
+  load.
 
 Dependencies: []
 
