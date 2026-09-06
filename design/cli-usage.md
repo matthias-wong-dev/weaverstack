@@ -729,6 +729,57 @@ weaver install ./dist/estate-bundle --workspace-config examples/weaver_example.y
 that need to validate source without contacting Fabric. It is not a prerequisite
 for `weaver build`, which always checks source itself.
 
+## Load
+
+Run the installed loadable objects the named items own, in dependency order:
+
+```bash
+weaver load Lakehouse/Sales Warehouse/Reporting
+```
+
+`--name` selects installed loadables inside those items. It is an operator
+override: only those nodes run, without dependency expansion or dependency
+ordering. `--reload` reconstructs each selected table from zero; see
+[Central catalogue](catalogue.md).
+
+### Loading what is not green
+
+`--stale-only` runs the objects whose Load health is not Green, and nothing
+else:
+
+```bash
+weaver load --stale-only
+weaver load Warehouse/Reporting --stale-only
+weaver load --stale-only --as-of 2026-09-05T00:00:00Z
+weaver load --stale-only --dry-run
+```
+
+The subjects are the ones `weaver health` reports on, from the one assessment
+both operations read. An object is selected when health carries a Load finding
+about it: no settled load since it was built, a failed, errored or blocked load,
+rejected rows, a load older than the threshold, or a managed ancestor whose data
+moved since. A Static object that has loaded stays Green however long ago that
+was, so it is not selected. See [Health](health.md).
+
+`--as-of` is that threshold, an ISO-8601 instant carrying a zone, defaulting to
+24 hours before the load started. It is the same instant `weaver health --as-of`
+names, and it is valid only with `--stale-only`.
+
+The item scope still bounds the run, and dependency ordering still applies: two
+selected objects keep the order the graph gives them, and a Green object between
+them is crossed the way a View is. A Green upstream stays out of a run that
+selected only its descendant.
+
+`--stale-only` and `--reload` are refused together. Reload reconstructs what it
+names and stale-only runs only what is not Green, so a request naming both asks
+for opposite work.
+
+A healthy estate selects nothing, which is a success:
+
+```text
+load succeeded: Lakehouse/Sales, Warehouse/Reporting
+```
+
 ## Test
 
 Run the installed Tests and Assumptions the named items own:

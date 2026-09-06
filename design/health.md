@@ -129,6 +129,51 @@ a dictionary row.
 
 ---
 
+## One Load assessment, two consumers
+
+There is one implementation of Load health, and both operations that need it
+read the same one:
+
+```text
+Catalogue
+    ↓
+InstalledDag
+    ↓
+LoadAssessment                     weaver.health.assess_load
+    ├── weaver health              LoadAssessment.to_health_section()
+    └── weaver load --stale-only   the subjects it does not call Green
+```
+
+A `LoadSubjectHealth` holds one loadable, the `_.LoadStatus` row behind it and
+the findings that follow. The findings are the whole answer: a subject with none
+is Green, a subject with any is not. Stale-only selects on that and on nothing
+else, so it matches no finding code and re-reads no status row.
+
+`assess_load` takes the scope in the grammar its caller uses. Health bounds
+subjects by physical target, which is how a report names them, and load bounds
+them by logical item, which is how a run names its scope. Managed ancestry
+outside either is still read.
+
+`resolve_as_of` is shared the same way. An explicit value is parsed as a zoned
+ISO-8601 instant and normalised to UTC; an omitted one is `DEFAULT_AGE_HOURS`
+before the operation started. For a load it is meaningful only with
+`--stale-only`, and a request naming one without the other is refused.
+
+A stale-only load widens the catalogue read it already makes to include
+`_.LoadStatus`. It performs no second read, calls no nested health operation,
+reads no inventories and runs neither the Test nor the Build assessment.
+
+The selection then leaves Health behind. It reaches the ordinary load planner as
+a set of logical loadable identities and nothing more, and the planner and the
+Runner apply their ordinary topology, barrier and readiness rules to it. Neither
+carries a stale rule. A loadable the selection leaves out is crossed the way a
+View is, so two selected loadables keep the order the graph gives them.
+
+A stale-only load of a healthy estate selects nothing and succeeds. An empty
+valid run plan is a success wherever it comes from.
+
+---
+
 ## Build health
 
 Build health reports what installed state contradicts about itself:
@@ -274,8 +319,9 @@ starts a Livy session.
 ## Where to look in the code
 
 ```text
-weaver/health.py                the report model and the evaluator, pure
+weaver/health.py                the report model, the Load assessment and the evaluator, pure
 weaver/catalogue/history.py     the bounded window of _.Log and _.LoadStatistic
 weaver/operations/health.py     the operation that reads the estate into a Catalogue
+weaver/operations/load.py       the stale-only selection, from the same assessment
 weaver_cli/main.py              the parser, the terminal renderer and --json
 ```

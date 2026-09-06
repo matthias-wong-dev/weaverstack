@@ -10,8 +10,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+from ..catalogue.state import READABLE_TABLES
+from ..catalogue.tables import LOAD_STATUS
 from ..declaration.model import WeaverItemId
 from ..errors import CommandError, LoadError
+from ..health import assess_load, resolve_as_of
 from ..installed import PYTHON_FOLDER, PYTHON_TABLE, WAREHOUSE_PROCEDURE
 from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 from ..load_report import (
@@ -44,6 +47,8 @@ def load(
     fault_tolerant: bool = False,
     dry_run: bool = False,
     reload: bool = False,
+    stale_only: bool = False,
+    as_of: str | datetime | None = None,
     session=None,
 ) -> LoadRunReport:
     """Load the installed objects the named items own.
@@ -65,6 +70,12 @@ def load(
     the authored load runs. It reaches what this request selected and nothing
     downstream.
 
+    ``stale_only`` runs the loadables whose Load health is not Green. The
+    subjects come from :func:`weaver.health.assess_load`, the assessment
+    ``weaver health`` renders. Selecting nothing is a success. ``as_of`` is that
+    assessment's freshness instant, and it is meaningful only with
+    ``stale_only``.
+
     ``workspace``, ``catalogue`` and ``environment`` are names, resolved as
     ``build`` resolves them; ``session`` is where an already-resolved
     ``Workspace`` travels.
@@ -78,8 +89,13 @@ def load(
                 → a configuration error naming what is missing
     """
 
+    started = datetime.now(timezone.utc)
     requested = requested_items(items, what="load")
     selected_names = _load_names(names)
+    _refuse_conflicting_modes(stale_only=stale_only, reload=reload, as_of=as_of)
+    # Before the workspace is resolved, so a malformed instant is refused
+    # without reaching a tenant.
+    threshold = resolve_as_of(as_of, started=started)
 
     from .workspace import operation_workspace
 
@@ -107,7 +123,30 @@ def load(
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
                 reload=reload,
+                stale_only=stale_only,
+                as_of=threshold,
             )
+
+
+def _refuse_conflicting_modes(*, stale_only: bool, reload: bool, as_of) -> None:
+    """Stop a request that names two loads at once.
+
+    Reload reconstructs what it selected, and stale-only runs the loadables
+    whose Load health is not Green. One request holding both asks for the same
+    work to be forced and avoided.
+    """
+
+    if stale_only and reload:
+        raise CommandError(
+            "reload and stale-only select opposite work: reload reconstructs "
+            "what it names, and stale-only runs only what health does not call "
+            "green. Choose one."
+        )
+    if as_of is not None and not stale_only:
+        raise CommandError(
+            "as-of is the freshness instant stale-only selects against. Add "
+            "stale-only, or drop as-of."
+        )
 
 
 def run_load(
@@ -120,12 +159,19 @@ def run_load(
     fault_tolerant: bool = False,
     dry_run: bool = False,
     reload: bool = False,
+    stale_only: bool = False,
+    as_of: datetime | None = None,
 ) -> LoadRunReport:
     """Run the catalogue graph through a Session.
 
     Ordered so the catalogue read comes before the Spark home is offered: the
     physical Lakehouse to attach to is recorded there, and a missing installation
     is therefore refused before Livy starts.
+
+    ``stale_only`` turns the catalogue already read into a
+    :class:`weaver.health.LoadAssessment` and runs the subjects it does not call
+    Green. ``as_of`` is that assessment's freshness instant, resolved by the
+    caller.
     """
 
     from ..run import (
@@ -146,7 +192,13 @@ def run_load(
         catalogue = (
             state.catalogue
             if state is not None
-            else read_installed_catalogue(session=session, workspace=workspace)
+            else read_installed_catalogue(
+                session=session,
+                workspace=workspace,
+                # Stale-only assesses Load health, which reads _.LoadStatus.
+                # The one catalogue read, widened to carry it.
+                tables=(*READABLE_TABLES, LOAD_STATUS) if stale_only else None,
+            )
         )
         # An empty scope is every installed item, and it is resolved here: the
         # catalogue that answers it has just been read, and everything below
@@ -154,6 +206,16 @@ def run_load(
         items, installed = run_scope(
             catalogue.dag(), items, what="load", catalogue=workspace.catalogue
         )
+
+    selected = None
+    if stale_only:
+        # One assessment, the one `weaver health` renders. What it does not call
+        # Green is what runs, and nothing here reinterprets a finding.
+        selected = assess_load(
+            catalogue,
+            as_of=as_of if as_of is not None else resolve_as_of(None, started=started),
+            items=items,
+        ).unsettled_identities()
 
     # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
     # needs one of the Lakehouses this load is for.
@@ -167,6 +229,7 @@ def run_load(
             RunRequest.load(
                 items,
                 names=names,
+                selected=selected,
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
                 reload=reload,

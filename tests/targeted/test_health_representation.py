@@ -43,6 +43,7 @@ from weaver.catalogue.tables import (
     TEST_STATUS,
 )
 from weaver.declaration.model import WeaverItemId
+from weaver.errors import CommandError
 from weaver.etl import validation_artefact_id
 from weaver.health import (
     AMBER,
@@ -62,6 +63,7 @@ from weaver.health import (
     TEST_PENDING,
     TEST_STALE_DEPENDENCY,
     assess,
+    resolve_as_of,
     worst,
 )
 from weaver.targets import PhysicalTargetRef
@@ -285,6 +287,50 @@ def codes(section) -> tuple[str, ...]:
 
 def about(section, code: str):
     return tuple(finding for finding in section.findings if finding.code == code)
+
+
+# --- the instant a Load assessment measures against ---------------------------
+
+
+@weaver_test()
+def test_as_of_defaults_to_a_day_before_the_operation_started():
+    assert resolve_as_of(None, started=NOW) == NOW - timedelta(hours=24)
+
+
+@weaver_test()
+def test_an_aware_datetime_is_normalised_to_utc():
+    from datetime import timezone as tz
+
+    melbourne = timezone(timedelta(hours=10))
+    given = datetime(2026, 4, 23, 22, 0, tzinfo=melbourne)
+
+    assert resolve_as_of(given, started=NOW) == datetime(
+        2026, 4, 23, 12, 0, tzinfo=tz.utc
+    )
+
+
+@pytest.mark.parametrize(
+    "written", ["2026-04-22T00:00:00Z", "2026-04-22T10:00:00+10:00"]
+)
+@weaver_test()
+def test_an_iso_string_with_a_zone_is_accepted(written):
+    assert resolve_as_of(written, started=NOW) == datetime(
+        2026, 4, 22, tzinfo=timezone.utc
+    )
+
+
+@weaver_test()
+def test_a_naive_datetime_is_refused():
+    """A report that named an instant without a zone would mean two moments."""
+
+    with pytest.raises(CommandError, match="must carry a timezone"):
+        resolve_as_of(datetime(2026, 4, 22), started=NOW)
+
+
+@weaver_test()
+def test_a_string_that_is_not_an_instant_is_refused():
+    with pytest.raises(CommandError, match="ISO-8601"):
+        resolve_as_of("yesterday", started=NOW)
 
 
 # --- the vocabulary -----------------------------------------------------------

@@ -39,19 +39,24 @@ class RunState:
         return cls(catalogue=Catalogue.from_mapping(mapping["catalogue"]))
 
 
-def read_installed_catalogue(*, session, workspace=None) -> Catalogue:
+def read_installed_catalogue(*, session, workspace=None, tables=None) -> Catalogue:
     """The installed catalogue a run plans against, and records itself in.
 
     Readable and writable: one catalogue answers what is installed and how far
     each object has been loaded, and carries the run's own rows back.
+
+    ``tables`` widens that read where an operation needs more of the catalogue in
+    the same round trip. With none, what an ordinary run consults.
     """
 
-    from ..catalogue.state import catalogue_for
+    from ..catalogue.state import READABLE_TABLES, catalogue_for
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
         raise RunError("a run needs a Workspace with a Weaver catalogue")
-    return catalogue_for(session, workspace)
+    return catalogue_for(
+        session, workspace, tables=READABLE_TABLES if tables is None else tuple(tables)
+    )
 
 
 __all__ = ["RunState", "read_installed_catalogue"]
