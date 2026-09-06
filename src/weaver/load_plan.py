@@ -159,8 +159,11 @@ def load_dag(
     """The physical load graph for one set of items.
 
     Dependencies order the selection but never enlarge it: an edge is kept only
-    where both ends were named. ``names`` narrows it to exact ``Schema.Object``
-    loadables, an operator override that adds neither nodes nor ordering edges.
+    where both ends were named. ``names`` narrows it to named loadables, an
+    operator override that adds neither nodes nor ordering edges. A Lakehouse
+    selector carries its area, ``Tables/Schema.Object`` or
+    ``Files/Schema.Object``, and a bare ``Schema.Object`` is accepted where it
+    reaches one object.
     """
 
     requested = tuple(dict.fromkeys(items))
@@ -233,30 +236,48 @@ class _Planner:
         for written in names:
             name = str(written).strip()
             if not name:
-                raise LoadError("a load name must be a non-empty Schema.Object")
-            folded = name.casefold()
-            if folded in seen:
+                raise LoadError("a load name must be a non-empty load selector")
+            node = self._one_loadable(name, available)
+            if node.node_id in seen:
                 continue
-            seen.add(folded)
-            candidates = [
-                node
-                for node in available
-                if (node.load_name or "").casefold() == folded
-            ]
-            if not candidates:
-                known = ", ".join(sorted({node.load_name for node in available}))
-                raise LoadError(
-                    f"no loadable object named {name!r} is installed in the "
-                    f"requested item(s). Installed: {known or 'none'}"
-                )
-            if len(candidates) > 1:
-                found = ", ".join(node.node_id for node in candidates)
-                raise LoadError(
-                    f"{name!r} names more than one installed loadable object "
-                    f"({found}). Qualify the request with a single item"
-                )
-            selected.append(candidates[0])
+            seen.add(node.node_id)
+            selected.append(node)
         return tuple(selected)
+
+    def _one_loadable(
+        self, name: str, available: tuple[InstalledNode, ...]
+    ) -> InstalledNode:
+        """The single loadable one written selector names.
+
+        A Lakehouse holds a Folder and a table of one ``Schema.Object`` apart by
+        area, so the precise selector is ``load_key``. The bare ``Schema.Object``
+        remains accepted where it reaches one object.
+        """
+
+        folded = name.casefold()
+        precise = [node for node in available if node.load_key.casefold() == folded]
+        candidates = precise or [
+            node for node in available if (node.load_name or "").casefold() == folded
+        ]
+        if not candidates:
+            known = ", ".join(sorted({node.load_key for node in available}))
+            raise LoadError(
+                f"no loadable object named {name!r} is installed in the "
+                f"requested item(s). Installed: {known or 'none'}"
+            )
+        if len(candidates) == 1:
+            return candidates[0]
+        keys = sorted({node.load_key for node in candidates})
+        if len(keys) > 1:
+            raise LoadError(
+                f"{name!r} names more than one installed loadable object: "
+                f"{', '.join(keys)}. Choose an area-qualified name"
+            )
+        found = ", ".join(node.node_id for node in candidates)
+        raise LoadError(
+            f"{name!r} names more than one installed loadable object "
+            f"({found}). Qualify the request with a single item"
+        )
 
     def _refuse_ambiguity(self, items: tuple[WeaverItemId, ...]) -> None:
         """Stop if a target this request dispatches into holds a duplicated address.

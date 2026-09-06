@@ -34,6 +34,7 @@ from factories import (
 from support.weaver_test import weaver_test
 
 from weaver.catalogue.state import Catalogue
+from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.errors import CatalogueStateError, GraphError, LoadError
 from weaver.installed import (
@@ -42,6 +43,7 @@ from weaver.installed import (
     WAREHOUSE_PROCEDURE,
 )
 from weaver.load_plan import ENDPOINT_REFRESH, LoadDag, load_dag
+from weaver.locations import Location
 from weaver.targets import PhysicalTargetRef
 
 RAW = PhysicalTargetRef("lakehouse", LOAD_PRODUCER_TARGET)
@@ -207,6 +209,148 @@ def test_a_name_is_resolved_case_insensitively_within_the_requested_targets(esta
 def test_an_unknown_load_name_lists_the_installed_loadables(estate):
     with pytest.raises(LoadError, match="no loadable object named 'Sales.Missing'"):
         load_dag(estate, items=(PRODUCER,), names=("Sales.Missing",))
+
+
+# --- selecting a Lakehouse object by area -------------------------------------
+#
+# A Lakehouse keeps a Folder and a table of one `Schema.Object` apart, and the
+# selector has to keep them apart too. `Sales.Customer` is authored into both
+# areas of one item here, which is the case a bare name cannot answer.
+
+LANDING = WeaverItemId.parse("Lakehouse/Landing")
+STAGING = WeaverItemId.parse("Lakehouse/Staging")
+CURATED = WeaverItemId.parse("Warehouse/Curated")
+
+
+def _write(root, relative, text):
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+@pytest.fixture
+def areas(tmp_path):
+    """Two Lakehouses and a Warehouse.
+
+    `Landing` owns both areas of `Sales.Customer` and a `Sales.Order` unique to
+    it; `Staging` owns a second `Tables/Sales.Order`, so one precise selector
+    reaches two items when both are requested.
+    """
+
+    documents = {
+        "Lakehouse/Landing/schemas/Sales.yml": schema_document("Sales"),
+        "Lakehouse/Landing/Tables/Sales__Customer.py": lakehouse_table(
+            "Sales.Customer"
+        ),
+        "Lakehouse/Landing/Files/Sales__Customer.py": folder_document("Sales.Customer"),
+        "Lakehouse/Landing/Tables/Sales__Order.py": lakehouse_table("Sales.Order"),
+        "Lakehouse/Staging/schemas/Sales.yml": schema_document("Sales"),
+        "Lakehouse/Staging/Tables/Sales__Order.py": lakehouse_table("Sales.Order"),
+        "Warehouse/Curated/schemas/Sales.yml": schema_document("Sales"),
+        "Warehouse/Curated/Sales.Summary.sql": warehouse_table("Sales.Summary"),
+    }
+    for relative, text in documents.items():
+        _write(tmp_path, relative, text)
+    repository = parse_item_repository(Location(str(tmp_path)))
+    bindings = item_bindings(
+        ("Lakehouse/Landing", "Landing_LH"),
+        ("Lakehouse/Staging", "Staging_LH"),
+        ("Warehouse/Curated", "Curated_WH"),
+    )
+    return installed_catalogue(repository, bindings).dag()
+
+
+@weaver_test()
+def test_one_lakehouse_installs_both_areas_of_one_schema_object(areas):
+    """The premise the selector claims below rest on."""
+
+    keys = {node.load_key for node in areas.loadables(items=(LANDING,))}
+    assert {"Files/Sales.Customer", "Tables/Sales.Customer"} <= keys
+
+
+@weaver_test()
+def test_a_files_selector_reaches_the_folder_alone(areas):
+    dag = load_dag(areas, items=(LANDING,), names=("Files/Sales.Customer",))
+
+    assert node_ids(dag) == ("load:Lakehouse/Landing_LH/Files/Sales.Customer",)
+
+
+@weaver_test()
+def test_a_tables_selector_reaches_the_table_alone(areas):
+    dag = load_dag(areas, items=(LANDING,), names=("Tables/Sales.Customer",))
+
+    assert node_ids(dag) == ("load:Lakehouse/Landing_LH/Tables/Sales.Customer",)
+
+
+@weaver_test()
+def test_a_bare_name_reaching_two_areas_names_both_area_qualified_selectors(areas):
+    """The refusal has to carry the two selectors that answer it.
+
+    Both objects are in one item, so narrowing the item scope resolves nothing.
+    """
+
+    with pytest.raises(LoadError) as raised:
+        load_dag(areas, items=(LANDING,), names=("Sales.Customer",))
+
+    message = str(raised.value)
+    assert "Files/Sales.Customer, Tables/Sales.Customer" in message
+    assert "Choose an area-qualified name" in message
+    assert "single item" not in message
+
+
+@weaver_test()
+def test_a_bare_name_still_reaches_an_object_no_area_shares(areas):
+    dag = load_dag(areas, items=(LANDING,), names=("Sales.Order",))
+
+    assert node_ids(dag) == ("load:Lakehouse/Landing_LH/Tables/Sales.Order",)
+
+
+@weaver_test()
+@pytest.mark.parametrize("written", ["tables/sales.customer", "TABLES/SALES.CUSTOMER"])
+def test_an_area_qualified_selector_folds_case(areas, written):
+    dag = load_dag(areas, items=(LANDING,), names=(written,))
+
+    assert node_ids(dag) == ("load:Lakehouse/Landing_LH/Tables/Sales.Customer",)
+
+
+@weaver_test()
+def test_a_warehouse_relation_is_still_named_without_an_area(areas):
+    dag = load_dag(areas, items=(CURATED,), names=("Sales.Summary",))
+
+    assert node_ids(dag) == ("load:Warehouse/Curated_WH/Sales.Summary",)
+
+
+@weaver_test()
+def test_the_bare_and_area_qualified_spellings_of_one_object_select_it_once(areas):
+    """Deduplication is by resolved node, not by the text the caller wrote."""
+
+    dag = load_dag(areas, items=(LANDING,), names=("Sales.Order", "Tables/Sales.Order"))
+
+    assert node_ids(dag) == ("load:Lakehouse/Landing_LH/Tables/Sales.Order",)
+
+
+@weaver_test()
+def test_one_selector_reaching_two_requested_items_asks_for_a_narrower_scope(areas):
+    """Area-qualifying cannot help here: the two differ by item, not by area."""
+
+    with pytest.raises(LoadError) as raised:
+        load_dag(areas, items=(LANDING, STAGING), names=("Tables/Sales.Order",))
+
+    message = str(raised.value)
+    assert "Qualify the request with a single item" in message
+    # The logical items, which is what narrowing the scope names.
+    assert "Lakehouse/Landing/Tables/Sales.Order" in message
+    assert "Lakehouse/Staging/Tables/Sales.Order" in message
+
+
+@weaver_test()
+def test_an_unknown_selector_offers_the_area_qualified_choices(areas):
+    with pytest.raises(LoadError) as raised:
+        load_dag(areas, items=(LANDING,), names=("Sales.Missing",))
+
+    message = str(raised.value)
+    assert "Installed: Files/Sales.Customer, Tables/Sales.Customer" in message
+    assert "Tables/Sales.Order" in message
 
 
 # --- ordering -----------------------------------------------------------------

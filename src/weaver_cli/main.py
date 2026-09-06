@@ -462,8 +462,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--name",
         dest="names",
         action="append",
-        metavar="SCHEMA.OBJECT",
-        help="Load one installed object. Repeat to select more than one.",
+        metavar="NAME",
+        help=(
+            "Load one installed object, as Tables/Schema.Object or "
+            "Files/Schema.Object in a Lakehouse and Schema.Object in a "
+            "Warehouse. A bare Schema.Object is accepted where it names one "
+            "object. Repeat to select more than one."
+        ),
     )
     load.add_argument(
         "--fault-tolerant",

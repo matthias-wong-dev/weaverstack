@@ -887,8 +887,12 @@ two items installed in one Lakehouse do not select each other's work. Crossing
 between named items inserts the endpoint-refresh and OneLake-publication barriers
 their targets require.
 
-`--name` narrows a load to exact installed `Schema.Object` loadables, running
-only those and ordering nothing.
+`--name` narrows a load to named installed loadables, running only those and
+ordering nothing. A Lakehouse keeps a Folder and a table of one `Schema.Object`
+apart by area, so a Lakehouse selector is `Tables/Schema.Object` or
+`Files/Schema.Object`. A Warehouse relation has no area. A bare `Schema.Object`
+is accepted where it reaches one object, and refused with the area-qualified
+choices where it reaches both.
 
 Name selection runs only those objects. It does not expand or order them through
 declared dependencies.
