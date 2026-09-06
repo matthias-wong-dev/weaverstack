@@ -21,8 +21,8 @@ from weaver.errors import (
 CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
 #: Named in help text. Spelled out here rather than imported at module scope so
-#: building the parser stays free of everything ``compose`` pulls in.
-COMPOSE_DEFAULT_FILE = "compose.yml"
+#: building the parser stays free of everything ``workflow`` pulls in.
+WORKFLOW_DEFAULT_FILE = "workflow.yml"
 
 #: The first thing a new user reads. Product words, and no implementation.
 INITIALISE_DESCRIPTION = """\
@@ -55,7 +55,7 @@ Checking a Lakehouse starts a Fabric Spark session, which takes a minute.\
 # would be a second place deciding what an operation does. So commands declare
 # and the Session prepares.
 #
-# These are a superset, because arguments cannot know what a repository or a
+# These are a superset, because arguments cannot know what a project or a
 # catalogue turns out to contain. `load Lakehouse/Sales` says Livy may be needed
 # because a Lakehouse usually holds Python primitives, not because this estate
 # does. Exact routing comes later, from the BuildBundle or the RunGraph, and
@@ -98,7 +98,7 @@ def run_items(parsed) -> tuple[str, ...]:
     """The items one ``load`` or ``test`` names, positional first then ``--item``.
 
     Two spellings of one selection: the positional form is what a command line
-    and a composition entry are written in, and ``--item`` is the older one. Both
+    and a workflow entry are written in, and ``--item`` is the older one. Both
     reach core, which parses and deduplicates them.
     """
 
@@ -140,7 +140,7 @@ def _requires_build(args) -> frozenset[str]:
     minute and the capacity's only slot.
 
     Naming no item gets the superset: items can come from workspace
-    configuration, and what a repository holds is not knowable from arguments.
+    configuration, and what a project holds is not knowable from arguments.
     """
 
     from weaver.sessions.requirements import (
@@ -284,7 +284,7 @@ def command_lakehouses(parsed) -> tuple[str, ...]:
 
     A load or a test declares none: it names logical items, and the operation
     offers the Lakehouse once the catalogue has answered. The CLI resolves
-    nothing, so one-shot, shell, compose and notebook paths cannot drift.
+    nothing, so one-shot, shell, workflow and notebook paths cannot drift.
     """
 
     declares = getattr(parsed, "lakehouses", None)
@@ -315,28 +315,28 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shell.set_defaults(handler=handle_session)
 
-    compose = subcommands.add_parser(
-        "compose",
-        help="Run a named composition in one session.",
+    workflow = subcommands.add_parser(
+        "workflow",
+        help="Run a named workflow in one session.",
     )
-    compose.add_argument("name", help="Composition name in compose.yml.")
-    compose.add_argument(
+    workflow.add_argument("name", help="Workflow name in workflow.yml.")
+    workflow.add_argument(
         "--file",
         metavar="PATH",
-        help=f"Composition file. Defaults to ./{COMPOSE_DEFAULT_FILE}.",
+        help=f"Workflow file. Defaults to ./{WORKFLOW_DEFAULT_FILE}.",
     )
-    compose.add_argument(
+    workflow.add_argument(
         "--timings",
         action="store_true",
-        help="Report time spent by transport after the composition finishes.",
+        help="Report time spent by transport after the workflow finishes.",
     )
-    compose.add_argument(
+    workflow.add_argument(
         "--yes",
         action="store_true",
         help="Run without asking. Also authorises each command in the sequence.",
     )
-    _add_workspace_args(compose)
-    compose.set_defaults(handler=handle_compose)
+    _add_workspace_args(workflow)
+    workflow.set_defaults(handler=handle_workflow)
 
     for name in ("initialise", "initialize"):
         # One command, spelled both ways. The command list carries the first,
@@ -370,22 +370,27 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
 
     check = subcommands.add_parser(
-        "check", help="Check your repository source without contacting Fabric."
+        "check", help="Check your project folder without contacting Fabric."
     )
     check.add_argument(
-        "repository",
+        "project_folder",
+        metavar="PROJECT_FOLDER",
         nargs="?",
-        help="Repository folder. Defaults to the current directory.",
+        help="Project folder. Defaults to the current directory.",
     )
     check.set_defaults(handler=handle_check)
 
     build = subcommands.add_parser(
-        "build", help="Build repository objects into named items."
+        "build", help="Build a project's objects into named items."
     )
     build.add_argument(
-        "repository",
+        "source",
+        metavar="SOURCE",
         nargs="?",
-        help="Repository folder. Defaults to the current directory or Notebook Resources.",
+        help=(
+            "Project folder, or an abfss location inside a Fabric session. "
+            "Defaults to the current directory or Notebook Resources."
+        ),
     )
     build.add_argument(
         "--item",
@@ -457,8 +462,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--name",
         dest="names",
         action="append",
-        metavar="SCHEMA.OBJECT",
-        help="Load one installed object. Repeat to select more than one.",
+        metavar="NAME",
+        help=(
+            "Load one installed object, as Tables/Schema.Object or "
+            "Files/Schema.Object in a Lakehouse and Schema.Object in a "
+            "Warehouse. A bare Schema.Object is accepted where it names one "
+            "object. Repeat to select more than one."
+        ),
     )
     load.add_argument(
         "--fault-tolerant",
@@ -888,7 +898,7 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workspace", help="Fabric workspace name. It must exist.")
     parser.add_argument(
         "--project-folder",
-        dest="repository",
+        dest="project_folder",
         metavar="PATH",
         help="Project folder to create or reuse. Required for unattended setup.",
     )
@@ -1144,18 +1154,18 @@ def handle_session(args: argparse.Namespace) -> int:
     return run_shell(args)
 
 
-def handle_compose(args: argparse.Namespace) -> int:
+def handle_workflow(args: argparse.Namespace) -> int:
     """Show a named sequence, ask once, then run it in one Session."""
 
-    from .compose import run_composition
+    from .workflow import run_workflow
 
-    return run_composition(args)
+    return run_workflow(args)
 
 
 #: Retry controls for an interactive task failure.
 RETRY_PROMPT = "Enter to retry, Esc to exit."
 
-#: The errors a repository edit clears. Each attempt re-reads the source tree,
+#: The errors a project edit clears. Each attempt re-reads the source tree,
 #: so these become a failed attempt the retry prompt offers to run again.
 #: Workspace configuration, request errors, transports and installation stay
 #: raised: another attempt reads the same argument and reaches the same host.
@@ -1724,7 +1734,7 @@ def _build_once(args: argparse.Namespace) -> int:
     try:
         with _running_session(args, workspace) as opened:
             result = weaver.build(
-                args.repository,
+                args.source,
                 items=args.items,
                 bundle_only=args.bundle_only,
                 bundle_path=args.bundle_path,
@@ -1732,7 +1742,7 @@ def _build_once(args: argparse.Namespace) -> int:
                 **_command_context(workspace),
             )
     except SOURCE_ERRORS as exc:
-        # A repository the parse rejected. Reported as a failed attempt so the
+        # A project the parse rejected. Reported as a failed attempt so the
         # retry prompt offers the next one, which re-reads the edited tree.
         _render_error(exc)
         return 1
@@ -1844,7 +1854,7 @@ def _initialise_once(args: argparse.Namespace, *, session):
         if value
     }
     return weaver.initialise(
-        args.repository,
+        args.project_folder,
         workspace=args.workspace,
         lakehouse=args.lakehouse,
         warehouse=args.warehouse,
@@ -1885,11 +1895,11 @@ def _check_once(args: argparse.Namespace) -> int:
     from weaver.operations.check import check
 
     try:
-        check(args.repository)
+        check(args.project_folder)
     except WeaverError as exc:
         _render_error(exc)
         return 1
-    print("Repository valid.")
+    print("Project valid.")
     return 0
 
 

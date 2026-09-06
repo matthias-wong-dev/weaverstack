@@ -1,11 +1,11 @@
-"""``weaver compose``: what it accepts, what it asks, and what it runs.
+"""``weaver workflow``: what it accepts, what it asks, and what it runs.
 
-The composition is small, so what these prove is mostly what it
+The feature is small, so what these prove is mostly what it
 refuses: a file that could run arbitrary programs, a sequence that ran because
 nothing answered a prompt, a second grammar for commands that already have one.
 
 The handlers are replaced throughout. What a build or a load does is proved
-where builds and loads are proved; what matters here is that the composition
+where builds and loads are proved; what matters here is that the workflow
 reaches the real parser, hands the real handler the real arguments, in order,
 in one Session, and stops when one of them fails.
 """
@@ -19,32 +19,32 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError, ConfigError
-from weaver_cli.compose import (
-    _parse,
-    composition_words,
-    load_composition,
-    run_composition,
-)
 from weaver_cli.main import build_parser
+from weaver_cli.workflow import (
+    _parse,
+    load_workflow,
+    run_workflow,
+    workflow_words,
+)
 
 
 def _write(tmp_path, text: str):
-    path = tmp_path / "compose.yml"
+    path = tmp_path / "workflow.yml"
     path.write_text(text, encoding="utf-8")
     return path
 
 
 DEV = """\
-compose:
+workflows:
   dev:
     - weaver wipe Lakehouse/Sales_LH Warehouse/Curated_WH
-    - weaver build ./repository --item Lakehouse/Sales=Lakehouse/Sales_LH
+    - weaver build ./project --item Lakehouse/Sales=Lakehouse/Sales_LH
     - weaver load Warehouse/Curated
     - weaver test Warehouse/Curated
 """
 
 RUNS = """\
-compose:
+workflows:
   verify:
     - weaver load Warehouse/Curated
     - weaver test Warehouse/Curated
@@ -52,7 +52,7 @@ compose:
 
 
 class _Args:
-    """The parsed ``compose`` invocation, with no workspace of its own."""
+    """The parsed ``workflow`` invocation, with no workspace of its own."""
 
     def __init__(self, name, file=None, session=None, yes=False):
         self.name = name
@@ -81,7 +81,7 @@ def recorded(monkeypatch):
     for action in parser._subparsers._group_actions[0].choices.values():
         action.set_defaults(handler=record)
 
-    # No workspace: a composition of recorded handlers needs none, and asking
+    # No workspace: a workflow of recorded handlers needs none, and asking
     # for one would put credential resolution in front of every test here.
     monkeypatch.setattr("weaver_cli.shell._default_workspace", lambda args: None)
     return calls, (lambda: parser), record
@@ -91,10 +91,10 @@ def recorded(monkeypatch):
 
 
 @weaver_test()
-def test_a_composition_resolves_to_the_commands_it_lists(tmp_path):
+def test_a_workflow_resolves_to_the_commands_it_lists(tmp_path):
     path = _write(tmp_path, DEV)
 
-    entries, found = load_composition("dev", file=str(path))
+    entries, found = load_workflow("dev", file=str(path))
 
     assert found == path
     assert entries[0] == "weaver wipe Lakehouse/Sales_LH Warehouse/Curated_WH"
@@ -104,9 +104,9 @@ def test_a_composition_resolves_to_the_commands_it_lists(tmp_path):
 @weaver_test()
 def test_a_missing_file_says_so_and_names_the_flag(tmp_path):
     with pytest.raises(CommandError) as raised:
-        load_composition("dev", file=str(tmp_path / "nowhere.yml"))
+        load_workflow("dev", file=str(tmp_path / "nowhere.yml"))
 
-    assert "no composition file" in str(raised.value)
+    assert "no workflow file" in str(raised.value)
 
 
 @weaver_test()
@@ -114,17 +114,17 @@ def test_an_unknown_name_lists_the_ones_that_exist(tmp_path):
     path = _write(tmp_path, DEV)
 
     with pytest.raises(CommandError) as raised:
-        load_composition("prod", file=str(path))
+        load_workflow("prod", file=str(path))
 
     assert "dev" in str(raised.value)
 
 
 @weaver_test()
-def test_an_empty_composition_is_refused(tmp_path):
-    path = _write(tmp_path, "compose:\n  dev: []\n")
+def test_an_empty_workflow_is_refused(tmp_path):
+    path = _write(tmp_path, "workflows:\n  dev: []\n")
 
     with pytest.raises(CommandError):
-        load_composition("dev", file=str(path))
+        load_workflow("dev", file=str(path))
 
 
 # --- what an entry may be ----------------------------------------------------
@@ -132,7 +132,7 @@ def test_an_empty_composition_is_refused(tmp_path):
 
 @weaver_test()
 def test_an_entry_is_a_weaver_command_line():
-    assert composition_words("weaver load Lakehouse/Sales") == [
+    assert workflow_words("weaver load Lakehouse/Sales") == [
         "load",
         "Lakehouse/Sales",
     ]
@@ -140,13 +140,13 @@ def test_an_entry_is_a_weaver_command_line():
 
 @weaver_test()
 def test_the_weaver_prefix_is_optional():
-    """A composition holds Weaver commands, so naming the program adds nothing.
+    """A workflow holds Weaver commands, so naming the program adds nothing.
 
     Both spellings work: a line pasted from a terminal keeps the prefix, and a
     line written for the file need not.
     """
 
-    assert composition_words("load Lakehouse/Sales") == [
+    assert workflow_words("load Lakehouse/Sales") == [
         "load",
         "Lakehouse/Sales",
     ]
@@ -156,7 +156,7 @@ def test_the_weaver_prefix_is_optional():
 def test_quoted_arguments_survive_exactly():
     """A workspace with a space in it is ordinary, and must not become two."""
 
-    words = composition_words('weaver build . --workspace-config "my config.yml"')
+    words = workflow_words('weaver build . --workspace-config "my config.yml"')
 
     assert words == ["build", ".", "--workspace-config", "my config.yml"]
 
@@ -173,10 +173,10 @@ def test_quoted_arguments_survive_exactly():
 )
 @weaver_test()
 def test_anything_shell_shaped_is_refused(entry):
-    """A composition runs Weaver commands. It is not a place to put a script."""
+    """A workflow runs Weaver commands. It is not a place to put a script."""
 
     with pytest.raises(CommandError):
-        composition_words(entry)
+        workflow_words(entry)
 
 
 @pytest.mark.parametrize("entry", ["rm -rf /", "python -c 'print(1)'"])
@@ -192,11 +192,11 @@ def test_an_entry_naming_another_program_is_refused_by_the_parser(entry, recorde
     assert "not a valid Weaver command" in str(raised.value)
 
 
-@pytest.mark.parametrize("command", ["session", "compose"])
+@pytest.mark.parametrize("command", ["session", "workflow"])
 @weaver_test()
-def test_the_commands_a_composition_cannot_contain(command):
+def test_the_commands_a_workflow_cannot_contain(command):
     with pytest.raises(CommandError) as raised:
-        composition_words(f"weaver {command} dev")
+        workflow_words(f"weaver {command} dev")
 
     assert "cannot" in str(raised.value)
 
@@ -209,14 +209,14 @@ def test_the_sequence_is_shown_before_anything_runs(tmp_path, recorded, capsys):
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
-    run_composition(
+    run_workflow(
         _Args("dev", file=str(path)),
         parser_factory=parser_factory,
         stdin=io.StringIO(""),
     )
     printed = capsys.readouterr().out
 
-    assert "Compose: dev" in printed
+    assert "Workflow: dev" in printed
     for number in ("1.", "2.", "3.", "4."):
         assert number in printed
     assert not calls, "the sequence ran before it was confirmed"
@@ -227,13 +227,13 @@ def test_without_a_terminal_nothing_runs(tmp_path, recorded, capsys):
     """Silence is not consent, and the first entry is usually a wipe.
 
     Non-zero, because this is a refusal rather than a decision: a script that
-    piped nothing in and got a success back would be told the composition ran.
+    piped nothing in and got a success back would be told the workflow ran.
     """
 
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
-    status = run_composition(
+    status = run_workflow(
         _Args("dev", file=str(path)),
         parser_factory=parser_factory,
         stdin=io.StringIO("y\n"),
@@ -245,7 +245,7 @@ def test_without_a_terminal_nothing_runs(tmp_path, recorded, capsys):
 
 
 @weaver_test()
-def test_yes_runs_a_composition_unattended(tmp_path, recorded, capsys):
+def test_yes_runs_a_workflow_unattended(tmp_path, recorded, capsys):
     """The other half of the refusal above: a script says so and it runs.
 
     Approving the sequence approves each command in it, so a wipe inside one
@@ -255,7 +255,7 @@ def test_yes_runs_a_composition_unattended(tmp_path, recorded, capsys):
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
-    status = run_composition(
+    status = run_workflow(
         _Args("dev", file=str(path), yes=True),
         parser_factory=parser_factory,
         stdin=io.StringIO(""),
@@ -272,21 +272,19 @@ def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):
 
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
-    monkeypatch.setattr("weaver_cli.compose._interactive", lambda stdin: True)
-    monkeypatch.setattr("weaver_cli.compose._confirmed", lambda stdin: False)
+    monkeypatch.setattr("weaver_cli.workflow._interactive", lambda stdin: True)
+    monkeypatch.setattr("weaver_cli.workflow._confirmed", lambda stdin: False)
 
-    status = run_composition(
-        _Args("dev", file=str(path)), parser_factory=parser_factory
-    )
+    status = run_workflow(_Args("dev", file=str(path)), parser_factory=parser_factory)
 
     assert status == 0
     assert not calls
-    assert "Composition cancelled." in capsys.readouterr().out
+    assert "Workflow cancelled." in capsys.readouterr().out
 
 
 # --- an invalid workspace configuration ---------------------------------------
 #
-# Absence is state and invalidity is an error. A composition that names no
+# Absence is state and invalidity is an error. A workflow that names no
 # workspace runs against whatever its commands name. One that names a
 # configuration file Weaver cannot read says which key is wrong, before it
 # displays a sequence and before any command runs.
@@ -298,9 +296,9 @@ def test_a_malformed_workspace_configuration_is_reported_as_written(
 ):
     """The bug this replaces: a swallowed ConfigError became "no workspace".
 
-    ``_composition_workspace`` caught every :class:`WeaverError` to find out
+    ``_workflow_workspace`` caught every :class:`WeaverError` to find out
     whether a command had named a workspace, so a misspelled key resolved to
-    nothing and the composition failed further in, saying a workspace was
+    nothing and the workflow failed further in, saying a workspace was
     required.
     """
 
@@ -312,31 +310,31 @@ def test_a_malformed_workspace_configuration_is_reported_as_written(
     )
     path = _write(
         tmp_path,
-        "compose:\n  full:\n"
+        "workflows:\n  full:\n"
         f'    - load Warehouse/Curated --workspace-config "{config}"\n',
     )
 
     with pytest.raises(ConfigError) as raised:
-        run_composition(
+        run_workflow(
             _Args("full", file=str(path), yes=True), parser_factory=parser_factory
         )
 
     assert "targtes" in str(raised.value)
     assert "A Workspace is required" not in str(raised.value)
     assert not calls, "a command ran against a configuration nothing could read"
-    assert "Compose: full" not in capsys.readouterr().out
+    assert "Workflow: full" not in capsys.readouterr().out
 
 
 @weaver_test()
-def test_a_composition_with_no_workspace_configuration_still_runs(
+def test_a_workflow_with_no_workspace_configuration_still_runs(
     tmp_path, recorded, capsys
 ):
-    """The other half. Naming no workspace leaves the composition without one."""
+    """The other half. Naming no workspace leaves the workflow without one."""
 
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, RUNS)
 
-    status = run_composition(
+    status = run_workflow(
         _Args("verify", file=str(path), yes=True), parser_factory=parser_factory
     )
 
@@ -351,12 +349,12 @@ def test_a_bad_entry_is_found_before_the_first_command_runs(tmp_path, recorded):
     calls, parser_factory, _ = recorded
     path = _write(
         tmp_path,
-        "compose:\n  dev:\n    - weaver load --item Lakehouse/Sales\n"
+        "workflows:\n  dev:\n    - weaver load --item Lakehouse/Sales\n"
         "    - weaver frobnicate\n",
     )
 
     with pytest.raises(CommandError):
-        run_composition(
+        run_workflow(
             _Args("dev", file=str(path)),
             parser_factory=parser_factory,
             stdin=io.StringIO("y\n"),
@@ -371,8 +369,8 @@ def test_a_bad_entry_is_found_before_the_first_command_runs(tmp_path, recorded):
 def confirmed(monkeypatch):
     """An operator who says yes, without a terminal to type it into."""
 
-    monkeypatch.setattr("weaver_cli.compose._interactive", lambda stdin: True)
-    monkeypatch.setattr("weaver_cli.compose._confirmed", lambda stdin: True)
+    monkeypatch.setattr("weaver_cli.workflow._interactive", lambda stdin: True)
+    monkeypatch.setattr("weaver_cli.workflow._confirmed", lambda stdin: True)
 
 
 @weaver_test()
@@ -382,14 +380,12 @@ def test_every_command_runs_in_order_with_its_arguments(
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
-    status = run_composition(
-        _Args("dev", file=str(path)), parser_factory=parser_factory
-    )
+    status = run_workflow(_Args("dev", file=str(path)), parser_factory=parser_factory)
 
     assert status == 0
     assert len(calls) == 4
     assert calls[0].targets == ["Lakehouse/Sales_LH", "Warehouse/Curated_WH"]
-    assert calls[1].repository == "./repository"
+    assert calls[1].source == "./project"
     assert calls[1].items == ["Lakehouse/Sales=Lakehouse/Sales_LH"]
     assert calls[2].items == ["Warehouse/Curated"]
     assert calls[3].items == ["Warehouse/Curated"]
@@ -400,7 +396,7 @@ def test_one_session_serves_the_whole_sequence(tmp_path, recorded, confirmed):
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
-    run_composition(_Args("dev", file=str(path)), parser_factory=parser_factory)
+    run_workflow(_Args("dev", file=str(path)), parser_factory=parser_factory)
 
     sessions = {id(parsed.session) for parsed in calls}
     assert len(sessions) == 1
@@ -408,13 +404,11 @@ def test_one_session_serves_the_whole_sequence(tmp_path, recorded, confirmed):
 
 
 @weaver_test()
-def test_one_workflow_id_correlates_the_whole_composition(
-    tmp_path, recorded, confirmed
-):
+def test_one_workflow_id_correlates_the_whole_workflow(tmp_path, recorded, confirmed):
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, RUNS)
 
-    run_composition(_Args("verify", file=str(path)), parser_factory=parser_factory)
+    run_workflow(_Args("verify", file=str(path)), parser_factory=parser_factory)
 
     assert [parsed.command for parsed in calls] == ["load", "test"]
     assert len({parsed.workflow_id for parsed in calls}) == 1
@@ -422,7 +416,7 @@ def test_one_workflow_id_correlates_the_whole_composition(
 
 
 @weaver_test()
-def test_commands_can_supply_the_composition_workspace(
+def test_commands_can_supply_the_workflow_workspace(
     tmp_path, recorded, confirmed, monkeypatch
 ):
     calls, parser_factory, _ = recorded
@@ -432,7 +426,7 @@ def test_commands_can_supply_the_composition_workspace(
     )
     path = _write(
         tmp_path,
-        "compose:\n"
+        "workflows:\n"
         "  dev:\n"
         f'    - wipe Lakehouse/Sales_LH --workspace-config "{config}"\n'
         f'    - load --item Lakehouse/Sales --workspace-config "{config}"\n',
@@ -462,7 +456,7 @@ def test_commands_can_supply_the_composition_workspace(
     monkeypatch.setattr("weaver.sessions.host.use_or_create_session", use_session)
 
     assert (
-        run_composition(
+        run_workflow(
             _Args("dev", file=str(path), yes=True), parser_factory=parser_factory
         )
         == 0
@@ -473,7 +467,7 @@ def test_commands_can_supply_the_composition_workspace(
 
 
 @weaver_test()
-def test_a_composition_inside_a_session_joins_the_one_already_open(
+def test_a_workflow_inside_a_session_joins_the_one_already_open(
     tmp_path, recorded, confirmed
 ):
     calls, parser_factory, _ = recorded
@@ -481,13 +475,13 @@ def test_a_composition_inside_a_session_joins_the_one_already_open(
     from weaver.sessions import ConsoleSession
 
     with ConsoleSession(workspace=None) as session:
-        run_composition(
+        run_workflow(
             _Args("dev", file=str(path), session=session),
             parser_factory=parser_factory,
         )
 
         assert all(parsed.session is session for parsed in calls)
-        assert not session.closed, "a borrowed Session must outlive the composition"
+        assert not session.closed, "a borrowed Session must outlive the workflow"
 
 
 @weaver_test()
@@ -503,13 +497,11 @@ def test_the_sequence_stops_at_the_first_failure(tmp_path, recorded, confirmed, 
     for action in parser._subparsers._group_actions[0].choices.values():
         action.set_defaults(handler=fail_on_second)
 
-    status = run_composition(
-        _Args("dev", file=str(path)), parser_factory=lambda: parser
-    )
+    status = run_workflow(_Args("dev", file=str(path)), parser_factory=lambda: parser)
 
     assert status == 1
     assert len(calls) == 2
-    assert "Composition stopped at [2]" in capsys.readouterr().err
+    assert "Workflow stopped at [2]" in capsys.readouterr().err
 
 
 @weaver_test()
@@ -527,9 +519,7 @@ def test_a_raised_weaver_error_stops_the_sequence_too(
     for action in parser._subparsers._group_actions[0].choices.values():
         action.set_defaults(handler=raise_on_first)
 
-    status = run_composition(
-        _Args("dev", file=str(path)), parser_factory=lambda: parser
-    )
+    status = run_workflow(_Args("dev", file=str(path)), parser_factory=lambda: parser)
     captured = capsys.readouterr()
 
     assert status == 1
@@ -547,7 +537,7 @@ def test_the_confirmed_sequence_is_not_confirmed_again_per_command(
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
 
-    run_composition(_Args("dev", file=str(path)), parser_factory=parser_factory)
+    run_workflow(_Args("dev", file=str(path)), parser_factory=parser_factory)
 
     assert all(parsed.authorised for parsed in calls)
 
@@ -556,7 +546,7 @@ def test_the_confirmed_sequence_is_not_confirmed_again_per_command(
 
 
 @weaver_test()
-def test_a_composition_warms_the_union_before_the_first_command(
+def test_a_workflow_warms_the_union_before_the_first_command(
     tmp_path, recorded, confirmed, monkeypatch
 ):
     """A sequence ending in a load should not wait for Spark at the end of the
@@ -586,7 +576,7 @@ def test_a_composition_warms_the_union_before_the_first_command(
             prepared.append(set(required))
             return type("W", (), {"started": ()})()
 
-    run_composition(
+    run_workflow(
         _Args("dev", file=str(path), session=Warmed()), parser_factory=parser_factory
     )
 
@@ -603,7 +593,7 @@ def test_a_composition_warms_the_union_before_the_first_command(
 
 
 @weaver_test()
-def test_a_composition_with_no_workspace_warms_nothing(tmp_path, recorded, confirmed):
+def test_a_workflow_with_no_workspace_warms_nothing(tmp_path, recorded, confirmed):
     """There is nothing to warm against, and asking would put workspace
     resolution in front of a sequence that may name one per command."""
 
@@ -618,12 +608,12 @@ def test_a_composition_with_no_workspace_warms_nothing(tmp_path, recorded, confi
             return nullcontext()
 
         def offer_spark_home(self, lakehouses, *, workspace=None):
-            raise AssertionError("a composition with no workspace offered a Lakehouse")
+            raise AssertionError("a workflow with no workspace offered a Lakehouse")
 
         def prepare(self, required, *, workspace=None):
             prepared.append(required)
 
-    run_composition(
+    run_workflow(
         _Args("dev", file=str(path), session=Watched()), parser_factory=parser_factory
     )
 

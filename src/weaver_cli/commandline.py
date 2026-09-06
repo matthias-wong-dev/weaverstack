@@ -1,9 +1,9 @@
 """Reading a Weaver command line that was written down as text.
 
-``weaver session`` and ``weaver compose`` both take command lines a person
+``weaver session`` and ``weaver workflow`` both take command lines a person
 typed or pasted, so they read them the same way: ``shlex`` quoting, an optional
 leading ``weaver``, and the few commands the context cannot run. A line copied
-from a terminal, a composition file or the documentation means the same thing in
+from a terminal, a workflow file or the documentation means the same thing in
 all three places.
 
 What a line means is argparse's answer, not this module's. Nothing here

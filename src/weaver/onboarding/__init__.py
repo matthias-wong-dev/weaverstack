@@ -14,14 +14,14 @@ from __future__ import annotations
 from .environment import environment_definition_files
 from .example import example_files
 from .project import (
-    COMPOSE_FILE,
+    WORKFLOW_FILE,
     WORKSPACE_CONFIG_FILE,
     ProjectRequest,
     project_files,
 )
 
 __all__ = [
-    "COMPOSE_FILE",
+    "WORKFLOW_FILE",
     "WORKSPACE_CONFIG_FILE",
     "ProjectRequest",
     "environment_definition_files",

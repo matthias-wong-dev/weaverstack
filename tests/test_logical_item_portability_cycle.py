@@ -472,22 +472,22 @@ def test_the_notebook_api_names_the_same_items(tmp_path, root, bindings):
         assert report is not None
 
 
-# --- one composition, two environments ----------------------------------------
+# --- one workflow, two environments ----------------------------------------
 
 
 @weaver_test()
-def test_one_composition_serves_both_environments(tmp_path):
+def test_one_workflow_serves_both_environments(tmp_path):
     """Parsed rather than run: the claim is that the command text is identical."""
 
-    from weaver_cli.compose import composition_words
     from weaver_cli.main import build_parser
+    from weaver_cli.workflow import workflow_words
 
     parser = build_parser()
     parsed = {}
     for name, text in (("dev", DEV), ("prod", PROD)):
         config = _config(tmp_path, text, f"{name}.yml")
         parsed[name] = [
-            parser.parse_args(composition_words(line.format(item=ITEM, config=config)))
+            parser.parse_args(workflow_words(line.format(item=ITEM, config=config)))
             for line in SEQUENCE
         ]
 
@@ -499,7 +499,7 @@ def test_one_composition_serves_both_environments(tmp_path):
         # And the only difference between the two lines.
         assert dev.workspace_config != prod.workspace_config
 
-    # Nothing in parsing or displaying a composition resolves a physical target.
+    # Nothing in parsing or displaying a workflow resolves a physical target.
     from weaver_cli.main import command_lakehouses
 
     assert [command_lakehouses(one) for one in parsed["dev"]] == [(), (), ()]

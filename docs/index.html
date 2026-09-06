@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
     <title>Weaver: Microsoft Fabric, made easier.</title>
-    <meta name="description" content="Weaver helps you build and operate data pipelines across Microsoft Fabric from one repository. Write normal Python and T-SQL; Weaver derives dependencies from the code.">
+    <meta name="description" content="Weaver helps you build and operate data pipelines across Microsoft Fabric from one project. Write normal Python and T-SQL; Weaver derives dependencies from the code.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="author" content="Weaver contributors">
     <link rel="canonical" href="https://weaverstack.dev/">
@@ -14,14 +14,14 @@
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="Weaver: Microsoft Fabric, made easier.">
-    <meta property="og:description" content="Build and operate data on Microsoft Fabric from one repository.">
+    <meta property="og:description" content="Build and operate data on Microsoft Fabric from one project.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta property="og:image:width" content="1536">
     <meta property="og:image:height" content="1024">
     <meta property="og:image:alt" content="The Weaver home page: Microsoft Fabric, made easier.">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Weaver: Microsoft Fabric, made easier.">
-    <meta name="twitter:description" content="Build and operate data on Microsoft Fabric from one repository.">
+    <meta name="twitter:description" content="Build and operate data on Microsoft Fabric from one project.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="icon" type="image/png" sizes="128x128" href="favicon.png">
     <link rel="manifest" href="site.webmanifest">
@@ -45,7 +45,7 @@
             "@id": "https://weaverstack.dev/#software",
             "name": "Weaver",
             "alternateName": "weaverstack",
-            "description": "Build and operate data pipelines across Microsoft Fabric Lakehouses and Warehouses from one repository.",
+            "description": "Build and operate data pipelines across Microsoft Fabric Lakehouses and Warehouses from one project.",
             "url": "https://weaverstack.dev/",
             "codeRepository": "https://github.com/matthias-wong-dev/weaverstack",
             "license": "https://www.mozilla.org/en-US/MPL/2.0/",
@@ -80,7 +80,7 @@
       <section class="page-head">
         <div class="wrap">
           <h1>Microsoft Fabric, made easier.</h1>
-          <p class="lead">Weaver brings your Lakehouse and Warehouse work into one repository, and you keep writing Python and T-SQL as you already do. It derives dependencies from the code, builds Fabric objects, and records operational state.</p>
+          <p class="lead">Weaver brings your Lakehouse and Warehouse work into one project, and you keep writing Python and T-SQL as you already do. It derives dependencies from the code, builds Fabric objects, and records operational state.</p>
           <p style="margin-top: 26px;">
             <a class="button blue" href="get-started/index.html">Get started</a>
             <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack" style="margin-left: 8px;">View on GitHub <span class="arrow" aria-hidden="true">↗</span></a>
@@ -150,7 +150,7 @@
             <div class="code-bar"><span>Analytics/</span></div>
             <!-- example-tree -->
             <pre>workspace-config.yml
-compose.yml
+workflow.yml
 
 <span class="c-key">Lakehouse/Landing/</span>
 ├── Files/
@@ -258,7 +258,7 @@ compose.yml
             <pre>pip install weaverstack
 weaver initialise --workspace Analytics</pre>
           </div>
-          <p>Review the workspace and item choices, then select the Sales example to generate its source. From <code>Analytics</code>, publish the Environment and run <code>weaver compose full</code> to build, load, test and check health.</p>
+          <p>Review the workspace and item choices, then select the Sales example to generate its source. From <code>Analytics</code>, publish the Environment and run <code>weaver workflow full</code> to build, load, test and check health.</p>
           <p>
             <a class="button blue" href="get-started/index.html">Read the walkthrough</a>
           </p>

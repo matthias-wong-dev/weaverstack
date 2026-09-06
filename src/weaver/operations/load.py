@@ -53,9 +53,12 @@ def load(
     and a dependency never adds an unnamed item. Naming none loads every item the
     Weaver catalogue records an installation for.
 
-    ``names`` selects exact installed ``Schema.Object`` loadables inside those
-    items. It is an operator override: only those nodes run, without dependency
-    expansion or dependency ordering.
+    ``names`` selects installed loadables inside those items. A Lakehouse
+    selector carries its area, ``Tables/Schema.Object`` or
+    ``Files/Schema.Object``; a Warehouse relation has none, and a bare
+    ``Schema.Object`` is accepted where it reaches one object. It is an operator
+    override: only those nodes run, without dependency expansion or dependency
+    ordering.
 
     ``reload`` reconstructs each selected table from zero: its ``_.Bookmark`` row
     is removed, its ``_.LoadStatus`` goes to Pending, its target is emptied, and
@@ -379,7 +382,7 @@ def _load_names(names: str | Sequence[str] | None) -> tuple[str, ...]:
         return ()
     values = (names,) if isinstance(names, str) else tuple(names)
     if not values:
-        raise CommandError("load names= needs at least one Schema.Object")
+        raise CommandError("load names= needs at least one load selector")
     return tuple(str(value) for value in values)
 
 

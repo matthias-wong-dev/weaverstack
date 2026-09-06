@@ -73,7 +73,7 @@ class ExampleOutcome:
 class InitialiseReport:
     """What one initialise run set up, for a caller to print or assert on."""
 
-    repository: str
+    project_folder: str
     workspace: str
     resources: tuple[FabricItemOutcome, ...] = ()
     files: tuple[str, ...] = ()
@@ -106,7 +106,7 @@ class InitialiseReport:
         """A plain structure, for a CLI to serialise. The CLI owns no semantics."""
 
         return {
-            "repository": self.repository,
+            "project_folder": self.project_folder,
             "workspace": self.workspace,
             "resources": [outcome.to_mapping() for outcome in self.resources],
             "files": list(self.files),
@@ -123,7 +123,7 @@ class InitialiseReport:
 
 
 def initialise(
-    repository,
+    project_folder,
     *,
     workspace: str | None = None,
     catalogue: str = DEFAULT_CATALOGUE,
@@ -143,7 +143,7 @@ def initialise(
     Environment definition after the project has been written.
     """
 
-    if repository is None:
+    if project_folder is None:
         raise InitialiseError("A project folder is required.")
     if install_weaver is not None:
         import warnings
@@ -154,7 +154,7 @@ def initialise(
             stacklevel=2,
         )
         publish_environment = publish_environment or install_weaver
-    destination = Path(repository).resolve()
+    destination = Path(project_folder).resolve()
     request = ProjectRequest(
         workspace=_workspace_name(workspace, session=session),
         catalogue=catalogue,
@@ -212,7 +212,7 @@ def initialise(
 
             if dry_run:
                 return InitialiseReport(
-                    repository=str(destination),
+                    project_folder=str(destination),
                     workspace=request.workspace,
                     resources=_planned(request, found),
                     files=tuple(sorted(files)),
@@ -268,7 +268,7 @@ def initialise(
             outcome = ExampleOutcome(generated=request.example)
 
     return InitialiseReport(
-        repository=str(destination),
+        project_folder=str(destination),
         workspace=request.workspace,
         resources=_in_role_order(resources),
         files=tuple(sorted(files)),

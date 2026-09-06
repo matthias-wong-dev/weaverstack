@@ -56,7 +56,7 @@ def recording_parser(handler):
     parser = argparse.ArgumentParser(prog="weaver")
     commands = parser.add_subparsers(dest="command")
     build = commands.add_parser("build")
-    build.add_argument("repository", nargs="?")
+    build.add_argument("source", nargs="?")
     build.set_defaults(handler=handler)
     load = commands.add_parser("load")
     load.add_argument("targets", nargs="+")
@@ -140,13 +140,13 @@ def test_blank_lines_and_comments_in_a_pasted_block_are_ignored(recorded):
 @weaver_test()
 def test_quoted_paths_survive_a_pasted_block(recorded):
     calls, parser, _, history = recorded
-    keys = pasted('weaver build "my repository"') + f"exit{ENTER}"
+    keys = pasted('weaver build "my project"') + f"exit{ENTER}"
 
     with ConsoleSession() as session:
         with driven(keys, session=session, parser=parser, history=history):
             pass
 
-    assert calls[0].repository == "my repository"
+    assert calls[0].source == "my project"
 
 
 @weaver_test()

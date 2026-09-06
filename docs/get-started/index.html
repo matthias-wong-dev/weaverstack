@@ -209,7 +209,7 @@ Publish the Environment now? [y/N]:</pre>
             <div class="code-bar"><span>Analytics/</span></div>
             <pre>README.md
 workspace-config.yml
-compose.yml
+workflow.yml
 Environment/Weaver.Environment/
 
 <span class="c-key">Lakehouse/Landing/</span>
@@ -229,7 +229,7 @@ Environment/Weaver.Environment/
           </div>
 
           <p>README.md explains the local workflow. The Environment directory contains packages and compute settings, including those imported from an existing Environment. <code>workspace-config.yml</code> says which Fabric workspace and items to use:</p>
-          <p>These are your project files. Edit the configuration, compositions, README and Environment definition as your project develops.</p>
+          <p>These are your project files. Edit the configuration, workflows, README and Environment definition as your project develops.</p>
 
           <div class="code">
             <div class="code-bar"><span>workspace-config.yml</span></div>
@@ -246,12 +246,12 @@ targets:
 
           <p>To point at a different workspace, copy that file and change the names. Your objects do not move. <code>Lakehouse/Landing</code> stays what it is, and only the Fabric item behind it changes.</p>
 
-          <p><code>compose.yml</code> names a sequence you can run as one command:</p>
+          <p><code>workflow.yml</code> names a sequence you can run as one command:</p>
 
           <div class="code">
-            <div class="code-bar"><span>compose.yml</span></div>
-            <!-- example:compose.yml -->
-            <pre>compose:
+            <div class="code-bar"><span>workflow.yml</span></div>
+            <!-- example:workflow.yml -->
+            <pre>workflows:
   full:
     - build
     - load
@@ -494,10 +494,10 @@ weaver test</pre>
             </li>
           </ol>
 
-          <p>The generated <code>compose.yml</code> runs build, load, test and health in one session:</p>
+          <p>The generated <code>workflow.yml</code> runs build, load, test and health in one session:</p>
           <div class="code">
             <div class="code-bar"><span>terminal</span></div>
-            <pre>weaver compose full</pre>
+            <pre>weaver workflow full</pre>
           </div>
 
           <h3>In a notebook</h3>
@@ -622,7 +622,7 @@ Fabric Spark / Livy                OK
   via Lakehouse/Landing</pre>
           <p>Authentication shows the credential path and, when available, the account and tenant. Tokens and secrets are excluded.</p>
           <p>Doctor discovers one Lakehouse and Warehouse for its probes. A missing item is MISSING, a rejected probe is FAILED and a transport or runtime failure is ERROR. Missing probe items do not fail the command. Spark startup can take a minute.</p>
-          <p>Use <code>weaver check</code> for repository errors and <code>weaver health</code> for installed state.</p>
+          <p>Use <code>weaver check</code> for project errors and <code>weaver health</code> for installed state.</p>
 
         </div>
       </section>

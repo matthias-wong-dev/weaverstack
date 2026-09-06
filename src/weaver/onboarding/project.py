@@ -1,10 +1,10 @@
 """The configuration and folders a new Weaver project starts with.
 
 Two files carry the project: `workspace-config.yml` names the Fabric workspace,
-the Environment, the catalogue Warehouse and the item bindings, and `compose.yml`
+the Environment, the catalogue Warehouse and the item bindings, and `workflow.yml`
 names the build, load and test sequence. Both are read back by the parsers that
 read a user's own project, `weaver.config.load_workspace` and
-`weaver_cli.compose.load_composition`.
+`weaver_cli.workflow.load_workflow`.
 
 The catalogue Warehouse holds Weaver's `_` schema and no authored objects, so it
 gets no folder here. Item folders are empty when no example was asked for, and a
@@ -19,13 +19,13 @@ from ..declaration.model import LAKEHOUSE, WAREHOUSE
 from ..errors import CommandError
 from ..targets import validate_name
 
-#: The project files a generated repository is described by.
+#: The two files a generated project is described by.
 WORKSPACE_CONFIG_FILE = "workspace-config.yml"
-COMPOSE_FILE = "compose.yml"
+WORKFLOW_FILE = "workflow.yml"
 
-#: The composition a generated project starts with. Entries take the workspace
-#: the composition resolved, so none of them repeats it.
-COMPOSITION_NAME = "full"
+#: The workflow a generated project starts with. Entries take the workspace
+#: the workflow resolved, so none of them repeats it.
+WORKFLOW_NAME = "full"
 
 #: Kept so an empty item folder survives a commit.
 KEEP_FILE = ".gitkeep"
@@ -96,7 +96,7 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
 
     files = {
         WORKSPACE_CONFIG_FILE: _workspace_config(request),
-        COMPOSE_FILE: _composition(),
+        WORKFLOW_FILE: _workflow(),
         "README.md": _readme(request),
     }
     if request.lakehouse and not request.example:
@@ -124,10 +124,10 @@ def _workspace_config(request: ProjectRequest) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _composition() -> str:
+def _workflow() -> str:
     """The build, load and test sequence a new project runs as one command."""
 
-    return """compose:
+    return """workflows:
   full:
     - build
     - load
@@ -155,13 +155,13 @@ This project describes data objects in the Microsoft Fabric workspace
 ## The important files
 
 `workspace-config.yml` names the workspace, catalogue Warehouse, Environment
-and the physical target for each repository item.
+and the physical target for each project item.
 
 `Environment/{request.environment}.Environment` defines the Python runtime.
 Add packages to `Libraries/PublicLibraries/environment.yml` there. Fabric
 compute settings and custom libraries are kept beside it.
 
-`compose.yml` defines repeatable workflows: `full`, `load-only`, `build-only`
+`workflow.yml` defines repeatable workflows: `full`, `load-only`, `build-only`
 and `wipe-all`. Wipe removes all user objects from the configured targets and
 asks for confirmation.
 
@@ -177,10 +177,10 @@ weaver health
 Or run the sequence in one session:
 
 ```bash
-weaver compose full
+weaver workflow full
 ```
 
-Build makes Fabric structures match the repository. Load runs the data work.
+Build makes Fabric structures match the project. Load runs the data work.
 A build can be run independently.
 
 ## The Catalogue
@@ -210,7 +210,7 @@ Commands inside the session reuse Fabric connections and the Spark session.
 ## Try the example
 
 Choose the Sales example during initialisation to include its source files.
-Build, load and test run separately with `weaver compose full`.
+Build, load and test run separately with `weaver workflow full`.
 To explore the starter example later, initialise another project folder.
 
 ## Check connectivity

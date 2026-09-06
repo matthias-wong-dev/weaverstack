@@ -42,7 +42,7 @@ weaver doctor --workspace Analytics
 Doctor checks this machine and identity against the named workspace. It acquires
 an authentication token, reports the successful credential path, lists visible
 workspaces through Fabric REST and resolves the requested workspace. It reads no
-repository or workspace configuration.
+project or workspace configuration.
 Authentication also shows the account and tenant when those non-secret fields
 are available.
 
@@ -60,7 +60,7 @@ Missing probe items do not fail the command. A missing workspace, authentication
 failure, empty workspace listing or failed probe produces a nonzero exit code.
 `--json` includes the authentication path, workspace listing and all checks.
 
-Use `weaver health` for installed state and `weaver check` for repository syntax.
+Use `weaver health` for installed state and `weaver check` for project syntax.
 
 ## Setting a project up
 
@@ -98,7 +98,7 @@ Every project contains:
 Analytics/
 ├── README.md
 ├── workspace-config.yml
-├── compose.yml
+├── workflow.yml
 ├── Environment/Weaver.Environment/
 ├── Lakehouse/Landing/
 └── Warehouse/Curated/
@@ -148,7 +148,7 @@ weaver test
 weaver health
 ```
 
-`weaver compose full` runs those four commands in one Session. `load-only` runs
+`weaver workflow full` runs those four commands in one Session. `load-only` runs
 load, test and health; `build-only` builds; `wipe-all` wipes the physical targets
 declared in this project's workspace configuration with the usual destructive
 confirmation. `weaver wipe` with no targets has that same project scope.
@@ -234,7 +234,7 @@ targets['Lakehouse/Sales'].name must be a non-empty string, got 7
 
 **A named configuration that cannot be read is an error, not an absent
 workspace.** `--workspace-config bad.yml` reports the key that is wrong. Naming
-no workspace at all is a state, and a command or composition that can proceed
+no workspace at all is a state, and a command or workflow that can proceed
 without one proceeds.
 
 **A command naming no workspace reads `workspace-config.yml` beside it.** From a
@@ -265,19 +265,19 @@ weaver session --workspace "Weaver Example" --environment weaver
 Weaver · Weaver Example
 Starting: Fabric credential
 
-Available: build, compose, load, test, wipe.
+Available: build, health, load, test, wipe, workflow.
 Commands are written as they are in a terminal; the leading `weaver` is optional. `help` for options, `exit` to leave.
 
 weaver> wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev --yes
 weaver> build . --item Lakehouse/Sales
 weaver> weaver load Lakehouse/Sales Warehouse/Reporting
 weaver> weaver test Lakehouse/Sales
-weaver> compose all
+weaver> workflow all
 weaver> exit
 ```
 
 **A session command is a Weaver command line.** It is written the way it is
-written in a terminal, in `compose.yml` and in this document, parsed by the
+written in a terminal, in `workflow.yml` and in this document, parsed by the
 same parser and run by the same handlers. A line copied from any of them runs
 here unchanged, and what the session adds is underneath: one Session, held
 open, so a credential, item resolution and Livy are paid for once rather than
@@ -286,7 +286,7 @@ per command. The leading `weaver` is optional, so `build .` and
 `weaver --version` answer here as they do in a terminal.
 
 **A session offers the workspace lifecycle**: `build`, `load`, `test`, `wipe`
-and `compose`. `install` publishes Weaver into a Fabric Environment and
+and `workflow`. `install` publishes Weaver into a Fabric Environment and
 `weaver fabric` manages the estate underneath a workspace; both are run from a
 shell rather than from a prompt holding one workspace open.
 
@@ -408,7 +408,7 @@ were one Livy startup" call for opposite changes:
 
 ```bash
 weaver session --timings
-weaver compose dev --timings
+weaver workflow dev --timings
 ```
 
 ```text
@@ -445,13 +445,13 @@ Commands declare resources; the Session prepares them without taking ownership
 of build or run planning.
 
 Declarations are coarse and are a **superset** — arguments cannot know what a
-repository or a catalogue turns out to contain. Exact routing comes later, from
+project or a catalogue turns out to contain. Exact routing comes later, from
 the BuildBundle or the RunGraph. So **preparing is not using**: a declaration
 gives a head start to an acquisition that is coming anyway and never causes one.
 A run that declares `livy` and turns out to be all T-SQL opens no Spark session
 and no remote runtime scope.
 
-`weaver compose` takes the union of every parsed command's requirements and
+`weaver workflow` takes the union of every parsed command's requirements and
 warms that once, so a sequence ending in a load does not wait for Spark at the
 end of the build in front of it.
 
@@ -485,13 +485,13 @@ So for a from-scratch loop, wipe the catalogue Warehouse too. Keep it out only
 when you mean to preserve the catalogue — decommissioning one target out of an
 estate that carries on.
 
-## Compose
+## Workflow
 
 The development loop is the same four commands every time, each carrying the
-items the last one had. `compose.yml` writes the sequence down:
+items the last one had. `workflow.yml` writes the sequence down:
 
 ```yaml
-compose:
+workflows:
   dev:
     - wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev
     - build ./repository --item Lakehouse/Sales --item Warehouse/Reporting
@@ -500,15 +500,15 @@ compose:
 ```
 
 ```bash
-weaver compose dev
-weaver compose dev --file path/to/compose.yml
-weaver compose dev --yes                        # unattended
+weaver workflow dev
+weaver workflow dev --file path/to/workflow.yml
+weaver workflow dev --yes                       # unattended
 ```
 
 The sequence is displayed and confirmed before anything runs:
 
 ```text
-Compose: dev  (compose.yml)
+Workflow: dev  (workflow.yml)
 
 1. wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev
 2. build ./repository --item Lakehouse/Sales --item Warehouse/Reporting
@@ -529,14 +529,14 @@ session prompt reads a typed line with, parsed by the same parser and run by
 the same handlers, so an option means here what it means at a prompt. The
 leading `weaver` is optional, as it is at a prompt. Nothing shell-shaped is
 accepted — no pipes, no redirection, no `&&`, no variables, no other
-executables — and neither is `session` or a nested `compose`.
+executables — and neither is `session` or a nested `workflow`.
 
 **One Session runs the whole sequence**, which is the point: authentication,
 item resolution and Livy are paid for once rather than four times. Typed at a
-`weaver session` prompt as `weaver compose dev`, it joins the Session already
+`weaver session` prompt as `weaver workflow dev`, it joins the Session already
 open rather than acquiring a second set of resources.
 
-It is not a workflow engine, and is not meant to become one: no conditionals,
+It is not an orchestration engine, and is not meant to become one: no conditionals,
 no parallelism, no variables, no retries, no project-root discovery. Commands
 run in order and stop at the first failure.
 
@@ -573,7 +573,7 @@ With `--path`, a local `<Name>.Environment` directory is authoritative. The
 directory names the Environment, so `Sales.Environment` publishes `Sales`
 whatever workspace configuration names, and the definition is sent whole. A
 missing Environment is created from it. The directory is never written to.
-`Environment/` is a repository convention; the path may point anywhere.
+`Environment/` is a project convention; the path may point anywhere.
 
 Released publication leaves exactly one effective PyPI `weaverstack`
 requirement in the external library list and removes any Weaver custom wheel. An
@@ -663,7 +663,7 @@ Configuration may map two items to one target, which a constrained environment
 does. Only one of them is installed there at a time: a build into a target
 another item is installed to is refused, and `wipe` then `unbind` releases it.
 
-So one repository, one set of logical names and one command sequence run against
+So one project, one set of logical names and one command sequence run against
 development and production, and the only thing that changes is the workspace
 configuration:
 
@@ -695,7 +695,7 @@ builds every logical item the configuration declares.
 
 Every build adds the implicit binding from `Warehouse/_weaver` to the configured
 catalogue Warehouse. Catalogue publication is mandatory and registry certification
-is last. Every build treats the repository as authoritative: a document removed
+is last. Every build treats the project as authoritative: a document removed
 from it loses its catalogue claims and its physical object is pruned. The build
 planner compares effective signatures with the reconciled Registry.
 Unchanged objects receive no physical action; selected changes use an explicit
@@ -725,7 +725,7 @@ weaver build ./estate --bundle-only --bundle-path ./dist/estate-bundle
 weaver install ./dist/estate-bundle --workspace-config examples/weaver_example.yml
 ```
 
-`weaver check [repository]` is also available for agents, CI and editor tooling
+`weaver check [project-folder]` is also available for agents, CI and editor tooling
 that need to validate source without contacting Fabric. It is not a prerequisite
 for `weaver build`, which always checks source itself.
 
@@ -739,7 +739,7 @@ weaver test Lakehouse/Sales --workspace-config examples/weaver_example.yml
 
 The output is the verdict. A Test or an Assumption may pass, fail, or be unable
 to run, and none of those is a failure of the command: a run that produced a
-report exits zero, so a pasted block or a composition carries on to the next
+report exits zero, so a pasted block or a workflow carries on to the next
 command. A command that produced no report, an unusable `--name` or an estate it
 could not read, exits non-zero. `--json` emits the whole report.
 

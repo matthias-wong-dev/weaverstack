@@ -275,9 +275,9 @@ def parse_item_repository(
 
     store = store or FilesystemStore()
     if not store.exists(root):
-        raise DiscoveryError(f"repository root does not exist: {root}")
+        raise DiscoveryError(f"source root does not exist: {root}")
     if not store.is_directory(root):
-        raise DiscoveryError(f"repository root is not a directory: {root}")
+        raise DiscoveryError(f"source root is not a directory: {root}")
 
     authored = _read_authored_repository(root, store)
     merged = merge_repository(

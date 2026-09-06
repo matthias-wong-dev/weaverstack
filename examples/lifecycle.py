@@ -1,6 +1,6 @@
 """The whole desktop lifecycle, driven from Python instead of the CLI.
 
-The same four operations `weaver compose dev` runs, in the same order, against
+The same four operations `weaver workflow dev` runs, in the same order, against
 the same estate — written as a script because the Python API and the CLI are
 the same surface. The CLI parses arguments and prints; everything it then does
 is what this file does directly.
@@ -28,7 +28,7 @@ from pathlib import Path
 
 import weaver
 
-#: The repository this example builds, relative to the repository root.
+#: The project this example builds, relative to the Git repository root.
 ESTATE = (
     Path(__file__).resolve().parent
     / "workspaces"

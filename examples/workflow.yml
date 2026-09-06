@@ -1,9 +1,9 @@
 # The Weaver Example development loop, written down once.
 #
-#   weaver compose dev --file examples/compose.yml
+#   weaver workflow dev --file examples/workflow.yml
 #
 # Paths are as you would type them, so run this from the repository root.
-# Nothing here is discovered: the composition names its file, and the commands
+# Nothing here is discovered: the workflow names its file, and the commands
 # name their repository and workspace. Entries name a Weaver command; the
 # `weaver` in front of it is optional, so a line copied from a terminal works
 # unchanged.
@@ -12,7 +12,7 @@
 # Pointing the sequence at another environment is a different
 # `--workspace-config` and nothing else.
 
-compose:
+workflows:
   # Everything from empty: clear the estate, build it, load it, test it.
   dev:
     # The catalogue Warehouse is wiped too, which is why it is named here:

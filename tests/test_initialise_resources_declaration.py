@@ -144,7 +144,7 @@ def test_dry_run_writes_and_creates_nothing(tmp_path, fabric):
     assert not fabric.created and not fabric.published and not list(tmp_path.iterdir())
 
 
-@pytest.mark.parametrize("path", ["workspace-config.yml", "compose.yml", "README.md"])
+@pytest.mark.parametrize("path", ["workspace-config.yml", "workflow.yml", "README.md"])
 @weaver_test()
 def test_existing_project_files_are_not_overwritten(tmp_path, fabric, path):
     setup(tmp_path, fabric)

@@ -1,7 +1,7 @@
 """What ships as an example is what gets copied.
 
 `examples/` is documentation that runs: a notebook a user opens in Fabric, a
-desktop script, a composition and a workspace configuration. A retired spelling
+desktop script, a workflow and a workspace configuration. A retired spelling
 surviving in one of them is worse than in a docstring, because the reader's
 first move is to paste it.
 
@@ -38,6 +38,7 @@ RETIRED_SPELLINGS = (
     "weaver unbind ",
     "weaver capacity ",
     "weaver notebook ",
+    "weaver compose ",
 )
 
 #: `weaver doctor` was retired here when it meant "is local Spark, Delta and a

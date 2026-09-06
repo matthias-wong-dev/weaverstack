@@ -1,6 +1,6 @@
 """One way to read a written Weaver command line.
 
-``weaver session`` and ``weaver compose`` both accept command lines a person
+``weaver session`` and ``weaver workflow`` both accept command lines a person
 typed or pasted. They read them with the same function, so an option, a quoted
 path and the leading ``weaver`` mean the same thing in both.
 """
@@ -30,7 +30,7 @@ def test_quoting_survives():
 
 @weaver_test()
 def test_the_program_name_is_optional():
-    """The prompt and a composition both accept a line without it."""
+    """The prompt and a workflow both accept a line without it."""
 
     assert command_words("load Lakehouse/Sales") == ["load", "Lakehouse/Sales"]
 
@@ -203,10 +203,10 @@ def test_command_names_reads_the_parser_s_own_choices():
 
 
 @weaver_test()
-def test_the_session_and_a_composition_read_a_line_with_the_same_function():
+def test_the_session_and_a_workflow_read_a_line_with_the_same_function():
     """One parser, not two sets of rules that agree until they do not."""
 
-    from weaver_cli import compose, shell
+    from weaver_cli import shell, workflow
 
     assert shell.command_words is command_words
-    assert compose.command_words is command_words
+    assert workflow.command_words is command_words

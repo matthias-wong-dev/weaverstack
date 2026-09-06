@@ -126,7 +126,7 @@ def test_an_invalid_discovered_file_is_reported_against_itself(tmp_path, monkeyp
         resolve_workspace()
 
 
-# --- what a composition and a session run in -----------------------------------
+# --- what a workflow and a session run in -----------------------------------
 
 
 def _namespace(**values):
@@ -138,10 +138,10 @@ def _namespace(**values):
 
 
 @weaver_test()
-def test_a_composition_of_bare_entries_runs_in_the_project_it_was_started_in(project):
-    """`weaver compose full` in a generated project names no workspace anywhere.
+def test_a_workflow_of_bare_entries_runs_in_the_project_it_was_started_in(project):
+    """`weaver workflow full` in a generated project names no workspace anywhere.
 
-    The composition resolves one for its entries, and with nothing on the
+    The workflow resolves one for its entries, and with nothing on the
     command line that is the configuration beside it.
     """
 

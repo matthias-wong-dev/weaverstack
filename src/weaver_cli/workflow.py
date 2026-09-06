@@ -11,20 +11,20 @@ from weaver.sessions.requirements import union
 
 from .commandline import command_words
 
-#: Default composition file in the current directory.
-DEFAULT_FILE = "compose.yml"
+#: Default workflow file in the current directory.
+DEFAULT_FILE = "workflow.yml"
 
-#: Top-level key containing named compositions.
-COMPOSE_KEY = "compose"
+#: Top-level key containing named workflows.
+WORKFLOW_KEY = "workflows"
 
-#: Commands that cannot run inside a composition.
-NOT_IN_A_COMPOSITION = {
-    "session": "a composition cannot open an interactive prompt",
-    "compose": "a composition cannot run another composition",
+#: Commands that cannot run inside a workflow.
+NOT_IN_A_WORKFLOW = {
+    "session": "a workflow cannot open an interactive prompt",
+    "workflow": "a workflow cannot run another workflow",
 }
 
 
-def load_composition(name: str, *, file: str | None = None) -> tuple[list[str], Path]:
+def load_workflow(name: str, *, file: str | None = None) -> tuple[list[str], Path]:
     """The commands ``name`` resolves to, and the file they came from."""
 
     import yaml
@@ -32,7 +32,7 @@ def load_composition(name: str, *, file: str | None = None) -> tuple[list[str], 
     path = Path(file or DEFAULT_FILE).expanduser()
     if not path.is_file():
         raise CommandError(
-            f"no composition file at {path}"
+            f"no workflow file at {path}"
             + ("" if file else ". Write one, or name one with --file")
         )
     try:
@@ -42,46 +42,44 @@ def load_composition(name: str, *, file: str | None = None) -> tuple[list[str], 
 
     if not isinstance(document, dict):
         raise CommandError(f"{path}: expected a mapping at the top level")
-    compositions = document.get(COMPOSE_KEY)
-    if compositions is None:
-        raise CommandError(f"{path}: no {COMPOSE_KEY!r} key")
-    if not isinstance(compositions, dict):
-        raise CommandError(f"{path}: {COMPOSE_KEY!r} must be a mapping of names")
-    if name not in compositions:
-        known = ", ".join(sorted(compositions)) or "none"
-        raise CommandError(f"{path}: no composition named {name!r}. Found: {known}")
+    workflows = document.get(WORKFLOW_KEY)
+    if workflows is None:
+        raise CommandError(f"{path}: no {WORKFLOW_KEY!r} key")
+    if not isinstance(workflows, dict):
+        raise CommandError(f"{path}: {WORKFLOW_KEY!r} must be a mapping of names")
+    if name not in workflows:
+        known = ", ".join(sorted(workflows)) or "none"
+        raise CommandError(f"{path}: no workflow named {name!r}. Found: {known}")
 
-    entries = compositions[name]
+    entries = workflows[name]
     if not isinstance(entries, list) or not entries:
-        raise CommandError(f"{path}: composition {name!r} must be a non-empty list")
+        raise CommandError(f"{path}: workflow {name!r} must be a non-empty list")
     return [_one_entry(entry, path=path, name=name) for entry in entries], path
 
 
 def _one_entry(entry, *, path: Path, name: str) -> str:
     if not isinstance(entry, str):
         raise CommandError(
-            f"{path}: composition {name!r} contains a {type(entry).__name__}; "
+            f"{path}: workflow {name!r} contains a {type(entry).__name__}; "
             "every entry is one Weaver command line"
         )
     text = entry.strip()
     if not text:
-        raise CommandError(f"{path}: composition {name!r} contains an empty entry")
+        raise CommandError(f"{path}: workflow {name!r} contains an empty entry")
     return text
 
 
-def composition_words(entry: str) -> list[str]:
-    """The arguments one composition entry means.
+def workflow_words(entry: str) -> list[str]:
+    """The arguments one workflow entry means.
 
-    The leading ``weaver`` is optional here, because a composition holds
+    The leading ``weaver`` is optional here, because a workflow holds
     nothing else and a line written for the file need not repeat it.
     """
 
-    return command_words(entry, excluded=NOT_IN_A_COMPOSITION)
+    return command_words(entry, excluded=NOT_IN_A_WORKFLOW)
 
 
-def run_composition(
-    args: argparse.Namespace, *, parser_factory=None, stdin=None
-) -> int:
+def run_workflow(args: argparse.Namespace, *, parser_factory=None, stdin=None) -> int:
     """Show the sequence, ask once, then run it in one Session."""
 
     from weaver.sessions.host import use_or_create_session
@@ -92,24 +90,24 @@ def run_composition(
         parser_factory = build_parser
     parser = parser_factory()
 
-    entries, path = load_composition(args.name, file=args.file)
+    entries, path = load_workflow(args.name, file=args.file)
     # Parse every entry, and resolve the one Workspace, before displaying a
     # sequence for confirmation. A malformed workspace configuration is a fact
     # about the invocation, and it is reported here.
     parsed_commands = [_parse(parser, entry) for entry in entries]
-    workspace = _composition_workspace(args, parsed_commands)
+    workspace = _workflow_workspace(args, parsed_commands)
 
     _show(args.name, path, entries)
     if not getattr(args, "yes", False):
         stream = stdin or sys.stdin
         if not _interactive(stream):
             print(
-                "A composition asks before it runs. Pass --yes to run it unattended.",
+                "A workflow asks before it runs. Pass --yes to run it unattended.",
                 file=sys.stderr,
             )
             return 1
         if not _confirmed(stream):
-            print("Composition cancelled.")
+            print("Workflow cancelled.")
             return 0
 
     with use_or_create_session(
@@ -128,8 +126,8 @@ def run_composition(
                 _report_spending(session)
 
 
-def _composition_workspace(args, parsed_commands):
-    """The one Workspace named by the composition or its commands."""
+def _workflow_workspace(args, parsed_commands):
+    """The one Workspace named by the workflow or its commands."""
 
     from .main import _resolve_workspace, workspace_supplied
     from .shell import _default_workspace
@@ -139,7 +137,7 @@ def _composition_workspace(args, parsed_commands):
     if outer is not None:
         workspaces.append(outer)
     for parsed in parsed_commands:
-        # An entry naming no workspace takes the composition's. One that names
+        # An entry naming no workspace takes the workflow's. One that names
         # a configuration file raises the error that file carries.
         if not workspace_supplied(parsed):
             continue
@@ -150,14 +148,14 @@ def _composition_workspace(args, parsed_commands):
         return None
     if len(workspaces) > 1:
         raise CommandError(
-            "a composition runs in one Workspace; its commands name different "
+            "a workflow runs in one Workspace; its commands name different "
             "workspace configurations"
         )
     return workspaces[0]
 
 
 def _warm_for(session, parsed_commands, *, workspace) -> None:
-    """Start resources required by a composition before its first command.
+    """Start resources required by a workflow before its first command.
 
     The whole sequence is known, so the Lakehouses go in as one set: Fabric
     attaches a Spark session to a Lakehouse, and a sequence whose Spark work is
@@ -185,12 +183,12 @@ def _warm_for(session, parsed_commands, *, workspace) -> None:
 def _parse(parser: argparse.ArgumentParser, entry: str) -> argparse.Namespace:
     """One entry, through the CLI's own parser."""
 
-    words = composition_words(entry)
+    words = workflow_words(entry)
     try:
         parsed = parser.parse_args(words)
     except SystemExit as exc:
         # argparse has already said what was wrong with the line; what it cannot
-        # say is which entry of which composition it was reading.
+        # say is which entry of which workflow it was reading.
         raise CommandError(f"{entry!r} is not a valid Weaver command") from exc
     if getattr(parsed, "handler", None) is None:
         raise CommandError(f"{entry!r} names no command")
@@ -198,7 +196,7 @@ def _parse(parser: argparse.ArgumentParser, entry: str) -> argparse.Namespace:
 
 
 def _show(name: str, path: Path, entries: list[str]) -> None:
-    print(f"Compose: {name}  ({path})\n")
+    print(f"Workflow: {name}  ({path})\n")
     for number, entry in enumerate(entries, start=1):
         print(f"{number}. {entry}")
     print()
@@ -243,8 +241,8 @@ def _execute(entries, parsed_commands, *, session) -> int:
 
 
 def _stopped(number: int, entry: str) -> int:
-    print(f"\nComposition stopped at [{number}] {entry}", file=sys.stderr)
+    print(f"\nWorkflow stopped at [{number}] {entry}", file=sys.stderr)
     return 1
 
 
-__all__ = ["composition_words", "load_composition", "run_composition"]
+__all__ = ["load_workflow", "run_workflow", "workflow_words"]

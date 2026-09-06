@@ -1,7 +1,7 @@
 """What `weaver initialise` writes, read back by the parsers that read a project.
 
 A generated project is a reference implementation: it is the first Weaver
-repository most users see, and the shape they copy. So every generated file is
+project most users see, and the shape they copy. So every generated file is
 parsed here by the same parser a user's own project goes through, and each of
 the three shapes is checked for what it would otherwise teach.
 """
@@ -52,7 +52,7 @@ def _project(tmp_path, shape: str, *, example: bool):
 @pytest.mark.parametrize("example", [False, True])
 @weaver_test()
 def test_a_generated_project_parses(tmp_path, shape, example):
-    """The repository reader is the one a user's own project goes through."""
+    """The project reader is the one a user's own project goes through."""
 
     _project(tmp_path, shape, example=example)
 
@@ -97,14 +97,14 @@ def test_the_environment_definition_reads_and_names_itself(tmp_path):
 
 
 @weaver_test()
-def test_the_composition_runs_build_load_and_test(tmp_path):
-    """Parsed by `weaver compose`'s own loader, which lives in the CLI."""
+def test_the_workflow_runs_build_load_and_test(tmp_path):
+    """Parsed by `weaver workflow`'s own loader, which lives in the CLI."""
 
-    from weaver_cli.compose import load_composition
+    from weaver_cli.workflow import load_workflow
 
     _project(tmp_path, "both", example=True)
 
-    entries, _path = load_composition("full", file=str(tmp_path / "compose.yml"))
+    entries, _path = load_workflow("full", file=str(tmp_path / "workflow.yml"))
 
     assert entries == ["build", "load", "test", "health"]
 
@@ -265,15 +265,15 @@ def test_a_name_is_taken_as_it_is_written_once_the_spaces_are_gone(tmp_path):
 
 
 @weaver_test()
-def test_generated_project_explains_itself_and_has_all_compositions(tmp_path):
-    from weaver_cli.compose import load_composition
+def test_generated_project_explains_itself_and_has_all_workflows(tmp_path):
+    from weaver_cli.workflow import load_workflow
 
     _, files = _project(tmp_path, "both", example=False)
     readme = files["README.md"]
     for name in (
         "workspace-config.yml",
         "Environment/Weaver.Environment",
-        "compose.yml",
+        "workflow.yml",
         "weaver session",
         "weaver health",
     ):
@@ -289,7 +289,7 @@ def test_generated_project_explains_itself_and_has_all_compositions(tmp_path):
         "wipe-all": ["wipe"],
     }
     for name, commands in expected.items():
-        assert load_composition(name, file=str(tmp_path / "compose.yml"))[0] == commands
+        assert load_workflow(name, file=str(tmp_path / "workflow.yml"))[0] == commands
 
 
 @weaver_test()
