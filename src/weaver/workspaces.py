@@ -146,6 +146,16 @@ class CatalogueRef:
             == (workload_workspace or "").casefold()
         )
 
+    @property
+    def local(self) -> "CatalogueRef":
+        """The same catalogue, named without the workspace holding it.
+
+        How configuration writes one in its own workspace, and how an operation
+        that has established it is local reports it.
+        """
+
+        return CatalogueRef(workspace=None, name=self.name)
+
     def __str__(self) -> str:
         typed = f"{CATALOGUE_KIND}/{self.name}"
         return f"{self.workspace}/{typed}" if self.workspace else typed

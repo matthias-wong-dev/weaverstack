@@ -16,13 +16,7 @@ from ..workspaces import Workspace
 
 
 def _operation_workspace(
-    *,
-    workspace,
-    workspace_config,
-    catalogue=None,
-    mirror=None,
-    environment=None,
-    session=None,
+    *, workspace, workspace_config, catalogue=None, environment=None, session=None
 ) -> Workspace:
     """Which workspace this operation means.
 
@@ -67,7 +61,6 @@ def _operation_workspace(
         base = resolve_workspace(
             workspace=workspace,
             catalogue=catalogue,
-            mirror=mirror,
             environment=environment,
             workspace_config=workspace_config,
         )
@@ -78,12 +71,6 @@ def _operation_workspace(
     changes = {}
     if catalogue is not None and base.catalogue != catalogue:
         changes["catalogue"] = catalogue
-    if mirror is not None:
-        from ..workspaces import CatalogueRef
-
-        forked = CatalogueRef.parse(mirror)
-        if base.mirror != forked:
-            changes["mirror"] = forked
     if environment is not None:
         from ..workspaces import EnvironmentRef
 
@@ -103,7 +90,6 @@ def operation_workspace(
     *,
     workspace=None,
     catalogue=None,
-    mirror=None,
     environment=None,
     workspace_config=None,
     session=None,
@@ -120,7 +106,6 @@ def operation_workspace(
         workspace=workspace,
         workspace_config=workspace_config,
         catalogue=catalogue,
-        mirror=mirror,
         environment=environment,
         session=session,
     )

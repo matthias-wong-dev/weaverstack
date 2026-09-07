@@ -821,10 +821,22 @@ mirror: Warehouse/Weaver
 weaver mirror --no-item --yes
 ```
 
+`mirror` is the catalogue read from and `catalogue` the catalogue written to.
+Either side may instead be named on the command, as `--mirror` and
+`--catalogue`; see [using the CLI](cli-usage.md) for how the two are resolved
+together.
+
 The destination Warehouse is emptied by an ordinary wipe, its `_` schema is
 rebuilt by an ordinary build, and the source's rows are copied in. Running it
 again does the same work again, which is what makes a half-finished fork
 recoverable.
+
+**Nothing is removed until the fork is known to be possible.** The pair is
+resolved, the addresses are checked for locality and for naming two different
+Warehouses, and the source catalogue is read to prove it holds the tables a fork
+copies. `weaver.plan_mirror` produces that pair, `weaver.check_mirror` proves
+it, and `weaver.mirror` acts on it, so the sentence a confirmation shows and the
+Warehouse a fork empties come from one resolution.
 
 **What moves.** Everything but `_.Log` and `_.LoadStatistic`. Those record what a
 run did to the source estate. The projected tables say what is installed and

@@ -98,7 +98,6 @@ def resolve_workspace(
     workspace: str | None = None,
     environment: EnvironmentRef | str | None = None,
     catalogue: str | None = None,
-    mirror: str | None = None,
     workspace_config: str | Path | None = None,
 ) -> Workspace:
     """Apply CLI-over-configuration precedence and return one Workspace."""
@@ -125,9 +124,7 @@ def resolve_workspace(
         "catalogue": catalogue
         if catalogue is not None
         else (configured.catalogue if configured is not None else None),
-        "mirror": mirror
-        if mirror is not None
-        else (configured.mirror if configured is not None else None),
+        "mirror": configured.mirror if configured is not None else None,
         "execution": configured.execution
         if configured is not None
         else ExecutionSettings(),

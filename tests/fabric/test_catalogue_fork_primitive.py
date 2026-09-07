@@ -91,7 +91,7 @@ def forked(
         session=warehouse_session,
         workspace=fabric_workspace.workspace,
         catalogue=f"Warehouse/{fabric_fork_catalogue.name}",
-        source=f"Warehouse/{fabric_catalogue.name}",
+        mirror=f"Warehouse/{fabric_catalogue.name}",
     )
     return Forked(
         result=result,
@@ -230,8 +230,34 @@ def test_running_the_fork_again_converges(forked, warehouse_session, fabric_work
         session=warehouse_session,
         workspace=fabric_workspace.workspace,
         catalogue=f"Warehouse/{forked.destination_name}",
-        source=f"Warehouse/{forked.source_name}",
+        mirror=f"Warehouse/{forked.source_name}",
     )
+
+    assert _counts(forked.sql, FORKED_TABLES, where=NOT_THE_CATALOGUES_OWN) == before
+
+
+@weaver_test(remote=True, resources={"tds", "rest"})
+def test_a_source_that_is_not_there_fails_before_anything_is_emptied(
+    forked, warehouse_session, fabric_workspace
+):
+    """A misspelled source must not cost the destination.
+
+    Run after the fork, so what it proves is that the destination survived: the
+    rows counted afterwards are the ones the fork left.
+    """
+
+    from weaver.errors import CommandError
+
+    before = _counts(forked.sql, FORKED_TABLES, where=NOT_THE_CATALOGUES_OWN)
+
+    with pytest.raises(CommandError, match="could not read"):
+        weaver.mirror(
+            no_item=True,
+            session=warehouse_session,
+            workspace=fabric_workspace.workspace,
+            catalogue=f"Warehouse/{forked.destination_name}",
+            mirror=f"Warehouse/{forked.source_name}_no_such_catalogue",
+        )
 
     assert _counts(forked.sql, FORKED_TABLES, where=NOT_THE_CATALOGUES_OWN) == before
 

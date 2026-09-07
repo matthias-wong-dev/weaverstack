@@ -648,8 +648,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fork the catalogue and rebind no physical item.",
     )
     mirror.add_argument(
-        "--source",
+        "--mirror",
         metavar="CATALOGUE",
+        dest="mirror_source",
         help=(
             "The catalogue to fork, for example Warehouse/Weaver. Outranks "
             "mirror: in workspace configuration."
@@ -1783,50 +1784,57 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
 
 def handle_mirror(args: argparse.Namespace) -> int:
-    """Confirm the destination is expendable, then fork into it.
+    """Resolve the pair, prove the source, confirm, then fork.
 
-    A fork empties the destination catalogue Warehouse before it rebuilds it, so
-    it asks first for the reason ``wipe`` asks: what is removed does not come
-    back. There is no dry run, because what a fork would remove is everything
-    the Warehouse holds and the command already says so.
+    The order is the safety property. A fork empties the destination Warehouse,
+    so what it will do is settled and the source is read before anything is
+    asked, and long before anything is removed. A misspelled ``--mirror`` fails
+    while the destination is still intact.
+
+    One :class:`weaver.MirrorPlan` carries the pair through all three, so the
+    sentence somebody answers names the catalogues the fork acts on.
     """
 
     import json
 
-    workspace = _resolve_workspace(args)
     if args.items and args.no_item:
         raise CommandError("--item and --no-item cannot be used together")
 
-    destination = workspace.catalogue_ref
-    if not _authorised(args):
-        print(
-            f"mirror on {workspace.workspace}\n\n"
-            f"  Warehouse/{destination.name} will be emptied and rebuilt from "
-            f"{workspace.mirror}.\n"
-        )
-        if not sys.stdin.isatty():
-            print(
-                f"Refusing to empty Warehouse/{destination.name} without "
-                "confirmation. Pass --yes.",
-                file=sys.stderr,
-            )
-            return 1
-        answer = input(
-            f"Empty and rebuild Warehouse/{destination.name}? "
-            "This cannot be undone [y/N] "
-        )
-        if answer.strip().lower() not in {"y", "yes"}:
-            print("Cancelled.")
-            return 1
+    # Resolved from what this command line said, not from the workspace the CLI
+    # overlaid `--catalogue` onto: which configured value is the source and
+    # which the destination depends on what else is set.
+    plan = weaver.plan_mirror(
+        args.items,
+        no_item=args.no_item,
+        workspace=args.workspace,
+        catalogue=args.catalogue,
+        mirror=args.mirror_source,
+        environment=getattr(args, "environment", None),
+        workspace_config=args.workspace_config,
+        session=_session(args),
+    )
 
-    with _running_session(args, workspace) as opened:
-        result = weaver.mirror(
-            args.items,
-            no_item=args.no_item,
-            source=args.source,
-            session=opened,
-            **_command_context(workspace),
-        )
+    with _running_session(args, plan.workspace) as opened:
+        weaver.check_mirror(plan, session=opened)
+
+        if not _authorised(args):
+            print(f"mirror on {plan.workspace.workspace}\n\n  {plan.describe()}\n")
+            if not sys.stdin.isatty():
+                print(
+                    f"Refusing to empty {plan.target} without confirmation. "
+                    "Pass --yes.",
+                    file=sys.stderr,
+                )
+                return 1
+            answer = input(
+                f"Empty and rebuild {plan.target}? This cannot be undone [y/N] "
+            )
+            if answer.strip().lower() not in {"y", "yes"}:
+                print("Cancelled.")
+                return 1
+
+        result = weaver.mirror(plan=plan, session=opened)
+
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
         return 0

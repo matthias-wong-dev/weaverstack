@@ -1,7 +1,7 @@
 """What a catalogue fork copies, what it leaves, and how it says so in T-SQL.
 
-The rules the statements encode, held here so a table added to the catalogue
-cannot quietly fall out of a fork.
+The rules the statements encode. A table added to the catalogue has to be
+classified as one a fork copies or one it leaves, and these hold it to that.
 """
 
 from __future__ import annotations
