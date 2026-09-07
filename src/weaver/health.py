@@ -15,22 +15,15 @@ Health overlays evidence onto :class:`weaver.installed.InstalledDag`. Dependency
 direction, ancestry and what is installed are that graph's answers, read here and
 not recomputed.
 
-One signal, because ``_.LoadStatus`` is the current lifecycle state of every
-data node. A load establishes a table or a folder; a build establishes a View
-when its effective definition changes. ``as_of`` against a subject's completion
-instant says whether it is overdue, and the same instant against its ancestors'
-says whether it is behind its sources.
-
-``_.Bookmark`` is the loader's execution cursor and is read nowhere here.
+Load freshness reads ``_.LoadStatus``. A load settles a table or a folder, and a
+successful build settles a View. ``as_of`` against a subject's completion instant
+says whether it is overdue, and the same instant against its ancestors' says
+whether it is behind its sources.
 
 A Static object is asked neither question. It is loaded once, so it stays Green
-however long ago that was. Its own establishment still counts against everything
-downstream, which is what makes a genuine reload of a reference table put its
-consumers behind.
-
-Load health has one implementation, :class:`_LoadHealth`. A report renders it
-through :class:`LoadAssessment`, and ``weaver load --stale-only`` runs the
-subjects it does not call Green.
+however long ago that was. Its own load still counts against everything
+downstream, which is what makes a reload of a reference table put its consumers
+behind.
 
 This module is pure. Everything it reads is on the catalogue it is given: the
 graph, the status tables, and the current load state that catalogue was read
@@ -103,13 +96,12 @@ _NO_DATA_ESTABLISHED = (FAILED, ERROR, BLOCKED, PENDING)
 #: The load outcomes that make a subject Red.
 _LOAD_RED = (FAILED, ERROR, BLOCKED)
 
-#: The load outcomes that establish an object's current data, and therefore
-#: carry an instant a descendant can be measured against. A rejecting load moved
-#: rows and settled, so it establishes; everything else settled nothing.
+#: The outcomes that settle an object, and so carry an instant a descendant can
+#: be measured against. A rejecting load moved rows and completed.
 _ESTABLISHED = (SUCCEEDED, REJECTED)
 
-#: What Registry records an authored View as. A shortcut destination in a
-#: Warehouse is recorded the same way and is told apart by its role.
+#: What Registry records a View as. A Warehouse shortcut destination is recorded
+#: the same way and is told apart by its role.
 VIEW_OBJECT_TYPE = "view"
 
 #: The validation outcomes that make a subject Red.
@@ -464,8 +456,8 @@ def _count(row, name: str) -> int:
 class LoadSubjectHealth:
     """One loadable, its ``_.LoadStatus`` row and its findings.
 
-    The findings are the answer. No findings is Green. ``runtime_status`` is
-    carried so a report can render what happened.
+    No findings is Green. ``runtime_status`` is carried so a report can render
+    what happened.
     """
 
     node: InstalledNode
@@ -486,7 +478,7 @@ class LoadAssessment:
     """Every loadable in scope, assessed once.
 
     :func:`assess` renders it as the report's Load section, and
-    ``weaver load --stale-only`` runs the subjects it does not call Green.
+    ``weaver load --stale`` runs the subjects it does not call Green.
     """
 
     subjects: tuple[LoadSubjectHealth, ...] = ()
@@ -501,7 +493,7 @@ class LoadAssessment:
         return tuple(subject for subject in self.subjects if subject.severity != GREEN)
 
     def unsettled_identities(self) -> tuple[WeaverDocumentId, ...]:
-        """What ``--stale-only`` selects, as logical loadable identities."""
+        """The non-Green subjects, as logical loadable identities."""
 
         return tuple(subject.identity for subject in self.unsettled())
 
@@ -523,12 +515,11 @@ class LoadAssessment:
 
 
 class _LoadHealth:
-    """What a loadable's Load health is. The one implementation.
+    """What a loadable's Load health is.
 
-    ``_.LoadStatus`` throughout. ``as_of`` against its completion instant says
-    whether the object is overdue, and the same instant against its lifecycle
-    ancestors' says whether it is behind its sources. A Static object is asked
-    neither. ``_.Bookmark`` is a loader cursor and is read nowhere here.
+    ``as_of`` against its completion instant says whether the object is overdue,
+    and the same instant against its ancestors' says whether it is behind its
+    sources. A Static object is asked neither.
     """
 
     def __init__(
@@ -552,8 +543,8 @@ class _LoadHealth:
 
     def _state(self, node: InstalledNode, status):
         if status is None or status.result == PENDING:
-            # A build leaves a rebuilt loadable Pending. An absent row says the
-            # same thing for a catalogue written before that was explicit.
+            # A build leaves a rebuilt loadable Pending. A missing row is read
+            # the same way.
             yield _finding(
                 LOAD,
                 LOAD_PENDING,
@@ -590,9 +581,7 @@ class _LoadHealth:
         """Whether this object is overdue, and whether it is behind its sources.
 
         A Static object is asked neither. It is loaded once, so age says nothing
-        about it and neither does an ancestor that established since. Its own
-        establishment still counts against everything downstream: a genuine
-        reload of a reference table is what puts its consumers behind.
+        about it and neither does an ancestor that settled since.
         """
 
         if status is None or status.result in _NO_DATA_ESTABLISHED:
@@ -635,12 +624,10 @@ class _LoadHealth:
     # --- ancestry, over _.LoadStatus ------------------------------------------
 
     def _lifecycle_ancestors(self, node: InstalledNode):
-        """The ancestors ``_.LoadStatus`` describes, nearest name first.
+        """The ancestors that carry a ``_.LoadStatus`` row.
 
-        A loadable and a View carry lifecycle state: a load establishes the
-        first and a build establishes the second. Everything else on the path is
-        crossed, as a shortcut destination and a table Weaver does not load are,
-        because no state is kept for them to be behind.
+        Loadables and Views. A shortcut destination and a table Weaver does not
+        load hold no load state, so the walk passes through them.
         """
 
         return tuple(
@@ -650,10 +637,10 @@ class _LoadHealth:
         )
 
     def established_at(self, identity) -> datetime | None:
-        """When this node's current data was established, or ``None``.
+        """When this node last settled, or ``None`` if it has not.
 
-        ``None`` covers both an absent row and a state that settled nothing, so
-        a caller reads one answer to "is there an instant to compare against".
+        A Pending, failed, errored or blocked state settled nothing, and neither
+        does a missing row.
         """
 
         status = self.statuses.get(identity)
@@ -662,7 +649,7 @@ class _LoadHealth:
         return status.completed_at
 
     def _unestablished_ancestor(self, node: InstalledNode) -> str | None:
-        """The ancestor holding no settled state for its current incarnation."""
+        """The ancestor that has not settled since it was built."""
 
         behind = [
             ancestor.node_id
@@ -672,11 +659,10 @@ class _LoadHealth:
         return sorted(behind)[0] if behind else None
 
     def _newer_ancestor(self, node: InstalledNode) -> str | None:
-        """The ancestor established after this object last loaded.
+        """The ancestor that settled after this object last loaded.
 
-        ``_.LoadStatus`` on both sides. A load establishes a table or a folder
-        and a build establishes a View, so a View whose definition changed puts
-        everything materialised from it behind.
+        A rebuilt View settles when its build succeeds, so a new View definition
+        puts everything materialised from it behind.
         """
 
         loaded = self.established_at(node.identity)
@@ -691,19 +677,18 @@ class _LoadHealth:
 
 
 def is_lifecycle_node(node: InstalledNode) -> bool:
-    """Whether ``_.LoadStatus`` describes this installed node.
+    """Whether this node carries a ``_.LoadStatus`` row.
 
-    A loadable, which a load establishes, and a View, which a build establishes
-    when its effective definition changes. A View is never a load subject; its
-    state exists so its current definition can put materialised descendants
-    behind.
+    Loadable tables and folders, which a load settles, and Views, which a
+    successful build settles. A View is not a load subject; its state lets a
+    materialised descendant detect a newer View definition.
     """
 
     return node.is_loadable or is_view_node(node)
 
 
 def is_view_node(node: InstalledNode) -> bool:
-    """Whether this node is an authored View. A shortcut carries its own role."""
+    """Whether this node is a View this repository authored."""
 
     return node.role == ROLE_DATA and node.object_type == VIEW_OBJECT_TYPE
 
@@ -723,10 +708,9 @@ def assess_load(
 ) -> LoadAssessment:
     """Every installed loadable in scope, assessed once.
 
-    ``items`` bounds the subjects by logical item, as a load names its scope.
-    ``targets`` bounds them by physical target, as health names its own.
-    Ancestry outside the scope is read either way: whether a subject is behind
-    its sources is a question about the whole graph.
+    ``items`` bounds the subjects by logical item and ``targets`` by physical
+    target. Ancestry outside the scope is still read, because whether a subject
+    is behind its sources is a question about the whole graph.
     """
 
     dag = catalogue.dag()
@@ -742,7 +726,7 @@ def assess_load(
 
 
 def resolve_as_of(value, *, started: datetime) -> datetime:
-    """The instant a Load assessment measures freshness against, always UTC.
+    """The freshness cutoff, always UTC.
 
     Omitted, it is :data:`DEFAULT_AGE_HOURS` before the operation started. A
     naive datetime is refused: an instant with no zone names a different moment
@@ -928,10 +912,10 @@ class _Assessment:
             )
 
     def _loaded_since(self, node: InstalledNode, at: datetime | None) -> str | None:
-        """The managed ancestor established after this validation passed.
+        """The managed ancestor that settled after this validation passed.
 
-        The same ``_.LoadStatus`` question Load freshness asks, so a View whose
-        definition changed puts the validations over it behind as well.
+        A new View definition puts the validations over it behind, as it does a
+        materialised consumer.
         """
 
         if at is None:

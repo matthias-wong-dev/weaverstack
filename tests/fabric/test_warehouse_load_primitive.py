@@ -239,7 +239,7 @@ def _is_sentinel(at) -> bool:
     """Whether this bookmark is the sentinel.
 
     TDS hands back a naive datetime and the constant is aware, so the
-    comparison drops the zone rather than pretending the row carries one.
+    comparison drops the zone.
     """
 
     return at is not None and at.replace(tzinfo=None) == BOOKMARK_SENTINEL.replace(

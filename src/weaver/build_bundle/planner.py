@@ -57,9 +57,11 @@ from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
 from .runtime_tables import (
+    VIEW_STATE_SLUG,
     render_runtime_state_reconciliation,
     runtime_state_establishment,
     runtime_state_invalidation,
+    view_state_establishment,
 )
 from .schemas import lakehouse_schema_stage, warehouse_schema_stage
 from .shortcuts import plan_lakehouse_shortcuts, plan_warehouse_shortcuts
@@ -202,11 +204,9 @@ def generate_item_build_bundle(
     if catalogue_before is not None:
         stages.append(catalogue_before)
 
-    # Current state is invalidated here, between decertification and the first
+    # Runtime state is reset here, between decertification and the first
     # physical action, and never after it. See
-    # :mod:`weaver.build_bundle.runtime_tables`. Against the catalogue this build
-    # read: which rows are obsolete is arithmetic over rows it holds, and a build
-    # creating the tables read none.
+    # :mod:`weaver.build_bundle.runtime_tables`.
     runtime_state = runtime_state_invalidation(
         repository,
         items=tuple(target_by_item),
@@ -226,6 +226,13 @@ def generate_item_build_bundle(
     )
     if reconciliation is not None:
         stages.append(reconciliation)
+
+    # A View is recorded by the stage below, once its DDL has run.
+    view_state = view_state_establishment(
+        repository,
+        items=tuple(target_by_item),
+        selected_for_build=selected_for_build,
+    )
 
     for layer in _item_layers(repository, target_by_item):
         layer_stages: list[PlannedStage] = []
@@ -255,6 +262,17 @@ def generate_item_build_bundle(
         stages.extend(merge_layer_stages(layer_stages))
 
     _refuse_selected_omissions(omitted)
+
+    recorded_views = render_runtime_state_reconciliation(
+        (),
+        catalogue_target=catalogue_target,
+        establishment=view_state,
+        slug=VIEW_STATE_SLUG,
+        description="record the Views this build created",
+        index=1,
+    )
+    if recorded_views is not None:
+        stages.append(recorded_views)
 
     stages.extend(
         render_catalogue_after_build(
@@ -292,7 +310,7 @@ def generate_item_build_bundle(
         ),
         target_changes=target_changes,
         runtime_state=runtime_state,
-        runtime_state_established=established_state,
+        runtime_state_established=(*established_state, *view_state),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(

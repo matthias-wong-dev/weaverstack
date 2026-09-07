@@ -932,8 +932,7 @@ MAINTENANCE = (HISTORY, CURRENT_STATE)
 #: carries a bookmark and a load status; a validation carries a test status.
 BY_LOADABLE = "loadable"
 BY_VALIDATION = "validation"
-#: Every node _.LoadStatus describes: the loadables, and the Views a build
-#: establishes.
+#: The objects _.LoadStatus covers: loadable tables and folders, and Views.
 BY_DATA_NODE = "data_node"
 INVALIDATED_BY = (BY_DATA_NODE, BY_LOADABLE, BY_VALIDATION)
 
@@ -1118,11 +1117,11 @@ LOG = RuntimeTable(
 BOOKMARK = RuntimeTable(
     name="Bookmark",
     description=(
-        "The loader's execution cursor: the UTC instant immediately before each "
-        "loadable object's most recent clean load began. An incremental read "
-        "asks for source changes after it, and a Static object is skipped once "
-        "it holds anything other than the sentinel. One row per installed "
-        "loadable; a View has none. Health does not read it."
+        "Where the next incremental load starts: the UTC instant immediately "
+        "before each loadable object's most recent clean load began. A clean "
+        "load advances it, and rebuilding or reloading the object returns it to "
+        "the sentinel. A Static object uses it to tell whether it has loaded "
+        "before. One row per installed loadable; a View has none."
     ),
     # The Registry's identity exactly, and for the reason a shared key exists at
     # all: a bookmark row and a Registry row describe the same installed object.
@@ -1177,11 +1176,11 @@ def _outcome(*, vocabulary) -> tuple[CatalogueColumn, ...]:
 LOAD_STATUS = RuntimeTable(
     name="LoadStatus",
     description=(
-        "The current lifecycle state of each installed data object. One row per "
-        "object for as long as it is installed: a build writes Pending for a "
-        "rebuilt table or folder and Succeeded for a rebuilt View, and a load "
-        "settles the first. Logical identity only, because where it is "
-        "physically installed is the Installation's to say."
+        "The current load state of each table, folder and View Weaver manages. "
+        "A rebuilt table or folder is Pending until it loads, and a "
+        "successfully built View is Succeeded. Loading a table or folder "
+        "replaces the row with the result of that load. Logical identity only, "
+        "because where it is physically installed is the Installation's to say."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     maintenance=CURRENT_STATE,
@@ -1274,9 +1273,9 @@ LOAD_STATISTIC = RuntimeTable(
 TEST_STATUS = RuntimeTable(
     name="TestStatus",
     description=(
-        "How each validation's most recent run ended. One row per validation "
-        "per incarnation, as _.LoadStatus is for a loadable object: rebuilding "
-        "the validation ends the incarnation and the row goes with it."
+        "The current result of each Test and Assumption. Rebuilding a "
+        "validation sets it to Pending, and running it replaces Pending with "
+        "the result."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     maintenance=CURRENT_STATE,

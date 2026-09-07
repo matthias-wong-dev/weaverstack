@@ -31,14 +31,19 @@ from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
 from weaver.build_bundle.runtime_tables import (
+    RECONCILE_SLUG,
+    VIEW_STATE_SLUG,
     runtime_state_establishment,
     runtime_state_invalidation,
+    view_state_establishment,
 )
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL_TEXT,
     CURRENT_STATE_TABLES,
+    LOAD_STATUS,
+    PENDING,
     STANDARD_SURFACE_TABLES,
 )
 from weaver.declaration import parse_item_repository
@@ -146,11 +151,11 @@ def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
     )
 
 
-def _bookmark_actions(bundle):
+def _runtime_state_actions(bundle, slug: str = RECONCILE_SLUG):
     return [
         (sequence, action)
         for sequence, _batch, action in bundle.plan.actions()
-        if action.kind == "reconcile_runtime_state"
+        if action.kind == "reconcile_runtime_state" and action.id == slug
     ]
 
 
@@ -340,7 +345,7 @@ def test_a_first_build_removes_nothing_and_establishes_everything(estate, tmp_pa
     bundle = _bundle(estate, tmp_path)
 
     assert bundle.plan.runtime_state == ()
-    assert _bookmark_actions(bundle)
+    assert _runtime_state_actions(bundle)
     assert _invalidated(bundle.plan.runtime_state_established) == {
         ("Lakehouse", "Sales", "Tables/DWG", "Customer"),
         ("Lakehouse", "Sales", "Tables/DWG", "Summary"),
@@ -422,7 +427,7 @@ def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_p
 
 
 @weaver_test()
-def test_invalidation_is_one_action(estate, tmp_path):
+def test_the_reset_is_one_action(estate, tmp_path):
     """One lifecycle decision, so one action carrying the whole intent."""
 
     bundle = _bundle(
@@ -430,7 +435,7 @@ def test_invalidation_is_one_action(estate, tmp_path):
         tmp_path,
         catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
-    (_sequence, action), *rest = _bookmark_actions(bundle)
+    (_sequence, action), *rest = _runtime_state_actions(bundle)
 
     assert not rest
     assert action.executor == "runtime_state"
@@ -451,12 +456,60 @@ def test_the_action_carries_the_intent_the_plan_states(estate, tmp_path):
         tmp_path,
         catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
-    (_sequence, action), *_rest = _bookmark_actions(bundle)
+    (_sequence, action), *_rest = _runtime_state_actions(bundle)
     carried = read_invalidation(bundle.store.read(bundle.location / action.payload))
+    established, invalidated = carried
 
-    assert carried == (
-        bundle.plan.runtime_state_established,
-        bundle.plan.runtime_state,
+    assert invalidated == bundle.plan.runtime_state
+    # The reset half. The Views the build records travel in their own stage.
+    assert sorted(one.table for one in established) == [BOOKMARK.name, LOAD_STATUS.name]
+    assert all(
+        row["result"] == PENDING
+        for one in established
+        if one.table == LOAD_STATUS.name
+        for row in one.rows
+    )
+
+
+@weaver_test()
+def test_a_view_is_recorded_after_the_physical_work(estate, tmp_path):
+    """A View is Succeeded once its DDL has run, so its stage follows the build."""
+
+    bundle = _bundle(estate, tmp_path)
+    order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
+
+    assert VIEW_STATE_SLUG in order
+    assert order.index(VIEW_STATE_SLUG) > order.index(
+        "object-Lakehouse--Sales--Tables--DWG.ActiveCustomer"
+    )
+
+
+@weaver_test()
+def test_a_first_build_still_records_the_Views_it_created(estate, tmp_path):
+    """The tables arrive with this bundle, and the View stage follows them.
+
+    A View has no later load step, so a build that could write no reset state
+    still records what it built.
+    """
+
+    bundle = _bundle(
+        estate,
+        tmp_path,
+        inventories=_inventories(estate, holding_runtime_tables=False),
+    )
+    order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
+
+    assert RECONCILE_SLUG not in order
+    assert VIEW_STATE_SLUG in order
+
+
+@weaver_test()
+def test_a_view_that_is_not_rebuilt_is_not_recorded(estate):
+    """State is written for what this build made, and nothing else."""
+
+    assert (
+        view_state_establishment(estate, items=(item_id(ITEM),), selected_for_build=())
+        == ()
     )
 
 

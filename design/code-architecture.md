@@ -158,11 +158,13 @@ runs, not how a run behaves when one of them fails.
 its physical target, which stays on every node for dispatch and barrier
 placement, and selection is by item.
 
-`RunRequest.selected` narrows that scope to named logical loadables, resolved
-before planning. It reaches `load_dag(selection=...)` as identities, and the
-planner orders and places barriers over them as it always does.
-`weaver load --stale-only` fills it from `weaver.health.assess_load`. See
-[Health](health.md#one-load-assessment-two-consumers).
+`RunRequest.selected` narrows that scope to named logical loadables.
+
+`weaver health` and `weaver load --stale` both call `assess_load()`. The load
+command takes the non-green logical identities from that assessment and passes
+them to `RunRequest.selected`. `load_dag(selection=...)` preserves dependency
+ordering and publication barriers for the selected objects, and crosses the
+loadables it leaves out the way it crosses a View. See [Health](health.md).
 
 `Runner` delegates node execution through the `dispatch` callable. Production
 execution supplies the estate-backed dispatcher; tests can supply a controlled

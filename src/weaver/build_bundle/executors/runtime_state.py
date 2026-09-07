@@ -1,8 +1,8 @@
-"""Reconcile the catalogue's current-state rows to what one build installs.
+"""Write one build's decision about the catalogue's current-state rows.
 
-The payload is structured intent naming the table and the rows, so the lifecycle
-decision survives as something that can be inspected. This writes the rows the
-build establishes, then removes the rows it ended.
+The payload is structured intent naming the table and the rows, so the decision
+can be inspected. This writes the rows the build establishes, then removes the
+rows it ended.
 
 See :mod:`weaver.catalogue.runtime_state` for what the intent holds.
 """

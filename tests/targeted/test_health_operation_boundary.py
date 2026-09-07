@@ -358,15 +358,6 @@ def test_health_materialises_the_tables_it_consults_and_no_others():
 
 
 @weaver_test()
-def test_health_does_not_read_the_bookmark():
-    """The bookmark is the loader's cursor. Health reads lifecycle state."""
-
-    from weaver.catalogue.tables import BOOKMARK
-
-    assert BOOKMARK not in HEALTH_TABLES
-
-
-@weaver_test()
 def test_health_reads_no_dictionary_of_columns_or_keys():
     """Nothing health decides asks what an object's columns or keys are."""
 

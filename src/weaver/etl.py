@@ -214,10 +214,10 @@ def item_bookmarkable_objects(
 def item_view_objects(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[WeaverDocumentId, ...]:
-    """The Views one item declares, and therefore what a build establishes.
+    """The Views declared by this item.
 
-    A View owns no load. Its ``_.LoadStatus`` says when its current definition
-    was installed, so a consumer materialised from it can be measured.
+    Views have no load step. A successful build records their current
+    ``_.LoadStatus`` so downstream tables can detect a newer View definition.
     """
 
     from .declaration.metadata import VIEW
@@ -233,7 +233,10 @@ def item_view_objects(
 def item_data_nodes(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[WeaverDocumentId, ...]:
-    """Everything in one item that ``_.LoadStatus`` describes."""
+    """The objects in one item that carry a ``_.LoadStatus`` row.
+
+    Loadable tables and folders, and the Views this item declares.
+    """
 
     return tuple(
         sorted(

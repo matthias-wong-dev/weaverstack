@@ -1,27 +1,29 @@
-"""What a build does about the catalogue's runtime tables.
+"""What a build writes into the catalogue's runtime tables.
 
-This module decides the current-state rows a build leaves behind. Runtime-table
-references themselves are ordinary shortcut declarations, composed into the
-repository and planned by the shortcut planner.
+Runtime-table references themselves are ordinary shortcut declarations, composed
+into the repository and planned by the shortcut planner.
+
+Before any physical work:
 
 .. code-block:: text
 
-    no longer declared, or no longer run   the row goes
-    a rebuilt table or folder              Pending, bookmark at the sentinel
-    a rebuilt View                         Succeeded, dated by this build
-    a rebuilt validation                   Pending
-    everything else                        left alone
+    a rebuilt table or folder      LoadStatus Pending, Bookmark at the sentinel
+    a rebuilt Test or Assumption   TestStatus Pending
+    no longer declared             the row goes
 
-An installed object always holds a row. A table's and a validation's say
-``Pending`` until a run settles them; a View's says ``Succeeded``, because a
-build establishes a View and there is nothing further to run. A View has no
-bookmark.
+After the physical work succeeds:
 
-The reconciliation runs **before** any physical work, and that ordering is the
-safety property: a bookmark at the sentinel makes the next load read the whole
-source, while one left in place over a recreated table makes it read almost
-nothing. So a build that fails in between leaves work to repeat rather than rows
-that will never arrive.
+.. code-block:: text
+
+    a rebuilt View                 LoadStatus Succeeded, dated by the build
+
+A View is Succeeded once its DDL has run: the build is what establishes it, and
+there is nothing further to run. A View has no bookmark.
+
+The reset runs before physical work, and that ordering is the safety property. A
+bookmark at the sentinel makes the next load read the whole source, while a
+cursor left in place over a recreated table makes it read almost nothing. So a
+build that fails in between leaves work to repeat.
 
 The scope is the items this build reconciles and nothing wider, because the
 tables are shared across the estate.
@@ -73,6 +75,9 @@ from .stages import CATALOGUE, PlannedStage
 
 #: What the reconciliation stage's action and payload are named after.
 RECONCILE_SLUG = "runtime-state-reconciliation"
+
+#: The stage that records the Views a build created.
+VIEW_STATE_SLUG = "view-state"
 
 # --- which rows a build ends the life of --------------------------------------
 
@@ -148,12 +153,15 @@ def runtime_state_establishment(
     selected_for_build: Iterable[WeaverDocumentId],
     holds_table=None,
 ) -> tuple[RuntimeStateEstablishment, ...]:
-    """The lifecycle state this build writes.
+    """The state this build writes before it touches anything physical.
 
-    Bounded by ``selected_for_build``, so an object left alone keeps the state
-    it had. ``holds_table`` says whether the catalogue already has a table: the
-    build that creates them writes into none, because the reconciliation runs
-    ahead of the physical work that would make them.
+    A rebuilt table or folder is ``Pending`` with its bookmark at the sentinel,
+    and a rebuilt validation is ``Pending``. Bounded by ``selected_for_build``,
+    so an object left alone keeps the state it had.
+
+    ``holds_table`` says whether the catalogue already has a table. This runs
+    before the physical work that creates them, so the build that creates the
+    ``_`` schema writes into none.
     """
 
     scoped = sorted({item for item in items if not _is_builtin(item)}, key=str)
@@ -179,24 +187,13 @@ def runtime_state_establishment(
 
 
 def _load_status_state(repository, *, item, selected) -> list[dict]:
-    """A rebuilt loadable is Pending; a rebuilt View is established by now."""
+    """A rebuilt table or folder holds nothing until it loads."""
 
-    rows = [
+    return [
         {**_identity_row(identity), "result": PENDING}
         for identity in item_bookmarkable_objects(repository, item=item)
         if identity in selected
     ]
-    rows.extend(
-        {
-            **_identity_row(identity),
-            "result": SUCCEEDED,
-            "started_datetime": BUILD_DATETIME_TOKEN,
-            "completed_datetime": BUILD_DATETIME_TOKEN,
-        }
-        for identity in item_view_objects(repository, item=item)
-        if identity in selected
-    )
-    return rows
 
 
 def _bookmark_state(repository, *, item, selected) -> list[dict]:
@@ -225,12 +222,46 @@ def _test_status_state(repository, *, item, selected) -> list[dict]:
     ]
 
 
-#: What each current-state table holds once a build has installed the object.
+#: What each current-state table holds once a build has reset the object.
 _ESTABLISHED = {
     LOAD_STATUS.name: _load_status_state,
     BOOKMARK.name: _bookmark_state,
     TEST_STATUS.name: _test_status_state,
 }
+
+
+def view_state_establishment(
+    repository,
+    *,
+    items: Sequence[WeaverItemId],
+    selected_for_build: Iterable[WeaverDocumentId],
+) -> tuple[RuntimeStateEstablishment, ...]:
+    """The Views this build rebuilt, as the state a successful build leaves.
+
+    Rendered into a stage that follows the physical work, so a View that was
+    never created carries no Succeeded row.
+    """
+
+    scoped = sorted({item for item in items if not _is_builtin(item)}, key=str)
+    selected = set(selected_for_build)
+    rows = [
+        {
+            **_identity_row(identity),
+            "result": SUCCEEDED,
+            "started_datetime": BUILD_DATETIME_TOKEN,
+            "completed_datetime": BUILD_DATETIME_TOKEN,
+        }
+        for item in scoped
+        for identity in item_view_objects(repository, item=item)
+        if identity in selected
+    ]
+    if not rows:
+        return ()
+    return (
+        RuntimeStateEstablishment(
+            table=LOAD_STATUS.name, rows=tuple(sorted_rows(LOAD_STATUS, rows))
+        ),
+    )
 
 
 def _key(table, row: Row) -> tuple:
@@ -252,19 +283,19 @@ def render_runtime_state_reconciliation(
     *,
     catalogue_target,
     establishment: Sequence[RuntimeStateEstablishment] = (),
+    slug: str = RECONCILE_SLUG,
+    description: str = "reconcile runtime state before physical work",
+    index: int = 0,
 ) -> PlannedStage | None:
-    """The one stage that reconciles current state ahead of physical work.
-
-    One action carrying the whole intent: it is one lifecycle decision.
-    """
+    """One stage carrying a runtime-state decision, as one action."""
 
     if not any(one.rows for one in (*invalidation, *establishment)):
         return None
 
-    filename = f"{RECONCILE_SLUG}.runtime-state.json"
+    filename = f"{slug}.runtime-state.json"
     content = invalidation_payload(tuple(invalidation), tuple(establishment))
     action = InstallAction(
-        id=RECONCILE_SLUG,
+        id=slug,
         kind=RECONCILE_RUNTIME_STATE,
         resource_node_id=None,
         executor="runtime_state",
@@ -273,14 +304,12 @@ def render_runtime_state_reconciliation(
     )
     return PlannedStage(
         phase=CATALOGUE,
-        index=0,
-        slug=RECONCILE_SLUG,
-        description="reconcile runtime state before physical work",
+        index=index,
+        slug=slug,
+        description=description,
         payloads={filename: content},
         batches=(
-            BuildBatch(
-                id=RECONCILE_SLUG, target_id=catalogue_target.id, actions=(action,)
-            ),
+            BuildBatch(id=slug, target_id=catalogue_target.id, actions=(action,)),
         ),
     )
 
@@ -293,7 +322,9 @@ def _is_builtin(item: WeaverItemId) -> bool:
 
 __all__ = [
     "RECONCILE_SLUG",
+    "VIEW_STATE_SLUG",
     "render_runtime_state_reconciliation",
     "runtime_state_establishment",
     "runtime_state_invalidation",
+    "view_state_establishment",
 ]

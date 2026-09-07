@@ -442,10 +442,15 @@ They divide once, and everything else follows from the division:
 | a rebuild | rewrites the row | leaves it alone |
 | read by | a build, deciding what is obsolete | nothing |
 
-A current-state row describes one object's **current physical incarnation**. An
-installed object always has one. A build that rebuilds the object writes its new
-state over it; a build that stops installing it removes the row. History records
-that something happened, and a rebuild does not unhappen it.
+A current-state row describes one object's **current physical incarnation**. A
+build that rebuilds the object writes its new state over the row; a build that
+stops installing it removes the row. History records that something happened,
+and a rebuild does not unhappen it.
+
+Before any physical work a build sets a rebuilt table or folder to `Pending`
+with its bookmark at the sentinel, and a rebuilt validation to `Pending`. Once
+the physical work succeeds it records each View it built as `Succeeded`. A View
+is written afterwards because its build is what establishes it.
 
 `RuntimeTable` carries which of the two it is, and which population's rebuild ends
 a current-state row. Everything reads that declaration: the writer refuses a merge
@@ -604,11 +609,17 @@ was read, not whether rows moved.
 [Duration milliseconds]
 ```
 
-The current lifecycle state of each installed data object, on the same key as
-the bookmark. A build writes `Pending` for a rebuilt table or folder and
-`Succeeded` for a rebuilt View, and a load settles the first. A View has state
-here and no bookmark, so a changed View definition puts what is materialised from
-it behind. Health reads this table and never the bookmark.
+The current load state of each table, folder and View Weaver manages, on the
+same key as the bookmark.
+
+```text
+a rebuilt table or folder      Pending, until it loads
+a successful load              the result of that load
+a successfully built View      Succeeded, dated by that build
+```
+
+A View has state here and no bookmark, so a new View definition puts what is
+materialised from it behind.
 
 Logical identity only. Where the object is physically installed is the
 Installation's to say, and a status row that duplicated it would give a reader two

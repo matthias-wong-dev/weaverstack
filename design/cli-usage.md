@@ -741,27 +741,25 @@ weaver load Lakehouse/Sales Warehouse/Reporting
 reconstructs each selected table from zero; see
 [Central catalogue](catalogue.md).
 
-`--stale-only` runs only the objects `weaver health` does not report as green:
+`--stale` loads only objects that `weaver health` reports as not green:
 
 ```bash
-weaver load --stale-only
-weaver load Warehouse/Reporting --stale-only
-weaver load --stale-only --as-of 2026-09-05T00:00:00Z
-weaver load --stale-only --dry-run
+weaver load --stale
+weaver load Warehouse/Reporting --stale
 ```
 
-Both commands read the same assessment, so an object is selected when the report
-carries a Load finding for it: no load since it was built, a failed or blocked
-load, rejected rows, a load older than the threshold, or an ancestor loaded
-since. A Static object that has loaded is green at any age. See
-[Health](health.md).
+Use `--as-of` to change the freshness cutoff:
 
-`--as-of` is that threshold, an ISO-8601 instant carrying a zone. It defaults to
-24 hours before the load started and needs `--stale-only`. `--reload` and
-`--stale-only` are refused together.
+```bash
+weaver load --stale --as-of 2026-09-05T00:00:00Z
+```
+
+A green estate has nothing to load, so the command succeeds without running
+anything. `--dry-run` shows the selection without running it. `--as-of` requires
+`--stale`, and `--reload` and `--stale` cannot be used together.
 
 The named items bound the run, and the selected objects load in dependency
-order. A green estate selects nothing and the load succeeds.
+order. See [Health](health.md) for what makes an object green.
 
 ## Test
 

@@ -484,7 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     load.add_argument(
-        "--stale-only",
+        "--stale",
         action="store_true",
         help="Load only the objects whose load health is not green.",
     )
@@ -494,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "ISO-8601 instant with a zone, used as the health freshness "
             "threshold when selecting objects. Defaults to 24 hours ago. Only "
-            "valid with --stale-only."
+            "valid with --stale."
         ),
     )
     load.add_argument(
@@ -1351,7 +1351,7 @@ def _load_once(args: argparse.Namespace) -> int:
             fault_tolerant=args.fault_tolerant,
             dry_run=args.dry_run,
             reload=args.reload,
-            stale_only=args.stale_only,
+            stale=args.stale,
             as_of=args.as_of,
             session=_session(args),
         )
@@ -1380,7 +1380,7 @@ def _run_load(
     fault_tolerant: bool,
     dry_run: bool,
     reload: bool = False,
-    stale_only: bool = False,
+    stale: bool = False,
     as_of=None,
     session=None,
 ):
@@ -1395,7 +1395,7 @@ def _run_load(
             fault_tolerant=fault_tolerant,
             dry_run=dry_run,
             reload=reload,
-            stale_only=stale_only,
+            stale=stale,
             as_of=as_of,
             session=opened,
             **_command_context(workspace),

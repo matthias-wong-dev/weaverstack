@@ -67,40 +67,28 @@ runs a subject, and the graph holds it beside the node rather than as one.
 
 ---
 
-## One signal
+## Load freshness
 
-`_.LoadStatus` is the current lifecycle state of every installed data node.
+Load health reads the installed dependency graph and `_.LoadStatus`.
 
-```text
-a build    Pending for a rebuilt table or folder, bookmark at the sentinel
-           Succeeded for a rebuilt View, dated by the build
-a load     settles a table or a folder
-```
+A table or folder is not green when:
 
-An installed object always holds a row. `_.Bookmark` is the loader's execution
-cursor and health does not read it.
+- its own load state is not settled;
+- its last load is older than the freshness cutoff; or
+- an upstream table, folder or View settled after it loaded.
 
-**Overdue** compares `as_of` with the subject's completion instant.
+`as_of` is the cutoff, and it defaults to 24 hours before the report started.
 
-**Behind its sources** compares the same instant with its ancestors':
+A load settles a table or a folder. A successful build settles a View, so a new
+View definition puts everything materialised from it behind. Views are not load
+targets and `weaver load --stale` never selects one.
 
-```text
-established(ancestor) > established(node)   the node is behind
-ancestor established nothing                the node is behind
-```
+Settled means Succeeded or Rejected: both completed and moved rows. Pending,
+Failed, Error and Blocked settle nothing, and a descendant of one is not green.
 
-Established means Succeeded or Rejected. Pending, Failed, Error and Blocked
-establish nothing, so a descendant of one is not green. A View participates
-because a build establishes it, so a changed View definition puts everything
-materialised from it behind. A View is never a load subject and
-`weaver load --stale-only` never selects one.
-
-Ancestry is transitive over the whole managed graph, so a rebuilt table puts its
-whole downstream chain behind in one pass. Nodes with no lifecycle state, such
-as a shortcut destination or a table Weaver does not load, are crossed.
-
-A Test or Assumption is stale when a lifecycle ancestor was established after it
-passed.
+Dependency checks are transitive across the managed graph, so a rebuilt table
+puts its whole downstream chain behind in one pass. Objects with no load state,
+such as a shortcut destination or a table Weaver does not load, are crossed.
 
 ### Static objects
 
@@ -114,10 +102,10 @@ Static + rejected                    Amber
 Static + successfully loaded         Green
 ```
 
-Neither `as_of` nor an ancestor that moved is asked of one. A reference table
+Neither `as_of` nor an ancestor that settled is asked of one. A reference table
 loaded months ago stays Green.
 
-Its bookmark still counts against everything downstream. That is the lineage
+Its own load still counts against everything downstream. That is the lineage
 evidence a consumer needs:
 
 ```text
@@ -125,51 +113,11 @@ Static Ref.Country loaded January     Fact.Customer loaded February   Green
 Static Ref.Country loaded August      Fact.Customer loaded February   Amber
 ```
 
-A genuine reload of a reference table is exactly what puts its consumers behind.
+A reload of a reference table is what puts its consumers behind. A skip settles
+nothing and leaves `_.LoadStatus` alone.
 
 `is_static` reaches the evaluator on `InstalledNode`, carried from the Table or
-Folder dictionary row when the graph is built. Health reads the graph and never
-a dictionary row.
-
----
-
-## One Load assessment, two consumers
-
-`weaver health` and `weaver load --stale-only` read the same Load assessment:
-
-```text
-Catalogue
-    ↓
-InstalledDag
-    ↓
-LoadAssessment                     weaver.health.assess_load
-    ├── weaver health              LoadAssessment.to_health_section()
-    └── weaver load --stale-only   the subjects it does not call Green
-```
-
-A `LoadSubjectHealth` holds one loadable, its `_.LoadStatus` row and its
-findings. The findings are the answer: no findings is Green. Stale-only selects
-every subject that is not Green, and matches no finding code of its own.
-Subjects are loadables, so a View is never selected.
-
-`assess_load` takes the scope its caller names in. Health scopes by physical
-target and load by logical item. Ancestry outside the scope is read either way.
-
-`resolve_as_of` is shared too. An explicit value is a zoned ISO-8601 instant,
-normalised to UTC. An omitted one is `DEFAULT_AGE_HOURS` before the operation
-started. A load takes it only with `--stale-only`.
-
-A stale-only load widens its own catalogue read to include `_.LoadStatus`. There
-is no second read and no nested health operation, and it reads no inventories.
-Neither operation reads `_.Bookmark`.
-
-The selection then leaves the health domain. It reaches `load_dag` as a set of
-logical loadable identities, and the planner and the Runner apply their ordinary
-topology, barrier and readiness rules over it. A loadable left out is crossed
-the way a View is, so two selected loadables keep the order the graph gives
-them.
-
-An empty run plan is a success, so a green estate loads nothing and succeeds.
+Folder dictionary row when the graph is built.
 
 ---
 
@@ -271,7 +219,6 @@ Warehouse
 Catalogue
     ├─ dag()
     ├─ runtime status
-    ├─ bookmarks
     └─ load_history
     │
   health
@@ -318,9 +265,9 @@ starts a Livy session.
 ## Where to look in the code
 
 ```text
-weaver/health.py                the report model, the Load assessment and the evaluator, pure
+weaver/health.py                the report model and the evaluator, pure
 weaver/catalogue/history.py     the bounded window of _.Log and _.LoadStatistic
 weaver/operations/health.py     the operation that reads the estate into a Catalogue
-weaver/operations/load.py       the stale-only selection, from the same assessment
+weaver/operations/load.py       the objects `weaver load --stale` selects
 weaver_cli/main.py              the parser, the terminal renderer and --json
 ```

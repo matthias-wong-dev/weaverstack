@@ -1,19 +1,16 @@
-"""What a build leaves in the catalogue's current-state tables.
+"""What a build writes into the catalogue's current-state tables.
 
-A current-state row describes the current incarnation of one object: how far it
-has been loaded, how its last load ended, what its last validation found. A
-build decides two things about those rows.
+A current-state row describes one object's current incarnation: how far it has
+been loaded, how its last load ended, what its last validation found. A build
+decides two things about those rows.
 
 .. code-block:: text
 
     establish    the object is installed, so it has explicit state
-                 a rebuilt table or folder   Pending, bookmark at the sentinel
-                 a rebuilt View              Succeeded, dated by this build
-
     invalidate   the object is no longer installed, so its row goes
 
-An installed object always has a row. ``Pending`` is how Weaver says "not loaded
-yet", and the bookmark sentinel how it says no clean load has set a cursor.
+``Pending`` is how Weaver says "not run yet", and the bookmark sentinel how it
+says no clean load has set a cursor.
 
 The decision is structured intent, so two things can read it:
 
@@ -37,17 +34,16 @@ from ..errors import BuildError
 from .render import Row, render_delete_rows
 
 #: The intent document's version, carried in the payload a bundle freezes.
-#: Version 2 added ``establish``, the rows a build writes so an installed object
-#: always holds explicit lifecycle state.
+#: Version 2 added ``establish``, the rows a build writes.
 FORMAT_VERSION = 2
 
 
 @dataclass(frozen=True)
 class RuntimeStateInvalidation:
-    """One current-state table, and the keyed rows a build ends the life of.
+    """One current-state table, and the keyed rows a build removes.
 
-    ``rows`` carry the table's key columns and nothing else: the row is being
-    removed, so its other values are not part of the decision.
+    ``rows`` carry the table's key columns alone. The row is being removed, so
+    its other values are not part of the decision.
     """
 
     table: str
@@ -134,7 +130,7 @@ def read_invalidation(payload: bytes):
 def render_establishment(
     establishments: Iterable[RuntimeStateEstablishment],
 ) -> tuple[str, ...]:
-    """One scoped MERGE per table. A rebuilt object already has a row."""
+    """One scoped MERGE per table."""
 
     from .reconcile import InstallationScope, InstallationScopes
     from .render import render_merge
@@ -228,7 +224,7 @@ def with_established(
     rows: Mapping[Any, Mapping[str, tuple[Row, ...]]],
     establishments: Iterable[RuntimeStateEstablishment],
 ) -> dict[Any, dict[str, tuple[Row, ...]]]:
-    """These catalogue rows with every established row written over its key."""
+    """These catalogue rows, with each established row written over its key."""
 
     from ..declaration.model import WeaverItemId
     from .tables import SCOPE_ITEM_NAME, SCOPE_ITEM_TYPE

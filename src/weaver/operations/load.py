@@ -47,7 +47,7 @@ def load(
     fault_tolerant: bool = False,
     dry_run: bool = False,
     reload: bool = False,
-    stale_only: bool = False,
+    stale: bool = False,
     as_of: str | datetime | None = None,
     session=None,
 ) -> LoadRunReport:
@@ -70,10 +70,9 @@ def load(
     the authored load runs. It reaches what this request selected and nothing
     downstream.
 
-    ``stale_only`` runs the loadables whose Load health is not Green, from the
-    same :func:`weaver.health.assess_load` ``weaver health`` renders. Selecting
-    nothing is a success. ``as_of`` is that assessment's freshness instant, and
-    it is taken only with ``stale_only``.
+    ``stale`` runs the loadables ``weaver health`` reports as not green.
+    Selecting nothing is a success. ``as_of`` is the freshness cutoff that
+    selection measures against, and it requires ``stale``.
 
     ``workspace``, ``catalogue`` and ``environment`` are names, resolved as
     ``build`` resolves them; ``session`` is where an already-resolved
@@ -91,7 +90,7 @@ def load(
     started = datetime.now(timezone.utc)
     requested = requested_items(items, what="load")
     selected_names = _load_names(names)
-    _refuse_conflicting_modes(stale_only=stale_only, reload=reload, as_of=as_of)
+    _refuse_conflicting_modes(stale=stale, reload=reload, as_of=as_of)
     # Before the workspace is resolved, so a malformed instant is refused
     # without reaching a tenant.
     threshold = resolve_as_of(as_of, started=started)
@@ -122,29 +121,18 @@ def load(
                 fault_tolerant=fault_tolerant,
                 dry_run=dry_run,
                 reload=reload,
-                stale_only=stale_only,
+                stale=stale,
                 as_of=threshold,
             )
 
 
-def _refuse_conflicting_modes(*, stale_only: bool, reload: bool, as_of) -> None:
-    """Stop a request that names two loads at once.
+def _refuse_conflicting_modes(*, stale: bool, reload: bool, as_of) -> None:
+    """Stop a request that names two loads at once."""
 
-    Reload reconstructs what it selected, and stale-only runs the loadables
-    whose Load health is not Green.
-    """
-
-    if stale_only and reload:
-        raise CommandError(
-            "reload and stale-only select opposite work: reload reconstructs "
-            "what it names, and stale-only runs only what health does not call "
-            "green. Choose one."
-        )
-    if as_of is not None and not stale_only:
-        raise CommandError(
-            "as-of is the freshness instant stale-only selects against. Add "
-            "stale-only, or drop as-of."
-        )
+    if stale and reload:
+        raise CommandError("--reload and --stale cannot be used together")
+    if as_of is not None and not stale:
+        raise CommandError("--as-of requires --stale")
 
 
 def run_load(
@@ -157,7 +145,7 @@ def run_load(
     fault_tolerant: bool = False,
     dry_run: bool = False,
     reload: bool = False,
-    stale_only: bool = False,
+    stale: bool = False,
     as_of: datetime | None = None,
 ) -> LoadRunReport:
     """Run the catalogue graph through a Session.
@@ -166,9 +154,8 @@ def run_load(
     physical Lakehouse to attach to is recorded there, and a missing installation
     is therefore refused before Livy starts.
 
-    ``stale_only`` assesses the catalogue already read and runs the subjects
-    that are not Green. ``as_of`` is that assessment's freshness instant,
-    resolved by the caller.
+    ``stale`` assesses the catalogue this read and runs the subjects that are
+    not green. ``as_of`` is the freshness cutoff, resolved by the caller.
     """
 
     from ..run import (
@@ -194,7 +181,7 @@ def run_load(
                 workspace=workspace,
                 # Stale-only assesses Load health, which reads _.LoadStatus.
                 # The one catalogue read, widened to carry it.
-                tables=(*READABLE_TABLES, LOAD_STATUS) if stale_only else None,
+                tables=(*READABLE_TABLES, LOAD_STATUS) if stale else None,
             )
         )
         # An empty scope is every installed item, and it is resolved here: the
@@ -205,9 +192,7 @@ def run_load(
         )
 
     selected = None
-    if stale_only:
-        # The assessment `weaver health` renders. What is not Green is what
-        # runs, and nothing here reinterprets a finding.
+    if stale:
         selected = assess_load(
             catalogue,
             as_of=as_of if as_of is not None else resolve_as_of(None, started=started),

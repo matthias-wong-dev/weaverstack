@@ -1,12 +1,12 @@
-"""What ``weaver load --stale-only`` runs, and where that answer comes from.
+"""What ``weaver load --stale`` runs.
 
-There is one implementation of Load health, :func:`weaver.health.assess_load`.
-``weaver health`` renders it and a stale-only load executes the subjects it does
-not call Green. These tests are about that reuse. The freshness matrix belongs to
-``test_health_representation``, which holds it.
+``weaver health`` and a stale load both read
+:func:`weaver.health.assess_load`, so these tests compare what the report says
+with what the load selects. The freshness matrix itself belongs to
+``test_health_representation``.
 
 The estate is the one that module builds from rows, so both sides read the same
-catalogue and the comparison is between two consumers of one assessment.
+catalogue.
 """
 
 from __future__ import annotations
@@ -58,8 +58,8 @@ def planned(catalogue, *, items, selection) -> set[str]:
     }
 
 
-def stale_only_plan(catalogue, *, items, as_of=YESTERDAY) -> set[str]:
-    """The logical loadables a stale-only load of this estate would run."""
+def stale_plan(catalogue, *, items, as_of=YESTERDAY) -> set[str]:
+    """The logical loadables a stale load of this estate would run."""
 
     assessment = assess_load(catalogue, as_of=as_of, items=items)
     return planned(catalogue, items=items, selection=assessment.unsettled_identities())
@@ -87,17 +87,17 @@ def mixed_estate() -> _Estate:
 
 
 @weaver_test()
-def test_a_stale_only_plan_runs_exactly_the_subjects_health_does_not_call_green():
-    """The acceptance criterion: one assessment, two consumers, one answer."""
+def test_a_stale_plan_runs_exactly_the_subjects_health_does_not_call_green():
+    """The report and the load agree on which objects are not green."""
 
     catalogue = mixed_estate().catalogue()
     expected = selection_of(catalogue, items=(RAW_ITEM,))
 
-    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == expected
+    assert stale_plan(catalogue, items=(RAW_ITEM,)) == expected
 
 
 @weaver_test()
-def test_health_renders_the_same_assessment_a_stale_only_load_executes():
+def test_health_renders_the_same_assessment_a_stale_load_executes():
     catalogue = mixed_estate().catalogue()
     assessment = assess_load(catalogue, as_of=YESTERDAY)
     report = mixed_estate().report()
@@ -121,43 +121,35 @@ def test_the_subjects_of_an_assessment_are_every_loadable_in_scope():
 def test_a_freshly_rebuilt_object_has_no_load_status_and_is_selected():
     catalogue = mixed_estate().catalogue()
 
-    assert f"{RAW}/Tables/Sales.Rebuilt" in stale_only_plan(
-        catalogue, items=(RAW_ITEM,)
-    )
+    assert f"{RAW}/Tables/Sales.Rebuilt" in stale_plan(catalogue, items=(RAW_ITEM,))
 
 
 @weaver_test()
 def test_a_recently_loaded_object_is_green_and_is_not_selected():
     catalogue = mixed_estate().catalogue()
 
-    assert f"{RAW}/Tables/Sales.Fresh" not in stale_only_plan(
-        catalogue, items=(RAW_ITEM,)
-    )
+    assert f"{RAW}/Tables/Sales.Fresh" not in stale_plan(catalogue, items=(RAW_ITEM,))
 
 
 @weaver_test()
 def test_an_object_loaded_before_the_threshold_is_selected():
     catalogue = mixed_estate().catalogue()
 
-    assert f"{RAW}/Tables/Sales.Overdue" in stale_only_plan(
-        catalogue, items=(RAW_ITEM,)
-    )
+    assert f"{RAW}/Tables/Sales.Overdue" in stale_plan(catalogue, items=(RAW_ITEM,))
 
 
 @weaver_test()
 def test_a_static_object_that_loaded_stays_green_however_long_ago():
     catalogue = mixed_estate().catalogue()
 
-    assert f"{RAW}/Tables/Ref.Country" not in stale_only_plan(
-        catalogue, items=(RAW_ITEM,)
-    )
+    assert f"{RAW}/Tables/Ref.Country" not in stale_plan(catalogue, items=(RAW_ITEM,))
 
 
 @weaver_test()
 def test_a_static_object_that_has_never_loaded_is_selected():
     catalogue = mixed_estate().catalogue()
 
-    assert f"{RAW}/Tables/Ref.Region" in stale_only_plan(catalogue, items=(RAW_ITEM,))
+    assert f"{RAW}/Tables/Ref.Region" in stale_plan(catalogue, items=(RAW_ITEM,))
 
 
 @weaver_test()
@@ -170,7 +162,7 @@ def test_an_object_whose_managed_ancestor_moved_is_selected():
         .catalogue()
     )
 
-    selected = stale_only_plan(catalogue, items=(RAW_ITEM,))
+    selected = stale_plan(catalogue, items=(RAW_ITEM,))
 
     assert selected == {f"{RAW}/Tables/Sales.Derived"}
 
@@ -193,7 +185,7 @@ def test_every_non_green_load_outcome_is_selected(result, selected):
         .catalogue()
     )
 
-    plan = stale_only_plan(catalogue, items=(RAW_ITEM,))
+    plan = stale_plan(catalogue, items=(RAW_ITEM,))
 
     assert (f"{RAW}/Tables/Sales.Order" in plan) is selected
 
@@ -206,15 +198,14 @@ def test_an_explicit_as_of_moves_what_both_call_stale():
     catalogue = mixed_estate().catalogue()
     long_ago = at(500)
 
-    assert stale_only_plan(catalogue, items=(RAW_ITEM,), as_of=long_ago) == {
+    assert stale_plan(catalogue, items=(RAW_ITEM,), as_of=long_ago) == {
         f"{RAW}/Tables/Sales.Rebuilt",
         f"{RAW}/Tables/Ref.Region",
     }
 
 
 @weaver_test()
-def test_the_default_threshold_is_a_day_before_the_operation_started():
-    """Both operations resolve ``as_of`` through the one Health helper."""
+def test_the_default_cutoff_is_a_day_before_the_operation_started():
 
     from weaver.health import DEFAULT_AGE_HOURS, resolve_as_of
 
@@ -225,12 +216,12 @@ def test_the_default_threshold_is_a_day_before_the_operation_started():
     )
 
 
-# --- ordering, which stale-only never suspends --------------------------------
+# --- ordering, which stale never suspends --------------------------------
 
 
 @weaver_test()
 def test_two_selected_loadables_keep_their_ordering_edge():
-    """A selection is not ``names=``: the ordinary traversal still applies."""
+    """A selection preserves dependency ordering."""
 
     catalogue = (
         _Estate()
@@ -255,8 +246,8 @@ def test_two_selected_loadables_keep_their_ordering_edge():
 
 
 @weaver_test()
-def test_the_same_selection_written_as_names_carries_no_ordering():
-    """Why ``names=`` is not the mechanism: it is an operator override."""
+def test_names_runs_the_exact_nodes_without_dependency_ordering():
+    """``names=`` is an operator override: no expansion and no ordering."""
 
     catalogue = (
         _Estate()
@@ -284,9 +275,7 @@ def test_a_green_upstream_is_not_pulled_in_by_a_selected_descendant():
         .catalogue()
     )
 
-    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == {
-        f"{RAW}/Tables/Sales.Derived"
-    }
+    assert stale_plan(catalogue, items=(RAW_ITEM,)) == {f"{RAW}/Tables/Sales.Derived"}
 
 
 @weaver_test()
@@ -353,7 +342,7 @@ def test_an_endpoint_refresh_barrier_still_stands_between_two_targets():
 
 
 @weaver_test()
-def test_the_item_scope_still_bounds_a_stale_only_load():
+def test_the_item_scope_still_bounds_a_stale_load():
     catalogue = (
         _Estate()
         .table(f"{RAW}/Tables/Sales.Order", loaded=at(48), moved=at(48))
@@ -361,7 +350,7 @@ def test_the_item_scope_still_bounds_a_stale_only_load():
         .catalogue()
     )
 
-    assert stale_only_plan(catalogue, items=(CURATED_ITEM,)) == {
+    assert stale_plan(catalogue, items=(CURATED_ITEM,)) == {
         f"{CURATED}/Tables/Sales.Daily"
     }
 
@@ -393,21 +382,23 @@ def test_an_empty_selection_plans_nothing():
 
 
 @weaver_test()
-def test_as_of_without_stale_only_is_refused():
-    with pytest.raises(CommandError, match="as-of is the freshness instant"):
+def test_as_of_without_stale_is_refused():
+    with pytest.raises(CommandError, match="--as-of requires --stale"):
         weaver.load(RAW, as_of="2026-09-05T00:00:00Z")
 
 
 @weaver_test()
-def test_reload_with_stale_only_is_refused():
-    with pytest.raises(CommandError, match="reload and stale-only"):
-        weaver.load(RAW, stale_only=True, reload=True)
+def test_reload_with_stale_is_refused():
+    with pytest.raises(
+        CommandError, match="--reload and --stale cannot be used together"
+    ):
+        weaver.load(RAW, stale=True, reload=True)
 
 
 @weaver_test()
 def test_a_naive_as_of_is_refused_in_the_same_words_health_refuses_it():
     with pytest.raises(CommandError, match="must carry a timezone"):
-        weaver.load(RAW, stale_only=True, as_of="2026-09-05T00:00:00")
+        weaver.load(RAW, stale=True, as_of="2026-09-05T00:00:00")
 
 
 # --- the operation ------------------------------------------------------------
@@ -435,13 +426,13 @@ def dry_run(prepared, catalogue, **policy):
 
 
 @weaver_test()
-def test_a_stale_only_dry_run_reports_the_assessment_it_selected_from(prepared):
+def test_a_stale_dry_run_reports_the_assessment_it_selected_from(prepared):
     catalogue = mixed_estate().catalogue()
     report = dry_run(
         prepared,
         catalogue,
         items=(RAW_ITEM,),
-        stale_only=True,
+        stale=True,
         as_of=YESTERDAY,
     )
 
@@ -451,8 +442,8 @@ def test_a_stale_only_dry_run_reports_the_assessment_it_selected_from(prepared):
 
 
 @weaver_test()
-def test_a_stale_only_run_that_selects_nothing_succeeds(prepared):
-    """A healthy estate is nothing to do, which is a success and not a fault."""
+def test_a_stale_run_that_selects_nothing_succeeds(prepared):
+    """A green estate has nothing to load."""
 
     catalogue = (
         _Estate()
@@ -460,7 +451,7 @@ def test_a_stale_only_run_that_selects_nothing_succeeds(prepared):
         .catalogue()
     )
     report = dry_run(
-        prepared, catalogue, items=(RAW_ITEM,), stale_only=True, as_of=YESTERDAY
+        prepared, catalogue, items=(RAW_ITEM,), stale=True, as_of=YESTERDAY
     )
 
     assert report.nodes == ()
@@ -469,7 +460,7 @@ def test_a_stale_only_run_that_selects_nothing_succeeds(prepared):
 
 
 @weaver_test()
-def test_an_empty_run_plan_that_is_not_a_dry_run_also_succeeds():
+def test_an_empty_run_plan_succeeds():
     from weaver.run.result import RUN_SUCCEEDED, run_status
 
     assert run_status((), dry_run=False) == RUN_SUCCEEDED
@@ -477,8 +468,10 @@ def test_an_empty_run_plan_that_is_not_a_dry_run_also_succeeds():
 
 
 @weaver_test()
-def test_stale_only_widens_the_one_catalogue_read_to_load_status(prepared, monkeypatch):
-    """One read, widened. Not a second read and not a nested health operation."""
+def test_a_stale_load_reads_load_status_with_the_installed_catalogue(
+    prepared, monkeypatch
+):
+    """Stale selection needs ``_.LoadStatus``, so the catalogue read carries it."""
 
     catalogue = mixed_estate().catalogue()
     seen = {}
@@ -494,7 +487,7 @@ def test_stale_only_widens_the_one_catalogue_read_to_load_status(prepared, monke
         workspace=workspace,
         items=(RAW_ITEM,),
         dry_run=True,
-        stale_only=True,
+        stale=True,
         as_of=YESTERDAY,
     )
 
@@ -502,7 +495,7 @@ def test_stale_only_widens_the_one_catalogue_read_to_load_status(prepared, monke
 
 
 @weaver_test()
-def test_an_ordinary_load_reads_the_catalogue_it_always_read(prepared, monkeypatch):
+def test_an_ordinary_load_reads_no_load_status(prepared, monkeypatch):
     catalogue = mixed_estate().catalogue()
     seen = {}
 
@@ -521,8 +514,8 @@ def test_an_ordinary_load_reads_the_catalogue_it_always_read(prepared, monkeypat
 
 
 @weaver_test()
-def test_a_view_carries_lifecycle_state_and_is_never_a_load_subject():
-    """A View is established by a build. It runs nothing, so it runs nothing."""
+def test_a_view_carries_load_state_and_is_never_a_load_subject():
+    """A View has a LoadStatus row, and `--stale` never selects one."""
 
     catalogue = (
         _Estate()
@@ -536,9 +529,7 @@ def test_a_view_carries_lifecycle_state_and_is_never_a_load_subject():
     assert [str(subject.identity) for subject in assessment.subjects] == [
         f"{RAW}/Tables/Sales.Order"
     ]
-    assert f"{RAW}/Tables/Sales.Live" not in stale_only_plan(
-        catalogue, items=(RAW_ITEM,)
-    )
+    assert f"{RAW}/Tables/Sales.Live" not in stale_plan(catalogue, items=(RAW_ITEM,))
 
 
 @weaver_test()
@@ -551,7 +542,7 @@ def test_a_view_established_after_a_consumer_loaded_makes_it_stale():
         .catalogue()
     )
 
-    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == {f"{RAW}/Tables/Sales.B"}
+    assert stale_plan(catalogue, items=(RAW_ITEM,)) == {f"{RAW}/Tables/Sales.B"}
 
 
 @weaver_test()
@@ -564,12 +555,12 @@ def test_a_view_established_before_a_consumer_loaded_does_not():
         .catalogue()
     )
 
-    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == set()
+    assert stale_plan(catalogue, items=(RAW_ITEM,)) == set()
 
 
 @weaver_test()
 def test_a_pending_ancestor_makes_a_loaded_descendant_non_green():
-    """The closure the whole model rests on: A rebuilt puts B and C behind."""
+    """A rebuilt table puts its whole downstream chain behind."""
 
     catalogue = (
         _Estate()
@@ -581,7 +572,7 @@ def test_a_pending_ancestor_makes_a_loaded_descendant_non_green():
         .catalogue()
     )
 
-    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == {
+    assert stale_plan(catalogue, items=(RAW_ITEM,)) == {
         f"{RAW}/Tables/Sales.A",
         f"{RAW}/Tables/Sales.B",
         f"{RAW}/Tables/Sales.C",
@@ -589,8 +580,8 @@ def test_a_pending_ancestor_makes_a_loaded_descendant_non_green():
 
 
 @weaver_test()
-def test_a_missing_load_status_is_conservatively_non_green():
-    """An old catalogue that never wrote a row reads as unestablished."""
+def test_a_missing_load_status_is_read_as_pending():
+    """A missing row means the object has not settled since it was built."""
 
     catalogue = (
         _Estate()
@@ -600,15 +591,15 @@ def test_a_missing_load_status_is_conservatively_non_green():
         .catalogue()
     )
 
-    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == {
+    assert stale_plan(catalogue, items=(RAW_ITEM,)) == {
         f"{RAW}/Tables/Sales.A",
         f"{RAW}/Tables/Sales.B",
     }
 
 
 @weaver_test()
-def test_the_assessment_needs_no_bookmark_materialised():
-    """Health reads lifecycle state. A catalogue with no Bookmark table answers."""
+def test_the_assessment_reads_only_the_installed_graph_and_load_status():
+    """A catalogue holding no Bookmark rows answers the whole assessment."""
 
     estate = (
         _Estate()
@@ -619,9 +610,7 @@ def test_the_assessment_needs_no_bookmark_materialised():
     for tables in catalogue.rows.values():
         assert not tables.get(BOOKMARK.name)
 
-    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == {
-        f"{RAW}/Tables/Sales.Order"
-    }
+    assert stale_plan(catalogue, items=(RAW_ITEM,)) == {f"{RAW}/Tables/Sales.Order"}
 
 
 @weaver_test()
@@ -632,4 +621,4 @@ def test_a_static_object_that_loaded_stays_green_with_no_bookmark_read():
         .catalogue()
     )
 
-    assert stale_only_plan(catalogue, items=(RAW_ITEM,)) == set()
+    assert stale_plan(catalogue, items=(RAW_ITEM,)) == set()

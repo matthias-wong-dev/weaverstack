@@ -87,10 +87,8 @@ class RunRequest:
     name: str | None = None
     #: Exact installed loadables by ``Schema.Object``. ``load`` only.
     names: tuple[str, ...] = ()
-    #: The installed loadables this run may execute, by logical identity,
-    #: resolved before planning. An execution filter, carrying no reason for the
-    #: choice. ``None`` runs every loadable the requested items own. ``load``
-    #: only.
+    #: The installed loadables this run may execute, by logical identity.
+    #: ``None`` runs every loadable the requested items own. ``load`` only.
     selected: tuple | None = None
     #: A source file compiled and run without being installed. ``test`` only.
     file: str | None = None

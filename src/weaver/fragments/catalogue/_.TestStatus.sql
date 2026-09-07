@@ -2,15 +2,14 @@
 Table ID: _.TestStatus
 
 Description: >-
-  How each validation's most recent run ended. One row per validation for as
-  long as it is installed, as _.LoadStatus is for a data object: rebuilding
-  the validation returns it to Pending.
+  The current result of each Test and Assumption. Rebuilding a validation
+  sets it to Pending, and running it replaces Pending with the result.
 
 Lineage: >-
-  Maintained by Weaver's own build and validation lifecycle: a build returns
-  the validations it rebuilds to Pending and removes the rows of those it no
-  longer installs, and each settled validation records what it found. Never
-  authored and never projected from a declaration.
+  Maintained by Weaver's own build and validation lifecycle: a build sets a
+  rebuilt validation to Pending and removes the rows of those it no longer
+  installs, and each settled validation records what it found. Never authored
+  and never projected from a declaration.
 
 Dependencies: []
 
