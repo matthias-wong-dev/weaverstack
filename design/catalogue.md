@@ -759,8 +759,9 @@ the tables and then points at them, in that order.
 Ordering is necessary and not sufficient: a Warehouse creates a table in its own
 catalogue and publishes the Delta directory behind it a moment later, so a shortcut
 can arrive before there is anything to point at. Fabric validates a shortcut's
-target, and `weaver.fabric.shortcuts.create_shortcut` waits for a source it has just
-been asked to point at — bounded, so a source that will never appear still fails.
+target, and `weaver.fabric.shortcuts.create_shortcuts` sends the batch again for a
+source it has just been asked to point at. One deadline covers the batch, so a
+source that will never appear still fails.
 They are Weaver infrastructure rather than authored declarations, but publish the
 same `_.Shortcut` producer pair and `_.Registry` certification. That is what lets
 load planning reconstruct the relation after the source repository is gone. Their

@@ -62,13 +62,18 @@ def probe(
             """One shortcut, through the product path the installer uses."""
 
             made.append((path, name))
-            return resolver.create_onelake_shortcut(
+            return resolver.create_onelake_shortcuts(
                 target,
-                path=path,
-                name=name,
-                source=external_source.item,
-                source_path=source_path,
-            )
+                [
+                    {
+                        "path": path,
+                        "name": name,
+                        "source": external_source.item,
+                        "source_kind": None,
+                        "source_path": source_path,
+                    }
+                ],
+            )[0]
 
         def local(self, relative: str):
             return resolver.lakehouse(target) / relative
@@ -108,7 +113,9 @@ def test_a_table_shortcut_reaches_another_workspace(probe):
         source_path=external_estate.table_path("Customer"),
     )
 
-    assert made["status"] in (200, 201)
+    # Returned at all means the batch settled: bulk creation is long-running and
+    # the outcome is read after the operation, not from the accepting response.
+    assert made["path"] == f"Tables/{probe.schema}/Customer"
     assert f"Tables/{probe.schema}/Customer" in probe.shortcuts()
     assert probe.store.exists(probe.local(f"Tables/{probe.schema}/Customer/_delta_log"))
 

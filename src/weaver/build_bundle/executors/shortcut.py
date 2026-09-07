@@ -9,10 +9,12 @@ was generated, because it is not a target of this build and nothing here would
 know where to look.
 
 The pointer is a OneLake shortcut in the destination Lakehouse, created through
-the workspace's own API. A payload naming ``remove`` instead unpicks the pointers
-it lists, through the same API and for the same reason: a shortcut is a
-read-write window into the item it points at, so removing the name over storage
-or over Spark would reach that item's data.
+the workspace's own API. One action's shortcuts are created as one batch: one
+bulk create submission for the action rather than one create request per
+shortcut. A payload naming ``remove`` instead unpicks the pointers it lists,
+through the same API and for the same reason: a shortcut is a read-write window
+into the item it points at, so removing the name over storage or over Spark would
+reach that item's data.
 
 Which shortcut, over what, is settled in the manifest; how a name is made to
 point somewhere is the transport's business. A shortcut holds no data, so an
@@ -76,14 +78,23 @@ class ShortcutExecutor:
         if not frozen:
             return {"shortcuts": []}
 
-        shortcut = getattr(context.resolver, "create_onelake_shortcut", None)
-        if shortcut is None:
+        create = getattr(context.resolver, "create_onelake_shortcuts", None)
+        if create is None:
             raise InstallError(
                 f"shortcut action {action.id!r} cannot be materialised here: this "
                 "environment offers no way to create a OneLake shortcut"
             )
 
-        made = [self._shortcut(shortcut, each, context) for each in frozen]
+        # Every source is addressed before anything is sent, so the action
+        # makes one bulk create submission. Addressing a bound source reads
+        # storage to settle the spelling Fabric published it under, which stays
+        # per shortcut.
+        requested = [self._request(each, context) for each in frozen]
+        created = create(context.target.lakehouse, requested)
+        made = [
+            {"shortcut": each["shortcut"], "source": each["source"], **(detail or {})}
+            for each, detail in zip(frozen, created)
+        ]
 
         details: dict[str, Any] = {"shortcuts": made}
         # Every shortcut is created before anything waits, so the cost is one
@@ -148,8 +159,8 @@ class ShortcutExecutor:
             time.sleep(NAME_RELEASE_POLL_INTERVAL)
         return round(time.monotonic() - started, 1)
 
-    def _shortcut(self, shortcut, frozen: dict, context) -> dict:
-        """One shortcut, from whichever kind of source the plan froze."""
+    def _request(self, frozen: dict, context) -> dict:
+        """One batch member, from whichever kind of source the plan froze."""
 
         if "source_target_id" in frozen:
             source = context.resolved(frozen["source_target_id"])
@@ -169,18 +180,12 @@ class ShortcutExecutor:
             )
             source_path = frozen["source_path"]
             source_kind = None
-        made = shortcut(
-            context.target.lakehouse,
-            path=frozen["path"],
-            name=frozen["name"],
-            source=source_item,
-            source_kind=source_kind,
-            source_path=source_path,
-        )
         return {
-            "shortcut": frozen["shortcut"],
-            "source": frozen["source"],
-            **(made or {}),
+            "path": frozen["path"],
+            "name": frozen["name"],
+            "source": source_item,
+            "source_kind": source_kind,
+            "source_path": source_path,
         }
 
     def _await_addressable(

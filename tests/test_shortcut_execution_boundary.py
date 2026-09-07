@@ -83,7 +83,7 @@ def _local_context(tmp_path, *, resolver=None, store=None):
     if resolver is not None and hasattr(resolver, "inner"):
         resolver.inner = local_resolver
     chosen_store = store or FilesystemStore()
-    if resolver is not None and hasattr(resolver, "create_onelake_shortcut"):
+    if resolver is not None and hasattr(resolver, "create_onelake_shortcuts"):
         chosen_store.make_directory(
             local_resolver.tables_root(ItemRef("Raw_Dev")) / "Sales" / "Customer"
         )
@@ -121,15 +121,17 @@ def test_a_shortcut_naming_a_target_the_plan_never_declared_fails(tmp_path):
 
 
 class _ShortcutResolver:
-    """A resolver that can make a shortcut, as the Fabric ones can.
+    """A resolver that can make shortcuts, as the Fabric ones can.
 
     ``events`` is shared with the fake session so a test can prove the ordering
-    between creating shortcuts and reading them.
+    between creating shortcuts and reading them. ``batches`` records how the
+    requests arrived, because arriving as one batch is the contract.
     """
 
     def __init__(self, events=None):
         self.calls = []
         self.source_kinds = []
+        self.batches = []
         self.events = events if events is not None else []
         self.inner = None
 
@@ -138,13 +140,24 @@ class _ShortcutResolver:
             raise AttributeError(name)
         return getattr(self.inner, name)
 
-    def create_onelake_shortcut(
-        self, item, *, path, name, source, source_kind=None, source_path
-    ):
-        self.calls.append((item.name, path, name, source.name, source_path))
-        self.source_kinds.append(source_kind)
+    def create_onelake_shortcuts(self, item, shortcuts):
+        requests = list(shortcuts)
+        self.batches.append(len(requests))
         self.events.append("create")
-        return {"path": f"{path}/{name}"}
+        for request in requests:
+            self.calls.append(
+                (
+                    item.name,
+                    request["path"],
+                    request["name"],
+                    request["source"].name,
+                    request["source_path"],
+                )
+            )
+            self.source_kinds.append(request["source_kind"])
+        return tuple(
+            {"path": f"{request['path']}/{request['name']}"} for request in requests
+        )
 
 
 @weaver_test()
@@ -219,23 +232,30 @@ def test_the_fabric_transport_resolves_a_bound_warehouse_by_its_declared_kind(
     resolver = given_resolver(lakehouses=("Curated_LH",), warehouses=("Serving_WH",))
     captured = {}
 
-    def create(item, *, path, name, source, source_path, client):
-        captured.update(destination=item, source=source)
-        return {"path": f"{path}/{name}"}
+    def create(destination, requests, *, client):
+        captured.update(destination=destination, requests=requests)
+        return shortcuts.BulkShortcutResult(
+            created=tuple({"path": each.qualified} for each in requests),
+            calls=1,
+        )
 
-    monkeypatch.setattr(shortcuts, "create_shortcut", create)
+    monkeypatch.setattr(shortcuts, "create_shortcuts", create)
 
-    resolver.create_onelake_shortcut(
+    resolver.create_onelake_shortcuts(
         ItemRef("Curated_LH"),
-        path="Tables/Sales",
-        name="Customer",
-        source=ItemRef("Serving_WH"),
-        source_kind="warehouse",
-        source_path="Tables/Sales/Customer",
+        [
+            {
+                "path": "Tables/Sales",
+                "name": "Customer",
+                "source": ItemRef("Serving_WH"),
+                "source_kind": "warehouse",
+                "source_path": "Tables/Sales/Customer",
+            }
+        ],
     )
 
     assert captured["destination"].type == "Lakehouse"
-    assert captured["source"].type == "Warehouse"
+    assert captured["requests"][0].source.type == "Warehouse"
 
 
 class _Conf:
@@ -425,7 +445,7 @@ def test_an_environment_that_cannot_create_a_shortcut_says_so(tmp_path):
             self.inner = inner
 
         def __getattr__(self, name):
-            if name == "create_onelake_shortcut":
+            if name == "create_onelake_shortcuts":
                 raise AttributeError(name)
             return getattr(self.inner, name)
 
@@ -447,11 +467,11 @@ def _two_shortcuts() -> bytes:
 
 
 @weaver_test()
-def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
-    """The cost of a shortcut is the wait, so the waits must not serialise.
+def test_one_action_creates_its_shortcuts_as_one_batch(tmp_path, monkeypatch):
+    """The cost of a shortcut is the request, so the creates must not serialise.
 
-    Two shortcuts through one action means one discovery window rather than two,
-    only true if both shortcuts exist before the first read is attempted.
+    Two shortcuts through one action means one bulk create and one discovery
+    window. The second shortcut adds an entry to the batch.
     """
 
     monkeypatch.setattr(shortcut_module, "ADDRESSABLE_POLL_INTERVAL", 0)
@@ -466,10 +486,11 @@ def test_every_shortcut_is_created_before_anything_waits(tmp_path, monkeypatch):
         "Lakehouse/Curated/Tables/Sales.Landed",
         "Lakehouse/Curated/Tables/Sales.Second",
     ]
-    # Every create precedes every read: two shortcuts, one discovery window.
+    assert resolver.batches == [2]
+    # Creation precedes every read: two shortcuts, one discovery window.
     creates = [index for index, event in enumerate(events) if event == "create"]
     reads = [index for index, event in enumerate(events) if event == "read"]
-    assert len(creates) == 2 and reads
+    assert len(creates) == 1 and reads
     assert max(creates) < min(reads)
 
 

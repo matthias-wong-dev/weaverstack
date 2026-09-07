@@ -4,12 +4,18 @@ A shortcut is made where one is declared and none stands, and repointed where
 the pair it declares changed. What a build leaves alone it does not touch: which
 shortcuts an installation acts on is settled in
 :mod:`weaver.build_bundle.incremental`.
+
+Creation is bulk. Fabric takes a whole batch in one submission and reports each
+member's outcome separately, so a caller sends one bulk create for a batch rather
+than one create request per shortcut. The submission is long-running, so the
+interaction also polls the operation and reads its result.
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Sequence
 from urllib.parse import quote
 
 from ..errors import CommandError
@@ -37,6 +43,9 @@ SOURCE_POLL_INTERVAL = 5.0
 #: shortcut occupies the path, which it does not.
 _SOURCE_MISSING = "Target path doesn't exist"
 _PATH_OCCUPIED = "NameConflictError"
+
+#: What Fabric calls a member that was created.
+_SUCCEEDED = "Succeeded"
 
 
 @dataclass(frozen=True)
@@ -79,84 +88,199 @@ def list_shortcuts(item: Item, *, client: FabricClient) -> tuple[Shortcut, ...]:
     return tuple(sorted(found, key=lambda shortcut: shortcut.qualified))
 
 
-def create_shortcut(
-    destination: Item,
-    *,
-    path: str,
-    name: str,
-    source: Item,
-    source_path: str,
-    client: FabricClient,
-) -> dict:
-    """Point ``destination``'s ``path/name`` at ``source``'s ``source_path``.
+@dataclass(frozen=True)
+class ShortcutRequest:
+    """One member of a batch: where it appears, and what it points at."""
 
-    One request, under ``CreateOrOverwrite``: a shortcut holds no data, so an
-    existing name is repointed, and a build has to be able to run twice.
+    path: str
+    name: str
+    source: Item
+    source_path: str
 
-    Retried for one condition: Fabric validates the target, and a source created
-    earlier in this same build may not be published to OneLake yet. Waiting is
-    what lets one build create a thing and point at it; the deadline is what
-    makes a source that will never appear still fail.
+    @property
+    def qualified(self) -> str:
+        return f"{self.path}/{self.name}"
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """What a response member is matched back by, rooting normalised."""
+
+        return (self.path.strip("/"), self.name)
+
+
+@dataclass(frozen=True)
+class BulkShortcutResult:
+    """What one batch of shortcut creations produced.
+
+    ``created`` is one detail mapping per request, in request order. ``calls`` is
+    how many bulk requests it took, which is more than one where a source was
+    still being published when the batch reached Fabric.
     """
 
-    payload = {
-        "path": path,
-        "name": name,
+    created: tuple[dict, ...]
+    calls: int
+
+
+def create_shortcuts(
+    destination: Item,
+    requests: Sequence[ShortcutRequest],
+    *,
+    client: FabricClient,
+) -> BulkShortcutResult:
+    """Point each request's ``path/name`` at its source, in one bulk request.
+
+    Under ``CreateOrOverwrite``: a shortcut holds no data, so an existing name is
+    repointed, and a build has to be able to run twice.
+
+    Fabric settles each member separately, so a batch can come back part
+    succeeded. What succeeded is kept. A member whose source is not published to
+    OneLake yet is sent again, and only that member: a source created earlier in
+    this same build may not be readable when the batch reaches Fabric. One
+    deadline covers the whole batch, so a source that will never appear still
+    fails.
+    """
+
+    if not requests:
+        return BulkShortcutResult(created=(), calls=0)
+
+    endpoint = (
+        f"workspaces/{destination.workspace_id}/items/{destination.id}"
+        f"/shortcuts/bulkCreate?shortcutConflictPolicy={OVERWRITE_POLICY}"
+    )
+    made: dict[tuple[str, str], dict] = {}
+    pending = list(requests)
+    deadline: float | None = None
+    calls = 0
+
+    while pending:
+        try:
+            response = client.request(
+                "POST",
+                endpoint,
+                payload={
+                    "createShortcutRequests": [
+                        _request_payload(request) for request in pending
+                    ]
+                },
+                expected=(200, 202),
+            )
+        except FabricError as exc:
+            # The batch was refused as a whole, so no member has an outcome.
+            raise CommandError(
+                f"could not create {len(pending)} shortcut(s) in "
+                f"{destination.name}: {exc}"
+            ) from exc
+        members = _members(response, client=client)
+        calls += 1
+        retry: list[ShortcutRequest] = []
+        for request in pending:
+            member = members.get(request.key)
+            if member is None:
+                raise CommandError(
+                    f"Fabric reported no outcome for the shortcut "
+                    f"{request.qualified} in {destination.name}, so whether it "
+                    "was created is unknown."
+                )
+            if not member.get("error") and member.get("status") == _SUCCEEDED:
+                made[request.key] = _detail(destination, request)
+                continue
+            _refuse_permanent(destination, request, member)
+            retry.append(request)
+
+        if not retry:
+            break
+        if deadline is None:
+            deadline = time.monotonic() + SOURCE_TIMEOUT
+        if time.monotonic() >= deadline:
+            raise CommandError(
+                "could not create the shortcut(s) "
+                + ", ".join(sorted(request.qualified for request in retry))
+                + f" in {destination.name}: their sources did not appear in "
+                f"OneLake within {SOURCE_TIMEOUT:.0f}s. A source created in this "
+                "build is published a moment after it is made; one that never "
+                "appears is not there."
+            )
+        time.sleep(SOURCE_POLL_INTERVAL)
+        pending = retry
+
+    return BulkShortcutResult(
+        created=tuple(made[request.key] for request in requests),
+        calls=calls,
+    )
+
+
+def _request_payload(request: ShortcutRequest) -> dict:
+    return {
+        "path": request.path,
+        "name": request.name,
         "target": {
             "oneLake": {
-                "workspaceId": source.workspace_id,
-                "itemId": source.id,
-                "path": source_path,
+                "workspaceId": request.source.workspace_id,
+                "itemId": request.source.id,
+                "path": request.source_path,
             }
         },
     }
-    endpoint = (
-        f"workspaces/{destination.workspace_id}/items/{destination.id}/shortcuts"
-        f"?shortcutConflictPolicy={OVERWRITE_POLICY}"
-    )
-    source_deadline: float | None = None
-    while True:
-        try:
-            response = client.request("POST", endpoint, payload=payload)
-            break
-        except FabricError as exc:
-            message = str(exc)
-            if _PATH_OCCUPIED in message:
-                raise CommandError(
-                    f"{destination.name} already holds something at {path}/{name}, "
-                    "so a shortcut cannot be created there. Remove it, or point "
-                    "the shortcut at another name."
-                ) from exc
-            if _SOURCE_MISSING in message:
-                if source_deadline is None:
-                    source_deadline = time.monotonic() + SOURCE_TIMEOUT
-                if time.monotonic() >= source_deadline:
-                    raise CommandError(
-                        f"could not create the shortcut {path}/{name} in "
-                        f"{destination.name}: {source.name}/{source_path} did not "
-                        f"appear in OneLake within {SOURCE_TIMEOUT:.0f}s. A source "
-                        "created in this build is published a moment after it is "
-                        "made; one that never appears is not there."
-                    ) from exc
-                time.sleep(SOURCE_POLL_INTERVAL)
-                continue
-            raise CommandError(
-                f"could not create the shortcut {path}/{name} in "
-                f"{destination.name}: {exc}"
-            ) from exc
+
+
+def _detail(destination: Item, request: ShortcutRequest) -> dict:
     return {
-        "path": f"{path}/{name}",
+        "path": request.qualified,
         "in": destination.name,
-        "target": f"{source.name}/{source_path}",
-        # Reported because it says which contract Fabric honoured. Creating one
-        # shortcut is documented as synchronous, a 201 for a new name and a 200
-        # for one overwritten, while bulk creation is not; so a 202 here would
-        # mean the shortcut itself is still being made, which is a different
-        # thing from the destination Lakehouse not yet having registered it as a
-        # table. Only the second is what the readability wait in
-        # `weaver.build_bundle.executors.shortcut` exists for.
-        "status": response.status_code,
+        "target": f"{request.source.name}/{request.source_path}",
     }
+
+
+def _members(response, *, client: FabricClient) -> dict[tuple[str, str], dict]:
+    """Each member's outcome, keyed by the request Fabric echoes back.
+
+    Bulk creation is long-running, so a 202 carries the outcomes at the
+    operation's result address. Members are matched by the request Fabric echoes
+    back, because the order they return in is not part of the contract.
+    """
+
+    if response.status_code == 200:
+        body = response.json() if response.content else {}
+    else:
+        operation = response.headers.get("x-ms-operation-id")
+        client.wait_for_operation(response)
+        body = client.request(
+            "GET", f"operations/{operation}/result", expected=(200,)
+        ).json()
+    outcomes = {}
+    for member in body.get("value") or ():
+        echoed = member.get("request") or {}
+        key = (str(echoed.get("path") or "").strip("/"), echoed.get("name") or "")
+        outcomes[key] = member
+    return outcomes
+
+
+def _refuse_permanent(destination: Item, request: ShortcutRequest, member) -> None:
+    """Raise unless this member failed for a source still being published.
+
+    A failed member may carry no error body. Its status is then what there is to
+    report.
+    """
+
+    error = member.get("error") or {}
+    reported = (
+        " ".join(
+            part for part in (error.get("errorCode"), error.get("message")) if part
+        )
+        or f"Fabric reported status {member.get('status')!r}"
+    )
+    if _PATH_OCCUPIED in reported:
+        raise CommandError(
+            f"{destination.name} already holds something at {request.qualified}, "
+            "so a shortcut cannot be created there. Remove it, or point the "
+            "shortcut at another name."
+        )
+    if _SOURCE_MISSING in reported:
+        return
+    raise CommandError(
+        f"could not create the shortcut {request.qualified} in "
+        f"{destination.name}: {reported}"
+    )
 
 
 def delete_shortcut(
