@@ -41,9 +41,11 @@ from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     BOOKMARK,
+    BOOKMARK_SENTINEL_TEXT,
     LOAD_STATISTIC,
     LOAD_STATUS,
     LOG,
+    PENDING,
     TEST_STATUS,
 )
 from weaver.declaration import parse_item_repository
@@ -222,6 +224,15 @@ def _keys(catalogue, table) -> set[tuple]:
     }
 
 
+def _row(catalogue, table, key) -> dict:
+    """One current-state row by its ``(schema, object)`` key."""
+
+    for row in catalogue.table_rows(table):
+        if (row.get("schema_name"), row.get("object_name")) == key:
+            return row
+    raise AssertionError(f"{table.name} holds no row for {key}")
+
+
 def _rebuilt_table(tmp_path):
     return _changed(
         tmp_path,
@@ -246,16 +257,18 @@ def _rebuilt_validation(tmp_path):
 
 
 @weaver_test()
-def test_a_rebuilt_object_survives_and_its_current_state_does_not(estate, tmp_path):
-    """The object is still there; its bookmark and load status are not."""
+def test_a_rebuilt_object_survives_and_its_state_returns_to_unloaded(estate, tmp_path):
+    """The object is still there, and its state says nothing is loaded into it."""
 
     catalogue = _operational(estate)
 
     _bundle, reached, after = _applied(_rebuilt_table(tmp_path), catalogue, tmp_path)
 
     assert "DWG.Customer" in reached[item_id(ITEM)].tables
-    assert CUSTOMER not in _keys(after, BOOKMARK)
-    assert CUSTOMER not in _keys(after, LOAD_STATUS)
+    assert _row(after, LOAD_STATUS, CUSTOMER)["result"] == PENDING
+    assert _row(after, BOOKMARK, CUSTOMER)["bookmark_datetime"] == (
+        BOOKMARK_SENTINEL_TEXT
+    )
 
 
 @weaver_test()
@@ -298,7 +311,7 @@ def test_history_survives_the_rebuild(estate, tmp_path):
 
 
 @weaver_test()
-def test_a_rebuilt_validation_loses_its_status_and_nothing_else(estate, tmp_path):
+def test_a_rebuilt_validation_returns_to_pending_and_nothing_else(estate, tmp_path):
     """The other direction: rebuilding it says nothing about a bookmark."""
 
     catalogue = _operational(estate)
@@ -307,7 +320,7 @@ def test_a_rebuilt_validation_loses_its_status_and_nothing_else(estate, tmp_path
         _rebuilt_validation(tmp_path), catalogue, tmp_path
     )
 
-    assert RECONCILE not in _keys(after, TEST_STATUS)
+    assert _row(after, TEST_STATUS, RECONCILE)["result"] == PENDING
     assert _keys(after, BOOKMARK) == {CUSTOMER, CSV, OTHER}
     assert _keys(after, LOAD_STATUS) == {CUSTOMER, CSV, OTHER}
 

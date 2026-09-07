@@ -111,9 +111,10 @@ class LoadDag:
         catalogue: Catalogue,
         *,
         items: Sequence[WeaverItemId],
+        selection: Sequence[WeaverDocumentId] | None = None,
         names: Sequence[str] = (),
     ) -> "LoadDag":
-        return load_dag(catalogue.dag(), items=items, names=names)
+        return load_dag(catalogue.dag(), items=items, selection=selection, names=names)
 
     @property
     def by_id(self) -> Mapping[str, LoadNode]:
@@ -154,6 +155,7 @@ def load_dag(
     dag: InstalledDag,
     *,
     items: Sequence[WeaverItemId],
+    selection: Sequence[WeaverDocumentId] | None = None,
     names: Sequence[str] = (),
 ) -> LoadDag:
     """The physical load graph for one set of items.
@@ -164,10 +166,16 @@ def load_dag(
     selector carries its area, ``Tables/Schema.Object`` or
     ``Files/Schema.Object``, and a bare ``Schema.Object`` is accepted where it
     reaches one object.
+
+    ``selection`` is an execution filter over logical loadable identities,
+    decided by the caller. Only the loadables it names run. The traversal
+    continues through the ones it leaves out, so two selected loadables keep the
+    order the graph gives them. ``None`` selects every loadable the requested
+    items own.
     """
 
     requested = tuple(dict.fromkeys(items))
-    return _Planner(dag).plan(requested, names=tuple(names))
+    return _Planner(dag, selection=selection).plan(requested, names=tuple(names))
 
 
 class _Planner:
@@ -177,8 +185,14 @@ class _Planner:
     placement and the message stream all read the same installed graph.
     """
 
-    def __init__(self, dag: InstalledDag) -> None:
+    def __init__(
+        self,
+        dag: InstalledDag,
+        *,
+        selection: Sequence[WeaverDocumentId] | None = None,
+    ) -> None:
         self.dag = dag
+        self.selection = None if selection is None else frozenset(selection)
         self.messages: list[LoadMessage] = []
         self.nodes: dict[str, LoadNode] = {}
         self.edges: set[tuple[str, str]] = set()
@@ -229,7 +243,7 @@ class _Planner:
 
         available = self.dag.loadables(items=requested)
         if not names:
-            return available
+            return self._chosen(available)
 
         selected: list[InstalledNode] = []
         seen: set[str] = set()
@@ -242,7 +256,17 @@ class _Planner:
                 continue
             seen.add(node.node_id)
             selected.append(node)
-        return tuple(selected)
+        return self._chosen(tuple(selected))
+
+    def _chosen(self, nodes: tuple[InstalledNode, ...]) -> tuple[InstalledNode, ...]:
+        """The nodes the selection keeps."""
+
+        if self.selection is None:
+            return nodes
+        return tuple(node for node in nodes if node.identity in self.selection)
+
+    def _is_chosen(self, node: InstalledNode) -> bool:
+        return self.selection is None or node.identity in self.selection
 
     def _one_loadable(
         self, name: str, available: tuple[InstalledNode, ...]
@@ -426,8 +450,9 @@ class _Planner:
 
         Passing through non-loadable producers is what makes a view a conduit:
         it owns no load work, so it is not a node here, but a consumer still
-        depends on whatever fills the tables behind it. The traversal stops at
-        the requested-item boundary even so.
+        depends on whatever fills the tables behind it. A loadable the selection
+        leaves out is crossed the same way. The traversal stops at the
+        requested-item boundary even so.
         """
 
         found: dict[str, tuple[InstalledNode, object]] = {}
@@ -439,7 +464,7 @@ class _Planner:
                 if producer.item not in allowed_items:
                     continue
                 crossed = crossing or hop
-                if producer.is_loadable:
+                if producer.is_loadable and self._is_chosen(producer):
                     # A closer crossing wins: the barrier belongs to the hop that
                     # actually left the consumer's engine.
                     prior = found.get(producer.node_id)

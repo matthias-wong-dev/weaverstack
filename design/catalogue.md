@@ -439,14 +439,18 @@ They divide once, and everything else follows from the division:
 | tables | `_.Bookmark`, `_.LoadStatus`, `_.TestStatus` | `_.Log`, `_.LoadStatistic` |
 | holds | what is true of an object *now* | what happened |
 | written | merged on the object's identity | appended |
-| a rebuild | ends the row | leaves it alone |
+| a rebuild | rewrites the row | leaves it alone |
 | read by | a build, deciding what is obsolete | nothing |
 
 A current-state row describes one object's **current physical incarnation**. A
-build that drops and rebuilds the object, or stops installing it, ends that
-incarnation, and the row goes with it — deleted rather than reset, because absence
-already means what a sentinel would. History records that something happened, and
-a rebuild does not unhappen it.
+build that rebuilds the object writes its new state over the row; a build that
+stops installing it removes the row. History records that something happened,
+and a rebuild does not unhappen it.
+
+Before any physical work a build sets a rebuilt table or folder to `Pending`
+with its bookmark at the sentinel, and a rebuilt validation to `Pending`. Once
+the physical work succeeds it records each View it built as `Succeeded`. A View
+is written afterwards because its build is what establishes it.
 
 `RuntimeTable` carries which of the two it is, and which population's rebuild ends
 a current-state row. Everything reads that declaration: the writer refuses a merge
@@ -558,16 +562,16 @@ incarnation.** Absence means none has, and readers coalesce it to
 new object                     no row
 first clean load               MERGE inserts the instant
 later clean load               MERGE updates it
-dropped and rebuilt            DELETE, before the physical work
-reloaded                       DELETE, before the clear
+dropped and rebuilt            MERGE to the sentinel, before the physical work
+reloaded                       MERGE to the sentinel, before the clear
 no longer declared or loaded   DELETE
 unchanged object               left alone
 ```
 
 The governing rule: too old means replay, too advanced can omit data, so prefer
-replay. That is why the invalidation runs **before** any physical work — an absent
-bookmark makes the next load read the whole source, while one left in place over a
-recreated table makes it read almost nothing.
+replay. That is why the reconciliation runs **before** any physical work. A
+sentinel makes the next load read the whole source, while a cursor left in place
+over a recreated table makes it read almost nothing.
 
 Two things read it, and neither reads the target's contents. An incremental read
 asks its source for changes after it. A `Static` object is skipped once the row is
@@ -605,9 +609,17 @@ was read, not whether rows moved.
 [Duration milliseconds]
 ```
 
-How each loadable object's most recent load ended. Current state, on the same key
-as the bookmark: an absent row means no load has settled since the object was last
-built.
+The current load state of each table, folder and View Weaver manages, on the
+same key as the bookmark.
+
+```text
+a rebuilt table or folder      Pending, until it loads
+a successful load              the result of that load
+a successfully built View      Succeeded, dated by that build
+```
+
+A View has state here and no bookmark, so a new View definition puts what is
+materialised from it behind.
 
 Logical identity only. Where the object is physically installed is the
 Installation's to say, and a status row that duplicated it would give a reader two
@@ -655,19 +667,19 @@ for telemetry alone.
 Reload reconstructs a selected table from zero. Before the authored load runs:
 
 1. `_.LoadStatus` is set to `Pending`.
-2. The object's `_.Bookmark` row is removed.
+2. The object's `_.Bookmark` goes to `BOOKMARK_SENTINEL`.
 3. The target table is cleared.
 
-A missing `_.Bookmark` row reads as `BOOKMARK_SENTINEL`. The sentinel is not
-stored.
+An installed loadable keeps exactly one bookmark row. The sentinel is what says
+no clean load has established a cursor for the current incarnation.
 
 Reload is local to the selected objects. It does not reload or invalidate
 dependent objects. `--name Sales.Order` reloads one table; an item with no name
 filter reloads every table it owns. A folder is refused before anything runs.
 
-If reload fails after the target is cleared, the bookmark remains absent and
-`_.LoadStatus` records the failed execution, so a later load cannot continue from
-the previous bookmark.
+If reload fails after the target is cleared, the bookmark stands at the sentinel
+and `_.LoadStatus` records the failed execution, so a later load cannot continue
+from the previous cursor.
 
 `_.LoadStatistic.[Is reload]` records whether the execution was requested as a
 reload, including one that failed.
@@ -692,8 +704,8 @@ The surfaces are `weaver load --reload`, `weaver.load(..., reload=True)`,
 ```
 
 How each validation's most recent run ended, keyed the way `_.LoadStatus` is.
-Rebuilding the validation ends the incarnation and the row goes with it;
-rebuilding a loadable object says nothing about it, and the reverse holds too.
+Rebuilding the validation returns it to `Pending`; rebuilding a loadable object
+says nothing about it, and the reverse holds too.
 
 `Failure count` is meaningful only for a validation that was evaluated. One that
 could not run found nothing, and its count is null.

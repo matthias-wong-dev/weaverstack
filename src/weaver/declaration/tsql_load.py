@@ -302,15 +302,23 @@ def _static_gate(contract: LoadContract) -> str:
         succeeded="cast(1 as bit)", is_static_skip="cast(1 as bit)"
     )
     return (
-        "-- Static: loaded once. A bookmark row means a clean load has run for\n"
-        "-- this incarnation, so this reports a successful load of nothing. A\n"
-        "-- reload asks for it again.\n"
-        "if @reload = 0 and @weaver_bookmark is not null\n"
+        "-- Static: loaded once. A bookmark past the sentinel means a clean load\n"
+        "-- has run for this incarnation, so this reports a successful load of\n"
+        "-- nothing. A reload asks for it again.\n"
+        f"if @reload = 0 and @weaver_bookmark > {_sentinel_literal()}\n"
         "begin\n"
         f"{_indent(seeded, 4)}\n"
         "    return;\n"
         "end;"
     )
+
+
+def _sentinel_literal() -> str:
+    """The bookmark sentinel, as T-SQL compares it."""
+
+    from ..catalogue.tables import BOOKMARK_SENTINEL_TEXT
+
+    return f"convert(datetime2(6), '{BOOKMARK_SENTINEL_TEXT}')"
 
 
 def _bookmark_key(document: SesDocument, item, contract: LoadContract) -> str:
@@ -325,8 +333,10 @@ def _bookmark_key(document: SesDocument, item, contract: LoadContract) -> str:
     The identity is baked in: the procedure is one object's, so which row it
     means is a fact about the procedure rather than an argument to it.
 
-    No row leaves the local null, and that is the answer rather than a missing
-    one: no clean load has run since this object's current physical incarnation.
+    An installed loadable holds one row for as long as it is installed, and the
+    sentinel is what says no clean load has established a cursor for its current
+    incarnation. A null local means the same, for a catalogue written before the
+    row was always there.
     """
 
     if not contract.static:

@@ -67,36 +67,28 @@ runs a subject, and the graph holds it beside the node rather than as one.
 
 ---
 
-## Two clocks
+## Load freshness
 
-Freshness is two questions, so health reads two instants.
+Load health reads the installed dependency graph and `_.LoadStatus`.
 
-**Overdue** is a question about the wall clock. `as_of` is compared with
-`_.LoadStatus`'s completion instant, and a load that settled before it reads as
-stale. `as_of` defaults to 24 hours before the report started.
+A table or folder is not green when:
 
-**Behind its sources** is a question about data movement. `_.Bookmark` is
-compared instead, on both sides:
+- its own load state is not settled;
+- its last load is older than the freshness cutoff; or
+- an upstream table, folder or View settled after it loaded.
 
-```text
-bookmark(ancestor) > bookmark(node)   →  the node is behind
-```
+`as_of` is the cutoff, and it defaults to 24 hours before the report started.
 
-A bookmark advances for a clean load that established an instant. A rejecting
-load keeps the one it had, and a Static skip moves nothing, so neither reads as
-newer data. A failed, errored or blocked load establishes nothing and advances
-nothing.
+A load settles a table or a folder. A successful build settles a View, so a new
+View definition puts everything materialised from it behind. Views are not load
+targets and `weaver load --stale` never selects one.
 
-That is why a Static object skipped at 09:00 does not make a descendant loaded
-at 08:00 stale: its `_.LoadStatus` says the load succeeded a moment ago, and its
-bookmark says its data stood still.
+Settled means Succeeded or Rejected: both completed and moved rows. Pending,
+Failed, Error and Blocked settle nothing, and a descendant of one is not green.
 
-Ancestry is transitive over the whole managed graph, so it reaches through a
-View, through a logical shortcut, and across items.
-
-A Test or Assumption is stale when managed data in its ancestry moved after it
-passed. Time alone does not make a validation stale: its freshness is tied to
-whether the data it reads moved.
+Dependency checks are transitive across the managed graph, so a rebuilt table
+puts its whole downstream chain behind in one pass. Objects with no load state,
+such as a shortcut destination or a table Weaver does not load, are crossed.
 
 ### Static objects
 
@@ -110,10 +102,10 @@ Static + rejected                    Amber
 Static + successfully loaded         Green
 ```
 
-Neither `as_of` nor an ancestor that moved is asked of one. A reference table
+Neither `as_of` nor an ancestor that settled is asked of one. A reference table
 loaded months ago stays Green.
 
-Its bookmark still counts against everything downstream. That is the lineage
+Its own load still counts against everything downstream. That is the lineage
 evidence a consumer needs:
 
 ```text
@@ -121,11 +113,11 @@ Static Ref.Country loaded January     Fact.Customer loaded February   Green
 Static Ref.Country loaded August      Fact.Customer loaded February   Amber
 ```
 
-A genuine reload of a reference table is exactly what puts its consumers behind.
+A reload of a reference table is what puts its consumers behind. A skip settles
+nothing and leaves `_.LoadStatus` alone.
 
 `is_static` reaches the evaluator on `InstalledNode`, carried from the Table or
-Folder dictionary row when the graph is built. Health reads the graph and never
-a dictionary row.
+Folder dictionary row when the graph is built.
 
 ---
 
@@ -227,7 +219,6 @@ Warehouse
 Catalogue
     ├─ dag()
     ├─ runtime status
-    ├─ bookmarks
     └─ load_history
     │
   health
@@ -252,7 +243,7 @@ consults and no others:
 
 ```text
 Installation  Registry  TableDictionary  FolderDictionary  TestDictionary
-Dependency    Shortcut  Bookmark         LoadStatus        TestStatus
+Dependency    Shortcut  LoadStatus       TestStatus
 ```
 
 The dictionaries describing an object's columns and keys are absent: nothing
@@ -277,5 +268,6 @@ starts a Livy session.
 weaver/health.py                the report model and the evaluator, pure
 weaver/catalogue/history.py     the bounded window of _.Log and _.LoadStatistic
 weaver/operations/health.py     the operation that reads the estate into a Catalogue
+weaver/operations/load.py       the objects `weaver load --stale` selects
 weaver_cli/main.py              the parser, the terminal renderer and --json
 ```

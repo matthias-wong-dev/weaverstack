@@ -31,6 +31,15 @@ from weaver.declaration.model import LAKEHOUSE, WAREHOUSE, WeaverItemId
 from weaver.runtime.load_contract import FolderLoadContract, LoadContract
 from weaver.runtime.load_result import RESULT_COLUMNS
 
+#: The gate the generated procedure carries, as the installer's nested string
+#: spells it: a load procedure is built inside a string literal, so the
+#: sentinel's quotes are doubled.
+STATIC_GATE = (
+    "if @reload = 0 and @weaver_bookmark > "
+    "convert(datetime2(6), ''1900-01-01 00:00:00.000000'')"
+)
+
+
 PYTHON_TABLE = '''\
 """
 Table ID: Sales.Country
@@ -279,18 +288,18 @@ def test_a_static_warehouse_load_returns_early_when_it_has_a_bookmark_row():
     driving.
 
     The bookmark decides it, not the target's contents: ``Static`` means "load
-    this once", and the bookmark is the record of whether that has happened. A
-    table somebody populated by hand is still loaded, and a table a clean load
-    emptied is still skipped.
+    this once", and a bookmark past the sentinel is the record of whether that
+    has happened. A table somebody populated by hand is still loaded, and a
+    table a clean load emptied is still skipped.
     """
 
     payload = _procedure(static=True)
 
-    assert "if @reload = 0 and @weaver_bookmark is not null" in payload
+    assert STATIC_GATE in payload
     assert "return;" in payload
     assert "if exists (select 1 from [Sales].[Country])" not in payload
-    # No stored sentinel: absence is the answer, so nothing coalesces to 1900.
-    assert "1900-01-01" not in payload
+    # The sentinel is the comparison, so it appears once, in the gate.
+    assert payload.count("1900-01-01") == 1
 
 
 @weaver_test()
@@ -316,9 +325,7 @@ def test_the_static_gate_precedes_the_staging_query():
 
     payload = _procedure(static=True)
 
-    assert payload.index(
-        "if @reload = 0 and @weaver_bookmark is not null"
-    ) < payload.index("Data transformation")
+    assert payload.index(STATIC_GATE) < payload.index("Data transformation")
 
 
 @weaver_test()
@@ -327,9 +334,7 @@ def test_the_bookmark_is_read_before_the_static_gate_that_reads_it():
 
     payload = _procedure(static=True)
 
-    assert payload.index("select @weaver_bookmark =") < payload.index(
-        "if @reload = 0 and @weaver_bookmark is not null"
-    )
+    assert payload.index("select @weaver_bookmark =") < payload.index(STATIC_GATE)
 
 
 @weaver_test()
@@ -342,7 +347,7 @@ def test_a_reload_passes_the_static_gate():
 
     payload = _procedure(static=True)
 
-    assert "if @reload = 0 and @weaver_bookmark is not null" in payload
+    assert STATIC_GATE in payload
 
 
 @weaver_test()
@@ -391,7 +396,7 @@ def test_a_non_static_warehouse_load_carries_no_gate_at_all():
     payload = _procedure(static=False)
 
     assert "Not static: this object is loaded on every run." in payload
-    assert "if @reload = 0 and @weaver_bookmark is not null" not in payload
+    assert STATIC_GATE not in payload
 
 
 @weaver_test()

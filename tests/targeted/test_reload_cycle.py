@@ -6,7 +6,7 @@ ordinary authored load against changed state:
 .. code-block:: text
 
     _.LoadStatus  → Pending
-    _.Bookmark    → the row is removed
+    _.Bookmark    → the sentinel
     the target    → emptied
     read()        → runs, against both
 
@@ -211,8 +211,8 @@ def test_the_state_is_ended_and_durable_before_the_target_is_cleared():
     """The barrier the whole mode rests on.
 
     A bookmark left standing over an emptied target sends the next incremental
-    read at a window nothing holds, so the status is written and flushed and the
-    bookmark row removed, all before the clear.
+    read at a window nothing holds, so the status and the sentinel are written
+    and flushed before the clear.
     """
 
     table, _catalogue, events = _built(_table())
@@ -222,8 +222,8 @@ def test_the_state_is_ended_and_durable_before_the_target_is_cleared():
     order = _kinds(events)
     assert order[:4] == [
         f"update {LOAD_STATUS.name}",
+        f"update {BOOKMARK.name}",
         "flush",
-        f"delete {BOOKMARK.name}",
         "clear",
     ]
 
@@ -271,21 +271,22 @@ def test_an_ordinary_load_clears_nothing_and_keeps_its_bookmark():
 
 
 @weaver_test()
-def test_the_reset_removes_the_bookmark_row():
-    """One physical shape for "no clean load has established progress".
+def test_the_reset_returns_the_bookmark_to_the_sentinel():
+    """One physical shape for "no clean load has established a cursor".
 
-    An absent row, which is what a build's invalidation leaves. No sentinel is
-    stored: the sentinel is what an absent row reads as, and storing it would
-    give the estate two ways to say the same thing.
+    The sentinel, in a row that stays. An installed loadable keeps exactly one
+    bookmark row, so nothing has to read an absence as a value.
     """
 
     table, catalogue, _events = _built(_table())
 
     table.load(reload=True)
 
-    (removed,) = catalogue.writer.removed(BOOKMARK.name)
-    assert removed == identity_row("DWG.Customer")
-    assert "bookmark_datetime" not in removed
+    assert catalogue.writer.removed(BOOKMARK.name) == []
+    assert catalogue.writer.rows(BOOKMARK.name)[0] == {
+        **identity_row("DWG.Customer"),
+        "bookmark_datetime": BOOKMARK_SENTINEL,
+    }
 
 
 @weaver_test()
@@ -299,7 +300,9 @@ def test_a_clean_reload_then_advances_the_bookmark_as_any_load_does():
 
     table.load(reload=True)
 
-    (advanced,) = catalogue.writer.rows(BOOKMARK.name)
+    # The sentinel the reset wrote, then the instant the clean load established.
+    reset, advanced = catalogue.writer.rows(BOOKMARK.name)
+    assert reset["bookmark_datetime"] == BOOKMARK_SENTINEL
     assert advanced["bookmark_datetime"] > BOOKMARK_SENTINEL
     assert catalogue.bookmark(identity("DWG.Customer")) > BOOKMARK_SENTINEL
 
@@ -434,12 +437,12 @@ def test_an_ordinary_load_still_skips_a_loaded_static_table():
 
 
 @weaver_test()
-def test_a_failed_reload_leaves_no_bookmark_and_no_settled_success():
+def test_a_failed_reload_leaves_the_sentinel_and_no_settled_success():
     """The retry has to be a reload too, and the state is what says so.
 
     The target was emptied, so what must not survive is the account of it as
-    loaded. The bookmark row is gone and nothing wrote another, so the next
-    ordinary load reads the sentinel and asks its source for everything.
+    loaded. The bookmark stands at the sentinel and nothing advanced it, so the
+    next ordinary load asks its source for everything.
     """
 
     table, catalogue, events = _built(_table(failing=RuntimeError("the cluster went")))
@@ -448,8 +451,10 @@ def test_a_failed_reload_leaves_no_bookmark_and_no_settled_success():
         table.load(reload=True)
 
     assert "clear" in _kinds(events)
-    assert catalogue.writer.removed(BOOKMARK.name) == [identity_row("DWG.Customer")]
-    assert catalogue.writer.rows(BOOKMARK.name) == []
+    assert catalogue.writer.removed(BOOKMARK.name) == []
+    assert [
+        row["bookmark_datetime"] for row in catalogue.writer.rows(BOOKMARK.name)
+    ] == [BOOKMARK_SENTINEL]
     assert catalogue.bookmark(identity("DWG.Customer")) == BOOKMARK_SENTINEL
     assert [row["result"] for row in catalogue.writer.rows(LOAD_STATUS.name)] == [
         "pending",

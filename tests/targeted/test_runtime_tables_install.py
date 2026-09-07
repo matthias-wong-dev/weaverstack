@@ -1,7 +1,7 @@
 """What a build decides about the catalogue's runtime tables.
 
 Three claims, separate because they fail separately: which objects can hold a
-bookmark, which rows a build ends the life of, and where the action sits.
+bookmark, what state a build leaves in each table, and where the action sits.
 
 Read as structured intent rather than as SQL text, so a renaming of a keyword
 does not look like a change of lifecycle. The one narrow claim about the DML is
@@ -30,10 +30,20 @@ from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
 from weaver.build_bundle import WarehouseBinding, generate_item_build_bundle
-from weaver.build_bundle.runtime_tables import runtime_state_invalidation
+from weaver.build_bundle.runtime_tables import (
+    RECONCILE_SLUG,
+    VIEW_STATE_SLUG,
+    runtime_state_establishment,
+    runtime_state_invalidation,
+    view_state_establishment,
+)
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     BOOKMARK,
+    BOOKMARK_SENTINEL_TEXT,
+    CURRENT_STATE_TABLES,
+    LOAD_STATUS,
+    PENDING,
     STANDARD_SURFACE_TABLES,
 )
 from weaver.declaration import parse_item_repository
@@ -141,11 +151,11 @@ def _bundle(repository, tmp_path, *, catalogue=None, inventories=None):
     )
 
 
-def _bookmark_actions(bundle):
+def _runtime_state_actions(bundle, slug: str = RECONCILE_SLUG):
     return [
         (sequence, action)
         for sequence, _batch, action in bundle.plan.actions()
-        if action.kind == "reconcile_runtime_state"
+        if action.kind == "reconcile_runtime_state" and action.id == slug
     ]
 
 
@@ -161,7 +171,7 @@ def _invalidated(invalidation, table: str = BOOKMARK.name) -> set[tuple]:
 
 
 def _decided(repository, *, items, selected_for_build, catalogue):
-    """What a build over these inputs decides about ``_.Bookmark``."""
+    """Which ``_.Bookmark`` rows a build over these inputs removes."""
 
     return _invalidated(
         runtime_state_invalidation(
@@ -170,6 +180,17 @@ def _decided(repository, *, items, selected_for_build, catalogue):
             selected_for_build=selected_for_build,
             catalogue=catalogue,
         )
+    )
+
+
+def _established(repository, *, items, selected_for_build, table=BOOKMARK.name):
+    """Which rows a build over these inputs writes into ``table``."""
+
+    return _invalidated(
+        runtime_state_establishment(
+            repository, items=items, selected_for_build=selected_for_build
+        ),
+        table,
     )
 
 
@@ -314,39 +335,32 @@ def test_a_build_of_objects_that_hold_no_bookmark_says_nothing_either(estate):
 
 
 @weaver_test()
-def test_a_catalogue_holding_no_rows_has_nothing_to_invalidate(estate, tmp_path):
-    """A first build, and the one case that needed a special gate before.
+def test_a_first_build_removes_nothing_and_establishes_everything(estate, tmp_path):
+    """The table arrives with this bundle, so the read found no rows to remove.
 
-    The table arrives with this bundle, so the read found no rows and there is
-    nothing to remove. Nothing is skipped for a stated reason: the action is
-    absent because the set of obsolete rows is empty.
+    The build still writes state: every object it installs gets a row saying
+    where it stands.
     """
 
     bundle = _bundle(estate, tmp_path)
 
-    assert _bookmark_actions(bundle) == []
     assert bundle.plan.runtime_state == ()
-
-
-@weaver_test()
-def test_a_rebuild_ends_the_incarnation_of_what_it_replaces(estate, tmp_path):
-    """Every loadable object rebuilt, so every row it had goes."""
-
-    bundle = _bundle(
-        estate,
-        tmp_path,
-        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
-    )
-
-    assert _invalidated(bundle.plan.runtime_state) == {
+    assert _runtime_state_actions(bundle)
+    assert _invalidated(bundle.plan.runtime_state_established) == {
         ("Lakehouse", "Sales", "Tables/DWG", "Customer"),
+        ("Lakehouse", "Sales", "Tables/DWG", "Summary"),
         ("Lakehouse", "Sales", "Files/Raw", "CustomerCsv"),
+        ("Warehouse", "Reporting", "Sales", "Customer"),
     }
 
 
 @weaver_test()
-def test_only_current_state_is_invalidated(estate, tmp_path):
-    """``_.Bookmark`` is current state. Nothing historical is named."""
+def test_a_rebuild_returns_what_it_replaces_to_the_sentinel(estate, tmp_path):
+    """Every loadable object rebuilt, so every cursor goes back to the start.
+
+    The row stays. An installed loadable always has one, and the sentinel is
+    what says no clean load has established a cursor for this incarnation.
+    """
 
     bundle = _bundle(
         estate,
@@ -354,7 +368,33 @@ def test_only_current_state_is_invalidated(estate, tmp_path):
         catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
 
-    assert {one.table for one in bundle.plan.runtime_state} == {BOOKMARK.name}
+    assert bundle.plan.runtime_state == ()
+    rows = {
+        (row["object_name"], row["bookmark_datetime"])
+        for one in bundle.plan.runtime_state_established
+        if one.table == BOOKMARK.name
+        for row in one.rows
+    }
+    assert rows == {
+        ("Customer", BOOKMARK_SENTINEL_TEXT),
+        ("Summary", BOOKMARK_SENTINEL_TEXT),
+        ("CustomerCsv", BOOKMARK_SENTINEL_TEXT),
+    }
+
+
+@weaver_test()
+def test_only_current_state_is_reconciled(estate, tmp_path):
+    """Current state only. Nothing historical is named on either side."""
+
+    bundle = _bundle(
+        estate,
+        tmp_path,
+        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
+    )
+
+    assert {one.table for one in bundle.plan.runtime_state_established} <= {
+        table.name for table in CURRENT_STATE_TABLES
+    }
 
 
 # --- where the action sits -----------------------------------------------------
@@ -387,7 +427,7 @@ def test_bookmarks_are_reconciled_before_the_first_physical_action(estate, tmp_p
 
 
 @weaver_test()
-def test_invalidation_is_one_action(estate, tmp_path):
+def test_the_reset_is_one_action(estate, tmp_path):
     """One lifecycle decision, so one action carrying the whole intent."""
 
     bundle = _bundle(
@@ -395,7 +435,7 @@ def test_invalidation_is_one_action(estate, tmp_path):
         tmp_path,
         catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
-    (_sequence, action), *rest = _bookmark_actions(bundle)
+    (_sequence, action), *rest = _runtime_state_actions(bundle)
 
     assert not rest
     assert action.executor == "runtime_state"
@@ -416,10 +456,61 @@ def test_the_action_carries_the_intent_the_plan_states(estate, tmp_path):
         tmp_path,
         catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     )
-    (_sequence, action), *_rest = _bookmark_actions(bundle)
+    (_sequence, action), *_rest = _runtime_state_actions(bundle)
     carried = read_invalidation(bundle.store.read(bundle.location / action.payload))
+    established, invalidated = carried
 
-    assert carried == bundle.plan.runtime_state
+    assert invalidated == bundle.plan.runtime_state
+    # The reset half. The Views the build records travel in their own stage.
+    assert sorted(one.table for one in established) == [BOOKMARK.name, LOAD_STATUS.name]
+    assert all(
+        row["result"] == PENDING
+        for one in established
+        if one.table == LOAD_STATUS.name
+        for row in one.rows
+    )
+
+
+@weaver_test()
+def test_a_view_is_recorded_after_the_physical_work(estate, tmp_path):
+    """A View is Succeeded once its DDL has run, so its stage follows the build."""
+
+    bundle = _bundle(estate, tmp_path)
+    order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
+
+    assert VIEW_STATE_SLUG in order
+    assert order.index(VIEW_STATE_SLUG) > order.index(
+        "object-Lakehouse--Sales--Tables--DWG.ActiveCustomer"
+    )
+
+
+@weaver_test()
+def test_a_first_build_still_records_the_Views_it_created(estate, tmp_path):
+    """The tables arrive with this bundle, and the View stage follows them.
+
+    A View has no later load step, so a build that could write no reset state
+    still records what it built.
+    """
+
+    bundle = _bundle(
+        estate,
+        tmp_path,
+        inventories=_inventories(estate, holding_runtime_tables=False),
+    )
+    order = [action.id for _sequence, _batch, action in bundle.plan.actions()]
+
+    assert RECONCILE_SLUG not in order
+    assert VIEW_STATE_SLUG in order
+
+
+@weaver_test()
+def test_a_view_that_is_not_rebuilt_is_not_recorded(estate):
+    """State is written for what this build made, and nothing else."""
+
+    assert (
+        view_state_establishment(estate, items=(item_id(ITEM),), selected_for_build=())
+        == ()
+    )
 
 
 @weaver_test()
@@ -441,14 +532,22 @@ def test_runtime_references_precede_warehouse_documents_that_read_them(
 
 @weaver_test()
 def test_an_object_left_alone_keeps_its_row(estate):
-    """One object rebuilt, and only its row is named."""
+    """One object rebuilt, and only its state is written."""
 
-    assert _decided(
+    assert _established(
         estate,
         items=(item_id(ITEM),),
         selected_for_build={document_id_of(estate, "DWG.Customer")},
-        catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
     ) == {("Lakehouse", "Sales", "Tables/DWG", "Customer")}
+    assert (
+        _decided(
+            estate,
+            items=(item_id(ITEM),),
+            selected_for_build={document_id_of(estate, "DWG.Customer")},
+            catalogue=_holding("Tables/DWG.Customer", "Files/Raw.CustomerCsv"),
+        )
+        == set()
+    )
 
 
 @weaver_test()
@@ -477,31 +576,34 @@ def test_an_unrelated_item_is_outside_the_scope_that_prunes(estate):
     even though the table is shared.
     """
 
-    assert _decided(
+    assert _established(
         estate,
         items=(item_id(ITEM),),
         selected_for_build={one for one in estate.source_documents},
-        catalogue=_two_items(),
-    ) == {("Lakehouse", "Sales", "Tables/DWG", "Customer")}
+    ) == {
+        ("Lakehouse", "Sales", "Tables/DWG", "Customer"),
+        ("Lakehouse", "Sales", "Tables/DWG", "Summary"),
+        ("Lakehouse", "Sales", "Files/Raw", "CustomerCsv"),
+    }
 
 
 @weaver_test()
 def test_both_items_of_one_build_are_one_intent(estate):
     """Bound items share the table, so addressing them separately is round trips."""
 
-    invalidation = runtime_state_invalidation(
+    establishment = runtime_state_establishment(
         estate,
         items=(item_id(ITEM), item_id(WAREHOUSE_ITEM)),
         selected_for_build={one for one in estate.source_documents},
-        catalogue=_two_items(),
     )
-    (one,) = invalidation
 
-    assert _invalidated(invalidation) == {
+    assert _invalidated(establishment) == {
         ("Lakehouse", "Sales", "Tables/DWG", "Customer"),
-        ("Warehouse", "Reporting", "Rpt", "Customer"),
+        ("Lakehouse", "Sales", "Tables/DWG", "Summary"),
+        ("Lakehouse", "Sales", "Files/Raw", "CustomerCsv"),
+        ("Warehouse", "Reporting", "Sales", "Customer"),
     }
-    assert one.table == BOOKMARK.name
+    assert [one.table for one in establishment].count(BOOKMARK.name) == 1
 
 
 def _two_items() -> Catalogue:

@@ -133,6 +133,24 @@ def test_the_command_exposes_every_option_the_contract_names():
 
 
 @weaver_test()
+def test_the_command_exposes_the_stale_selection():
+    parser = build_parser()
+
+    load = parser.parse_args(
+        [
+            "load",
+            "Lakehouse/Sales",
+            "--stale",
+            "--as-of",
+            "2026-09-05T00:00:00Z",
+        ]
+    )
+
+    assert load.stale
+    assert load.as_of == "2026-09-05T00:00:00Z"
+
+
+@weaver_test()
 def test_more_than_one_item_is_one_request():
     parser = build_parser()
 
@@ -203,6 +221,14 @@ def test_a_load_without_reload_asks_for_none(recorded):
 
 
 @weaver_test()
+def test_stale_and_its_threshold_reach_the_api(recorded):
+    main(_command("--stale", "--as-of", "2026-09-05T00:00:00Z"))
+
+    assert recorded[0]["stale"] is True
+    assert recorded[0]["as_of"] == "2026-09-05T00:00:00Z"
+
+
+@weaver_test()
 def test_the_rendered_report_says_a_reload_ran(capsys):
     """The mode a user asked for, back on the line they read."""
 
@@ -232,6 +258,8 @@ def test_the_cautious_answers_are_the_defaults(recorded):
     assert recorded[0]["fault_tolerant"] is False
     assert recorded[0]["dry_run"] is False
     assert recorded[0]["names"] is None
+    assert recorded[0]["stale"] is False
+    assert recorded[0]["as_of"] is None
 
 
 @weaver_test()

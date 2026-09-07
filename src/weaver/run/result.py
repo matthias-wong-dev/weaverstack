@@ -314,15 +314,14 @@ def run_status(nodes, *, dry_run: bool = False) -> str:
     """
 
     statuses = {node.status for node in nodes}
+    if not statuses:
+        # A plan may select nothing, as a stale load of a green estate does.
+        return RUN_SUCCEEDED
     if dry_run:
         # Nothing ran, so "partially succeeded" would be a claim about work that
         # did not happen. A dry run either proved the run could happen or found
         # a reason it could not.
-        if not statuses:
-            return RUN_INVALID
         return RUN_INVALID if statuses & {INVALID, BLOCKED} else RUN_SUCCEEDED
-    if not statuses:
-        return RUN_SUCCEEDED
     if FAILED in statuses or BLOCKED in statuses or INVALID in statuses:
         succeeded = {SUCCEEDED, SUCCEEDED_WITH_REJECTS, VALIDATED, SKIPPED}
         return RUN_PARTIALLY_SUCCEEDED if statuses & succeeded else RUN_FAILED

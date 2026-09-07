@@ -57,8 +57,11 @@ from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
 from .runtime_tables import (
+    VIEW_STATE_SLUG,
     render_runtime_state_reconciliation,
+    runtime_state_establishment,
     runtime_state_invalidation,
+    view_state_establishment,
 )
 from .schemas import lakehouse_schema_stage, warehouse_schema_stage
 from .shortcuts import plan_lakehouse_shortcuts, plan_warehouse_shortcuts
@@ -201,22 +204,35 @@ def generate_item_build_bundle(
     if catalogue_before is not None:
         stages.append(catalogue_before)
 
-    # Current state is invalidated here, between decertification and the first
+    # Runtime state is reset here, between decertification and the first
     # physical action, and never after it. See
-    # :mod:`weaver.build_bundle.runtime_tables`. Against the catalogue this build
-    # read: which rows are obsolete is arithmetic over rows it holds, and a build
-    # creating the tables read none.
+    # :mod:`weaver.build_bundle.runtime_tables`.
     runtime_state = runtime_state_invalidation(
         repository,
         items=tuple(target_by_item),
         selected_for_build=selected_for_build,
         catalogue=catalogue,
     )
+    established_state = runtime_state_establishment(
+        repository,
+        items=tuple(target_by_item),
+        selected_for_build=selected_for_build,
+        holds_table=_catalogue_holds(inventories),
+    )
     reconciliation = render_runtime_state_reconciliation(
-        runtime_state, catalogue_target=catalogue_target
+        runtime_state,
+        catalogue_target=catalogue_target,
+        establishment=established_state,
     )
     if reconciliation is not None:
         stages.append(reconciliation)
+
+    # A View is recorded by the stage below, once its DDL has run.
+    view_state = view_state_establishment(
+        repository,
+        items=tuple(target_by_item),
+        selected_for_build=selected_for_build,
+    )
 
     for layer in _item_layers(repository, target_by_item):
         layer_stages: list[PlannedStage] = []
@@ -246,6 +262,17 @@ def generate_item_build_bundle(
         stages.extend(merge_layer_stages(layer_stages))
 
     _refuse_selected_omissions(omitted)
+
+    recorded_views = render_runtime_state_reconciliation(
+        (),
+        catalogue_target=catalogue_target,
+        establishment=view_state,
+        slug=VIEW_STATE_SLUG,
+        description="record the Views this build created",
+        index=1,
+    )
+    if recorded_views is not None:
+        stages.append(recorded_views)
 
     stages.extend(
         render_catalogue_after_build(
@@ -283,6 +310,7 @@ def generate_item_build_bundle(
         ),
         target_changes=target_changes,
         runtime_state=runtime_state,
+        runtime_state_established=(*established_state, *view_state),
     )
     plan = replace(plan, bundle_id=compute_bundle_id(plan))
     return write_bundle(
@@ -291,6 +319,23 @@ def generate_item_build_bundle(
         payloads=payloads,
         store=store,
     )
+
+
+def _catalogue_holds(inventories):
+    """Whether the catalogue target already holds one runtime table.
+
+    The reconciliation runs ahead of physical work, so the build that creates
+    the ``_`` schema has nothing to write into yet. Its objects reach explicit
+    state on the next build or the first load.
+    """
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+    from ..catalogue.tables import CATALOGUE_SCHEMA
+
+    inventory = inventories.get(BUILTIN_ITEM)
+    if inventory is None:
+        return lambda table: False
+    return lambda table: inventory.has_object(CATALOGUE_SCHEMA, table.name, "table")
 
 
 def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:

@@ -12,12 +12,11 @@ session.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
 from ..catalogue.tables import (
-    BOOKMARK,
     DEPENDENCY,
     FOLDER_DICTIONARY,
     INSTALLATION,
@@ -29,23 +28,21 @@ from ..catalogue.tables import (
     TEST_STATUS,
 )
 from ..declaration.model import WeaverItemId
-from ..errors import CommandError
-from ..health import DEFAULT_AGE_HOURS, HealthReport, assess
+from ..health import HealthReport, assess, resolve_as_of
 from .items import installed_targets, requested_items
 from .workspace import operation_workspace
 
 #: What health reads of the catalogue, table by table. Each one is read over
 #: TDS, so a table nothing consults is a round trip nobody needed.
 #:
-#: The installed graph is built from the first seven. ``_.Bookmark`` says how far
-#: each object has been loaded, and the two status tables how its most recent
-#: load and validation ended. ``_.TableDictionary`` and ``_.FolderDictionary``
+#: The installed graph is built from the first seven, and the two status tables
+#: hold current lifecycle state. ``_.TableDictionary`` and ``_.FolderDictionary``
 #: serve both: the graph reads whether an object is Static, and Build health
 #: reads what is declared and not certified.
 #:
-#: The dictionaries describing an object's columns and keys are absent. Nothing
-#: health decides consults one. So is ``_.LoadStatistic``, which accumulates
-#: and is read only where it matches current ``_.LoadStatus`` state.
+#: ``_.Bookmark`` is absent: it is the loader's execution cursor. So are the
+#: dictionaries describing columns and keys, and ``_.LoadStatistic``, read only
+#: as the window matching current ``_.LoadStatus`` state.
 HEALTH_TABLES = (
     INSTALLATION,
     REGISTRY,
@@ -54,7 +51,6 @@ HEALTH_TABLES = (
     TEST_DICTIONARY,
     DEPENDENCY,
     SHORTCUT,
-    BOOKMARK,
     LOAD_STATUS,
     TEST_STATUS,
 )
@@ -104,7 +100,7 @@ def health(
                 opened,
                 workspace=resolved,
                 items=requested,
-                as_of=_as_of(as_of, started=started),
+                as_of=resolve_as_of(as_of, started=started),
                 generated_at=started,
                 inventories=inventories,
             )
@@ -209,36 +205,6 @@ def _inventories(session, *, workspace, targets, dag):
                 ),
             )
     return found
-
-
-def _as_of(value, *, started: datetime) -> datetime:
-    """The instant this report measures freshness against, always UTC.
-
-    A naive datetime is refused. A report that named an instant without a zone
-    would mean a different moment on every machine that read it.
-    """
-
-    if value is None:
-        return started - timedelta(hours=DEFAULT_AGE_HOURS)
-    if isinstance(value, str):
-        text = value.strip()
-        try:
-            value = datetime.fromisoformat(text.replace("Z", "+00:00"))
-        except ValueError:
-            raise CommandError(
-                f"as-of must be an ISO-8601 instant with a zone, got {text!r}"
-            ) from None
-    if not isinstance(value, datetime):
-        raise CommandError(
-            f"as-of must be a datetime or an ISO-8601 string, got "
-            f"{type(value).__name__}"
-        )
-    if value.tzinfo is None:
-        raise CommandError(
-            "as-of must carry a timezone, so the instant it names is the same "
-            "on every machine that reads the report"
-        )
-    return value.astimezone(timezone.utc)
 
 
 __all__ = ["HEALTH_TABLES", "health", "run_health"]

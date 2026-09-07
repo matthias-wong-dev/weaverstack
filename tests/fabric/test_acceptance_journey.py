@@ -298,7 +298,11 @@ def _assert_the_catalogue_is_installed(journey) -> None:
 
 
 def _assert_load_status(journey, report) -> None:
-    """Current operational state agrees with this successful physical load."""
+    """Current operational state agrees with this successful physical load.
+
+    ``_.LoadStatus`` holds every installed data node, Views included, so what
+    this load ran is a subset of it. The claim is about that subset.
+    """
 
     from weaver.catalogue.claims import bookmark_row
     from weaver.declaration.model import WeaverDocumentId, parse_installed_identity
@@ -328,18 +332,19 @@ def _assert_load_status(journey, report) -> None:
         "from [_].[LoadStatus] where [Item name] in "
         "('Landing', 'Curated', 'Serving', 'Published')",
     )
-    actual = {
+    held = {
         (
             row["item_type"],
             row["item_name"],
             row["schema_name"],
             row["object_name"],
-        )
+        ): row
         for row in rows
     }
-    assert actual == expected
-    assert {row["result"] for row in rows} == {"Succeeded"}
-    assert {row["workflow_id"] for row in rows} == {report.workflow_id}
+    assert expected <= set(held)
+    loaded = [held[key] for key in expected]
+    assert {row["result"] for row in loaded} == {"Succeeded"}
+    assert {row["workflow_id"] for row in loaded} == {report.workflow_id}
 
 
 def _run_identities(report) -> set:
@@ -1509,7 +1514,7 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     # the safety property: the next load reads the whole source rather than
     # reading almost nothing over a table that was replaced.
     assert _certifications(acceptance, REPLACED) == []
-    assert _bookmarks(acceptance, REPLACED) == []
+    assert _bookmarks(acceptance, REPLACED) == [SENTINEL]
 
     # And the protected table kept both. Its declaration changed in this same
     # revision, and `Prohibit rebuild` keeps it out of the selection, so there
@@ -1538,9 +1543,9 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     ]
 
     # The catalogue converged from what is physically there: certified again,
-    # and still no bookmark, because a build records how far nothing has loaded.
+    # and still at the sentinel, because a build establishes no cursor.
     assert len(_certifications(acceptance, REPLACED)) == 1
-    assert _bookmarks(acceptance, REPLACED) == []
+    assert _bookmarks(acceptance, REPLACED) == [SENTINEL]
 
     # No manual cleanup: the corrected build settles on the next attempt.
     settled = acceptance.step(

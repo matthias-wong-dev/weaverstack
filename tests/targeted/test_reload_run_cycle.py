@@ -31,7 +31,12 @@ from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
 from weaver.catalogue.state import Catalogue
-from weaver.catalogue.tables import BOOKMARK, LOAD_STATISTIC, LOAD_STATUS
+from weaver.catalogue.tables import (
+    BOOKMARK,
+    BOOKMARK_SENTINEL,
+    LOAD_STATISTIC,
+    LOAD_STATUS,
+)
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.operations.load import _refuse_unsupported_reload, _reset_before
@@ -161,8 +166,8 @@ def test_only_the_loadable_tables_have_state_to_end(catalogue):
 
 
 @weaver_test()
-def test_the_reset_ends_the_status_and_removes_the_bookmark_row(catalogue):
-    """Pending and an absent row: the same state a build's invalidation leaves."""
+def test_the_reset_ends_the_status_and_returns_the_bookmark_to_the_sentinel(catalogue):
+    """Pending and the sentinel: the state a build's reconciliation leaves."""
 
     record, writer = _record()
     runner = _runner(catalogue, items=(REPORTING,))
@@ -172,9 +177,10 @@ def test_the_reset_ends_the_status_and_removes_the_bookmark_row(catalogue):
     (status,) = writer.rows(LOAD_STATUS.name)
     assert status["result"] == "pending"
     assert status["workflow_id"] == "workflow"
-    (removed,) = writer.removed(BOOKMARK.name)
-    assert removed["object_name"] == "Summary"
-    assert "bookmark_datetime" not in removed
+    assert writer.removed(BOOKMARK.name) == []
+    (bookmark,) = writer.rows(BOOKMARK.name)
+    assert bookmark["object_name"] == "Summary"
+    assert bookmark["bookmark_datetime"] == BOOKMARK_SENTINEL
 
 
 @weaver_test()

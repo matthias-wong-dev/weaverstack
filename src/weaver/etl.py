@@ -211,6 +211,44 @@ def item_bookmarkable_objects(
     return tuple(sorted(found, key=str))
 
 
+def item_view_objects(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    """The Views declared by this item.
+
+    Views have no load step. A successful build records their current
+    ``_.LoadStatus`` so downstream tables can detect a newer View definition.
+    """
+
+    from .declaration.metadata import VIEW
+
+    found = {
+        identity
+        for identity, source in repository.source_documents.items()
+        if identity.item == item and source.kind == VIEW
+    }
+    return tuple(sorted(found, key=str))
+
+
+def item_data_nodes(
+    repository: WeaverRepository, *, item: WeaverItemId
+) -> tuple[WeaverDocumentId, ...]:
+    """The objects in one item that carry a ``_.LoadStatus`` row.
+
+    Loadable tables and folders, and the Views this item declares.
+    """
+
+    return tuple(
+        sorted(
+            {
+                *item_bookmarkable_objects(repository, item=item),
+                *item_view_objects(repository, item=item),
+            },
+            key=str,
+        )
+    )
+
+
 def item_validated_objects(
     repository: WeaverRepository, *, item: WeaverItemId
 ) -> tuple[WeaverDocumentId, ...]:

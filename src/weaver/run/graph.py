@@ -126,7 +126,12 @@ def graph_for(request, state) -> RunGraph:
 def _load_graph(request, state) -> RunGraph:
     from ..load_plan import load_dag
 
-    dag = load_dag(state.catalogue.dag(), items=request.items, names=request.names)
+    dag = load_dag(
+        state.catalogue.dag(),
+        items=request.items,
+        selection=request.selected,
+        names=request.names,
+    )
     return RunGraph(
         nodes=tuple(
             RunNode(

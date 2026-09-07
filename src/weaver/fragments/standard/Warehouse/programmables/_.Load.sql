@@ -8,7 +8,7 @@ The implementation procedure is in [_], and the source object's schema is part
 of its name. `@item_name` omitted means recover it from [_].[Installation].
 
 `@reload = 1` reconstructs the object from zero: [_].[LoadStatus] goes to Pending
-and the [_].[Bookmark] row is removed, then the implementation procedure clears
+and [_].[Bookmark] goes to the sentinel, then the implementation procedure clears
 the target and runs. It reaches this object alone.
 
 Every write is a MERGE, including the appends. In every Warehouse but the one
@@ -30,6 +30,9 @@ begin
 
     declare @weaver_unmatched nvarchar(2048) = null;
     declare @weaver_started datetime2(6) = sysutcdatetime();
+    -- No clean load has established a cursor for this incarnation.
+    declare @weaver_bookmark_sentinel datetime2(6) =
+        convert(datetime2(6), '1900-01-01 00:00:00.000000');
     declare @weaver_completed datetime2(6) = null;
     declare @weaver_workflow varchar(128) = cast(newid() as varchar(36));
     declare @weaver_log_sk varchar(128) = cast(newid() as varchar(36));
@@ -160,11 +163,41 @@ begin
                 , convert(datetime2(6), '9999-12-31 23:59:59.999999')
             );
 
-            delete from [_].[Bookmark]
-             where [Item type] = N'Warehouse'
-               and [Item name] = @item_name
-               and [Schema name] = @weaver_schema
-               and [Object name] = @weaver_object;
+            merge into [_].[Bookmark] as target
+            using (select
+                N'Warehouse' as [Item type]
+                , @item_name as [Item name]
+                , @weaver_schema as [Schema name]
+                , @weaver_object as [Object name]
+            ) as source
+               on
+                target.[Item type] = source.[Item type]
+                  and target.[Item name] = source.[Item name]
+                  and target.[Schema name] = source.[Schema name]
+                  and target.[Object name] = source.[Object name]
+            when matched then update set
+                target.[Bookmark datetime] = @weaver_bookmark_sentinel
+                , target.[Row update datetime] = sysdatetime()
+            when not matched then insert (
+                [Item type]
+                , [Item name]
+                , [Schema name]
+                , [Object name]
+                , [Bookmark datetime]
+                , [Row insert datetime]
+                , [Row update datetime]
+                , [Row delete datetime]
+            )
+            values (
+                source.[Item type]
+                , source.[Item name]
+                , source.[Schema name]
+                , source.[Object name]
+                , @weaver_bookmark_sentinel
+                , sysdatetime()
+                , sysdatetime()
+                , convert(datetime2(6), '9999-12-31 23:59:59.999999')
+            );
         end;
 
         if @weaver_call is not null

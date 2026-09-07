@@ -31,7 +31,7 @@ from weaver.catalogue.tables import (
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.health import current_load, load_activity
-from weaver.operations.health import HEALTH_TABLES, _as_of, run_health
+from weaver.operations.health import HEALTH_TABLES, run_health
 from weaver.sessions.testing import TestSession
 from weaver.targets import PhysicalTargetRef
 
@@ -41,46 +41,6 @@ RAW_LH = PhysicalTargetRef("lakehouse", "Raw_LH")
 REPORTING_WH = PhysicalTargetRef("warehouse", "Reporting_WH")
 
 NOW = datetime(2026, 4, 23, 12, 0, tzinfo=timezone.utc)
-
-
-# --- the instant a report measures against ------------------------------------
-
-
-@weaver_test()
-def test_as_of_defaults_to_a_day_before_the_operation_started():
-    assert _as_of(None, started=NOW) == NOW - timedelta(hours=24)
-
-
-@weaver_test()
-def test_an_aware_datetime_is_normalised_to_utc():
-    from datetime import timezone as tz
-
-    melbourne = timezone(timedelta(hours=10))
-    given = datetime(2026, 4, 23, 22, 0, tzinfo=melbourne)
-
-    assert _as_of(given, started=NOW) == datetime(2026, 4, 23, 12, 0, tzinfo=tz.utc)
-
-
-@pytest.mark.parametrize(
-    "written", ["2026-04-22T00:00:00Z", "2026-04-22T10:00:00+10:00"]
-)
-@weaver_test()
-def test_an_iso_string_with_a_zone_is_accepted(written):
-    assert _as_of(written, started=NOW) == datetime(2026, 4, 22, tzinfo=timezone.utc)
-
-
-@weaver_test()
-def test_a_naive_datetime_is_refused():
-    """A report that named an instant without a zone would mean two moments."""
-
-    with pytest.raises(CommandError, match="must carry a timezone"):
-        _as_of(datetime(2026, 4, 22), started=NOW)
-
-
-@weaver_test()
-def test_a_string_that_is_not_an_instant_is_refused():
-    with pytest.raises(CommandError, match="ISO-8601"):
-        _as_of("yesterday", started=NOW)
 
 
 # --- what a request may name --------------------------------------------------
@@ -392,7 +352,6 @@ def test_health_materialises_the_tables_it_consults_and_no_others():
         "TestDictionary",
         "Dependency",
         "Shortcut",
-        "Bookmark",
         "LoadStatus",
         "TestStatus",
     ]

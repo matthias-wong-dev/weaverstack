@@ -27,10 +27,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from ..catalogue.claims import catalogue_schema
+from ..catalogue.claims import bookmark_row, catalogue_schema
 from ..catalogue.tables import (
     BLOCKED,
     BOOKMARK,
+    BOOKMARK_SENTINEL,
     ERROR,
     FAILED,
     LOAD_STATISTIC,
@@ -175,8 +176,9 @@ def load_statistic_row(
 def reset_load_status_row(identity, *, workflow_id: str, started) -> dict:
     """The ``_.LoadStatus`` row a reload writes before it clears the target.
 
-    ``Pending`` is the vocabulary's "current state not yet established", and
-    health reads it as it reads an absent row.
+    ``Pending`` is the vocabulary's "current state not yet established". The row
+    stays: it is the lifecycle state health reads, and an absent row states
+    nothing.
     """
 
     return {
@@ -187,6 +189,12 @@ def reset_load_status_row(identity, *, workflow_id: str, started) -> dict:
         "completed_datetime": None,
         "duration_milliseconds": None,
     }
+
+
+def _is_static_skip(node) -> bool:
+    """Whether this node's load skipped a Static object that already holds data."""
+
+    return bool(getattr(node.result, "is_static_skip", False))
 
 
 def test_status_row(node, identity, *, workflow_id: str) -> dict:
@@ -213,8 +221,6 @@ def _identity(identity) -> dict:
 
 def bookmark_key(identity) -> dict:
     """One ``_.Bookmark`` row's key, without its instant."""
-
-    from ..catalogue.claims import bookmark_row
 
     return bookmark_row(identity)
 
@@ -281,10 +287,15 @@ class RunRecord:
                 test_status_row(node, identity, workflow_id=self.workflow_id),
             )
             return
-        self.catalogue.update(
-            LOAD_STATUS,
-            load_status_row(node, identity, workflow_id=self.workflow_id),
-        )
+        if not _is_static_skip(node):
+            # A Static skip settles nothing: the object is loaded once, and its
+            # existing state says when that was. Rewriting it would date this
+            # object's data to a run that read nothing, and put every consumer
+            # of a reference table behind on every load.
+            self.catalogue.update(
+                LOAD_STATUS,
+                load_status_row(node, identity, workflow_id=self.workflow_id),
+            )
         if node.executed:
             # A statistic describes a load that ran. A blocked node did nothing,
             # and a row of zeroes for it would read as a load that moved nothing.
@@ -302,9 +313,14 @@ class RunRecord:
     def reset(self, identity) -> None:
         """Invalidate this object's load state before it is reconstructed.
 
-        ``_.LoadStatus`` goes to Pending and the ``_.Bookmark`` row is removed.
-        Both are durable before this returns, so a failed reload cannot retain
-        the previous bookmark over a cleared target.
+        ``_.LoadStatus`` goes to Pending and the ``_.Bookmark`` goes to the
+        sentinel. Both are durable before this returns, so a failed reload
+        cannot retain the previous cursor over a cleared target.
+
+        Each object keeps exactly one bookmark row for as long as it is
+        installed. The sentinel is what says no clean load has established a
+        cursor for the current incarnation, so the next load reads the whole
+        source.
         """
 
         started = datetime.now(timezone.utc)
@@ -317,8 +333,8 @@ class RunRecord:
                 identity, workflow_id=self.workflow_id, started=started
             ),
         )
+        self.catalogue.update(BOOKMARK, bookmark_row(identity, BOOKMARK_SENTINEL))
         self.flush()
-        self.catalogue.remove(BOOKMARK, [bookmark_key(identity)])
 
     def _bookmark(self, node, identity) -> None:
         """Advance the bookmark, for a clean load that established an instant.
@@ -333,8 +349,6 @@ class RunRecord:
         at = getattr(node.result, "bookmark_datetime", None)
         if at is None:
             return
-        from ..catalogue.claims import bookmark_row
-
         self.catalogue.update(BOOKMARK, bookmark_row(identity, at))
 
     def flush(self) -> None:

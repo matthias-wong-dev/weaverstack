@@ -729,6 +729,38 @@ weaver install ./dist/estate-bundle --workspace-config examples/weaver_example.y
 that need to validate source without contacting Fabric. It is not a prerequisite
 for `weaver build`, which always checks source itself.
 
+## Load
+
+Run the installed loadable objects the named items own, in dependency order:
+
+```bash
+weaver load Lakehouse/Sales Warehouse/Reporting
+```
+
+`--name` runs one installed object, without dependency ordering. `--reload`
+reconstructs each selected table from zero; see
+[Central catalogue](catalogue.md).
+
+`--stale` loads only objects that `weaver health` reports as not green:
+
+```bash
+weaver load --stale
+weaver load Warehouse/Reporting --stale
+```
+
+Use `--as-of` to change the freshness cutoff:
+
+```bash
+weaver load --stale --as-of 2026-09-05T00:00:00Z
+```
+
+A green estate has nothing to load, so the command succeeds without running
+anything. `--dry-run` shows the selection without running it. `--as-of` requires
+`--stale`, and `--reload` and `--stale` cannot be used together.
+
+The named items bound the run, and the selected objects load in dependency
+order. See [Health](health.md) for what makes an object green.
+
 ## Test
 
 Run the installed Tests and Assumptions the named items own:

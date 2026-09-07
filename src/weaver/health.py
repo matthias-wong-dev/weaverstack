@@ -15,46 +15,43 @@ Health overlays evidence onto :class:`weaver.installed.InstalledDag`. Dependency
 direction, ancestry and what is installed are that graph's answers, read here and
 not recomputed.
 
-Two clocks, because two questions. Whether an object is overdue is a question
-about the wall clock, so ``as_of`` is compared with ``_.LoadStatus``'s completion
-instant. Whether an object is behind its sources is a question about data
-movement, so ``_.Bookmark`` is compared instead: a bookmark advances for a clean
-load that established an instant, and a Static skip moves nothing.
+Load freshness reads ``_.LoadStatus``. A load settles a table or a folder, and a
+successful build settles a View. ``as_of`` against a subject's completion instant
+says whether it is overdue, and the same instant against its ancestors' says
+whether it is behind its sources.
 
-A Static object is asked neither. It is loaded once, so it stays Green however
-long ago that was. Its bookmark still counts against everything downstream,
-which is what makes a genuine reload of a reference table put its consumers
+A Static object is asked neither question. It is loaded once, so it stays Green
+however long ago that was. Its own load still counts against everything
+downstream, which is what makes a reload of a reference table put its consumers
 behind.
 
 This module is pure. Everything it reads is on the catalogue it is given: the
-graph, the status tables, the bookmarks, and the current load state that
-catalogue was read with. See :mod:`weaver.operations.health` for
-the operation that reads it.
+graph, the status tables, and the current load state that catalogue was read
+with. See :mod:`weaver.operations.health` for the operation that reads it.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 from typing import Mapping, Sequence
 
 from .catalogue.state import Catalogue
 from .catalogue.tables import (
     BLOCKED,
-    BOOKMARK,
-    BOOKMARK_SENTINEL,
     ERROR,
     FAILED,
     FOLDER_DICTIONARY,
     LOAD_STATUS,
     PENDING,
     REJECTED,
+    ROLE_DATA,
     SUCCEEDED,
     TABLE_DICTIONARY,
     TEST_STATUS,
 )
-from .declaration.model import WeaverDocumentId
+from .declaration.model import WeaverDocumentId, WeaverItemId
 from .installed import InstalledDag, InstalledNode, stored_identity
 from .targets import PhysicalTargetRef
 
@@ -77,6 +74,7 @@ LOAD_FAILED = "load_failed"
 LOAD_REJECTED = "load_rejected"
 LOAD_STALE_TIME = "load_stale_time"
 LOAD_STALE_ANCESTOR = "load_stale_ancestor"
+LOAD_ANCESTOR_UNESTABLISHED = "load_ancestor_unestablished"
 TEST_PENDING = "test_pending"
 TEST_FAILED = "test_failed"
 TEST_STALE_DEPENDENCY = "test_stale_dependency"
@@ -97,6 +95,14 @@ _NO_DATA_ESTABLISHED = (FAILED, ERROR, BLOCKED, PENDING)
 
 #: The load outcomes that make a subject Red.
 _LOAD_RED = (FAILED, ERROR, BLOCKED)
+
+#: The outcomes that settle an object, and so carry an instant a descendant can
+#: be measured against. A rejecting load moved rows and completed.
+_ESTABLISHED = (SUCCEEDED, REJECTED)
+
+#: What Registry records a View as. A Warehouse shortcut destination is recorded
+#: the same way and is told apart by its role.
+VIEW_OBJECT_TYPE = "view"
 
 #: The validation outcomes that make a subject Red.
 _TEST_RED = (FAILED, ERROR, BLOCKED)
@@ -141,22 +147,6 @@ def test_statuses(catalogue: Catalogue) -> Mapping[WeaverDocumentId, RuntimeStat
     """
 
     return _statuses(catalogue, TEST_STATUS, validation=True)
-
-
-def bookmarks(catalogue: Catalogue) -> Mapping[WeaverDocumentId, datetime]:
-    """How far each object has been loaded, by logical identity.
-
-    The sentinel is left out: it says no clean load has run for this object's
-    current incarnation, which is an absence rather than an instant.
-    """
-
-    found: dict[WeaverDocumentId, datetime] = {}
-    for row in catalogue.table_rows(BOOKMARK):
-        identity = _row_identity(row)
-        at = _aware(row.get("bookmark_datetime"))
-        if at is not None and at != BOOKMARK_SENTINEL:
-            found[identity] = at
-    return MappingProxyType(found)
 
 
 def _statuses(
@@ -459,6 +449,315 @@ def _count(row, name: str) -> int:
     return 0 if value is None else int(value)
 
 
+# --- the canonical Load assessment --------------------------------------------
+
+
+@dataclass(frozen=True)
+class LoadSubjectHealth:
+    """One loadable, its ``_.LoadStatus`` row and its findings.
+
+    No findings is Green. ``runtime_status`` is carried so a report can render
+    what happened.
+    """
+
+    node: InstalledNode
+    runtime_status: RuntimeStatus | None = None
+    findings: tuple[HealthFinding, ...] = ()
+
+    @property
+    def identity(self) -> WeaverDocumentId:
+        return self.node.identity
+
+    @property
+    def severity(self) -> str:
+        return worst(finding.severity for finding in self.findings)
+
+
+@dataclass(frozen=True)
+class LoadAssessment:
+    """Every loadable in scope, assessed once.
+
+    :func:`assess` renders it as the report's Load section, and
+    ``weaver load --stale`` runs the subjects it does not call Green.
+    """
+
+    subjects: tuple[LoadSubjectHealth, ...] = ()
+
+    @property
+    def status(self) -> str:
+        return worst(subject.severity for subject in self.subjects)
+
+    def unsettled(self) -> tuple[LoadSubjectHealth, ...]:
+        """The subjects that are not Green, in subject order."""
+
+        return tuple(subject for subject in self.subjects if subject.severity != GREEN)
+
+    def unsettled_identities(self) -> tuple[WeaverDocumentId, ...]:
+        """The non-Green subjects, as logical loadable identities."""
+
+        return tuple(subject.identity for subject in self.unsettled())
+
+    def to_health_section(self) -> HealthSection:
+        """The Load section of a health report."""
+
+        findings: list[HealthFinding] = []
+        counts: dict[str, int] = {}
+        for subject in self.subjects:
+            word = _word(subject.runtime_status)
+            counts[word] = counts.get(word, 0) + 1
+            findings.extend(subject.findings)
+        return HealthSection(
+            area=LOAD,
+            findings=_ordered(findings),
+            counts=MappingProxyType(counts),
+            subjects=len(self.subjects),
+        )
+
+
+class _LoadHealth:
+    """What a loadable's Load health is.
+
+    ``as_of`` against its completion instant says whether the object is overdue,
+    and the same instant against its ancestors' says whether it is behind its
+    sources. A Static object is asked neither.
+    """
+
+    def __init__(
+        self,
+        dag: InstalledDag,
+        *,
+        statuses: Mapping[WeaverDocumentId, RuntimeStatus],
+        as_of: datetime,
+    ) -> None:
+        self.dag = dag
+        self.statuses = statuses
+        self.as_of = as_of
+
+    def assess(self, nodes: Sequence[InstalledNode]) -> LoadAssessment:
+        return LoadAssessment(subjects=tuple(self.subject(node) for node in nodes))
+
+    def subject(self, node: InstalledNode) -> LoadSubjectHealth:
+        status = self.statuses.get(node.identity)
+        findings = (*self._state(node, status), *self._freshness(node, status))
+        return LoadSubjectHealth(node=node, runtime_status=status, findings=findings)
+
+    def _state(self, node: InstalledNode, status):
+        if status is None or status.result == PENDING:
+            # A build leaves a rebuilt loadable Pending. A missing row is read
+            # the same way.
+            yield _finding(
+                LOAD,
+                LOAD_PENDING,
+                AMBER,
+                node,
+                PENDING,
+                "no load has settled since this object was built",
+                status,
+            )
+            return
+        if status.result in _LOAD_RED:
+            yield _finding(
+                LOAD,
+                LOAD_FAILED,
+                RED,
+                node,
+                status.result,
+                f"the last load {status.result}",
+                status,
+            )
+            return
+        if status.result == REJECTED:
+            yield _finding(
+                LOAD,
+                LOAD_REJECTED,
+                AMBER,
+                node,
+                status.result,
+                "the last load completed with rejected rows",
+                status,
+            )
+
+    def _freshness(self, node: InstalledNode, status):
+        """Whether this object is overdue, and whether it is behind its sources.
+
+        A Static object is asked neither. It is loaded once, so age says nothing
+        about it and neither does an ancestor that settled since.
+        """
+
+        if status is None or status.result in _NO_DATA_ESTABLISHED:
+            return
+        if node.is_static:
+            return
+        if status.completed_at is not None and status.completed_at < self.as_of:
+            yield _finding(
+                LOAD,
+                LOAD_STALE_TIME,
+                AMBER,
+                node,
+                status.result,
+                f"last loaded {_isoformat(status.completed_at)}",
+                status,
+            )
+        unestablished = self._unestablished_ancestor(node)
+        if unestablished is not None:
+            yield _finding(
+                LOAD,
+                LOAD_ANCESTOR_UNESTABLISHED,
+                AMBER,
+                node,
+                status.result,
+                f"{unestablished} has no settled state for its current incarnation",
+                status,
+            )
+        newer = self._newer_ancestor(node)
+        if newer is not None:
+            yield _finding(
+                LOAD,
+                LOAD_STALE_ANCESTOR,
+                AMBER,
+                node,
+                status.result,
+                f"{newer} has been established since this object was loaded",
+                status,
+            )
+
+    # --- ancestry, over _.LoadStatus ------------------------------------------
+
+    def _lifecycle_ancestors(self, node: InstalledNode):
+        """The ancestors that carry a ``_.LoadStatus`` row.
+
+        Loadables and Views. A shortcut destination and a table Weaver does not
+        load hold no load state, so the walk passes through them.
+        """
+
+        return tuple(
+            ancestor
+            for ancestor in self.dag.ancestors(node.identity)
+            if is_lifecycle_node(ancestor)
+        )
+
+    def established_at(self, identity) -> datetime | None:
+        """When this node last settled, or ``None`` if it has not.
+
+        A Pending, failed, errored or blocked state settled nothing, and neither
+        does a missing row.
+        """
+
+        status = self.statuses.get(identity)
+        if status is None or status.result not in _ESTABLISHED:
+            return None
+        return status.completed_at
+
+    def _unestablished_ancestor(self, node: InstalledNode) -> str | None:
+        """The ancestor that has not settled since it was built."""
+
+        behind = [
+            ancestor.node_id
+            for ancestor in self._lifecycle_ancestors(node)
+            if self.established_at(ancestor.identity) is None
+        ]
+        return sorted(behind)[0] if behind else None
+
+    def _newer_ancestor(self, node: InstalledNode) -> str | None:
+        """The ancestor that settled after this object last loaded.
+
+        A rebuilt View settles when its build succeeds, so a new View definition
+        puts everything materialised from it behind.
+        """
+
+        loaded = self.established_at(node.identity)
+        if loaded is None:
+            return None
+        newer = [
+            ancestor.node_id
+            for ancestor in self._lifecycle_ancestors(node)
+            if (self.established_at(ancestor.identity) or loaded) > loaded
+        ]
+        return sorted(newer)[0] if newer else None
+
+
+def is_lifecycle_node(node: InstalledNode) -> bool:
+    """Whether this node carries a ``_.LoadStatus`` row.
+
+    Loadable tables and folders, which a load settles, and Views, which a
+    successful build settles. A View is not a load subject; its state lets a
+    materialised descendant detect a newer View definition.
+    """
+
+    return node.is_loadable or is_view_node(node)
+
+
+def is_view_node(node: InstalledNode) -> bool:
+    """Whether this node is a View this repository authored."""
+
+    return node.role == ROLE_DATA and node.object_type == VIEW_OBJECT_TYPE
+
+
+def load_health(catalogue: Catalogue, *, as_of: datetime) -> _LoadHealth:
+    """The Load rules, bound to one catalogue's graph and its load statuses."""
+
+    return _LoadHealth(catalogue.dag(), statuses=load_statuses(catalogue), as_of=as_of)
+
+
+def assess_load(
+    catalogue: Catalogue,
+    *,
+    as_of: datetime,
+    items: Sequence[WeaverItemId] | None = None,
+    targets: Sequence[PhysicalTargetRef] | None = None,
+) -> LoadAssessment:
+    """Every installed loadable in scope, assessed once.
+
+    ``items`` bounds the subjects by logical item and ``targets`` by physical
+    target. Ancestry outside the scope is still read, because whether a subject
+    is behind its sources is a question about the whole graph.
+    """
+
+    dag = catalogue.dag()
+    chosen = None if items is None else frozenset(items)
+    where = None if targets is None else frozenset(targets)
+    subjects = tuple(
+        node
+        for node in dag.loadables()
+        if (chosen is None or node.item in chosen)
+        and (where is None or node.target in where)
+    )
+    return load_health(catalogue, as_of=as_of).assess(subjects)
+
+
+def resolve_as_of(value, *, started: datetime) -> datetime:
+    """The freshness cutoff, always UTC.
+
+    Omitted, it is :data:`DEFAULT_AGE_HOURS` before the operation started. A
+    naive datetime is refused: an instant with no zone names a different moment
+    on every machine that reads it.
+    """
+
+    from .errors import CommandError
+
+    if value is None:
+        return started - timedelta(hours=DEFAULT_AGE_HOURS)
+    if isinstance(value, str):
+        text = value.strip()
+        try:
+            value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            raise CommandError(
+                f"as-of must be an ISO-8601 instant with a zone, got {text!r}"
+            ) from None
+    if not isinstance(value, datetime):
+        raise CommandError(
+            f"as-of must be a datetime or an ISO-8601 string, got "
+            f"{type(value).__name__}"
+        )
+    if value.tzinfo is None:
+        raise CommandError(
+            "as-of must carry a timezone, so the instant it names is the same "
+            "on every machine that reads the report"
+        )
+    return value.astimezone(timezone.utc)
+
+
 # --- the evaluation -----------------------------------------------------------
 
 
@@ -473,8 +772,7 @@ def assess(
     """One catalogue's operational state, as a report.
 
     Everything comes from the catalogue: what is installed, what depends on what,
-    the current status tables, the bookmarks, and the current load state it was
-    read with.
+    the current status tables, and the current load state it was read with.
 
     ``targets`` restricts what is reported on. Ancestry outside it is still read,
     because whether a selected object is behind its sources is a question about
@@ -524,9 +822,13 @@ class _Assessment:
         self.as_of = as_of
         self.selected = selected
         self.inventories = inventories
-        self.load_status = load_statuses(catalogue)
         self.test_status = test_statuses(catalogue)
-        self.bookmarks = bookmarks(catalogue)
+        # The one Load implementation, over the statuses read here. Validation
+        # freshness asks it the same question, so there is one answer to "when
+        # was this ancestor established".
+        self.load_health = _LoadHealth(
+            dag, statuses=load_statuses(catalogue), as_of=as_of
+        )
 
     # --- scope ----------------------------------------------------------------
 
@@ -539,110 +841,11 @@ class _Assessment:
     # --- load -----------------------------------------------------------------
 
     def load(self) -> HealthSection:
-        """Every loadable node in scope, its direct state and its freshness."""
+        """Every loadable node in scope, as the canonical Load assessment."""
 
-        findings: list[HealthFinding] = []
-        counts: dict[str, int] = {}
-        subjects = self._subjects(self.dag.loadables())
-        for node in subjects:
-            status = self.load_status.get(node.identity)
-            counts[_word(status)] = counts.get(_word(status), 0) + 1
-            findings.extend(self._load_state(node, status))
-            findings.extend(self._load_freshness(node, status))
-        return HealthSection(
-            area=LOAD,
-            findings=_ordered(findings),
-            counts=MappingProxyType(counts),
-            subjects=len(subjects),
-        )
-
-    def _load_state(self, node: InstalledNode, status):
-        if status is None:
-            # A freshly rebuilt loadable has no status row: the rebuild ended the
-            # incarnation the old row described.
-            yield self._finding(
-                LOAD,
-                LOAD_PENDING,
-                AMBER,
-                node,
-                PENDING,
-                "no load has settled since this object was built",
-            )
-            return
-        if status.result in _LOAD_RED:
-            yield self._finding(
-                LOAD,
-                LOAD_FAILED,
-                RED,
-                node,
-                status.result,
-                f"the last load {status.result}",
-                status,
-            )
-            return
-        if status.result == REJECTED:
-            yield self._finding(
-                LOAD,
-                LOAD_REJECTED,
-                AMBER,
-                node,
-                status.result,
-                "the last load completed with rejected rows",
-                status,
-            )
-
-    def _load_freshness(self, node: InstalledNode, status):
-        """Whether this object is overdue, and whether it is behind its sources.
-
-        A Static object is asked neither. It is loaded once, so age says nothing
-        about it and neither does an ancestor that moved. Its own bookmark still
-        counts against everything downstream: a genuine reload of a reference
-        table is exactly what puts its consumers behind.
-        """
-
-        if status is None or status.result in _NO_DATA_ESTABLISHED:
-            return
-        if node.is_static:
-            return
-        if status.completed_at is not None and status.completed_at < self.as_of:
-            yield self._finding(
-                LOAD,
-                LOAD_STALE_TIME,
-                AMBER,
-                node,
-                status.result,
-                f"last loaded {_isoformat(status.completed_at)}",
-                status,
-            )
-        newer = self._newer_ancestor(node)
-        if newer is not None:
-            yield self._finding(
-                LOAD,
-                LOAD_STALE_ANCESTOR,
-                AMBER,
-                node,
-                status.result,
-                f"{newer} has been loaded since this object was",
-                status,
-            )
-
-    def _newer_ancestor(self, node: InstalledNode) -> str | None:
-        """The managed ancestor whose data moved after this object's did.
-
-        Bookmarks on both sides. A bookmark advances for a clean load that
-        established an instant, so a Static skip and a rejecting load leave it
-        where it was, and neither reads as newer data.
-        """
-
-        moved = self.bookmarks.get(node.identity)
-        if moved is None:
-            return None
-        newer = [
-            ancestor.node_id
-            for ancestor in self.dag.ancestors(node.identity)
-            if (self.bookmarks.get(ancestor.identity) or moved) > moved
-        ]
-        return sorted(newer)[0] if newer else None
+        return self.load_health.assess(
+            self._subjects(self.dag.loadables())
+        ).to_health_section()
 
     # --- tests ----------------------------------------------------------------
 
@@ -665,7 +868,7 @@ class _Assessment:
 
     def _test_state(self, node: InstalledNode, status):
         if status is None:
-            yield self._finding(
+            yield _finding(
                 TESTS,
                 TEST_PENDING,
                 AMBER,
@@ -675,7 +878,7 @@ class _Assessment:
             )
             return
         if status.result in _TEST_RED:
-            yield self._finding(
+            yield _finding(
                 TESTS,
                 TEST_FAILED,
                 RED,
@@ -686,7 +889,7 @@ class _Assessment:
             )
             return
         if status.result != SUCCEEDED:
-            yield self._finding(
+            yield _finding(
                 TESTS,
                 TEST_PENDING,
                 AMBER,
@@ -698,7 +901,7 @@ class _Assessment:
             return
         moved = self._loaded_since(node, status.completed_at)
         if moved is not None:
-            yield self._finding(
+            yield _finding(
                 TESTS,
                 TEST_STALE_DEPENDENCY,
                 AMBER,
@@ -709,14 +912,19 @@ class _Assessment:
             )
 
     def _loaded_since(self, node: InstalledNode, at: datetime | None) -> str | None:
-        """The managed ancestor whose data moved after this validation passed."""
+        """The managed ancestor that settled after this validation passed.
+
+        A new View definition puts the validations over it behind, as it does a
+        materialised consumer.
+        """
 
         if at is None:
             return None
         moved = [
             ancestor.node_id
             for ancestor in self.dag.ancestors(node.identity)
-            if (self.bookmarks.get(ancestor.identity) or at) > at
+            if is_lifecycle_node(ancestor)
+            and (self.load_health.established_at(ancestor.identity) or at) > at
         ]
         return sorted(moved)[0] if moved else None
 
@@ -747,7 +955,7 @@ class _Assessment:
         for node in self._subjects(self.dag.validations()):
             if node.is_installed:
                 continue
-            yield self._finding(
+            yield _finding(
                 BUILD,
                 MISSING_VALIDATION_ARTEFACT,
                 RED,
@@ -785,9 +993,7 @@ class _Assessment:
             node = self.dag.by_id.get(str(identity))
             if node is None or not self._in_scope(node):
                 continue
-            yield self._finding(
-                BUILD, DEPENDENCY_UNRESOLVED, RED, node, None, messages[0]
-            )
+            yield _finding(BUILD, DEPENDENCY_UNRESOLVED, RED, node, None, messages[0])
 
     def _ambiguous_addresses(self):
         for target, found in sorted(
@@ -820,7 +1026,7 @@ class _Assessment:
                     continue
                 if inventory.has_object(where.schema, where.object, where.object_type):
                     continue
-                yield self._finding(
+                yield _finding(
                     BUILD,
                     CERTIFIED_MISSING,
                     RED,
@@ -841,31 +1047,31 @@ class _Assessment:
         if node.is_installed:
             yield node.artefact_physical(node.artefact_type)
 
-    # --- one finding ----------------------------------------------------------
 
-    def _finding(
-        self,
-        area: str,
-        code: str,
-        severity: str,
-        node: InstalledNode,
-        status_word: str | None,
-        message: str,
-        status: RuntimeStatus | None = None,
-    ) -> HealthFinding:
-        return HealthFinding(
-            area=area,
-            code=code,
-            severity=severity,
-            message=message,
-            object_id=node.node_id,
-            target=str(node.target),
-            status=status_word,
-            workflow_id=None if status is None else status.workflow_id,
-            started_at=None if status is None else status.started_at,
-            completed_at=None if status is None else status.completed_at,
-            failure_count=None if status is None else status.failure_count,
-        )
+def _finding(
+    area: str,
+    code: str,
+    severity: str,
+    node: InstalledNode,
+    status_word: str | None,
+    message: str,
+    status: RuntimeStatus | None = None,
+) -> HealthFinding:
+    """One finding about one installed node, carrying the status behind it."""
+
+    return HealthFinding(
+        area=area,
+        code=code,
+        severity=severity,
+        message=message,
+        object_id=node.node_id,
+        target=str(node.target),
+        status=status_word,
+        workflow_id=None if status is None else status.workflow_id,
+        started_at=None if status is None else status.started_at,
+        completed_at=None if status is None else status.completed_at,
+        failure_count=None if status is None else status.failure_count,
+    )
 
 
 def _ordered(findings) -> tuple[HealthFinding, ...]:
@@ -914,6 +1120,7 @@ __all__ = [
     "LOAD_FAILED",
     "LOAD_PENDING",
     "LOAD_REJECTED",
+    "LOAD_ANCESTOR_UNESTABLISHED",
     "LOAD_STALE_ANCESTOR",
     "LOAD_STALE_TIME",
     "MISSING_VALIDATION_ARTEFACT",
@@ -925,13 +1132,19 @@ __all__ = [
     "TEST_PENDING",
     "TEST_STALE_DEPENDENCY",
     "LoadActivity",
+    "LoadAssessment",
+    "LoadSubjectHealth",
     "CurrentLoad",
     "RuntimeStatus",
     "assess",
-    "bookmarks",
+    "assess_load",
     "current_load",
     "load_activity",
+    "is_lifecycle_node",
+    "is_view_node",
+    "load_health",
     "load_statuses",
+    "resolve_as_of",
     "test_statuses",
     "worst",
 ]

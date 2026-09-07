@@ -76,6 +76,7 @@ def estate(tmp_path):
             "tsql",
             "tsql_batch",
             "load_file",
+            "runtime_state",
         )
     }
     return {

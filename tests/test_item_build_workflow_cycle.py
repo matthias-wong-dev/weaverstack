@@ -88,6 +88,7 @@ def _executors():
             "tsql_batch",
             "sql_endpoint_refresh",
             "load_file",
+            "runtime_state",
         )
     }
 

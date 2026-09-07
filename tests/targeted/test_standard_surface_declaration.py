@@ -173,7 +173,7 @@ def test_the_load_entry_point_passes_reload_to_the_implementation():
 
 @weaver_test()
 def test_the_load_entry_point_ends_the_load_state_before_it_calls():
-    """Pending status and no bookmark row, both before the implementation runs."""
+    """Pending status and a sentinel bookmark, both before the implementation runs."""
 
     sql = standard_fragment(WAREHOUSE)["programmables/_.Load.sql"].decode("utf-8")
 
@@ -182,18 +182,19 @@ def test_the_load_entry_point_ends_the_load_state_before_it_calls():
     assert reset < called
     ending = sql[reset:called]
     assert "N'Pending'" in ending
-    assert "delete from [_].[Bookmark]" in ending
-    # The status first: nothing may read Succeeded beside an absent bookmark.
+    assert "@weaver_bookmark_sentinel" in ending
+    # The status first: nothing may read Succeeded beside an unset cursor.
     assert ending.index("[_].[LoadStatus]") < ending.index("[_].[Bookmark]")
 
 
 @weaver_test()
-def test_the_load_entry_point_stores_no_bookmark_sentinel():
-    """The sentinel is what an absent row reads as, and is never written."""
+def test_the_load_entry_point_deletes_no_bookmark_row():
+    """An installed loadable keeps one row; a reload returns it to the sentinel."""
 
     sql = standard_fragment(WAREHOUSE)["programmables/_.Load.sql"].decode("utf-8")
 
-    assert BOOKMARK_SENTINEL_TEXT not in sql
+    assert "delete from [_].[Bookmark]" not in sql
+    assert BOOKMARK_SENTINEL_TEXT in sql
 
 
 @weaver_test()

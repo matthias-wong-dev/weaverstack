@@ -92,7 +92,7 @@ def test_the_payload_round_trips():
 
     invalidation = (_bookmark(CUSTOMER, CSV),)
 
-    assert read_invalidation(invalidation_payload(invalidation)) == invalidation
+    assert read_invalidation(invalidation_payload(invalidation)) == ((), invalidation)
 
 
 @weaver_test()
