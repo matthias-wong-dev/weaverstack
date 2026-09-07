@@ -926,6 +926,34 @@ from a directory being deleted. Only the pointer goes: the data belongs to the
 item that produced it, and wiping one Lakehouse never reaches through a shortcut
 into another.
 
+## Mirror
+
+Mirror forks another catalogue's installed estate into this workspace's
+catalogue. The source is `mirror:` in workspace configuration, or `--source` on
+the command:
+
+```bash
+weaver mirror --no-item --yes
+weaver mirror --no-item --source Warehouse/Weaver --catalogue Warehouse/Weaver_Dev
+```
+
+The destination Warehouse is emptied first, so a non-interactive process refuses
+without `--yes`, as wipe does.
+
+`--item` selects logical items to rebind, in the grammar build uses
+(`Warehouse/Model` or `Warehouse/Model=Warehouse/Model_Dev`); omitting it selects
+every configured target. Rebinding is not implemented yet, so a run that selects
+an item says so. `--no-item` forks the catalogue and stops, and that fork plus an
+ordinary build is how one item is moved today:
+
+```bash
+weaver mirror --no-item --yes
+weaver build --item Warehouse/Model=Warehouse/Model_Dev
+```
+
+Nothing a fork does reaches a Lakehouse, so it starts no Spark session. See
+[the central catalogue](catalogue.md) for what moves and what stays.
+
 ## Fabric estate
 
 `weaver fabric` manages the estate Weaver runs on rather than anything Weaver

@@ -28,8 +28,10 @@ def identifier(name: str) -> str:
 def qualified_name(table, schema: str = CATALOGUE_SCHEMA) -> str:
     """How a rendered statement names one catalogue table.
 
-    Two parts, not three: the connection is already open against the catalogue
-    Warehouse, and a Warehouse cannot address another database's tables.
+    Two parts: the connection is already open against the catalogue Warehouse,
+    so the table is in the database the statement runs in. Three-part is how a
+    Warehouse reaches another item in the same workspace, and it is what a fork
+    and a ``_`` surface view are spelled with.
     """
 
     return f"{identifier(schema)}.{identifier(table.name)}"

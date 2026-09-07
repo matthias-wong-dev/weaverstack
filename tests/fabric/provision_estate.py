@@ -17,6 +17,7 @@ Optional environment variables:
     WEAVER_FABRIC_WORKSPACE
     WEAVER_FABRIC_WORKSPACE_EXT
     WEAVER_PYTEST_WEAVER
+    WEAVER_PYTEST_WEAVER_FORK
     WEAVER_PYTEST_TARGET
     WEAVER_PYTEST_PRODUCER
     WEAVER_PYTEST_CONSUMER
@@ -65,6 +66,9 @@ WAREHOUSE_ROLES = {
     # Where the Weaver catalogue lives. A Warehouse: catalogue state is read and
     # written over TDS.
     "weaver": "PYTEST_WEAVER",
+    # Where a fork writes. A second catalogue Warehouse, because a fork empties
+    # its destination and the suite's own catalogue has to survive the run.
+    "weaver_fork": "PYTEST_WEAVER_FORK",
     "warehouse": "PYTEST_WH_1",
 }
 

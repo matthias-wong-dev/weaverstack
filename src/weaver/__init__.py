@@ -39,6 +39,7 @@ from .objects import (
 from .operations.build import BuildResult, build
 from .operations.health import health
 from .operations.load import load
+from .operations.mirror import MirrorResult, mirror
 from .operations.test import test
 from .operations.wipe import WipeReport, WipeResult, wipe
 from .operations.workspace import current_workspace
@@ -69,6 +70,8 @@ __all__ = [
     "ExampleOutcome",
     "build",
     "BuildResult",
+    "mirror",
+    "MirrorResult",
     "wipe",
     "WipeReport",
     "WipeResult",

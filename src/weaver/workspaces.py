@@ -74,6 +74,83 @@ class EnvironmentRef:
         return f"{self.workspace}/{self.name}" if self.workspace else self.name
 
 
+@dataclass(frozen=True)
+class CatalogueRef:
+    """A Weaver catalogue's address: its Warehouse, and the workspace holding it.
+
+    ``Warehouse/Weaver`` names one in the workspace the command is running
+    against. ``Prod/Warehouse/Weaver`` names one in another workspace. The second
+    form parses so an address written today keeps its meaning, and
+    :meth:`is_local_to` is the check an operation bounded to one workspace makes.
+    """
+
+    workspace: str | None
+    name: str
+
+    def __post_init__(self) -> None:
+        if self.workspace is not None:
+            object.__setattr__(
+                self,
+                "workspace",
+                validate_name(self.workspace, what="catalogue workspace"),
+            )
+        object.__setattr__(self, "name", validate_name(self.name, what="catalogue"))
+
+    @classmethod
+    def parse(cls, value: object) -> "CatalogueRef":
+        """Parse ``Warehouse/Name`` or ``Workspace/Warehouse/Name``."""
+
+        if isinstance(value, cls):
+            return value
+        if not isinstance(value, str):
+            raise ConfigError(
+                f"a catalogue address must be a string, got {type(value).__name__}"
+            )
+        parts = value.strip().split("/")
+        if len(parts) == 2:
+            workspace, kind, name = None, parts[0], parts[1]
+        elif len(parts) == 3:
+            workspace, kind, name = parts[0], parts[1], parts[2]
+        else:
+            raise ConfigError(
+                f"a catalogue address must be '{CATALOGUE_KIND}/Name' or "
+                f"'Workspace/{CATALOGUE_KIND}/Name', got {value!r}"
+            )
+        if kind != CATALOGUE_KIND:
+            raise ConfigError(
+                f"a catalogue address must name a {CATALOGUE_KIND}, for example "
+                f"{CATALOGUE_KIND}/Weaver; got {value!r}"
+            )
+        return cls(workspace=workspace, name=name)
+
+    @property
+    def item(self) -> "ItemRef":
+        """The Warehouse as a resolvable item."""
+
+        from .targets import ItemRef
+
+        return ItemRef(self.name)
+
+    def owner(self, workload_workspace: str) -> str:
+        """The workspace holding this catalogue."""
+
+        return self.workspace or validate_name(
+            workload_workspace, what="workload workspace"
+        )
+
+    def is_local_to(self, workload_workspace: str) -> bool:
+        """Whether this catalogue is in the workspace a command runs against."""
+
+        return (
+            self.owner(workload_workspace).casefold()
+            == (workload_workspace or "").casefold()
+        )
+
+    def __str__(self) -> str:
+        typed = f"{CATALOGUE_KIND}/{self.name}"
+        return f"{self.workspace}/{typed}" if self.workspace else typed
+
+
 def _catalogue_value(value: object) -> str:
     """One ``Warehouse/Name`` catalogue, checked and returned as written."""
 
@@ -162,6 +239,10 @@ class Workspace:
     #: value says which kind of item it names rather than relying on the field's
     #: name to imply it.
     catalogue: str | None = None
+    #: The installed estate this one forks, as the address of the catalogue
+    #: holding it. Set, ``weaver mirror`` reads that catalogue's installed state
+    #: and reproduces it here. Unset, this workspace forks nothing.
+    mirror: "CatalogueRef | str | None" = None
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
     #: Where each Weaver item is deployed in this environment, keyed by the item.
     targets: Mapping[WeaverItemId, TargetDeclaration] = field(default_factory=dict)
@@ -178,6 +259,8 @@ class Workspace:
             )
         if self.catalogue is not None:
             object.__setattr__(self, "catalogue", _catalogue_value(self.catalogue))
+        if self.mirror is not None:
+            object.__setattr__(self, "mirror", CatalogueRef.parse(self.mirror))
         if not isinstance(self.execution, ExecutionSettings):
             raise ConfigError("execution must be ExecutionSettings")
         object.__setattr__(self, "targets", _target_declarations(self.targets))
@@ -198,6 +281,12 @@ class Workspace:
                 "'Warehouse/Weaver' or set it in workspace configuration"
             )
         return ItemRef(self.catalogue.split("/", 1)[1])
+
+    @property
+    def catalogue_ref(self) -> CatalogueRef:
+        """The catalogue this workspace writes, as an address."""
+
+        return CatalogueRef(workspace=self.workspace, name=self.catalogue_item.name)
 
     def target_for(self, item: WeaverItemId):
         """Where this configuration deploys one item, typed. A build's answer."""

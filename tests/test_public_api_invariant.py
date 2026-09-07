@@ -33,6 +33,9 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "ExampleOutcome",
         "build",
         "BuildResult",
+        # Forking an installed estate into this workspace's catalogue.
+        "mirror",
+        "MirrorResult",
         "wipe",
         "WipeReport",
         "WipeResult",
