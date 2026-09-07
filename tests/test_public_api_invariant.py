@@ -33,6 +33,14 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "ExampleOutcome",
         "build",
         "BuildResult",
+        # Forking an installed estate into this workspace's catalogue. The
+        # pair is resolved once and proved before anything is emptied, so the
+        # plan and the check are public alongside the operation.
+        "mirror",
+        "MirrorResult",
+        "plan_mirror",
+        "MirrorPlan",
+        "check_mirror",
         "wipe",
         "WipeReport",
         "WipeResult",

@@ -18,6 +18,7 @@ _KEYS = {
     "workspace",
     "environment",
     "catalogue",
+    "mirror",
     "execution",
     "targets",
 }
@@ -63,6 +64,7 @@ def parse_workspace(payload: Any, base_dir: str | Path | None = None) -> Workspa
             workspace=_text(payload["workspace"], where="workspace"),
             environment=payload.get("environment"),
             catalogue=payload.get("catalogue"),
+            mirror=payload.get("mirror"),
             execution=_execution(payload.get("execution"), where="execution"),
             targets=_targets(payload.get("targets")),
         )
@@ -122,6 +124,7 @@ def resolve_workspace(
         "catalogue": catalogue
         if catalogue is not None
         else (configured.catalogue if configured is not None else None),
+        "mirror": configured.mirror if configured is not None else None,
         "execution": configured.execution
         if configured is not None
         else ExecutionSettings(),

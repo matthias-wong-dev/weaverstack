@@ -805,6 +805,76 @@ Every catalogue table holds state no declaration reproduces, so all of them decl
 asked of a *table* and not of a view, since a runtime table is the catalogue's own in
 one Warehouse and a reference to it everywhere else.
 
+## Forking a catalogue
+
+`weaver mirror` gives one workspace's catalogue the installed state of another,
+so an estate can be worked on without touching the estate it came from.
+
+```yaml
+workspace: Analytics
+catalogue: Warehouse/Weaver_Dev
+
+mirror: Warehouse/Weaver
+```
+
+```bash
+weaver mirror --no-item --yes
+```
+
+`mirror` is the catalogue read from and `catalogue` the catalogue written to.
+Either side may instead be named on the command, as `--mirror` and
+`--catalogue`; see [using the CLI](cli-usage.md) for how the two are resolved
+together.
+
+The destination Warehouse is emptied by an ordinary wipe, its `_` schema is
+rebuilt by an ordinary build, and the source's rows are copied in. Running it
+again does the same work again, which is what makes a half-finished fork
+recoverable.
+
+**Nothing is removed until the fork is known to be possible.** The pair is
+resolved, the addresses are checked for locality and for naming two different
+Warehouses, and the source catalogue is read to prove it holds the tables a fork
+copies. `weaver.plan_mirror` produces that pair, `weaver.check_mirror` proves
+it, and `weaver.mirror` acts on it, so the sentence a confirmation shows and the
+Warehouse a fork empties come from one resolution.
+
+**What moves.** Everything but `_.Log` and `_.LoadStatistic`. Those record what a
+run did to the source estate. The projected tables say what is installed and
+where, and the current-state tables say how far each object has been loaded and
+validated, and a fork inherits both.
+
+**What the destination writes about itself.** The build that made the `_` schema
+published its own Installation, dictionary and Registry rows for
+`Warehouse/_weaver`, naming the Warehouse those tables are in. Those rows stay,
+and the source's are left behind: copied across, the forked catalogue would
+assert its own tables live in a catalogue it is not.
+
+**Installation is copied as it stands.** A forked catalogue names the source's
+physical targets, so every item begins where it already is. One
+
+```bash
+weaver build --item Warehouse/Model=Warehouse/Model_Dev
+```
+
+then moves that item alone, and every other binding stays as copied. That is the
+point of the fork: the choice of what to diverge is made per item, after the
+state is branched. A build reads the inventory of the target it is bound to, so
+a copied Registry row for an object the new target does not physically hold
+classifies as new and is built in full.
+
+**The copy is server-side.** Fabric spells another Warehouse in the same
+workspace three-part, so each table moves in one `insert ... select` and no row
+passes through the client. That reach is why v1 requires the source catalogue to
+be in the workspace being built, and why a source elsewhere is refused before the
+destination is emptied.
+
+**A kept item's `_` surface still addresses the source catalogue.** The views and
+OneLake shortcuts in an item's `_` schema were built pointing at the catalogue
+that built them, and a fork does not touch the item. `weaver load` driven against
+the fork records centrally and is unaffected, but `exec [_].[Load]` typed inside a
+kept item reaches the source catalogue. An item is only fully the fork's once it
+has been built into a target of its own.
+
 ## The catalogue lives in a Warehouse
 
 Every table above is a Warehouse table under `_`, read and written over TDS.

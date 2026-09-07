@@ -171,6 +171,19 @@ def _requires_wipe(args) -> frozenset[str]:
     )
 
 
+def _requires_mirror(args) -> frozenset[str]:
+    """What forking a catalogue will want.
+
+    T-SQL and item resolution. A fork empties a Warehouse, rebuilds the ``_``
+    schema and copies rows between two Warehouses, and none of that reaches a
+    Lakehouse, so no Spark session is asked for.
+    """
+
+    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
+
+    return requirements(AUTH, RESOLVER, TDS)
+
+
 def _requires_health(args) -> frozenset[str]:
     """What a health report will want.
 
@@ -611,6 +624,44 @@ def build_parser() -> argparse.ArgumentParser:
         requires=_requires_wipe,
         lakehouses=_physical_target_lakehouses,
     )
+
+    mirror = subcommands.add_parser(
+        "mirror",
+        help=(
+            "Fork another catalogue's installed estate into this workspace's catalogue."
+        ),
+    )
+    mirror.add_argument(
+        "--item",
+        action="append",
+        dest="items",
+        metavar="ITEM[=TARGET]",
+        help=(
+            "A logical item to rebind, such as Warehouse/Model or "
+            "Warehouse/Model=Warehouse/Model_Dev. Repeatable. Omitted, every "
+            "configured target is selected."
+        ),
+    )
+    mirror.add_argument(
+        "--no-item",
+        action="store_true",
+        help="Fork the catalogue and rebind no physical item.",
+    )
+    mirror.add_argument(
+        "--mirror",
+        metavar="CATALOGUE",
+        dest="mirror_source",
+        help=(
+            "The catalogue to fork, for example Warehouse/Weaver. Outranks "
+            "mirror: in workspace configuration."
+        ),
+    )
+    _add_workspace_args(mirror)
+    mirror.add_argument(
+        "--yes", action="store_true", help="Skip the confirmation prompt."
+    )
+    mirror.add_argument("--json", action="store_true", help="emit the result as JSON")
+    mirror.set_defaults(handler=handle_mirror, requires=_requires_mirror)
 
     install = subcommands.add_parser(
         "install",
@@ -1729,6 +1780,68 @@ def handle_wipe(args: argparse.Namespace) -> int:
             print(f"  {report.target}: removed {report.count}")
     else:
         print("Nothing to remove.")
+    return 0
+
+
+def handle_mirror(args: argparse.Namespace) -> int:
+    """Resolve the pair, prove the source, confirm, then fork.
+
+    The order is the safety property. A fork empties the destination Warehouse,
+    so what it will do is settled and the source is read before anything is
+    asked, and long before anything is removed. A misspelled ``--mirror`` fails
+    while the destination is still intact.
+
+    One :class:`weaver.MirrorPlan` carries the pair through all three, so the
+    sentence somebody answers names the catalogues the fork acts on.
+    """
+
+    import json
+
+    if args.items and args.no_item:
+        raise CommandError("--item and --no-item cannot be used together")
+
+    # Resolved from what this command line said, not from the workspace the CLI
+    # overlaid `--catalogue` onto: which configured value is the source and
+    # which the destination depends on what else is set.
+    plan = weaver.plan_mirror(
+        args.items,
+        no_item=args.no_item,
+        workspace=args.workspace,
+        catalogue=args.catalogue,
+        mirror=args.mirror_source,
+        environment=getattr(args, "environment", None),
+        workspace_config=args.workspace_config,
+        session=_session(args),
+    )
+
+    with _running_session(args, plan.workspace) as opened:
+        weaver.check_mirror(plan, session=opened)
+
+        if not _authorised(args):
+            print(f"mirror on {plan.workspace.workspace}\n\n  {plan.describe()}\n")
+            if not sys.stdin.isatty():
+                print(
+                    f"Refusing to empty {plan.target} without confirmation. "
+                    "Pass --yes.",
+                    file=sys.stderr,
+                )
+                return 1
+            answer = input(
+                f"Empty and rebuild {plan.target}? This cannot be undone [y/N] "
+            )
+            if answer.strip().lower() not in {"y", "yes"}:
+                print("Cancelled.")
+                return 1
+
+        result = weaver.mirror(plan=plan, session=opened)
+
+    if args.json:
+        print(json.dumps(result.to_mapping(), indent=2))
+        return 0
+    print(f"Forked {result.source_catalogue} into {result.destination_catalogue}.")
+    for table, rows in result.copied.items():
+        print(f"  {table}: {rows}")
+    print(f"  ({', '.join(result.uncopied)} start empty)")
     return 0
 
 

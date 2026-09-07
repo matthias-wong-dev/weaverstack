@@ -926,6 +926,59 @@ from a directory being deleted. Only the pointer goes: the data belongs to the
 item that produced it, and wiping one Lakehouse never reaches through a shortcut
 into another.
 
+## Mirror
+
+Mirror forks another catalogue's installed estate into this workspace's
+catalogue. A fork has two sides and one vocabulary for them: `mirror` is the
+catalogue read from and `catalogue` the catalogue written to, in configuration
+and on the command alike.
+
+```bash
+weaver mirror \
+  --mirror Warehouse/Catalogue \
+  --catalogue Warehouse/DEV_Catalogue \
+  --workspace "Analytics" \
+  --no-item
+```
+
+Both sides can come from configuration instead, and resolution is additive:
+
+| Configuration | Command | Source | Destination |
+|---|---|---|---|
+| none | `--mirror` and `--catalogue` | named | named |
+| `catalogue:` alone | `--catalogue` | the configured `catalogue:` | named |
+| `catalogue:` and `mirror:` | nothing | the configured `mirror:` | the configured `catalogue:` |
+
+A configuration naming `catalogue:` alone describes the estate being forked
+**from**, so it supplies the source. It never supplies the destination: a
+production configuration's catalogue is the last Warehouse a fork should empty,
+and a missing destination is an error rather than a guess. A configuration that
+also names `mirror:` describes a fork already, so its `catalogue:` is the
+destination.
+
+The destination Warehouse is emptied first, so a non-interactive process refuses
+without `--yes`, as wipe does. Before it asks, the pair is resolved and the
+source catalogue is read, so a misspelled `--mirror` fails while the destination
+is still intact. The question names the pair that was resolved:
+
+```text
+Warehouse/DEV_Catalogue will be emptied and rebuilt from Warehouse/Catalogue.
+```
+
+`--item` selects logical items to rebind, in the grammar build uses
+(`Warehouse/Model` or `Warehouse/Model=Warehouse/Model_Dev`); omitting it selects
+every configured target. Rebinding is not implemented yet, so a run that selects
+an item says so. `--no-item` forks the catalogue and stops, and that fork plus an
+ordinary build is how one item is moved today:
+
+```bash
+weaver mirror --no-item --yes
+weaver build --item Warehouse/Model=Warehouse/Model_Dev
+```
+
+Nothing a fork does reaches a Lakehouse, so it starts no Spark session. See
+[the central catalogue](catalogue.md) for what moves and what stays.
+
 ## Fabric estate
 
 `weaver fabric` manages the estate Weaver runs on rather than anything Weaver

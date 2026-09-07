@@ -131,6 +131,9 @@ def fabric_client(fabric_workspace_item):
 #: Every name is overridable, so another tenant runs the suite against its own.
 FIXED_ITEMS = {
     "weaver": "PYTEST_WEAVER",
+    # Where a fork writes. A fork empties its destination, so it needs a
+    # catalogue Warehouse that is not the one the rest of the suite reads.
+    "weaver_fork": "PYTEST_WEAVER_FORK",
     # Repositories and bundles need OneLake and the catalogue has none. This
     # Lakehouse holds them and is never built into: staged files in a target
     # would show up in its own inventory, which is how the bundle the suite had
@@ -271,6 +274,20 @@ def fabric_catalogue(fabric_workspace_item, fabric_client):
     """
 
     return _ensure_catalogue_warehouse(fabric_client, fabric_workspace_item, "weaver")
+
+
+@pytest.fixture(scope="session")
+def fabric_fork_catalogue(fabric_workspace_item, fabric_client):
+    """The fixed Warehouse a fork writes into.
+
+    Separate from :func:`fabric_catalogue` because a fork empties its
+    destination before it rebuilds it, and the catalogue the rest of the suite
+    reads has to survive the run.
+    """
+
+    return _ensure_catalogue_warehouse(
+        fabric_client, fabric_workspace_item, "weaver_fork"
+    )
 
 
 @pytest.fixture(scope="session")

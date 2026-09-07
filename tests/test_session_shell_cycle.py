@@ -242,6 +242,7 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
         "build",
         "health",
         "load",
+        "mirror",
         "test",
         "wipe",
         "workflow",
