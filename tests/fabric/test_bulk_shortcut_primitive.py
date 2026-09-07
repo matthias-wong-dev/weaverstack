@@ -3,8 +3,8 @@
 Fabric takes a whole batch at ``shortcuts/bulkCreate`` and settles each member
 separately, so a batch can come back part succeeded. This is the narrow claim
 that the batch Weaver sends is the batch Fabric makes: table shortcuts and a
-folder shortcut in one crossing, every member reported, and each one readable in
-the destination afterwards.
+folder shortcut in one bulk create, every member reported, and each one readable
+in the destination afterwards.
 
 Where a member's outcome is read from is the part worth proving against a tenant.
 Bulk creation is long-running, so the accepting response carries no outcomes and
@@ -83,7 +83,7 @@ def batch(
 
 @weaver_test(remote=True, resources={"rest", "onelake"})
 def test_one_bulk_request_creates_tables_and_a_folder(batch):
-    """Two table shortcuts and a folder shortcut, in one crossing.
+    """Two table shortcuts and a folder shortcut, in one bulk create.
 
     A folder shortcut sits directly under ``Files`` and a table shortcut under
     ``Tables/<schema>``, so the batch carries both shapes and Fabric is asked to

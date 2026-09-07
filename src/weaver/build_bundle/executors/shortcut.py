@@ -9,11 +9,12 @@ was generated, because it is not a target of this build and nothing here would
 know where to look.
 
 The pointer is a OneLake shortcut in the destination Lakehouse, created through
-the workspace's own API. One action's shortcuts are created as one batch, so an
-item presenting seventy of them costs one crossing. A payload naming ``remove``
-instead unpicks the pointers it lists, through the same API and for the same
-reason: a shortcut is a read-write window into the item it points at, so removing
-the name over storage or over Spark would reach that item's data.
+the workspace's own API. One action's shortcuts are created as one batch: one
+bulk create submission for the action rather than one create request per
+shortcut. A payload naming ``remove`` instead unpicks the pointers it lists,
+through the same API and for the same reason: a shortcut is a read-write window
+into the item it points at, so removing the name over storage or over Spark would
+reach that item's data.
 
 Which shortcut, over what, is settled in the manifest; how a name is made to
 point somewhere is the transport's business. A shortcut holds no data, so an
@@ -84,9 +85,10 @@ class ShortcutExecutor:
                 "environment offers no way to create a OneLake shortcut"
             )
 
-        # Every source is addressed before anything is sent, so the batch costs
-        # one crossing. Addressing a bound source reads storage to settle the
-        # spelling Fabric published it under, which stays per shortcut.
+        # Every source is addressed before anything is sent, so the action
+        # makes one bulk create submission. Addressing a bound source reads
+        # storage to settle the spelling Fabric published it under, which stays
+        # per shortcut.
         requested = [self._request(each, context) for each in frozen]
         created = create(context.target.lakehouse, requested)
         made = [

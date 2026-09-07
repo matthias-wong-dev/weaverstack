@@ -468,9 +468,9 @@ def _two_shortcuts() -> bytes:
 
 @weaver_test()
 def test_one_action_creates_its_shortcuts_as_one_batch(tmp_path, monkeypatch):
-    """The cost of a shortcut is the crossing, so the creates must not serialise.
+    """The cost of a shortcut is the request, so the creates must not serialise.
 
-    Two shortcuts through one action means one bulk request and one discovery
+    Two shortcuts through one action means one bulk create and one discovery
     window. The second shortcut adds an entry to the batch.
     """
 

@@ -361,7 +361,7 @@ def test_a_refused_batch_names_what_it_could_not_create():
 
 @weaver_test()
 def test_an_empty_batch_sends_nothing():
-    """Nothing declared is nothing to create, and no crossing to pay for."""
+    """Nothing declared is nothing to create, and no request to pay for."""
 
     client = _Client()
 

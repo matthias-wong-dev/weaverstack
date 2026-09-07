@@ -5,9 +5,10 @@ the pair it declares changed. What a build leaves alone it does not touch: which
 shortcuts an installation acts on is settled in
 :mod:`weaver.build_bundle.incremental`.
 
-Creation is bulk. Fabric takes a whole batch in one request and reports each
-member's outcome separately, so a Lakehouse mirror of seventy shortcuts costs one
-crossing.
+Creation is bulk. Fabric takes a whole batch in one submission and reports each
+member's outcome separately, so a caller sends one bulk create for a batch rather
+than one create request per shortcut. The submission is long-running, so the
+interaction also polls the operation and reads its result.
 """
 
 from __future__ import annotations
@@ -257,8 +258,7 @@ def _members(response, *, client: FabricClient) -> dict[tuple[str, str], dict]:
 def _refuse_permanent(destination: Item, request: ShortcutRequest, member) -> None:
     """Raise unless this member failed for a source still being published.
 
-    A member that failed carries an error. One reporting a status Fabric added
-    after this was written carries none, and the status is then what there is to
+    A failed member may carry no error body. Its status is then what there is to
     report.
     """
 

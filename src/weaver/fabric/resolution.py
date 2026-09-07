@@ -178,8 +178,8 @@ class FabricResolver:
         the workspace the build is bound to, and that address is settled when the
         bundle is generated, so there is nothing left to look up here.
 
-        Sources are resolved before anything is sent, so one crossing creates the
-        whole batch.
+        Sources are resolved before anything is sent, so the whole batch goes in
+        one bulk create submission.
         """
 
         from .shortcuts import ShortcutRequest, create_shortcuts

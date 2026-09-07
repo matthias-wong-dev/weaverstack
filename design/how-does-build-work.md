@@ -371,10 +371,10 @@ for Fabric to let go of a name it was about to reuse. Measured against a Fabric
 tenant: an overwrite answers 200 in under a second.
 
 **One action's shortcuts are created as one batch.** The transport posts them to
-`shortcuts/bulkCreate`, so an item presenting seventy pointers costs one
-crossing. Bulk creation is long-running, and the accepting response carries no
-member outcomes: they are read from the operation's result address once it
-settles. Fabric settles each member separately, so a batch can come back
+`shortcuts/bulkCreate`, so an action makes one bulk create submission rather than
+one create request per shortcut. Bulk creation is long-running, so the submission
+is followed by polling and a read of the operation's result address: the
+accepting response carries no member outcomes. Fabric settles each member separately, so a batch can come back
 part succeeded. What succeeded is kept, and a member whose source is still being
 published is sent again on its own. See `weaver.fabric.shortcuts.create_shortcuts`.
 
