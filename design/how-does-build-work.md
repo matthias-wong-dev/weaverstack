@@ -370,6 +370,14 @@ up to thirty-five seconds afterwards, which is time a build would spend waiting
 for Fabric to let go of a name it was about to reuse. Measured against a Fabric
 tenant: an overwrite answers 200 in under a second.
 
+**One action's shortcuts are created as one batch.** The transport posts them to
+`shortcuts/bulkCreate`, so an item presenting seventy pointers costs one
+crossing. Bulk creation is long-running, and the accepting response carries no
+member outcomes: they are read from the operation's result address once it
+settles. Fabric settles each member separately, so a batch can come back
+part succeeded. What succeeded is kept, and a member whose source is still being
+published is sent again on its own. See `weaver.fabric.shortcuts.create_shortcuts`.
+
 **Which shortcuts an installation touches is settled before it runs.** A pointer
 is created when it is new and repointed when the pair it declares changes. See
 [§4a](#4a-shortcuts) and [§7a](#7a-cross-item-freshness).

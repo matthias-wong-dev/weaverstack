@@ -170,41 +170,45 @@ class FabricResolver:
     # resolver inside a Fabric session offers neither, and an action that needs
     # one is recorded as skipped rather than failed.
 
-    def create_onelake_shortcut(
-        self,
-        item: ItemRef,
-        *,
-        path: str,
-        name: str,
-        source: ItemRef | Item,
-        source_kind: str | None = None,
-        source_path: str,
-    ) -> dict:
-        """Point ``item``'s ``path/name`` at ``source``'s ``source_path``.
+    def create_onelake_shortcuts(self, item: ItemRef, shortcuts) -> tuple[dict, ...]:
+        """Point each shortcut's ``path/name`` at its source, in one request.
 
-        ``source`` is a name in this workspace, or an item already resolved
-        elsewhere. A direct shortcut may point outside the workspace the build is
-        bound to, and that address is settled when the bundle is generated, so
-        there is nothing left to look up here.
+        Each shortcut names a source that is either a name in this workspace or
+        an item already resolved elsewhere. A direct shortcut may point outside
+        the workspace the build is bound to, and that address is settled when the
+        bundle is generated, so there is nothing left to look up here.
+
+        Sources are resolved before anything is sent, so one crossing creates the
+        whole batch.
         """
 
-        from .shortcuts import create_shortcut
+        from .shortcuts import ShortcutRequest, create_shortcuts
 
-        resolved_source = (
-            source
-            if getattr(source, "id", None) and getattr(source, "workspace_id", None)
-            else self.resolve(
-                source,
-                item_type=(WAREHOUSE if source_kind == WAREHOUSE_TARGET else LAKEHOUSE),
+        requests = tuple(
+            ShortcutRequest(
+                path=shortcut["path"],
+                name=shortcut["name"],
+                source=self._shortcut_source(
+                    shortcut["source"], shortcut.get("source_kind")
+                ),
+                source_path=shortcut["source_path"],
             )
+            for shortcut in shortcuts
         )
-        return create_shortcut(
+        return create_shortcuts(
             self.resolve(item, item_type=LAKEHOUSE),
-            path=path,
-            name=name,
-            source=resolved_source,
-            source_path=source_path,
+            requests,
             client=self.client,
+        ).created
+
+    def _shortcut_source(self, source: "ItemRef | Item", source_kind: str | None):
+        """A shortcut's source item, resolved here unless it already was."""
+
+        if getattr(source, "id", None) and getattr(source, "workspace_id", None):
+            return source
+        return self.resolve(
+            source,
+            item_type=(WAREHOUSE if source_kind == WAREHOUSE_TARGET else LAKEHOUSE),
         )
 
     def external_item(self, name: str, *, item_type: str, workspace: str | None = None):
