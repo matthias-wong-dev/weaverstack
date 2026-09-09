@@ -8,7 +8,7 @@ source has one, since nothing declares that table.
 The copy is server-side: Fabric spells another Warehouse in the same workspace
 three-part, so each table moves in one statement.
 
-See ``design/catalogue.md`` for the fork this belongs to.
+See ``design/catalogue.md``.
 """
 
 from __future__ import annotations
@@ -62,8 +62,7 @@ def local_relation(table) -> str:
 def create_statement(table) -> str:
     """The table, created where this catalogue has none.
 
-    For ``_.Mirror`` alone, which no document declares and no build makes. Its
-    columns come from the same declaration every other statement reads.
+    For ``_.Mirror`` alone, which no document declares and no build makes.
     """
 
     definitions = ",\n    ".join(
@@ -127,12 +126,8 @@ def fork_statements(
 ) -> tuple[str, ...]:
     """Every statement that copies one catalogue's state into this one.
 
-    Projected tables first and current state after, which is the order they
-    describe an estate in: what is installed, then how far it has been run.
-
     ``borrowed`` says the source holds a ``_.Mirror``. Set, the destination is
-    given one and its rows come across, because which objects are borrowed is
-    part of the installed state a fork inherits.
+    given one and its rows come across.
     """
 
     statements = [
@@ -148,9 +143,7 @@ def fork_statements(
 def copied_tables(*, borrowed: bool = False) -> tuple:
     """What a fork copies, in the order it copies them.
 
-    ``_.Mirror`` is last and only where the source has one: it is the only
-    table here that no document declares, so a fork creates it before the rows
-    land.
+    ``_.Mirror`` is last, and only where the source has one.
     """
 
     return FORKED_TABLES + (MIRROR,) if borrowed else FORKED_TABLES

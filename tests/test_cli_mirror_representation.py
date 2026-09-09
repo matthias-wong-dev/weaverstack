@@ -1,9 +1,8 @@
 """The CLI is a confirmation and rendering adapter for public mirror.
 
-The order it runs things in is the safety property. A mirror empties a
-Warehouse for the destination catalogue and one for each selected item, so the
-scope is settled and the source is read before anybody is asked, and what they
-answer names every Warehouse the run empties.
+The order it runs things in is the safety property: the scope is settled and
+the source is read before anybody is asked, and what they answer names every
+Warehouse the run empties.
 """
 
 from __future__ import annotations

@@ -967,9 +967,11 @@ A mirror empties one Warehouse for the destination catalogue and one for each
 selected item, so a non-interactive process refuses without `--yes`, as wipe
 does. Before it asks, the whole scope is settled: the pair is resolved, the
 source catalogue is read, and every item's installed target is looked up there.
-A misspelled `--mirror`, an item the catalogue never installed, or a destination
-another item is installed to fails while every Warehouse is intact. The question
-names each Warehouse it will empty:
+A misspelled `--mirror` or an item the catalogue never installed fails while
+every Warehouse is intact. Naming a Warehouse as a destination says its
+contents are disposable, and the one refusal is a destination this run reads
+from: the source catalogue, or the Warehouse an item borrows its rows through.
+The question names each Warehouse it will empty:
 
 ```text
 Mirror will empty:

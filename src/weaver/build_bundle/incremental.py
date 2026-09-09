@@ -341,9 +341,9 @@ def determine_impact(
 def _installed_as_pointer(registered, mirrored, identity) -> bool:
     """Whether what is installed at this identity holds none of its own data.
 
-    Two kinds. A shortcut destination says so in its Registry role, because it
-    and an owned object share one identity. A mirror says so in ``_.Mirror``,
-    because Registry still records what the object logically is.
+    Two sources, because a pointer and an owned object share one identity: a
+    shortcut destination says so in its Registry role, and a mirror in
+    ``_.Mirror``, Registry still recording what the object logically is.
     """
 
     document = registered.get(identity)

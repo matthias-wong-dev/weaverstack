@@ -1,7 +1,7 @@
 """What a Warehouse mirror stands up, and what it records.
 
-Data borrowed, code local. The statements are settled here; whether Fabric reads
-through them is ``tests/fabric/test_warehouse_mirror_primitive.py``.
+The statements are settled here; whether Fabric reads through them is
+``tests/fabric/test_warehouse_mirror_journey.py``.
 """
 
 from __future__ import annotations
@@ -105,7 +105,7 @@ def test_the_schemas_a_mirror_needs_are_made_first():
 def test_the_catalogue_schema_is_never_made_as_an_application_one():
     """``_`` is Weaver's, and the surface is what puts it there."""
 
-    assert schema_statements([_id("_", "Registry")]) == ()
+    assert schema_statements(["_"]) == ()
 
 
 # --- the surface a target reads Weaver state through --------------------------
@@ -131,7 +131,7 @@ def test_the_surface_does_not_present_what_is_borrowed():
     assert f"[{MIRROR.name}]" not in body
 
 
-# --- code is local ------------------------------------------------------------
+# --- the procedures it copies ------------------------------------------------------------
 
 
 def _certified(*rows) -> dict:
@@ -155,11 +155,7 @@ CERTIFIED = _certified(
 
 @weaver_test()
 def test_every_certified_procedure_is_copied_whatever_schema_it_is_in():
-    """Weaver's generated load and validation procedures sit in ``_``.
-
-    The copied Registry certifies them, and ``weaver test`` dispatches
-    ``_.[Test Core.Integrity]`` by name, so the mirror holds them too.
-    """
+    """``weaver test`` dispatches ``_.[Test Core.Integrity]`` by name."""
 
     assert {identity.object_id.qualified for identity in executable(CERTIFIED)} == {
         "Rpt.Refresh",
@@ -170,7 +166,6 @@ def test_every_certified_procedure_is_copied_whatever_schema_it_is_in():
 
 @weaver_test()
 def test_a_source_that_does_not_hold_certified_code_is_named():
-    """Registry and the source Warehouse are two readings of one estate."""
 
     absent = missing_programmables(
         executable(CERTIFIED), ["rpt.refresh", "_.Load Core.Customer"]

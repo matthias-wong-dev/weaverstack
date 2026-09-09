@@ -1,9 +1,7 @@
 """What ``weaver mirror`` settles before it empties anything.
 
 Which catalogue is read, which is written, where each selected item goes, and
-which runs are refused. A mirror empties one Warehouse for the destination
-catalogue and one for each item, so the whole scope is settled first, and
-settling it needs no tenant.
+which runs are refused. None of it needs a tenant.
 
 A fork has two sides and one vocabulary for them. ``mirror`` is read from,
 ``catalogue`` is written to, in configuration and on the command alike.
@@ -16,6 +14,7 @@ from support.weaver_test import weaver_test
 
 import weaver
 from weaver.config import parse_workspace
+from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError, ConfigError
 from weaver.operations.mirror import (
     MirrorPlan,
@@ -48,7 +47,6 @@ def _plan(monkeypatch, configured: Workspace, items=None, **named) -> MirrorPlan
 def _with_targets() -> Workspace:
     """A dev configuration that deploys two items."""
 
-    from weaver.declaration.model import WeaverItemId
     from weaver.workspaces import TargetDeclaration
 
     return _workspace(
@@ -418,62 +416,36 @@ def test_an_item_the_catalogue_never_installed_is_refused(monkeypatch):
 
 
 @weaver_test()
-def test_mirroring_an_item_onto_its_own_target_is_refused(monkeypatch):
-    """The wipe would empty the Warehouse holding the rows being borrowed."""
+def test_mirroring_an_item_onto_the_warehouse_it_borrows_from_is_refused(monkeypatch):
+    """A named destination is emptied, and this one holds the rows being read."""
 
     plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model=Warehouse/Model_Dev"])
 
-    with pytest.raises(CommandError, match="rows it borrows"):
+    with pytest.raises(CommandError, match="does not read from"):
         resolve_mirror(plan, _installed({"Warehouse/Model": "Model_Dev"}))
 
 
-@pytest.mark.parametrize("destination", ["Weaver", "Weaver_Dev"])
 @weaver_test()
-def test_an_item_destination_holding_a_catalogue_is_refused(monkeypatch, destination):
-    """Neither catalogue is a Warehouse an item may be emptied into."""
+def test_mirroring_an_item_onto_the_source_catalogue_is_refused(monkeypatch):
+    """The fork copies state from it, so emptying it would take the source."""
 
-    plan = _plan(
-        monkeypatch, _with_targets(), [f"Warehouse/Model=Warehouse/{destination}"]
-    )
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model=Warehouse/Weaver"])
 
-    with pytest.raises(CommandError, match="holds the"):
+    with pytest.raises(CommandError, match="does not read from"):
         resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
 
 
 @weaver_test()
-def test_two_items_emptying_one_warehouse_is_refused(monkeypatch):
-    plan = _plan(
-        monkeypatch,
-        _with_targets(),
-        ["Warehouse/Model=Warehouse/Shared", "Warehouse/Other=Warehouse/Shared"],
-    )
-
-    with pytest.raises(CommandError, match="One Warehouse holds one item"):
-        resolve_mirror(
-            plan,
-            _installed({"Warehouse/Model": "Model", "Warehouse/Other": "Other"}),
-        )
-
-
-@weaver_test()
-def test_selecting_one_item_twice_is_refused(monkeypatch):
-    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model", "Warehouse/Model"])
-
-    with pytest.raises(CommandError, match="twice"):
-        resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
-
-
-@weaver_test()
-def test_a_destination_another_item_is_installed_to_is_refused(monkeypatch):
-    """Emptying it would take the rows of an item this run does not mirror."""
+def test_a_destination_another_item_occupies_is_emptied_like_any_other(monkeypatch):
+    """Naming a Warehouse is saying its contents are disposable."""
 
     plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model=Warehouse/Reporting"])
 
-    with pytest.raises(CommandError, match="Warehouse/Other installed there"):
-        resolve_mirror(
-            plan,
-            _installed({"Warehouse/Model": "Model", "Warehouse/Other": "Reporting"}),
-        )
+    resolved = resolve_mirror(
+        plan, _installed({"Warehouse/Model": "Model", "Warehouse/Other": "Reporting"})
+    )
+
+    assert resolved.wiped == ("Warehouse/Weaver_Dev", "Warehouse/Reporting")
 
 
 # --- what it reports ----------------------------------------------------------
@@ -498,36 +470,23 @@ def test_a_result_says_what_moved_and_what_did_not():
 # --- helpers ------------------------------------------------------------------
 
 
-def _installed(targets: dict[str, str], objects: dict[str, tuple] | None = None):
-    """A source catalogue recording where each item is installed.
-
-    ``objects`` holds ``(schema, name, object_type, object_role)`` per item, for
-    a claim about what a mirror stands over. Most claims here are about which
-    Warehouses are emptied, and those need only the Installation rows.
-    """
+def _installed(targets: dict[str, str]):
+    """A source catalogue recording where each item is installed."""
 
     from weaver.catalogue.state import Catalogue
-    from weaver.catalogue.tables import INSTALLATION, REGISTRY
-    from weaver.declaration.model import WeaverItemId
+    from weaver.catalogue.tables import INSTALLATION
 
-    objects = objects or {}
     rows = {}
     for written, target in targets.items():
         item = WeaverItemId.parse(written)
-        scope = {"item_type": item.item_type, "item_name": item.item_name}
         rows[item] = {
-            INSTALLATION.name: ({**scope, "target_name": target},),
-            REGISTRY.name: tuple(
+            INSTALLATION.name: (
                 {
-                    **scope,
-                    "schema_name": schema,
-                    "object_name": name,
-                    "object_type": object_type,
-                    "object_role": role,
-                    "signature": "sig",
-                }
-                for schema, name, object_type, role in objects.get(written, ())
-            ),
+                    "item_type": item.item_type,
+                    "item_name": item.item_name,
+                    "target_name": target,
+                },
+            )
         }
     return Catalogue(rows=rows)
 

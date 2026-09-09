@@ -923,9 +923,9 @@ BOOKMARK_SENTINEL = datetime(1900, 1, 1, tzinfo=timezone.utc)
 #: History is appended: a row records that something happened, and nothing that
 #: happens later makes it not have happened. Current state is merged on the
 #: table's own key: there is one row per object per incarnation, and when a build
-#: ends that incarnation the row goes with it. Borrowed is merged on the key too,
-#: and outlives an incarnation: it says an installed object's data comes from
-#: somewhere else, and what ends the row is the object becoming locally owned.
+#: ends that incarnation the row goes with it. Borrowed is merged on the key too
+#: and outlives an incarnation: what ends the row is the object becoming locally
+#: owned.
 HISTORY = "history"
 CURRENT_STATE = "current_state"
 BORROWED = "borrowed"
@@ -1328,14 +1328,13 @@ TEST_STATUS = RuntimeTable(
 MIRROR = RuntimeTable(
     name="Mirror",
     description=(
-        "Installed objects whose data is supplied by another physical target "
-        "rather than held locally. One row per borrowed object, written when a "
-        "mirror is created and removed when the object is built locally. "
-        "Registry still says what the object logically is; this says where its "
-        "rows come from and what stands at its address."
+        "Installed objects whose data is supplied by another physical target. "
+        "One row per borrowed object, written when a mirror is created and "
+        "removed when the object is built locally. Registry says what the "
+        "object is; this says where its rows come from and what stands at its "
+        "address."
     ),
-    # The Registry's identity exactly, and for the reason a shared key exists at
-    # all: a Mirror row and a Registry row describe the same installed object.
+    # The Registry's identity exactly: both rows describe one installed object.
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     maintenance=BORROWED,
     columns=(
@@ -1385,9 +1384,6 @@ RUNTIME_TABLES = (LOG, BOOKMARK, LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
 #: authored Spark SQL, ``_.Load`` and ``_.Test`` reach Weaver's operational
 #: state. ``_.Installation`` is here because ``_.Load`` and ``_.Test`` recover
 #: their logical item from it when a caller omits ``@item_name``.
-#:
-#: ``_.Mirror`` is not here and is not a runtime table, so nothing presents it:
-#: nothing running inside a target asks where its data came from.
 STANDARD_SURFACE_TABLES = (INSTALLATION,) + RUNTIME_TABLES
 
 #: The runtime tables describing one object's state now. A build ends the
@@ -1399,12 +1395,10 @@ CURRENT_STATE_TABLES = tuple(
 #: The runtime tables recording what happened. Never invalidated.
 HISTORY_TABLES = tuple(table for table in RUNTIME_TABLES if table.is_history)
 
-#: The tables saying an object's data is supplied from elsewhere.
-#:
-#: Outside the declared catalogue. No document declares ``_.Mirror`` and no
-#: build creates it, so a catalogue only ever reached by ``weaver build`` does
-#: not have one. The mirror operation installs it into its destination when it
-#: first writes a borrowed row, and a read of an absent one is nothing borrowed.
+#: The tables saying an object's data is supplied from elsewhere, and the one
+#: part of the catalogue no document declares. The mirror operation creates
+#: ``_.Mirror`` when it first writes a row, so a catalogue only ever reached by
+#: ``weaver build`` has none and a read of an absent one is nothing borrowed.
 BORROWED_TABLES = (MIRROR,)
 
 #: Every catalogue table the ``_weaver`` item declares, however it is
@@ -1412,9 +1406,8 @@ BORROWED_TABLES = (MIRROR,)
 CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
 #: What a run reads. The projected tables, which say what is installed and
-#: where, ``_.Mirror``, which says whose data a borrowed object reads and so
-#: which nodes a load may write, and ``_.Bookmark``, which says how far each
-#: object has been loaded.
+#: where, ``_.Mirror``, which says which nodes a load may write, and
+#: ``_.Bookmark``, which says how far each object has been loaded.
 #:
 #: The other current-state tables are absent, and that is the asymmetry worth
 #: knowing: a run writes a load status and a test status and never asks what
@@ -1430,9 +1423,8 @@ TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES + BORROWED_TAB
 #: to installations a scoped build has no authority over, and the runtime tables
 #: hold a run's own record of what it did and how far it got. All of them are
 #: declared ``Prohibit rebuild``, so selection never offers one; this is the
-#: guard behind that declaration.
-#: ``_.Mirror`` is here for a reason of its own: nothing declares it, so an
-#: item-scoped prune would find it in the ``_`` inventory unclaimed.
+#: guard behind that declaration. ``_.Mirror`` is here because nothing declares
+#: it, so an item-scoped prune would find it in the ``_`` inventory unclaimed.
 _PROTECTED = frozenset(
     f"{CATALOGUE_SCHEMA}.{table.name}".casefold()
     for table in CATALOGUE_TABLES + BORROWED_TABLES

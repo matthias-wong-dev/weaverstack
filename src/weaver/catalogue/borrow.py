@@ -1,10 +1,9 @@
 """The statements that make one Warehouse read another's rows.
 
-A mirrored Warehouse holds a View over each of the source's data relations and
-its own copy of everything else. The data is borrowed; the code is local.
-
 Three-part is how a Fabric Warehouse reaches another item in its workspace, the
 same reach a built Warehouse's ``_`` surface views use.
+
+See ``design/catalogue.md``.
 """
 
 from __future__ import annotations
@@ -18,22 +17,15 @@ from .fork import create_statement, local_relation
 from .tables import CATALOGUE_SCHEMA, MIRROR, ROLE_DATA, STANDARD_SURFACE_TABLES
 from .tsql import identifier, literal
 
-#: What stands at a borrowed Warehouse relation's address. A View, whatever the
-#: source is: a table and a view both read the same way through one.
+#: What stands at a borrowed relation's address, whatever the source is: a
+#: table and a view both read the same way through a View.
 BORROWED_TYPE = "view"
 
-#: What the Registry calls a procedure. Weaver's generated load and validation
-#: procedures sit in ``_`` and authored ones in a user schema. Both are code,
-#: and a mirror recreates code locally.
 PROCEDURE_TYPE = "stored_procedure"
 
 
 def borrowable(registered: Mapping[WeaverDocumentId, object]) -> tuple:
-    """The data relations of one item, which are what a mirror points at.
-
-    Runtime artefacts are excluded: a load procedure and a deployed module are
-    code, and a mirror recreates code locally.
-    """
+    """The data relations of one item, which are what a mirror points at."""
 
     return tuple(
         sorted(
@@ -49,12 +41,7 @@ def borrowable(registered: Mapping[WeaverDocumentId, object]) -> tuple:
 
 
 def executable(registered: Mapping[WeaverDocumentId, object]) -> tuple:
-    """The procedures one item installs, which a mirror recreates locally.
-
-    Everything the Registry certifies as a procedure, in every schema. A
-    mirrored Warehouse holds each of these, so ``weaver test`` and ``_.Load``
-    reach the same code an ordinary build installs.
-    """
+    """Everything the Registry certifies as a procedure, in every schema."""
 
     return tuple(
         sorted(
@@ -71,9 +58,7 @@ def executable(registered: Mapping[WeaverDocumentId, object]) -> tuple:
 def missing_programmables(required: Iterable[WeaverDocumentId], copied) -> tuple:
     """Certified procedures the source Warehouse did not supply.
 
-    ``copied`` is the folded ``schema.name`` of every procedure read from the
-    source. What the Registry certifies and what the source holds are two
-    readings of one estate, and a mirror stands only where they agree.
+    ``copied`` names every procedure read from the source, ``schema.name``.
     """
 
     held = {value.casefold() for value in copied}
@@ -84,13 +69,12 @@ def missing_programmables(required: Iterable[WeaverDocumentId], copied) -> tuple
     )
 
 
-def schema_statements(identities: Iterable[WeaverDocumentId]) -> tuple[str, ...]:
-    """One ``create schema`` per schema the borrowed relations sit in."""
+def schema_statements(schemas: Iterable[str]) -> tuple[str, ...]:
+    """One ``create schema`` per named schema. ``_`` is the surface's to make."""
 
-    schemas = sorted({identity.object_id.schema for identity in identities})
     return tuple(
         f"if schema_id(N'{schema}') is null exec('create schema {identifier(schema)}');"
-        for schema in schemas
+        for schema in sorted(set(schemas))
         if schema != CATALOGUE_SCHEMA
     )
 
@@ -108,11 +92,7 @@ def view_statement(identity: WeaverDocumentId, *, source_target: str) -> str:
 
 
 def surface_statements(catalogue_name: str) -> tuple[str, ...]:
-    """The ``_`` schema and the views a built Warehouse reads Weaver state through.
-
-    A mirror gives its target the same surface a build would, so ``_.Load`` and
-    authored SQL in it reach the catalogue that owns the estate.
-    """
+    """The ``_`` schema and the views a Warehouse reads Weaver state through."""
 
     return (
         f"if schema_id(N'{CATALOGUE_SCHEMA}') is null "
@@ -138,7 +118,7 @@ def borrow_statements(
 
     return (
         surface_statements(catalogue_name)
-        + schema_statements(identities)
+        + schema_statements(identity.object_id.schema for identity in identities)
         + tuple(
             view_statement(identity, source_target=source_target)
             for identity in identities
@@ -179,8 +159,8 @@ def record_statements(
 ) -> tuple[str, ...]:
     """Create ``_.Mirror`` if this catalogue has none, then record the rows.
 
-    Written against the catalogue Warehouse, not the mirrored one. Each row is
-    deleted first so a rerun replaces rather than duplicates.
+    For the catalogue Warehouse. Each row is deleted first, so a rerun replaces
+    rather than duplicates.
     """
 
     if not identities:

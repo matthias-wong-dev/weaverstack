@@ -1786,16 +1786,8 @@ def handle_wipe(args: argparse.Namespace) -> int:
 def handle_mirror(args: argparse.Namespace) -> int:
     """Resolve the pair, settle the scope, confirm, then mirror.
 
-    The order is the safety property. A mirror empties a Warehouse for the
-    destination catalogue and one for each selected item, so the whole
-    destructive scope is settled and the source is read before anything is
-    asked, and long before anything is removed. A misspelled ``--mirror``, an
-    item that is not installed, or a destination holding somebody else's rows
-    fails while every Warehouse is intact.
-
-    One :class:`weaver.operations.mirror.ResolvedMirror` carries that scope
-    through all three, so what somebody answers names the Warehouses the run
-    empties.
+    The order is the safety property: a misspelled ``--mirror`` or an item the
+    catalogue never installed fails while every Warehouse is still intact.
     """
 
     import json

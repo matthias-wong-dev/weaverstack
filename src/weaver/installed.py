@@ -133,8 +133,7 @@ class InstalledNode:
     #: Folder dictionary row declared it. Carried here so nothing downstream
     #: goes back to a dictionary row to ask.
     is_static: bool = False
-    #: Whose data this object reads, where it is not its own. ``None`` for an
-    #: object holding its own rows.
+    #: Whose data this object reads. ``None`` where it holds its own rows.
     mirror: InstalledMirror | None = None
 
     @property
@@ -177,8 +176,8 @@ class InstalledNode:
     def is_loadable(self) -> bool:
         """Whether this node has an installed load primitive to dispatch.
 
-        A mirrored node has one and is not loadable: the rows belong to the
-        target it borrows from, and writing them here would write there.
+        A mirrored node has one and is not loadable: a write here would land in
+        the target it borrows from.
         """
 
         return self.role == ROLE_DATA and self.is_installed and not self.is_mirrored
@@ -209,12 +208,7 @@ class InstalledNode:
 
     @property
     def physical(self) -> PhysicalObjectRef:
-        """Where this node's own object sits in its physical target.
-
-        The type is what stands there. For a borrowed object that is what
-        ``_.Mirror`` says, so a Warehouse table read through a source-backed
-        View is where the estate expects a view.
-        """
+        """Where this node's own object sits, typed as what stands there."""
 
         schema, name = catalogue_columns(self.identity)
         return PhysicalObjectRef(
@@ -677,8 +671,6 @@ def _registered(catalogue: Catalogue, installations):
             target=target,
             role=document.object_role,
             object_type=document.object_type,
-            # Registered and mirrored is an installed object reading another
-            # target's rows. Registered and not mirrored is the ordinary case.
             mirror=catalogue.mirrors.get(identity),
         )
         where = node.physical

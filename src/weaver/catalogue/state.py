@@ -89,8 +89,7 @@ class Catalogue:
     rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
     registered: Mapping[WeaverDocumentId, "RegisteredDocument"]
     #: Installed objects whose data is borrowed, from ``_.Mirror``. Empty where
-    #: the catalogue has no such table, which is what a catalogue only ever
-    #: reached by ``weaver build`` looks like.
+    #: the catalogue has no such table.
     mirrors: Mapping[WeaverDocumentId, "InstalledMirror"]
     materialised: frozenset[str]
 
@@ -367,17 +366,15 @@ class Catalogue:
         )
 
     def is_mirrored(self, identity: WeaverDocumentId) -> bool:
-        """Whether this object's data is borrowed rather than held locally."""
+        """Whether this object's data comes from another physical target."""
 
         return identity in self.mirrors
 
     def effective_physical_type(self, identity: WeaverDocumentId) -> str | None:
         """What should stand at this object's address, borrowed or not.
 
-        Registry says what the object logically is. While it is borrowed, what
-        stands there is what ``_.Mirror`` says: a Warehouse table reads through
-        a View over the source. Reconciliation and prune ask this rather than
-        Registry, so a mirror is not a mismatch.
+        Registry says what the object logically is, and while it is borrowed
+        ``_.Mirror`` says what stands there. Reconciliation and prune ask this.
         """
 
         borrowed = self.mirrors.get(identity)
@@ -749,8 +746,6 @@ class InstalledMirror:
 
     @property
     def source(self) -> str:
-        """The relation the data comes from, for a message or a statement."""
-
         return f"{self.source_target}.{self.source_schema}.{self.source_object}"
 
 
@@ -1159,9 +1154,8 @@ def reconcile_catalogue_state(
 ) -> Reconciliation:
     """Discard catalogue claims the prepared inventories physically disprove.
 
-    The inventory is asked for the type that should stand at the address, which
-    for a borrowed object is the View ``_.Mirror`` records and for every other
-    object is what Registry says. See
+    The inventory is asked for the effective physical type, so a borrowed
+    object is looked for as what stands there. See
     :meth:`Catalogue.effective_physical_type`.
 
     Pure: a catalogue and an inventory in, a catalogue and its stale claims out.

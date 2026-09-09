@@ -276,8 +276,8 @@ def generate_item_build_bundle(
     if recorded_views is not None:
         stages.append(recorded_views)
 
-    # An object stops being borrowed once the build that gave it its own rows
-    # has run, so this sits after every physical stage and before publication.
+    # After the physical stages: an object stops being borrowed once the build
+    # that gave it its own rows has run.
     deregistered = render_mirror_deregistration(
         catalogue,
         selected_for_build,

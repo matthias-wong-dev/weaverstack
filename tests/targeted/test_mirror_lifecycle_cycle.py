@@ -1,10 +1,7 @@
 """A mirrored Warehouse through reconciliation, selection and bundle generation.
 
 What a mirror leaves is a Registry row saying Table, a ``_.Mirror`` row saying
-View, and a Warehouse holding a View. Three decisions read all three: the
-inventory is asked for the type that should stand at the address, an unchanged
-build plans nothing, and a changed declaration is materialised locally and stops
-being borrowed.
+View, and a Warehouse holding a View. Every claim here reads all three.
 
 Pure Python, through the two functions a build runs:
 :func:`weaver.catalogue.state.reconcile_catalogue_state` and
@@ -88,9 +85,9 @@ def _bindings():
 def _installed(repository) -> Catalogue:
     """The catalogue a successful build of this estate leaves behind.
 
-    Composed from the two functions the build itself uses, so it moves with
-    them. Every catalogue table exists once a build has run, which is what lets
-    reconciliation raise a claim against one.
+    Composed from the two functions the build itself uses. ``materialised``
+    names every projected table, because reconciliation may only raise a claim
+    against a table that is there.
     """
 
     bindings = _bindings()

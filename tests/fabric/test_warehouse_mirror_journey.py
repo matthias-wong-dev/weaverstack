@@ -1,21 +1,15 @@
 """One Warehouse item mirrored, then driven through the ordinary lifecycle.
 
-The ordered claim: build a source estate, mirror the item into another
-Warehouse, run its installed validations there, build again with nothing
-changed, then change one declaration and build again. The unchanged build leaves
-the mirror standing. The changed object becomes a local table and stops being
-borrowed; every other object is still a View over the source, and the source's
-rows are where they were.
+Build a source estate, mirror the item into another Warehouse, run its
+installed validations there, build again with nothing changed, then change one
+declaration and build again.
 
-A tenant answers what only Fabric can: whether a three-part View resolves across
-Warehouses, whether a row written at the source is visible through one, and
-whether a copied procedure executes where it was copied to. What the mirror
-decides is settled without a tenant, in
-``tests/targeted/test_mirror_lifecycle_cycle.py``,
-``tests/test_mirror_boundary.py`` and ``tests/test_borrow_declaration.py``.
+A tenant answers what only Fabric can: whether a three-part View resolves
+across Warehouses, whether a row written at the source is visible through one,
+and whether a copied procedure executes where it was copied to. What the mirror
+decides is settled in ``tests/targeted/test_mirror_lifecycle_cycle.py``.
 
-Steps run in file order and do not cascade. A failed step is recorded and every
-later claim skips naming the step that broke.
+Steps run in file order and do not cascade.
 """
 
 from __future__ import annotations

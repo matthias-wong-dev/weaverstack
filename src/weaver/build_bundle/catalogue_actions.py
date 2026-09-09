@@ -238,9 +238,6 @@ def desired_catalogue(
     return _with_installation_rows(bound, binding_rows)
 
 
-#: Where deregistration sits: after every physical stage and before the
-#: publication. An object stops being borrowed once the build that gives it its
-#: own rows has run.
 DEREGISTER_MIRROR_SLUG = "deregister-mirrors"
 
 
@@ -250,10 +247,7 @@ def render_mirror_deregistration(
     *,
     catalogue_target,
 ) -> PlannedStage | None:
-    """Stop recording as borrowed every object this build materialised locally.
-
-    One batch for the whole build, after the physical work it depends on.
-    """
+    """Stop recording as borrowed every object this build materialised locally."""
 
     materialised = sorted(
         (identity for identity in built_ids if identity in catalogue.mirrors),
@@ -272,7 +266,7 @@ def render_mirror_deregistration(
 
 
 def _mirror_keys(identities: Iterable[WeaverDocumentId]) -> tuple[dict, ...]:
-    """Each materialised object as the key row that identifies its Mirror row."""
+    """Each object as the key row identifying its ``_.Mirror`` row."""
 
     return tuple(
         {
