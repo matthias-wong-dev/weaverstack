@@ -484,24 +484,39 @@ def _installed_target(installed: Mapping[tuple, str], item) -> str:
 
 
 def _refuse_unsafe(resolved: ResolvedMirror) -> None:
-    """Refuse a run that would empty a Warehouse it reads from.
+    """Refuse a plan that contradicts itself.
 
-    A named destination is emptied, and its contents are the caller's to
-    discard. The exception is a Warehouse this run needs: the catalogue it
-    copies state from, and the target each item borrows its rows through.
+    Naming a destination says its contents are disposable, so nothing here asks
+    what is in one. What it asks is whether the plan is coherent: a Warehouse
+    this run reads may not also be one it empties, and two items may not share
+    a destination, the second wipe taking the first mirror.
     """
+
+    emptied = {resolved.destination.name.casefold(): resolved.plan.target}
+    for each in resolved.items:
+        emptied.setdefault(each.destination.casefold(), each.target)
 
     read = {resolved.source.name.casefold(): str(resolved.source)}
     for each in resolved.items:
         read.setdefault(
             each.source_target.casefold(), f"{CATALOGUE_KIND}/{each.source_target}"
         )
+
+    collision = sorted(set(read) & set(emptied))
+    if collision:
+        raise CommandError(
+            "mirror reads and empties "
+            + ", ".join(emptied[name] for name in collision)
+            + " in the same run. Name a destination this run does not read from."
+        )
+
+    seen: dict[str, MirrorItem] = {}
     for each in resolved.items:
-        source = read.get(each.destination.casefold())
-        if source is not None:
+        first = seen.setdefault(each.destination.casefold(), each)
+        if first is not each:
             raise CommandError(
-                f"mirror reads {source} and would empty it for {each.item}. "
-                "Name a destination this run does not read from."
+                f"mirror would empty {each.target} for both {first.item} and "
+                f"{each.item}. Give each item a destination of its own."
             )
 
 

@@ -436,6 +436,36 @@ def test_mirroring_an_item_onto_the_source_catalogue_is_refused(monkeypatch):
 
 
 @weaver_test()
+def test_a_destination_catalogue_holding_an_items_rows_is_refused(monkeypatch):
+    """The whole wipe set is checked, not only the item destinations.
+
+    The catalogue Warehouse is emptied first, so an item installed there loses
+    the rows the same run then tries to borrow.
+    """
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model"])
+
+    with pytest.raises(CommandError, match="does not read from"):
+        resolve_mirror(plan, _installed({"Warehouse/Model": "Weaver_Dev"}))
+
+
+@weaver_test()
+def test_two_items_sharing_one_destination_are_refused(monkeypatch):
+    """The second wipe would take the first mirror, leaving both recorded."""
+
+    plan = _plan(
+        monkeypatch,
+        _with_targets(),
+        ["Warehouse/Model=Warehouse/Shared", "Warehouse/Other=Warehouse/Shared"],
+    )
+
+    with pytest.raises(CommandError, match="a destination of its own"):
+        resolve_mirror(
+            plan, _installed({"Warehouse/Model": "Model", "Warehouse/Other": "Other"})
+        )
+
+
+@weaver_test()
 def test_a_destination_another_item_occupies_is_emptied_like_any_other(monkeypatch):
     """Naming a Warehouse is saying its contents are disposable."""
 

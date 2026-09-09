@@ -969,9 +969,9 @@ does. Before it asks, the whole scope is settled: the pair is resolved, the
 source catalogue is read, and every item's installed target is looked up there.
 A misspelled `--mirror` or an item the catalogue never installed fails while
 every Warehouse is intact. Naming a Warehouse as a destination says its
-contents are disposable, and the one refusal is a destination this run reads
-from: the source catalogue, or the Warehouse an item borrows its rows through.
-The question names each Warehouse it will empty:
+contents are disposable, so the only refusals left are a plan that contradicts
+itself: a Warehouse the run both reads and empties, and two items sharing one
+destination. The question names each Warehouse it will empty:
 
 ```text
 Mirror will empty:
