@@ -179,7 +179,9 @@ def test_a_static_skip_still_settles_the_objects_load_status():
 
     assert row["result"] == "skipped"
     assert row["workflow_id"] == "workflow-1"
-    assert row["completed_datetime"] == datetime(2026, 8, 22, 3, 4, 7, tzinfo=timezone.utc)
+    assert row["completed_datetime"] == datetime(
+        2026, 8, 22, 3, 4, 7, tzinfo=timezone.utc
+    )
 
 
 @weaver_test()
