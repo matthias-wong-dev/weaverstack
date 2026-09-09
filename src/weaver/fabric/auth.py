@@ -127,11 +127,13 @@ def desktop_credential():
     token, and browser sign-in where it cannot.
 
     An unattended process signs in as a service principal through the standard
-    ``AZURE_CLIENT_ID``, ``AZURE_CLIENT_SECRET`` and ``AZURE_TENANT_ID``
-    variables, what :class:`azure.identity.EnvironmentCredential` reads. Naming
-    all three puts the principal at the front of this chain. Naming none of
-    them leaves the chain unchanged. A half configured principal is reported as
-    unavailable, and the chain moves on to the interactive half.
+    ``AZURE_CLIENT_ID``, ``AZURE_TENANT_ID`` and ``AZURE_CLIENT_SECRET``
+    variables, or a certificate through ``AZURE_CLIENT_CERTIFICATE_PATH`` in
+    place of the secret; what :class:`azure.identity.EnvironmentCredential`
+    reads. Naming a client, tenant and one credential puts the principal at the
+    front of this chain. Naming none of them leaves the chain unchanged. A half
+    configured principal is reported as unavailable, and the chain moves on to
+    the interactive half.
 
     A desktop user who has run ``az login`` keeps that identity. One who has not
     is sent to Microsoft sign-in in a browser once. See :class:`BrowserSignIn`
@@ -169,12 +171,21 @@ def desktop_credential():
 
 
 def _principal_configured() -> bool:
-    """Whether the standard variables name a complete service principal."""
+    """Whether the standard variables name a complete service principal.
+
+    A principal names its client and tenant, and holds either a secret or a
+    certificate. The certificate variable is read wherever
+    :class:`azure.identity.EnvironmentCredential` reads it; this check only
+    decides whether a principal of either shape is named at all.
+    """
 
     return bool(
         os.environ.get("AZURE_CLIENT_ID")
-        and os.environ.get("AZURE_CLIENT_SECRET")
         and os.environ.get("AZURE_TENANT_ID")
+        and (
+            os.environ.get("AZURE_CLIENT_SECRET")
+            or os.environ.get("AZURE_CLIENT_CERTIFICATE_PATH")
+        )
     )
 
 
@@ -186,9 +197,10 @@ def _principal_credential():
     unconfigured principal is a token-time "unavailable", not a failure to
     build the chain.
 
-    ``EnvironmentCredential`` serves a secret-configured principal and a
-    certificate-configured one (``AZURE_CLIENT_CERTIFICATE_PATH``) from the
-    same variables. The configuration is read where Azure's library reads it.
+    A principal names its client and tenant and holds either a secret or a
+    certificate; :class:`azure.identity.EnvironmentCredential` serves both from
+    the same variables. The configuration is read where Azure's library reads
+    it.
     """
 
     return _PrincipalCredential()
@@ -206,7 +218,8 @@ class _PrincipalCredential:
         if not _principal_configured():
             raise CredentialUnavailableError(
                 "no service principal is configured "
-                "(set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET and AZURE_TENANT_ID)"
+                "(set AZURE_CLIENT_ID and AZURE_TENANT_ID, plus either "
+                "AZURE_CLIENT_SECRET or AZURE_CLIENT_CERTIFICATE_PATH)"
             )
         if self._credential is None:
             from azure.identity import EnvironmentCredential

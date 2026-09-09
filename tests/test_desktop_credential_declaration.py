@@ -82,7 +82,12 @@ def uninstalled(monkeypatch, tmp_path):
     monkeypatch.setattr(auth, "_warned", set())
     # A principal configured in the caller's environment would otherwise sit at
     # the front of every chain these tests build and answer with a real token.
-    for variable in ("AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID"):
+    for variable in (
+        "AZURE_CLIENT_ID",
+        "AZURE_CLIENT_SECRET",
+        "AZURE_TENANT_ID",
+        "AZURE_CLIENT_CERTIFICATE_PATH",
+    ):
         monkeypatch.delenv(variable, raising=False)
 
     before = auth._installed
@@ -206,6 +211,37 @@ def test_an_unconfigurable_principal_is_reported(monkeypatch):
 
     assert token.token == "a-token"
     assert cli.calls == 1
+
+
+@weaver_test()
+def test_a_certificate_principal_is_configured(monkeypatch):
+    """A certificate in place of the secret names a complete principal.
+
+    Through the real `_PrincipalCredential`, because what this pins is the
+    configuration boundary itself: `_principal_configured` deciding that client
+    and tenant plus a certificate path is a principal, and
+    `EnvironmentCredential` being the credential built to serve it.
+    """
+
+    built = []
+
+    class _Environment:
+        def __init__(self):
+            built.append(self)
+
+        def get_token(self, *scopes, **kwargs):
+            return _Token()
+
+    monkeypatch.setattr("azure.identity.EnvironmentCredential", _Environment)
+    monkeypatch.setenv("AZURE_CLIENT_ID", "a-client")
+    monkeypatch.setenv("AZURE_TENANT_ID", "a-tenant")
+    monkeypatch.delenv("AZURE_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("AZURE_CLIENT_CERTIFICATE_PATH", "/a/cert.pem")
+
+    answer = auth._PrincipalCredential().get_token(auth.FABRIC_SCOPE)
+
+    assert answer.token == "a-token"
+    assert len(built) == 1
 
 
 @weaver_test()

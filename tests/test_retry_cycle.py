@@ -433,8 +433,8 @@ def test_one_keypress_is_read_as_itself(sent, expected):
         # _read_key installs its cbreak mode through tty.setcbreak, whose
         # default TCSAFLUSH discards a key already queued on the pty. Pinned to
         # TCSANOW here, so a key the parent sends between the handshake and
-        # _read_key is read rather than dropped. What the test proves is key
-        # interpretation, not the flush behaviour of the mode change.
+        # _read_key is read, so the test proves key interpretation; the
+        # flush behaviour of the mode change is outside it.
         "_setcbreak = tty.setcbreak;"
         "tty.setcbreak = lambda fd, when=None: _setcbreak(fd, termios.TCSANOW);"
         "tty.setcbreak(0);"
@@ -483,7 +483,7 @@ def test_one_keypress_is_read_as_itself(sent, expected):
         os.write(descriptor, sent)
         received = _read_until(descriptor, b"GOT:")
     finally:
-        # A hung child ends here rather than holding the suite. SIGKILL cannot
+        # A hung child ends here, killed. SIGKILL cannot
         # be caught by the `finally: os._exit(127)` guard in it.
         import signal
 
