@@ -283,9 +283,10 @@ class RunRecord:
             return
         # Every load attempt moves _.LoadStatus forward, a Static skip
         # included: it records Result=Skipped with this workflow's timestamps,
-        # the same row the Warehouse ``_.Load`` procedure writes. What a skip
-        # must never do is advance the bookmark, which is the data cursor, or
-        # read as data movement in health. See ``design/health.md``.
+        # the same row the Warehouse ``_.Load`` procedure writes. A skip does
+        # not advance the bookmark, because it consumed no source window; its
+        # LoadStatus timestamp still takes part in health ancestry ordering.
+        # See ``design/health.md``.
         self.catalogue.update(
             LOAD_STATUS,
             load_status_row(node, identity, workflow_id=self.workflow_id),

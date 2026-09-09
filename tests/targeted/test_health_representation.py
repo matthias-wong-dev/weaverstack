@@ -565,25 +565,6 @@ def test_a_blocked_ancestor_is_not_newer_data():
 
 
 @weaver_test()
-def test_a_static_skip_does_not_make_its_descendants_stale():
-    """A Static skip settles nothing, so it leaves its ``_.LoadStatus`` alone.
-
-    The row still names the load that established the reference data, which is
-    older than the consumer, so the consumer is not behind.
-    """
-
-    report = (
-        _Estate()
-        .table(f"{RAW}/Tables/Sales.Reference", loaded=at(40), is_static=True)
-        .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
-        .reads(f"{RAW}/Tables/Sales.B", "Sales.Reference")
-        .report()
-    )
-
-    assert about(report.load, LOAD_STALE_ANCESTOR) == ()
-
-
-@weaver_test()
 def test_a_fresh_static_skip_puts_its_descendant_behind():
     """A skip is a lifecycle touch, so ancestry reads it like any other.
 
