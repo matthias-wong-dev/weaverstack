@@ -90,17 +90,20 @@ AMBIGUOUS_INSTALLATION = "ambiguous_installation"
 DEFAULT_AGE_HOURS = 24
 
 #: Load outcomes that establish nothing about the data. A blocked node did no
-#: work, an errored one cannot say what it did, and a Static skip moved
-#: nothing: none is a reason to call a downstream object behind, and a skip's
-#: fresh ``_.LoadStatus`` timestamp is not data movement.
-_NO_DATA_ESTABLISHED = (FAILED, ERROR, BLOCKED, PENDING, SKIPPED)
+#: work and an errored one cannot say what it did, so neither is a reason to
+#: call a downstream object behind. A Static skip is not here: it is a
+#: lifecycle touch, recorded in ``_.LoadStatus`` with the workflow that made
+#: it, and ancestry reads it like any other touch.
+_NO_DATA_ESTABLISHED = (FAILED, ERROR, BLOCKED, PENDING)
 
 #: The load outcomes that make a subject Red.
 _LOAD_RED = (FAILED, ERROR, BLOCKED)
 
-#: The outcomes that settle an object, and so carry an instant a descendant can
-#: be measured against. A rejecting load moved rows and completed.
-_ESTABLISHED = (SUCCEEDED, REJECTED)
+#: The outcomes that carry an instant a descendant can be measured against. A
+#: rejecting load moved rows and completed. A Static skip consumed no window,
+#: but it is a lifecycle touch: ``_.LoadStatus`` records when it happened, and
+#: ancestry measures against that record.
+_ESTABLISHED = (SUCCEEDED, REJECTED, SKIPPED)
 
 #: What Registry records a View as. A Warehouse shortcut destination is recorded
 #: the same way and is told apart by its role.
@@ -629,28 +632,17 @@ class _LoadHealth:
         """The ancestors that carry a ``_.LoadStatus`` row.
 
         Loadables and Views. A shortcut destination and a table Weaver does not
-        load hold no load state, so the walk passes through them.
-
-        An ancestor whose current state is Skipped is passed over too. A skip
-        says "no change": it neither establishes the object nor unestablishes
-        it, and its fresh timestamp is not data movement for anything
-        downstream.
+        load hold no load state, so the walk passes through them. A skipped
+        Static ancestor takes part like any other: its row is the object's
+        latest lifecycle touch, so a descendant last touched before it is
+        behind.
         """
 
         return tuple(
             ancestor
             for ancestor in self.dag.ancestors(node.identity)
             if is_lifecycle_node(ancestor)
-            and self._skipped(ancestor.identity) is not True
         )
-
-    def _skipped(self, identity) -> bool | None:
-        """Whether this identity's current load state is a Static skip."""
-
-        status = self.statuses.get(identity)
-        if status is None:
-            return None
-        return status.result == SKIPPED
 
     def established_at(self, identity) -> datetime | None:
         """When this node last settled, or ``None`` if it has not.

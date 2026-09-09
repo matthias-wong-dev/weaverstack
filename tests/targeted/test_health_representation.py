@@ -584,25 +584,24 @@ def test_a_static_skip_does_not_make_its_descendants_stale():
 
 
 @weaver_test()
-def test_a_fresh_static_skip_is_not_data_movement_for_a_descendant():
-    """A daily load that skips a loaded Static object changes nothing.
+def test_a_fresh_static_skip_puts_its_descendant_behind():
+    """A skip is a lifecycle touch, so ancestry reads it like any other.
 
-    The skip now settles a ``Skipped`` row dated today, and health must not
-    read that timestamp as the reference data having moved: the skip states
-    the object was left alone, so a consumer loaded after the reference data
-    was established stays Green.
+    The Static reference table loaded cleanly once, its consumer loaded after
+    it, and then a daily load skipped the reference table, which still
+    settles a ``Skipped`` row dated today. The descendant's latest lifecycle
+    touch now predates the ancestor's, so it is behind.
     """
 
     report = (
         _Estate()
-        .table(f"{RAW}/Tables/Sales.Reference", loaded=at(40), result="skipped")
+        .table(f"{RAW}/Tables/Sales.Reference", loaded=at(1), result="skipped")
         .table(f"{RAW}/Tables/Sales.B", loaded=at(5), moved=at(5))
         .reads(f"{RAW}/Tables/Sales.B", "Sales.Reference")
         .report()
     )
 
-    assert about(report.load, LOAD_STALE_ANCESTOR) == ()
-    assert about(report.load, LOAD_ANCESTOR_UNESTABLISHED) == ()
+    assert about(report.load, LOAD_STALE_ANCESTOR) != ()
 
 
 @weaver_test()

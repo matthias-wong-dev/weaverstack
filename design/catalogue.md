@@ -588,7 +588,9 @@ succeeded, zero rejects   advance to the instant the load reported
 succeeded with rejects    unchanged: it has not read its window
 failed, error, blocked    unchanged
 Static skip               unchanged: the skip advances no bookmark, and its
-                          Skipped status in _.LoadStatus says why
+                          Skipped status in _.LoadStatus says why. _.LoadStatus
+                          still records the skip as the object's latest
+                          lifecycle touch, so health reads it as a touch.
 endpoint refresh          not an object
 test, assumption          never
 ```
