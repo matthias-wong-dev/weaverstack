@@ -956,20 +956,32 @@ and a missing destination is an error rather than a guess. A configuration that
 also names `mirror:` describes a fork already, so its `catalogue:` is the
 destination.
 
-The destination Warehouse is emptied first, so a non-interactive process refuses
-without `--yes`, as wipe does. Before it asks, the pair is resolved and the
-source catalogue is read, so a misspelled `--mirror` fails while the destination
-is still intact. The question names the pair that was resolved:
-
-```text
-Warehouse/DEV_Catalogue will be emptied and rebuilt from Warehouse/Catalogue.
-```
-
 `--item` selects logical items to rebind, in the grammar build uses
 (`Warehouse/Model` or `Warehouse/Model=Warehouse/Model_Dev`); omitting it selects
 every configured target. A selected Warehouse item is emptied and given a View
-over each of the source's relations, so its rows stay where they were. Only a
-Warehouse can be mirrored so far; a Lakehouse item is built into its target.
+over each of the source's relations, so its rows stay where they were, plus a
+copy of every procedure and function the source holds. Only a Warehouse can be
+mirrored so far; a Lakehouse item is built into its target.
+
+A mirror empties one Warehouse for the destination catalogue and one for each
+selected item, so a non-interactive process refuses without `--yes`, as wipe
+does. Before it asks, the whole scope is settled: the pair is resolved, the
+source catalogue is read, and every item's installed target is looked up there.
+A misspelled `--mirror`, an item the catalogue never installed, or a destination
+another item is installed to fails while every Warehouse is intact. The question
+names each Warehouse it will empty:
+
+```text
+Mirror will empty:
+
+  Warehouse/DEV_Catalogue
+  Warehouse/Sales_Dev
+
+Warehouse/DEV_Catalogue will be emptied and rebuilt from Warehouse/Catalogue.
+Warehouse/Sales will be mirrored into Warehouse/Sales_Dev.
+
+Continue? This cannot be undone [y/N]
+```
 
 `--no-item` forks the catalogue and stops. That fork plus an ordinary build is
 the other way to diverge one item, materialising it in full:

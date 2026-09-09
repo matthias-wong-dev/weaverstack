@@ -1,14 +1,14 @@
 """Forking an installed estate: the destination catalogue, then its items.
 
 ``mirror`` is the catalogue read from and ``catalogue`` the one written to, in
-configuration and on the command alike. :class:`MirrorPlan` is that pair once
-resolved: :func:`plan_mirror` produces it, :func:`check_mirror` proves the
-source, and :func:`mirror` acts on it, so a prompt and a wipe name one pair.
+configuration and on the command alike. :func:`plan_mirror` names that pair,
+:func:`check_mirror` reads the source and turns it into a
+:class:`ResolvedMirror` carrying every Warehouse the run empties and what each
+one is for, and :func:`mirror` acts on that. The prompt, the refusals and the
+work read one description.
 
-A fork empties its destination and rebuilds it, so running it again does the
-same work again. Installation is copied as it stands, and one
-``weaver build --item Warehouse/Model=Warehouse/Model_Dev`` then moves that item
-alone.
+A mirror empties what it writes into and rebuilds it, so running it again does
+the same work again.
 
 See ``design/catalogue.md``, including what a kept item's ``_`` surface still
 addresses.
@@ -57,6 +57,82 @@ class MirrorPlan:
 
     def __str__(self) -> str:
         return f"{self.source} into {self.destination}"
+
+
+@dataclass(frozen=True)
+class MirrorItem:
+    """One selected item: where its rows are, and what is emptied to reach them.
+
+    ``source_target`` is the Warehouse the source catalogue records the item
+    installed to. ``destination`` is the Warehouse this run empties and fills
+    with Views over it.
+    """
+
+    item: object
+    source_target: str
+    destination: str
+    #: The data relations a View is stood over, in identity order.
+    relations: tuple = ()
+    #: The procedures the source catalogue certifies, which the mirror copies.
+    programmables: tuple = ()
+    #: Other logical items the source catalogue installs to ``destination``.
+    occupants: tuple[str, ...] = ()
+
+    @property
+    def target(self) -> str:
+        """The destination as a wipe names it."""
+
+        return f"{CATALOGUE_KIND}/{self.destination}"
+
+    def describe(self) -> str:
+        return (
+            f"{CATALOGUE_KIND}/{self.source_target} will be mirrored into "
+            f"{self.target}."
+        )
+
+
+@dataclass(frozen=True)
+class ResolvedMirror:
+    """One mirror run, settled, before anything is emptied.
+
+    :func:`plan_mirror` names the two catalogues; this adds what the workspace
+    had to be read to learn. Every Warehouse the run empties is on it, so the
+    confirmation, the refusals and the work all read one description.
+    """
+
+    plan: MirrorPlan
+    #: Whether the source catalogue holds a ``_.Mirror``.
+    borrowed: bool = False
+    items: tuple[MirrorItem, ...] = ()
+
+    @property
+    def workspace(self) -> Workspace:
+        return self.plan.workspace
+
+    @property
+    def source(self) -> CatalogueRef:
+        return self.plan.source
+
+    @property
+    def destination(self) -> CatalogueRef:
+        return self.plan.destination
+
+    @property
+    def wiped(self) -> tuple[str, ...]:
+        """Every physical Warehouse this run empties, in the order it does."""
+
+        return (self.plan.target, *(item.target for item in self.items))
+
+    def describe(self) -> str:
+        """The complete destructive scope, for a confirmation to display."""
+
+        emptied = "\n".join(f"  {target}" for target in self.wiped)
+        lines = [f"Mirror will empty:\n\n{emptied}\n", self.plan.describe()]
+        lines.extend(item.describe() for item in self.items)
+        return "\n".join(lines)
+
+    def __str__(self) -> str:
+        return str(self.plan)
 
 
 @dataclass(frozen=True)
@@ -143,26 +219,59 @@ def plan_mirror(
     )
 
 
-def check_mirror(plan: MirrorPlan, *, session=None) -> bool:
-    """Prove the source catalogue is there and readable, and say what it holds.
+def check_mirror(plan: MirrorPlan, *, session=None) -> ResolvedMirror:
+    """Prove the source, settle every physical target, and refuse an unsafe run.
 
     Run before a confirmation and before anything is emptied, so a misspelled
-    source fails while the destination is still intact. It reads and does not
-    write: what it asks is whether the Warehouse resolves and whether its ``_``
-    schema holds the tables a fork copies.
+    source, an item that is not installed, or a destination holding somebody
+    else's rows fails while both Warehouses are intact. It reads and does not
+    write: the source catalogue's ``_`` schema, then its Installation and
+    Registry rows.
 
-    Returns whether the source holds a ``_.Mirror``. Nothing declares that
-    table, so a source that has never mirrored anything has none, and a fork of
-    one has nothing borrowed to bring across.
+    What comes back is the complete destructive scope. Confirmation, refusal
+    and execution all read that one description.
+    """
+
+    from ..catalogue.state import catalogue_for
+    from ..sessions.host import use_or_create_session
+
+    with use_or_create_session(session, workspace=plan.workspace) as opened:
+        borrowed = _prove_source(plan, session=opened)
+        catalogue = (
+            catalogue_for(opened, _source_workspace(plan)) if plan.items else None
+        )
+        return resolve_mirror(plan, catalogue, borrowed=borrowed)
+
+
+def resolve_mirror(
+    plan: MirrorPlan, catalogue, *, borrowed: bool = False
+) -> ResolvedMirror:
+    """The complete destructive scope, from the catalogue being forked.
+
+    Pure: a plan and the source catalogue in, the settled run out, refusals
+    included. ``catalogue`` may be ``None`` where the plan selects no item.
+    """
+
+    resolved = ResolvedMirror(
+        plan=plan,
+        borrowed=borrowed,
+        items=_resolved_items(plan, catalogue) if plan.items else (),
+    )
+    _refuse_unsafe(resolved)
+    return resolved
+
+
+def _prove_source(plan: MirrorPlan, *, session) -> bool:
+    """Whether the source catalogue holds a ``_.Mirror``, having proved the rest.
+
+    Nothing declares that table, so a source that has never mirrored anything
+    has none, and a fork of one has nothing borrowed to bring across.
     """
 
     from ..catalogue.fork import FORKED_TABLES
     from ..catalogue.tables import MIRROR
-    from ..sessions.host import use_or_create_session
 
-    with use_or_create_session(session, workspace=plan.workspace) as opened:
-        found = _source_catalogue_tables(plan, session=opened)
-
+    found = _source_catalogue_tables(plan, session=session)
     if not found:
         raise CommandError(
             f"mirror reads {plan.source}, which holds no catalogue: its "
@@ -186,7 +295,7 @@ def mirror(
     items: str | Sequence[str] | None = None,
     *,
     no_item: bool = False,
-    plan: MirrorPlan | None = None,
+    plan: MirrorPlan | ResolvedMirror | None = None,
     workspace: str | None = None,
     catalogue: str | None = None,
     mirror: str | None = None,
@@ -202,32 +311,33 @@ def mirror(
     ``no_item=True`` selects none, which forks the catalogue and stops.
 
     ``mirror`` names the catalogue to fork and ``catalogue`` the catalogue to
-    fork into, the same two names workspace configuration uses. ``plan`` is a
-    pair :func:`plan_mirror` already resolved, for a caller that showed it to
-    somebody first; supplied, the names are already settled and are not read
-    again. The source is proved either way.
+    fork into, the same two names workspace configuration uses. ``plan`` is
+    what a caller already settled: a :class:`ResolvedMirror` is acted on as it
+    stands, so the scope somebody was shown is the scope that runs, and a
+    :class:`MirrorPlan` is proved through :func:`check_mirror` first.
     """
 
-    forking = plan or plan_mirror(
-        items,
-        no_item=no_item,
-        workspace=workspace,
-        catalogue=catalogue,
-        mirror=mirror,
-        environment=environment,
-        workspace_config=workspace_config,
-        session=session,
-    )
+    forking = plan if isinstance(plan, ResolvedMirror) else None
+    if forking is None:
+        forking = check_mirror(
+            plan
+            or plan_mirror(
+                items,
+                no_item=no_item,
+                workspace=workspace,
+                catalogue=catalogue,
+                mirror=mirror,
+                environment=environment,
+                workspace_config=workspace_config,
+                session=session,
+            ),
+            session=session,
+        )
     from ..catalogue.fork import uncopied_table_names
     from ..sessions.host import use_or_create_session
 
     resolved = forking.workspace
-    bindings = _item_bindings(forking)
     with use_or_create_session(session, workspace=resolved) as opened:
-        # Proved again for a supplied plan, because a caller holding one is not
-        # proof it was checked. The source Warehouse is already resolved by
-        # then, so the second read is one query.
-        borrowed = check_mirror(forking, session=opened)
         with opened.task("Mirror", str(forking)):
             wiped = [_wipe_destination(resolved, forking.destination, session=opened)]
             _rebuild_catalogue(resolved, session=opened)
@@ -235,15 +345,13 @@ def mirror(
                 resolved,
                 forking.source,
                 forking.destination,
-                borrowed=borrowed,
+                borrowed=forking.borrowed,
                 session=opened,
             )
             mirrored = {}
-            for item, target in bindings:
-                wiped.append(_wipe_target(resolved, target, session=opened))
-                mirrored[str(item)] = _mirror_item(
-                    resolved, item, target, session=opened
-                )
+            for each in forking.items:
+                wiped.append(_wipe_target(resolved, each, session=opened))
+                mirrored[str(each.item)] = _mirror_item(resolved, each, session=opened)
 
     return MirrorResult(
         workspace=str(resolved.workspace),
@@ -257,110 +365,224 @@ def mirror(
     )
 
 
-# --- mirroring one item -------------------------------------------------------
+# --- settling what will be emptied --------------------------------------------
 
 
-def _item_bindings(plan: MirrorPlan) -> tuple[tuple, ...]:
-    """Each selected item with the physical target it is mirrored into.
+def _resolved_items(plan: MirrorPlan, catalogue) -> tuple[MirrorItem, ...]:
+    """Each selected item, against the catalogue being forked.
 
-    ``build``'s grammar, so ``Warehouse/Model`` reads its destination from
-    ``targets:`` and ``Warehouse/Model=Warehouse/Model_Dev`` names one.
+    The source catalogue is the one read: it holds the Installation row saying
+    where the rows are and the Registry rows saying what a mirror stands over,
+    and it is intact at this point in the run.
     """
 
     from ..build_bundle.targets import parse_build_item
+    from ..catalogue.borrow import borrowable, executable
+    from ..catalogue.tables import INSTALLATION
     from ..declaration.model import WAREHOUSE
 
-    bindings = []
+    installed = {
+        (str(row.get("item_type")), str(row.get("item_name"))): str(
+            row.get("target_name") or ""
+        )
+        for row in catalogue.table_rows(INSTALLATION)
+    }
+    resolved = []
     for written in plan.items:
         binding = parse_build_item(written, workspace=plan.workspace)
-        if binding.item.item_type != WAREHOUSE:
+        item = binding.item
+        if item.item_type != WAREHOUSE:
             raise CommandError(
-                f"mirror does not yet mirror {binding.item}: only a Warehouse "
-                "item can be mirrored. Build a Lakehouse item into its target "
-                "with 'weaver build --item ITEM=TYPE/NAME'."
+                f"mirror does not yet mirror {item}: only a Warehouse item can "
+                "be mirrored. Build a Lakehouse item into its target with "
+                "'weaver build --item ITEM=TYPE/NAME'."
             )
-        bindings.append((binding.item, binding.target.item))
-    return tuple(bindings)
-
-
-def _wipe_target(workspace: Workspace, target, *, session) -> str:
-    """Empty the Warehouse a mirror is about to be built in."""
-
-    from .wipe import wipe
-
-    named = f"{CATALOGUE_KIND}/{target.name}"
-    with session.step(f"Empty {named}"):
-        wipe(
-            named,
-            session=session,
-            workspace=workspace.workspace,
-            catalogue=workspace.catalogue,
-        )
-    return named
-
-
-def _mirror_item(workspace: Workspace, item, target, *, session) -> dict:
-    """Point one Warehouse item at another target's rows.
-
-    The destination is emptied first, so what stands in it afterwards is what
-    this wrote. Installation moves last: until the Views are there, the item is
-    still installed where it was.
-    """
-
-    from ..catalogue.borrow import borrow_statements, borrowable
-    from ..catalogue.state import catalogue_in
-    from ..targets import ItemRef, WarehouseTarget
-
-    with catalogue_in(workspace) as catalogue:
-        source_target = _installed_target(catalogue, item)
         registered = {
             identity: document
             for identity, document in catalogue.registered.items()
             if identity.item == item
         }
-    relations = borrowable(registered)
+        destination = binding.target.item.name
+        resolved.append(
+            MirrorItem(
+                item=item,
+                source_target=_installed_target(installed, item),
+                destination=destination,
+                relations=borrowable(registered),
+                programmables=executable(registered),
+                occupants=_occupants(installed, item, destination),
+            )
+        )
+    return tuple(resolved)
 
-    sql = session.sql_executor(WarehouseTarget(target), workspace=workspace)
-    with session.step(f"Borrow {item} from {source_target}"):
+
+def _source_workspace(plan: MirrorPlan) -> Workspace:
+    """The plan's workspace, pointed at the catalogue being forked."""
+
+    return replace(plan.workspace, catalogue=f"{CATALOGUE_KIND}/{plan.source.name}")
+
+
+def _installed_target(installed: Mapping[tuple, str], item) -> str:
+    """Where the source catalogue says this item is installed."""
+
+    target = installed.get((item.item_type, item.item_name))
+    if not target:
+        raise CommandError(
+            f"the catalogue records no installation for {item}, so there is "
+            "nothing to mirror. Fork a catalogue that has one, or build the "
+            "item first."
+        )
+    return target
+
+
+def _occupants(installed: Mapping[tuple, str], item, destination: str) -> tuple:
+    """The other logical items the source catalogue installs to this Warehouse."""
+
+    return tuple(
+        sorted(
+            f"{item_type}/{item_name}"
+            for (item_type, item_name), target in installed.items()
+            if target.casefold() == destination.casefold()
+            and (item_type, item_name) != (item.item_type, item.item_name)
+        )
+    )
+
+
+def _refuse_unsafe(resolved: ResolvedMirror) -> None:
+    """Refuse a run whose destructive scope is not safe to carry out.
+
+    Every Warehouse on :attr:`ResolvedMirror.wiped` is emptied. Each one must
+    therefore be named once, hold no rows this run is about to borrow, and be
+    neither catalogue.
+    """
+
+    catalogues = {
+        resolved.source.name.casefold(): str(resolved.source),
+        resolved.destination.name.casefold(): str(resolved.destination),
+    }
+    seen_items: set[str] = set()
+    seen_targets: dict[str, MirrorItem] = {}
+    for each in resolved.items:
+        name = str(each.item)
+        if name in seen_items:
+            raise CommandError(f"mirror selects {name} twice. Name each item once.")
+        seen_items.add(name)
+
+        folded = each.destination.casefold()
+        clash = seen_targets.get(folded)
+        if clash is not None:
+            raise CommandError(
+                f"mirror would empty {each.target} for both {clash.item} and "
+                f"{each.item}. One Warehouse holds one item."
+            )
+        seen_targets[folded] = each
+
+        if folded == each.source_target.casefold():
+            raise CommandError(
+                f"{each.item} is installed to {each.target}, so mirroring it "
+                "there would empty the Warehouse holding the rows it borrows. "
+                "Name a different destination."
+            )
+        if folded in catalogues:
+            raise CommandError(
+                f"mirror would empty {each.target} for {each.item}, and that "
+                f"Warehouse holds the {catalogues[folded]} catalogue. Name a "
+                "destination that holds no catalogue."
+            )
+        if each.occupants:
+            raise CommandError(
+                f"mirror would empty {each.target} for {each.item}, and the "
+                "catalogue records "
+                + ", ".join(each.occupants)
+                + " installed there. Name a destination of its own, or mirror "
+                "that item too."
+            )
+
+
+# --- mirroring one item -------------------------------------------------------
+
+
+def _wipe_target(workspace: Workspace, each: MirrorItem, *, session) -> str:
+    """Empty the Warehouse a mirror is about to be built in."""
+
+    from .wipe import wipe
+
+    with session.step(f"Empty {each.target}"):
+        wipe(
+            each.target,
+            session=session,
+            workspace=workspace.workspace,
+            catalogue=workspace.catalogue,
+        )
+    return each.target
+
+
+def _mirror_item(workspace: Workspace, each: MirrorItem, *, session) -> dict:
+    """Point one Warehouse item at another target's rows.
+
+    The destination is emptied first, so what stands in it afterwards is what
+    this wrote. Installation moves last: until the Views and the procedures are
+    there, the item is still installed where it was.
+    """
+
+    from ..catalogue.borrow import borrow_statements
+    from ..targets import ItemRef, WarehouseTarget
+
+    sql = session.sql_executor(
+        WarehouseTarget(ItemRef(each.destination)), workspace=workspace
+    )
+    with session.step(f"Borrow {each.item} from {each.source_target}"):
         for statement in borrow_statements(
-            relations,
-            source_target=source_target,
+            each.relations,
+            source_target=each.source_target,
             catalogue_name=workspace.catalogue_item.name,
         ):
             sql.execute(statement)
 
-    code = _copy_programmables(
-        workspace, ItemRef(source_target), sql=sql, session=session
-    )
-    _record_borrowed(workspace, relations, source_target=source_target, session=session)
-    _switch_installation(workspace, item, target, session=session)
+    code = _copy_programmables(workspace, each, sql=sql, session=session)
+    _record_borrowed(workspace, each, session=session)
+    _switch_installation(workspace, each, session=session)
     return {
-        "source": source_target,
-        "target": target.name,
-        "relations": len(relations),
+        "source": each.source_target,
+        "target": each.destination,
+        "relations": len(each.relations),
         "programmables": code,
     }
 
 
-def _copy_programmables(workspace: Workspace, source, *, sql, session) -> int:
-    """Copy the source's authored procedures and functions into the mirror.
+def _copy_programmables(workspace: Workspace, each: MirrorItem, *, sql, session) -> int:
+    """Copy the source's procedures and functions into the mirror.
 
-    Data is borrowed and code is local. Weaver's own generated code sits in
-    ``_`` and is left to the next ordinary build, which is what makes it.
+    Data is borrowed and code is local, so every schema comes across, ``_``
+    included: the copied Registry certifies ``_.[Load X.Y]`` and
+    ``_.[Test X.Y]``, and ``weaver test`` dispatches those by name.
     """
 
-    from ..catalogue.borrow import programmable_statements
-    from ..catalogue.tables import CATALOGUE_SCHEMA
-    from ..targets import WarehouseTarget
+    from ..catalogue.borrow import missing_programmables, programmable_statements
+    from ..targets import ItemRef, WarehouseTarget
 
-    source_sql = session.sql_executor(WarehouseTarget(source), workspace=workspace)
+    source_sql = session.sql_executor(
+        WarehouseTarget(ItemRef(each.source_target)), workspace=workspace
+    )
     rows = source_sql.query(
-        "select m.definition as definition "
+        "select schema_name(o.schema_id) as schema_name, o.name as object_name, "
+        "m.definition as definition "
         "from sys.sql_modules as m "
         "join sys.objects as o on o.object_id = m.object_id "
-        "where o.is_ms_shipped = 0 and o.type in (N'P', N'FN', N'IF', N'TF') "
-        f"and schema_name(o.schema_id) <> N'{CATALOGUE_SCHEMA}'"
+        "where o.is_ms_shipped = 0 and o.type in (N'P', N'FN', N'IF', N'TF')"
     )
+    rows = tuple(rows)
+    absent = missing_programmables(
+        each.programmables,
+        tuple(f"{row['schema_name']}.{row['object_name']}" for row in rows),
+    )
+    if absent:
+        raise CommandError(
+            f"mirror cannot give {each.target} the code {each.item} is certified "
+            f"with: {CATALOGUE_KIND}/{each.source_target} does not hold "
+            + ", ".join(identity.object_id.qualified for identity in absent)
+            + ". Build the source item, so its catalogue and its Warehouse agree."
+        )
     statements = programmable_statements(str(row["definition"]) for row in rows)
     if not statements:
         return 0
@@ -370,35 +592,16 @@ def _copy_programmables(workspace: Workspace, source, *, sql, session) -> int:
     return len(statements)
 
 
-def _installed_target(catalogue, item) -> str:
-    """Where the catalogue says this item is installed, which is what it reads."""
-
-    from ..catalogue.tables import INSTALLATION
-
-    for row in catalogue.table_rows(INSTALLATION):
-        if (
-            str(row.get("item_type")) == item.item_type
-            and str(row.get("item_name")) == item.item_name
-        ):
-            return str(row.get("target_name"))
-    raise CommandError(
-        f"the catalogue records no installation for {item}, so there is nothing "
-        "to mirror. Fork a catalogue that has one, or build the item first."
-    )
-
-
-def _record_borrowed(
-    workspace: Workspace, relations, *, source_target: str, session
-) -> None:
+def _record_borrowed(workspace: Workspace, each: MirrorItem, *, session) -> None:
     """Write the ``_.Mirror`` rows, into the catalogue rather than the target."""
 
     from ..catalogue.borrow import record_statements
     from ..targets import WarehouseTarget
 
     statements = record_statements(
-        relations,
+        each.relations,
         source_workspace=workspace.workspace,
-        source_target=source_target,
+        source_target=each.source_target,
     )
     if not statements:
         return
@@ -410,7 +613,7 @@ def _record_borrowed(
             sql.execute(statement)
 
 
-def _switch_installation(workspace: Workspace, item, target, *, session) -> None:
+def _switch_installation(workspace: Workspace, each: MirrorItem, *, session) -> None:
     """Bind the item to its new target, once the mirror stands."""
 
     from .. import __version__
@@ -419,6 +622,7 @@ def _switch_installation(workspace: Workspace, item, target, *, session) -> None
     from ..catalogue.tables import INSTALLATION
     from ..targets import WarehouseTarget
 
+    item = each.item
     with catalogue_in(workspace) as catalogue:
         existing = [
             row
@@ -431,7 +635,7 @@ def _switch_installation(workspace: Workspace, item, target, *, session) -> None
         {
             "item_type": item.item_type,
             "item_name": item.item_name,
-            "target_name": target.name,
+            "target_name": each.destination,
             "weaver_version": __version__,
             "signature": str(row.get("signature") or ""),
         }
@@ -444,7 +648,7 @@ def _switch_installation(workspace: Workspace, item, target, *, session) -> None
     sql = session.sql_executor(
         WarehouseTarget(workspace.catalogue_item), workspace=workspace
     )
-    with session.step(f"Bind {item} to {target.name}"):
+    with session.step(f"Bind {item} to {each.destination}"):
         sql.execute(statement)
 
 

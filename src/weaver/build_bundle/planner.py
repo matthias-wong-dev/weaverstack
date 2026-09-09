@@ -48,6 +48,7 @@ from .catalogue_actions import (
     collect_claims,
     render_catalogue_after_build,
     render_catalogue_before_build,
+    render_mirror_deregistration,
 )
 from .documents import lakehouse_build_stages, warehouse_build_stages
 from .drops import lakehouse_drop_stages, warehouse_drop_stages
@@ -274,6 +275,16 @@ def generate_item_build_bundle(
     )
     if recorded_views is not None:
         stages.append(recorded_views)
+
+    # An object stops being borrowed once the build that gave it its own rows
+    # has run, so this sits after every physical stage and before publication.
+    deregistered = render_mirror_deregistration(
+        catalogue,
+        selected_for_build,
+        catalogue_target=catalogue_target,
+    )
+    if deregistered is not None:
+        stages.append(deregistered)
 
     stages.extend(
         render_catalogue_after_build(

@@ -886,9 +886,15 @@ weaver mirror --item Warehouse/Model=Warehouse/Model_Dev   # borrow its rows
 ```
 
 A build materialises everything locally. A mirror empties the destination, puts
-a View over each of the source's data relations in it, copies the authored
-procedures and functions, gives it the standard `_` surface over this
+a View over each of the source's data relations in it, copies every procedure
+and function the source holds, gives it the standard `_` surface over this
 catalogue, and binds the item. The data is borrowed; the code is local.
+
+Every schema comes across, `_` included. The copied Registry certifies
+`_.[Load Wh.Product]` and `_.[Test Rpt.Reconciles]`, and `weaver test`
+dispatches those by name, so a mirrored Warehouse has the executable surface an
+ordinary build gives one. A source whose Warehouse holds less than its Registry
+certifies is named, and the item stays bound where it was.
 
 `_.Mirror` records what is borrowed: one row per object, saying whose rows it
 reads and what stands at its address.
@@ -918,6 +924,11 @@ Signature comparison is untouched. An object whose declaration changed is
 selected by an ordinary build, its View is dropped, the local object is built,
 and its `_.Mirror` row goes last, once that build has run. Everything unchanged
 stays borrowed.
+
+Reconciliation asks the inventory for the effective type, so a build over a
+mirrored item finds every claim standing and plans nothing. Deregistration is a
+stage of the build like any other, after every physical stage and before
+publication.
 
 ## The catalogue lives in a Warehouse
 

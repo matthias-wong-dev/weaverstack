@@ -1,8 +1,9 @@
-"""What ``weaver mirror`` settles before it reaches a workspace.
+"""What ``weaver mirror`` settles before it empties anything.
 
-Which catalogue is read, which is written, and which pairs are refused. All of
-it is decided without a tenant, and that is the point: a fork empties a
-Warehouse, so a refusal has to come first.
+Which catalogue is read, which is written, where each selected item goes, and
+which runs are refused. A mirror empties one Warehouse for the destination
+catalogue and one for each item, so the whole scope is settled first, and
+settling it needs no tenant.
 
 A fork has two sides and one vocabulary for them. ``mirror`` is read from,
 ``catalogue`` is written to, in configuration and on the command alike.
@@ -16,7 +17,12 @@ from support.weaver_test import weaver_test
 import weaver
 from weaver.config import parse_workspace
 from weaver.errors import CommandError, ConfigError
-from weaver.operations.mirror import MirrorPlan, MirrorResult
+from weaver.operations.mirror import (
+    MirrorPlan,
+    MirrorResult,
+    ResolvedMirror,
+    resolve_mirror,
+)
 from weaver.workspaces import CatalogueRef, Workspace
 
 WORKSPACE = "Analytics"
@@ -250,35 +256,30 @@ def test_naming_items_and_no_item_together_is_refused(monkeypatch):
 def test_only_a_warehouse_item_can_be_mirrored_yet(monkeypatch):
     """A Lakehouse mirror is shortcuts and wrapper views, which is not here."""
 
-    from weaver.operations.mirror import _item_bindings
-
     plan = _plan(monkeypatch, _with_targets(), ["Lakehouse/Input"])
 
     with pytest.raises(CommandError, match="only a Warehouse item"):
-        _item_bindings(plan)
+        resolve_mirror(plan, _installed({"Lakehouse/Input": "Input"}))
 
 
 @weaver_test()
 def test_an_item_reads_its_destination_from_the_configured_targets(monkeypatch):
     """``build``'s grammar, so an unqualified item resolves through targets:."""
 
-    from weaver.operations.mirror import _item_bindings
-
     plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model"])
-    ((item, target),) = _item_bindings(plan)
+    (each,) = resolve_mirror(plan, _installed({"Warehouse/Model": "Model"})).items
 
-    assert str(item) == "Warehouse/Model"
-    assert target.name == "Model_Dev"
+    assert str(each.item) == "Warehouse/Model"
+    assert each.destination == "Model_Dev"
+    assert each.source_target == "Model"
 
 
 @weaver_test()
 def test_a_named_destination_outranks_the_configured_target(monkeypatch):
-    from weaver.operations.mirror import _item_bindings
-
     plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model=Warehouse/Somewhere"])
-    ((_item, target),) = _item_bindings(plan)
+    (each,) = resolve_mirror(plan, _installed({"Warehouse/Model": "Model"})).items
 
-    assert target.name == "Somewhere"
+    assert each.destination == "Somewhere"
 
 
 @weaver_test()
@@ -352,6 +353,21 @@ def test_a_supplied_plan_is_not_resolved_again(monkeypatch):
 
 
 @weaver_test()
+def test_a_settled_scope_is_acted_on_without_a_second_read(monkeypatch):
+    """What somebody was shown is what runs, and nothing settles it again."""
+
+    import weaver.operations.mirror as module
+
+    plan = _plan(monkeypatch, _workspace())
+    monkeypatch.setattr(
+        module, "check_mirror", lambda *_a, **_k: pytest.fail("the scope was re-read")
+    )
+
+    with pytest.raises(CommandError, match="reached its work"):
+        weaver.mirror(plan=ResolvedMirror(plan=plan), session=_open())
+
+
+@weaver_test()
 def test_the_source_is_proved_before_anything_is_emptied(monkeypatch):
     """A misspelled source fails while the destination is still intact."""
 
@@ -371,6 +387,93 @@ def test_the_source_is_proved_before_anything_is_emptied(monkeypatch):
 
     with pytest.raises(CommandError, match="no such catalogue"):
         weaver.mirror(plan=plan, session=_open())
+
+
+# --- the complete destructive scope, settled before any wipe -----------------
+
+
+@weaver_test()
+def test_the_scope_names_the_catalogue_and_every_item_target(monkeypatch):
+    """What a confirmation shows and what the run empties are one list."""
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model"])
+    resolved = resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
+
+    assert resolved.wiped == ("Warehouse/Weaver_Dev", "Warehouse/Model_Dev")
+    described = resolved.describe()
+    assert "  Warehouse/Weaver_Dev\n  Warehouse/Model_Dev" in described
+    assert plan.describe() in described
+    # The physical Warehouse the rows come from, which is what is read.
+    assert "Warehouse/Model will be mirrored into Warehouse/Model_Dev." in described
+
+
+@weaver_test()
+def test_an_item_the_catalogue_never_installed_is_refused(monkeypatch):
+    """There is nothing to point a View at, and the wipe has not happened yet."""
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model"])
+
+    with pytest.raises(CommandError, match="records no installation"):
+        resolve_mirror(plan, _installed({}))
+
+
+@weaver_test()
+def test_mirroring_an_item_onto_its_own_target_is_refused(monkeypatch):
+    """The wipe would empty the Warehouse holding the rows being borrowed."""
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model=Warehouse/Model_Dev"])
+
+    with pytest.raises(CommandError, match="rows it borrows"):
+        resolve_mirror(plan, _installed({"Warehouse/Model": "Model_Dev"}))
+
+
+@pytest.mark.parametrize("destination", ["Weaver", "Weaver_Dev"])
+@weaver_test()
+def test_an_item_destination_holding_a_catalogue_is_refused(monkeypatch, destination):
+    """Neither catalogue is a Warehouse an item may be emptied into."""
+
+    plan = _plan(
+        monkeypatch, _with_targets(), [f"Warehouse/Model=Warehouse/{destination}"]
+    )
+
+    with pytest.raises(CommandError, match="holds the"):
+        resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
+
+
+@weaver_test()
+def test_two_items_emptying_one_warehouse_is_refused(monkeypatch):
+    plan = _plan(
+        monkeypatch,
+        _with_targets(),
+        ["Warehouse/Model=Warehouse/Shared", "Warehouse/Other=Warehouse/Shared"],
+    )
+
+    with pytest.raises(CommandError, match="One Warehouse holds one item"):
+        resolve_mirror(
+            plan,
+            _installed({"Warehouse/Model": "Model", "Warehouse/Other": "Other"}),
+        )
+
+
+@weaver_test()
+def test_selecting_one_item_twice_is_refused(monkeypatch):
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model", "Warehouse/Model"])
+
+    with pytest.raises(CommandError, match="twice"):
+        resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
+
+
+@weaver_test()
+def test_a_destination_another_item_is_installed_to_is_refused(monkeypatch):
+    """Emptying it would take the rows of an item this run does not mirror."""
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model=Warehouse/Reporting"])
+
+    with pytest.raises(CommandError, match="Warehouse/Other installed there"):
+        resolve_mirror(
+            plan,
+            _installed({"Warehouse/Model": "Model", "Warehouse/Other": "Reporting"}),
+        )
 
 
 # --- what it reports ----------------------------------------------------------
@@ -395,6 +498,40 @@ def test_a_result_says_what_moved_and_what_did_not():
 # --- helpers ------------------------------------------------------------------
 
 
+def _installed(targets: dict[str, str], objects: dict[str, tuple] | None = None):
+    """A source catalogue recording where each item is installed.
+
+    ``objects`` holds ``(schema, name, object_type, object_role)`` per item, for
+    a claim about what a mirror stands over. Most claims here are about which
+    Warehouses are emptied, and those need only the Installation rows.
+    """
+
+    from weaver.catalogue.state import Catalogue
+    from weaver.catalogue.tables import INSTALLATION, REGISTRY
+    from weaver.declaration.model import WeaverItemId
+
+    objects = objects or {}
+    rows = {}
+    for written, target in targets.items():
+        item = WeaverItemId.parse(written)
+        scope = {"item_type": item.item_type, "item_name": item.item_name}
+        rows[item] = {
+            INSTALLATION.name: ({**scope, "target_name": target},),
+            REGISTRY.name: tuple(
+                {
+                    **scope,
+                    "schema_name": schema,
+                    "object_name": name,
+                    "object_type": object_type,
+                    "object_role": role,
+                    "signature": "sig",
+                }
+                for schema, name, object_type, role in objects.get(written, ())
+            ),
+        }
+    return Catalogue(rows=rows)
+
+
 class _Never:
     """A session that fails if a refusal ever reaches a workspace."""
 
@@ -410,10 +547,14 @@ class _Open:
     """A Session an operation may enter, and nothing more.
 
     For a claim that stops inside the operation: what is under test is the
-    order, so the Session only has to be open.
+    order, so the Session only has to be open. Opening a task ends the claim,
+    which is where the work begins.
     """
 
     closed = False
+
+    def task(self, *_names):
+        raise CommandError("the run reached its work")
 
 
 def _open():

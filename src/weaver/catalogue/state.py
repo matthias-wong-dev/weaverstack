@@ -1159,6 +1159,11 @@ def reconcile_catalogue_state(
 ) -> Reconciliation:
     """Discard catalogue claims the prepared inventories physically disprove.
 
+    The inventory is asked for the type that should stand at the address, which
+    for a borrowed object is the View ``_.Mirror`` records and for every other
+    object is what Registry says. See
+    :meth:`Catalogue.effective_physical_type`.
+
     Pure: a catalogue and an inventory in, a catalogue and its stale claims out.
     Both inputs can be built directly, so no Lakehouse is needed to demonstrate
     what happens when a registered object is not there.
@@ -1176,9 +1181,8 @@ def reconcile_catalogue_state(
                 if identity.item != item:
                     continue
                 schema_name, object_name = catalogue_columns(identity)
-                if not inventory.has_object(
-                    schema_name, object_name, document.object_type
-                ):
+                expected = state.effective_physical_type(identity)
+                if not inventory.has_object(schema_name, object_name, expected):
                     stale[identity] = document
         # Reconciliation removes disproved declaration claims. Current runtime
         # state is not a claim and must survive into build planning, where the

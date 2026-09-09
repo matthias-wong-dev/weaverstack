@@ -22,6 +22,11 @@ from .tsql import identifier, literal
 #: source is: a table and a view both read the same way through one.
 BORROWED_TYPE = "view"
 
+#: What the Registry calls a procedure. Weaver's generated load and validation
+#: procedures sit in ``_`` and authored ones in a user schema. Both are code,
+#: and a mirror recreates code locally.
+PROCEDURE_TYPE = "stored_procedure"
+
 
 def borrowable(registered: Mapping[WeaverDocumentId, object]) -> tuple:
     """The data relations of one item, which are what a mirror points at.
@@ -40,6 +45,42 @@ def borrowable(registered: Mapping[WeaverDocumentId, object]) -> tuple:
             ),
             key=str,
         )
+    )
+
+
+def executable(registered: Mapping[WeaverDocumentId, object]) -> tuple:
+    """The procedures one item installs, which a mirror recreates locally.
+
+    Everything the Registry certifies as a procedure, in every schema. A
+    mirrored Warehouse holds each of these, so ``weaver test`` and ``_.Load``
+    reach the same code an ordinary build installs.
+    """
+
+    return tuple(
+        sorted(
+            (
+                identity
+                for identity, document in registered.items()
+                if document.object_type == PROCEDURE_TYPE
+            ),
+            key=str,
+        )
+    )
+
+
+def missing_programmables(required: Iterable[WeaverDocumentId], copied) -> tuple:
+    """Certified procedures the source Warehouse did not supply.
+
+    ``copied`` is the folded ``schema.name`` of every procedure read from the
+    source. What the Registry certifies and what the source holds are two
+    readings of one estate, and a mirror stands only where they agree.
+    """
+
+    held = {value.casefold() for value in copied}
+    return tuple(
+        identity
+        for identity in required
+        if identity.object_id.qualified.casefold() not in held
     )
 
 
@@ -105,10 +146,8 @@ def borrow_statements(
     )
 
 
-#: Programmables Weaver generates, which a build makes and a mirror does not
-#: copy. Everything else in a user schema is authored, and is copied as written.
 def programmable_statements(definitions: Iterable[str]) -> tuple[str, ...]:
-    """Each authored programmable, as a create-or-alter of its own definition."""
+    """Each programmable, as a create-or-alter of the source's own definition."""
 
     return tuple(
         _as_create_or_alter(definition)
@@ -206,8 +245,11 @@ _AUDIT = ("Row insert datetime", "Row update datetime", "Row delete datetime")
 
 __all__ = [
     "BORROWED_TYPE",
+    "PROCEDURE_TYPE",
     "borrow_statements",
     "borrowable",
+    "executable",
+    "missing_programmables",
     "programmable_statements",
     "record_statements",
     "schema_statements",

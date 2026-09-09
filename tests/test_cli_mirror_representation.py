@@ -1,8 +1,9 @@
 """The CLI is a confirmation and rendering adapter for public mirror.
 
-The order it runs things in is the safety property. A fork empties the
-destination Warehouse, so the pair is resolved and the source is read before
-anybody is asked, and the sentence they answer names that same pair.
+The order it runs things in is the safety property. A mirror empties a
+Warehouse for the destination catalogue and one for each selected item, so the
+scope is settled and the source is read before anybody is asked, and what they
+answer names every Warehouse the run empties.
 """
 
 from __future__ import annotations
@@ -13,8 +14,13 @@ import pytest
 from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
-from weaver import MirrorPlan, MirrorResult
 from weaver.errors import CommandError
+from weaver.operations.mirror import (
+    MirrorItem,
+    MirrorPlan,
+    MirrorResult,
+    ResolvedMirror,
+)
 from weaver.workspaces import CatalogueRef
 from weaver_cli import main
 from weaver_cli.main import build_parser
@@ -48,14 +54,14 @@ def _plan() -> MirrorPlan:
     )
 
 
-def _wired(monkeypatch, *, order=None):
+def _wired(monkeypatch, *, order=None, items=()):
     """The CLI with each public step recorded rather than performed."""
 
     cli = importlib.import_module("weaver_cli.main")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda _args: _workspace())
     steps = order if order is not None else []
     plan = _plan()
-    calls: dict[str, object] = {"plan": plan, "steps": steps}
+    calls: dict[str, object] = {"plan": plan, "steps": steps, "items": items}
 
     def plan_mirror(items=None, **kwargs):
         steps.append("plan")
@@ -65,6 +71,9 @@ def _wired(monkeypatch, *, order=None):
     def check_mirror(supplied, **kwargs):
         steps.append("check")
         calls["checked"] = supplied
+        settled = ResolvedMirror(plan=supplied, items=calls["items"])
+        calls["resolved"] = settled
+        return settled
 
     def mirror(items=None, **kwargs):
         steps.append("mirror")
@@ -241,7 +250,7 @@ def test_the_fork_acts_on_the_plan_that_was_shown(monkeypatch):
     main(["mirror", "--no-item", "--yes", "--workspace", "Analytics"])
 
     assert calls["checked"] is calls["plan"]
-    assert calls["mirrored"]["plan"] is calls["plan"]
+    assert calls["mirrored"]["plan"] is calls["resolved"]
 
 
 # --- confirmation -------------------------------------------------------------
@@ -266,12 +275,35 @@ def test_a_fork_is_refused_without_confirmation(monkeypatch, capsys):
 
 
 @weaver_test()
-def test_the_question_names_the_resolved_pair(monkeypatch, capsys):
-    plan = _plan()
+def test_the_question_names_every_warehouse_the_run_empties(monkeypatch, capsys):
+    """A selected item empties its own target too, so the question says so."""
 
-    assert plan.describe() == (
-        "Warehouse/Weaver_Dev will be emptied and rebuilt from Warehouse/Weaver."
+    from weaver.declaration.model import WeaverItemId
+
+    cli = importlib.import_module("weaver_cli.main")
+    _wired(
+        monkeypatch,
+        items=(
+            MirrorItem(
+                item=WeaverItemId.parse("Warehouse/Model"),
+                source_target="Sales",
+                destination="Sales_Dev",
+            ),
+        ),
     )
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    assert (
+        main(["mirror", "--item", "Warehouse/Model", "--workspace", "Analytics"]) == 0
+    )
+
+    printed = capsys.readouterr().out
+    assert "  Warehouse/Weaver_Dev\n  Warehouse/Sales_Dev" in printed
+    assert (
+        "Warehouse/Weaver_Dev will be emptied and rebuilt from Warehouse/Weaver."
+    ) in printed
+    assert "Warehouse/Sales will be mirrored into Warehouse/Sales_Dev." in printed
 
 
 @weaver_test()

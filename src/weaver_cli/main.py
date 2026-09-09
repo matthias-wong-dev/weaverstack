@@ -1784,15 +1784,18 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
 
 def handle_mirror(args: argparse.Namespace) -> int:
-    """Resolve the pair, prove the source, confirm, then fork.
+    """Resolve the pair, settle the scope, confirm, then mirror.
 
-    The order is the safety property. A fork empties the destination Warehouse,
-    so what it will do is settled and the source is read before anything is
-    asked, and long before anything is removed. A misspelled ``--mirror`` fails
-    while the destination is still intact.
+    The order is the safety property. A mirror empties a Warehouse for the
+    destination catalogue and one for each selected item, so the whole
+    destructive scope is settled and the source is read before anything is
+    asked, and long before anything is removed. A misspelled ``--mirror``, an
+    item that is not installed, or a destination holding somebody else's rows
+    fails while every Warehouse is intact.
 
-    One :class:`weaver.MirrorPlan` carries the pair through all three, so the
-    sentence somebody answers names the catalogues the fork acts on.
+    One :class:`weaver.operations.mirror.ResolvedMirror` carries that scope
+    through all three, so what somebody answers names the Warehouses the run
+    empties.
     """
 
     import json
@@ -1815,25 +1818,23 @@ def handle_mirror(args: argparse.Namespace) -> int:
     )
 
     with _running_session(args, plan.workspace) as opened:
-        weaver.check_mirror(plan, session=opened)
+        resolved = weaver.check_mirror(plan, session=opened)
 
         if not _authorised(args):
-            print(f"mirror on {plan.workspace.workspace}\n\n  {plan.describe()}\n")
+            print(f"mirror on {plan.workspace.workspace}\n\n{resolved.describe()}\n")
+            emptied = ", ".join(resolved.wiped)
             if not sys.stdin.isatty():
                 print(
-                    f"Refusing to empty {plan.target} without confirmation. "
-                    "Pass --yes.",
+                    f"Refusing to empty {emptied} without confirmation. Pass --yes.",
                     file=sys.stderr,
                 )
                 return 1
-            answer = input(
-                f"Empty and rebuild {plan.target}? This cannot be undone [y/N] "
-            )
+            answer = input("Continue? This cannot be undone [y/N] ")
             if answer.strip().lower() not in {"y", "yes"}:
                 print("Cancelled.")
                 return 1
 
-        result = weaver.mirror(plan=plan, session=opened)
+        result = weaver.mirror(plan=resolved, session=opened)
 
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
@@ -1842,6 +1843,13 @@ def handle_mirror(args: argparse.Namespace) -> int:
     for table, rows in result.copied.items():
         print(f"  {table}: {rows}")
     print(f"  ({', '.join(result.uncopied)} start empty)")
+    for item in result.items:
+        borrowed = result.borrowed[item]
+        print(
+            f"{item} borrows {borrowed['relations']} relation(s) from "
+            f"{borrowed['source']}, with {borrowed['programmables']} "
+            "procedure(s) of its own."
+        )
     return 0
 
 

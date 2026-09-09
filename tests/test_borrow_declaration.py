@@ -13,6 +13,8 @@ from weaver.catalogue.borrow import (
     BORROWED_TYPE,
     borrow_statements,
     borrowable,
+    executable,
+    missing_programmables,
     programmable_statements,
     record_statements,
     schema_statements,
@@ -24,10 +26,17 @@ from weaver.catalogue.tables import (
     MIRROR,
     ROLE_DATA,
     ROLE_LOAD,
+    ROLE_PROGRAMMABLE,
+    ROLE_TEST,
     STANDARD_SURFACE_TABLES,
 )
 from weaver.declaration.metadata import ObjectId
-from weaver.declaration.model import WeaverDocumentId, WeaverItemId
+from weaver.declaration.model import (
+    OBJECT_SHAPE,
+    PROCEDURE_SHAPE,
+    WeaverDocumentId,
+    WeaverItemId,
+)
 
 ITEM = WeaverItemId.parse("Warehouse/Model")
 
@@ -123,6 +132,60 @@ def test_the_surface_does_not_present_what_is_borrowed():
 
 
 # --- code is local ------------------------------------------------------------
+
+
+def _certified(*rows) -> dict:
+    """A Registry the fork copied, as ``(schema, name, type, role)`` rows."""
+
+    registered = {}
+    for schema, name, object_type, role in rows:
+        shape = PROCEDURE_SHAPE if object_type == "stored_procedure" else OBJECT_SHAPE
+        identity = WeaverDocumentId(ITEM, ObjectId(schema, name), shape=shape)
+        registered[identity] = RegisteredDocument(identity, object_type, "sig", role)
+    return registered
+
+
+CERTIFIED = _certified(
+    ("Core", "Customer", "table", ROLE_DATA),
+    ("_", "Load Core.Customer", "stored_procedure", ROLE_LOAD),
+    ("_", "Test Core.Integrity", "stored_procedure", ROLE_TEST),
+    ("Rpt", "Refresh", "stored_procedure", ROLE_PROGRAMMABLE),
+)
+
+
+@weaver_test()
+def test_every_certified_procedure_is_copied_whatever_schema_it_is_in():
+    """Weaver's generated load and validation procedures sit in ``_``.
+
+    The copied Registry certifies them, and ``weaver test`` dispatches
+    ``_.[Test Core.Integrity]`` by name, so the mirror holds them too.
+    """
+
+    assert {identity.object_id.qualified for identity in executable(CERTIFIED)} == {
+        "Rpt.Refresh",
+        "_.Load Core.Customer",
+        "_.Test Core.Integrity",
+    }
+
+
+@weaver_test()
+def test_a_source_that_does_not_hold_certified_code_is_named():
+    """Registry and the source Warehouse are two readings of one estate."""
+
+    absent = missing_programmables(
+        executable(CERTIFIED), ["rpt.refresh", "_.Load Core.Customer"]
+    )
+
+    assert [identity.object_id.qualified for identity in absent] == [
+        "_.Test Core.Integrity"
+    ]
+
+
+@weaver_test()
+def test_a_source_holding_everything_certified_leaves_nothing_missing():
+    copied = [identity.object_id.qualified for identity in executable(CERTIFIED)]
+
+    assert missing_programmables(executable(CERTIFIED), copied) == ()
 
 
 @weaver_test()
