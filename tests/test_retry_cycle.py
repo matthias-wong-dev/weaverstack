@@ -471,9 +471,7 @@ def test_one_keypress_is_read_as_itself(sent, expected):
 
     try:
         if b"READY" not in _read_until(descriptor, b"READY"):
-            pytest.fail(
-                "the child never reached cbreak mode, so no key could be read"
-            )
+            pytest.fail("the child never reached cbreak mode, so no key could be read")
         os.write(descriptor, sent)
         received = _read_until(descriptor, b"GOT:")
     finally:

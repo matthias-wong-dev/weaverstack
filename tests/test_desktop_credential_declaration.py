@@ -163,9 +163,7 @@ def test_a_configured_principal_answers_before_the_cli(monkeypatch):
     cli = _Working()
     auth._desktop_chain = None
     monkeypatch.setattr(auth, "_principal_credential", lambda: principal)
-    monkeypatch.setattr(
-        "azure.identity.AzureCliCredential", lambda *a, **k: cli
-    )
+    monkeypatch.setattr("azure.identity.AzureCliCredential", lambda *a, **k: cli)
     monkeypatch.setattr(auth, "_browser_credential", lambda: _Working())
     monkeypatch.setenv("AZURE_CLIENT_ID", "a-client")
     monkeypatch.setenv("AZURE_CLIENT_SECRET", "a-secret")
@@ -196,9 +194,7 @@ def test_an_unconfigurable_principal_is_reported(monkeypatch):
 
     class _Unconfigurable:
         def get_token(self, *scopes, **kwargs):
-            raise CredentialUnavailableError(
-                "no service principal is configured"
-            )
+            raise CredentialUnavailableError("no service principal is configured")
 
     cli = _Working()
     auth._desktop_chain = None

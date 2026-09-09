@@ -154,9 +154,15 @@ def desktop_credential():
     from azure.identity import AzureCliCredential, ChainedTokenCredential
 
     diagnostic = {}
-    credentials = [DiagnosticCredential(_principal_credential(), "Service principal", diagnostic)]
-    credentials.append(DiagnosticCredential(AzureCliCredential(), "Azure CLI", diagnostic))
-    credentials.append(DiagnosticCredential(_browser_credential(), "Browser sign-in", diagnostic))
+    credentials = [
+        DiagnosticCredential(_principal_credential(), "Service principal", diagnostic)
+    ]
+    credentials.append(
+        DiagnosticCredential(AzureCliCredential(), "Azure CLI", diagnostic)
+    )
+    credentials.append(
+        DiagnosticCredential(_browser_credential(), "Browser sign-in", diagnostic)
+    )
     _desktop_chain = ChainedTokenCredential(*credentials)
     _desktop_chain.diagnostic = diagnostic
     return _desktop_chain
