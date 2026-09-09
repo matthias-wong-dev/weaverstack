@@ -422,13 +422,21 @@ def test_one_keypress_is_read_as_itself(sent, expected):
     import time
 
     probe = (
-        "import sys, tty;"
+        "import sys, termios, tty;"
         f"sys.path.insert(0, {str(_SRC)!r});"
         "from weaver_cli.main import _read_key, ESC;"
         # The key may only be sent once the terminal is out of canonical mode.
         # The child announces that itself, after importing and entering cbreak,
         # so the pace of the child's startup decides the timing and no sleep in
         # the parent can race it.
+        #
+        # _read_key installs its cbreak mode through tty.setcbreak, whose
+        # default TCSAFLUSH discards a key already queued on the pty. Pinned to
+        # TCSANOW here, so a key the parent sends between the handshake and
+        # _read_key is read rather than dropped. What the test proves is key
+        # interpretation, not the flush behaviour of the mode change.
+        "_setcbreak = tty.setcbreak;"
+        "tty.setcbreak = lambda fd, when=None: _setcbreak(fd, termios.TCSANOW);"
         "tty.setcbreak(0);"
         'sys.stderr.write("READY\\n");'
         "sys.stderr.flush();"
