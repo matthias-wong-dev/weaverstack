@@ -80,6 +80,15 @@ def uninstalled(monkeypatch, tmp_path):
         auth, "_authentication_record_path", lambda: tmp_path / "record.json"
     )
     monkeypatch.setattr(auth, "_warned", set())
+    # A principal configured in the caller's environment would otherwise sit at
+    # the front of every chain these tests build and answer with a real token.
+    for variable in (
+        "AZURE_CLIENT_ID",
+        "AZURE_CLIENT_SECRET",
+        "AZURE_TENANT_ID",
+        "AZURE_CLIENT_CERTIFICATE_PATH",
+    ):
+        monkeypatch.delenv(variable, raising=False)
 
     before = auth._installed
     chain = auth._desktop_chain
@@ -148,7 +157,91 @@ def test_an_object_that_is_not_a_credential_is_refused_here():
         auth.use_credential(object())
 
 
-# --- choosing between the two --------------------------------------------------
+# --- choosing between the three ------------------------------------------------
+
+
+@weaver_test()
+def test_a_configured_principal_answers_before_the_cli(monkeypatch):
+    """Unattended machines sign in without a person or an Azure CLI."""
+
+    principal = _Working()
+    cli = _Working()
+    auth._desktop_chain = None
+    monkeypatch.setattr(auth, "_principal_credential", lambda: principal)
+    monkeypatch.setattr("azure.identity.AzureCliCredential", lambda *a, **k: cli)
+    monkeypatch.setattr(auth, "_browser_credential", lambda: _Working())
+    monkeypatch.setenv("AZURE_CLIENT_ID", "a-client")
+    monkeypatch.setenv("AZURE_CLIENT_SECRET", "a-secret")
+    monkeypatch.setenv("AZURE_TENANT_ID", "a-tenant")
+
+    token = auth.desktop_credential().get_token(auth.FABRIC_SCOPE)
+
+    assert token.token == "a-token"
+    assert principal.calls == 1
+    assert cli.calls == 0
+
+
+@weaver_test()
+def test_the_principal_slips_when_the_variables_are_absent(credentials):
+    """No principal variables, no principal in the chain's behaviour."""
+
+    chosen = auth.desktop_credential()
+
+    assert chosen.get_token(auth.FABRIC_SCOPE).token == "a-token"
+    assert credentials.cli.calls == 1
+
+
+@weaver_test()
+def test_an_unconfigurable_principal_is_reported(monkeypatch):
+    """A principal that is asked for and cannot be built moves the chain on."""
+
+    from azure.identity import CredentialUnavailableError
+
+    class _Unconfigurable:
+        def get_token(self, *scopes, **kwargs):
+            raise CredentialUnavailableError("no service principal is configured")
+
+    cli = _Working()
+    auth._desktop_chain = None
+    monkeypatch.setattr(auth, "_principal_credential", _Unconfigurable)
+    monkeypatch.setattr("azure.identity.AzureCliCredential", lambda *a, **k: cli)
+    monkeypatch.setattr(auth, "_browser_credential", lambda: _Working())
+
+    token = auth.desktop_credential().get_token(auth.FABRIC_SCOPE)
+
+    assert token.token == "a-token"
+    assert cli.calls == 1
+
+
+@weaver_test()
+def test_a_certificate_principal_is_configured(monkeypatch):
+    """A certificate in place of the secret names a complete principal.
+
+    Through the real `_PrincipalCredential`, because what this pins is the
+    configuration boundary itself: `_principal_configured` deciding that client
+    and tenant plus a certificate path is a principal, and
+    `EnvironmentCredential` being the credential built to serve it.
+    """
+
+    built = []
+
+    class _Environment:
+        def __init__(self):
+            built.append(self)
+
+        def get_token(self, *scopes, **kwargs):
+            return _Token()
+
+    monkeypatch.setattr("azure.identity.EnvironmentCredential", _Environment)
+    monkeypatch.setenv("AZURE_CLIENT_ID", "a-client")
+    monkeypatch.setenv("AZURE_TENANT_ID", "a-tenant")
+    monkeypatch.delenv("AZURE_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("AZURE_CLIENT_CERTIFICATE_PATH", "/a/cert.pem")
+
+    answer = auth._PrincipalCredential().get_token(auth.FABRIC_SCOPE)
+
+    assert answer.token == "a-token"
+    assert len(built) == 1
 
 
 @weaver_test()
