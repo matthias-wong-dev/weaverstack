@@ -417,18 +417,45 @@ def test_every_retryable_command_offers_the_same_prompt():
 @weaver_test()
 def test_one_keypress_is_read_as_itself(sent, expected):
     import pty
+    import select
     import sys
     import time
 
     probe = (
-        "import sys;"
+        "import sys, tty;"
         f"sys.path.insert(0, {str(_SRC)!r});"
         "from weaver_cli.main import _read_key, ESC;"
+        # The key may only be sent once the terminal is out of canonical mode.
+        # The child announces that itself, after importing and entering cbreak,
+        # so the pace of the child's startup decides the timing and no sleep in
+        # the parent can race it.
+        "tty.setcbreak(0);"
+        'sys.stderr.write("READY\\n");'
+        "sys.stderr.flush();"
         "key = _read_key();"
         'name = {"\\r": "ENTER", "\\n": "ENTER", ESC: "ESC"}.get(key, repr(key));'
         'sys.stderr.write("GOT:" + name + "\\n");'
         "sys.stderr.flush()"
     )
+
+    #: A keypress and an answer, in a child that may take a second to import
+    #: and may answer nothing at all if it is broken.
+    READ_TIMEOUT = 30.0
+
+    def _read_until(descriptor, marker: bytes) -> bytes:
+        """Bounded reads: stop at the marker, at a timeout, or at end of child."""
+
+        deadline = time.monotonic() + READ_TIMEOUT
+        received = b""
+        while marker not in received and time.monotonic() < deadline:
+            ready, _, _ = select.select([descriptor], [], [], READ_TIMEOUT)
+            if not ready:
+                break
+            chunk = os.read(descriptor, 1024)
+            if not chunk:
+                break
+            received += chunk
+        return received
 
     pid, descriptor = pty.fork()
     if pid == 0:  # the child is the terminal session
@@ -442,19 +469,23 @@ def test_one_keypress_is_read_as_itself(sent, expected):
         finally:
             os._exit(127)
 
-    time.sleep(0.35)
-    os.write(descriptor, sent)
-    time.sleep(0.35)
-    received = b""
     try:
-        while b"GOT:" not in received:
-            chunk = os.read(descriptor, 1024)
-            if not chunk:
-                break
-            received += chunk
-    except OSError:
-        pass
-    os.waitpid(pid, 0)
+        if b"READY" not in _read_until(descriptor, b"READY"):
+            pytest.fail(
+                "the child never reached cbreak mode, so no key could be read"
+            )
+        os.write(descriptor, sent)
+        received = _read_until(descriptor, b"GOT:")
+    finally:
+        # A hung child ends here rather than holding the suite. SIGKILL cannot
+        # be caught by the `finally: os._exit(127)` guard in it.
+        import signal
+
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        os.waitpid(pid, 0)
 
     answer = [
         line.strip()
