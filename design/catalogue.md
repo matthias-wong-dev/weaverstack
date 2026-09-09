@@ -875,6 +875,50 @@ the fork records centrally and is unaffected, but `exec [_].[Load]` typed inside
 kept item reaches the source catalogue. An item is only fully the fork's once it
 has been built into a target of its own.
 
+## Borrowed data
+
+A fork branches the state. Each item then diverges however it needs to, and
+there are two ways.
+
+```bash
+weaver build  --item Warehouse/Model=Warehouse/Model_Dev   # rebuild it there
+weaver mirror --item Warehouse/Model=Warehouse/Model_Dev   # borrow its rows
+```
+
+A build materialises everything locally. A mirror empties the destination, puts
+a View over each of the source's data relations in it, copies the authored
+procedures and functions, gives it the standard `_` surface over this
+catalogue, and binds the item. The data is borrowed; the code is local.
+
+`_.Mirror` records what is borrowed: one row per object, saying whose rows it
+reads and what stands at its address.
+
+```text
+Registry   Warehouse/Model | Core | Customer | Table | Data | abc123
+Mirror     Warehouse/Model | Core | Customer | PROD_MODEL.Core.Customer | View
+```
+
+Registry still says what the object logically is. A mirror is an overlay, not a
+type or a role, so nothing downstream has a second vocabulary to learn.
+
+**Nothing declares `_.Mirror`.** A catalogue only ever reached by `weaver build`
+does not have that table. The mirror operation installs it into its destination
+when it first writes a row, prune spares it, and a read of an absent one is
+nothing borrowed. A fork carries the rows across where the source has them.
+
+**What a borrowed object changes.** Three decisions, and no others:
+
+| | |
+|---|---|
+| what stands at its address | `Catalogue.effective_physical_type` says View, so Registry Table plus a physical View is valid rather than a mismatch |
+| whether Weaver loads it | it does not: the rows belong to the target it borrows from, and a load would write through to the source |
+| whether Prohibit rebuild protects it | it does not: a mirror holds none of Weaver's data, the same reason a shortcut is replaceable |
+
+Signature comparison is untouched. An object whose declaration changed is
+selected by an ordinary build, its View is dropped, the local object is built,
+and its `_.Mirror` row goes last, once that build has run. Everything unchanged
+stays borrowed.
+
 ## The catalogue lives in a Warehouse
 
 Every table above is a Warehouse table under `_`, read and written over TDS.

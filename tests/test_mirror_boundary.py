@@ -32,9 +32,25 @@ def _workspace(**overrides) -> Workspace:
     return Workspace(**values)
 
 
-def _plan(monkeypatch, configured: Workspace, **named) -> MirrorPlan:
+def _plan(monkeypatch, configured: Workspace, items=None, **named) -> MirrorPlan:
     _given(monkeypatch, configured)
+    if items is not None:
+        return weaver.plan_mirror(items, session=_never(), **named)
     return weaver.plan_mirror(no_item=True, session=_never(), **named)
+
+
+def _with_targets() -> Workspace:
+    """A dev configuration that deploys two items."""
+
+    from weaver.declaration.model import WeaverItemId
+    from weaver.workspaces import TargetDeclaration
+
+    return _workspace(
+        targets={
+            WeaverItemId.parse("Warehouse/Model"): TargetDeclaration("Model_Dev"),
+            WeaverItemId.parse("Lakehouse/Input"): TargetDeclaration("Input_Dev"),
+        }
+    )
 
 
 # --- the configured pair ------------------------------------------------------
@@ -231,33 +247,48 @@ def test_naming_items_and_no_item_together_is_refused(monkeypatch):
 
 
 @weaver_test()
-def test_selecting_an_item_says_the_rebinding_is_not_here_yet(monkeypatch):
-    """Silence would leave the item where the copied catalogue put it."""
+def test_only_a_warehouse_item_can_be_mirrored_yet(monkeypatch):
+    """A Lakehouse mirror is shortcuts and wrapper views, which is not here."""
 
-    _given(monkeypatch, _workspace())
+    from weaver.operations.mirror import _item_bindings
 
-    with pytest.raises(CommandError, match="rebinds no physical item yet"):
-        weaver.mirror(["Warehouse/Model"], session=_never())
+    plan = _plan(monkeypatch, _with_targets(), ["Lakehouse/Input"])
+
+    with pytest.raises(CommandError, match="only a Warehouse item"):
+        _item_bindings(plan)
+
+
+@weaver_test()
+def test_an_item_reads_its_destination_from_the_configured_targets(monkeypatch):
+    """``build``'s grammar, so an unqualified item resolves through targets:."""
+
+    from weaver.operations.mirror import _item_bindings
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model"])
+    ((item, target),) = _item_bindings(plan)
+
+    assert str(item) == "Warehouse/Model"
+    assert target.name == "Model_Dev"
+
+
+@weaver_test()
+def test_a_named_destination_outranks_the_configured_target(monkeypatch):
+    from weaver.operations.mirror import _item_bindings
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model=Warehouse/Somewhere"])
+    ((_item, target),) = _item_bindings(plan)
+
+    assert target.name == "Somewhere"
 
 
 @weaver_test()
 def test_a_configured_target_is_selected_when_no_item_is_named(monkeypatch):
     """Bare ``mirror`` means every configured target, as ``build`` does."""
 
-    from weaver.declaration.model import WeaverItemId
-    from weaver.workspaces import TargetDeclaration
+    _given(monkeypatch, _with_targets())
+    plan = weaver.plan_mirror(session=_never())
 
-    _given(
-        monkeypatch,
-        _workspace(
-            targets={
-                WeaverItemId.parse("Warehouse/Model"): TargetDeclaration("Model_Dev")
-            }
-        ),
-    )
-
-    with pytest.raises(CommandError, match="Warehouse/Model"):
-        weaver.mirror(session=_never())
+    assert plan.items == ("Lakehouse/Input", "Warehouse/Model")
 
 
 # --- one plan through preflight, prompt and execution ------------------------

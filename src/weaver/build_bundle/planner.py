@@ -149,6 +149,7 @@ def generate_item_build_bundle(
         selected=selected_ids,
         stale_consumers=stale_consumers,
         inventories=inventories,
+        mirrored=catalogue.mirrors,
     )
     selected_for_drop = set(selection.selected_for_drop)
     selected_for_build = set(selection.selected_for_build)

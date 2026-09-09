@@ -338,15 +338,18 @@ def determine_impact(
     )
 
 
-def _installed_as_shortcut(registered, identity) -> bool:
-    """Whether what is installed at this identity is a pointer.
+def _installed_as_pointer(registered, mirrored, identity) -> bool:
+    """Whether what is installed at this identity holds none of its own data.
 
-    Read from the Registry row's role, because a shortcut destination and an
-    owned object share one identity and only the role separates them.
+    Two kinds. A shortcut destination says so in its Registry role, because it
+    and an owned object share one identity. A mirror says so in ``_.Mirror``,
+    because Registry still records what the object logically is.
     """
 
     document = registered.get(identity)
-    return document is not None and document.object_role == ROLE_SHORTCUT
+    if document is not None and document.object_role == ROLE_SHORTCUT:
+        return True
+    return identity in mirrored
 
 
 def select_build(
@@ -356,8 +359,10 @@ def select_build(
     selected: Iterable[WeaverDocumentId],
     inventories: Mapping[WeaverItemId, object],
     stale_consumers: Iterable[WeaverDocumentId] = (),
+    mirrored: Iterable[WeaverDocumentId] = (),
 ) -> BuildSelection:
     selected = set(selected)
+    mirrored = set(mirrored)
     stale_consumers = set(stale_consumers)
     physical_types = _physical_types(
         repository, selected=selected, inventories=inventories
@@ -369,17 +374,15 @@ def select_build(
         stale_consumers=stale_consumers,
         physical_types=physical_types,
     )
-    # ``prohibit_rebuild`` protects landed data, so the installed role is what
-    # it answers for. A pointer holds none of Weaver's data and replacing one
-    # destroys nothing, so an identity installed as a shortcut stays
-    # replaceable. That is the shortcut-to-owned transition: the declaration
-    # arrives first, and the pointer is still what stands at the identity.
+    # ``prohibit_rebuild`` protects landed data, and a pointer holds none: a
+    # shortcut and a mirror both read another target's rows, so replacing one
+    # with an owned object destroys nothing.
     prohibited = {
         identity
         for identity in impact.impacted
         if identity in repository.source_documents
         and repository.source_documents[identity].document.prohibit_rebuild
-        and not _installed_as_shortcut(registered, identity)
+        and not _installed_as_pointer(registered, mirrored, identity)
     }
     # A pointer impacted through the graph is refreshed over its own address and
     # never dropped to do it: `CreateOrOverwrite` for a Lakehouse shortcut and

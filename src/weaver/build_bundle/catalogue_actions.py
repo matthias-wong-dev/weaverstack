@@ -6,14 +6,21 @@ import json
 from collections import defaultdict
 from typing import Iterable, Mapping
 
-from ..catalogue.claims import CatalogueClaim, claim_rules_for_object_type
+from ..catalogue.claims import (
+    CatalogueClaim,
+    catalogue_schema,
+    claim_rules_for_object_type,
+)
 from ..catalogue.reconcile import publish
-from ..catalogue.render import InstallationScope
+from ..catalogue.render import InstallationScope, render_delete_rows
 from ..catalogue.state import Catalogue, for_targets, retaining
 from ..catalogue.tables import (
     DICTIONARY_TABLES,
     INSTALLATION,
+    MIRROR,
     REGISTRY,
+    SCOPE_ITEM_NAME,
+    SCOPE_ITEM_TYPE,
     CatalogueTable,
 )
 from ..catalogue.tsql import identifier, literal, qualified_name
@@ -229,6 +236,53 @@ def desired_catalogue(
         for item in target_by_item
     }
     return _with_installation_rows(bound, binding_rows)
+
+
+#: Where deregistration sits: after every physical stage and before the
+#: publication. An object stops being borrowed once the build that gives it its
+#: own rows has run.
+DEREGISTER_MIRROR_SLUG = "deregister-mirrors"
+
+
+def render_mirror_deregistration(
+    catalogue: Catalogue,
+    built_ids: Iterable[WeaverDocumentId],
+    *,
+    catalogue_target,
+) -> PlannedStage | None:
+    """Stop recording as borrowed every object this build materialised locally.
+
+    One batch for the whole build, after the physical work it depends on.
+    """
+
+    materialised = sorted(
+        (identity for identity in built_ids if identity in catalogue.mirrors),
+        key=str,
+    )
+    if not materialised:
+        return None
+    return _stage(
+        index=1,
+        slug=DEREGISTER_MIRROR_SLUG,
+        description="stop recording materialised objects as borrowed",
+        kind=PUBLISH_CATALOGUE,
+        statements=(render_delete_rows(MIRROR, _mirror_keys(materialised)),),
+        catalogue_target=catalogue_target,
+    )
+
+
+def _mirror_keys(identities: Iterable[WeaverDocumentId]) -> tuple[dict, ...]:
+    """Each materialised object as the key row that identifies its Mirror row."""
+
+    return tuple(
+        {
+            SCOPE_ITEM_TYPE: identity.item.item_type,
+            SCOPE_ITEM_NAME: identity.item.item_name,
+            "schema_name": catalogue_schema(identity),
+            "object_name": identity.object_id.object,
+        }
+        for identity in identities
+    )
 
 
 def render_catalogue_after_build(

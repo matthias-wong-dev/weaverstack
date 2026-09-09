@@ -24,7 +24,7 @@ from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence
 
 from .catalogue.claims import catalogue_columns, stored_area
-from .catalogue.state import Catalogue
+from .catalogue.state import Catalogue, InstalledMirror
 from .catalogue.tables import (
     DEPENDENCY,
     FOLDER_DICTIONARY,
@@ -133,6 +133,9 @@ class InstalledNode:
     #: Folder dictionary row declared it. Carried here so nothing downstream
     #: goes back to a dictionary row to ask.
     is_static: bool = False
+    #: Whose data this object reads, where it is not its own. ``None`` for an
+    #: object holding its own rows.
+    mirror: InstalledMirror | None = None
 
     @property
     def node_id(self) -> str:
@@ -159,10 +162,26 @@ class InstalledNode:
         return self.artefact_type is not None
 
     @property
-    def is_loadable(self) -> bool:
-        """Whether this node has an installed load primitive to dispatch."""
+    def is_mirrored(self) -> bool:
+        """Whether this node's data is supplied by another physical target."""
 
-        return self.role == ROLE_DATA and self.is_installed
+        return self.mirror is not None
+
+    @property
+    def effective_object_type(self) -> str | None:
+        """What physically stands at this node's address, borrowed or not."""
+
+        return self.mirror.physical_type if self.mirror else self.object_type
+
+    @property
+    def is_loadable(self) -> bool:
+        """Whether this node has an installed load primitive to dispatch.
+
+        A mirrored node has one and is not loadable: the rows belong to the
+        target it borrows from, and writing them here would write there.
+        """
+
+        return self.role == ROLE_DATA and self.is_installed and not self.is_mirrored
 
     @property
     def load_name(self) -> str | None:
@@ -190,7 +209,12 @@ class InstalledNode:
 
     @property
     def physical(self) -> PhysicalObjectRef:
-        """Where this node's own object sits in its physical target."""
+        """Where this node's own object sits in its physical target.
+
+        The type is what stands there. For a borrowed object that is what
+        ``_.Mirror`` says, so a Warehouse table read through a source-backed
+        View is where the estate expects a view.
+        """
 
         schema, name = catalogue_columns(self.identity)
         return PhysicalObjectRef(
@@ -198,7 +222,7 @@ class InstalledNode:
             target_kind=self.target.kind,
             schema=schema,
             object=name,
-            object_type=self.object_type or "",
+            object_type=self.effective_object_type or "",
             # A schema identity carries no shape: it names a namespace, and
             # nothing is installed inside it that this estate owns.
             shape=getattr(self.identity, "shape", OBJECT_SHAPE),
@@ -653,6 +677,9 @@ def _registered(catalogue: Catalogue, installations):
             target=target,
             role=document.object_role,
             object_type=document.object_type,
+            # Registered and mirrored is an installed object reading another
+            # target's rows. Registered and not mirrored is the ordinary case.
+            mirror=catalogue.mirrors.get(identity),
         )
         where = node.physical
         key = (

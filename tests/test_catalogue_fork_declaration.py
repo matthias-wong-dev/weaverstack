@@ -11,7 +11,9 @@ from support.weaver_test import weaver_test
 
 from weaver.catalogue.fork import (
     FORKED_TABLES,
+    copied_tables,
     copy_statement,
+    create_statement,
     fork_statements,
     forked_table_names,
     source_relation,
@@ -24,6 +26,7 @@ from weaver.catalogue.tables import (
     INSTALLATION,
     LOAD_STATISTIC,
     LOG,
+    MIRROR,
     REGISTRY,
 )
 
@@ -122,3 +125,50 @@ def test_no_statement_touches_a_history_table():
 
     for table in HISTORY_TABLES:
         assert f"[{table.name}]" not in body
+
+
+# --- the one table no document declares ---------------------------------------
+
+
+@weaver_test()
+def test_a_fork_carries_nothing_borrowed_unless_the_source_has_some():
+    """``_.Mirror`` exists only where something mirrored into that catalogue.
+
+    A source only ever reached by ``weaver build`` has no such table, so a fork
+    of one neither creates nor reads it.
+    """
+
+    assert MIRROR not in copied_tables()
+    assert MIRROR not in FORKED_TABLES
+
+    body = "\n".join(fork_statements(source_catalogue="Weaver"))
+
+    assert "[Mirror]" not in body
+
+
+@weaver_test()
+def test_a_borrowed_source_gives_the_destination_the_table_and_its_rows():
+    """Which objects are borrowed is installed state, so a fork inherits it."""
+
+    statements = fork_statements(source_catalogue="Weaver", borrowed=True)
+
+    assert copied_tables(borrowed=True)[-1] is MIRROR
+    # Created before the rows land: no build makes this one.
+    created = next(i for i, each in enumerate(statements) if "create table" in each)
+    copied = next(
+        i for i, each in enumerate(statements) if "insert into [_].[Mirror]" in each
+    )
+    assert created < copied
+
+
+@weaver_test()
+def test_the_borrowed_table_is_created_only_where_there_is_none():
+    """A fork reruns, and a second one stands on the table the first made."""
+
+    statement = create_statement(MIRROR)
+
+    assert statement.startswith("if object_id(N'_.Mirror', N'U') is null")
+    for column in MIRROR.public_columns:
+        assert f"[{column}]" in statement
+    # Every column of it is written on every row.
+    assert "null," not in statement.replace("not null,", "")

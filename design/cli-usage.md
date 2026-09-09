@@ -967,9 +967,12 @@ Warehouse/DEV_Catalogue will be emptied and rebuilt from Warehouse/Catalogue.
 
 `--item` selects logical items to rebind, in the grammar build uses
 (`Warehouse/Model` or `Warehouse/Model=Warehouse/Model_Dev`); omitting it selects
-every configured target. Rebinding is not implemented yet, so a run that selects
-an item says so. `--no-item` forks the catalogue and stops, and that fork plus an
-ordinary build is how one item is moved today:
+every configured target. A selected Warehouse item is emptied and given a View
+over each of the source's relations, so its rows stay where they were. Only a
+Warehouse can be mirrored so far; a Lakehouse item is built into its target.
+
+`--no-item` forks the catalogue and stops. That fork plus an ordinary build is
+the other way to diverge one item, materialising it in full:
 
 ```bash
 weaver mirror --no-item --yes

@@ -144,6 +144,8 @@ FIXED_ITEMS = {
     "consumer": "PYTEST_LH_3",
     "warehouse_producer": "PYTEST_HOUSE",
     "warehouse": "PYTEST_WH_1",
+    # Where a mirrored Warehouse item is built. Emptied by every mirror.
+    "warehouse_mirror": "PYTEST_WH_MIRROR",
 }
 
 
@@ -274,6 +276,21 @@ def fabric_catalogue(fabric_workspace_item, fabric_client):
     """
 
     return _ensure_catalogue_warehouse(fabric_client, fabric_workspace_item, "weaver")
+
+
+@pytest.fixture(scope="session")
+def fabric_mirror_warehouse(fabric_workspace_item, fabric_client):
+    """The fixed Warehouse a mirrored item is built into. Emptied by each mirror."""
+
+    from weaver.fabric.resources import WAREHOUSE, create_warehouse, find_item
+
+    name = _fixed_name("warehouse_mirror")
+    try:
+        return find_item(
+            fabric_workspace_item, name, item_type=WAREHOUSE, client=fabric_client
+        )
+    except Exception:
+        return create_warehouse(fabric_workspace_item, name, client=fabric_client)
 
 
 @pytest.fixture(scope="session")

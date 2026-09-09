@@ -27,6 +27,7 @@ from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
+    BORROWED_TABLES,
     CATALOGUE_TABLES,
     CURRENT_STATE_TABLES,
     HISTORY_TABLES,
@@ -49,8 +50,12 @@ class _Connection:
         return {name.casefold(): name for name in table.public_columns}
 
     def rows(self, statement: str):
+        # Every table the ``_`` schema may hold, which is one more than the
+        # ``_weaver`` item declares.
         name = next(
-            table.name for table in CATALOGUE_TABLES if f"[{table.name}]" in statement
+            table.name
+            for table in CATALOGUE_TABLES + BORROWED_TABLES
+            if f"[{table.name}]" in statement
         )
         self.read.append(name)
         return self._rows.get(name, [])
@@ -65,10 +70,13 @@ def test_a_run_reads_the_bookmark_and_writes_the_rest():
 
     A run writes a load status and a test status and never asks what they were,
     so reading them would be round trips for an answer nothing uses. It does read
-    bookmarks, because an incremental load asks how far it got.
+    bookmarks, because an incremental load asks how far it got, and ``_.Mirror``,
+    because a borrowed object is one it must not write.
     """
 
-    assert set(READABLE_TABLES) == set(PROJECTED_TABLES) | {BOOKMARK}
+    assert set(READABLE_TABLES) == (
+        set(PROJECTED_TABLES) | set(BORROWED_TABLES) | {BOOKMARK}
+    )
     assert not set(READABLE_TABLES) & set(HISTORY_TABLES)
 
 
@@ -93,6 +101,23 @@ def test_the_runtime_tables_are_one_of_the_two_kinds_and_no_other():
     assert not set(HISTORY_TABLES) & set(CURRENT_STATE_TABLES)
     assert not set(RUNTIME_TABLES) & set(PROJECTED_TABLES)
     assert set(CATALOGUE_TABLES) == set(PROJECTED_TABLES) | set(RUNTIME_TABLES)
+
+
+@weaver_test()
+def test_the_borrowed_table_is_not_one_of_the_declared_catalogue_tables():
+    """Nothing declares ``_.Mirror``, so no build creates it.
+
+    A catalogue only ever reached by ``weaver build`` has no ``_.Mirror``. The
+    mirror operation installs one into its destination, and a read of an absent
+    one is nothing borrowed.
+    """
+
+    from weaver.catalogue.tables import is_protected
+
+    assert not set(BORROWED_TABLES) & set(CATALOGUE_TABLES)
+    # Undeclared, so an item-scoped prune would offer it up as an orphan of the
+    # ``_weaver`` item without this.
+    assert all(is_protected("_", table.name) for table in BORROWED_TABLES)
 
 
 @weaver_test()
@@ -483,6 +508,7 @@ def test_a_catalogue_is_live_state_and_says_so():
     assert {field.name for field in fields(catalogue)} == {
         "rows",
         "registered",
+        "mirrors",
         "materialised",
     }
 

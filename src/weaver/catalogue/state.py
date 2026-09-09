@@ -34,10 +34,12 @@ from .render import InstallationScope, InstallationScopes
 from .tables import (
     BOOKMARK,
     BOOKMARK_SENTINEL,
+    BORROWED_TABLES,
     BUILD_DATETIME,
     CURRENT_STATE_TABLES,
     INSTALLATION,
     LOAD_STATUS,
+    MIRROR,
     OBJECT_ROLES,
     OBJECT_TYPES,
     PROJECTED_TABLES,
@@ -86,6 +88,10 @@ class Catalogue:
 
     rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]]
     registered: Mapping[WeaverDocumentId, "RegisteredDocument"]
+    #: Installed objects whose data is borrowed, from ``_.Mirror``. Empty where
+    #: the catalogue has no such table, which is what a catalogue only ever
+    #: reached by ``weaver build`` looks like.
+    mirrors: Mapping[WeaverDocumentId, "InstalledMirror"]
     materialised: frozenset[str]
 
     def __init__(
@@ -105,6 +111,7 @@ class Catalogue:
             if registered is None
             else MappingProxyType(dict(registered))
         )
+        self.mirrors = _installed_mirrors(self.rows)
         # Defaulting to "every table this catalogue carries rows for" keeps a
         # hand-built catalogue honest without making every caller state it.
         carried = {table for tables in self.rows.values() for table in tables}
@@ -358,6 +365,26 @@ class Catalogue:
             )
             for row in self.table_rows(TEST_DICTIONARY)
         )
+
+    def is_mirrored(self, identity: WeaverDocumentId) -> bool:
+        """Whether this object's data is borrowed rather than held locally."""
+
+        return identity in self.mirrors
+
+    def effective_physical_type(self, identity: WeaverDocumentId) -> str | None:
+        """What should stand at this object's address, borrowed or not.
+
+        Registry says what the object logically is. While it is borrowed, what
+        stands there is what ``_.Mirror`` says: a Warehouse table reads through
+        a View over the source. Reconciliation and prune ask this rather than
+        Registry, so a mirror is not a mismatch.
+        """
+
+        borrowed = self.mirrors.get(identity)
+        if borrowed is not None:
+            return borrowed.physical_type
+        document = self.registered.get(identity)
+        return None if document is None else document.object_type
 
     def bound_to(self, *, kind: str, name: str) -> set:
         """The items this catalogue's rows bind to one physical target.
@@ -708,6 +735,25 @@ class RegisteredDocument:
         return self.object_role in VALIDATION_ROLES
 
 
+@dataclass(frozen=True)
+class InstalledMirror:
+    """One validated ``_.Mirror`` row: whose data an installed object reads."""
+
+    identity: WeaverDocumentId
+    source_workspace: str
+    source_target: str
+    source_schema: str
+    source_object: str
+    #: What physically stands at the address while the data is borrowed.
+    physical_type: str
+
+    @property
+    def source(self) -> str:
+        """The relation the data comes from, for a message or a statement."""
+
+        return f"{self.source_target}.{self.source_schema}.{self.source_object}"
+
+
 #: Catalogue tables introduced after the first release of the catalogue.
 #:
 #: An estate built by an older Weaver has every other table and not these: an
@@ -730,11 +776,12 @@ INTRODUCED_TABLES = frozenset(
 #:
 #: The history tables are absent. Nothing reads them to decide anything, and
 #: reading one would grow with the estate's age.
-READ_FOR_BUILD = PROJECTED_TABLES + CURRENT_STATE_TABLES
+READ_FOR_BUILD = PROJECTED_TABLES + BORROWED_TABLES + CURRENT_STATE_TABLES
 
 #: The tables whose presence a build has to know about, being the ones it reads:
-#: a claim may only be raised against a table that is there.
-CHECKED_TABLES = READ_FOR_BUILD
+#: a claim may only be raised against a table that is there. ``_.Mirror`` is not
+#: among them: nothing declares it, so absence is nothing borrowed.
+CHECKED_TABLES = PROJECTED_TABLES + CURRENT_STATE_TABLES
 
 
 def _encode_json_value(value):
@@ -813,6 +860,34 @@ def _registered_documents(
                 raise BuildError(f"Registry contains conflicting rows for {identity}")
             registered[identity] = document
     return MappingProxyType(registered)
+
+
+def _installed_mirrors(
+    rows: Mapping[WeaverItemId, Mapping[str, tuple[Mapping[str, object], ...]]],
+) -> Mapping[WeaverDocumentId, InstalledMirror]:
+    """Parse ``_.Mirror`` rows once, at the catalogue boundary."""
+
+    mirrors: dict[WeaverDocumentId, InstalledMirror] = {}
+    for item, tables in rows.items():
+        for row in tables.get(MIRROR.name, ()):
+            physical_type = str(row.get("physical_type") or "")
+            if physical_type not in OBJECT_TYPES:
+                expected = ", ".join(OBJECT_TYPES)
+                raise BuildError(
+                    f"Mirror row for {item}/{row.get('schema_name')}."
+                    f"{row.get('object_name')} has unsupported physical_type "
+                    f"{physical_type!r}; expected one of {expected}"
+                )
+            identity = _row_identity(item, row, physical_type)
+            mirrors[identity] = InstalledMirror(
+                identity=identity,
+                source_workspace=str(row.get("source_workspace_name") or ""),
+                source_target=str(row.get("source_target_name") or ""),
+                source_schema=str(row.get("source_schema_name") or ""),
+                source_object=str(row.get("source_object_name") or ""),
+                physical_type=physical_type,
+            )
+    return MappingProxyType(mirrors)
 
 
 def read_target_occupancy(catalogue: Any) -> dict[tuple[str, str], frozenset]:
