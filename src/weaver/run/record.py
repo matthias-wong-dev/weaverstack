@@ -191,12 +191,6 @@ def reset_load_status_row(identity, *, workflow_id: str, started) -> dict:
     }
 
 
-def _is_static_skip(node) -> bool:
-    """Whether this node's load skipped a Static object that already holds data."""
-
-    return bool(getattr(node.result, "is_static_skip", False))
-
-
 def test_status_row(node, identity, *, workflow_id: str) -> dict:
     """The ``_.TestStatus`` row one settled validation leaves behind."""
 
@@ -287,15 +281,15 @@ class RunRecord:
                 test_status_row(node, identity, workflow_id=self.workflow_id),
             )
             return
-        if not _is_static_skip(node):
-            # A Static skip settles nothing: the object is loaded once, and its
-            # existing state says when that was. Rewriting it would date this
-            # object's data to a run that read nothing, and put every consumer
-            # of a reference table behind on every load.
-            self.catalogue.update(
-                LOAD_STATUS,
-                load_status_row(node, identity, workflow_id=self.workflow_id),
-            )
+        # Every load attempt moves _.LoadStatus forward, a Static skip
+        # included: it records Result=Skipped with this workflow's timestamps,
+        # the same row the Warehouse ``_.Load`` procedure writes. What a skip
+        # must never do is advance the bookmark, which is the data cursor, or
+        # read as data movement in health. See ``design/health.md``.
+        self.catalogue.update(
+            LOAD_STATUS,
+            load_status_row(node, identity, workflow_id=self.workflow_id),
+        )
         if node.executed:
             # A statistic describes a load that ran. A blocked node did nothing,
             # and a row of zeroes for it would read as a load that moved nothing.

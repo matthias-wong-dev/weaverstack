@@ -29,6 +29,7 @@ from .result import (
     PRIMITIVE_FAILURE,
     PRIMITIVE_REJECTS,
     RESULT_CONTRACT_INVALID,
+    SKIPPED,
     SUCCEEDED,
     SUCCEEDED_WITH_REJECTS,
     RunFailure,
@@ -157,9 +158,13 @@ def status_of(result) -> str:
     A primitive that refused rows and was asked to tolerate them wrote the valid
     ones and returned the refusal. That is not a failed step; a step that
     failed without refusing anything is. A result with no notion of rejected
-    rows, a validation's judgement, failed.
+    rows, a validation's judgement, failed. A Static skip reports a successful
+    load of nothing and is recorded as Skipped, the vocabulary's word for work
+    not done, so ``_.LoadStatus`` carries the distinction.
     """
 
+    if getattr(result, "is_static_skip", False):
+        return SKIPPED
     if result.succeeded:
         return SUCCEEDED
     return SUCCEEDED_WITH_REJECTS if getattr(result, "rows_rejected", 0) else FAILED

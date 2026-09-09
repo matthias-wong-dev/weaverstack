@@ -47,6 +47,7 @@ from .catalogue.tables import (
     PENDING,
     REJECTED,
     ROLE_DATA,
+    SKIPPED,
     SUCCEEDED,
     TABLE_DICTIONARY,
     TEST_STATUS,
@@ -89,9 +90,10 @@ AMBIGUOUS_INSTALLATION = "ambiguous_installation"
 DEFAULT_AGE_HOURS = 24
 
 #: Load outcomes that establish nothing about the data. A blocked node did no
-#: work and an errored one cannot say what it did, so neither is a reason to
-#: call a downstream object behind.
-_NO_DATA_ESTABLISHED = (FAILED, ERROR, BLOCKED, PENDING)
+#: work, an errored one cannot say what it did, and a Static skip moved
+#: nothing: none is a reason to call a downstream object behind, and a skip's
+#: fresh ``_.LoadStatus`` timestamp is not data movement.
+_NO_DATA_ESTABLISHED = (FAILED, ERROR, BLOCKED, PENDING, SKIPPED)
 
 #: The load outcomes that make a subject Red.
 _LOAD_RED = (FAILED, ERROR, BLOCKED)
@@ -628,13 +630,27 @@ class _LoadHealth:
 
         Loadables and Views. A shortcut destination and a table Weaver does not
         load hold no load state, so the walk passes through them.
+
+        An ancestor whose current state is Skipped is passed over too. A skip
+        says "no change": it neither establishes the object nor unestablishes
+        it, and its fresh timestamp is not data movement for anything
+        downstream.
         """
 
         return tuple(
             ancestor
             for ancestor in self.dag.ancestors(node.identity)
             if is_lifecycle_node(ancestor)
+            and self._skipped(ancestor.identity) is not True
         )
+
+    def _skipped(self, identity) -> bool | None:
+        """Whether this identity's current load state is a Static skip."""
+
+        status = self.statuses.get(identity)
+        if status is None:
+            return None
+        return status.result == SKIPPED
 
     def established_at(self, identity) -> datetime | None:
         """When this node last settled, or ``None`` if it has not.

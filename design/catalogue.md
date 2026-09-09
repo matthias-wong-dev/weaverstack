@@ -587,7 +587,8 @@ it — and reports none unless the load was clean.
 succeeded, zero rejects   advance to the instant the load reported
 succeeded with rejects    unchanged: it has not read its window
 failed, error, blocked    unchanged
-Static skip               unchanged: a clean success reporting no instant
+Static skip               unchanged: the skip advances no bookmark, and its
+                          Skipped status in _.LoadStatus says why
 endpoint refresh          not an object
 test, assumption          never
 ```
