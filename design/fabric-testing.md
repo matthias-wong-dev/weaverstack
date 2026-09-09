@@ -136,7 +136,9 @@ python3.11 -m venv .venv
 The suite installs `desktop_credential()`, the chain a `weaver` command uses, so
 the browser sign-in that command performs is what later runs reuse. The Azure
 CLI is not required: it answers where `az login` has produced an identity, and
-reports itself unavailable where it has not.
+reports itself unavailable where it has not. A service principal named by
+`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET` and `AZURE_TENANT_ID` answers ahead of
+both, which is how an unattended machine runs this suite.
 
 An `az login` that belongs to another identity is worth knowing about, because
 the chain settles on the first credential that answers. A service principal with

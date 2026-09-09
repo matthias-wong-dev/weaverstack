@@ -14,8 +14,10 @@ sets it to ``AzureCliCredential``. The Fabric test infrastructure invokes that.
 Core never sets it as a side effect of asking for a token.
 
 A pinned chain names one credential type and cannot express a fallback, so the
-desktop CLI installs an object instead: :func:`desktop_credential` answers the
-Azure CLI where it works and Microsoft browser sign-in where it does not, and
+desktop CLI installs an object instead: :func:`desktop_credential` answers a
+service principal where the standard ``AZURE_CLIENT_ID``,
+``AZURE_CLIENT_SECRET`` and ``AZURE_TENANT_ID`` variables name one, the Azure
+CLI where it works and Microsoft browser sign-in where it does not, and
 :func:`use_credential` makes it this process's default. That reaches every
 client, including the ones an operation constructs for itself.
 """
@@ -121,7 +123,15 @@ _desktop_chain = None
 
 
 def desktop_credential():
-    """The Azure CLI where it can issue a token, and browser sign-in where it cannot.
+    """The principal where it is configured, the Azure CLI where it can issue a
+    token, and browser sign-in where it cannot.
+
+    An unattended process signs in as a service principal through the standard
+    ``AZURE_CLIENT_ID``, ``AZURE_CLIENT_SECRET`` and ``AZURE_TENANT_ID``
+    variables, what :class:`azure.identity.EnvironmentCredential` reads. Naming
+    all three puts the principal at the front of this chain. Naming none of
+    them leaves the chain unchanged. A half configured principal is reported as
+    unavailable, and the chain moves on to the interactive half.
 
     A desktop user who has run ``az login`` keeps that identity. One who has not
     is sent to Microsoft sign-in in a browser once. See :class:`BrowserSignIn`
@@ -144,12 +154,64 @@ def desktop_credential():
     from azure.identity import AzureCliCredential, ChainedTokenCredential
 
     diagnostic = {}
-    _desktop_chain = ChainedTokenCredential(
-        DiagnosticCredential(AzureCliCredential(), "Azure CLI", diagnostic),
-        DiagnosticCredential(_browser_credential(), "Browser sign-in", diagnostic),
-    )
+    credentials = [DiagnosticCredential(_principal_credential(), "Service principal", diagnostic)]
+    credentials.append(DiagnosticCredential(AzureCliCredential(), "Azure CLI", diagnostic))
+    credentials.append(DiagnosticCredential(_browser_credential(), "Browser sign-in", diagnostic))
+    _desktop_chain = ChainedTokenCredential(*credentials)
     _desktop_chain.diagnostic = diagnostic
     return _desktop_chain
+
+
+def _principal_configured() -> bool:
+    """Whether the standard variables name a complete service principal."""
+
+    return bool(
+        os.environ.get("AZURE_CLIENT_ID")
+        and os.environ.get("AZURE_CLIENT_SECRET")
+        and os.environ.get("AZURE_TENANT_ID")
+    )
+
+
+def _principal_credential():
+    """The service principal where the standard variables name one.
+
+    Built lazily inside :class:`_PrincipalCredential`, because
+    ``ChainedTokenCredential`` asks for every member at construction and an
+    unconfigured principal is a token-time "unavailable", not a failure to
+    build the chain.
+
+    ``EnvironmentCredential`` serves a secret-configured principal and a
+    certificate-configured one (``AZURE_CLIENT_CERTIFICATE_PATH``) from the
+    same variables. The configuration is read where Azure's library reads it.
+    """
+
+    return _PrincipalCredential()
+
+
+class _PrincipalCredential:
+    """The configured service principal, or a reported absence."""
+
+    def __init__(self) -> None:
+        self._credential = None
+
+    def get_token(self, *scopes, **kwargs):
+        from azure.identity import CredentialUnavailableError
+
+        if not _principal_configured():
+            raise CredentialUnavailableError(
+                "no service principal is configured "
+                "(set AZURE_CLIENT_ID, AZURE_CLIENT_SECRET and AZURE_TENANT_ID)"
+            )
+        if self._credential is None:
+            from azure.identity import EnvironmentCredential
+
+            self._credential = EnvironmentCredential()
+        return self._credential.get_token(*scopes, **kwargs)
+
+    def close(self):
+        close = getattr(self._credential, "close", None)
+        if close is not None:
+            close()
 
 
 class DiagnosticCredential:
