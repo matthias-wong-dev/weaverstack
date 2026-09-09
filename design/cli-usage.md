@@ -958,10 +958,15 @@ destination.
 
 `--item` selects logical items to rebind, in the grammar build uses
 (`Warehouse/Model` or `Warehouse/Model=Warehouse/Model_Dev`); omitting it selects
-every configured target. A selected Warehouse item is emptied and given a View
-over each of the source's relations, so its rows stay where they were, plus a
-copy of every procedure and function the source holds. Only a Warehouse can be
-mirrored so far; a Lakehouse item is built into its target.
+every configured target. A selected item is emptied and given borrowed data:
+Views over the source's relations for a Warehouse, OneLake shortcuts and Spark
+wrapper views for a Lakehouse. Its rows stay where they were. Code is local, so
+a Warehouse gets the source's procedures and functions and a Lakehouse gets a
+copy of its `Files/_/Load` tree.
+
+A mirrored Lakehouse reaches Spark, because a table shortcut is not finished
+until Spark can read it. A run that selects Warehouse items alone, or `--no-item`,
+starts no Spark session.
 
 A mirror empties one Warehouse for the destination catalogue and one for each
 selected item, so a non-interactive process refuses without `--yes`, as wipe

@@ -191,18 +191,6 @@ class ShortcutExecutor:
     def _await_addressable(
         self, context: InstallationContext, frozen: list
     ) -> float | None:
-        """Wait until every table shortcut's relation and Delta path can be read.
-
-        Reads rather than catalogue or storage lookups, because Fabric can report
-        the shortcut's metadata before either consumer surface is ready. All of
-        them are waited on together, so several shortcuts cost one discovery
-        window.
-        """
-
-        tables = [each for each in frozen if each.get("type", "table") == "table"]
-        if not tables:
-            return None
-
         if context.spark_sql is None:
             # Loud rather than silent: every context the Installer builds has
             # this, so its absence means one was assembled by hand, and not
@@ -212,7 +200,6 @@ class ShortcutExecutor:
                 "ask Spark whether it is readable yet, so the discovery wait "
                 "cannot run"
             )
-
         destination = context.target.destination
         if destination is None:
             raise InstallError(
@@ -225,47 +212,71 @@ class ShortcutExecutor:
                 f"target {context.target.bound.id!r} resolved to no Spark "
                 "location, so a shortcut's Delta path cannot be checked"
             )
-        pending = {
-            each["shortcut"]: {
-                "relation": str(
-                    destination.qualify(each["path"].split("/", 1)[1], each["name"])
-                ),
-                "delta path": location.table_path(
-                    each["path"].split("/", 1)[1], each["name"]
-                ),
-            }
-            for each in tables
-        }
+        return await_addressable(
+            frozen,
+            destination=destination,
+            location=location,
+            spark_sql=context.spark_sql,
+        )
 
-        started = time.monotonic()
-        deadline = started + ADDRESSABLE_TIMEOUT
-        failure: Exception | None = None
-        while pending:
-            for shortcut, surfaces in list(pending.items()):
-                for surface, address in list(surfaces.items()):
-                    statement = (
-                        f"SELECT * FROM {address} LIMIT 0"
-                        if surface == "relation"
-                        else f"SELECT * FROM delta.`{address}` LIMIT 0"
-                    )
-                    try:
-                        # The probes cross; the waiting does not.
-                        context.spark_sql(statement, exact_case=True)
-                        del surfaces[surface]
-                    except Exception as exc:  # not discovered yet, or never will be
-                        failure = exc
-                if not surfaces:
-                    del pending[shortcut]
-            if not pending:
-                break
-            if time.monotonic() >= deadline:
-                raise InstallError(
-                    f"shortcut(s) {', '.join(sorted(pending))} were created but "
-                    f"did not become readable within {int(ADDRESSABLE_TIMEOUT)}s: "
-                    f"{failure}"
-                ) from failure
-            time.sleep(ADDRESSABLE_POLL_INTERVAL)
-        return round(time.monotonic() - started, 1)
+
+def await_addressable(frozen, *, destination, location, spark_sql) -> float | None:
+    """Wait until every table shortcut's relation and Delta path can be read.
+
+    Reads rather than catalogue or storage lookups, because Fabric can report
+    the shortcut's metadata before either consumer surface is ready. All of them
+    are waited on together, so several shortcuts cost one discovery window.
+
+    Shared with :func:`weaver.operations.mirror`: a mirrored Lakehouse stands on
+    the same shortcuts a build makes, and one weaker readiness rule for it would
+    be a second contract.
+    """
+
+    tables = [each for each in frozen if each.get("type", "table") == "table"]
+    if not tables:
+        return None
+
+    pending = {
+        each["shortcut"]: {
+            "relation": str(
+                destination.qualify(each["path"].split("/", 1)[1], each["name"])
+            ),
+            "delta path": location.table_path(
+                each["path"].split("/", 1)[1], each["name"]
+            ),
+        }
+        for each in tables
+    }
+
+    started = time.monotonic()
+    deadline = started + ADDRESSABLE_TIMEOUT
+    failure: Exception | None = None
+    while pending:
+        for shortcut, surfaces in list(pending.items()):
+            for surface, address in list(surfaces.items()):
+                statement = (
+                    f"SELECT * FROM {address} LIMIT 0"
+                    if surface == "relation"
+                    else f"SELECT * FROM delta.`{address}` LIMIT 0"
+                )
+                try:
+                    # The probes cross; the waiting does not.
+                    spark_sql(statement, exact_case=True)
+                    del surfaces[surface]
+                except Exception as exc:  # not discovered yet, or never will be
+                    failure = exc
+            if not surfaces:
+                del pending[shortcut]
+        if not pending:
+            break
+        if time.monotonic() >= deadline:
+            raise InstallError(
+                f"shortcut(s) {', '.join(sorted(pending))} were created but "
+                f"did not become readable within {int(ADDRESSABLE_TIMEOUT)}s: "
+                f"{failure}"
+            ) from failure
+        time.sleep(ADDRESSABLE_POLL_INTERVAL)
+    return round(time.monotonic() - started, 1)
 
 
 @dataclass(frozen=True)

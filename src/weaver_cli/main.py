@@ -172,16 +172,33 @@ def _requires_wipe(args) -> frozenset[str]:
 
 
 def _requires_mirror(args) -> frozenset[str]:
-    """What forking a catalogue will want.
+    """What forking a catalogue and rebinding its items will want.
 
-    T-SQL and item resolution. A fork empties a Warehouse, rebuilds the ``_``
-    schema and copies rows between two Warehouses, and none of that reaches a
-    Lakehouse, so no Spark session is asked for.
+    T-SQL always, because the catalogue is a Warehouse. A mirrored Lakehouse
+    adds OneLake and Livy: its shortcuts are not finished until Spark can read
+    them, and its wrapper views are Spark SQL.
+
+    Naming no item selects every configured target, and which kinds those are
+    is configuration's answer, read after this. So an unscoped run declares the
+    superset, as ``build`` does.
     """
 
-    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
+    from weaver.sessions.requirements import (
+        AUTH,
+        LIVY,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
+    )
 
-    return requirements(AUTH, RESOLVER, TDS)
+    if getattr(args, "no_item", False):
+        return requirements(AUTH, RESOLVER, TDS)
+    items = getattr(args, "items", None)
+    if not items:
+        return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+    logical = [str(value).split("=", 1)[0] for value in items]
+    return requirements(AUTH, RESOLVER, TDS, *_kind_requirements(logical))
 
 
 def _requires_health(args) -> frozenset[str]:

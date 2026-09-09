@@ -155,12 +155,8 @@ def test_naming_no_item_is_a_choice_rather_than_an_omission():
 
 
 @weaver_test()
-def test_mirror_starts_no_spark_session():
-    """A fork empties a Warehouse, rebuilds ``_`` and copies rows between two.
-
-    None of that reaches a Lakehouse, so asking for Spark would be paying for a
-    session nothing submits to.
-    """
+def test_a_catalogue_fork_alone_starts_no_spark_session():
+    """It empties a Warehouse, rebuilds ``_`` and copies rows between two."""
 
     from weaver.sessions.requirements import AUTH, LIVY, ONELAKE, RESOLVER, TDS
 
@@ -170,6 +166,23 @@ def test_mirror_starts_no_spark_session():
     assert LIVY not in required
     assert ONELAKE not in required
     assert {AUTH, RESOLVER, TDS} <= required
+
+
+@weaver_test()
+def test_a_mirrored_lakehouse_asks_for_spark_and_a_warehouse_does_not():
+    """A Lakehouse shortcut is not finished until Spark can read it."""
+
+    from weaver.sessions.requirements import LIVY, ONELAKE, TDS
+
+    lake = build_parser().parse_args(
+        ["mirror", "--item", "Lakehouse/Input", "--workspace", "A"]
+    )
+    house = build_parser().parse_args(
+        ["mirror", "--item", "Warehouse/Model", "--workspace", "A"]
+    )
+
+    assert {LIVY, ONELAKE, TDS} <= lake.requires(lake)
+    assert LIVY not in house.requires(house)
 
 
 # --- the order, which is what keeps a typo from emptying a Warehouse ---------

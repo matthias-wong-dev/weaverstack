@@ -61,6 +61,8 @@ LAKEHOUSE_ROLES = {
     "producer": "PYTEST_LH_2",
     "consumer": "PYTEST_LH_3",
     "warehouse_producer": "PYTEST_HOUSE",
+    # Where a mirrored Lakehouse item is built. Emptied by every mirror.
+    "lakehouse_mirror": "PYTEST_LH_MIRROR",
 }
 
 WAREHOUSE_ROLES = {

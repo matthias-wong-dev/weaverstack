@@ -885,10 +885,24 @@ weaver build  --item Warehouse/Model=Warehouse/Model_Dev   # rebuild it there
 weaver mirror --item Warehouse/Model=Warehouse/Model_Dev   # borrow its rows
 ```
 
-A build materialises everything locally. A mirror empties the destination, puts
-a View over each of the source's data relations in it, copies every procedure
-and function the source holds, gives it the standard `_` surface over this
-catalogue, and binds the item. The data is borrowed; the code is local.
+A build materialises everything locally. A mirror empties the destination and
+borrows the source's data, in whatever form its kind borrows:
+
+| source object | in a mirrored Warehouse | in a mirrored Lakehouse |
+|---|---|---|
+| Table | a View over the source's three-part name | a OneLake shortcut |
+| Folder | | a OneLake shortcut |
+| View | a View over the source's View | a Spark view over the source's View |
+
+Code is local either way. A Warehouse gets every procedure and function the
+source holds; a Lakehouse gets a byte copy of the source's `Files/_/Load` tree,
+which is what a run imports where Spark is. Both get the standard `_` surface
+over this catalogue, and both end with the item bound to its new target.
+
+A Lakehouse mirror stands on the same shortcut-readiness rule an ordinary build
+uses: a table shortcut is not finished until its Spark relation and its Delta
+path can both be read. A mirrored Lakehouse therefore starts a Spark session
+even where the item declares no View.
 
 Every schema comes across, `_` included. The copied Registry certifies
 `_.[Load Wh.Product]` and `_.[Test Rpt.Reconciles]`, and `weaver test`

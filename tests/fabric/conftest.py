@@ -279,6 +279,13 @@ def fabric_catalogue(fabric_workspace_item, fabric_client):
 
 
 @pytest.fixture(scope="session")
+def fabric_mirror_lakehouse(fabric_workspace_item, fabric_client):
+    """The fixed Lakehouse a mirrored item is built into. Emptied by each mirror."""
+
+    return _ensure_lakehouse(fabric_client, fabric_workspace_item, "lakehouse_mirror")
+
+
+@pytest.fixture(scope="session")
 def fabric_mirror_warehouse(fabric_workspace_item, fabric_client):
     """The fixed Warehouse a mirrored item is built into. Emptied by each mirror."""
 

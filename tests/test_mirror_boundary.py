@@ -251,13 +251,26 @@ def test_naming_items_and_no_item_together_is_refused(monkeypatch):
 
 
 @weaver_test()
-def test_only_a_warehouse_item_can_be_mirrored_yet(monkeypatch):
-    """A Lakehouse mirror is shortcuts and wrapper views, which is not here."""
+def test_either_item_kind_resolves_and_keeps_its_own_kind(monkeypatch):
+    """A physical target's kind is its item's, so both halves are typed."""
 
     plan = _plan(monkeypatch, _with_targets(), ["Lakehouse/Input"])
+    (each,) = resolve_mirror(plan, _installed({"Lakehouse/Input": "Input"})).items
 
-    with pytest.raises(CommandError, match="only a Warehouse item"):
-        resolve_mirror(plan, _installed({"Lakehouse/Input": "Input"}))
+    assert each.kind == "Lakehouse"
+    assert each.source == "Lakehouse/Input"
+    assert each.target == "Lakehouse/Input_Dev"
+
+
+@weaver_test()
+def test_a_lakehouse_and_a_warehouse_of_one_name_are_two_items(monkeypatch):
+    """Level-three identity is type and name, so these do not collide."""
+
+    plan = _plan(monkeypatch, _with_targets(), ["Lakehouse/Input=Lakehouse/Weaver"])
+
+    resolved = resolve_mirror(plan, _installed({"Lakehouse/Input": "Input"}))
+
+    assert resolved.wiped == ("Warehouse/Weaver_Dev", "Lakehouse/Weaver")
 
 
 @weaver_test()

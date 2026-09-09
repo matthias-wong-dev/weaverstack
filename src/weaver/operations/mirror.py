@@ -43,7 +43,7 @@ class MirrorPlan:
 
 @dataclass(frozen=True)
 class MirrorItem:
-    """One selected item, with the Warehouse it borrows from and the one it fills."""
+    """One selected item, with the target it borrows from and the one it fills."""
 
     item: object
     source_target: str
@@ -52,14 +52,21 @@ class MirrorItem:
     programmables: tuple = ()
 
     @property
+    def kind(self) -> str:
+        """The physical kind, which is the item's: a Lakehouse item deploys to one."""
+
+        return self.item.item_type
+
+    @property
     def target(self) -> str:
-        return f"{CATALOGUE_KIND}/{self.destination}"
+        return f"{self.kind}/{self.destination}"
+
+    @property
+    def source(self) -> str:
+        return f"{self.kind}/{self.source_target}"
 
     def describe(self) -> str:
-        return (
-            f"{CATALOGUE_KIND}/{self.source_target} will be mirrored into "
-            f"{self.target}."
-        )
+        return f"{self.source} will be mirrored into {self.target}."
 
 
 @dataclass(frozen=True)
@@ -85,7 +92,7 @@ class ResolvedMirror:
 
     @property
     def wiped(self) -> tuple[str, ...]:
-        """Every Warehouse this run empties, in the order it empties them."""
+        """Every physical target this run empties, in the order it empties them."""
 
         return (self.plan.target, *(item.target for item in self.items))
 
@@ -435,7 +442,6 @@ def _resolved_items(plan: MirrorPlan, catalogue) -> tuple[MirrorItem, ...]:
     from ..build_bundle.targets import parse_build_item
     from ..catalogue.borrow import borrowable, executable
     from ..catalogue.tables import INSTALLATION
-    from ..declaration.model import WAREHOUSE
 
     installed = {
         (str(row.get("item_type")), str(row.get("item_name"))): str(
@@ -447,12 +453,6 @@ def _resolved_items(plan: MirrorPlan, catalogue) -> tuple[MirrorItem, ...]:
     for written in plan.items:
         binding = parse_build_item(written, workspace=plan.workspace)
         item = binding.item
-        if item.item_type != WAREHOUSE:
-            raise CommandError(
-                f"mirror does not yet mirror {item}: only a Warehouse item can "
-                "be mirrored. Build a Lakehouse item into its target with "
-                "'weaver build --item ITEM=TYPE/NAME'."
-            )
         registered = {
             identity: document
             for identity, document in catalogue.registered.items()
@@ -463,7 +463,7 @@ def _resolved_items(plan: MirrorPlan, catalogue) -> tuple[MirrorItem, ...]:
                 item=item,
                 source_target=_installed_target(installed, item),
                 destination=binding.target.item.name,
-                relations=borrowable(registered),
+                relations=borrowable(registered, kind=item.item_type),
                 programmables=executable(registered),
             )
         )
@@ -492,17 +492,20 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
     a destination, the second wipe taking the first mirror.
     """
 
-    emptied = {resolved.destination.name.casefold(): resolved.plan.target}
+    # Keyed on kind and name, which is a physical item's identity: a Lakehouse
+    # and a Warehouse may share a display name.
+    emptied = {
+        (CATALOGUE_KIND, resolved.destination.name.casefold()): resolved.plan.target
+    }
     for each in resolved.items:
-        emptied.setdefault(each.destination.casefold(), each.target)
+        emptied.setdefault((each.kind, each.destination.casefold()), each.target)
 
-    read = {resolved.source.name.casefold(): str(resolved.source)}
+    read = {(CATALOGUE_KIND, resolved.source.name.casefold()): str(resolved.source)}
     for each in resolved.items:
-        read.setdefault(
-            each.source_target.casefold(), f"{CATALOGUE_KIND}/{each.source_target}"
-        )
+        read.setdefault((each.kind, each.source_target.casefold()), each.source)
 
     collision = sorted(set(read) & set(emptied))
+
     if collision:
         raise CommandError(
             "mirror reads and empties "
@@ -650,6 +653,16 @@ def _wipe_target(workspace: Workspace, each: MirrorItem, *, session) -> str:
 
 
 def _mirror_item(workspace: Workspace, each: MirrorItem, *, session) -> dict:
+    """Point one item at another target's data, however its kind borrows."""
+
+    from ..declaration.model import LAKEHOUSE
+
+    if each.kind == LAKEHOUSE:
+        return _mirror_lakehouse_item(workspace, each, session=session)
+    return _mirror_warehouse_item(workspace, each, session=session)
+
+
+def _mirror_warehouse_item(workspace: Workspace, each: MirrorItem, *, session) -> dict:
     """Point one Warehouse item at another target's rows."""
 
     from ..catalogue.borrow import borrow_statements
@@ -677,6 +690,150 @@ def _mirror_item(workspace: Workspace, each: MirrorItem, *, session) -> dict:
         "relations": len(each.relations),
         "programmables": code,
     }
+
+
+def _mirror_lakehouse_item(workspace: Workspace, each: MirrorItem, *, session) -> dict:
+    """Point one Lakehouse item at another target's tables, folders and views.
+
+    Storage is borrowed through OneLake shortcuts, and a source view through a
+    view of Weaver's own over the source's four-part name. The deployed load
+    tree is copied, because a run imports it where Spark is.
+    """
+
+    from ..build_bundle.executors.shortcut import await_addressable
+    from ..catalogue.borrow import wrapper_view_statement
+    from ..targets import ItemRef
+
+    resolver = session.resolver(workspace)
+    destination = resolver.spark_destination(ItemRef(each.destination))
+    source = resolver.spark_destination(ItemRef(each.source_target))
+
+    shortcuts = _pointer_requests(workspace, each, session=session)
+    if shortcuts:
+        with session.step(f"Borrow {len(shortcuts)} object(s) from {each.source}"):
+            resolver.create_onelake_shortcuts(ItemRef(each.destination), shortcuts)
+        with session.step("Wait for the shortcuts to become readable"):
+            # The build's own readiness rule: a table shortcut is not finished
+            # until its relation and its Delta path can both be read.
+            await_addressable(
+                shortcuts,
+                destination=destination,
+                location=resolver.lakehouse_spark_location(ItemRef(each.destination)),
+                spark_sql=_spark_sql(workspace, session=session),
+            )
+
+    wrapped = tuple(
+        wrapper_view_statement(borrowed, destination=destination, source=source)
+        for borrowed in each.relations
+        if not borrowed.is_pointer
+    )
+    if wrapped:
+        with session.step(f"Wrap {len(wrapped)} source view(s)"):
+            # Every schema, because one holding only views has no shortcut to
+            # have created it.
+            statements = [
+                destination.create_schema_statement(schema)
+                for schema in sorted({borrowed.schema for borrowed in each.relations})
+            ]
+            session.execute_spark_sql_batch(
+                statements + list(wrapped), exact_case=True, workspace=workspace
+            )
+
+    files = _copy_load_tree(workspace, each, session=session)
+    _record_borrowed(workspace, each, session=session)
+    _switch_installation(workspace, each, session=session)
+    return {
+        "source": each.source_target,
+        "target": each.destination,
+        "relations": len(each.relations),
+        "shortcuts": len(shortcuts),
+        "views": len(wrapped),
+        "files": files,
+    }
+
+
+def _spark_sql(workspace: Workspace, *, session):
+    """One Spark SQL statement, wherever this is running."""
+
+    def run(statement: str, *, exact_case: bool = False):
+        return session.execute_spark_sql(
+            statement, exact_case=exact_case, workspace=workspace
+        )
+
+    return run
+
+
+def _pointer_requests(workspace: Workspace, each: MirrorItem, *, session) -> tuple:
+    """Each borrowed table and folder, addressed in the source's own spelling."""
+
+    from ..build_bundle.shortcut_sources import stored_path
+    from ..catalogue.borrow import pointer_shortcuts
+    from ..fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
+
+    resolver = session.resolver(workspace)
+    item = resolver.external_item(each.source_target, item_type=LAKEHOUSE_ITEM)
+    root = resolver.external_root(item)
+    store = session.store(workspace)
+
+    def path_of(borrowed) -> str:
+        return stored_path(
+            root,
+            (borrowed.area, borrowed.schema, borrowed.name),
+            store=store,
+            what=f"mirror reads {each.source} for {borrowed.identity}",
+        )
+
+    return pointer_shortcuts(each.relations, source=item, path_of=path_of)
+
+
+#: The one part of ``Files/_`` a mirror copies. Everything else under it is
+#: state the destination's own runs write.
+LOAD_TREE = ("Files", "_", "Load")
+
+
+def _copy_load_tree(workspace: Workspace, each: MirrorItem, *, session) -> int:
+    """Copy the source's deployed load tree, and remove what it no longer holds.
+
+    The data is borrowed and the code is local: a run imports these modules
+    where Spark is, from the item it is running against.
+    """
+
+    from ..fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
+
+    resolver = session.resolver(workspace)
+    store = session.store(workspace)
+    source = resolver.external_root(
+        resolver.external_item(each.source_target, item_type=LAKEHOUSE_ITEM)
+    ).join(*LOAD_TREE)
+    destination = resolver.external_root(
+        resolver.external_item(each.destination, item_type=LAKEHOUSE_ITEM)
+    ).join(*LOAD_TREE)
+
+    if not store.exists(source):
+        return 0
+    held = {
+        entry.location.value[len(source.value) :].lstrip("/"): entry
+        for entry in store.list(source, recursive=True)
+        if not entry.is_directory
+    }
+    with session.step(f"Copy {len(held)} deployed file(s)"):
+        for relative, entry in sorted(held.items()):
+            store.write(
+                destination.join(*relative.split("/")), store.read(entry.location)
+            )
+        stale = [
+            entry.location
+            for entry in (
+                store.list(destination, recursive=True)
+                if store.exists(destination)
+                else ()
+            )
+            if not entry.is_directory
+            and entry.location.value[len(destination.value) :].lstrip("/") not in held
+        ]
+        for location in stale:
+            store.delete(location)
+    return len(held)
 
 
 def _copy_programmables(workspace: Workspace, each: MirrorItem, *, sql, session) -> int:

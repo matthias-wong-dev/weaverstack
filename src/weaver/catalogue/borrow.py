@@ -8,35 +8,86 @@ See ``design/catalogue.md``.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
 from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
-from ..declaration.model import WeaverDocumentId
-from .claims import catalogue_columns
+from ..declaration.model import LAKEHOUSE, WeaverDocumentId
+from .claims import catalogue_columns, stored_area
 from .fork import create_statement, local_relation
 from .tables import CATALOGUE_SCHEMA, MIRROR, ROLE_DATA, STANDARD_SURFACE_TABLES
 from .tsql import identifier, literal
 
-#: What stands at a borrowed relation's address, whatever the source is: a
-#: table and a view both read the same way through a View.
+#: What stands at a borrowed Warehouse relation's address, whatever the source
+#: is: a table and a view both read the same way through a View.
 BORROWED_TYPE = "view"
 
 PROCEDURE_TYPE = "stored_procedure"
 
+#: What a Lakehouse borrows through a OneLake shortcut. A View is not among
+#: them: a shortcut addresses storage, and a view is a definition.
+POINTER_TYPES = ("table", "folder")
 
-def borrowable(registered: Mapping[WeaverDocumentId, object]) -> tuple:
-    """The data relations of one item, which are what a mirror points at."""
 
+@dataclass(frozen=True)
+class Borrowed:
+    """One relation a mirror points at, and what stands at its address."""
+
+    identity: WeaverDocumentId
+    #: What Registry certifies the object as.
+    declared: str
+    #: What physically stands at the address once the mirror is built.
+    physical: str
+
+    @property
+    def is_pointer(self) -> bool:
+        """Whether a shortcut stands there rather than a view Weaver wrote."""
+
+        return self.physical in POINTER_TYPES
+
+    @property
+    def area(self) -> str | None:
+        """The Lakehouse area this sits in, or ``None`` for a Warehouse."""
+
+        return stored_area(catalogue_columns(self.identity)[0])[0]
+
+    @property
+    def schema(self) -> str:
+        """The relational schema, with any Lakehouse area taken off."""
+
+        return stored_area(catalogue_columns(self.identity)[0])[1]
+
+    @property
+    def name(self) -> str:
+        return self.identity.object_id.object
+
+
+def borrowable(
+    registered: Mapping[WeaverDocumentId, object], *, kind: str
+) -> tuple[Borrowed, ...]:
+    """The data relations of one item, and what a mirror puts at each address.
+
+    A Warehouse reads everything through a View over the source's three-part
+    name. A Lakehouse points a shortcut at a table or a folder, because those
+    are storage, and wraps a source view in a view of its own.
+    """
+
+    relations = sorted(
+        (
+            (identity, document.object_type)
+            for identity, document in registered.items()
+            if document.object_role == ROLE_DATA
+            and getattr(identity, "object_id", None) is not None
+        ),
+        key=lambda pair: str(pair[0]),
+    )
     return tuple(
-        sorted(
-            (
-                identity
-                for identity, document in registered.items()
-                if document.object_role == ROLE_DATA
-                and getattr(identity, "object_id", None) is not None
-            ),
-            key=str,
+        Borrowed(
+            identity=identity,
+            declared=declared,
+            physical=declared if kind == LAKEHOUSE else BORROWED_TYPE,
         )
+        for identity, declared in relations
     )
 
 
@@ -66,6 +117,47 @@ def missing_programmables(required: Iterable[WeaverDocumentId], copied) -> tuple
         identity
         for identity in required
         if identity.object_id.qualified.casefold() not in held
+    )
+
+
+def wrapper_view_statement(borrowed: Borrowed, *, destination, source) -> str:
+    """A view in the destination Lakehouse selecting from the source's view.
+
+    Both sides are spelled four-part, so the statement names no ambient
+    catalogue and the source's definition is never read: a change at the source
+    stays visible through the wrapper until an ordinary build replaces it.
+    """
+
+    return (
+        f"CREATE OR REPLACE VIEW "
+        f"{destination.qualify(borrowed.schema, borrowed.name)} "
+        f"AS SELECT * FROM {source.qualify(borrowed.schema, borrowed.name)}"
+    )
+
+
+def pointer_shortcuts(borrowed: Sequence[Borrowed], *, source, path_of) -> tuple:
+    """Each borrowed table and folder as the shortcut that will stand for it.
+
+    ``source`` is the resolved source item and ``path_of`` gives one object's
+    path inside it, which storage may spell differently from the declaration.
+    The destination path is the estate's own address, which a mirror keeps.
+
+    One shape serves the transport and the readiness wait: ``path``, ``name``,
+    ``source`` and ``source_path`` are what a shortcut request carries, and
+    ``shortcut`` and ``type`` are what waiting on one needs.
+    """
+
+    return tuple(
+        {
+            "shortcut": str(each.identity),
+            "type": each.physical,
+            "path": f"{each.area}/{each.schema}",
+            "name": each.name,
+            "source": source,
+            "source_path": path_of(each),
+        }
+        for each in borrowed
+        if each.is_pointer
     )
 
 
@@ -109,7 +201,7 @@ def surface_statements(catalogue_name: str) -> tuple[str, ...]:
 
 
 def borrow_statements(
-    identities: Sequence[WeaverDocumentId],
+    borrowed: Sequence[Borrowed],
     *,
     source_target: str,
     catalogue_name: str,
@@ -118,10 +210,10 @@ def borrow_statements(
 
     return (
         surface_statements(catalogue_name)
-        + schema_statements(identity.object_id.schema for identity in identities)
+        + schema_statements(each.schema for each in borrowed)
         + tuple(
-            view_statement(identity, source_target=source_target)
-            for identity in identities
+            view_statement(each.identity, source_target=source_target)
+            for each in borrowed
         )
     )
 
@@ -152,7 +244,7 @@ def _as_create_or_alter(definition: str) -> str:
 
 
 def record_statements(
-    identities: Sequence[WeaverDocumentId],
+    borrowed: Sequence[Borrowed],
     *,
     source_workspace: str,
     source_target: str,
@@ -163,22 +255,19 @@ def record_statements(
     rather than duplicates.
     """
 
-    if not identities:
+    if not borrowed:
         return ()
     rows = [
-        _row(
-            identity,
-            source_workspace=source_workspace,
-            source_target=source_target,
-        )
-        for identity in identities
+        _row(each, source_workspace=source_workspace, source_target=source_target)
+        for each in borrowed
     ]
     return (create_statement(MIRROR), _delete(rows), _insert(rows))
 
 
 def _row(
-    identity: WeaverDocumentId, *, source_workspace: str, source_target: str
+    borrowed: Borrowed, *, source_workspace: str, source_target: str
 ) -> dict[str, str]:
+    identity = borrowed.identity
     schema, name = catalogue_columns(identity)
     return {
         "Item type": identity.item.item_type,
@@ -189,7 +278,7 @@ def _row(
         "Source target name": source_target,
         "Source schema name": identity.object_id.schema,
         "Source object name": identity.object_id.object,
-        "Physical type": MIRROR.column("physical_type").to_public(BORROWED_TYPE),
+        "Physical type": MIRROR.column("physical_type").to_public(borrowed.physical),
     }
 
 
@@ -225,7 +314,9 @@ _AUDIT = ("Row insert datetime", "Row update datetime", "Row delete datetime")
 
 __all__ = [
     "BORROWED_TYPE",
+    "POINTER_TYPES",
     "PROCEDURE_TYPE",
+    "Borrowed",
     "borrow_statements",
     "borrowable",
     "executable",
@@ -233,6 +324,8 @@ __all__ = [
     "programmable_statements",
     "record_statements",
     "schema_statements",
+    "pointer_shortcuts",
     "surface_statements",
     "view_statement",
+    "wrapper_view_statement",
 ]
