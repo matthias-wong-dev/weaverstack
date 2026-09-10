@@ -113,8 +113,12 @@ Static Ref.Country loaded January     Fact.Customer loaded February   Green
 Static Ref.Country loaded August      Fact.Customer loaded February   Amber
 ```
 
-A reload of a reference table is what puts its consumers behind. A skip settles
-nothing and leaves `_.LoadStatus` alone.
+A reload of a reference table is what puts its consumers behind. A daily load
+that skips an already-loaded Static object records a `Skipped` status row dated
+to the run, the same row the Warehouse `_.Load` procedure writes. That row is
+the object's latest lifecycle touch, and health reads it like any other: an
+ancestor touched today puts a descendant last touched yesterday behind, even
+though the skip consumed no source window.
 
 `is_static` reaches the evaluator on `InstalledNode`, carried from the Table or
 Folder dictionary row when the graph is built.

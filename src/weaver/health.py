@@ -47,6 +47,7 @@ from .catalogue.tables import (
     PENDING,
     REJECTED,
     ROLE_DATA,
+    SKIPPED,
     SUCCEEDED,
     TABLE_DICTIONARY,
     TEST_STATUS,
@@ -90,15 +91,19 @@ DEFAULT_AGE_HOURS = 24
 
 #: Load outcomes that establish nothing about the data. A blocked node did no
 #: work and an errored one cannot say what it did, so neither is a reason to
-#: call a downstream object behind.
+#: call a downstream object behind. A Static skip is not here: it is a
+#: lifecycle touch, recorded in ``_.LoadStatus`` with the workflow that made
+#: it, and ancestry reads it like any other touch.
 _NO_DATA_ESTABLISHED = (FAILED, ERROR, BLOCKED, PENDING)
 
 #: The load outcomes that make a subject Red.
 _LOAD_RED = (FAILED, ERROR, BLOCKED)
 
-#: The outcomes that settle an object, and so carry an instant a descendant can
-#: be measured against. A rejecting load moved rows and completed.
-_ESTABLISHED = (SUCCEEDED, REJECTED)
+#: The outcomes that carry an instant a descendant can be measured against. A
+#: rejecting load moved rows and completed. A Static skip consumed no window,
+#: but it is a lifecycle touch: ``_.LoadStatus`` records when it happened, and
+#: ancestry measures against that record.
+_ESTABLISHED = (SUCCEEDED, REJECTED, SKIPPED)
 
 #: What Registry records a View as. A Warehouse shortcut destination is recorded
 #: the same way and is told apart by its role.
@@ -627,7 +632,10 @@ class _LoadHealth:
         """The ancestors that carry a ``_.LoadStatus`` row.
 
         Loadables and Views. A shortcut destination and a table Weaver does not
-        load hold no load state, so the walk passes through them.
+        load hold no load state, so the walk passes through them. A skipped
+        Static ancestor takes part like any other: its row is the object's
+        latest lifecycle touch, so a descendant last touched before it is
+        behind.
         """
 
         return tuple(

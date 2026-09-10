@@ -163,6 +163,28 @@ def test_a_static_skip_says_so_rather_than_reading_as_a_load_of_nothing():
 
 
 @weaver_test()
+def test_a_static_skip_still_settles_the_objects_load_status():
+    """Every load attempt moves ``_.LoadStatus`` forward, a skip included.
+
+    The row records ``Skipped`` with this workflow's timestamps, the same row
+    the Warehouse ``_.Load`` procedure writes, so a daily load of an
+    already-loaded Static object shows today's skip. What the skip must not do
+    is read as a success that loaded: the result says what happened.
+    """
+
+    node = _node(
+        status="skipped", result=LoadResult(succeeded=True, is_static_skip=True)
+    )
+    row = _one(_recorded(node), LOAD_STATUS)
+
+    assert row["result"] == "skipped"
+    assert row["workflow_id"] == "workflow-1"
+    assert row["completed_datetime"] == datetime(
+        2026, 8, 22, 3, 4, 7, tzinfo=timezone.utc
+    )
+
+
+@weaver_test()
 def test_a_load_with_rejected_rows_is_rejected_and_keeps_its_bookmark():
     """It has not read its window, so the bookmark stays where it was."""
 
