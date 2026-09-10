@@ -332,26 +332,17 @@ def test_a_wrapper_view_reads_through_to_the_sources_view(journey):
         assert _spark(journey, f"SELECT * FROM {destination.qualify(schema, name)}")
 
 
-@weaver_test(remote=True, resources={"onelake"})
+@weaver_test(remote=True)
 def test_the_deployed_load_tree_is_copied_byte_for_byte(journey):
-    """The data is borrowed and the code is local, so a run has its modules."""
+    """The data is borrowed and the code is local, so a run has its modules.
+
+    Read from the mirror's own observation. The two trees are equal at that
+    moment and diverge at the changed build, which
+    :func:`test_a_build_here_rewrites_this_items_runtime_module_alone` is about.
+    """
 
     journey.require("mirror")
-    resolver = journey.session.resolver(journey.workspace)
-    store = journey.session.store(journey.workspace)
-    held = {}
-    for role, name in (
-        ("source", journey.source_name),
-        ("target", journey.target_name),
-    ):
-        root = resolver.lakehouse(ItemRef(name)).join("Files", "_", "Load")
-        held[role] = {
-            entry.location.value[len(root.value) :].lstrip("/"): store.read(
-                entry.location
-            )
-            for entry in store.list(root, recursive=True)
-            if not entry.is_directory
-        }
+    held = journey["mirror"].observation.runtime
 
     assert held["source"], "the source item deployed no load tree"
     assert held["target"] == held["source"]
@@ -361,9 +352,8 @@ def test_the_deployed_load_tree_is_copied_byte_for_byte(journey):
 def test_the_runtime_tree_is_not_a_shortcut(journey):
     """Equal bytes are also what a shortcut shows, so the shortcuts say which.
 
-    ``Files/_.Load`` carries a data role in Registry like an authored Folder.
-    Pointed at the source, every deployed module a build here writes lands in
-    the source item.
+    ``Files/_.Load`` carries a data role in Registry like an authored Folder,
+    and the shortcut list is where a mirror's treatment of it is visible.
     """
 
     journey.require("mirror")

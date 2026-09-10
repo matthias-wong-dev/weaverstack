@@ -172,10 +172,11 @@ def test_a_lakehouse_borrows_storage_as_itself_and_wraps_a_view():
 
 @weaver_test()
 def test_the_deployed_runtime_tree_is_never_borrowed():
-    """A shortcut at ``Files/_.Load`` would send a build's writes to the source.
+    """``Files/_.Load`` holds the modules a run imports where Spark is.
 
-    The tree holds the modules a run imports where Spark is, and a mirror copies
-    it into the destination's own storage.
+    Weaver declares the tree as a Folder, so it carries a data role and reaches
+    this rule beside the authored ones. A mirror copies it into the
+    destination's own storage.
     """
 
     borrowed = {each.name: each for each in borrowable(LAKE_ESTATE, kind=LAKEHOUSE)}

@@ -73,7 +73,7 @@ def borrowable(
 
     Schema ``_`` is left out. It is Weaver's own, and the one object it holds
     with a data role is the Lakehouse runtime tree at ``Files/_.Load``, which a
-    mirror copies rather than points at.
+    mirror copies into the destination's own storage.
     """
 
     relations = sorted(
