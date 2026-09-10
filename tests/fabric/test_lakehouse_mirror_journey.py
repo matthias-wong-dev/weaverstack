@@ -128,9 +128,12 @@ def journey(
             [ITEM], session=weaver_session, workspace_config=run.health_config
         ),
     )
+    # The item declares a Folder, and reload covers tables. A second
+    # ordinary load re-dates every status row, which is the lifecycle movement
+    # the fork has to see.
     run.step(
         "load the source again",
-        lambda: weaver.load([ITEM], session=weaver_session, reload=True),
+        lambda: weaver.load([ITEM], session=weaver_session),
     )
     run.step(
         "report health after the source advanced",
@@ -588,32 +591,20 @@ def test_health_reads_the_mirror_and_calls_the_build_green(journey):
     assert report.load.subjects > 0
 
 
-def _last_loaded(report, identity: str):
-    """When the report says that object last loaded, from its activity window.
-
-    A mirrored object's statistics come from the catalogue it mirrors, which is
-    also the only place they exist: a fork copies ``_.LoadStatus`` and leaves
-    ``_.LoadStatistic`` behind.
-    """
-
-    seen = [
-        each.completed_at
-        for each in report.load_activity
-        if each.object_id == identity and each.completed_at is not None
-    ]
-    return max(seen) if seen else None
-
-
 @weaver_test(remote=True)
 def test_a_load_at_the_source_reaches_the_forks_report(journey):
-    """The fork ran nothing, and the instant its mirrored table carries moved."""
+    """The fork ran nothing, and the lifecycle its mirrored objects carry moved.
 
-    journey.require("report health after the source advanced")
+    A fork copies ``_.LoadStatus`` and leaves ``_.LoadStatistic`` behind, so an
+    activity row for a mirrored object can only have come from the catalogue
+    this one mirrors. Nothing loads into the fork, so an instant that advances
+    is a mirrored object's.
+    """
+
+    journey.require("load the source again", "report health after the source advanced")
     borrowed = f"{ITEM}/Tables/DWG.Customer"
-    before = _last_loaded(journey["report health over the mirror"].result, borrowed)
-    after = _last_loaded(
-        journey["report health after the source advanced"].result, borrowed
-    )
+    before = journey["report health over the mirror"].result
+    after = journey["report health after the source advanced"].result
 
-    assert before is not None, "the mirrored table carried no source statistic"
-    assert after > before
+    assert borrowed in {each.object_id for each in before.load_activity}
+    assert after.current_load.completed_at > before.current_load.completed_at

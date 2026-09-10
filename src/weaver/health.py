@@ -246,8 +246,8 @@ def _effective_history(local, *, source, statuses, mirrored):
         if _row_identity(row) in mirrored
     )
     if not statuses and not rows:
-        # Bootstrap on both sides, which reads as no activity rather than as a
-        # window holding none.
+        # Bootstrap on both sides. Nothing has settled a load, and a report
+        # carries no window at all.
         return None
     counts: dict[str, int] = {}
     for status in statuses.values():
