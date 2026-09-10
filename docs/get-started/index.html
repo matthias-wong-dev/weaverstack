@@ -57,7 +57,7 @@
           <ul>
             <li><strong>A Microsoft Fabric workspace</strong> you can reach, on a running capacity.</li>
             <li><strong>Python 3.11 or later</strong> if you are working from your own machine. A Fabric notebook already provides it.</li>
-            <li><strong>Azure authentication</strong> through the Azure CLI or Microsoft sign-in in a browser.</li>
+            <li><strong>Azure authentication</strong> as a service principal (<code>AZURE_CLIENT_ID</code> and <code>AZURE_TENANT_ID</code>, plus a <code>AZURE_CLIENT_SECRET</code> or <code>AZURE_CLIENT_CERTIFICATE_PATH</code>), through the Azure CLI, or Microsoft sign-in in a browser.</li>
           </ul>
           <p>Setup can reuse existing Lakehouses, Warehouses and Environments. Creating a new Fabric item requires the relevant workspace permission.</p>
         </div>
@@ -106,7 +106,7 @@ weaver.<span class="c-fn">initialise</span>(
 weaver initialise --workspace Analytics</pre>
               </div>
               <p>Run <code>weaver initialise --workspace Analytics</code> to choose a project folder and its Fabric items. Run <code>weaver initialise</code> to enter the workspace name in the wizard too.</p>
-              <p class="small">The desktop CLI tries Azure CLI credentials first and opens Microsoft sign-in in a browser when needed. On a machine with secure credential storage, later commands reuse that sign-in until Microsoft requires you to authenticate again.</p>
+              <p class="small">The desktop CLI tries a configured service principal first, then Azure CLI credentials, and opens Microsoft sign-in in a browser when needed. On a machine with secure credential storage, later commands reuse that sign-in until Microsoft requires you to authenticate again.</p>
             </div>
           </div>
         </div>
