@@ -338,7 +338,7 @@ def determine_impact(
     )
 
 
-def _installed_as_pointer(registered, mirrored, identity) -> bool:
+def installed_as_pointer(registered, mirrored, identity) -> bool:
     """Whether what is installed at this identity holds none of its own data.
 
     Two sources, because a pointer and an owned object share one identity: a
@@ -382,7 +382,7 @@ def select_build(
         for identity in impact.impacted
         if identity in repository.source_documents
         and repository.source_documents[identity].document.prohibit_rebuild
-        and not _installed_as_pointer(registered, mirrored, identity)
+        and not installed_as_pointer(registered, mirrored, identity)
     }
     # A pointer impacted through the graph is refreshed over its own address and
     # never dropped to do it: `CreateOrOverwrite` for a Lakehouse shortcut and

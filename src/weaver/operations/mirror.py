@@ -513,9 +513,9 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
             + " in the same run. Name a destination this run does not read from."
         )
 
-    seen: dict[str, MirrorItem] = {}
+    seen: dict[tuple[str, str], MirrorItem] = {}
     for each in resolved.items:
-        first = seen.setdefault(each.destination.casefold(), each)
+        first = seen.setdefault((each.kind, each.destination.casefold()), each)
         if first is not each:
             raise CommandError(
                 f"mirror would empty {each.target} for both {first.item} and "
@@ -708,7 +708,11 @@ def _mirror_lakehouse_item(workspace: Workspace, each: MirrorItem, *, session) -
     destination = resolver.spark_destination(ItemRef(each.destination))
     source = resolver.spark_destination(ItemRef(each.source_target))
 
-    shortcuts = _pointer_requests(workspace, each, session=session)
+    # The borrowed data and the ``_`` surface in one submission: both are
+    # shortcuts into this Lakehouse, and both are waited on together.
+    shortcuts = _pointer_requests(workspace, each, session=session) + _surface_requests(
+        workspace, each, session=session
+    )
     if shortcuts:
         with session.step(f"Borrow {len(shortcuts)} object(s) from {each.source}"):
             resolver.create_onelake_shortcuts(ItemRef(each.destination), shortcuts)
@@ -784,6 +788,23 @@ def _pointer_requests(workspace: Workspace, each: MirrorItem, *, session) -> tup
         )
 
     return pointer_shortcuts(each.relations, source=item, path_of=path_of)
+
+
+def _surface_requests(workspace: Workspace, each: MirrorItem, *, session) -> tuple:
+    """The standard ``_`` surface, reading this workspace's own catalogue.
+
+    A mirrored Lakehouse runs the code copied into it, and that code reads
+    Weaver state through the same surface a built one has.
+    """
+
+    from ..catalogue.borrow import surface_shortcuts
+    from ..fabric.resources import WAREHOUSE as WAREHOUSE_ITEM
+
+    resolver = session.resolver(workspace)
+    catalogue = resolver.external_item(
+        workspace.catalogue_item.name, item_type=WAREHOUSE_ITEM
+    )
+    return surface_shortcuts(each.item, catalogue=catalogue)
 
 
 #: The one part of ``Files/_`` a mirror copies. Everything else under it is

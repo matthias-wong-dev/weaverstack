@@ -965,8 +965,10 @@ a Warehouse gets the source's procedures and functions and a Lakehouse gets a
 copy of its `Files/_/Load` tree.
 
 A mirrored Lakehouse reaches Spark, because a table shortcut is not finished
-until Spark can read it. A run that selects Warehouse items alone, or `--no-item`,
-starts no Spark session.
+until Spark can read it. A run that names Warehouse items alone, or `--no-item`,
+starts no Spark session. A run that names no item at all asks for Spark either
+way: which kinds the configured targets are is configuration's answer, read
+after the session's resources are declared.
 
 A mirror empties one Warehouse for the destination catalogue and one for each
 selected item, so a non-interactive process refuses without `--yes`, as wipe

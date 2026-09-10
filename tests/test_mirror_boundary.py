@@ -463,6 +463,27 @@ def test_a_destination_catalogue_holding_an_items_rows_is_refused(monkeypatch):
 
 
 @weaver_test()
+def test_two_items_of_different_kinds_may_share_a_destination_name(monkeypatch):
+    """Two kinds of one name are two Fabric items, so neither wipe reaches both."""
+
+    plan = _plan(
+        monkeypatch,
+        _with_targets(),
+        ["Warehouse/Model=Warehouse/Shared", "Lakehouse/Input=Lakehouse/Shared"],
+    )
+
+    resolved = resolve_mirror(
+        plan, _installed({"Warehouse/Model": "Model", "Lakehouse/Input": "Input"})
+    )
+
+    assert resolved.wiped == (
+        "Warehouse/Weaver_Dev",
+        "Warehouse/Shared",
+        "Lakehouse/Shared",
+    )
+
+
+@weaver_test()
 def test_two_items_sharing_one_destination_are_refused(monkeypatch):
     """The second wipe would take the first mirror, leaving both recorded."""
 

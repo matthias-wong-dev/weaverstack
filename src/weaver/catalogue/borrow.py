@@ -161,6 +161,35 @@ def pointer_shortcuts(borrowed: Sequence[Borrowed], *, source, path_of) -> tuple
     )
 
 
+def surface_shortcuts(item, *, catalogue) -> tuple:
+    """The standard ``_`` surface a mirrored Lakehouse presents, as shortcuts.
+
+    From :func:`weaver.catalogue.builtin.standard_surface_references`, so a
+    mirrored Lakehouse and a built one present one surface from one
+    declaration. ``catalogue`` is the resolved Warehouse the destination
+    catalogue lives in, which is what the surface reads.
+    """
+
+    from ..declaration.model import TABLES
+    from .builtin import standard_surface_references
+
+    declarations, pairs = standard_surface_references(item)
+    return tuple(
+        {
+            "shortcut": str(pair.destination),
+            "type": declaration.shortcut_type,
+            "path": f"{pair.destination.area}/{pair.destination.object_id.schema}",
+            "name": pair.destination.object_id.object,
+            "source": catalogue,
+            "source_path": (
+                f"{TABLES}/{pair.source.object_id.schema}"
+                f"/{pair.source.object_id.object}"
+            ),
+        }
+        for declaration, pair in zip(declarations, pairs)
+    )
+
+
 def schema_statements(schemas: Iterable[str]) -> tuple[str, ...]:
     """One ``create schema`` per named schema. ``_`` is the surface's to make."""
 
@@ -325,6 +354,7 @@ __all__ = [
     "record_statements",
     "schema_statements",
     "pointer_shortcuts",
+    "surface_shortcuts",
     "surface_statements",
     "view_statement",
     "wrapper_view_statement",

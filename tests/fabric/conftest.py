@@ -144,8 +144,9 @@ FIXED_ITEMS = {
     "consumer": "PYTEST_LH_3",
     "warehouse_producer": "PYTEST_HOUSE",
     "warehouse": "PYTEST_WH_1",
-    # Where a mirrored Warehouse item is built. Emptied by every mirror.
+    # Where a mirrored item is built, one per kind. Emptied by every mirror.
     "warehouse_mirror": "PYTEST_WH_MIRROR",
+    "lakehouse_mirror": "PYTEST_LH_MIRROR",
 }
 
 

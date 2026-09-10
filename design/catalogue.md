@@ -899,6 +899,12 @@ source holds; a Lakehouse gets a byte copy of the source's `Files/_/Load` tree,
 which is what a run imports where Spark is. Both get the standard `_` surface
 over this catalogue, and both end with the item bound to its new target.
 
+A mirrored Lakehouse gets the standard `_` surface a built one gets, from the
+same `standard_surface_references` declaration, pointed at this catalogue. The
+copied `Files/_/Load` code runs inside it and reads Weaver state through that
+surface, so a mirrored item is operationally an ordinary one whose data happens
+to be borrowed.
+
 A Lakehouse mirror stands on the same shortcut-readiness rule an ordinary build
 uses: a table shortcut is not finished until its Spark relation and its Delta
 path can both be read. A mirrored Lakehouse therefore starts a Spark session
@@ -935,9 +941,16 @@ nothing borrowed. A fork carries the rows across where the source has them.
 | whether Prohibit rebuild protects it | it does not: a mirror holds none of Weaver's data, the same reason a shortcut is replaceable |
 
 Signature comparison is untouched. An object whose declaration changed is
-selected by an ordinary build, its View is dropped, the local object is built,
-and its `_.Mirror` row goes last, once that build has run. Everything unchanged
-stays borrowed.
+selected by an ordinary build, what is borrowed comes off, the local object is
+built, and its `_.Mirror` row goes last, once that build has run. Everything
+unchanged stays borrowed.
+
+What comes off depends on what stands there, and `_.Mirror` is what says so. A
+borrowed Warehouse relation and a borrowed Lakehouse view are dropped as views.
+A borrowed Lakehouse table or folder is a shortcut, so it is removed through the
+shortcut API and its name waited on: a Spark drop would reach the storage the
+source owns. Registry still says Table throughout, and nothing encodes the
+borrowing in the logical type.
 
 Reconciliation asks the inventory for the effective type, so a build over a
 mirrored item finds every claim standing and plans nothing. Deregistration is a

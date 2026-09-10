@@ -37,6 +37,8 @@ class Mirrored:
     """One Lakehouse mirror, and a way to read either side of it."""
 
     result: Any
+    #: What ``weaver test`` made of the mirrored item, or the error it raised.
+    validated: Any
     catalogue_sql: Any
     source_name: str
     target_name: str
@@ -75,8 +77,19 @@ def mirrored(
         catalogue=f"Warehouse/{fabric_fork_catalogue.name}",
         mirror=f"Warehouse/{fabric_catalogue.name}",
     )
+    try:
+        # The session's own workspace, so the run keeps the Environment its
+        # deployed modules are imported from. Only the catalogue is overridden.
+        validated = weaver.test(
+            [ITEM],
+            session=weaver_session,
+            catalogue=f"Warehouse/{fabric_fork_catalogue.name}",
+        )
+    except Exception as exc:  # recorded, so the physical claims still report
+        validated = exc
     return Mirrored(
         result=result,
+        validated=validated,
         catalogue_sql=weaver_session.sql_executor(
             WarehouseTarget(ItemRef(fabric_fork_catalogue.name)),
             workspace=fabric_workspace,
@@ -94,7 +107,7 @@ def _shortcuts(mirrored) -> dict[str, str]:
 
     resolver = mirrored.session.resolver(mirrored.workspace)
     return {
-        f"{each['path']}/{each['name']}": each.get("target", {}).get("type", "")
+        each.qualified: each.target_path or ""
         for each in resolver.onelake_shortcuts(ItemRef(mirrored.target_name))
     }
 
@@ -223,6 +236,32 @@ def test_no_borrowed_node_is_loadable(mirrored):
     borrowed = [node for node in dag.nodes if node.is_mirrored]
     assert borrowed, "the mirror recorded nothing"
     assert not any(node.is_loadable for node in borrowed)
+
+
+@weaver_test(remote=True, resources={"rest"})
+def test_the_standard_surface_is_there(mirrored):
+    """A mirrored Lakehouse presents what a built one presents."""
+
+    from weaver.catalogue.tables import STANDARD_SURFACE_TABLES
+
+    held = _shortcuts(mirrored)
+
+    for table in STANDARD_SURFACE_TABLES:
+        assert f"Tables/{CATALOGUE_SCHEMA}/{table.name}" in held
+
+
+@weaver_test(remote=True)
+def test_the_mirrored_lakehouse_runs_its_installed_validations(mirrored):
+    """The operational proof: copied code plus the surface is a working item.
+
+    Reading files and catalogue rows says the parts are there. Dispatching a
+    validation says they compose.
+    """
+
+    report = mirrored.validated
+    assert not isinstance(report, Exception), report
+    assert report.nodes, "dispatch reached no validation"
+    assert {node.status for node in report.nodes} <= {"passed", "failed"}
 
 
 @weaver_test(remote=True, resources={"livy"})

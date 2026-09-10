@@ -53,7 +53,7 @@ from .catalogue_actions import (
 from .documents import lakehouse_build_stages, warehouse_build_stages
 from .drops import lakehouse_drop_stages, warehouse_drop_stages
 from .endpoints import lakehouse_endpoint_refresh_stage
-from .incremental import select_build, stale_through_shortcuts
+from .incremental import installed_as_pointer, select_build, stale_through_shortcuts
 from .models import OMIT_TARGET_UNBOUND, BuildPlan, OmittedNode
 from .prune import TargetInventory, lakehouse_prune_stage, warehouse_prune_stage
 from .runtime import item_runtime_removals, item_runtime_stages
@@ -258,6 +258,7 @@ def generate_item_build_bundle(
                 removed=removed,
                 registered=registered,
                 catalogue_target=catalogue_target,
+                mirrored=catalogue.mirrors,
             )
             layer_stages.extend(planned.stages)
             omitted.extend(planned.omitted)
@@ -469,6 +470,7 @@ def plan_item_build(
     selected_loads=(),
     removed=(),
     shortcut_sources=None,
+    mirrored=(),
 ) -> PlannedItem:
     """One item's physical plan, from prepared inputs.
 
@@ -496,6 +498,7 @@ def plan_item_build(
         selected_loads=selected_loads,
         removed=removed,
         shortcut_sources=shortcut_sources,
+        mirrored=mirrored,
     )
     if item.item_type == LAKEHOUSE:
         return _plan_lakehouse_item(**arguments)
@@ -551,6 +554,7 @@ def _plan_item(
     selected_loads,
     removed,
     shortcut_sources,
+    mirrored,
     shortcut_planner,
     prune_planner,
     drop_planner,
@@ -604,7 +608,9 @@ def _plan_item(
                 selected_for_build,
                 selected_shortcuts,
                 registered,
+                mirrored,
             ),
+            mirrored=mirrored,
         )
     )
     schemas = schema_planner(
@@ -655,7 +661,11 @@ def _plan_item(
 
 
 def pointers_whose_name_is_reused(
-    selected_for_drop, selected_for_build, selected_shortcuts, registered: Mapping
+    selected_for_drop,
+    selected_for_build,
+    selected_shortcuts,
+    registered: Mapping,
+    mirrored=(),
 ):
     """Pointers this plan removes and then gives to an owned object.
 
@@ -670,13 +680,13 @@ def pointers_whose_name_is_reused(
     over itself and never released, so nothing waits for it.
     """
 
+    mirrored = set(mirrored)
     return {
         identity
         for identity in selected_for_drop
         if identity in selected_for_build
         and identity not in selected_shortcuts
-        and (document := registered.get(identity)) is not None
-        and document.object_role == ROLE_SHORTCUT
+        and installed_as_pointer(registered, mirrored, identity)
     }
 
 

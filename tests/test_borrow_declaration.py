@@ -22,12 +22,14 @@ from weaver.catalogue.borrow import (
     programmable_statements,
     record_statements,
     schema_statements,
+    surface_shortcuts,
     surface_statements,
     view_statement,
     wrapper_view_statement,
 )
 from weaver.catalogue.state import RegisteredDocument
 from weaver.catalogue.tables import (
+    CATALOGUE_SCHEMA,
     MIRROR,
     ROLE_DATA,
     ROLE_LOAD,
@@ -234,6 +236,30 @@ class _Item:
     id: str
     name: str
     workspace_id: str
+
+
+@weaver_test()
+def test_a_mirrored_lakehouse_gets_the_surface_a_built_one_declares():
+    """One definition: the standard references, turned into shortcuts."""
+
+    from weaver.catalogue.builtin import standard_surface_references
+    from weaver.catalogue.tables import STANDARD_SURFACE_TABLES
+
+    item = _Item(id="wh-1", name="Weaver_Dev", workspace_id="ws-1")
+    requests = surface_shortcuts(LAKE, catalogue=item)
+    declarations, _pairs = standard_surface_references(LAKE)
+
+    assert [each["name"] for each in requests] == [
+        table.name for table in STANDARD_SURFACE_TABLES
+    ]
+    assert {each["path"] for each in requests} == {f"Tables/{CATALOGUE_SCHEMA}"}
+    assert [each["type"] for each in requests] == [
+        declaration.shortcut_type for declaration in declarations
+    ]
+    assert requests[0]["source"] is item
+    assert requests[0]["source_path"] == (
+        f"Tables/{CATALOGUE_SCHEMA}/{STANDARD_SURFACE_TABLES[0].name}"
+    )
 
 
 # --- the surface a target reads Weaver state through --------------------------
