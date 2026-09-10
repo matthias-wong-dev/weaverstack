@@ -27,6 +27,7 @@ from support.weaver_test import register_session, weaver_test
 import weaver
 from weaver.catalogue.tables import CATALOGUE_SCHEMA, STANDARD_SURFACE_TABLES
 from weaver.catalogue.tables import MIRROR as MIRROR_TABLE
+from weaver.etl import LOAD_ROOT
 from weaver.targets import ItemRef, WarehouseTarget
 
 ITEM = "Lakehouse/Sales"
@@ -39,6 +40,15 @@ WRAPPED = ("DWG.ActiveCustomer", "DWG.ActiveCustomerSummary")
 #: The object whose declaration changes: a table nothing else reads, so an
 #: ordinary build selects it alone.
 MATERIALISED = "DWG.NamedCustomer"
+
+#: The deployed module the changed declaration compiles to. A Spark SQL table
+#: installs as a ``SparkSqlTable`` carrying its query, so editing the query
+#: changes these bytes.
+CHANGED_MODULE = f"Tables/{MATERIALISED.replace('.', '__')}.py"
+
+#: The runtime tree's address inside a Lakehouse, as storage spells it.
+RUNTIME_TREE = ("Files", *LOAD_ROOT.split("/"))
+RUNTIME_ROOT = "/".join(RUNTIME_TREE)
 
 
 @dataclass(frozen=True)
@@ -57,6 +67,10 @@ class Estate:
     loadable: dict[str, bool]
     #: Rows the source still holds, which no build in this journey may touch.
     source_rows: int
+    #: Deployed file to digest under ``Files/_/Load``, keyed by ``source`` and
+    #: ``target``. A digest of each side at one moment is what separates a local
+    #: copy from a shortcut: writes through a shortcut move both.
+    runtime: dict[str, dict[str, str]]
 
 
 # --- the journey --------------------------------------------------------------
@@ -181,6 +195,25 @@ def _spark(run, statement: str):
     )
 
 
+def _runtime_tree(run, name: str) -> dict[str, str]:
+    """Every deployed file under ``Files/_/Load``, by relative path and digest."""
+
+    from hashlib import sha256
+
+    resolver = run.session.resolver(run.workspace)
+    store = run.session.store(run.workspace)
+    root = resolver.lakehouse(ItemRef(name)).join(*RUNTIME_TREE)
+    if not store.exists(root):
+        return {}
+    return {
+        entry.location.value[len(root.value) :].lstrip("/"): sha256(
+            store.read(entry.location)
+        ).hexdigest()
+        for entry in store.list(root, recursive=True)
+        if not entry.is_directory
+    }
+
+
 def _observe(run) -> Estate:
     """The estate as this transition left it."""
 
@@ -227,6 +260,10 @@ def _observe(run) -> Estate:
                 run, f"SELECT count(*) as n FROM {source.qualify('DWG', 'Customer')}"
             )[0]["n"]
         ),
+        runtime={
+            "source": _runtime_tree(run, run.source_name),
+            "target": _runtime_tree(run, run.target_name),
+        },
     )
 
 
@@ -318,6 +355,22 @@ def test_the_deployed_load_tree_is_copied_byte_for_byte(journey):
 
     assert held["source"], "the source item deployed no load tree"
     assert held["target"] == held["source"]
+
+
+@weaver_test(remote=True)
+def test_the_runtime_tree_is_not_a_shortcut(journey):
+    """Equal bytes are also what a shortcut shows, so the shortcuts say which.
+
+    ``Files/_.Load`` carries a data role in Registry like an authored Folder.
+    Pointed at the source, every deployed module a build here writes lands in
+    the source item.
+    """
+
+    journey.require("mirror")
+    held = journey["mirror"].observation.shortcuts
+
+    assert RUNTIME_ROOT not in held
+    assert not [name for name in held if name.startswith(f"Files/{CATALOGUE_SCHEMA}/")]
 
 
 @weaver_test(remote=True)
@@ -467,3 +520,20 @@ def test_materialising_one_object_leaves_the_source_untouched(journey):
         journey["mirror"].observation.source_rows
     )
     assert journey["mirror"].observation.source_rows > 0
+
+
+@weaver_test(remote=True)
+def test_a_build_here_rewrites_this_items_runtime_module_alone(journey):
+    """Rows are borrowed and code is not, so a build reaches only local storage.
+
+    The changed table compiles to a module carrying its query. That module's
+    bytes move here, and the source item's copy of it stays where it was.
+    """
+
+    journey.require("build the changed declaration")
+    before = journey["mirror"].observation.runtime
+    after = journey["build the changed declaration"].observation.runtime
+
+    assert before["source"], "the source item deployed no load tree"
+    assert after["target"][CHANGED_MODULE] != before["target"][CHANGED_MODULE]
+    assert after["source"] == before["source"]

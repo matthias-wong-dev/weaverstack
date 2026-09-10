@@ -70,6 +70,10 @@ def borrowable(
     A Warehouse reads everything through a View over the source's three-part
     name. A Lakehouse points a shortcut at a table or a folder, because those
     are storage, and wraps a source view in a view of its own.
+
+    Schema ``_`` is left out. It is Weaver's own, and the one object it holds
+    with a data role is the Lakehouse runtime tree at ``Files/_.Load``, which a
+    mirror copies rather than points at.
     """
 
     relations = sorted(
@@ -78,6 +82,7 @@ def borrowable(
             for identity, document in registered.items()
             if document.object_role == ROLE_DATA
             and getattr(identity, "object_id", None) is not None
+            and identity.object_id.schema != CATALOGUE_SCHEMA
         ),
         key=lambda pair: str(pair[0]),
     )

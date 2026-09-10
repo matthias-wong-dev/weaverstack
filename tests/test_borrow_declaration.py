@@ -145,10 +145,14 @@ def _lake_registered(*rows) -> dict:
     return registered
 
 
+#: A Lakehouse item as Registry holds it, including the runtime tree. Weaver
+#: declares ``Files/_.Load`` as a Folder, so it carries the same data role as an
+#: authored one and reaches every candidate rule alongside them.
 LAKE_ESTATE = _lake_registered(
     ("Tables", "Core", "Customer", "table"),
     ("Tables", "Core", "ActiveCustomer", "view"),
     ("Files", "Raw", "CustomerCsv", "folder"),
+    ("Files", CATALOGUE_SCHEMA, "Load", "folder"),
 )
 
 
@@ -164,6 +168,20 @@ def test_a_lakehouse_borrows_storage_as_itself_and_wraps_a_view():
     assert borrowed["Customer"].is_pointer
     assert borrowed["CustomerCsv"].is_pointer
     assert not borrowed["ActiveCustomer"].is_pointer
+
+
+@weaver_test()
+def test_the_deployed_runtime_tree_is_never_borrowed():
+    """A shortcut at ``Files/_.Load`` would send a build's writes to the source.
+
+    The tree holds the modules a run imports where Spark is, and a mirror copies
+    it into the destination's own storage.
+    """
+
+    borrowed = {each.name: each for each in borrowable(LAKE_ESTATE, kind=LAKEHOUSE)}
+
+    assert "Load" not in borrowed
+    assert not [each for each in borrowed.values() if each.schema == CATALOGUE_SCHEMA]
 
 
 @weaver_test()
