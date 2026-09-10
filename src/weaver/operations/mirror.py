@@ -976,3 +976,51 @@ def _switch_installation(workspace: Workspace, each: MirrorItem, *, session) -> 
     )
     with session.step(f"Bind {item} to {each.destination}"):
         sql.execute(statement)
+
+
+# --- reading the catalogue an estate mirrors ---------------------------------
+
+
+def mirrored_source(
+    catalogue, *, workspace: Workspace, session, operation: str, tables, history=False
+):
+    """The catalogue this estate mirrors, read for its runtime state.
+
+    ``None`` where ``_.Mirror`` holds nothing, which is every estate that forks
+    nothing. Where it holds rows, the workspace has to name the catalogue this
+    one was forked from: a fork copies ``_.LoadStatus`` at the moment it is
+    made, and live state for a mirrored object is the source's.
+    """
+
+    from ..catalogue.state import catalogue_for
+
+    if not catalogue.mirrors:
+        return None
+    if workspace.mirror is None:
+        raise CommandError(
+            f"{operation} reads live load state from the catalogue this estate "
+            f"mirrors, and this workspace names none. "
+            f"{len(catalogue.mirrors)} object(s) are recorded in "
+            f"{CATALOGUE_KIND}/{workspace.catalogue_item.name} as mirrored. Set "
+            f"mirror: {CATALOGUE_KIND}/<name> in workspace configuration, naming "
+            "the catalogue this one was forked from."
+        )
+    if not workspace.mirror.is_local_to(workspace.workspace):
+        raise CommandError(
+            f"{operation} reads the mirrored catalogue in the workspace it runs "
+            f"against, and mirror: names {workspace.mirror} in another one. Run "
+            f"{operation} against workspace {workspace.mirror.owner(workspace.workspace)}, "
+            "or name a catalogue in this workspace."
+        )
+    return catalogue_for(
+        session,
+        _mirrored_workspace(workspace),
+        tables=tables,
+        load_history=history,
+    )
+
+
+def _mirrored_workspace(workspace: Workspace) -> Workspace:
+    """The same workspace, pointed at the catalogue it mirrors."""
+
+    return replace(workspace, catalogue=f"{CATALOGUE_KIND}/{workspace.mirror.name}")

@@ -173,11 +173,13 @@ class InstalledNode:
         return self.mirror.physical_type if self.mirror else self.object_type
 
     @property
-    def is_loadable(self) -> bool:
-        """Whether this node has an installed load primitive to dispatch.
+    def can_load(self) -> bool:
+        """Whether Weaver may run a load against this node in this estate.
 
-        A mirrored node has one and is not loadable: a write here would land in
-        the target it borrows from.
+        Execution, not lifecycle. A mirrored node holds an installed load
+        primitive and answers ``False``, because the rows it stands over belong
+        to the target it mirrors. What carries Load state is a separate
+        question; see :func:`weaver.health.participates_in_load_state`.
         """
 
         return self.role == ROLE_DATA and self.is_installed and not self.is_mirrored
@@ -438,7 +440,7 @@ class InstalledDag:
         items: Sequence[WeaverItemId] | None = None,
         roles: Sequence[str] | None = None,
         object_types: Sequence[str] | None = None,
-        loadable: bool | None = None,
+        can_load: bool | None = None,
         validation: bool | None = None,
         load_names: Sequence[str] | None = None,
     ) -> tuple[InstalledNode, ...]:
@@ -467,7 +469,7 @@ class InstalledDag:
                 continue
             if wanted_types is not None and node.object_type not in wanted_types:
                 continue
-            if loadable is not None and node.is_loadable is not loadable:
+            if can_load is not None and node.can_load is not can_load:
                 continue
             if validation is not None and node.is_validation is not validation:
                 continue
@@ -479,9 +481,13 @@ class InstalledDag:
         return tuple(selected)
 
     def loadables(self, **filters) -> tuple[InstalledNode, ...]:
-        """The nodes with an installed load primitive, in identity order."""
+        """The nodes a load may run against here, in identity order.
 
-        return self.select(loadable=True, **filters)
+        A mirrored node holds an installed load primitive and is not among
+        them. See :attr:`InstalledNode.can_load`.
+        """
+
+        return self.select(can_load=True, **filters)
 
     def validations(self, **filters) -> tuple[InstalledNode, ...]:
         """The Test and Assumption nodes, in identity order."""

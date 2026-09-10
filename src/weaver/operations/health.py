@@ -21,6 +21,7 @@ from ..catalogue.tables import (
     FOLDER_DICTIONARY,
     INSTALLATION,
     LOAD_STATUS,
+    MIRROR,
     REGISTRY,
     SHORTCUT,
     TABLE_DICTIONARY,
@@ -35,10 +36,12 @@ from .workspace import operation_workspace
 #: What health reads of the catalogue, table by table. Each one is read over
 #: TDS, so a table nothing consults is a round trip nobody needed.
 #:
-#: The installed graph is built from the first seven, and the two status tables
+#: The installed graph is built from the first eight, and the two status tables
 #: hold current lifecycle state. ``_.TableDictionary`` and ``_.FolderDictionary``
 #: serve both: the graph reads whether an object is Static, and Build health
-#: reads what is declared and not certified.
+#: reads what is declared and not certified. ``_.Mirror`` says what physically
+#: stands at a mirrored object's address, and which objects take their Load
+#: state from the catalogue this one mirrors.
 #:
 #: ``_.Bookmark`` is absent: it is the loader's execution cursor. So are the
 #: dictionaries describing columns and keys, and ``_.LoadStatistic``, read only
@@ -51,9 +54,15 @@ HEALTH_TABLES = (
     TEST_DICTIONARY,
     DEPENDENCY,
     SHORTCUT,
+    MIRROR,
     LOAD_STATUS,
     TEST_STATUS,
 )
+
+#: What health reads of the catalogue an estate mirrors: current load state and
+#: nothing else. The logical estate is the selected catalogue's, and the source
+#: contributes lifecycle evidence for the mirrored identities.
+SOURCE_TABLES = (LOAD_STATUS,)
 
 
 def health(
@@ -134,6 +143,22 @@ def run_health(
             connection, tables=HEALTH_TABLES, load_history=True
         )
 
+    source = None
+    if catalogue.mirrors:
+        from .mirror import mirrored_source
+
+        with session.step("Read the mirrored catalogue"):
+            # Current load state for the mirrored objects, from where their
+            # rows are written. The logical estate stays this catalogue's.
+            source = mirrored_source(
+                catalogue,
+                workspace=workspace,
+                session=session,
+                operation="health",
+                tables=SOURCE_TABLES,
+                history=True,
+            )
+
     dag = catalogue.dag()
     # Item to target, from the same `_.Installation` a load resolves through.
     # Inventories and the report's subjects are physical: that is where the
@@ -158,6 +183,7 @@ def run_health(
         generated_at=generated_at,
         targets=selected if items else None,
         inventories=read,
+        source=source,
     )
 
 
@@ -207,4 +233,4 @@ def _inventories(session, *, workspace, targets, dag):
     return found
 
 
-__all__ = ["HEALTH_TABLES", "health", "run_health"]
+__all__ = ["HEALTH_TABLES", "SOURCE_TABLES", "health", "run_health"]

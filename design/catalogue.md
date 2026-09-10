@@ -943,6 +943,12 @@ nothing borrowed. A fork carries the rows across where the source has them.
 | whether Weaver loads it | it does not: the rows belong to the target it borrows from, and a load would write through to the source |
 | whether Prohibit rebuild protects it | it does not: a mirror holds none of Weaver's data, the same reason a shortcut is replaceable |
 
+A fourth decision belongs to health, and is described in
+[health](health.md#a-mirrored-estate): a mirrored object's Load lifecycle state
+is read from the catalogue this one mirrors, because that is where its rows are
+written. A fork copies `_.LoadStatus` at the moment it is made, so the row this
+catalogue holds for a mirrored object dates from the fork.
+
 Signature comparison is untouched. An object whose declaration changed is
 selected by an ordinary build, what is borrowed comes off, the local object is
 built, and its `_.Mirror` row goes last, once that build has run. Everything

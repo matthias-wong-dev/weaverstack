@@ -95,6 +95,7 @@ def journey(
     run.source_name = fabric_target_lakehouse.name
     run.target_name = fabric_mirror_lakehouse.name
     run.catalogue_name = fabric_fork_catalogue.name
+    run.source_catalogue_name = fabric_catalogue.name
     run.workspace = fabric_workspace
     run.session = weaver_session
     run.forked = replace(fabric_workspace, catalogue=f"Warehouse/{run.catalogue_name}")
@@ -120,6 +121,23 @@ def journey(
         "mirror again", lambda: _mirror(run, into_mirror, fabric_catalogue)
     )
     again.observation = _observe(run)
+    run.health_config = _forked_config(run, tmp_path_factory.mktemp("lh-health"))
+    run.step(
+        "report health over the mirror",
+        lambda: weaver.health(
+            [ITEM], session=weaver_session, workspace_config=run.health_config
+        ),
+    )
+    run.step(
+        "load the source again",
+        lambda: weaver.load([ITEM], session=weaver_session, reload=True),
+    )
+    run.step(
+        "report health after the source advanced",
+        lambda: weaver.health(
+            [ITEM], session=weaver_session, workspace_config=run.health_config
+        ),
+    )
     run.step(
         "validate the mirror",
         lambda: weaver.test(
@@ -157,6 +175,27 @@ def journey(
 
 
 # --- driving it ---------------------------------------------------------------
+
+
+def _forked_config(run, directory):
+    """A workspace configuration naming the fork and the catalogue it mirrors.
+
+    ``mirror:`` reaches a Workspace from configuration alone, and it is what
+    tells health where a mirrored object's load state is recorded.
+    """
+
+    path = directory / "workspace-config.yml"
+    path.write_text(
+        "\n".join(
+            (
+                f"workspace: {run.workspace.workspace}",
+                f"catalogue: Warehouse/{run.catalogue_name}",
+                f"mirror: Warehouse/{run.source_catalogue_name}",
+            )
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def _mirror(run, items, source_catalogue) -> Any:
@@ -251,7 +290,7 @@ def _observe(run) -> Estate:
             )
         },
         loadable={
-            node.load_name: node.is_loadable
+            node.load_name: node.can_load
             for node in dag.nodes
             if str(node.item) == ITEM and node.load_name
         },
@@ -383,7 +422,7 @@ def test_the_item_is_bound_to_its_new_target(journey):
 
 
 @weaver_test(remote=True)
-def test_no_borrowed_node_is_loadable(journey):
+def test_no_mirrored_node_can_be_loaded_here(journey):
     """The rows belong to the target each node borrows from."""
 
     journey.require("mirror")
@@ -527,3 +566,54 @@ def test_a_build_here_rewrites_this_items_runtime_module_alone(journey):
     assert before["source"], "the source item deployed no load tree"
     assert after["target"][CHANGED_MODULE] != before["target"][CHANGED_MODULE]
     assert after["source"] == before["source"]
+
+
+# --- health over the mirror ---------------------------------------------------
+
+
+@weaver_test(remote=True)
+def test_health_reads_the_mirror_and_calls_the_build_green(journey):
+    """Registry says Table, ``_.Mirror`` says shortcut, and the Lakehouse holds one.
+
+    Without ``_.Mirror`` the inventory check expects Registry's own type at each
+    borrowed address.
+    """
+
+    journey.require("report health over the mirror")
+    report = journey["report health over the mirror"].result
+
+    assert [
+        (finding.code, finding.object_id) for finding in report.build.findings
+    ] == []
+    assert report.load.subjects > 0
+
+
+def _last_loaded(report, identity: str):
+    """When the report says that object last loaded, from its activity window.
+
+    A mirrored object's statistics come from the catalogue it mirrors, which is
+    also the only place they exist: a fork copies ``_.LoadStatus`` and leaves
+    ``_.LoadStatistic`` behind.
+    """
+
+    seen = [
+        each.completed_at
+        for each in report.load_activity
+        if each.object_id == identity and each.completed_at is not None
+    ]
+    return max(seen) if seen else None
+
+
+@weaver_test(remote=True)
+def test_a_load_at_the_source_reaches_the_forks_report(journey):
+    """The fork ran nothing, and the instant its mirrored table carries moved."""
+
+    journey.require("report health after the source advanced")
+    borrowed = f"{ITEM}/Tables/DWG.Customer"
+    before = _last_loaded(journey["report health over the mirror"].result, borrowed)
+    after = _last_loaded(
+        journey["report health after the source advanced"].result, borrowed
+    )
+
+    assert before is not None, "the mirrored table carried no source statistic"
+    assert after > before

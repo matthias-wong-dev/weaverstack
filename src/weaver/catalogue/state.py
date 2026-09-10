@@ -1106,7 +1106,9 @@ def read_installed_catalogue(
     )
 
 
-def catalogue_for(session, workspace=None, *, tables=READABLE_TABLES) -> Catalogue:
+def catalogue_for(
+    session, workspace=None, *, tables=READABLE_TABLES, load_history: bool = False
+) -> Catalogue:
     """The installed catalogue, read and writable, through a Session it borrows.
 
     The one construction an operation needs: it reads what it asked for and
@@ -1124,6 +1126,7 @@ def catalogue_for(session, workspace=None, *, tables=READABLE_TABLES) -> Catalog
     return read_installed_catalogue(
         catalogue_connection(session, resolved),
         tables=tables,
+        load_history=load_history,
         writer=writer_for(session, resolved),
         session=session,
     )

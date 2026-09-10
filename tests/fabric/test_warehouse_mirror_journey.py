@@ -100,6 +100,8 @@ def journey(
     run.source_name = session_disposable_warehouse.item.name
     run.target_name = fabric_mirror_warehouse.name
     run.catalogue_name = fabric_fork_catalogue.name
+    run.source_catalogue_name = fabric_catalogue.name
+    run.workspace = fabric_workspace
     run.source_sql = _sql(warehouse_session, fabric_workspace, run.source_name)
     run.target_sql = _sql(warehouse_session, fabric_workspace, run.target_name)
     run.catalogue_sql = _sql(warehouse_session, fabric_workspace, run.catalogue_name)
@@ -142,6 +144,14 @@ def journey(
     again.observation = _observe(run)
     run.step("read a source change through the mirror", lambda: _read_through(run))
     run.step(
+        "report health over the mirror",
+        lambda: weaver.health(
+            [ITEM],
+            session=warehouse_session,
+            workspace_config=_forked_config(run, tmp_path_factory.mktemp("wh-health")),
+        ),
+    )
+    run.step(
         "validate the mirror",
         lambda: weaver.test(
             [ITEM],
@@ -179,6 +189,27 @@ def journey(
 
 
 # --- driving it ---------------------------------------------------------------
+
+
+def _forked_config(run, directory):
+    """A workspace configuration naming the fork and the catalogue it mirrors.
+
+    ``mirror:`` reaches a Workspace from configuration alone, and it is what
+    tells health where a mirrored object's load state is recorded.
+    """
+
+    path = directory / "workspace-config.yml"
+    path.write_text(
+        "\n".join(
+            (
+                f"workspace: {run.workspace.workspace}",
+                f"catalogue: Warehouse/{run.catalogue_name}",
+                f"mirror: Warehouse/{run.source_catalogue_name}",
+            )
+        ),
+        encoding="utf-8",
+    )
+    return path
 
 
 def _sql(session, workspace, name: str):
@@ -261,7 +292,7 @@ def _observe(run) -> Estate:
             )
         },
         loadable={
-            node.load_name: node.is_loadable
+            node.load_name: node.can_load
             for node in dag.nodes
             if str(node.item) == ITEM and node.load_name
         },
@@ -495,3 +526,23 @@ def test_materialising_one_object_leaves_the_source_untouched(journey):
     assert journey["build the changed declaration"].observation.source_rows == [
         (SENTINEL[0], CHANGED)
     ]
+
+
+# --- health over the mirror ---------------------------------------------------
+
+
+@weaver_test(remote=True)
+def test_health_reads_the_mirror_and_calls_the_build_green(journey):
+    """Registry says Table, ``_.Mirror`` says View, and the Warehouse holds one.
+
+    Without ``_.Mirror`` the inventory check expects a Table at each borrowed
+    address and reports every one of them missing.
+    """
+
+    journey.require("report health over the mirror")
+    report = journey["report health over the mirror"].result
+
+    assert [
+        (finding.code, finding.object_id) for finding in report.build.findings
+    ] == []
+    assert report.build.status == "green"

@@ -343,8 +343,8 @@ def test_the_installed_graph_reads_a_borrowed_node_as_a_view_it_may_not_load(tmp
     assert borrowed.is_installed and borrowed.is_mirrored
     assert borrowed.effective_object_type == "view"
     assert borrowed.physical.object_type == "view"
-    assert not borrowed.is_loadable
+    assert not borrowed.can_load
 
     assert not local.is_mirrored
     assert local.effective_object_type == "table"
-    assert local.is_loadable
+    assert local.can_load
