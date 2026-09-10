@@ -1329,7 +1329,7 @@ MIRROR = RuntimeTable(
     name="Mirror",
     description=(
         "Installed objects whose data is supplied by another physical target. "
-        "One row per borrowed object, written when a mirror is created and "
+        "One row per mirrored object, written when a mirror is created and "
         "removed when the object is built locally. Registry says what the "
         "object is; this says where its rows come from and what stands at its "
         "address."
@@ -1365,9 +1365,9 @@ MIRROR = RuntimeTable(
             not_null=True,
             vocabulary=OBJECT_TYPE_VOCABULARY,
             description=(
-                "What physically stands at this object's address while it is "
-                "borrowed: a View over the source relation in a Warehouse, a "
-                "Table or Folder shortcut in a Lakehouse."
+                "What physically stands at this object's address while it "
+                "mirrors that source: a View over the source relation in a "
+                "Warehouse, a Table or Folder shortcut in a Lakehouse."
             ),
         ),
     ),

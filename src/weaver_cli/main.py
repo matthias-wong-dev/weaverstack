@@ -1853,12 +1853,15 @@ def handle_mirror(args: argparse.Namespace) -> int:
         print(f"  {table}: {rows}")
     print(f"  ({', '.join(result.uncopied)} start empty)")
     for item in result.items:
-        borrowed = result.borrowed[item]
-        print(
-            f"{item} borrows {borrowed['relations']} relation(s) from "
-            f"{borrowed['source']}, with {borrowed['programmables']} "
-            "procedure(s) of its own."
+        mirrored = result.mirrored[item]
+        # What a mirror makes depends on the item's kind, so the counts are
+        # printed as the result reports them rather than named here.
+        made = ", ".join(
+            f"{count} {what}"
+            for what, count in sorted(mirrored.items())
+            if isinstance(count, int)
         )
+        print(f"{item} mirrors {mirrored['source']} into {mirrored['target']}: {made}.")
     return 0
 
 

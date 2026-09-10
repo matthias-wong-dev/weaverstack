@@ -43,7 +43,7 @@ class MirrorPlan:
 
 @dataclass(frozen=True)
 class MirrorItem:
-    """One selected item, with the target it borrows from and the one it fills."""
+    """One selected item, with the target it mirrors and the one it fills."""
 
     item: object
     source_target: str
@@ -118,7 +118,8 @@ class MirrorResult:
     #: Catalogue tables the fork rebuilt and left empty, being history.
     uncopied: tuple[str, ...] = ()
     items: tuple[str, ...] = ()
-    borrowed: Mapping[str, Mapping] = field(default_factory=dict)
+    #: What each rebound item now mirrors, by item.
+    mirrored: Mapping[str, Mapping] = field(default_factory=dict)
     status: str = "succeeded"
 
     @property
@@ -134,7 +135,7 @@ class MirrorResult:
             "copied": dict(self.copied),
             "uncopied": list(self.uncopied),
             "items": list(self.items),
-            "borrowed": {item: dict(each) for item, each in self.borrowed.items()},
+            "mirrored": {item: dict(each) for item, each in self.mirrored.items()},
             "status": self.status,
         }
 
@@ -283,7 +284,7 @@ def mirror(
         copied=copied,
         uncopied=uncopied_table_names(),
         items=tuple(sorted(mirrored)),
-        borrowed=mirrored,
+        mirrored=mirrored,
     )
 
 
@@ -487,40 +488,51 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
     """Refuse a plan that contradicts itself.
 
     Naming a destination says its contents are disposable, so nothing here asks
-    what is in one. What it asks is whether the plan is coherent: a Warehouse
-    this run reads may not also be one it empties, and two items may not share
-    a destination, the second wipe taking the first mirror.
+    what is in one. What it asks is whether the plan is coherent: every output
+    is emptied and rebuilt on its own, so two of them at one address would leave
+    the second overwriting the first, and none of them may be something the run
+    reads.
     """
 
     # Keyed on kind and name, which is a physical item's identity: a Lakehouse
-    # and a Warehouse may share a display name.
-    emptied = {
-        (CATALOGUE_KIND, resolved.destination.name.casefold()): resolved.plan.target
-    }
-    for each in resolved.items:
-        emptied.setdefault((each.kind, each.destination.casefold()), each.target)
+    # and a Warehouse may share a display name. The destination catalogue is an
+    # output like any other, and an item rebuilt over it would take the rows
+    # this run has just copied in.
+    emptied: dict[tuple[str, str], str] = {}
+    whose: dict[tuple[str, str], str] = {}
+    for kind, name, label, claimant in (
+        (
+            CATALOGUE_KIND,
+            resolved.destination.name,
+            resolved.plan.target,
+            "the destination catalogue",
+        ),
+        *(
+            (each.kind, each.destination, each.target, str(each.item))
+            for each in resolved.items
+        ),
+    ):
+        key = (kind, name.casefold())
+        if key in emptied:
+            raise CommandError(
+                f"mirror would empty {label} for both {whose[key]} and "
+                f"{claimant}. Each is rebuilt on its own, so give each a "
+                "destination of its own."
+            )
+        emptied[key] = label
+        whose[key] = claimant
 
     read = {(CATALOGUE_KIND, resolved.source.name.casefold()): str(resolved.source)}
     for each in resolved.items:
         read.setdefault((each.kind, each.source_target.casefold()), each.source)
 
     collision = sorted(set(read) & set(emptied))
-
     if collision:
         raise CommandError(
             "mirror reads and empties "
             + ", ".join(emptied[name] for name in collision)
             + " in the same run. Name a destination this run does not read from."
         )
-
-    seen: dict[tuple[str, str], MirrorItem] = {}
-    for each in resolved.items:
-        first = seen.setdefault((each.kind, each.destination.casefold()), each)
-        if first is not each:
-            raise CommandError(
-                f"mirror would empty {each.target} for both {first.item} and "
-                f"{each.item}. Give each item a destination of its own."
-            )
 
 
 # --- doing it -----------------------------------------------------------------
@@ -653,7 +665,7 @@ def _wipe_target(workspace: Workspace, each: MirrorItem, *, session) -> str:
 
 
 def _mirror_item(workspace: Workspace, each: MirrorItem, *, session) -> dict:
-    """Point one item at another target's data, however its kind borrows."""
+    """Point one item at another target's data, however its kind mirrors."""
 
     from ..declaration.model import LAKEHOUSE
 
@@ -671,7 +683,7 @@ def _mirror_warehouse_item(workspace: Workspace, each: MirrorItem, *, session) -
     sql = session.sql_executor(
         WarehouseTarget(ItemRef(each.destination)), workspace=workspace
     )
-    with session.step(f"Borrow {each.item} from {each.source_target}"):
+    with session.step(f"Mirror {each.item} from {each.source}"):
         for statement in borrow_statements(
             each.relations,
             source_target=each.source_target,
@@ -685,8 +697,8 @@ def _mirror_warehouse_item(workspace: Workspace, each: MirrorItem, *, session) -
     # was rather than bound to a half-built mirror.
     _switch_installation(workspace, each, session=session)
     return {
-        "source": each.source_target,
-        "target": each.destination,
+        "source": each.source,
+        "target": each.target,
         "relations": len(each.relations),
         "programmables": code,
     }
@@ -714,7 +726,7 @@ def _mirror_lakehouse_item(workspace: Workspace, each: MirrorItem, *, session) -
         workspace, each, session=session
     )
     if shortcuts:
-        with session.step(f"Borrow {len(shortcuts)} object(s) from {each.source}"):
+        with session.step(f"Mirror {len(shortcuts)} object(s) from {each.source}"):
             resolver.create_onelake_shortcuts(ItemRef(each.destination), shortcuts)
         with session.step("Wait for the shortcuts to become readable"):
             # The build's own readiness rule: a table shortcut is not finished
@@ -747,8 +759,8 @@ def _mirror_lakehouse_item(workspace: Workspace, each: MirrorItem, *, session) -
     _record_borrowed(workspace, each, session=session)
     _switch_installation(workspace, each, session=session)
     return {
-        "source": each.source_target,
-        "target": each.destination,
+        "source": each.source,
+        "target": each.target,
         "relations": len(each.relations),
         "shortcuts": len(shortcuts),
         "views": len(wrapped),
@@ -923,7 +935,7 @@ def _record_borrowed(workspace: Workspace, each: MirrorItem, *, session) -> None
     sql = session.sql_executor(
         WarehouseTarget(workspace.catalogue_item), workspace=workspace
     )
-    with session.step("Record what is borrowed"):
+    with session.step("Record the mirror source"):
         for statement in statements:
             sql.execute(statement)
 

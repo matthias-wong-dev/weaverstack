@@ -875,18 +875,18 @@ the fork records centrally and is unaffected, but `exec [_].[Load]` typed inside
 kept item reaches the source catalogue. An item is only fully the fork's once it
 has been built into a target of its own.
 
-## Borrowed data
+## Mirroring an item
 
 A fork branches the state. Each item then diverges however it needs to, and
 there are two ways.
 
 ```bash
 weaver build  --item Warehouse/Model=Warehouse/Model_Dev   # rebuild it there
-weaver mirror --item Warehouse/Model=Warehouse/Model_Dev   # borrow its rows
+weaver mirror --item Warehouse/Model=Warehouse/Model_Dev   # read the source's rows
 ```
 
 A build materialises everything locally. A mirror empties the destination and
-borrows the source's data, in whatever form its kind borrows:
+points it at the source, in whatever form its kind mirrors:
 
 | source object | in a mirrored Warehouse | in a mirrored Lakehouse |
 |---|---|---|
@@ -903,7 +903,7 @@ A mirrored Lakehouse gets the standard `_` surface a built one gets, from the
 same `standard_surface_references` declaration, pointed at this catalogue. The
 copied `Files/_/Load` code runs inside it and reads Weaver state through that
 surface, so a mirrored item is operationally an ordinary one whose data happens
-to be borrowed.
+to come from somewhere else.
 
 A Lakehouse mirror stands on the same shortcut-readiness rule an ordinary build
 uses: a table shortcut is not finished until its Spark relation and its Delta

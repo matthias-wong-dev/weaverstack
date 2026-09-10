@@ -77,7 +77,7 @@ def _wired(monkeypatch, *, order=None, items=()):
     def mirror(items=None, **kwargs):
         steps.append("mirror")
         calls["mirrored"] = kwargs
-        return _result()
+        return calls.get("result") or _result()
 
     monkeypatch.setattr("weaver.plan_mirror", plan_mirror)
     monkeypatch.setattr("weaver.check_mirror", check_mirror)
@@ -331,6 +331,48 @@ def test_an_authorised_fork_reports_what_moved(monkeypatch, capsys):
     assert "Forked Warehouse/Weaver into Warehouse/Weaver_Dev" in printed
     assert "Registry: 11" in printed
     assert "Log, LoadStatistic" in printed
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    "made",
+    [
+        {
+            "source": "Warehouse/Model",
+            "target": "Warehouse/Model_Dev",
+            "relations": 5,
+            "programmables": 3,
+        },
+        {
+            "source": "Lakehouse/Input",
+            "target": "Lakehouse/Input_Dev",
+            "relations": 6,
+            "shortcuts": 4,
+            "views": 2,
+            "files": 11,
+        },
+    ],
+    ids=["warehouse", "lakehouse"],
+)
+def test_a_rebound_item_is_reported_whatever_its_kind_made(monkeypatch, capsys, made):
+    """What a mirror makes differs by kind, so the report reads the result."""
+
+    calls = _wired(monkeypatch)
+    calls["result"] = MirrorResult(
+        workspace="Analytics",
+        source_catalogue="Warehouse/Weaver",
+        destination_catalogue="Warehouse/Weaver_Dev",
+        wiped=("Warehouse/Weaver_Dev", made["target"]),
+        items=("Item",),
+        mirrored={"Item": made},
+    )
+
+    assert main(["mirror", "--no-item", "--yes", "--workspace", "Analytics"]) == 0
+
+    printed = capsys.readouterr().out
+    assert f"Item mirrors {made['source']} into {made['target']}" in printed
+    assert f"{made['relations']} relations" in printed
+    assert "borrow" not in printed.casefold()
 
 
 @weaver_test()

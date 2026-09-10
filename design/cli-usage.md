@@ -958,7 +958,7 @@ destination.
 
 `--item` selects logical items to rebind, in the grammar build uses
 (`Warehouse/Model` or `Warehouse/Model=Warehouse/Model_Dev`); omitting it selects
-every configured target. A selected item is emptied and given borrowed data:
+every configured target. A selected item is emptied and pointed at the source:
 Views over the source's relations for a Warehouse, OneLake shortcuts and Spark
 wrapper views for a Lakehouse. Its rows stay where they were. Code is local, so
 a Warehouse gets the source's procedures and functions and a Lakehouse gets a

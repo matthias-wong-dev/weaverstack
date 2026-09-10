@@ -19,15 +19,6 @@ from dataclasses import dataclass, replace
 import pytest
 from support.acceptance import Acceptance
 from support.build_envs import WAREHOUSE_ESTATE_FIXTURE
-from support.mirror_journey import (
-    BUILD_SOURCE,
-    CHANGE,
-    CHANGED_BUILD,
-    MIRROR,
-    MIRROR_AGAIN,
-    UNCHANGED_BUILD,
-    VALIDATE,
-)
 from support.weaver_test import register_session, weaver_test
 
 import weaver
@@ -117,7 +108,7 @@ def journey(
     into_mirror = [f"{ITEM}=Warehouse/{run.target_name}"]
 
     run.step(
-        BUILD_SOURCE,
+        "build the source",
         lambda: _built(
             weaver.build(
                 str(estate.path),
@@ -128,7 +119,7 @@ def journey(
     )
     run.step("seed the source", lambda: _seed(run.source_sql))
     mirrored = run.step(
-        MIRROR,
+        "mirror",
         lambda: weaver.mirror(
             into_mirror,
             session=warehouse_session,
@@ -139,7 +130,7 @@ def journey(
     )
     mirrored.observation = _observe(run)
     again = run.step(
-        MIRROR_AGAIN,
+        "mirror again",
         lambda: weaver.mirror(
             into_mirror,
             session=warehouse_session,
@@ -151,7 +142,7 @@ def journey(
     again.observation = _observe(run)
     run.step("read a source change through the mirror", lambda: _read_through(run))
     run.step(
-        VALIDATE,
+        "validate the mirror",
         lambda: weaver.test(
             [ITEM],
             session=warehouse_session,
@@ -160,7 +151,7 @@ def journey(
         ),
     )
     rebuilt = run.step(
-        UNCHANGED_BUILD,
+        "build with nothing changed",
         lambda: _built(
             weaver.build(
                 str(estate.path),
@@ -171,9 +162,9 @@ def journey(
         ),
     )
     rebuilt.observation = _observe(run)
-    run.step(CHANGE, lambda: _change(estate))
+    run.step("change one declaration", lambda: _change(estate))
     materialised = run.step(
-        CHANGED_BUILD,
+        "build the changed declaration",
         lambda: _built(
             weaver.build(
                 str(estate.path),
@@ -304,8 +295,8 @@ def _relations(estate: Estate) -> dict[str, str]:
 def test_every_data_relation_becomes_a_view(journey):
     """A table and a view at the source both read the same way through one."""
 
-    journey.require(MIRROR)
-    relations = _relations(journey[MIRROR].observation)
+    journey.require("mirror")
+    relations = _relations(journey["mirror"].observation)
 
     assert relations["Wh.Product"] == "V"
     assert relations["Wh.Customer"] == "V"
@@ -327,8 +318,8 @@ def test_the_rows_stay_where_they_were(journey):
 
 @weaver_test(remote=True)
 def test_the_catalogue_records_what_is_borrowed(journey):
-    journey.require(MIRROR)
-    observed = journey[MIRROR].observation
+    journey.require("mirror")
+    observed = journey["mirror"].observation
 
     assert set(observed.borrowed) == {
         "Wh.Customer",
@@ -345,8 +336,8 @@ def test_the_catalogue_records_what_is_borrowed(journey):
 def test_the_catalogues_own_tables_are_never_borrowed(journey):
     """``_`` is Weaver's own state, so the target gets real views over it."""
 
-    journey.require(MIRROR)
-    observed = journey[MIRROR].observation
+    journey.require("mirror")
+    observed = journey["mirror"].observation
 
     assert not [name for name in observed.borrowed if name.startswith("_.")]
     assert f"{CATALOGUE_SCHEMA}.Installation" in observed.objects
@@ -357,8 +348,8 @@ def test_the_catalogues_own_tables_are_never_borrowed(journey):
 def test_the_item_is_bound_to_its_new_target(journey):
     """Installation moves last, once the Views and the procedures are there."""
 
-    journey.require(MIRROR)
-    installed = journey[MIRROR].observation.installed
+    journey.require("mirror")
+    installed = journey["mirror"].observation.installed
 
     assert installed["Reporting"] == journey.target_name
     assert installed["_weaver"] != journey.target_name
@@ -368,10 +359,10 @@ def test_the_item_is_bound_to_its_new_target(journey):
 def test_the_mirrored_warehouse_holds_the_code_its_registry_certifies(journey):
     """Data borrowed, code local: the procedures came across with the mirror."""
 
-    journey.require(MIRROR)
+    journey.require("mirror")
     procedures = {
         name
-        for name, kind in journey[MIRROR].observation.objects.items()
+        for name, kind in journey["mirror"].observation.objects.items()
         if kind == "P"
     }
 
@@ -383,8 +374,8 @@ def test_the_mirrored_warehouse_holds_the_code_its_registry_certifies(journey):
 def test_the_mirrored_warehouse_runs_its_installed_validations(journey):
     """``weaver test`` dispatches a procedure by name, and it is there."""
 
-    journey.require(VALIDATE)
-    report = journey[VALIDATE].result
+    journey.require("validate the mirror")
+    report = journey["validate the mirror"].result
 
     assert report.nodes, "dispatch reached no validation"
     assert {node.status for node in report.nodes} == {"passed"}
@@ -394,26 +385,27 @@ def test_the_mirrored_warehouse_runs_its_installed_validations(journey):
 def test_the_result_names_every_warehouse_it_emptied(journey):
     """What the confirmation showed and what the run did are one list."""
 
-    journey.require(MIRROR)
-    result = journey[MIRROR].result
+    journey.require("mirror")
+    result = journey["mirror"].result
 
     assert result.wiped == (
         f"Warehouse/{journey.catalogue_name}",
         f"Warehouse/{journey.target_name}",
     )
     assert result.items == (ITEM,)
-    assert result.borrowed[ITEM]["source"] == journey.source_name
-    assert result.borrowed[ITEM]["relations"] == 5
-    assert result.borrowed[ITEM]["programmables"] > 0
+    assert result.mirrored[ITEM]["source"] == f"Warehouse/{journey.source_name}"
+    assert result.mirrored[ITEM]["target"] == f"Warehouse/{journey.target_name}"
+    assert result.mirrored[ITEM]["relations"] == 5
+    assert result.mirrored[ITEM]["programmables"] > 0
 
 
 @weaver_test(remote=True)
 def test_mirroring_again_leaves_the_same_estate(journey):
     """A mirror is reconstruction, so a half-finished one is rerun, not repaired."""
 
-    journey.require(MIRROR_AGAIN)
-    first = journey[MIRROR].observation
-    second = journey[MIRROR_AGAIN].observation
+    journey.require("mirror again")
+    first = journey["mirror"].observation
+    second = journey["mirror again"].observation
 
     assert _relations(second) == _relations(first)
     assert second.borrowed == first.borrowed
@@ -424,9 +416,9 @@ def test_mirroring_again_leaves_the_same_estate(journey):
 
 @weaver_test(remote=True)
 def test_an_unchanged_build_leaves_every_relation_borrowed(journey):
-    journey.require(UNCHANGED_BUILD)
-    before = journey[MIRROR].observation
-    after = journey[UNCHANGED_BUILD].observation
+    journey.require("build with nothing changed")
+    before = journey["mirror"].observation
+    after = journey["build with nothing changed"].observation
 
     assert _relations(after) == _relations(before)
     assert after.borrowed == before.borrowed
@@ -436,9 +428,11 @@ def test_an_unchanged_build_leaves_every_relation_borrowed(journey):
 def test_an_unchanged_build_leaves_the_source_rows_alone(journey):
     """The rows are the source's, and a build over the mirror is not a load."""
 
-    journey.require(UNCHANGED_BUILD)
+    journey.require("build with nothing changed")
 
-    assert journey[UNCHANGED_BUILD].observation.source_rows == [(SENTINEL[0], CHANGED)]
+    assert journey["build with nothing changed"].observation.source_rows == [
+        (SENTINEL[0], CHANGED)
+    ]
 
 
 # --- one changed declaration --------------------------------------------------
@@ -448,16 +442,16 @@ def test_an_unchanged_build_leaves_the_source_rows_alone(journey):
 def test_the_changed_object_becomes_a_local_table(journey):
     """The View is dropped and the object is built where it now belongs."""
 
-    journey.require(CHANGED_BUILD)
-    relations = _relations(journey[CHANGED_BUILD].observation)
+    journey.require("build the changed declaration")
+    relations = _relations(journey["build the changed declaration"].observation)
 
     assert relations[MATERIALISED] == "U"
 
 
 @weaver_test(remote=True)
 def test_everything_unchanged_is_still_a_view(journey):
-    journey.require(CHANGED_BUILD)
-    relations = _relations(journey[CHANGED_BUILD].observation)
+    journey.require("build the changed declaration")
+    relations = _relations(journey["build the changed declaration"].observation)
 
     assert {name: kind for name, kind in relations.items() if name != MATERIALISED} == {
         "Wh.Customer": "V",
@@ -469,8 +463,8 @@ def test_everything_unchanged_is_still_a_view(journey):
 
 @weaver_test(remote=True)
 def test_only_the_materialised_object_stops_being_borrowed(journey):
-    journey.require(CHANGED_BUILD)
-    observed = journey[CHANGED_BUILD].observation
+    journey.require("build the changed declaration")
+    observed = journey["build the changed declaration"].observation
 
     assert MATERIALISED not in observed.borrowed
     assert set(observed.borrowed) == {
@@ -485,8 +479,8 @@ def test_only_the_materialised_object_stops_being_borrowed(journey):
 def test_the_materialised_object_is_the_only_loadable_one(journey):
     """It holds its own rows now, so Weaver may write them."""
 
-    journey.require(CHANGED_BUILD)
-    loadable = journey[CHANGED_BUILD].observation.loadable
+    journey.require("build the changed declaration")
+    loadable = journey["build the changed declaration"].observation.loadable
 
     assert loadable[MATERIALISED] is True
     assert not [name for name, yes in loadable.items() if yes and name != MATERIALISED]
@@ -496,6 +490,8 @@ def test_the_materialised_object_is_the_only_loadable_one(journey):
 def test_materialising_one_object_leaves_the_source_untouched(journey):
     """The drop reached a View in the mirror, and never the source's table."""
 
-    journey.require(CHANGED_BUILD)
+    journey.require("build the changed declaration")
 
-    assert journey[CHANGED_BUILD].observation.source_rows == [(SENTINEL[0], CHANGED)]
+    assert journey["build the changed declaration"].observation.source_rows == [
+        (SENTINEL[0], CHANGED)
+    ]

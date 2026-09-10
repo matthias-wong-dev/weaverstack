@@ -500,6 +500,32 @@ def test_two_items_sharing_one_destination_are_refused(monkeypatch):
 
 
 @weaver_test()
+def test_an_item_rebuilt_over_the_destination_catalogue_is_refused(monkeypatch):
+    """The catalogue is an output too, and it is rebuilt before the items are.
+
+    An item emptying it afterwards would take the state this run has just
+    copied in, and then write its own Mirror and Installation rows into what it
+    destroyed.
+    """
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model=Warehouse/Weaver_Dev"])
+
+    with pytest.raises(CommandError, match="a destination of its own"):
+        resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
+
+
+@weaver_test()
+def test_a_lakehouse_may_be_named_for_the_destination_catalogues_name(monkeypatch):
+    """Two kinds, two items: only a Warehouse holds the catalogue."""
+
+    plan = _plan(monkeypatch, _with_targets(), ["Lakehouse/Input=Lakehouse/Weaver_Dev"])
+
+    resolved = resolve_mirror(plan, _installed({"Lakehouse/Input": "Input"}))
+
+    assert resolved.wiped == ("Warehouse/Weaver_Dev", "Lakehouse/Weaver_Dev")
+
+
+@weaver_test()
 def test_a_destination_another_item_occupies_is_emptied_like_any_other(monkeypatch):
     """Naming a Warehouse is saying its contents are disposable."""
 

@@ -22,15 +22,6 @@ from typing import Any
 import pytest
 from support.acceptance import Acceptance
 from support.build_envs import LAKEHOUSE_JOURNEY_FIXTURE
-from support.mirror_journey import (
-    BUILD_SOURCE,
-    CHANGE,
-    CHANGED_BUILD,
-    MIRROR,
-    MIRROR_AGAIN,
-    UNCHANGED_BUILD,
-    VALIDATE,
-)
 from support.weaver_test import register_session, weaver_test
 
 import weaver
@@ -99,7 +90,7 @@ def journey(
     into_mirror = [f"{ITEM}=Lakehouse/{run.target_name}"]
 
     run.step(
-        BUILD_SOURCE,
+        "build the source",
         lambda: _built(
             weaver.build(
                 str(estate.path),
@@ -109,12 +100,14 @@ def journey(
         ),
     )
     run.step("load the source", lambda: weaver.load([ITEM], session=weaver_session))
-    mirrored = run.step(MIRROR, lambda: _mirror(run, into_mirror, fabric_catalogue))
+    mirrored = run.step("mirror", lambda: _mirror(run, into_mirror, fabric_catalogue))
     mirrored.observation = _observe(run)
-    again = run.step(MIRROR_AGAIN, lambda: _mirror(run, into_mirror, fabric_catalogue))
+    again = run.step(
+        "mirror again", lambda: _mirror(run, into_mirror, fabric_catalogue)
+    )
     again.observation = _observe(run)
     run.step(
-        VALIDATE,
+        "validate the mirror",
         lambda: weaver.test(
             [ITEM],
             session=weaver_session,
@@ -122,7 +115,7 @@ def journey(
         ),
     )
     rebuilt = run.step(
-        UNCHANGED_BUILD,
+        "build with nothing changed",
         lambda: _built(
             weaver.build(
                 str(estate.path),
@@ -133,9 +126,9 @@ def journey(
         ),
     )
     rebuilt.observation = _observe(run)
-    run.step(CHANGE, lambda: _change(estate))
+    run.step("change one declaration", lambda: _change(estate))
     materialised = run.step(
-        CHANGED_BUILD,
+        "build the changed declaration",
         lambda: _built(
             weaver.build(
                 str(estate.path),
@@ -244,8 +237,8 @@ def _observe(run) -> Estate:
 def test_every_table_and_folder_becomes_a_shortcut(journey):
     """Storage is borrowed, so nothing was copied into the destination."""
 
-    journey.require(MIRROR)
-    held = journey[MIRROR].observation.shortcuts
+    journey.require("mirror")
+    held = journey["mirror"].observation.shortcuts
 
     for qualified in POINTED_AT:
         assert qualified in held
@@ -255,8 +248,8 @@ def test_every_table_and_folder_becomes_a_shortcut(journey):
 def test_a_view_is_not_pointed_at_with_a_shortcut(journey):
     """A shortcut addresses storage, and a view is a definition."""
 
-    journey.require(MIRROR)
-    held = journey[MIRROR].observation.shortcuts
+    journey.require("mirror")
+    held = journey["mirror"].observation.shortcuts
 
     for qualified in WRAPPED:
         schema, _, name = qualified.partition(".")
@@ -267,8 +260,8 @@ def test_a_view_is_not_pointed_at_with_a_shortcut(journey):
 def test_the_standard_surface_is_there(journey):
     """A mirrored Lakehouse presents what a built one presents."""
 
-    journey.require(MIRROR)
-    held = journey[MIRROR].observation.shortcuts
+    journey.require("mirror")
+    held = journey["mirror"].observation.shortcuts
 
     for table in STANDARD_SURFACE_TABLES:
         assert f"Tables/{CATALOGUE_SCHEMA}/{table.name}" in held
@@ -278,7 +271,7 @@ def test_the_standard_surface_is_there(journey):
 def test_a_borrowed_table_reads_the_sources_rows(journey):
     """Zero copy: the rows are the source's, read through the shortcut."""
 
-    journey.require(MIRROR)
+    journey.require("mirror")
     resolver = journey.session.resolver(journey.workspace)
     destination = resolver.spark_destination(ItemRef(journey.target_name))
 
@@ -286,14 +279,14 @@ def test_a_borrowed_table_reads_the_sources_rows(journey):
         journey, f"SELECT count(*) as n FROM {destination.qualify('DWG', 'Customer')}"
     )
 
-    assert int(seen[0]["n"]) == journey[MIRROR].observation.source_rows
+    assert int(seen[0]["n"]) == journey["mirror"].observation.source_rows
 
 
 @weaver_test(remote=True, resources={"livy"})
 def test_a_wrapper_view_reads_through_to_the_sources_view(journey):
     """A persistent view over another Lakehouse's view, after its session went."""
 
-    journey.require(MIRROR)
+    journey.require("mirror")
     resolver = journey.session.resolver(journey.workspace)
     destination = resolver.spark_destination(ItemRef(journey.target_name))
 
@@ -306,7 +299,7 @@ def test_a_wrapper_view_reads_through_to_the_sources_view(journey):
 def test_the_deployed_load_tree_is_copied_byte_for_byte(journey):
     """The data is borrowed and the code is local, so a run has its modules."""
 
-    journey.require(MIRROR)
+    journey.require("mirror")
     resolver = journey.session.resolver(journey.workspace)
     store = journey.session.store(journey.workspace)
     held = {}
@@ -331,8 +324,8 @@ def test_the_deployed_load_tree_is_copied_byte_for_byte(journey):
 def test_the_catalogue_records_what_stands_at_each_address(journey):
     """``_.Mirror`` says Table, Folder or View, being what is physically there."""
 
-    journey.require(MIRROR)
-    borrowed = journey[MIRROR].observation.borrowed
+    journey.require("mirror")
+    borrowed = journey["mirror"].observation.borrowed
 
     assert borrowed["Tables/DWG.Customer"] == "Table"
     assert borrowed["Files/Raw.CustomerCsv"] == "Folder"
@@ -341,17 +334,17 @@ def test_the_catalogue_records_what_stands_at_each_address(journey):
 
 @weaver_test(remote=True)
 def test_the_item_is_bound_to_its_new_target(journey):
-    journey.require(MIRROR)
+    journey.require("mirror")
 
-    assert journey[MIRROR].observation.installed["Sales"] == journey.target_name
+    assert journey["mirror"].observation.installed["Sales"] == journey.target_name
 
 
 @weaver_test(remote=True)
 def test_no_borrowed_node_is_loadable(journey):
     """The rows belong to the target each node borrows from."""
 
-    journey.require(MIRROR)
-    loadable = journey[MIRROR].observation.loadable
+    journey.require("mirror")
+    loadable = journey["mirror"].observation.loadable
 
     assert loadable, "the mirror recorded nothing"
     assert not any(loadable.values())
@@ -365,20 +358,20 @@ def test_the_mirrored_lakehouse_runs_its_installed_validations(journey):
     validation says they compose.
     """
 
-    journey.require(VALIDATE)
-    report = journey[VALIDATE].result
+    journey.require("validate the mirror")
+    report = journey["validate the mirror"].result
 
     assert report.nodes, "dispatch reached no validation"
-    assert {node.status for node in report.nodes} <= {"passed", "failed"}
+    assert {node.status for node in report.nodes} == {"passed"}
 
 
 @weaver_test(remote=True)
 def test_mirroring_again_leaves_the_same_estate(journey):
     """A mirror is reconstruction, so a half-finished one is rerun, not repaired."""
 
-    journey.require(MIRROR_AGAIN)
-    first = journey[MIRROR].observation
-    second = journey[MIRROR_AGAIN].observation
+    journey.require("mirror again")
+    first = journey["mirror"].observation
+    second = journey["mirror again"].observation
 
     assert second.shortcuts == first.shortcuts
     assert second.borrowed == first.borrowed
@@ -390,9 +383,9 @@ def test_mirroring_again_leaves_the_same_estate(journey):
 
 @weaver_test(remote=True)
 def test_an_unchanged_build_leaves_every_relation_borrowed(journey):
-    journey.require(UNCHANGED_BUILD)
-    before = journey[MIRROR].observation
-    after = journey[UNCHANGED_BUILD].observation
+    journey.require("build with nothing changed")
+    before = journey["mirror"].observation
+    after = journey["build with nothing changed"].observation
 
     assert after.shortcuts == before.shortcuts
     assert after.borrowed == before.borrowed
@@ -402,10 +395,10 @@ def test_an_unchanged_build_leaves_every_relation_borrowed(journey):
 def test_an_unchanged_build_leaves_the_source_rows_alone(journey):
     """The rows are the source's, and a build over the mirror is not a load."""
 
-    journey.require(UNCHANGED_BUILD)
+    journey.require("build with nothing changed")
 
-    assert journey[UNCHANGED_BUILD].observation.source_rows == (
-        journey[MIRROR].observation.source_rows
+    assert journey["build with nothing changed"].observation.source_rows == (
+        journey["mirror"].observation.source_rows
     )
 
 
@@ -416,28 +409,28 @@ def test_an_unchanged_build_leaves_the_source_rows_alone(journey):
 def test_the_changed_object_stops_being_a_shortcut(journey):
     """The borrowed pointer came off through the shortcut API."""
 
-    journey.require(CHANGED_BUILD)
+    journey.require("build the changed declaration")
     schema, _, name = MATERIALISED.partition(".")
-    held = journey[CHANGED_BUILD].observation.shortcuts
+    held = journey["build the changed declaration"].observation.shortcuts
 
     assert f"Tables/{schema}/{name}" not in held
-    assert f"Tables/{schema}/{name}" in journey[MIRROR].observation.shortcuts
+    assert f"Tables/{schema}/{name}" in journey["mirror"].observation.shortcuts
 
 
 @weaver_test(remote=True)
 def test_the_changed_object_is_a_local_relation(journey):
     """Its name was released, and an owned table took it."""
 
-    journey.require(CHANGED_BUILD)
+    journey.require("build the changed declaration")
     _schema, _, name = MATERIALISED.partition(".")
 
-    assert name in journey[CHANGED_BUILD].observation.relations
+    assert name in journey["build the changed declaration"].observation.relations
 
 
 @weaver_test(remote=True)
 def test_everything_unchanged_is_still_borrowed(journey):
-    journey.require(CHANGED_BUILD)
-    held = journey[CHANGED_BUILD].observation.shortcuts
+    journey.require("build the changed declaration")
+    held = journey["build the changed declaration"].observation.shortcuts
 
     for qualified in POINTED_AT:
         assert qualified in held
@@ -445,8 +438,8 @@ def test_everything_unchanged_is_still_borrowed(journey):
 
 @weaver_test(remote=True)
 def test_only_the_materialised_object_stops_being_borrowed(journey):
-    journey.require(CHANGED_BUILD)
-    borrowed = journey[CHANGED_BUILD].observation.borrowed
+    journey.require("build the changed declaration")
+    borrowed = journey["build the changed declaration"].observation.borrowed
 
     assert f"Tables/{MATERIALISED}" not in borrowed
     assert "Tables/DWG.Customer" in borrowed
@@ -457,8 +450,8 @@ def test_only_the_materialised_object_stops_being_borrowed(journey):
 def test_the_materialised_object_is_the_only_loadable_one(journey):
     """It holds its own rows now, so Weaver may write them."""
 
-    journey.require(CHANGED_BUILD)
-    loadable = journey[CHANGED_BUILD].observation.loadable
+    journey.require("build the changed declaration")
+    loadable = journey["build the changed declaration"].observation.loadable
 
     assert loadable[MATERIALISED] is True
     assert not [name for name, yes in loadable.items() if yes and name != MATERIALISED]
@@ -468,9 +461,9 @@ def test_the_materialised_object_is_the_only_loadable_one(journey):
 def test_materialising_one_object_leaves_the_source_untouched(journey):
     """The drop reached a shortcut, and never the storage it pointed at."""
 
-    journey.require(CHANGED_BUILD)
+    journey.require("build the changed declaration")
 
-    assert journey[CHANGED_BUILD].observation.source_rows == (
-        journey[MIRROR].observation.source_rows
+    assert journey["build the changed declaration"].observation.source_rows == (
+        journey["mirror"].observation.source_rows
     )
-    assert journey[MIRROR].observation.source_rows > 0
+    assert journey["mirror"].observation.source_rows > 0
