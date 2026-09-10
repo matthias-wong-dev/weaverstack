@@ -488,10 +488,9 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
     """Refuse a plan that contradicts itself.
 
     Naming a destination says its contents are disposable, so nothing here asks
-    what is in one. What it asks is whether the plan is coherent: every output
-    is emptied and rebuilt on its own, so two of them at one address would leave
-    the second overwriting the first, and none of them may be something the run
-    reads.
+    what is in one. What it asks is whether the plan is coherent. Every output
+    is emptied and rebuilt on its own, so each needs a physical identity of its
+    own, and none of them may be something the run reads.
     """
 
     # Keyed on kind and name, which is a physical item's identity: a Lakehouse
