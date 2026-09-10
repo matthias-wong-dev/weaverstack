@@ -978,18 +978,23 @@ A misspelled `--mirror` or an item the catalogue never installed fails while
 every Warehouse is intact. Naming a Warehouse as a destination says its
 contents are disposable, so the only refusals left are a plan that contradicts
 itself: a Warehouse the run both reads and empties, and two items sharing one
-destination. The question names each Warehouse it will empty:
+destination. The question is one list, each destination first and what fills it
+second, the catalogue leading:
 
 ```text
-Mirror will empty:
+Mirror on Analytics
 
-  Warehouse/DEV_Catalogue
-  Warehouse/Sales_Dev
+  Warehouse/DEV_Catalogue  <- Warehouse/Catalogue
+  Warehouse/Sales_Dev      <- Warehouse/Sales
 
-Warehouse/DEV_Catalogue will be emptied and rebuilt from Warehouse/Catalogue.
-Warehouse/Sales will be mirrored into Warehouse/Sales_Dev.
+These targets will be emptied. Continue? This cannot be undone [y/N]
+```
 
-Continue? This cannot be undone [y/N]
+A completed run names the targets it filled, as `build` and `load` name theirs.
+Per-table row counts and per-item object counts are in `--json`:
+
+```text
+mirror succeeded: Warehouse/DEV_Catalogue, Warehouse/Sales_Dev
 ```
 
 `--no-item` forks the catalogue and stops. That fork plus an ordinary build is

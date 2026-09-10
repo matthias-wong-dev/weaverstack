@@ -1830,7 +1830,7 @@ def handle_mirror(args: argparse.Namespace) -> int:
         resolved = weaver.check_mirror(plan, session=opened)
 
         if not _authorised(args):
-            print(f"mirror on {plan.workspace.workspace}\n\n{resolved.describe()}\n")
+            print(f"Mirror on {plan.workspace.workspace}\n\n{resolved.describe()}\n")
             emptied = ", ".join(resolved.wiped)
             if not sys.stdin.isatty():
                 print(
@@ -1838,7 +1838,10 @@ def handle_mirror(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            answer = input("Continue? This cannot be undone [y/N] ")
+            answer = input(
+                "These targets will be emptied. Continue? "
+                "This cannot be undone [y/N] "
+            )
             if answer.strip().lower() not in {"y", "yes"}:
                 print("Cancelled.")
                 return 1
@@ -1848,20 +1851,9 @@ def handle_mirror(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
         return 0
-    print(f"Forked {result.source_catalogue} into {result.destination_catalogue}.")
-    for table, rows in result.copied.items():
-        print(f"  {table}: {rows}")
-    print(f"  ({', '.join(result.uncopied)} start empty)")
-    for item in result.items:
-        mirrored = result.mirrored[item]
-        # What a mirror makes depends on the item's kind, so the counts are
-        # printed as the result reports them rather than named here.
-        made = ", ".join(
-            f"{count} {what}"
-            for what, count in sorted(mirrored.items())
-            if isinstance(count, int)
-        )
-        print(f"{item} mirrors {mirrored['source']} into {mirrored['target']}: {made}.")
+    # The targets, as build and load report theirs. Per-table row counts and
+    # per-item object counts are in --json.
+    print(f"mirror {result.status}: {', '.join(result.wiped)}")
     return 0
 
 

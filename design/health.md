@@ -52,7 +52,7 @@ rather than reconstructing them. See
 [Code architecture](code-architecture.md#one-graph-implementation-three-topologies).
 
 ```text
-Load subjects    every node holding rows, its own or a mirror's
+Load subjects    every node holding rows, its own or a mirror's, Views apart
 Test subjects    dag.validations()
 Build subjects   every node
 ```
@@ -78,9 +78,18 @@ is about observation, and a mirrored object answers `True`: its source's load
 is what its rows are. A View answers `True` there and is still not a subject.
 
 `weaver load --stale` selects from `can_load`. Health assesses from
-`is_load_subject`, which is `can_load` or mirrored. That is the whole of the
-divergence: a mirrored table whose source failed is reported here and never run
-here, and a local descendant of it is selected in the ordinary way.
+`is_load_subject`, which is `can_load` or mirrored, with a View taken back out.
+That is the whole of the divergence: a mirrored table whose source failed is
+reported here and never run here, and a local descendant of it is selected in
+the ordinary way.
+
+A mirrored View is where the two lists come apart:
+
+```text
+local Table or Folder      load subject, lifecycle state its own
+mirrored Table or Folder   load subject, lifecycle state the source's
+View, mirrored or not      not a load subject, lifecycle state still ordered
+```
 
 ---
 

@@ -13,12 +13,14 @@ See ``design/catalogue.md``.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Sequence
 
 from ..declaration.model import WAREHOUSE
 from .builtin import BUILTIN_ITEM
 from .tables import (
     AUDIT_COLUMN_NAMES,
+    BUILD_DATETIME,
     CATALOGUE_SCHEMA,
     CATALOGUE_TABLES,
     CURRENT_STATE_TABLES,
@@ -89,21 +91,43 @@ def _definition(table, name: str) -> str:
     return column.warehouse_type + (" not null" if column.not_null else "")
 
 
-def copy_statement(table, *, source_catalogue: str) -> str:
+def copy_statement(table, *, source_catalogue: str, published: datetime) -> str:
     """Copy one table's rows from ``source_catalogue`` into this one.
 
     Columns are named rather than starred, so the statement says which value
     lands where and does not depend on two catalogues declaring their columns in
     one order.
+
+    ``published`` is written over any ``build_datetime`` the source held, being
+    the instant this fork installs the destination at.
     """
 
     columns = ", ".join(identifier(name) for name in table.public_columns)
+    values = ", ".join(
+        _copied_value(table, name, published=published)
+        for name in table.physical_columns
+    )
     return (
         f"insert into {local_relation(table)} ({columns})\n"
-        f"select {columns}\n"
+        f"select {values}\n"
         f"  from {source_relation(source_catalogue, table)}\n"
         f" where {_excluding_builtin(table)};"
     )
+
+
+def _copied_value(table, name: str, *, published: datetime) -> str:
+    """One column of the copy: the source's value, or the fork's own instant.
+
+    A build datetime is one catalogue's own publication clock, and
+    :func:`weaver.build_bundle.incremental.stale_through_shortcuts` compares two
+    of that catalogue's rows on it. The destination's ``Warehouse/_weaver`` rows
+    are the build this fork has just run and are the only rows a fork leaves,
+    so one instant here puts both sides of a ``_`` surface chain on one clock.
+    """
+
+    if name == BUILD_DATETIME:
+        return literal(published)
+    return identifier(table.public_name_of(name))
 
 
 def _excluding_builtin(table) -> str:
@@ -122,21 +146,26 @@ def _excluding_builtin(table) -> str:
 
 
 def fork_statements(
-    *, source_catalogue: str, borrowed: bool = False
+    *, source_catalogue: str, published: datetime, borrowed: bool = False
 ) -> tuple[str, ...]:
     """Every statement that copies one catalogue's state into this one.
 
-    ``borrowed`` says the source holds a ``_.Mirror``. Set, the destination is
-    given one and its rows come across.
+    ``published`` is the instant every copied row is dated to, being when this
+    fork installs the destination. ``borrowed`` says the source holds a
+    ``_.Mirror``. Set, the destination is given one and its rows come across.
     """
 
     statements = [
-        copy_statement(table, source_catalogue=source_catalogue)
+        copy_statement(table, source_catalogue=source_catalogue, published=published)
         for table in FORKED_TABLES
     ]
     if borrowed:
         statements.append(create_statement(MIRROR))
-        statements.append(copy_statement(MIRROR, source_catalogue=source_catalogue))
+        statements.append(
+            copy_statement(
+                MIRROR, source_catalogue=source_catalogue, published=published
+            )
+        )
     return tuple(statements)
 
 

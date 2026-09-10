@@ -66,6 +66,8 @@ from weaver.health import (
     TEST_STALE_DEPENDENCY,
     assess,
     assess_load,
+    is_load_subject,
+    participates_in_load_state,
     resolve_as_of,
     worst,
 )
@@ -1218,6 +1220,30 @@ def test_a_mirrored_object_cannot_be_loaded_here():
 
     assert not node.can_load
     assert node.is_mirrored
+
+
+@weaver_test()
+def test_a_mirrored_view_takes_part_in_lifecycle_and_is_not_a_load_subject():
+    """A build settles a View wherever it stands, and a mirror is no exception.
+
+    The two questions come apart here: the View's instant still orders a
+    descendant materialised from it, and no load is expected of it.
+    """
+
+    estate = (
+        _Estate()
+        .view(f"{REPORTING}/Sales.Live")
+        .mirrors(f"{REPORTING}/Sales.Live")
+    )
+    node = estate.catalogue().dag().node(document_id(f"{REPORTING}/Sales.Live"))
+
+    report = estate.report()
+
+    assert node.is_mirrored
+    assert participates_in_load_state(node)
+    assert not is_load_subject(node)
+    assert report.load.subjects == 0
+    assert report.load.status == GREEN
 
 
 @weaver_test()

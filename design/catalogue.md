@@ -852,6 +852,15 @@ published its own Installation, dictionary and Registry rows for
 and the source's are left behind: copied across, the forked catalogue would
 assert its own tables live in a catalogue it is not.
 
+**Every copied row is dated to the fork.** A `build_datetime` is one catalogue's
+own publication clock, and freshness compares two of that catalogue's rows on it
+(see [how does build work](how-does-build-work.md#7a-cross-item-freshness)). The
+destination's `Warehouse/_weaver` rows are the build the fork has just run, and
+they are the only rows a fork does not copy. The copy therefore writes one
+instant over the `build_datetime` of every row it moves, being when the
+destination's objects were published, which puts both sides of a `_` surface
+chain on one clock.
+
 **Installation is copied as it stands.** A forked catalogue names the source's
 physical targets, so every item begins where it already is. One
 

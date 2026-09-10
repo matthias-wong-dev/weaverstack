@@ -38,6 +38,35 @@ CHANGED = "Changed"
 #: The object whose declaration changes, and the one every later claim watches.
 MATERIALISED = "Wh.Product"
 
+#: The object whose query reads the ``_`` surface, which puts it downstream of
+#: ``Warehouse/_weaver`` in the dependency graph. A fork dates its rows to
+#: itself and the destination catalogue's rows to the build that made it, so a
+#: chain through the surface has to stay on one clock for this to stay
+#: borrowed through an unchanged build.
+SURFACE_READER = "Wh.CustomerDelta"
+
+SURFACE_READER_SOURCE = f"""/*
+Table ID: {SURFACE_READER}
+
+Description: Customers read through this table's own bookmark.
+
+Lineage: $Wh.Customer
+
+Primary key: CustomerId
+*/
+declare @bookmark datetime2(6) = (
+    select b.[Bookmark datetime]
+      from [_].[Bookmark] as b
+     where b.[Item name] = 'Reporting'
+       and b.[Schema name] = 'Wh'
+       and b.[Object name] = 'CustomerDelta'
+);
+
+select c.CustomerId, c.CustomerName
+from [Wh].[Customer] as c
+where @bookmark is null or c.CustomerId > 0;
+"""
+
 #: The validation the mirrored Warehouse runs. Both sides read borrowed Views.
 VALIDATION = "Rpt.CustomerOrdersReconcile"
 
@@ -95,6 +124,7 @@ def journey(
     register_session(warehouse_session)
     estate = WAREHOUSE_ESTATE_FIXTURE.disposable(tmp_path_factory.mktemp("mirror"))
     _write(estate, f"{ITEM}/tests/{VALIDATION}.sql", VALIDATION_SOURCE)
+    _write(estate, f"{ITEM}/{SURFACE_READER}.sql", SURFACE_READER_SOURCE)
 
     run = Acceptance(name="warehouse-mirror")
     run.source_name = session_disposable_warehouse.item.name
@@ -354,6 +384,7 @@ def test_the_catalogue_records_what_is_borrowed(journey):
 
     assert set(observed.borrowed) == {
         "Wh.Customer",
+        "Wh.CustomerDelta",
         "Wh.CustomerDim",
         "Wh.CustomerOrder",
         "Wh.Product",
@@ -426,7 +457,7 @@ def test_the_result_names_every_warehouse_it_emptied(journey):
     assert result.items == (ITEM,)
     assert result.mirrored[ITEM]["source"] == f"Warehouse/{journey.source_name}"
     assert result.mirrored[ITEM]["target"] == f"Warehouse/{journey.target_name}"
-    assert result.mirrored[ITEM]["relations"] == 5
+    assert result.mirrored[ITEM]["relations"] == 6
     assert result.mirrored[ITEM]["programmables"] > 0
 
 
@@ -453,6 +484,24 @@ def test_an_unchanged_build_leaves_every_relation_borrowed(journey):
 
     assert _relations(after) == _relations(before)
     assert after.borrowed == before.borrowed
+
+
+@weaver_test(remote=True)
+def test_an_unchanged_build_leaves_a_surface_reader_borrowed(journey):
+    """The chain through the ``_`` surface, which is where two clocks met.
+
+    ``Wh.CustomerDelta`` reads ``[_].[Bookmark]``, so the graph puts it under
+    the surface view over ``Warehouse/_weaver``. A fork dates every row it
+    copies to itself and the destination catalogue's rows are the build that
+    made it, so the pointer and its reader compare on one clock and nothing on
+    the chain is behind.
+    """
+
+    journey.require("build with nothing changed")
+    after = journey["build with nothing changed"].observation
+
+    assert after.borrowed[SURFACE_READER] == "View"
+    assert _relations(after)[SURFACE_READER] == "V"
 
 
 @weaver_test(remote=True)
@@ -486,6 +535,7 @@ def test_everything_unchanged_is_still_a_view(journey):
 
     assert {name: kind for name, kind in relations.items() if name != MATERIALISED} == {
         "Wh.Customer": "V",
+        "Wh.CustomerDelta": "V",
         "Wh.CustomerDim": "V",
         "Wh.CustomerOrder": "V",
         "Rpt.CustomerSummary": "V",
@@ -500,6 +550,7 @@ def test_only_the_materialised_object_stops_being_borrowed(journey):
     assert MATERIALISED not in observed.borrowed
     assert set(observed.borrowed) == {
         "Wh.Customer",
+        "Wh.CustomerDelta",
         "Wh.CustomerDim",
         "Wh.CustomerOrder",
         "Rpt.CustomerSummary",

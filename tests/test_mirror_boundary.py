@@ -310,9 +310,7 @@ def test_a_configured_target_is_selected_when_no_item_is_named(monkeypatch):
 def test_a_plan_says_what_a_confirmation_has_to_show(monkeypatch):
     plan = _plan(monkeypatch, _workspace())
 
-    assert plan.describe() == (
-        "Warehouse/Weaver_Dev will be emptied and rebuilt from Warehouse/Weaver."
-    )
+    assert plan.mapping == ("Warehouse/Weaver_Dev", "Warehouse/Weaver")
     # Both sides are in this workspace, so neither repeats its name.
     assert str(plan) == "Warehouse/Weaver into Warehouse/Weaver_Dev"
 
@@ -411,11 +409,12 @@ def test_the_scope_names_the_catalogue_and_every_item_target(monkeypatch):
     resolved = resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
 
     assert resolved.wiped == ("Warehouse/Weaver_Dev", "Warehouse/Model_Dev")
-    described = resolved.describe()
-    assert "  Warehouse/Weaver_Dev\n  Warehouse/Model_Dev" in described
-    assert plan.describe() in described
-    # The physical Warehouse the rows come from, which is what is read.
-    assert "Warehouse/Model will be mirrored into Warehouse/Model_Dev." in described
+    # One list, the destination catalogue first, and the source of each row
+    # second. The item's source is the physical Warehouse its rows come from.
+    assert resolved.describe() == (
+        "  Warehouse/Weaver_Dev  <- Warehouse/Weaver\n"
+        "  Warehouse/Model_Dev   <- Warehouse/Model"
+    )
 
 
 @weaver_test()

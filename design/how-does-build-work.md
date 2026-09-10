@@ -508,6 +508,12 @@ The set that stops being certified is what the build **rebuilds**, not what it
 drops. A pointer is refreshed over its own address without being dropped, and it
 is decertified with everything else, which is what re-dates its row.
 
+**One catalogue, one clock.** The comparison holds between rows one estate's own
+builds wrote. `weaver mirror` copies another catalogue's rows in, and the
+destination's `Warehouse/_weaver` rows are its own build, so the fork writes its
+own instant over every `build_datetime` it moves. See
+[the catalogue](catalogue.md#forking-a-catalogue).
+
 It is written as an `{{build_datetime}}` token resolved once per installation, not a
 literal frozen at generation time and not `current_timestamp()`. A literal would
 give the same repository different payload bytes every run and destroy bundle

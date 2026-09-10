@@ -809,11 +809,13 @@ def is_load_subject(node: InstalledNode) -> bool:
     """Whether Load health assesses this node.
 
     The objects that hold rows, whether those rows are their own or a mirror's.
-    A View is left out: a build settles it, and Build health is where its
-    installation is reported.
+    A View is left out, mirrored or not: a build settles it, and Build health is
+    where its installation is reported. It stays in
+    :func:`participates_in_load_state`, where its instant orders a materialised
+    descendant against it.
     """
 
-    return node.can_load or node.is_mirrored
+    return (node.can_load or node.is_mirrored) and not is_view_node(node)
 
 
 def is_view_node(node: InstalledNode) -> bool:

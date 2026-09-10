@@ -283,7 +283,7 @@ def test_a_fork_is_refused_without_confirmation(monkeypatch, capsys):
     printed = capsys.readouterr()
     assert "Refusing to empty Warehouse/Weaver_Dev" in printed.err
     # The pair it names is the resolved one, not a second answer to the question.
-    assert calls["plan"].describe() in printed.out
+    assert "  Warehouse/Weaver_Dev  <- Warehouse/Weaver" in printed.out
 
 
 @weaver_test()
@@ -311,16 +311,35 @@ def test_the_question_names_every_warehouse_the_run_empties(monkeypatch, capsys)
     )
 
     printed = capsys.readouterr().out
-    assert "  Warehouse/Weaver_Dev\n  Warehouse/Sales_Dev" in printed
+    # One list, target first, the catalogue leading, and each row spelled the
+    # same way.
     assert (
-        "Warehouse/Weaver_Dev will be emptied and rebuilt from Warehouse/Weaver."
+        "  Warehouse/Weaver_Dev  <- Warehouse/Weaver\n"
+        "  Warehouse/Sales_Dev   <- Warehouse/Sales\n"
     ) in printed
-    assert "Warehouse/Sales will be mirrored into Warehouse/Sales_Dev." in printed
+    assert "will be emptied and rebuilt" not in printed
+    assert "will be mirrored into" not in printed
 
 
 @weaver_test()
-def test_an_authorised_fork_reports_what_moved(monkeypatch, capsys):
+def test_an_authorised_fork_reports_the_targets_it_filled(monkeypatch, capsys):
+    """As dense as ``build`` and ``load``: the status and what it wrote.
+
+    A catalogue table's row count and an item's object counts are debugging
+    detail, and ``--json`` is where they are.
+    """
+
     calls = _wired(monkeypatch)
+    calls["result"] = MirrorResult(
+        workspace="Analytics",
+        source_catalogue="Warehouse/Weaver",
+        destination_catalogue="Warehouse/Weaver_Dev",
+        wiped=("Warehouse/Weaver_Dev", "Lakehouse/Input_Dev"),
+        copied={"Installation": 2, "Registry": 11},
+        uncopied=("Log", "LoadStatistic"),
+        items=("Lakehouse/Input",),
+        mirrored={"Lakehouse/Input": {"relations": 6, "files": 11}},
+    )
 
     assert main(["mirror", "--no-item", "--yes", "--workspace", "Analytics"]) == 0
 
@@ -328,9 +347,9 @@ def test_an_authorised_fork_reports_what_moved(monkeypatch, capsys):
     # The CLI hands the operation a Session rather than a resolved Workspace.
     assert passed["session"].workspace is calls["plan"].workspace
     printed = capsys.readouterr().out
-    assert "Forked Warehouse/Weaver into Warehouse/Weaver_Dev" in printed
-    assert "Registry: 11" in printed
-    assert "Log, LoadStatistic" in printed
+    assert printed == (
+        "mirror succeeded: Warehouse/Weaver_Dev, Lakehouse/Input_Dev\n"
+    )
 
 
 @weaver_test()
@@ -354,8 +373,10 @@ def test_an_authorised_fork_reports_what_moved(monkeypatch, capsys):
     ],
     ids=["warehouse", "lakehouse"],
 )
-def test_a_rebound_item_is_reported_whatever_its_kind_made(monkeypatch, capsys, made):
-    """What a mirror makes differs by kind, so the report reads the result."""
+def test_json_carries_what_a_kind_made(monkeypatch, capsys, made):
+    """What a mirror makes differs by kind, so the payload reads the result."""
+
+    import json
 
     calls = _wired(monkeypatch)
     calls["result"] = MirrorResult(
@@ -367,12 +388,13 @@ def test_a_rebound_item_is_reported_whatever_its_kind_made(monkeypatch, capsys, 
         mirrored={"Item": made},
     )
 
-    assert main(["mirror", "--no-item", "--yes", "--workspace", "Analytics"]) == 0
+    argv = ["mirror", "--no-item", "--yes", "--json", "--workspace", "Analytics"]
 
-    printed = capsys.readouterr().out
-    assert f"Item mirrors {made['source']} into {made['target']}" in printed
-    assert f"{made['relations']} relations" in printed
-    assert "borrow" not in printed.casefold()
+    assert main(argv) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["mirrored"]["Item"] == made
+    assert "borrow" not in json.dumps(payload).casefold()
 
 
 @weaver_test()

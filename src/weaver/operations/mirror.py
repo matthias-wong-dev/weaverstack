@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -18,6 +19,11 @@ from ..errors import CommandError
 from ..locations import Location
 from ..workspaces import CATALOGUE_KIND, CatalogueRef, Workspace
 from .workspace import operation_workspace
+
+#: What separates a destination from the target it reads, in a described run.
+#: ASCII, because a Windows console runs on the system codepage and a described
+#: run is the last thing printed before a destination is emptied.
+MIRRORS = "<-"
 
 
 @dataclass(frozen=True)
@@ -34,8 +40,11 @@ class MirrorPlan:
     def target(self) -> str:
         return f"{CATALOGUE_KIND}/{self.destination.name}"
 
-    def describe(self) -> str:
-        return f"{self.target} will be emptied and rebuilt from {self.source}."
+    @property
+    def mapping(self) -> tuple[str, str]:
+        """The catalogue this fork writes, and the one it reads."""
+
+        return self.target, str(self.source)
 
     def __str__(self) -> str:
         return f"{self.source} into {self.destination}"
@@ -65,8 +74,11 @@ class MirrorItem:
     def source(self) -> str:
         return f"{self.kind}/{self.source_target}"
 
-    def describe(self) -> str:
-        return f"{self.source} will be mirrored into {self.target}."
+    @property
+    def mapping(self) -> tuple[str, str]:
+        """The target this item is mirrored into, and the one it reads."""
+
+        return self.target, self.source
 
 
 @dataclass(frozen=True)
@@ -91,16 +103,29 @@ class ResolvedMirror:
         return self.plan.destination
 
     @property
+    def mappings(self) -> tuple[tuple[str, str], ...]:
+        """Each target this run empties and what fills it, target first.
+
+        The destination catalogue leads, being the first target emptied and the
+        one the items are rebound through.
+        """
+
+        return (self.plan.mapping, *(item.mapping for item in self.items))
+
+    @property
     def wiped(self) -> tuple[str, ...]:
         """Every physical target this run empties, in the order it empties them."""
 
-        return (self.plan.target, *(item.target for item in self.items))
+        return tuple(target for target, _source in self.mappings)
 
     def describe(self) -> str:
-        emptied = "\n".join(f"  {target}" for target in self.wiped)
-        lines = [f"Mirror will empty:\n\n{emptied}\n", self.plan.describe()]
-        lines.extend(item.describe() for item in self.items)
-        return "\n".join(lines)
+        """One row per target this run empties, and what it will read."""
+
+        width = max(len(target) for target, _source in self.mappings)
+        return "\n".join(
+            f"  {target.ljust(width)}  {MIRRORS} {source}"
+            for target, source in self.mappings
+        )
 
     def __str__(self) -> str:
         return str(self.plan)
@@ -621,9 +646,18 @@ def _copy_catalogue_state(
     from ..targets import WarehouseTarget
 
     sql = session.sql_executor(WarehouseTarget(destination.item), workspace=workspace)
+    # One instant for the whole fork: this is when the destination's objects are
+    # published, and every copied row carries it.
+    published = datetime.now(timezone.utc).replace(tzinfo=None)
     with session.step(f"Copy catalogue state from {source}"):
         sql.execute_script(
-            "\n".join(fork_statements(source_catalogue=source.name, borrowed=borrowed))
+            "\n".join(
+                fork_statements(
+                    source_catalogue=source.name,
+                    published=published,
+                    borrowed=borrowed,
+                )
+            )
         )
     with session.step("Count what was copied"):
         rows = sql.query(_count_statement(borrowed=borrowed))
