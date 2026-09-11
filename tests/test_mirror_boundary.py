@@ -536,6 +536,20 @@ def test_an_item_the_catalogue_never_installed_is_refused(monkeypatch):
 
 
 @weaver_test()
+def test_one_logical_item_named_twice_is_refused(monkeypatch):
+    """The run is keyed on the logical name, so one name carries one destination."""
+
+    plan = _plan(
+        monkeypatch,
+        _with_targets(),
+        ["Warehouse/Model=Warehouse/A", "Warehouse/Model=Warehouse/B"],
+    )
+
+    with pytest.raises(CommandError, match="Warehouse/Model twice"):
+        resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
+
+
+@weaver_test()
 def test_mirroring_an_item_onto_the_warehouse_it_borrows_from_is_refused(monkeypatch):
     """A named destination is emptied, and this one holds the rows being read."""
 

@@ -543,7 +543,27 @@ def _resolved_items(plan: MirrorPlan, catalogue) -> tuple[MirrorItem, ...]:
                 ),
             )
         )
+    _refuse_repeated_items(resolved)
     return _in_producer_order(resolved, recorded)
+
+
+def _refuse_repeated_items(items: Sequence[MirrorItem]) -> None:
+    """Refuse naming one logical item more than once.
+
+    Everything past this point is keyed on the logical name, so one name
+    carries one destination.
+    """
+
+    seen: dict[str, MirrorItem] = {}
+    for each in items:
+        name = str(each.item)
+        first = seen.get(name)
+        if first is not None:
+            raise CommandError(
+                f"mirror was given {name} twice, for {first.target} and "
+                f"{each.target}. Name each item once."
+            )
+        seen[name] = each
 
 
 def _in_producer_order(items, shortcuts) -> tuple[MirrorItem, ...]:
