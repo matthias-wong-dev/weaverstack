@@ -209,7 +209,7 @@ def test_an_estate_wipe_states_the_catalogue_is_removed_with_it(monkeypatch, cap
     monkeypatch.setattr("weaver.wipe", wipe)
     assert main(["wipe", "--workspace", "/tmp/local", "--yes"]) == 0
     out = capsys.readouterr().out
-    assert "Warehouse/Control: removed 1" in out
+    assert "Warehouse/Control: wiped" in out
     assert "catalogue: removed with the estate" in out
 
 

@@ -1728,9 +1728,14 @@ def _ago(at, now) -> str:
 
 
 def _wipe_plan_line(report) -> str:
-    """One compact line for a target in a wipe summary."""
+    """One line for a target in a wipe summary, without a pseudo-count.
 
-    return f"  {report.target}: removed {report.count}"
+    A Warehouse report's one entry is ``all user-created SQL objects``, so a
+    count would say ``removed 1`` about an estate. What a target was, not how
+    many entries its report has.
+    """
+
+    return f"  {report.target}: wiped"
 
 
 def handle_wipe(args: argparse.Namespace) -> int:

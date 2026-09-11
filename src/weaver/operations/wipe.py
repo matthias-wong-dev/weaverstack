@@ -154,11 +154,23 @@ def wipe(
         # resolves decides what an untargeted wipe means.
         needs_catalogue=False,
     )
-    if not parsed:
-        parsed = _estate_targets(resolved_workspace, session=session)
+    from ..catalogue.connection import catalogue_connection
     from ..sessions.host import use_or_create_session
 
+    if not parsed and not resolved_workspace.catalogue:
+        raise CommandError(
+            "Wiping a whole estate needs a Weaver catalogue: pass "
+            "catalogue='Warehouse/Weaver', or give one in workspace "
+            "configuration."
+        )
+    # One Session for the whole run: the estate read that decides the scope and
+    # the removals that act on it cross the same way.
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
+        if not parsed:
+            parsed = _estate_targets(
+                resolved_workspace,
+                catalogue=catalogue_connection(opened, resolved_workspace),
+            )
         # Named for what it is. A dry run reads the estate and decides, which
         # takes real time and is worth seeing; what it must not do is present
         # itself as the removal.
@@ -230,17 +242,24 @@ def _catalogue_role(
     return "preserved"
 
 
-def _estate_targets(workspace: Workspace, *, session=None) -> tuple[WipeTarget, ...]:
+def _estate_targets(
+    workspace: Workspace, *, session=None, catalogue=None
+) -> tuple[WipeTarget, ...]:
     """The estate one catalogue holds, catalogue first.
 
     The Installation rows say what is bound; the catalogue Warehouse itself
-    completes the estate, and its removal takes its claims with it.
+    completes the estate, and its removal takes its claims with it. Weaver's
+    identity model only writes Lakehouse and Warehouse item types, so any other
+    kind in an Installation row is corruption and is refused; a valid
+    installation of another kind cannot arise to be skipped.
+
+    ``catalogue`` is an existing connection, which a wipe supplies from the
+    session it already holds; without one the connection is opened here.
     """
 
     from ..catalogue.connection import catalogue_connection
     from ..catalogue.reader import read_table
     from ..catalogue.tables import INSTALLATION
-    from ..sessions.host import use_or_create_session
 
     if not workspace.catalogue:
         raise CommandError(
@@ -248,9 +267,9 @@ def _estate_targets(workspace: Workspace, *, session=None) -> tuple[WipeTarget, 
             "catalogue='Warehouse/Weaver', or give one in workspace "
             "configuration."
         )
-    with use_or_create_session(session, workspace=workspace) as opened:
-        connection = catalogue_connection(opened, workspace)
-        rows = read_table(connection, INSTALLATION)
+    if catalogue is None:
+        catalogue = catalogue_connection(session, workspace)
+    rows = read_table(catalogue, INSTALLATION)
 
     kind, _, name = workspace.catalogue.partition("/")
     parsed = [WipeTarget(item_type=kind, item=ItemRef(name))]

@@ -341,7 +341,7 @@ def test_an_untargeted_wipe_uses_the_estate_the_catalogue_holds(monkeypatch):
     monkeypatch.setattr(
         operations,
         "_estate_targets",
-        lambda workspace, session=None: (
+        lambda workspace, catalogue=None: (
             WipeTarget.parse("Warehouse/Control"),
             WipeTarget.parse("Lakehouse/Sales"),
         ),
