@@ -10,6 +10,7 @@ from weaver.errors import CommandError, WeaverError
 from weaver.sessions.requirements import union
 
 from .commandline import command_words
+from .interaction import authorised, can_prompt, confirm, non_interactive
 
 #: Default workflow file in the current directory.
 DEFAULT_FILE = "workflow.yml"
@@ -95,18 +96,22 @@ def run_workflow(args: argparse.Namespace, *, parser_factory=None, stdin=None) -
     # sequence for confirmation. A malformed workspace configuration is a fact
     # about the invocation, and it is reported here.
     parsed_commands = [_parse(parser, entry) for entry in entries]
+    # The outer interaction policy is the whole invocation's, so it reaches
+    # every nested command before one of them opens a sign-in or a prompt.
+    for parsed in parsed_commands:
+        parsed.non_interactive = non_interactive(args)
     workspace = _workflow_workspace(args, parsed_commands)
 
     _show(args.name, path, entries)
-    if not getattr(args, "yes", False):
+    if not authorised(args):
         stream = stdin or sys.stdin
-        if not _interactive(stream):
+        if not can_prompt(args, stream):
             print(
                 "A workflow asks before it runs. Pass --yes to run it unattended.",
                 file=sys.stderr,
             )
             return 1
-        if not _confirmed(stream):
+        if not confirm(args, "Execute this sequence? [y/N] ", stream=stream):
             print("Workflow cancelled.")
             return 0
 
@@ -200,23 +205,6 @@ def _show(name: str, path: Path, entries: list[str]) -> None:
     for number, entry in enumerate(entries, start=1):
         print(f"{number}. {entry}")
     print()
-
-
-def _interactive(stdin) -> bool:
-    """Return whether the input stream supports confirmation."""
-
-    try:
-        return bool(stdin.isatty())
-    except (AttributeError, ValueError):
-        return False
-
-
-def _confirmed(stdin) -> bool:
-    """Read an explicit yes confirmation from the given stream."""
-
-    print("Execute this sequence? [y/N] ", end="", flush=True)
-    answer = stdin.readline()
-    return answer.strip().lower() in {"y", "yes"}
 
 
 def _execute(entries, parsed_commands, *, session) -> int:

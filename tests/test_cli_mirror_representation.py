@@ -196,9 +196,9 @@ def test_the_source_is_proved_before_the_question_is_asked(monkeypatch, capsys):
     monkeypatch.setattr(cli, "_resolve_workspace", lambda _args: _workspace())
     order: list[str] = []
     monkeypatch.setattr("weaver.plan_mirror", lambda *_a, **_k: _plan())
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(cli, "can_prompt", lambda *_a, **_k: True)
     monkeypatch.setattr(
-        "builtins.input", lambda _prompt: pytest.fail("the question was asked")
+        cli, "confirm", lambda *_a, **_k: pytest.fail("the question was asked")
     )
 
     def check(_plan, **_kwargs):
@@ -274,7 +274,7 @@ def test_a_fork_is_refused_without_confirmation(monkeypatch, capsys):
 
     cli = importlib.import_module("weaver_cli.main")
     _wired(monkeypatch)
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(cli, "can_prompt", lambda *_a, **_k: False)
     monkeypatch.setattr(
         "weaver.mirror", lambda *_a, **_k: pytest.fail("the fork ran unconfirmed")
     )
@@ -303,8 +303,8 @@ def test_the_question_names_every_warehouse_the_run_empties(monkeypatch, capsys)
             ),
         ),
     )
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+    monkeypatch.setattr(cli, "can_prompt", lambda *_a, **_k: True)
+    monkeypatch.setattr(cli, "confirm", lambda *_a, **_k: True)
 
     assert (
         main(["mirror", "--item", "Warehouse/Model", "--workspace", "Analytics"]) == 0

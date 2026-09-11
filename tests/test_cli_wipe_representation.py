@@ -157,8 +157,8 @@ def test_an_unauthorised_wipe_still_previews_before_it_asks(monkeypatch):
     cli = importlib.import_module("weaver_cli.main")
     workspace = given_workspace(catalogue="Warehouse/Control")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda _args: workspace)
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
-    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+    monkeypatch.setattr(cli, "can_prompt", lambda *_a, **_k: True)
+    monkeypatch.setattr(cli, "confirm", lambda *_a, **_k: True)
     calls = []
 
     def wipe(targets, **kwargs):

@@ -131,7 +131,7 @@ local definition again.
 For unattended setup:
 
 ```bash
-weaver initialise --workspace Analytics --project-folder ./Analytics --lakehouse Landing --warehouse Curated --example --no-input
+weaver initialise --workspace Analytics --project-folder ./Analytics --lakehouse Landing --warehouse Curated --example --non-interactive
 ```
 
 `--publish-environment` requests publication. `--dry-run` changes nothing.

@@ -9,6 +9,8 @@ from weaver.errors import CommandError
 from weaver.initialise import DEFAULT_CATALOGUE, DEFAULT_ENVIRONMENT
 from weaver.onboarding.project import ProjectRequest, validate_fabric_name
 
+from .interaction import can_prompt, non_interactive
+
 INTRODUCTION = "Set up a Weaver project."
 INSTALL_WARNING = "Publishing a Fabric Environment can take about 5 minutes."
 DISPLAY = {"existing": "already exists", "planned": "create"}
@@ -17,15 +19,24 @@ NAME_WIDTH = 19
 GAP = 2
 
 
-def _can_ask(stream):
-    return stream.isatty()
+def _asking(args, stream) -> bool:
+    """Whether this setup asks its questions.
+
+    ``--non-interactive`` asks nowhere. ``--interactive`` asks over a scripted
+    stream as well as a terminal, which is how a setup run from a script still
+    collects the optional names.
+    """
+
+    if non_interactive(args):
+        return False
+    return bool(args.interactive) or can_prompt(args, stream)
 
 
 def collect_workspace(args, *, ask=True, stdin=None):
     """Collect the workspace needed for item discovery."""
 
     stream = stdin if stdin is not None else sys.stdin
-    if args.workspace or not ask or not (args.interactive or _can_ask(stream)):
+    if args.workspace or not ask or not _asking(args, stream):
         return False
     print(INTRODUCTION)
     args.workspace = _answer(stream, "Fabric workspace")
@@ -44,7 +55,7 @@ def collect(
     """Collect names, allow revisions, and record publication preference."""
 
     stream = stdin if stdin is not None else sys.stdin
-    interactive = ask and (args.interactive or _can_ask(stream))
+    interactive = ask and _asking(args, stream)
     if not interactive:
         _validate(args)
         return False
@@ -191,7 +202,7 @@ def _read(stream, prompt):
     line = stream.readline()
     if line == "":
         raise CommandError(
-            "The answers ran out before the questions did. Provide the names and --no-input, or run at a terminal."
+            "The answers ran out before the questions did. Provide the names and --non-interactive, or run at a terminal."
         )
     return line.strip()
 
@@ -252,7 +263,7 @@ def equivalent_command(args):
         parts.append("--example")
     if getattr(args, "publish_environment", False):
         parts.append("--publish-environment")
-    parts.append("--no-input")
+    parts.append("--non-interactive")
     return shlex.join(parts)
 
 
