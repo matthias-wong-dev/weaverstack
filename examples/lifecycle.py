@@ -80,15 +80,15 @@ def main(argv: list[str] | None = None) -> int:
         environment=options.environment,
     ) as session:
         # Everything from empty, unless the caller asked to keep what is there.
-        # The catalogue Warehouse goes too: wipe skips the catalogue unbind
-        # entirely when the catalogue itself is going, because deleting rows
-        # from tables that are about to be removed is work nobody needs.
+        # The catalogue Warehouse goes too, last of all, and the build below
+        # bootstraps `_` again.
         if not options.keep:
             wiped = weaver.wipe(
                 [lakehouse, warehouse, options.catalogue],
                 session=session,
             )
-            print(f"wiped {wiped.count} object(s)")
+            for item in wiped.items:
+                print(f"  {item.describe()}")
 
         built = weaver.build(
             str(ESTATE),

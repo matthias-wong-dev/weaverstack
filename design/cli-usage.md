@@ -33,6 +33,43 @@ The choice belongs to the CLI. The importable core accepts a credential and
 installs none, and the Fabric test suite pins the Azure CLI explicitly, so an
 unattended run can never be sent to a browser.
 
+A service principal outranks both. Where `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`
+and either `AZURE_CLIENT_SECRET` or `AZURE_CLIENT_CERTIFICATE_PATH` name one, it
+is the front of the chain.
+
+`--non-interactive` takes the chain without browser sign-in: the service
+principal, then the Azure CLI. A command that reaches the end of it fails with
+what each credential reported.
+
+## Asking, and authorising
+
+Two options, two meanings.
+
+```text
+--non-interactive    never wait for a person
+--yes                authorise the destructive action
+```
+
+`--non-interactive` is the whole invocation's execution policy and every
+executable command accepts it. Under it a command reads no stdin, waits for no
+keypress, shows no retry prompt, asks no setup question and opens no browser
+sign-in. Absent it, a terminal on stdin is what makes an invocation
+interactive, and a pipe is not somebody to ask.
+
+`--yes` grants permission for an action that would otherwise be confirmed.
+Neither option implies the other, so an unattended destructive command carries
+both:
+
+```bash
+weaver wipe --workspace-config dev.yml --non-interactive           # exits 1
+weaver wipe --workspace-config dev.yml --non-interactive --yes     # runs
+```
+
+A workflow propagates `--non-interactive` into every command in its sequence,
+and its own `--yes` authorises each of them.
+
+`weaver session` is the interactive command and takes neither.
+
 ## Checking that Weaver can connect
 
 ```bash
@@ -149,9 +186,9 @@ weaver health
 ```
 
 `weaver workflow full` runs those four commands in one Session. `load-only` runs
-load, test and health; `build-only` builds; `wipe-all` wipes the physical targets
-declared in this project's workspace configuration with the usual destructive
-confirmation. `weaver wipe` with no targets has that same project scope.
+load, test and health; `build-only` builds; `wipe-all` empties the estate this
+project's catalogue records, with the usual destructive confirmation.
+`weaver wipe` with no targets has that same scope.
 
 In a Fabric notebook, pass an explicit filesystem destination, for example
 `Path("builtin") / "repository"`, to `weaver.initialise`. The notebook workspace
@@ -265,7 +302,7 @@ weaver session --workspace "Weaver Example" --environment weaver
 Weaver · Weaver Example
 Starting: Fabric credential
 
-Available: build, health, load, test, wipe, workflow.
+Available: mirror, build, load, test, wipe, workflow, health.
 Commands are written as they are in a terminal; the leading `weaver` is optional. `help` for options, `exit` to leave.
 
 weaver> wipe Lakehouse/Sales_Dev Warehouse/Reporting_Dev --yes
@@ -285,8 +322,10 @@ per command. The leading `weaver` is optional, so `build .` and
 `weaver build .` are the same command, and `weaver --help` and
 `weaver --version` answer here as they do in a terminal.
 
-**A session offers the workspace lifecycle**: `build`, `load`, `test`, `wipe`
-and `workflow`. `install` publishes Weaver into a Fabric Environment and
+**A session offers the workspace lifecycle**, in the order a workspace moves
+through it: `mirror`, `build`, `load`, `test`, `wipe`, `workflow` and `health`.
+The list is derived from the parser, so a command the session accepts appears in
+it. `install` publishes Weaver into a Fabric Environment and
 `weaver fabric` manages the estate underneath a workspace; both are run from a
 shell rather than from a prompt holding one workspace open.
 
@@ -465,25 +504,17 @@ names no Lakehouse declares no `livy` and starts no session.
 
 ## Wiping a whole estate
 
-Name the catalogue Warehouse alongside the destinations:
-
 ```bash
-weaver wipe Lakehouse/Sales Warehouse/Reporting Warehouse/Weaver --yes
+weaver wipe --workspace-config dev.yml --yes
 ```
 
-`wipe` removes the physical contents of what it is given, then deletes the
-catalogue claims of anything it emptied — unless the catalogue Warehouse is among
-them, in which case it skips that entirely, because the catalogue tables are
-going with it and deleting rows from a table about to be removed is work nobody
-needs.
+Naming no target is the whole recorded estate: the physical items the
+catalogue's `_.Installation` rows bind its items to, and the catalogue
+Warehouse last. That is the from-scratch loop, and the build after it
+bootstraps `_` again.
 
-That is worth knowing, because the catalogue tidy is not cheap: it deletes a row
-per claim, and for a from-scratch loop those are rows the next build rewrites
-immediately.
-
-So for a from-scratch loop, wipe the catalogue Warehouse too. Keep it out only
-when you mean to preserve the catalogue — decommissioning one target out of an
-estate that carries on.
+Keep the catalogue only when one target is being decommissioned out of an
+estate that carries on, which is what `--unbind` says. See [Wipe](#wipe).
 
 ## Workflow
 
@@ -523,6 +554,8 @@ whole sequence** — a `wipe` inside it does not stop to ask again, because havi
 agreed to four commands, being asked about the first of them is not a second
 safeguard. Without a terminal to ask, nothing runs unless `--yes` said so
 already; `--yes` carries the same authority to each command in the sequence.
+`--non-interactive` reaches each of them too, so a sequence run unattended has
+no prompt anywhere in it.
 
 **Entries are ordinary Weaver command lines**, read by the same function the
 session prompt reads a typed line with, parsed by the same parser and run by
@@ -625,8 +658,7 @@ physical half comes from:
 | load | item, positional, or every installed item | the catalogue's `_.Installation` |
 | test | item, positional, or every installed item | the catalogue's `_.Installation` |
 | health | item, `--item`, or the whole estate | the catalogue's `_.Installation` |
-| wipe | target, positional | the caller |
-| unbind | target, positional | the caller |
+| wipe | target, positional, or the whole estate | the caller, or the catalogue's `_.Installation` |
 | catalogue | Warehouse target | `--catalogue`, or workspace configuration |
 
 A build establishes the installation, so it is the one operation that names both
@@ -656,12 +688,18 @@ Because the item kinds are the catalogue's answer and are read after the command
 line, an unscoped run declares the superset of resources it may want: `auth`,
 `resolver`, `tds`, `onelake` and `livy`.
 
-`wipe` and `unbind` address a Fabric item whether or not an installation exists,
-so they name a target and have no item to resolve.
+`wipe` addresses a Fabric item whether or not an installation exists, so it
+names a target and has no item to resolve. Naming none is the one case where it
+reads the catalogue: the estate it empties is what `_.Installation` records.
+
+Because the item kinds of a discovered estate are the catalogue's answer, an
+unscoped wipe declares `auth`, `resolver`, `tds` and `onelake`. Never `livy`:
+emptying a Lakehouse removes directories and shortcut pointers and runs no
+Spark.
 
 Configuration may map two items to one target, which a constrained environment
 does. Only one of them is installed there at a time: a build into a target
-another item is installed to is refused, and `wipe` then `unbind` releases it.
+another item is installed to is refused, and `wipe --unbind` releases it.
 
 So one project, one set of logical names and one command sequence run against
 development and production, and the only thing that changes is the workspace
@@ -894,37 +932,100 @@ report.to_mapping()  # what --json prints
 
 ## Wipe
 
-Wipe clears everything in each named physical target. It needs no catalogue, and
-where one resolves it also removes that catalogue's claims for the wiped targets:
+Wipe empties physical Fabric items. It clears the contents of a Lakehouse or a
+Warehouse; the Fabric item itself stays.
+
+Two things are chosen separately: which physical items are emptied, and what
+happens to the Weaver catalogue.
 
 ```bash
-weaver wipe Lakehouse/Sales_Dev                       # physical only
-weaver wipe Lakehouse/Sales_Dev --catalogue Warehouse/Weaver
-weaver wipe Lakehouse/Sales_Dev --workspace-config dev.yml
+weaver wipe --workspace-config dev.yml            # the whole recorded estate
+weaver wipe --workspace Analytics --catalogue Warehouse/DevCatalogue
+weaver wipe Lakehouse/Landing Warehouse/Curated --workspace Analytics
+weaver wipe Lakehouse/Landing --unbind --workspace-config dev.yml
 ```
 
-The last two also remove the claims. Wiping the Warehouse the catalogue itself
-lives in skips that, because deleting rows from tables that are about to be
-removed is work nobody needs.
+**Naming targets selects exactly those items.** The selection is not expanded to
+every installation the catalogue holds.
 
-```bash
-weaver wipe \
-  Lakehouse/Sales_Dev \
-  Warehouse/Reporting_Dev \
-  --workspace-config examples/weaver_example.yml \
-  --dry-run
+**Naming none discovers the estate.** The catalogue's `_.Installation` rows say
+which physical items its logical items are bound to, and those are what a wipe
+empties. Workspace configuration declares what a build would install; the
+catalogue records what one did, and that is the estate.
+
+**A resolved catalogue is emptied too, last of all.** The catalogue is the index
+describing the estate, so it stays readable while the items it names go, and a
+wipe stopped part way runs again from the same index. `--catalogue` names the
+catalogue to read the estate from; it is not an instruction to keep it.
+
+**`--unbind` keeps the catalogue and cleans its claims.** It empties the named
+targets and deletes the catalogue rows for them, which is what decommissioning
+one target out of an estate that carries on means. It needs a catalogue and at
+least one named target, and the catalogue is not one of them.
+
+The preflight answers one question: is this the estate I mean to destroy.
+
+```text
+Wipe on Analytics
+
+Empty
+  Lakehouse/Landing_Dev
+  Warehouse/Curated_Dev
+  Warehouse/DevCatalogue  catalogue
+
+Catalogue
+  Warehouse/DevCatalogue  emptied last
 ```
 
-Lakehouse wipe clears its Files and Tables areas. Warehouse wipe removes all
-user-created object types covered by Weaver's Warehouse wipe implementation,
-not only objects previously registered by Weaver. Use `--yes` for unattended
-execution; otherwise a non-interactive process refuses the destructive action.
+```text
+Wipe on Analytics
 
-A Lakehouse's **shortcuts go first**, and they are reported as
-`shortcut:<path>/<name>` so a dry run distinguishes a pointer being taken away
-from a directory being deleted. Only the pointer goes: the data belongs to the
-item that produced it, and wiping one Lakehouse never reaches through a shortcut
-into another.
+Empty
+  Lakehouse/Landing_Dev
+
+Catalogue
+  Warehouse/DevCatalogue  preserved; claims for Lakehouse/Landing_Dev unbound
+```
+
+It names Fabric items and nothing inside them. Tables, views, schemas, shortcut
+paths, OneLake URLs and SQL object names are inventory, and inventory answers a
+different question. `--dry-run` prints the same plan and changes nothing.
+
+The plan shown is the plan executed. Nothing is discovered again after the
+question has been answered.
+
+The result is one line per physical Fabric item:
+
+```text
+Wipe complete
+
+  Lakehouse/Landing_Dev       emptied, 12 tables, 2 shortcuts
+  Warehouse/Curated_Dev       emptied
+  Warehouse/DevCatalogue      catalogue emptied
+```
+
+`--json` carries the same plan and result.
+
+A Lakehouse wipe clears its Files and Tables areas. **Its shortcuts go first**:
+only the pointer goes, because the data belongs to the item that produced it,
+and wiping one Lakehouse never reaches through a shortcut into another. A
+Warehouse wipe removes every user-created object type Weaver's Warehouse wipe
+enumerates, not only what Weaver registered, and reports no names, so it carries
+no count.
+
+Use `--yes` for unattended execution. Without it, an invocation with nobody to
+ask exits 1 and empties nothing.
+
+Python callers get the same two steps:
+
+```python
+plan = weaver.plan_wipe(targets, workspace="Analytics", session=session)
+result = weaver.wipe(plan=plan, session=session)
+```
+
+`catalogue_action` names the disposition outright: `"remove"`, `"unbind"` or
+`"leave"`. Mirror uses `"unbind"` to empty one destination Warehouse, so a
+catalogue it is about to fill is one physical item and not an estate index.
 
 ## Mirror
 

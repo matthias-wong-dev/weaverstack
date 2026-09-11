@@ -485,26 +485,32 @@ def test_the_json_result_carries_the_plan_and_the_items(monkeypatch):
 # --- the question a person answers --------------------------------------------
 
 
+def _described(plan) -> list[str]:
+    """The preflight, with the padding that aligns its columns collapsed."""
+
+    return [" ".join(line.split()) for line in plan.describe().splitlines()]
+
+
 @weaver_test()
 def test_the_preflight_names_items_and_no_objects_inside_them():
-    described = _plan("Lakehouse/Landing", "Warehouse/Curated").describe()
+    described = _described(_plan("Lakehouse/Landing", "Warehouse/Curated"))
 
     assert "Wipe on Analytics" in described
     assert "Lakehouse/Landing" in described
-    assert "Warehouse/Weaver  emptied last" in described
+    assert "Warehouse/Weaver emptied last" in described
     for inventory in ("Tables/", "Files/", "abfss://", "dbo.", "shortcut:"):
-        assert inventory not in described
+        assert all(inventory not in line for line in described)
 
 
 @weaver_test()
 def test_the_preflight_marks_which_item_is_the_catalogue():
-    described = _plan("Lakehouse/Landing").describe()
-
-    assert "Warehouse/Weaver  catalogue" in described
+    assert "Warehouse/Weaver catalogue" in _described(_plan("Lakehouse/Landing"))
 
 
 @weaver_test()
 def test_the_preflight_says_where_claims_are_unbound():
-    described = _plan("Lakehouse/Landing", unbind=True).describe()
+    described = _described(_plan("Lakehouse/Landing", unbind=True))
 
-    assert "preserved; claims for Lakehouse/Landing unbound" in described
+    assert (
+        "Warehouse/Weaver preserved; claims for Lakehouse/Landing unbound" in described
+    )

@@ -46,10 +46,8 @@ wipe_result = weaver.wipe(
     ]
 )
 
-print(f"Removed {wipe_result.count} managed objects")
-
-for report in wipe_result.reports:
-    print(f"{report.target}: {report.count} removed")
+for item in wipe_result.items:
+    print(item.describe())
 
 # METADATA ********************
 

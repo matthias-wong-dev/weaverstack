@@ -53,6 +53,9 @@ PRESERVED = "preserved"
 #: A removal that took a pointer away, as the low-level reports spell it.
 SHORTCUT_PREFIX = "shortcut:"
 
+#: The coarse counts an emptied item carries, in the order they are reported.
+COUNTED = ("tables", "folders", "shortcuts")
+
 
 @dataclass(frozen=True)
 class WipeTarget:
@@ -103,21 +106,25 @@ class WipePlan:
         inventory answers a different one.
         """
 
+        names = [str(target) for target in self.targets] + [self.catalogue or ""]
+        width = max(len(name) for name in names)
         lines = [f"Wipe on {self.workspace.workspace}", "", "Empty"]
         for target in self.targets:
             note = "  catalogue" if self.is_catalogue(target) else ""
-            lines.append(f"  {target}{note}")
+            lines.append(f"  {str(target).ljust(width)}{note}".rstrip())
         lines.append("")
         lines.append("Catalogue")
         if self.catalogue is None:
             lines.append("  none resolved")
-        elif self.catalogue_action == REMOVE:
-            lines.append(f"  {self.catalogue}  emptied last")
+            return "\n".join(lines)
+        held = self.catalogue.ljust(width)
+        if self.catalogue_action == REMOVE:
+            lines.append(f"  {held}  emptied last")
         elif self.catalogue_action == UNBIND:
             claims = ", ".join(self.unbound)
-            lines.append(f"  {self.catalogue}  preserved; claims for {claims} unbound")
+            lines.append(f"  {held}  preserved; claims for {claims} unbound")
         else:
-            lines.append(f"  {self.catalogue}  untouched")
+            lines.append(f"  {held}  untouched")
         return "\n".join(lines)
 
     def to_mapping(self) -> dict:
@@ -171,17 +178,19 @@ class WipeItemResult:
             object.__setattr__(self, "counts", {})
 
     def describe(self) -> str:
-        """One line: the item, what happened to it, and the coarse counts."""
+        """One line: the item, what happened to it, and the coarse counts.
 
-        words = [self.outcome]
-        if self.is_catalogue:
-            words[0] = f"catalogue {self.outcome}"
+        ASCII, because a Windows console runs on the system codepage and this
+        is the last thing printed after an estate was emptied.
+        """
+
+        outcome = f"catalogue {self.outcome}" if self.is_catalogue else self.outcome
+        words = [outcome]
         if self.unbound:
             words.append("claims unbound")
-        words.extend(
-            f"{count} {word}" for word, count in sorted((self.counts or {}).items())
-        )
-        return f"{self.target:<28}{' · '.join(words)}"
+        counted = self.counts or {}
+        words.extend(f"{counted[word]} {word}" for word in COUNTED if counted.get(word))
+        return f"{self.target:<28}{', '.join(words)}"
 
     def to_mapping(self) -> dict:
         return {
@@ -370,9 +379,9 @@ def installed_targets(catalogue) -> tuple[WipeTarget, ...]:
         name = row.get("target_name")
         if not name:
             continue
-        target = WipeTarget(
-            item_type=str(row["item_type"]), item=ItemRef(str(name).strip())
-        )
+        # Through the target grammar, so a row naming something other than a
+        # Lakehouse or a Warehouse is reported as the catalogue row it is.
+        target = WipeTarget.parse(f"{row['item_type']}/{str(name).strip()}")
         found.setdefault(str(target).casefold(), target)
     return tuple(found[key] for key in sorted(found))
 

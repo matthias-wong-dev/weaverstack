@@ -309,7 +309,7 @@ def test_a_preserved_catalogue_reads_as_preserved(monkeypatch, capsys):
     _wired(monkeypatch, plan, result=result)
 
     assert main(["wipe", "Lakehouse/Landing", "--unbind", "--yes"]) == 0
-    assert "catalogue preserved · claims unbound" in capsys.readouterr().out
+    assert "catalogue preserved, claims unbound" in capsys.readouterr().out
 
 
 @weaver_test()

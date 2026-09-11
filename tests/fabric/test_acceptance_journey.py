@@ -50,6 +50,11 @@ from weaver.sessions.program import RemoteProgram
 BUILDING = {"livy", "onelake", "rest", "tds"}
 RUNNING = {"livy", "onelake", "rest", "tds"}
 
+#: What emptying a Lakehouse and cleaning the catalogue's claims crosses.
+#: Storage and the shortcut control plane for the item, TDS for the catalogue.
+#: No Livy: a wipe removes directories and pointers and runs no Spark.
+EMPTYING = {"onelake", "rest", "tds"}
+
 #: A schema a user owns inside the catalogue Warehouse. Weaver owns ``_`` there
 #: and nothing else, so every build in this journey reconciles a catalogue that
 #: has a neighbour sitting next to it.
@@ -492,10 +497,15 @@ def test_a_realistic_estate_builds_from_nothing(acceptance):
     every declared object, shortcut and relation.
     """
 
+    # The data targets, and the catalogue kept: the neighbour schema seeded
+    # into the catalogue Warehouse is what every later reading of `_` is a
+    # claim against, and the catalogue going would take it too. Scenario J
+    # empties the whole estate, catalogue included.
     acceptance.step(
         "wipe",
         lambda: weaver.wipe(
             acceptance.targets,
+            unbind=True,
             session=acceptance.session,
         ),
     )
@@ -1607,28 +1617,100 @@ def test_a_failed_build_leaves_partial_state_and_the_next_one_converges(acceptan
     assert tested.totals()["invalid"] == 0, tested.to_mapping()
 
 
-# --- Scenario I: the ownership boundary -------------------------------------
+# --- Scenario I: preserving the catalogue -------------------------------------
 
 
-@weaver_test(integration=True, resources=BUILDING)
-def test_wipe_removes_the_managed_estate_and_not_the_foreign_one(acceptance):
+@weaver_test(integration=True, resources=EMPTYING)
+def test_unbind_empties_one_target_and_keeps_the_catalogue(acceptance):
     """
-    Intent: Weaver removes the estate it owns without mutating the foreign source
-    workspace.
+    Intent: `--unbind` empties the target it names and leaves the catalogue
+    standing with that target's claims removed.
 
-    Proof: after wiping every managed target, the foreign Lakehouse and Warehouse
-    still hold their baseline, and the acceptance mutations are restored.
+    Proof: the Published Lakehouse is emptied, `_.Installation` no longer holds
+    its item, and the three installations this journey did not name are there.
     """
 
     acceptance.require("build")
+    published = acceptance.physical["Lakehouse/Published"]
     acceptance.step(
-        "final-wipe",
+        "unbind-wipe",
         lambda: weaver.wipe(
-            acceptance.targets,
+            published,
+            unbind=True,
             session=acceptance.session,
         ),
     )
+    acceptance.require("unbind-wipe")
+    result = acceptance["unbind-wipe"].result
+
+    # One line per physical item: the Lakehouse emptied, the catalogue kept.
+    assert [(item.target, item.outcome) for item in result.items] == [
+        (published, "emptied"),
+        (acceptance.workspace.catalogue, "preserved"),
+    ]
+    assert result.items[-1].unbound is True
+
+    # The catalogue is still readable, and it has forgotten exactly one item.
+    installed = {
+        f"{row['Item type']}/{row['Item name']}"
+        for row in _catalogue_rows(
+            acceptance, "select [Item type], [Item name] from [_].[Installation]"
+        )
+    }
+    assert "Lakehouse/Published" not in installed
+    assert {"Lakehouse/Landing", "Lakehouse/Curated", "Warehouse/Serving"} <= installed
+
+
+# --- Scenario J: the whole estate, and the ownership boundary ----------------
+
+
+@weaver_test(integration=True, resources=BUILDING)
+def test_the_whole_estate_comes_from_the_catalogue_and_goes_last(acceptance):
+    """
+    Intent: naming no target empties the estate the catalogue records, the
+    catalogue last, without mutating the foreign source workspace.
+
+    Proof: the planned targets are the installed bindings plus the catalogue at
+    the end; afterwards the catalogue holds no `_` tables, and the foreign
+    Lakehouse and Warehouse still hold their baseline.
+    """
+
+    acceptance.require("unbind-wipe")
+    catalogue = acceptance.workspace.catalogue
+    remaining = {
+        acceptance.physical[item]
+        for item in ("Lakehouse/Landing", "Lakehouse/Curated", "Warehouse/Serving")
+    }
+
+    acceptance.step(
+        "estate-plan",
+        lambda: weaver.plan_wipe(session=acceptance.session),
+    )
+    acceptance.require("estate-plan")
+    plan = acceptance["estate-plan"].result
+
+    # Discovered from `_.Installation`, and the catalogue is the last one out.
+    assert {str(target) for target in plan.targets} == remaining | {catalogue}
+    assert str(plan.targets[-1]) == catalogue
+    assert plan.catalogue_action == "remove"
+
+    acceptance.step(
+        "final-wipe",
+        lambda: weaver.wipe(plan=plan, session=acceptance.session),
+    )
     acceptance.require("final-wipe")
+    emptied = acceptance["final-wipe"].result
+    assert [item.target for item in emptied.items][-1] == catalogue
+
+    # The catalogue Warehouse is empty, `_` included, so the next build
+    # bootstraps it.
+    assert (
+        _catalogue_rows(
+            acceptance,
+            "select TABLE_NAME from INFORMATION_SCHEMA.TABLES where TABLE_SCHEMA = '_'",
+        )
+        == []
+    )
 
     # The stable foreign tables are exactly as provisioning left them.
     item = acceptance.external_lakehouse
@@ -1660,6 +1742,41 @@ def test_wipe_removes_the_managed_estate_and_not_the_foreign_one(acceptance):
         "select RegionId from [Reference].[Region] order by RegionId",
     )
     assert [row["RegionId"] for row in region] == [1, 2]
+
+
+# --- Scenario K: building back over an emptied catalogue ---------------------
+
+
+@weaver_test(integration=True, resources=BUILDING)
+def test_the_estate_builds_again_over_an_emptied_catalogue(acceptance):
+    """
+    Intent: a wipe that took the catalogue leaves a workspace a build can fill.
+
+    Proof: the same build request that opened this journey succeeds against a
+    Warehouse whose `_` schema the previous scenario removed, and the catalogue
+    records every item again.
+    """
+
+    acceptance.require("final-wipe")
+    acceptance.step(
+        "rebuild-after-wipe",
+        lambda: weaver.build(
+            acceptance.repository,
+            items=acceptance.build_items,
+            session=acceptance.session,
+        ),
+    )
+    acceptance.require("rebuild-after-wipe")
+    result = acceptance["rebuild-after-wipe"].result
+    assert result.succeeded, result.to_mapping()
+
+    installed = {
+        f"{row['Item type']}/{row['Item name']}"
+        for row in _catalogue_rows(
+            acceptance, "select [Item type], [Item name] from [_].[Installation]"
+        )
+    }
+    assert set(acceptance.items) <= installed
 
 
 def _abfss(item, relative: str) -> str:

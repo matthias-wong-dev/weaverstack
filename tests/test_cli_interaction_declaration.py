@@ -346,3 +346,72 @@ def test_a_non_interactive_workflow_without_yes_refuses_before_it_runs(
 
     assert status == 1
     assert "Pass --yes" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_nested_retryable_failure_is_not_offered_a_retry(tmp_path, capsys):
+    """One attempt each, the sequence stops, and the Session closes."""
+
+    from weaver_cli.workflow import run_workflow
+
+    path = tmp_path / "workflow.yml"
+    path.write_text(
+        "workflows:\n  full:\n    - build .\n    - load Lakehouse/Sales\n",
+        encoding="utf-8",
+    )
+    interaction = _module("weaver_cli.interaction")
+    attempts = []
+    parser = build_parser()
+    parser._subparsers._group_actions[0].choices["build"].set_defaults(
+        handler=lambda parsed: attempts.append(parsed) or 1, requires=None
+    )
+    parser._subparsers._group_actions[0].choices["load"].set_defaults(
+        handler=lambda _parsed: pytest.fail("the sequence continued past a failure"),
+        requires=None,
+    )
+    original = interaction.read_key
+    interaction.read_key = lambda: pytest.fail("a retry was offered")
+    try:
+        status = run_workflow(
+            argparse.Namespace(
+                name="full",
+                file=str(path),
+                yes=True,
+                non_interactive=True,
+                session=None,
+                timings=False,
+                workspace=None,
+                workspace_config=None,
+                catalogue=None,
+                environment=None,
+            ),
+            parser_factory=lambda: parser,
+        )
+    finally:
+        interaction.read_key = original
+
+    assert status == 1
+    assert len(attempts) == 1
+    assert "Workflow stopped at [1]" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_non_interactive_setup_asks_nothing_and_reads_no_stream():
+    """A missing name is an error, and no question reaches the stream."""
+
+    from weaver.errors import CommandError
+    from weaver_cli.initialise import collect
+
+    class _Refuses:
+        def isatty(self):
+            return True
+
+        def readline(self):
+            pytest.fail("a non-interactive setup read its input")
+
+    args = build_parser().parse_args(
+        ["initialise", "--workspace", "Analytics", "--non-interactive"]
+    )
+
+    with pytest.raises(CommandError, match="--project-folder"):
+        collect(args, stdin=_Refuses())

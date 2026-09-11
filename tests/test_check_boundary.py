@@ -63,3 +63,22 @@ def test_check_command_adapts_parser_error_to_retry_status(tmp_path, capsys):
 
     assert handle_check(args) == 1
     assert "error:" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_a_folder_that_is_not_a_weaver_project_says_so(tmp_path, capsys):
+    """The folder the command was pointed at, not the bystander inside it."""
+
+    export = tmp_path / "project" / "FabricExport" / "Thing" / "schemas"
+    export.mkdir(parents=True)
+    (export / "Sales.yml").write_text(
+        "Schema ID: Sales\nDescription: Sales objects.\n", encoding="utf-8"
+    )
+    args = build_parser().parse_args(["check", str(tmp_path / "project")])
+
+    assert handle_check(args) == 1
+
+    printed = capsys.readouterr().err
+    assert "not a Weaver project" in printed
+    assert "Lakehouse/<Name>/" in printed
+    assert "FabricExport" not in printed
