@@ -601,8 +601,8 @@ def build_parser() -> argparse.ArgumentParser:
     wipe = subcommands.add_parser(
         "wipe",
         help=(
-            "Clear a physical Lakehouse or Warehouse, and remove a resolved "
-            "catalogue's claims for it."
+            "Clear named physical targets exactly, or, with no targets, the "
+            "whole estate the resolved catalogue holds including the catalogue."
         ),
     )
     wipe.add_argument(
@@ -612,6 +612,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Lakehouse/Name[/Files|/Tables] or Warehouse/Name",
     )
     _add_workspace_args(wipe)
+    wipe.add_argument(
+        "--unbind",
+        action="store_true",
+        help=(
+            "With named targets: preserve the catalogue and remove its claims "
+            "for what was wiped."
+        ),
+    )
     wipe.add_argument(
         "--dry-run", action="store_true", help="Show what would be removed."
     )
@@ -1719,8 +1727,18 @@ def _ago(at, now) -> str:
     return f"{hours}h {remainder // 60}m ago"
 
 
+def _wipe_plan_line(report) -> str:
+    """One compact line for a target in a wipe summary."""
+
+    return f"  {report.target}: removed {report.count}"
+
+
 def handle_wipe(args: argparse.Namespace) -> int:
-    """Preview, confirm, then invoke the same public wipe operation."""
+    """Settle the scope, show it compactly, confirm, then wipe.
+
+    The whole scope is settled and shown before anything is removed; a
+    non-interactive process is refused without ``--yes``.
+    """
 
     import json
 
@@ -1732,6 +1750,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
         with _running_session(args, workspace) as opened:
             planned = weaver.wipe(
                 args.targets,
+                unbind=getattr(args, "unbind", False),
                 dry_run=True,
                 session=opened,
                 **_command_context(workspace),
@@ -1739,11 +1758,8 @@ def handle_wipe(args: argparse.Namespace) -> int:
         print(f"wipe on {workspace.workspace}\n")
         for report in planned.reports:
             print(f"  {report.target}")
-            print(f"    {report.location}")
-            for name in report.removed:
-                print(f"      - {name}")
-            if not report.removed:
-                print("      (already empty)")
+        if planned.catalogue_role:
+            print(f"\n  catalogue: {planned.catalogue_role}")
         total = planned.count
         print()
 
@@ -1754,32 +1770,38 @@ def handle_wipe(args: argparse.Namespace) -> int:
                 print(f"{total} item(s) would be removed. Nothing was changed.")
             return 0
 
-        if total:
-            if not sys.stdin.isatty():
-                print(
-                    f"Refusing to remove {total} item(s) without confirmation. "
-                    "Pass --yes, or --dry-run to preview.",
-                    file=sys.stderr,
-                )
-                return 1
-            answer = input(f"Remove {total} item(s)? This cannot be undone [y/N] ")
-            if answer.strip().lower() not in {"y", "yes"}:
-                print("Cancelled.")
-                return 1
+        if not sys.stdin.isatty():
+            print(
+                "Refusing to wipe without confirmation. Pass --yes, or "
+                "--dry-run to preview.",
+                file=sys.stderr,
+            )
+            return 1
+        answer = input("Continue? This cannot be undone [y/N] ")
+        if answer.strip().lower() not in {"y", "yes"}:
+            print("Cancelled.")
+            return 1
 
     with _running_session(args, workspace) as opened:
         result = weaver.wipe(
             args.targets,
+            unbind=getattr(args, "unbind", False),
             session=opened,
             **_command_context(workspace),
         )
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
-    elif result.count:
+    elif result.reports:
         for report in result.reports:
-            print(f"  {report.target}: removed {report.count}")
+            print(_wipe_plan_line(report))
     else:
         print("Nothing to remove.")
+    if result.catalogue_role:
+        print(f"catalogue: {result.catalogue_role}")
+    if result.unbound is not None:
+        logical = ", ".join(result.unbound.get("logical_items", ()))
+        if logical:
+            print(f"unbound: {logical}")
     return 0
 
 

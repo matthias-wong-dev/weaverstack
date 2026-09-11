@@ -1,8 +1,18 @@
-"""Emptying a physical item, and the catalogue claims that leaves behind.
+"""Emptying physical items, and the catalogue state that decides what a wipe means.
 
-A wipe is the one operation that removes rather than builds, so it is kept
-apart from the build it usually precedes: what they share is how a workspace is
-resolved, and that lives in :mod:`weaver.operations.workspace`.
+A wipe answers one question: am I pointed at the estate I intend to destroy?
+It is kept apart from the build it usually precedes; what they share is how a
+workspace is resolved, and that lives in :mod:`weaver.operations.workspace`.
+
+Three shapes, one vocabulary:
+
+- naming targets wipes exactly those physical items, and nothing else;
+- naming no target with a catalogue wipes the estate that catalogue holds: every
+  target its Installation rows name, plus the catalogue Warehouse itself;
+- ``--unbind`` wipes named targets while preserving the catalogue, so its claims
+  must be removed for it by name.
+
+See ``design/cli-usage.md``.
 """
 
 from __future__ import annotations
@@ -84,6 +94,9 @@ class WipeResult:
     reports: tuple[WipeReport, ...]
     unbound: Mapping | None = None
     dry_run: bool = False
+    #: How the catalogue stood to this wipe: ``"removed with the estate"``,
+    #: ``"preserved; claims unbound"`` or ``None`` where no catalogue resolved.
+    catalogue_role: str | None = None
 
     @property
     def count(self) -> int:
@@ -94,6 +107,7 @@ class WipeResult:
             "workspace": self.workspace,
             "reports": [report.to_mapping() for report in self.reports],
             "unbound": dict(self.unbound) if self.unbound is not None else None,
+            "catalogue_role": self.catalogue_role,
             "dry_run": self.dry_run,
         }
 
@@ -105,17 +119,17 @@ def wipe(
     catalogue: str | None = None,
     environment: str | None = None,
     workspace_config: str | Path | None = None,
+    unbind: bool = False,
     dry_run: bool = False,
     session=None,
 ) -> WipeResult:
-    """Empty one or more whole Lakehouse or Warehouse items.
+    """Empty physical items: exactly those named, or the whole estate.
 
-    ``targets`` are physical: a wipe addresses a Fabric item whether or not an
-    installation exists.
-
-    A resolved catalogue also has its claims for those targets removed. Wiping
-    the Warehouse the catalogue lives in skips that, because deleting rows from
-    tables that are about to be removed is work nobody needs.
+    Named targets are wiped and nothing else: the catalogue's claims are left
+    alone unless ``unbind`` asks for their removal by name. Naming no target
+    wipes the estate the resolved catalogue holds - every target its
+    Installation rows name, plus the catalogue Warehouse itself, whose removal
+    takes its claims with it.
 
     Takes a Session as the other operations do: a wipe resolves the same item
     names, reaches the same OneLake paths and opens the same Warehouse
@@ -124,6 +138,11 @@ def wipe(
 
     values = (targets,) if isinstance(targets, str) else tuple(targets)
     parsed = tuple(WipeTarget.parse(value) for value in values)
+    if unbind and not parsed:
+        raise CommandError(
+            "unbind preserves the catalogue while named targets are wiped, "
+            "so it needs at least one target."
+        )
     resolved_workspace = operation_workspace(
         "wipe",
         workspace=workspace,
@@ -131,22 +150,12 @@ def wipe(
         environment=environment,
         workspace_config=workspace_config,
         session=session,
-        # A wipe empties a physical item, which needs no catalogue. One that
-        # resolves has its claims for the wiped targets removed as well.
+        # A wipe empties physical items, which needs no catalogue. One that
+        # resolves decides what an untargeted wipe means.
         needs_catalogue=False,
     )
     if not parsed:
-        parsed = tuple(
-            WipeTarget.parse(value)
-            for value in dict.fromkeys(
-                f"{item.item_type}/{declaration.physical}"
-                for item, declaration in resolved_workspace.targets.items()
-            )
-        )
-        if not parsed:
-            raise CommandError(
-                "No physical targets are declared in workspace configuration."
-            )
+        parsed = _estate_targets(resolved_workspace, session=session)
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved_workspace) as opened:
@@ -172,22 +181,95 @@ def wipe(
                     )
 
             unbound = None
-            catalogue = resolved_workspace.catalogue
-            # Typed, because Lakehouse/Weaver and Warehouse/Weaver are two items
-            # and only the Warehouse can be the catalogue.
-            wiped = {str(target).casefold() for target in parsed}
-            if not dry_run and catalogue and catalogue.casefold() not in wiped:
+            catalogue_role = _catalogue_role(resolved_workspace, parsed, unbind)
+            # Claims for a catalogue that is itself being wiped go with it; the
+            # unbind removes what a preserved catalogue still holds.
+            unbind_targets_parsed = tuple(
+                target
+                for target in parsed
+                if (target.item_type, target.physical_name.casefold())
+                != _catalogue_key(resolved_workspace)
+            )
+            if unbind and not dry_run and unbind_targets_parsed:
                 with opened.step("Unbind catalogue claims"):
                     unbound = _unbind_physical_targets(
-                        resolved_workspace, parsed, session=opened
+                        resolved_workspace, unbind_targets_parsed, session=opened
                     )
 
             return WipeResult(
                 workspace=str(resolved_workspace.workspace),
                 reports=tuple(reports),
                 unbound=unbound,
+                catalogue_role=catalogue_role,
                 dry_run=dry_run,
             )
+
+
+def _catalogue_key(workspace: Workspace) -> tuple[str, str] | None:
+    """The resolved catalogue as a ``(kind, folded name)`` pair, or ``None``."""
+
+    if not workspace.catalogue:
+        return None
+    kind, _, name = workspace.catalogue.partition("/")
+    return (kind, name.casefold())
+
+
+def _catalogue_role(
+    workspace: Workspace, targets: Sequence[WipeTarget], unbind: bool
+) -> str | None:
+    """How the catalogue stands to this wipe, as the preflight states it."""
+
+    catalogue = workspace.catalogue
+    if not catalogue:
+        return None
+    wiped = {(target.item_type, target.physical_name.casefold()) for target in targets}
+    if _catalogue_key(workspace) in wiped:
+        return "removed with the estate"
+    if unbind:
+        return "preserved; claims unbound"
+    return "preserved"
+
+
+def _estate_targets(workspace: Workspace, *, session=None) -> tuple[WipeTarget, ...]:
+    """The estate one catalogue holds, catalogue first.
+
+    The Installation rows say what is bound; the catalogue Warehouse itself
+    completes the estate, and its removal takes its claims with it.
+    """
+
+    from ..catalogue.connection import catalogue_connection
+    from ..catalogue.reader import read_table
+    from ..catalogue.tables import INSTALLATION
+    from ..sessions.host import use_or_create_session
+
+    if not workspace.catalogue:
+        raise CommandError(
+            "Wiping a whole estate needs a Weaver catalogue: pass "
+            "catalogue='Warehouse/Weaver', or give one in workspace "
+            "configuration."
+        )
+    with use_or_create_session(session, workspace=workspace) as opened:
+        connection = catalogue_connection(opened, workspace)
+        rows = read_table(connection, INSTALLATION)
+
+    kind, _, name = workspace.catalogue.partition("/")
+    parsed = [WipeTarget(item_type=kind, item=ItemRef(name))]
+    seen = {(kind, name.casefold())}
+    for row in rows:
+        target = WipeTarget(
+            item_type=str(row.get("item_type") or ""),
+            item=ItemRef(str(row.get("target_name") or "")),
+        )
+        if target.item_type not in ("Lakehouse", "Warehouse"):
+            raise CommandError(
+                f"The catalogue holds an installation of {target.item_type!r} "
+                f"for {target.item}, which is not a wipeable item kind."
+            )
+        if (target.item_type, target.physical_name.casefold()) in seen:
+            continue
+        seen.add((target.item_type, target.physical_name.casefold()))
+        parsed.append(target)
+    return tuple(parsed)
 
 
 def _wipe_one(target: WipeTarget, workspace, *, store, dry_run, session):
@@ -255,10 +337,11 @@ def unbind_catalogue_claims(
 ) -> dict:
     """Remove catalogue claims for named physical targets.
 
-    Two callers want it: ``weaver unbind``, and the tail of a ``wipe`` that
-    emptied a target the catalogue still claims. Reading and deleting are both
-    T-SQL against the catalogue Warehouse, so neither needs Spark and the
-    statements go through the Session.
+    The caller is a wipe run with ``unbind``: physical targets were wiped while
+    the catalogue was preserved, so the claims those targets held are removed
+    here by name. Reading and deleting are both T-SQL against
+    the catalogue Warehouse, so neither needs Spark and the statements go
+    through the Session.
     """
 
     from ..catalogue.connection import catalogue_connection

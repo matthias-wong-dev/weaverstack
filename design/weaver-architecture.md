@@ -653,7 +653,8 @@ resolver. Every other library, setting and platform value remains user-owned.
 
 # wipe
 
-`wipe` removes one or more physical deployment targets.
+`wipe` empties physical deployment targets: exactly those named, or, with none
+named, the whole estate the resolved catalogue holds.
 
 ```bash
 weaver wipe \
@@ -661,8 +662,11 @@ weaver wipe \
     --workspace-config workspace.yml \
 ```
 
-The command accepts multiple targets. With none named it uses only physical
-targets declared by the resolved project configuration, with the same confirmation.
+The command accepts multiple targets. Naming targets wipes those items and
+nothing else: the catalogue's claims for them are left alone unless `--unbind`
+asks for their removal by name. Naming no target wipes every physical target
+the resolved catalogue's Installation rows name, plus the catalogue Warehouse
+itself.
 
 ```bash
 weaver wipe \
@@ -676,11 +680,11 @@ Unlike incremental build, a wipe removes all user-created objects from the
 selected target, including objects not created by Weaver.
 
 ```text
-Physical Target
+Physical Target(s)
 
 ↓
 
-Preview
+Preview (the estate, compact)
 
 ↓
 
@@ -692,7 +696,7 @@ Remove Objects
 
 ↓
 
-Remove Catalogue Bindings
+Unbind Catalogue Claims (--unbind only)
 ```
 
 By default, Weaver displays the proposed changes before asking for confirmation.
@@ -715,8 +719,9 @@ weaver wipe \
 ```
 
 A wipe needs no catalogue. Where one resolves, from `--catalogue` or workspace
-configuration, it also removes that catalogue's claims for the wiped targets;
-otherwise the next build reconciles them against physical inventory.
+configuration, it decides what an untargeted wipe covers and how the catalogue
+stands to the run: removed with the estate, preserved with claims unbound, or
+preserved.
 
 `wipe` does not modify the authored repository.
 

@@ -465,25 +465,20 @@ names no Lakehouse declares no `livy` and starts no session.
 
 ## Wiping a whole estate
 
-Name the catalogue Warehouse alongside the destinations:
+Name no target. A catalogue resolves the estate, so the whole of it goes:
 
 ```bash
-weaver wipe Lakehouse/Sales Warehouse/Reporting Warehouse/Weaver --yes
+weaver wipe --workspace-config examples/weaver_example.yml --yes
 ```
 
-`wipe` removes the physical contents of what it is given, then deletes the
-catalogue claims of anything it emptied — unless the catalogue Warehouse is among
-them, in which case it skips that entirely, because the catalogue tables are
-going with it and deleting rows from a table about to be removed is work nobody
-needs.
+`wipe` reads the catalogue's Installation rows, wipes every physical target
+they name plus the catalogue Warehouse itself, and the claims go with the
+catalogue.
 
-That is worth knowing, because the catalogue tidy is not cheap: it deletes a row
-per claim, and for a from-scratch loop those are rows the next build rewrites
-immediately.
-
-So for a from-scratch loop, wipe the catalogue Warehouse too. Keep it out only
-when you mean to preserve the catalogue — decommissioning one target out of an
-estate that carries on.
+To decommission one target out of an estate that carries on, name it and pass
+`--unbind`: the target is emptied, the catalogue is preserved, and its claims
+for what was wiped are removed by name. Naming targets without `--unbind`
+touches the physical items only.
 
 ## Workflow
 
@@ -894,26 +889,33 @@ report.to_mapping()  # what --json prints
 
 ## Wipe
 
-Wipe clears everything in each named physical target. It needs no catalogue, and
-where one resolves it also removes that catalogue's claims for the wiped targets:
+Wipe answers one question: am I pointed at the estate I intend to destroy?
+
+Naming targets wipes exactly those physical items, and nothing else. The
+catalogue's claims for them are left alone unless `--unbind` asks for their
+removal by name, so a decommissioned target stops being bound while the rest of
+the estate carries on:
 
 ```bash
 weaver wipe Lakehouse/Sales_Dev                       # physical only
+weaver wipe Lakehouse/Sales_Dev --unbind              # physical, claims removed
 weaver wipe Lakehouse/Sales_Dev --catalogue Warehouse/Weaver
 weaver wipe Lakehouse/Sales_Dev --workspace-config dev.yml
 ```
 
-The last two also remove the claims. Wiping the Warehouse the catalogue itself
-lives in skips that, because deleting rows from tables that are about to be
-removed is work nobody needs.
+Naming no target wipes the whole estate the resolved catalogue holds: every
+physical target its Installation rows name, plus the catalogue Warehouse
+itself. A catalogue with no installations wipes only itself.
 
 ```bash
-weaver wipe \
-  Lakehouse/Sales_Dev \
-  Warehouse/Reporting_Dev \
-  --workspace-config examples/weaver_example.yml \
-  --dry-run
+weaver wipe --workspace-config examples/weaver_example.yml --dry-run
 ```
+
+The confirmation names every physical item that will be emptied and the
+catalogue's role: `removed with the estate`, `preserved; claims unbound`, or
+`preserved`. It does not enumerate objects, schemas or paths; a dry run's JSON
+does, being the inventory view for debugging. The summary reports each target
+and what was removed in one typed line.
 
 Lakehouse wipe clears its Files and Tables areas. Warehouse wipe removes all
 user-created object types covered by Weaver's Warehouse wipe implementation,
