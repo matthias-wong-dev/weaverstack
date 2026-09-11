@@ -33,10 +33,15 @@ from ..declaration.model import (
     WeaverItemId,
     WeaverSchemaId,
 )
+from ..errors import WeaverError
 from ..installed import InstalledShortcut
 from .claims import stored_area
 from .tables import CATALOGUE_SCHEMA
 from .tsql import identifier
+
+
+class UnresolvedShortcut(WeaverError):
+    """A recorded pointer this estate has no address to stand up again."""
 
 
 @dataclass(frozen=True)
@@ -107,9 +112,12 @@ def recreatable(
     """One item's recorded shortcuts, each resolved to a physical target.
 
     ``bindings`` is the estate's final Installation map, which is what makes a
-    logical pointer move with the fork. A logical target no binding names is
-    left out: nothing here can say where it is, and a build against the
-    destination classifies the pointer as new and materialises it.
+    logical pointer move with the fork.
+
+    Every recorded pointer resolves or the run stops: a mirror reconstructs the
+    estate it was asked for and says what it could not. A logical target no
+    binding names has no address to point at, and a row naming no target item at
+    all is a catalogue that contradicts itself.
     """
 
     found = []
@@ -118,11 +126,18 @@ def recreatable(
             continue
         target_item = shortcut.target_item
         if target_item is None:
-            continue
+            raise UnresolvedShortcut(
+                f"{shortcut.destination} is recorded as a shortcut naming no "
+                "target item, so there is no address to point it at"
+            )
         if shortcut.is_logical:
             bound = bindings.get(target_item)
             if bound is None:
-                continue
+                raise UnresolvedShortcut(
+                    f"{shortcut.destination} points at {target_item}, which the "
+                    "catalogue records no installation for, so there is no "
+                    "target to point it at"
+                )
             found.append(Recreated(shortcut=shortcut, target_name=bound))
             continue
         found.append(
@@ -225,6 +240,7 @@ def unsupported(recreated: Recreated, *, kind: str) -> str | None:
 
 __all__: Sequence[str] = [
     "Recreated",
+    "UnresolvedShortcut",
     "recreatable",
     "schemas_of",
     "shortcut_request",

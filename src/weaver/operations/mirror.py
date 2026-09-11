@@ -543,7 +543,40 @@ def _resolved_items(plan: MirrorPlan, catalogue) -> tuple[MirrorItem, ...]:
                 ),
             )
         )
-    return tuple(resolved)
+    return _in_producer_order(resolved, recorded)
+
+
+def _in_producer_order(items, shortcuts) -> tuple[MirrorItem, ...]:
+    """The selected items, each producer before whatever points at it.
+
+    A recreated logical shortcut reads the target its producer was mirrored
+    into, so that item is stood up first. The pointers the catalogue records
+    decide it rather than the command line, which is what makes naming a
+    consumer first reconstruct the same estate. Items no pointer relates keep
+    the order they were given, so a run reads the way it was asked for.
+    """
+
+    from ..errors import GraphError
+    from ..graph import Graph
+
+    by_name = {str(each.item): each for each in items}
+    given = {name: position for position, name in enumerate(by_name)}
+    edges = []
+    for shortcut in shortcuts:
+        if not shortcut.is_logical or shortcut.target_item is None:
+            continue
+        producer, consumer = str(shortcut.target_item), str(shortcut.destination.item)
+        if producer != consumer and producer in by_name and consumer in by_name:
+            edges.append((producer, consumer))
+    try:
+        ordered = Graph(by_name, edges).order(key=given.get)
+    except GraphError as exc:
+        raise CommandError(
+            f"mirror cannot order the items it was given: {exc}. A recreated "
+            "pointer reads the target its producer was mirrored into, so the "
+            "items have to stand up in one order. Mirror them in separate runs."
+        ) from exc
+    return tuple(by_name[name] for name in ordered)
 
 
 def _installed_target(installed: Mapping[tuple, str], item) -> str:
@@ -559,6 +592,30 @@ def _installed_target(installed: Mapping[tuple, str], item) -> str:
     return target
 
 
+def _refuse_mirrored_source(resolved: ResolvedMirror) -> None:
+    """Refuse rebinding an item out of a catalogue that is itself a mirror.
+
+    A mirrored object's Load lifecycle is read from the catalogue it mirrors,
+    and one hop is all ``_.Mirror`` records: an item mirrored out of a mirror
+    has its rows two catalogues back, which nothing here addresses.
+    ``_prove_source`` already read whether the source holds the table, so this
+    costs nothing and lands before anything is emptied.
+
+    A fork alone is unaffected. It copies the rows as they stand, so the
+    destination mirrors whatever the source did, one hop from the same estate.
+    """
+
+    if not resolved.borrowed or not resolved.items:
+        return
+    named = ", ".join(str(each.item) for each in resolved.items)
+    raise CommandError(
+        f"mirror reads {resolved.source}, which is itself a mirror: it holds "
+        f"[_].[Mirror]. Weaver records one hop, and rebinding {named} out of it "
+        "puts their rows two catalogues away. Mirror those items from the "
+        "estate that holds their rows."
+    )
+
+
 def _refuse_unsafe(resolved: ResolvedMirror) -> None:
     """Refuse a plan that contradicts itself.
 
@@ -568,6 +625,7 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
     own, and none of them may be something the run reads.
     """
 
+    _refuse_mirrored_source(resolved)
     for each in resolved.items:
         _recreatable(each, bindings=resolved.bindings)
 
@@ -800,15 +858,22 @@ def _mirror_warehouse_item(
 def _recreatable(each: MirrorItem, *, bindings) -> tuple:
     """The pointers this item stands up again, refusing one its kind cannot.
 
-    ``_.Shortcut`` records what the source declared, so a row this item's kind
-    has no physical form for is a contradiction, and it is refused.
-    Asked while the plan is settled as well as while it runs, so a contradiction
-    fails with every Warehouse still intact.
+    A mirror reconstructs the estate it was asked for or says what it could
+    not: a pointer this item's kind has no physical form for, and one whose
+    target this run cannot address, both stop the run. Asked while the plan is
+    settled as well as while it runs, so either fails with every Warehouse
+    still intact.
     """
 
-    from ..catalogue.shortcuts import recreatable, unsupported
+    from ..catalogue.shortcuts import UnresolvedShortcut, recreatable, unsupported
 
-    found = recreatable(each.shortcuts, item=each.item, bindings=bindings)
+    try:
+        found = recreatable(each.shortcuts, item=each.item, bindings=bindings)
+    except UnresolvedShortcut as exc:
+        raise CommandError(
+            f"mirror cannot reconstruct {each.target}: {exc}. Mirror the item it "
+            "points at in the same run, or build this one instead."
+        ) from exc
     for pointer in found:
         why = unsupported(pointer, kind=each.kind)
         if why is not None:

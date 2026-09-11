@@ -14,7 +14,7 @@ from support.weaver_test import weaver_test
 
 import weaver
 from weaver.config import parse_workspace
-from weaver.declaration.model import WeaverItemId
+from weaver.declaration.model import WeaverDocumentId, WeaverItemId
 from weaver.errors import CommandError, ConfigError
 from weaver.operations.mirror import (
     MirrorPlan,
@@ -398,6 +398,95 @@ def test_the_source_is_proved_before_anything_is_emptied(monkeypatch):
         weaver.mirror(plan=plan, session=_open())
 
 
+# --- what a recreated pointer depends on --------------------------------------
+
+
+@weaver_test()
+def test_a_producer_is_mirrored_before_what_points_at_it(monkeypatch):
+    """Naming the consumer first reconstructs the same estate.
+
+    ``Warehouse/Model`` reads ``Lakehouse/Input`` through a pointer, so the
+    item filling ``Input_Dev`` stands up first however the run was asked for.
+    """
+
+    plan = _plan(
+        monkeypatch,
+        _with_targets(),
+        ["Warehouse/Model", "Lakehouse/Input"],
+    )
+
+    resolved = resolve_mirror(
+        plan,
+        _installed(
+            {"Warehouse/Model": "Model", "Lakehouse/Input": "Input"},
+            pointers={"Warehouse/Model/Core.Order": "Lakehouse/Input/Core.Order"},
+        ),
+    )
+
+    assert [str(each.item) for each in resolved.items] == [
+        "Lakehouse/Input",
+        "Warehouse/Model",
+    ]
+    assert resolved.wiped == (
+        "Warehouse/Weaver_Dev",
+        "Lakehouse/Input_Dev",
+        "Warehouse/Model_Dev",
+    )
+
+
+@weaver_test()
+def test_items_no_pointer_relates_keep_the_order_they_were_given(monkeypatch):
+    """Ordering is what a pointer needs, not a sort the run imposes."""
+
+    plan = _plan(
+        monkeypatch, _with_targets(), ["Warehouse/Model", "Lakehouse/Input"]
+    )
+
+    resolved = resolve_mirror(
+        plan, _installed({"Warehouse/Model": "Model", "Lakehouse/Input": "Input"})
+    )
+
+    assert [str(each.item) for each in resolved.items] == [
+        "Warehouse/Model",
+        "Lakehouse/Input",
+    ]
+
+
+@weaver_test()
+def test_a_pointer_at_an_item_the_catalogue_never_installed_is_refused(monkeypatch):
+    """A mirror reconstructs the estate it was asked for, or says what it could not."""
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model"])
+
+    with pytest.raises(CommandError, match="records no installation"):
+        resolve_mirror(
+            plan,
+            _installed(
+                {"Warehouse/Model": "Model"},
+                pointers={"Warehouse/Model/Core.Order": "Lakehouse/Absent/Core.Order"},
+            ),
+        )
+
+
+@weaver_test()
+def test_rebinding_an_item_out_of_a_mirrored_catalogue_is_refused(monkeypatch):
+    """One hop is all ``_.Mirror`` records, and this run asks for a second.
+
+    A fork alone is unaffected: it copies the rows as they stand, so the
+    destination mirrors whatever the source did, from the same estate.
+    """
+
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model"])
+    installed = _installed({"Warehouse/Model": "Model"})
+
+    with pytest.raises(CommandError, match="itself a mirror"):
+        resolve_mirror(plan, installed, borrowed=True)
+
+    assert resolve_mirror(_plan(monkeypatch, _workspace()), None, borrowed=True).items == (
+        ()
+    )
+
+
 # --- the complete destructive scope, settled before any wipe -----------------
 
 
@@ -578,11 +667,16 @@ def test_a_result_says_what_moved_and_what_did_not():
 # --- helpers ------------------------------------------------------------------
 
 
-def _installed(targets: dict[str, str]):
-    """A source catalogue recording where each item is installed."""
+def _installed(targets: dict[str, str], *, pointers: dict[str, str] | None = None):
+    """A source catalogue recording where each item is installed.
+
+    ``pointers`` adds one logical shortcut per entry, written
+    ``consumer/Schema.Name`` to ``producer/Schema.Name``, which is the row a
+    fork copies and a recreated pointer resolves from.
+    """
 
     from weaver.catalogue.state import Catalogue
-    from weaver.catalogue.tables import INSTALLATION
+    from weaver.catalogue.tables import INSTALLATION, SHORTCUT
 
     rows = {}
     for written, target in targets.items():
@@ -596,7 +690,35 @@ def _installed(targets: dict[str, str]):
                 },
             )
         }
+    for written, points_at in (pointers or {}).items():
+        destination = _document(written)
+        source = _document(points_at)
+        rows.setdefault(destination.item, {})[SHORTCUT.name] = (
+            {
+                "item_type": destination.item.item_type,
+                "item_name": destination.item.item_name,
+                "shortcut_id": destination.object_id.qualified,
+                "schema_name": destination.object_id.schema,
+                "object_name": destination.object_id.object,
+                "shortcut_type": "view",
+                "target_type": "logical",
+                "target_item_type": source.item.item_type,
+                "target_item_name": source.item.item_name,
+                "target_schema_name": f"Tables/{source.object_id.schema}",
+                "target_object_name": source.object_id.object,
+            },
+        )
     return Catalogue(rows=rows)
+
+
+def _document(written: str):
+    """``Item/Type/Schema.Object`` as the identity a catalogue row names."""
+
+    from weaver.declaration.metadata import ObjectId
+
+    item_type, item_name, tail = written.split("/", 2)
+    schema, _, name = tail.partition(".")
+    return WeaverDocumentId(WeaverItemId(item_type, item_name), ObjectId(schema, name))
 
 
 class _Never:

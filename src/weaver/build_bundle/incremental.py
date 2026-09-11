@@ -139,13 +139,14 @@ def stale_through_shortcuts(
     ``bound_items`` scopes it to what this build could act on. An absent row is
     a missing installation, which signature classification calls new.
 
-    A chain whose producer is ``Warehouse/_weaver`` is left out. Every build
+    Only the first comparison is skipped for ``Warehouse/_weaver``. Every build
     binds the catalogue item, so a changed catalogue table is classified by
-    signature and the descendant walk carries it from there. The build datetime
-    is the evidence for a producer a build cannot classify, and this one never
-    is. It is also the one row a fork does not copy, so a forked catalogue
-    holds its own build's instant here beside the source estate's everywhere
-    else.
+    signature and the descendant walk carries it from there, and it is the one
+    row a fork writes for itself: a forked catalogue holds this destination's
+    own build instant there beside the source estate's everywhere else, so
+    comparing a surface pointer against it reads two clocks. What the pointer's
+    own instant says about the objects below it is unaffected, and a build that
+    refreshed the surface and then stopped is recovered from there.
     """
 
     from ..catalogue.builtin import BUILTIN_ITEM
@@ -157,8 +158,6 @@ def stale_through_shortcuts(
     by_text = {str(identity): identity for identity in registered}
     behind = []
     for shortcut in repository.logical_shortcuts:
-        if shortcut.source.item == BUILTIN_ITEM:
-            continue
         destination = shortcut.destination
         if destination.item not in bound or str(destination) not in graph:
             continue
@@ -166,12 +165,17 @@ def stale_through_shortcuts(
         pointer = registered.get(destination)
         if source is None or pointer is None:
             continue
-        source_datetime = _as_instant(source.build_datetime)
-        if source_datetime is None:
-            continue
         pointer_datetime = _as_instant(pointer.build_datetime)
-        if pointer_datetime is None or source_datetime > pointer_datetime:
-            behind.append(destination)
+        if shortcut.source.item != BUILTIN_ITEM:
+            source_datetime = _as_instant(source.build_datetime)
+            if source_datetime is None:
+                continue
+            if pointer_datetime is None or source_datetime > pointer_datetime:
+                behind.append(destination)
+                continue
+        if pointer_datetime is None:
+            # Nothing below it orders against a pointer with no instant, and
+            # the source comparison is the one this chain skips.
             continue
         for node in graph.descendants(str(destination)):
             consumer = by_text.get(node)

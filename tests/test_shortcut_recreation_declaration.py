@@ -13,6 +13,7 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.catalogue.shortcuts import (
+    UnresolvedShortcut,
     recreatable,
     schemas_of,
     shortcut_request,
@@ -161,10 +162,16 @@ def test_a_physical_pointer_stays_on_the_target_it_was_recorded_with():
 
 
 @weaver_test()
-def test_an_unbound_logical_target_is_left_for_the_build():
-    """Nothing here can say where it is, and a build classifies it as new."""
+def test_an_unbound_logical_target_stops_the_run():
+    """A mirror reconstructs the estate it was asked for, or says what it could not.
 
-    assert recreatable([DELTA], item=CURATED, bindings={}) == ()
+    Nothing here can say where the target is, so there is no address to point
+    at. Left out, the estate would come back missing a pointer its own Registry
+    certifies.
+    """
+
+    with pytest.raises(UnresolvedShortcut, match="Lakehouse/Landing"):
+        recreatable([DELTA], item=CURATED, bindings={})
 
 
 @weaver_test()

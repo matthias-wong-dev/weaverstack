@@ -124,6 +124,12 @@ def _object(name: str) -> WeaverDocumentId:
     return WeaverDocumentId(item_id(ITEM), ObjectId("Sales", name))
 
 
+def _surface(name: str) -> WeaverDocumentId:
+    """One of the ``_`` surface pointers this item reads Weaver state through."""
+
+    return WeaverDocumentId(item_id(ITEM), ObjectId("_", name))
+
+
 def _bindings():
     """Both items and the catalogue item, as every build binds them."""
 
@@ -276,6 +282,29 @@ def test_the_catalogues_own_build_does_not_outdate_the_surface_it_made(tmp_path)
     )
 
     assert stale == ()
+
+
+@weaver_test()
+def test_only_the_catalogues_own_instant_is_set_aside(tmp_path):
+    """Two comparisons, and the exception reaches one of them.
+
+    ``Warehouse/_weaver`` to its surface pointer reads the fork's clock against
+    the source estate's, so it is skipped. The pointer to what reads it is this
+    catalogue's own instants throughout, and it is what recovers a build that
+    refreshed the surface and then stopped.
+    """
+
+    repository = _estate(tmp_path / "repo")
+    bound = _bindings().by_item
+    forked = _forked(repository)
+    refreshed = _rebuilt(forked, _surface("Bookmark"))
+
+    assert stale_through_shortcuts(repository, forked.registered, bound_items=bound) == (
+        ()
+    )
+    assert _object("Order") in stale_through_shortcuts(
+        repository, refreshed.registered, bound_items=bound
+    )
 
 
 # --- a mirror that certified a pointer it did not stand up --------------------

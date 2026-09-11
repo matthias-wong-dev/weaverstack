@@ -852,6 +852,19 @@ published its own Installation, dictionary and Registry rows for
 and the source's are left behind: copied across, the forked catalogue would
 assert its own tables live in a catalogue it is not.
 
+**Every row is copied as it stands, `Build datetime` included.** A forked
+Registry is the installed history this estate inherits, so nothing is re-dated
+on the way across. The destination's `Warehouse/_weaver` rows are the only ones
+a fork writes for itself, being its own catalogue build's. When a mirror
+physically established something is `_.Mirror`'s audit datetime, and that is
+the one place to read it.
+
+Cross-item freshness accounts for that one written row. It compares a `_`
+surface pointer against what reads it, and leaves out the comparison against
+`Warehouse/_weaver`, which sets this catalogue's build beside the source
+estate's instants. See
+[how does build work](how-does-build-work.md#7a-cross-item-freshness).
+
 **Installation is copied as it stands.** A forked catalogue names the source's
 physical targets, so every item begins where it already is. One
 
@@ -958,6 +971,12 @@ Mirror     Warehouse/Model | Core | Customer | PROD_MODEL.Core.Customer | View
 
 Registry still says what the object logically is. A mirror is an overlay, not a
 type or a role, so nothing downstream has a second vocabulary to learn.
+
+A source catalogue that is itself a mirror is refused for rebinding. One hop is
+all `_.Mirror` records, and an item mirrored out of a mirror has its rows two
+catalogues back. A fork alone is unaffected: it copies the rows as they stand,
+so the destination mirrors whatever the source did, one hop from the same
+estate.
 
 **Nothing declares `_.Mirror`.** A catalogue only ever reached by `weaver build`
 does not have that table. The mirror operation installs it into its destination

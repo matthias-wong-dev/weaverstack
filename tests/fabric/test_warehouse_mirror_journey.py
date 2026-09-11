@@ -39,10 +39,10 @@ CHANGED = "Changed"
 MATERIALISED = "Wh.Product"
 
 #: The object whose query reads the ``_`` surface, which puts it downstream of
-#: ``Warehouse/_weaver`` in the dependency graph. A fork dates its rows to
-#: itself and the destination catalogue's rows to the build that made it, so a
-#: chain through the surface has to stay on one clock for this to stay
-#: borrowed through an unchanged build.
+#: ``Warehouse/_weaver`` in the dependency graph. A fork copies every row as it
+#: stands and the destination's ``Warehouse/_weaver`` rows are its own
+#: catalogue build, so this stays borrowed only while freshness leaves the
+#: catalogue item's instant out of the comparison.
 SURFACE_READER = "Wh.CustomerDelta"
 
 SURFACE_READER_SOURCE = f"""/*
@@ -488,13 +488,12 @@ def test_an_unchanged_build_leaves_every_relation_borrowed(journey):
 
 @weaver_test(remote=True)
 def test_an_unchanged_build_leaves_a_surface_reader_borrowed(journey):
-    """The chain through the ``_`` surface, which is where two clocks met.
+    """The chain through the ``_`` surface, and what a fork leaves on it.
 
     ``Wh.CustomerDelta`` reads ``[_].[Bookmark]``, so the graph puts it under
-    the surface view over ``Warehouse/_weaver``. A fork dates every row it
-    copies to itself and the destination catalogue's rows are the build that
-    made it, so the pointer and its reader compare on one clock and nothing on
-    the chain is behind.
+    the surface view over ``Warehouse/_weaver``. A fork copies every row as it
+    stands, and the one row it writes for itself is the catalogue item's, which
+    freshness leaves out of the comparison against a pointer.
     """
 
     journey.require("build with nothing changed")
