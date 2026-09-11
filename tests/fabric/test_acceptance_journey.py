@@ -1750,11 +1750,13 @@ def test_the_whole_estate_comes_from_the_catalogue_and_goes_last(acceptance):
 @weaver_test(integration=True, resources=BUILDING)
 def test_the_estate_builds_again_over_an_emptied_catalogue(acceptance):
     """
-    Intent: a wipe that took the catalogue leaves a workspace a build can fill.
+    Intent: a wipe that took the catalogue leaves a workspace a build can fill,
+    and this module hands the shared estate back the way it found it.
 
     Proof: the same build request that opened this journey succeeds against a
-    Warehouse whose `_` schema the previous scenario removed, and the catalogue
-    records every item again.
+    Warehouse whose `_` schema the previous scenario removed, the catalogue
+    records every item again, and the release afterwards leaves no installation
+    claiming one of these targets.
     """
 
     acceptance.require("final-wipe")
@@ -1777,6 +1779,28 @@ def test_the_estate_builds_again_over_an_emptied_catalogue(acceptance):
         )
     }
     assert set(acceptance.items) <= installed
+
+    # The estate is fixed and shared, so this module leaves its targets
+    # released: another module builds its own items into the same Warehouse,
+    # and a build into a target another item is installed to is refused.
+    acceptance.step(
+        "release",
+        lambda: weaver.wipe(
+            acceptance.targets,
+            unbind=True,
+            session=acceptance.session,
+        ),
+    )
+    acceptance.require("release")
+    claimed = {
+        str(row["Target name"])
+        for row in _catalogue_rows(
+            acceptance, "select [Target name] from [_].[Installation]"
+        )
+    }
+    assert claimed.isdisjoint(
+        {target.split("/", 1)[1] for target in acceptance.targets}
+    )
 
 
 def _abfss(item, relative: str) -> str:
