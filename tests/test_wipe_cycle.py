@@ -309,22 +309,22 @@ def test_public_wipe_unbinds_only_when_asked_and_skips_the_catalogue_itself(
 
     # --unbind asks for their removal by name.
     public_wipe(
-        "Lakehouse/Sales",
+        ("Lakehouse/Sales", "Warehouse/Reporting"),
         workspace="Demo",
         catalogue="Warehouse/Control",
         unbind=True,
     )
-    assert calls == [("Warehouse/Control", ("Lakehouse/Sales",))]
+    assert calls == [("Warehouse/Control", ("Lakehouse/Sales", "Warehouse/Reporting"))]
 
-    # The catalogue itself among the unbound targets is skipped: its rows are
-    # about to be removed with it.
-    public_wipe(
-        ("Lakehouse/Sales", "Warehouse/Control"),
-        workspace="Demo",
-        catalogue="Warehouse/Control",
-        unbind=True,
-    )
-    assert calls[-1] == ("Warehouse/Control", ("Lakehouse/Sales",))
+
+class _Store:
+    """A store that holds nothing: the wipes under test are stubbed."""
+
+    def exists(self, location):
+        return False
+
+    def list(self, location, recursive=False):
+        return ()
 
 
 @weaver_test()
@@ -347,11 +347,11 @@ def test_an_untargeted_wipe_uses_the_estate_the_catalogue_holds(monkeypatch):
         ),
     )
     result = public_wipe(
-        workspace="Demo",
-        catalogue="Warehouse/Control",
-        session=given_session(store=object()),
+        workspace="Demo", catalogue="Warehouse/Control", session=given_session(store=_Store())
     )
-    assert selected == ["Warehouse/Control", "Lakehouse/Sales"]
+    # The catalogue is wiped last: it is the index a half-finished wipe is
+    # retried from.
+    assert selected == ["Lakehouse/Sales", "Warehouse/Control"]
     assert not result.dry_run
 
 

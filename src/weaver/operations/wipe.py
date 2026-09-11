@@ -103,9 +103,17 @@ class WipeResult:
         return sum(report.count for report in self.reports)
 
     def to_mapping(self) -> dict:
+        """The estate-level machine view of one wipe.
+
+        Not an inventory: which targets were addressed, how the
+        catalogue stood to the run, and nothing per object. The dry-run JSON
+        carries the same estate-level shape; object listings live in the
+        physical layer's own diagnostics, not in wipe output.
+        """
+
         return {
             "workspace": self.workspace,
-            "reports": [report.to_mapping() for report in self.reports],
+            "targets": [report.target for report in self.reports],
             "unbound": dict(self.unbound) if self.unbound is not None else None,
             "catalogue_role": self.catalogue_role,
             "dry_run": self.dry_run,
@@ -154,6 +162,15 @@ def wipe(
         # resolves decides what an untargeted wipe means.
         needs_catalogue=False,
     )
+    key = _catalogue_key(resolved_workspace)
+    if unbind and parsed and key in {
+        (target.item_type, target.physical_name.casefold()) for target in parsed
+    }:
+        raise CommandError(
+            f"unbind preserves the catalogue, but {resolved_workspace.catalogue} "
+            "is among the targets to wipe. Name targets other than the "
+            "catalogue, or drop --unbind."
+        )
     from ..catalogue.connection import catalogue_connection
     from ..sessions.host import use_or_create_session
 
@@ -171,16 +188,23 @@ def wipe(
                 resolved_workspace,
                 catalogue=catalogue_connection(opened, resolved_workspace),
             )
+        # The catalogue goes last. It is the index a half-finished wipe is
+        # retried from, so every other target is emptied before its removal
+        # can make the estate unreadable.
+        ordered = parsed if not key else (
+            *(t for t in parsed if (t.item_type, t.physical_name.casefold()) != key),
+            *(t for t in parsed if (t.item_type, t.physical_name.casefold()) == key),
+        )
         # Named for what it is. A dry run reads the estate and decides, which
         # takes real time and is worth seeing; what it must not do is present
         # itself as the removal.
         with opened.task(
-            "Wipe (dry run)" if dry_run else "Wipe", ", ".join(map(str, parsed))
+            "Wipe (dry run)" if dry_run else "Wipe", ", ".join(map(str, ordered))
         ):
-            storage_targets = tuple(t for t in parsed if t.item_type == "Lakehouse")
+            storage_targets = tuple(t for t in ordered if t.item_type == "Lakehouse")
             store = opened.store(resolved_workspace) if storage_targets else None
             reports: list[WipeReport] = []
-            for target in parsed:
+            for target in ordered:
                 with opened.step(str(target)):
                     reports.extend(
                         _wipe_one(

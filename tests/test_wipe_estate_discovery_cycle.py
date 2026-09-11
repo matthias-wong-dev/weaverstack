@@ -22,9 +22,8 @@ SCHEMA_READ = "SELECT TABLE_NAME, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS"
 class RecordingCatalogue:
     """A ``_`` schema whose Installation rows the caller supplies.
 
-    The reader's first question is always the shape read from
-    ``INFORMATION_SCHEMA``, so this answers it with an Installation of the
-    expected columns before any row is asked for.
+    The shape read from ``INFORMATION_SCHEMA`` is answered with an
+    Installation of the expected columns before any row is asked for.
     """
 
     def __init__(self, installation_rows=()):
@@ -87,7 +86,7 @@ def test_a_target_named_like_the_catalogue_is_still_one_target():
     rows = [{"item_type": "Lakehouse", "target_name": "Control"}]
     estate = _estate_targets(workspace(), catalogue=connection_with(rows))
     # A Lakehouse/Control is a different Fabric item from Warehouse/Control,
-    # so it joins the estate rather than deduplicating against it.
+    # so both are in the estate.
     assert [str(target) for target in estate] == [
         "Warehouse/Control",
         "Lakehouse/Control",
