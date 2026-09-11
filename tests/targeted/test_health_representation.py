@@ -1231,9 +1231,7 @@ def test_a_mirrored_view_takes_part_in_lifecycle_and_is_not_a_load_subject():
     """
 
     estate = (
-        _Estate()
-        .view(f"{REPORTING}/Sales.Live")
-        .mirrors(f"{REPORTING}/Sales.Live")
+        _Estate().view(f"{REPORTING}/Sales.Live").mirrors(f"{REPORTING}/Sales.Live")
     )
     node = estate.catalogue().dag().node(document_id(f"{REPORTING}/Sales.Live"))
 

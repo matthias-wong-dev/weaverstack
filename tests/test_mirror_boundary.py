@@ -438,9 +438,7 @@ def test_a_producer_is_mirrored_before_what_points_at_it(monkeypatch):
 def test_items_no_pointer_relates_keep_the_order_they_were_given(monkeypatch):
     """Ordering is what a pointer needs, not a sort the run imposes."""
 
-    plan = _plan(
-        monkeypatch, _with_targets(), ["Warehouse/Model", "Lakehouse/Input"]
-    )
+    plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model", "Lakehouse/Input"])
 
     resolved = resolve_mirror(
         plan, _installed({"Warehouse/Model": "Model", "Lakehouse/Input": "Input"})
@@ -482,8 +480,9 @@ def test_rebinding_an_item_out_of_a_mirrored_catalogue_is_refused(monkeypatch):
     with pytest.raises(CommandError, match="itself a mirror"):
         resolve_mirror(plan, installed, borrowed=True)
 
-    assert resolve_mirror(_plan(monkeypatch, _workspace()), None, borrowed=True).items == (
-        ()
+    assert (
+        resolve_mirror(_plan(monkeypatch, _workspace()), None, borrowed=True).items
+        == ()
     )
 
 

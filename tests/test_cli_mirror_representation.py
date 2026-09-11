@@ -347,9 +347,7 @@ def test_an_authorised_fork_reports_the_targets_it_filled(monkeypatch, capsys):
     # The CLI hands the operation a Session rather than a resolved Workspace.
     assert passed["session"].workspace is calls["plan"].workspace
     printed = capsys.readouterr().out
-    assert printed == (
-        "mirror succeeded: Warehouse/Weaver_Dev, Lakehouse/Input_Dev\n"
-    )
+    assert printed == "mirror succeeded: Warehouse/Weaver_Dev, Lakehouse/Input_Dev\n"
 
 
 @weaver_test()

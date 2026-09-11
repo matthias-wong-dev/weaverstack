@@ -299,8 +299,8 @@ def test_only_the_catalogues_own_instant_is_set_aside(tmp_path):
     forked = _forked(repository)
     refreshed = _rebuilt(forked, _surface("Bookmark"))
 
-    assert stale_through_shortcuts(repository, forked.registered, bound_items=bound) == (
-        ()
+    assert (
+        stale_through_shortcuts(repository, forked.registered, bound_items=bound) == ()
     )
     assert _object("Order") in stale_through_shortcuts(
         repository, refreshed.registered, bound_items=bound
@@ -368,4 +368,3 @@ def _rebuilt(catalogue: Catalogue, identity) -> Catalogue:
             ),
         }
     return Catalogue(rows=rows, materialised=catalogue.materialised)
-

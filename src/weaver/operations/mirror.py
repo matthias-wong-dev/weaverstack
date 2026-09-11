@@ -819,9 +819,7 @@ def _wipe_target(workspace: Workspace, each: MirrorItem, *, session) -> str:
     return each.target
 
 
-def _mirror_item(
-    workspace: Workspace, each: MirrorItem, *, bindings, session
-) -> dict:
+def _mirror_item(workspace: Workspace, each: MirrorItem, *, bindings, session) -> dict:
     """Point one item at another target's data, however its kind mirrors."""
 
     from ..declaration.model import LAKEHOUSE
@@ -898,8 +896,7 @@ def _recreatable(each: MirrorItem, *, bindings) -> tuple:
         why = unsupported(pointer, kind=each.kind)
         if why is not None:
             raise CommandError(
-                f"mirror cannot recreate {pointer.destination} in {each.target}: "
-                f"{why}"
+                f"mirror cannot recreate {pointer.destination} in {each.target}: {why}"
             )
     return found
 

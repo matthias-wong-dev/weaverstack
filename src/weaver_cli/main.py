@@ -1839,8 +1839,7 @@ def handle_mirror(args: argparse.Namespace) -> int:
                 )
                 return 1
             answer = input(
-                "These targets will be emptied. Continue? "
-                "This cannot be undone [y/N] "
+                "These targets will be emptied. Continue? This cannot be undone [y/N] "
             )
             if answer.strip().lower() not in {"y", "yes"}:
                 print("Cancelled.")
