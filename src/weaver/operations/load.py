@@ -180,7 +180,8 @@ def run_load(
                 session=session,
                 workspace=workspace,
                 # Stale-only assesses Load health, which reads _.LoadStatus.
-                # The one catalogue read, widened to carry it.
+                # The one catalogue read, widened to carry it. _.Mirror is in
+                # READABLE_TABLES already, being what says a node may be written.
                 tables=(*READABLE_TABLES, LOAD_STATUS) if stale else None,
             )
         )
@@ -193,10 +194,24 @@ def run_load(
 
     selected = None
     if stale:
+        from .mirror import mirrored_source
+
+        # A mirrored ancestor's load is recorded where its rows are written, so
+        # stale selection reads that catalogue too. The mirrored nodes are never
+        # selected; their local descendants are, which is how a source that
+        # advanced reaches this estate.
+        source = mirrored_source(
+            catalogue,
+            workspace=workspace,
+            session=session,
+            operation="load --stale",
+            tables=(LOAD_STATUS,),
+        )
         selected = assess_load(
             catalogue,
             as_of=as_of if as_of is not None else resolve_as_of(None, started=started),
             items=items,
+            source=source,
         ).unsettled_identities()
 
     # Fabric attaches a Spark session to a Lakehouse, so a host that crosses

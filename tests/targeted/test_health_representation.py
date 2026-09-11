@@ -36,6 +36,7 @@ from weaver.catalogue.tables import (
     DEPENDENCY,
     INSTALLATION,
     LOAD_STATUS,
+    MIRROR,
     REGISTRY,
     SHORTCUT,
     TABLE_DICTIONARY,
@@ -64,6 +65,9 @@ from weaver.health import (
     TEST_PENDING,
     TEST_STALE_DEPENDENCY,
     assess,
+    assess_load,
+    is_load_subject,
+    participates_in_load_state,
     resolve_as_of,
     worst,
 )
@@ -216,6 +220,38 @@ class _Estate:
                     failure_count=failure_count,
                 )
             )
+        return self
+
+    def mirrors(
+        self,
+        identity: str,
+        *,
+        physical: str = "view",
+        source_target: str = "Prod_WH",
+    ) -> "_Estate":
+        """The same object, with its rows supplied by another target.
+
+        ``physical`` is what stands at the address while it mirrors, being a
+        View over a Warehouse relation or a shortcut in a Lakehouse.
+        """
+
+        from weaver.catalogue.claims import catalogue_schema
+
+        parsed = document_id(identity)
+        tables = self._tables(parsed.item)
+        tables.setdefault(MIRROR.name, []).append(
+            {
+                "item_type": parsed.item.item_type,
+                "item_name": parsed.item.item_name,
+                "schema_name": catalogue_schema(parsed),
+                "object_name": parsed.object_id.object,
+                "source_workspace_name": "Prod",
+                "source_target_name": source_target,
+                "source_schema_name": parsed.object_id.schema,
+                "source_object_name": parsed.object_id.object,
+                "physical_type": physical,
+            }
+        )
         return self
 
     def catalogue(self, *, load_history=None) -> Catalogue:
@@ -1122,3 +1158,217 @@ def test_a_catalogue_read_without_a_window_reports_no_activity():
 
     assert report.current_load is None
     assert report.load_activity == ()
+
+
+# --- a mirrored estate --------------------------------------------------------
+#
+# The selected catalogue is the logical estate. `_.Mirror` changes two things
+# about an object at a mirrored address: what physically stands there, and
+# which catalogue its Load state is read from.
+
+
+def _source(*rows) -> Catalogue:
+    """The mirrored catalogue, holding current load state and nothing else."""
+
+    gathered: dict = {}
+    for identity, result, completed in rows:
+        parsed = document_id(identity)
+        gathered.setdefault(parsed.item, {LOAD_STATUS.name: []})[
+            LOAD_STATUS.name
+        ].append(load_status_row(parsed, result=result, completed_at=completed))
+    return Catalogue(
+        rows={
+            item: {name: tuple(rows) for name, rows in tables.items()}
+            for item, tables in gathered.items()
+        }
+    )
+
+
+@weaver_test()
+def test_inventory_health_expects_what_the_mirror_put_at_the_address():
+    """Registry says Table, ``_.Mirror`` says View, and the target holds a View."""
+
+    estate = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(1))
+        .mirrors(f"{REPORTING}/Sales.Customer")
+    )
+    held = target_inventory(
+        kind="warehouse",
+        target_name="Reporting_WH",
+        schemas=("Sales", "_"),
+        views=("Sales.Customer",),
+        procedures=("_.Load Sales.Customer",),
+    )
+
+    report = estate.report(inventories={REPORTING_WH: held})
+
+    assert not about(report.build, CERTIFIED_MISSING)
+
+
+@weaver_test()
+def test_a_mirrored_object_cannot_be_loaded_here():
+    """The rows belong to the target it mirrors, so nothing here writes them."""
+
+    estate = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(1))
+        .mirrors(f"{REPORTING}/Sales.Customer")
+    )
+
+    node = estate.catalogue().dag().node(document_id(f"{REPORTING}/Sales.Customer"))
+
+    assert not node.can_load
+    assert node.is_mirrored
+
+
+@weaver_test()
+def test_a_mirrored_view_takes_part_in_lifecycle_and_is_not_a_load_subject():
+    """A build settles a View wherever it stands, and a mirror is no exception.
+
+    The two questions come apart here: the View's instant still orders a
+    descendant materialised from it, and no load is expected of it.
+    """
+
+    estate = (
+        _Estate().view(f"{REPORTING}/Sales.Live").mirrors(f"{REPORTING}/Sales.Live")
+    )
+    node = estate.catalogue().dag().node(document_id(f"{REPORTING}/Sales.Live"))
+
+    report = estate.report()
+
+    assert node.is_mirrored
+    assert participates_in_load_state(node)
+    assert not is_load_subject(node)
+    assert report.load.subjects == 0
+    assert report.load.status == GREEN
+
+
+@weaver_test()
+def test_a_mirrored_object_is_still_a_load_subject():
+    """Its source's load is what its rows are, so its state is worth reporting."""
+
+    estate = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(1))
+        .mirrors(f"{REPORTING}/Sales.Customer")
+    )
+
+    report = estate.report(
+        source=_source((f"{REPORTING}/Sales.Customer", "failed", at(1)))
+    )
+
+    assert report.load.subjects == 1
+    assert about(report.load, LOAD_FAILED)[0].object_id == f"{REPORTING}/Sales.Customer"
+
+
+@weaver_test()
+def test_the_sources_state_replaces_the_copy_a_fork_made():
+    """A fork copies ``_.LoadStatus``, and the copy describes the fork's moment."""
+
+    estate = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(1), result="succeeded")
+        .mirrors(f"{REPORTING}/Sales.Customer")
+    )
+
+    report = estate.report(
+        source=_source((f"{REPORTING}/Sales.Customer", "failed", at(2)))
+    )
+
+    assert report.load.status == RED
+    assert codes(report.load) == (LOAD_FAILED,)
+
+
+@weaver_test()
+def test_a_source_holding_nothing_leaves_a_mirrored_object_pending():
+    """The copied row is not evidence, so its absence at the source is Pending."""
+
+    estate = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(1), result="succeeded")
+        .mirrors(f"{REPORTING}/Sales.Customer")
+    )
+
+    report = estate.report(source=_source())
+
+    assert codes(report.load) == (LOAD_PENDING,)
+
+
+@weaver_test()
+def test_an_object_that_stops_being_mirrored_reads_its_own_state_again():
+    """Copy-on-write removes the ``_.Mirror`` row, and the fork's state stands."""
+
+    estate = _Estate().table(
+        f"{REPORTING}/Sales.Customer", loaded=at(1), result="succeeded"
+    )
+
+    report = estate.report(
+        source=_source((f"{REPORTING}/Sales.Customer", "failed", at(2)))
+    )
+
+    assert report.load.status == GREEN
+
+
+@weaver_test()
+def test_a_mirrored_ancestor_loaded_since_puts_a_local_descendant_behind():
+    """The source advanced, so what this estate materialised from it is behind."""
+
+    estate = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(10))
+        .mirrors(f"{REPORTING}/Sales.Customer")
+        .table(f"{REPORTING}/Sales.Summary", loaded=at(5), moved=at(5))
+        .reads(f"{REPORTING}/Sales.Summary", "Sales.Customer")
+    )
+
+    report = estate.report(
+        source=_source((f"{REPORTING}/Sales.Customer", "succeeded", at(1)))
+    )
+
+    behind = about(report.load, LOAD_STALE_ANCESTOR)
+    assert [finding.object_id for finding in behind] == [f"{REPORTING}/Sales.Summary"]
+
+
+@weaver_test()
+def test_a_mirrored_ancestor_loaded_since_puts_a_local_validation_behind():
+    """A validation passed here, and the source it reconciles has moved on."""
+
+    estate = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(10))
+        .mirrors(f"{REPORTING}/Sales.Customer")
+        .validation(f"{REPORTING}/Sales.CustomerRows", result="succeeded", ran=at(5))
+        .reads(f"{REPORTING}/Sales.CustomerRows", "Sales.Customer")
+    )
+
+    report = estate.report(
+        source=_source((f"{REPORTING}/Sales.Customer", "succeeded", at(1)))
+    )
+
+    assert codes(report.tests) == (TEST_STALE_DEPENDENCY,)
+
+
+@weaver_test()
+def test_stale_selection_takes_the_local_descendant_and_never_the_mirror():
+    """Health assesses what it cannot run, and ``--stale`` runs what it can."""
+
+    estate = (
+        _Estate()
+        .table(f"{REPORTING}/Sales.Customer", loaded=at(10))
+        .mirrors(f"{REPORTING}/Sales.Customer")
+        .table(f"{REPORTING}/Sales.Summary", loaded=at(5), moved=at(5))
+        .reads(f"{REPORTING}/Sales.Summary", "Sales.Customer")
+    )
+    catalogue = estate.catalogue()
+    source = _source((f"{REPORTING}/Sales.Customer", "failed", at(1)))
+
+    assessment = assess_load(catalogue, as_of=YESTERDAY, source=source)
+
+    assert {str(subject.identity) for subject in assessment.subjects} == {
+        f"{REPORTING}/Sales.Customer",
+        f"{REPORTING}/Sales.Summary",
+    }
+    assert [str(identity) for identity in assessment.unsettled_identities()] == [
+        f"{REPORTING}/Sales.Summary"
+    ]

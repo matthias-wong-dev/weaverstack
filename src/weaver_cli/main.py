@@ -172,16 +172,33 @@ def _requires_wipe(args) -> frozenset[str]:
 
 
 def _requires_mirror(args) -> frozenset[str]:
-    """What forking a catalogue will want.
+    """What forking a catalogue and rebinding its items will want.
 
-    T-SQL and item resolution. A fork empties a Warehouse, rebuilds the ``_``
-    schema and copies rows between two Warehouses, and none of that reaches a
-    Lakehouse, so no Spark session is asked for.
+    T-SQL always, because the catalogue is a Warehouse. A mirrored Lakehouse
+    adds OneLake and Livy: its shortcuts are not finished until Spark can read
+    them, and its wrapper views are Spark SQL.
+
+    Naming no item selects every configured target, and which kinds those are
+    is configuration's answer, read after this. So an unscoped run declares the
+    superset, as ``build`` does.
     """
 
-    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
+    from weaver.sessions.requirements import (
+        AUTH,
+        LIVY,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
+    )
 
-    return requirements(AUTH, RESOLVER, TDS)
+    if getattr(args, "no_item", False):
+        return requirements(AUTH, RESOLVER, TDS)
+    items = getattr(args, "items", None)
+    if not items:
+        return requirements(AUTH, RESOLVER, ONELAKE, LIVY, TDS)
+    logical = [str(value).split("=", 1)[0] for value in items]
+    return requirements(AUTH, RESOLVER, TDS, *_kind_requirements(logical))
 
 
 def _requires_health(args) -> frozenset[str]:
@@ -1784,15 +1801,10 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
 
 def handle_mirror(args: argparse.Namespace) -> int:
-    """Resolve the pair, prove the source, confirm, then fork.
+    """Resolve the pair, settle the scope, confirm, then mirror.
 
-    The order is the safety property. A fork empties the destination Warehouse,
-    so what it will do is settled and the source is read before anything is
-    asked, and long before anything is removed. A misspelled ``--mirror`` fails
-    while the destination is still intact.
-
-    One :class:`weaver.MirrorPlan` carries the pair through all three, so the
-    sentence somebody answers names the catalogues the fork acts on.
+    The order is the safety property: a misspelled ``--mirror`` or an item the
+    catalogue never installed fails while every Warehouse is still intact.
     """
 
     import json
@@ -1815,33 +1827,32 @@ def handle_mirror(args: argparse.Namespace) -> int:
     )
 
     with _running_session(args, plan.workspace) as opened:
-        weaver.check_mirror(plan, session=opened)
+        resolved = weaver.check_mirror(plan, session=opened)
 
         if not _authorised(args):
-            print(f"mirror on {plan.workspace.workspace}\n\n  {plan.describe()}\n")
+            print(f"Mirror on {plan.workspace.workspace}\n\n{resolved.describe()}\n")
+            emptied = ", ".join(resolved.wiped)
             if not sys.stdin.isatty():
                 print(
-                    f"Refusing to empty {plan.target} without confirmation. "
-                    "Pass --yes.",
+                    f"Refusing to empty {emptied} without confirmation. Pass --yes.",
                     file=sys.stderr,
                 )
                 return 1
             answer = input(
-                f"Empty and rebuild {plan.target}? This cannot be undone [y/N] "
+                "These targets will be emptied. Continue? This cannot be undone [y/N] "
             )
             if answer.strip().lower() not in {"y", "yes"}:
                 print("Cancelled.")
                 return 1
 
-        result = weaver.mirror(plan=plan, session=opened)
+        result = weaver.mirror(plan=resolved, session=opened)
 
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
         return 0
-    print(f"Forked {result.source_catalogue} into {result.destination_catalogue}.")
-    for table, rows in result.copied.items():
-        print(f"  {table}: {rows}")
-    print(f"  ({', '.join(result.uncopied)} start empty)")
+    # The targets, as build and load report theirs. Per-table row counts and
+    # per-item object counts are in --json.
+    print(f"mirror {result.status}: {', '.join(result.wiped)}")
     return 0
 
 

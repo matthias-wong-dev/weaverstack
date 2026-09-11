@@ -304,7 +304,7 @@ managed drop a table-to-view change goes through, reading the installed role and
 the inventory's installed type, and it runs in the drop phase, ahead of both the
 shortcut phase and the build phase. A shortcut create over a name an ordinary
 folder or table occupies returns a conflict from Fabric, so a native
-`Files/ACQSC/HarmSurveyXlsx` left standing by an earlier build blocks the folder
+`Files/Sales/ReturnsXlsx` left standing by an earlier build blocks the folder
 shortcut now declared there.
 
 An identity with no Registry row is left where it stands. Nothing certified it,
@@ -507,6 +507,14 @@ rebuild that never happened.
 The set that stops being certified is what the build **rebuilds**, not what it
 drops. A pointer is refreshed over its own address without being dropped, and it
 is decertified with everything else, which is what re-dates its row.
+
+**The catalogue item is not compared.** `Warehouse/_weaver` produces every `_`
+surface pointer, and every build binds it, so a changed catalogue table is a
+changed signature and the descendant walk carries it. The build datetime is the
+evidence for a producer a build cannot classify, and this one never is.
+`weaver mirror` writes it for itself and copies every other row, so the
+destination catalogue holds this estate's own build beside the source
+estate's instants; see [the catalogue](catalogue.md#forking-a-catalogue).
 
 It is written as an `{{build_datetime}}` token resolved once per installation, not a
 literal frozen at generation time and not `current_timestamp()`. A literal would

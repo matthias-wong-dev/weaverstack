@@ -4,7 +4,7 @@ Three sections over one installed graph.
 
 .. code-block:: text
 
-    Load    every loadable node, its current _.LoadStatus, and its freshness
+    Load    every node holding rows, its current _.LoadStatus, and its freshness
     Tests   every Test and Assumption, its current _.TestStatus, and its freshness
     Build   what installed state contradicts itself
 
@@ -170,6 +170,107 @@ def _statuses(
             failure_count=None if failure_count is None else int(failure_count),
         )
     return MappingProxyType(found)
+
+
+@dataclass(frozen=True)
+class EffectiveLoadState:
+    """Current load state for the estate a report is about.
+
+    A mirrored object's rows are written where it mirrors, so its lifecycle
+    state is the source catalogue's. Everything else is the selected
+    catalogue's. A fork copies ``_.LoadStatus`` when it is made, so a mirrored
+    object carries a row here from the moment of the fork; that copy is
+    replaced, and where the source holds nothing the object reads as
+    unestablished.
+    """
+
+    statuses: Mapping[WeaverDocumentId, RuntimeStatus]
+    history: object | None = None
+
+
+def effective_load_state(catalogue: Catalogue, *, source=None) -> EffectiveLoadState:
+    """One estate's load state, with mirrored identities taken from ``source``.
+
+    With no ``_.Mirror`` rows this is the catalogue's own state unchanged, which
+    is every estate that forks nothing.
+    """
+
+    mirrored = frozenset(catalogue.mirrors)
+    if not mirrored:
+        return EffectiveLoadState(
+            statuses=load_statuses(catalogue), history=catalogue.load_history
+        )
+    from_source = load_statuses(source) if source is not None else {}
+    statuses = {
+        identity: status
+        for identity, status in load_statuses(catalogue).items()
+        if identity not in mirrored
+    }
+    statuses.update(
+        (identity, from_source[identity])
+        for identity in mirrored
+        if identity in from_source
+    )
+    return EffectiveLoadState(
+        statuses=MappingProxyType(statuses),
+        history=_effective_history(
+            catalogue.load_history,
+            source=None if source is None else source.load_history,
+            statuses=statuses,
+            mirrored=mirrored,
+        ),
+    )
+
+
+def _effective_history(local, *, source, statuses, mirrored):
+    """The window behind effective state, drawn from both catalogues.
+
+    Statistics for a mirrored object come from the source, which is also the
+    only place they exist: a fork copies ``_.LoadStatus`` and leaves
+    ``_.LoadStatistic`` behind. The summary is recounted from the merged
+    statuses, so what the report totals and what it assesses are one thing.
+    """
+
+    from .catalogue.history import LoadHistory
+
+    if local is None and source is None:
+        return None
+    rows = [
+        row
+        for row in (local.statistics if local is not None else ())
+        if _row_identity(row) not in mirrored
+    ]
+    rows.extend(
+        row
+        for row in (source.statistics if source is not None else ())
+        if _row_identity(row) in mirrored
+    )
+    if not statuses and not rows:
+        # Bootstrap on both sides. Nothing has settled a load, and a report
+        # carries no window at all.
+        return None
+    counts: dict[str, int] = {}
+    for status in statuses.values():
+        counts[status.result] = counts.get(status.result, 0) + 1
+    started = [status.started_at for status in statuses.values() if status.started_at]
+    completed = [
+        status.completed_at for status in statuses.values() if status.completed_at
+    ]
+    return LoadHistory(
+        workflow_ids=tuple(
+            sorted(
+                {
+                    status.workflow_id
+                    for status in statuses.values()
+                    if status.workflow_id
+                }
+            )
+        ),
+        started_at=min(started) if started else None,
+        completed_at=max(completed) if completed else None,
+        counts=MappingProxyType(counts),
+        statistics=tuple(rows),
+    )
 
 
 def _row_identity(
@@ -498,9 +599,17 @@ class LoadAssessment:
         return tuple(subject for subject in self.subjects if subject.severity != GREEN)
 
     def unsettled_identities(self) -> tuple[WeaverDocumentId, ...]:
-        """The non-Green subjects, as logical loadable identities."""
+        """The non-Green subjects a load may run here.
 
-        return tuple(subject.identity for subject in self.unsettled())
+        A mirrored subject is assessed and never selected: its rows are written
+        in the catalogue it mirrors. A local descendant of one is selected in
+        the ordinary way, which is how a source that advanced reaches this
+        estate.
+        """
+
+        return tuple(
+            subject.identity for subject in self.unsettled() if subject.node.can_load
+        )
 
     def to_health_section(self) -> HealthSection:
         """The Load section of a health report."""
@@ -641,7 +750,7 @@ class _LoadHealth:
         return tuple(
             ancestor
             for ancestor in self.dag.ancestors(node.identity)
-            if is_lifecycle_node(ancestor)
+            if participates_in_load_state(ancestor)
         )
 
     def established_at(self, identity) -> datetime | None:
@@ -684,15 +793,29 @@ class _LoadHealth:
         return sorted(newer)[0] if newer else None
 
 
-def is_lifecycle_node(node: InstalledNode) -> bool:
-    """Whether this node carries a ``_.LoadStatus`` row.
+def participates_in_load_state(node: InstalledNode) -> bool:
+    """Whether this node carries ``_.LoadStatus`` state, wherever it is read.
 
-    Loadable tables and folders, which a load settles, and Views, which a
-    successful build settles. A View is not a load subject; its state lets a
-    materialised descendant detect a newer View definition.
+    Observation, not execution. A loadable settles here, a mirrored table or
+    folder settles in the catalogue it mirrors, and a View settles when its
+    build succeeds. A View is not a load subject; its state lets a materialised
+    descendant detect a newer View definition.
     """
 
-    return node.is_loadable or is_view_node(node)
+    return node.can_load or node.is_mirrored or is_view_node(node)
+
+
+def is_load_subject(node: InstalledNode) -> bool:
+    """Whether Load health assesses this node.
+
+    The objects that hold rows, whether those rows are their own or a mirror's.
+    A View is left out, mirrored or not: a build settles it, and Build health is
+    where its installation is reported. It stays in
+    :func:`participates_in_load_state`, where its instant orders a materialised
+    descendant against it.
+    """
+
+    return (node.can_load or node.is_mirrored) and not is_view_node(node)
 
 
 def is_view_node(node: InstalledNode) -> bool:
@@ -701,10 +824,14 @@ def is_view_node(node: InstalledNode) -> bool:
     return node.role == ROLE_DATA and node.object_type == VIEW_OBJECT_TYPE
 
 
-def load_health(catalogue: Catalogue, *, as_of: datetime) -> _LoadHealth:
-    """The Load rules, bound to one catalogue's graph and its load statuses."""
+def load_health(catalogue: Catalogue, *, as_of: datetime, source=None) -> _LoadHealth:
+    """The Load rules, bound to one catalogue's graph and its effective state."""
 
-    return _LoadHealth(catalogue.dag(), statuses=load_statuses(catalogue), as_of=as_of)
+    return _LoadHealth(
+        catalogue.dag(),
+        statuses=effective_load_state(catalogue, source=source).statuses,
+        as_of=as_of,
+    )
 
 
 def assess_load(
@@ -713,12 +840,16 @@ def assess_load(
     as_of: datetime,
     items: Sequence[WeaverItemId] | None = None,
     targets: Sequence[PhysicalTargetRef] | None = None,
+    source=None,
 ) -> LoadAssessment:
-    """Every installed loadable in scope, assessed once.
+    """Every object holding rows in scope, assessed once.
 
     ``items`` bounds the subjects by logical item and ``targets`` by physical
     target. Ancestry outside the scope is still read, because whether a subject
     is behind its sources is a question about the whole graph.
+
+    A mirrored object is a subject: its source's load is what its rows are.
+    ``source`` is the catalogue that load is recorded in.
     """
 
     dag = catalogue.dag()
@@ -726,11 +857,12 @@ def assess_load(
     where = None if targets is None else frozenset(targets)
     subjects = tuple(
         node
-        for node in dag.loadables()
-        if (chosen is None or node.item in chosen)
+        for node in dag.nodes
+        if is_load_subject(node)
+        and (chosen is None or node.item in chosen)
         and (where is None or node.target in where)
     )
-    return load_health(catalogue, as_of=as_of).assess(subjects)
+    return load_health(catalogue, as_of=as_of, source=source).assess(subjects)
 
 
 def resolve_as_of(value, *, started: datetime) -> datetime:
@@ -776,6 +908,7 @@ def assess(
     generated_at: datetime,
     targets: Sequence[PhysicalTargetRef] | None = None,
     inventories: Mapping[PhysicalTargetRef, object] | None = None,
+    source: Catalogue | None = None,
 ) -> HealthReport:
     """One catalogue's operational state, as a report.
 
@@ -789,10 +922,14 @@ def assess(
     ``inventories`` are read for the selected targets alone, so a certified
     object the target does not hold is reported. With none, Build health reports
     what the catalogue contradicts about itself.
+
+    ``source`` is the catalogue this estate mirrors, where one is mirrored. It
+    supplies Load state for the mirrored identities and nothing else.
     """
 
     dag = catalogue.dag()
-    history = catalogue.load_history
+    effective = effective_load_state(catalogue, source=source)
+    history = effective.history
     selected = None if targets is None else tuple(dict.fromkeys(targets))
     evaluation = _Assessment(
         dag,
@@ -800,6 +937,7 @@ def assess(
         as_of=as_of,
         selected=selected,
         inventories=dict(inventories or {}),
+        effective=effective,
     )
     return HealthReport(
         generated_at=generated_at,
@@ -824,6 +962,7 @@ class _Assessment:
         as_of: datetime,
         selected,
         inventories,
+        effective=None,
     ) -> None:
         self.dag = dag
         self.catalogue = catalogue
@@ -831,12 +970,13 @@ class _Assessment:
         self.selected = selected
         self.inventories = inventories
         self.test_status = test_statuses(catalogue)
-        # The one Load implementation, over the statuses read here. Validation
+        # The one Load implementation, over the effective statuses. Validation
         # freshness asks it the same question, so there is one answer to "when
-        # was this ancestor established".
-        self.load_health = _LoadHealth(
-            dag, statuses=load_statuses(catalogue), as_of=as_of
-        )
+        # was this ancestor established", and a mirrored ancestor answers it
+        # with the source's instant.
+        if effective is None:
+            effective = effective_load_state(catalogue)
+        self.load_health = _LoadHealth(dag, statuses=effective.statuses, as_of=as_of)
 
     # --- scope ----------------------------------------------------------------
 
@@ -849,10 +989,12 @@ class _Assessment:
     # --- load -----------------------------------------------------------------
 
     def load(self) -> HealthSection:
-        """Every loadable node in scope, as the canonical Load assessment."""
+        """Every object holding rows in scope, as the Load assessment."""
 
         return self.load_health.assess(
-            self._subjects(self.dag.loadables())
+            self._subjects(
+                tuple(node for node in self.dag.nodes if is_load_subject(node))
+            )
         ).to_health_section()
 
     # --- tests ----------------------------------------------------------------
@@ -931,7 +1073,7 @@ class _Assessment:
         moved = [
             ancestor.node_id
             for ancestor in self.dag.ancestors(node.identity)
-            if is_lifecycle_node(ancestor)
+            if participates_in_load_state(ancestor)
             and (self.load_health.established_at(ancestor.identity) or at) > at
         ]
         return sorted(moved)[0] if moved else None
@@ -1148,7 +1290,8 @@ __all__ = [
     "assess_load",
     "current_load",
     "load_activity",
-    "is_lifecycle_node",
+    "is_load_subject",
+    "participates_in_load_state",
     "is_view_node",
     "load_health",
     "load_statuses",

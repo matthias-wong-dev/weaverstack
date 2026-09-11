@@ -18,6 +18,7 @@ Optional environment variables:
     WEAVER_FABRIC_WORKSPACE_EXT
     WEAVER_PYTEST_WEAVER
     WEAVER_PYTEST_WEAVER_FORK
+    WEAVER_PYTEST_WAREHOUSE_MIRROR
     WEAVER_PYTEST_TARGET
     WEAVER_PYTEST_PRODUCER
     WEAVER_PYTEST_CONSUMER
@@ -60,6 +61,8 @@ LAKEHOUSE_ROLES = {
     "producer": "PYTEST_LH_2",
     "consumer": "PYTEST_LH_3",
     "warehouse_producer": "PYTEST_HOUSE",
+    # Where a mirrored Lakehouse item is built. Emptied by every mirror.
+    "lakehouse_mirror": "PYTEST_LH_MIRROR",
 }
 
 WAREHOUSE_ROLES = {
@@ -70,6 +73,8 @@ WAREHOUSE_ROLES = {
     # its destination and the suite's own catalogue has to survive the run.
     "weaver_fork": "PYTEST_WEAVER_FORK",
     "warehouse": "PYTEST_WH_1",
+    # Where a mirrored Warehouse item is built. Emptied by every mirror.
+    "warehouse_mirror": "PYTEST_WH_MIRROR",
 }
 
 

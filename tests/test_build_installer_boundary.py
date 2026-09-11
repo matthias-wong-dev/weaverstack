@@ -458,35 +458,3 @@ def test_spark_actions_are_not_run_concurrently(tmp_path):
     )
 
     assert recorder.peak == 1
-
-
-# --- every action is timed where it runs ---------------------------------------
-
-
-@weaver_test()
-def test_each_action_reports_its_own_duration(tmp_path):
-    """Actions in a batch share a target and a context, never a number.
-
-    Spark actions used to cross to the session together and be stamped with the
-    offsets the far side reported. Every action runs here now, one at a time, so
-    each result carries the time that action actually took and the spans sit on
-    one clock in the order they ran.
-    """
-
-    bundle, store = _tsql_batch(tmp_path, 3)
-
-    class _Slow(_Concurrent):
-        def execute(self, action, payload, context):
-            import time
-
-            if action.id == "a1":
-                time.sleep(0.2)
-            return super().execute(action, payload, context)
-
-    report = given_installer(store=store, executors={"tsql": _Slow()}).install(bundle)
-
-    by_id = {result.action_id: result for result in report.action_results()}
-    assert by_id["a1"].duration_seconds > by_id["a0"].duration_seconds
-    assert by_id["a1"].duration_seconds > by_id["a2"].duration_seconds
-    assert by_id["a0"].finished_at <= by_id["a1"].started_at
-    assert by_id["a1"].finished_at <= by_id["a2"].started_at

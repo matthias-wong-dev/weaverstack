@@ -24,7 +24,7 @@ from types import MappingProxyType
 from typing import Iterable, Mapping, Sequence
 
 from .catalogue.claims import catalogue_columns, stored_area
-from .catalogue.state import Catalogue
+from .catalogue.state import Catalogue, InstalledMirror
 from .catalogue.tables import (
     DEPENDENCY,
     FOLDER_DICTIONARY,
@@ -133,6 +133,8 @@ class InstalledNode:
     #: Folder dictionary row declared it. Carried here so nothing downstream
     #: goes back to a dictionary row to ask.
     is_static: bool = False
+    #: Whose data this object reads. ``None`` where it holds its own rows.
+    mirror: InstalledMirror | None = None
 
     @property
     def node_id(self) -> str:
@@ -159,10 +161,28 @@ class InstalledNode:
         return self.artefact_type is not None
 
     @property
-    def is_loadable(self) -> bool:
-        """Whether this node has an installed load primitive to dispatch."""
+    def is_mirrored(self) -> bool:
+        """Whether this node's data is supplied by another physical target."""
 
-        return self.role == ROLE_DATA and self.is_installed
+        return self.mirror is not None
+
+    @property
+    def effective_object_type(self) -> str | None:
+        """What physically stands at this node's address, borrowed or not."""
+
+        return self.mirror.physical_type if self.mirror else self.object_type
+
+    @property
+    def can_load(self) -> bool:
+        """Whether Weaver may run a load against this node in this estate.
+
+        Execution, not lifecycle. A mirrored node holds an installed load
+        primitive and answers ``False``, because the rows it stands over belong
+        to the target it mirrors. What carries Load state is a separate
+        question; see :func:`weaver.health.participates_in_load_state`.
+        """
+
+        return self.role == ROLE_DATA and self.is_installed and not self.is_mirrored
 
     @property
     def load_name(self) -> str | None:
@@ -190,7 +210,7 @@ class InstalledNode:
 
     @property
     def physical(self) -> PhysicalObjectRef:
-        """Where this node's own object sits in its physical target."""
+        """Where this node's own object sits, typed as what stands there."""
 
         schema, name = catalogue_columns(self.identity)
         return PhysicalObjectRef(
@@ -198,7 +218,7 @@ class InstalledNode:
             target_kind=self.target.kind,
             schema=schema,
             object=name,
-            object_type=self.object_type or "",
+            object_type=self.effective_object_type or "",
             # A schema identity carries no shape: it names a namespace, and
             # nothing is installed inside it that this estate owns.
             shape=getattr(self.identity, "shape", OBJECT_SHAPE),
@@ -255,6 +275,16 @@ class InstalledShortcut:
     source: WeaverDocumentId | None = None
     shortcut_type: str = ""
     target_type: str = ""
+    #: The item the target names, typed. A logical target's is a Weaver item and
+    #: is bound; a physical one's is the Fabric item itself.
+    target_item: WeaverItemId | None = None
+    #: The schema or path the target sits in, as ``_.Shortcut`` recorded it, and
+    #: the object under it where the target names one.
+    target_schema: str = ""
+    target_object: str | None = None
+    #: The workspace a physical target is in. ``None`` for a logical target,
+    #: which is bound, and for a physical one in this workspace.
+    target_workspace: str | None = None
 
     @property
     def is_logical(self) -> bool:
@@ -420,7 +450,7 @@ class InstalledDag:
         items: Sequence[WeaverItemId] | None = None,
         roles: Sequence[str] | None = None,
         object_types: Sequence[str] | None = None,
-        loadable: bool | None = None,
+        can_load: bool | None = None,
         validation: bool | None = None,
         load_names: Sequence[str] | None = None,
     ) -> tuple[InstalledNode, ...]:
@@ -449,7 +479,7 @@ class InstalledDag:
                 continue
             if wanted_types is not None and node.object_type not in wanted_types:
                 continue
-            if loadable is not None and node.is_loadable is not loadable:
+            if can_load is not None and node.can_load is not can_load:
                 continue
             if validation is not None and node.is_validation is not validation:
                 continue
@@ -461,9 +491,13 @@ class InstalledDag:
         return tuple(selected)
 
     def loadables(self, **filters) -> tuple[InstalledNode, ...]:
-        """The nodes with an installed load primitive, in identity order."""
+        """The nodes a load may run against here, in identity order.
 
-        return self.select(loadable=True, **filters)
+        A mirrored node holds an installed load primitive and is not among
+        them. See :attr:`InstalledNode.can_load`.
+        """
+
+        return self.select(can_load=True, **filters)
 
     def validations(self, **filters) -> tuple[InstalledNode, ...]:
         """The Test and Assumption nodes, in identity order."""
@@ -653,6 +687,7 @@ def _registered(catalogue: Catalogue, installations):
             target=target,
             role=document.object_role,
             object_type=document.object_type,
+            mirror=catalogue.mirrors.get(identity),
         )
         where = node.physical
         key = (
@@ -795,25 +830,28 @@ def installed_shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
                 destination = stored_identity(item, schema_name, object_name)
             else:
                 continue
+            target_item = WeaverItemId(
+                str(row.get("target_item_type") or ""),
+                str(row.get("target_item_name") or ""),
+            )
+            target_schema = str(row.get("target_schema_name") or "")
+            target_object = str(row.get("target_object_name") or "") or None
             source = None
             if target_type == LOGICAL_TARGET:
-                target_object = str(row.get("target_object_name") or "")
                 if not target_object:
                     continue
-                source = stored_identity(
-                    WeaverItemId(
-                        str(row.get("target_item_type") or ""),
-                        str(row.get("target_item_name") or ""),
-                    ),
-                    str(row.get("target_schema_name") or ""),
-                    target_object,
-                )
+                source = stored_identity(target_item, target_schema, target_object)
             found.append(
                 InstalledShortcut(
                     destination=destination,
                     source=source,
                     shortcut_type=shortcut_type,
                     target_type=target_type,
+                    target_item=target_item,
+                    target_schema=target_schema,
+                    target_object=target_object,
+                    target_workspace=str(row.get("target_workspace_name") or "")
+                    or None,
                 )
             )
     return tuple(sorted(found, key=lambda each: str(each.destination)))

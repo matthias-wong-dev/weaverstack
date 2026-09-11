@@ -49,9 +49,9 @@ from weaver.declaration import parse_item_repository
 from weaver.locations import Location
 
 ITEM = "Lakehouse/Landing"
-FOLDER = f"{ITEM}/Files/ACQSC.HarmSurveyXlsx"
-CONSUMER = f"{ITEM}/Tables/ACQSC.Consumer"
-TARGET = "Lakehouse/Drop/Files/ACQSC/HarmSurveyXlsx"
+FOLDER = f"{ITEM}/Files/Sales.ReturnsXlsx"
+CONSUMER = f"{ITEM}/Tables/Sales.Customer"
+TARGET = "Lakehouse/Drop/Files/Sales/ReturnsXlsx"
 
 
 @pytest.fixture
@@ -65,28 +65,28 @@ def estate(tmp_path):
     """
 
     root = tmp_path / "repo"
-    _write(root, f"{ITEM}/schemas/ACQSC.yml", schema_document("ACQSC"))
+    _write(root, f"{ITEM}/schemas/Sales.yml", schema_document("Sales"))
     _write(
         root,
         *physical_folder_shortcut(
-            ITEM, name="ACQSC.HarmSurveyXlsx", target=TARGET, workspace="Upstream"
+            ITEM, name="Sales.ReturnsXlsx", target=TARGET, workspace="Upstream"
         ),
     )
     _write(
         root,
-        f"{ITEM}/Tables/ACQSC__Consumer.py",
+        f"{ITEM}/Tables/Sales__Customer.py",
         '"""\n'
-        "Table ID: ACQSC.Consumer\n"
+        "Table ID: Sales.Customer\n"
         "Description: Reads the shortcut.\n"
         "Lineage: The shortcut.\n"
         "Schema:\n"
         "  Value: string\n"
         '"""\n'
-        "from shortcuts import ACQSC__HarmSurveyXlsx\n"
+        "from shortcuts import Sales__ReturnsXlsx\n"
         "from weaver import Table\n\n\n"
-        "class ACQSC__Consumer(Table):\n"
+        "class Sales__Customer(Table):\n"
         "    def read(self):\n"
-        "        return self.staging_table(ACQSC__HarmSurveyXlsx)\n",
+        "        return self.staging_table(Sales__ReturnsXlsx)\n",
     )
     return parse_item_repository(Location(str(root)))
 
@@ -206,7 +206,7 @@ def test_a_consumer_of_a_physical_shortcut_is_not_impacted_by_it(estate):
 # --- reconciling the installed form to the declared one -------------------------
 
 
-def planned(estate, *, registered, folders=("ACQSC.HarmSurveyXlsx",)):
+def planned(estate, *, registered, folders=("Sales.ReturnsXlsx",)):
     """One item's plan, with the destination selected for both drop and build."""
 
     item = item_id(ITEM)
@@ -219,7 +219,7 @@ def planned(estate, *, registered, folders=("ACQSC.HarmSurveyXlsx",)):
         inventory=target_inventory(
             target_id="landing",
             target_name="Landing_LH",
-            folder_schemas=("ACQSC",),
+            folder_schemas=("Sales",),
             folders=folders,
         ),
         target_by_item={item: target},
@@ -230,11 +230,11 @@ def planned(estate, *, registered, folders=("ACQSC.HarmSurveyXlsx",)):
         registered=registered,
         catalogue_target=catalogue_target(),
         shortcut_sources={
-            f"{ITEM}/ACQSC__HarmSurveyXlsx": ResolvedShortcutSource(
+            f"{ITEM}/Sales__ReturnsXlsx": ResolvedShortcutSource(
                 workspace_id="workspace-1",
                 item_id="drop-lakehouse",
                 item_name="Drop",
-                path="Files/ACQSC/HarmSurveyXlsx",
+                path="Files/Sales/ReturnsXlsx",
             )
         },
     )
@@ -322,8 +322,8 @@ def test_the_transition_converges_after_one_build(estate):
             item_id(ITEM): target_inventory(
                 target_id="landing",
                 target_name="Landing_LH",
-                folder_schemas=("ACQSC",),
-                folders=("ACQSC.HarmSurveyXlsx",),
+                folder_schemas=("Sales",),
+                folders=("Sales.ReturnsXlsx",),
             )
         },
     )
@@ -490,8 +490,8 @@ def test_the_wait_is_carried_on_the_drop_the_plan_names(tmp_path):
         inventory=target_inventory(
             target_id="landing",
             target_name="Landing_LH",
-            folder_schemas=("ACQSC",),
-            folders=("ACQSC.HarmSurveyXlsx",),
+            folder_schemas=("Sales",),
+            folders=("Sales.ReturnsXlsx",),
         ),
         target_by_item={item_id(ITEM): target},
         selected_documents={identity},
@@ -533,12 +533,12 @@ def _protected_folder_repository(tmp_path):
     """One item declaring a Folder that forbids its own rebuild."""
 
     root = tmp_path / "repo"
-    _write(root, f"{ITEM}/schemas/ACQSC.yml", schema_document("ACQSC"))
+    _write(root, f"{ITEM}/schemas/Sales.yml", schema_document("Sales"))
     _write(
         root,
-        f"{ITEM}/Files/ACQSC__HarmSurveyXlsx.py",
+        f"{ITEM}/Files/Sales__ReturnsXlsx.py",
         '"""\n'
-        "Folder ID: ACQSC.HarmSurveyXlsx\n"
+        "Folder ID: Sales.ReturnsXlsx\n"
         "Description: Retained source workbooks.\n"
         "Lineage: A source system.\n"
         'File key: "*.xlsx"\n'
@@ -546,7 +546,7 @@ def _protected_folder_repository(tmp_path):
         "Prohibit rebuild: true\n"
         '"""\n'
         "from weaver import Folder\n\n\n"
-        "class ACQSC__HarmSurveyXlsx(Folder):\n"
+        "class Sales__ReturnsXlsx(Folder):\n"
         "    def read(self):\n"
         "        return None\n",
     )
@@ -570,7 +570,7 @@ def _selection(estate, *, installed_role):
         selected={identity},
         inventories={
             identity.item: target_inventory(
-                folder_schemas=("ACQSC",), folders=("ACQSC.HarmSurveyXlsx",)
+                folder_schemas=("Sales",), folders=("Sales.ReturnsXlsx",)
             )
         },
     )

@@ -26,12 +26,14 @@ from weaver.catalogue.tables import (
     LOAD_STATISTIC,
     LOAD_STATUS,
     LOG,
+    MIRROR,
     REGISTRY,
 )
 from weaver.declaration.model import WeaverItemId
 from weaver.errors import CommandError
 from weaver.health import current_load, load_activity
-from weaver.operations.health import HEALTH_TABLES, run_health
+from weaver.operations.health import HEALTH_TABLES, SOURCE_TABLES, run_health
+from weaver.operations.mirror import mirrored_source
 from weaver.sessions.testing import TestSession
 from weaver.targets import PhysicalTargetRef
 
@@ -352,6 +354,7 @@ def test_health_materialises_the_tables_it_consults_and_no_others():
         "TestDictionary",
         "Dependency",
         "Shortcut",
+        "Mirror",
         "LoadStatus",
         "TestStatus",
     ]
@@ -411,3 +414,106 @@ def test_the_declared_requirements_name_no_livy():
 
     assert "livy" not in _requires_health(_Args())
     assert "tds" in _requires_health(_Args())
+
+
+# --- the catalogue an estate mirrors ------------------------------------------
+
+
+def _forked(*mirrored: str) -> Catalogue:
+    """A catalogue holding one item, with those objects recorded as mirrored."""
+
+    item = WeaverItemId.parse(REPORTING)
+    rows = {
+        INSTALLATION.name: (installation_row(item, "Reporting_WH"),),
+        MIRROR.name: tuple(
+            {
+                "item_type": item.item_type,
+                "item_name": item.item_name,
+                "schema_name": "Sales",
+                "object_name": name,
+                "source_workspace_name": "Prod",
+                "source_target_name": "Prod_WH",
+                "source_schema_name": "Sales",
+                "source_object_name": name,
+                "physical_type": "view",
+            }
+            for name in mirrored
+        ),
+    }
+    return Catalogue(rows={item: rows})
+
+
+@weaver_test()
+def test_an_estate_that_mirrors_nothing_reads_no_second_catalogue():
+    """One catalogue is the whole read, which is every estate that forks nothing."""
+
+    workspace = given_workspace(mirror="Warehouse/Weaver")
+    session = TestSession(workspace=workspace)
+
+    source = mirrored_source(
+        _forked(),
+        workspace=workspace,
+        session=session,
+        operation="health",
+        tables=SOURCE_TABLES,
+    )
+
+    assert source is None
+    assert session.calls == []
+
+
+@weaver_test()
+def test_a_mirrored_estate_reads_the_catalogue_it_mirrors():
+    """Live state for a mirrored object is recorded where its rows are written."""
+
+    workspace = given_workspace(mirror="Warehouse/Weaver")
+    session = TestSession(workspace=workspace)
+
+    source = mirrored_source(
+        _forked("Customer"),
+        workspace=workspace,
+        session=session,
+        operation="health",
+        tables=SOURCE_TABLES,
+    )
+
+    assert source is not None
+    assert {str(call.detail["target"]) for call in session.calls} == {"Weaver"}
+
+
+@weaver_test()
+def test_a_mirrored_estate_with_no_configured_source_is_refused():
+    """A copied ``_.LoadStatus`` row describes the fork's moment, not now."""
+
+    workspace = given_workspace()
+    session = TestSession(workspace=workspace)
+
+    with pytest.raises(CommandError, match="mirror:"):
+        mirrored_source(
+            _forked("Customer"),
+            workspace=workspace,
+            session=session,
+            operation="health",
+            tables=SOURCE_TABLES,
+        )
+
+    assert session.calls == []
+
+
+@weaver_test()
+def test_a_source_catalogue_in_another_workspace_is_refused():
+    """One workspace per run: the source is read where the command runs."""
+
+    workspace = given_workspace(mirror="Prod/Warehouse/Weaver")
+    session = TestSession(workspace=workspace)
+
+    with pytest.raises(CommandError, match="another one"):
+        mirrored_source(
+            _forked("Customer"),
+            workspace=workspace,
+            session=session,
+            operation="health",
+            tables=SOURCE_TABLES,
+        )
+
+    assert session.calls == []

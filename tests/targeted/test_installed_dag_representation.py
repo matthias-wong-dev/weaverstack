@@ -292,7 +292,7 @@ def test_a_view_is_a_conduit_that_owns_no_load():
         .dag()
     )
 
-    assert not dag.node(f"{RAW}/Tables/Sales.Live").is_loadable
+    assert not dag.node(f"{RAW}/Tables/Sales.Live").can_load
     assert ids(dag.ancestors(f"{RAW}/Tables/Sales.C")) == (
         f"{RAW}/Tables/Sales.A",
         f"{RAW}/Tables/Sales.Live",
@@ -416,7 +416,7 @@ def test_a_test_is_a_terminal_node_that_reads_what_it_validates():
 
     node = dag.node(f"{REPORTING}/Sales.Integrity")
     assert node.is_validation
-    assert not node.is_loadable
+    assert not node.can_load
     assert ids(dag.parents(node.identity)) == (f"{REPORTING}/Sales.Summary",)
     assert dag.children(node.identity) == ()
 
@@ -510,7 +510,7 @@ def test_an_object_whose_load_primitive_is_absent_is_not_loadable():
     node = dag.node(f"{RAW}/Tables/Sales.Order")
     assert node.expects_artefact
     assert not node.is_installed
-    assert not node.is_loadable
+    assert not node.can_load
 
 
 @weaver_test()

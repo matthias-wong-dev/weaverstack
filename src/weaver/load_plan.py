@@ -464,7 +464,7 @@ class _Planner:
                 if producer.item not in allowed_items:
                     continue
                 crossed = crossing or hop
-                if producer.is_loadable and self._is_chosen(producer):
+                if producer.can_load and self._is_chosen(producer):
                     # A closer crossing wins: the barrier belongs to the hop that
                     # actually left the consumer's engine.
                     prior = found.get(producer.node_id)

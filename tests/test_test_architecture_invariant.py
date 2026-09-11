@@ -61,7 +61,7 @@ def test_every_test_function_has_one_weaver_declaration():
     missing = []
     duplicated = []
     for path in _test_paths():
-        for node in ast.walk(ast.parse(path.read_text())):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
             if not node.name.startswith("test_"):
@@ -98,7 +98,7 @@ def test_managed_pytest_markers_are_generated_only_by_the_wrapper():
     for path in TESTS.rglob("*.py"):
         if path == TESTS / "support" / "weaver_test.py":
             continue
-        for node in ast.walk(ast.parse(path.read_text())):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not isinstance(node, ast.Attribute) or node.attr not in managed:
                 continue
             mark = node.value
@@ -124,8 +124,8 @@ def test_superseded_test_declaration_machinery_is_absent():
     }
     assert not {path.relative_to(ROOT) for path in retired_paths if path.exists()}
 
-    harness = (TESTS / "support" / "weaver_test.py").read_text()
-    root_harness = (TESTS / "conftest.py").read_text()
+    harness = (TESTS / "support" / "weaver_test.py").read_text(encoding="utf-8")
+    root_harness = (TESTS / "conftest.py").read_text(encoding="utf-8")
     assert "_known_sessions" not in harness + root_harness
     assert "Session.__init__" not in harness + root_harness
 
@@ -134,7 +134,7 @@ def test_superseded_test_declaration_machinery_is_absent():
 def test_fabric_claims_get_tds_from_a_session():
     offenders = []
     for path in sorted((TESTS / "fabric").glob("test_*.py")):
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         imported_names = {
             alias.asname or alias.name
             for node in ast.walk(tree)

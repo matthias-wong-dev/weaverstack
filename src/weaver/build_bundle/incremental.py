@@ -138,7 +138,18 @@ def stale_through_shortcuts(
 
     ``bound_items`` scopes it to what this build could act on. An absent row is
     a missing installation, which signature classification calls new.
+
+    Only the first comparison is skipped for ``Warehouse/_weaver``. Every build
+    binds the catalogue item, so a changed catalogue table is classified by
+    signature and the descendant walk carries it from there, and it is the one
+    row a fork writes for itself: a forked catalogue holds this destination's
+    own build instant there beside the source estate's everywhere else, so
+    comparing a surface pointer against it reads two clocks. What the pointer's
+    own instant says about the objects below it is unaffected, and a build that
+    refreshed the surface and then stopped is recovered from there.
     """
+
+    from ..catalogue.builtin import BUILTIN_ITEM
 
     graph = repository.dependency_graph
     if graph is None:
@@ -154,12 +165,17 @@ def stale_through_shortcuts(
         pointer = registered.get(destination)
         if source is None or pointer is None:
             continue
-        source_datetime = _as_instant(source.build_datetime)
-        if source_datetime is None:
-            continue
         pointer_datetime = _as_instant(pointer.build_datetime)
-        if pointer_datetime is None or source_datetime > pointer_datetime:
-            behind.append(destination)
+        if shortcut.source.item != BUILTIN_ITEM:
+            source_datetime = _as_instant(source.build_datetime)
+            if source_datetime is None:
+                continue
+            if pointer_datetime is None or source_datetime > pointer_datetime:
+                behind.append(destination)
+                continue
+        if pointer_datetime is None:
+            # Nothing below it orders against a pointer with no instant, and
+            # the source comparison is the one this chain skips.
             continue
         for node in graph.descendants(str(destination)):
             consumer = by_text.get(node)
@@ -338,15 +354,18 @@ def determine_impact(
     )
 
 
-def _installed_as_shortcut(registered, identity) -> bool:
-    """Whether what is installed at this identity is a pointer.
+def installed_as_pointer(registered, mirrored, identity) -> bool:
+    """Whether what is installed at this identity holds none of its own data.
 
-    Read from the Registry row's role, because a shortcut destination and an
-    owned object share one identity and only the role separates them.
+    Two sources, because a pointer and an owned object share one identity: a
+    shortcut destination says so in its Registry role, and a mirror in
+    ``_.Mirror``, Registry still recording what the object logically is.
     """
 
     document = registered.get(identity)
-    return document is not None and document.object_role == ROLE_SHORTCUT
+    if document is not None and document.object_role == ROLE_SHORTCUT:
+        return True
+    return identity in mirrored
 
 
 def select_build(
@@ -356,8 +375,10 @@ def select_build(
     selected: Iterable[WeaverDocumentId],
     inventories: Mapping[WeaverItemId, object],
     stale_consumers: Iterable[WeaverDocumentId] = (),
+    mirrored: Iterable[WeaverDocumentId] = (),
 ) -> BuildSelection:
     selected = set(selected)
+    mirrored = set(mirrored)
     stale_consumers = set(stale_consumers)
     physical_types = _physical_types(
         repository, selected=selected, inventories=inventories
@@ -369,17 +390,15 @@ def select_build(
         stale_consumers=stale_consumers,
         physical_types=physical_types,
     )
-    # ``prohibit_rebuild`` protects landed data, so the installed role is what
-    # it answers for. A pointer holds none of Weaver's data and replacing one
-    # destroys nothing, so an identity installed as a shortcut stays
-    # replaceable. That is the shortcut-to-owned transition: the declaration
-    # arrives first, and the pointer is still what stands at the identity.
+    # ``prohibit_rebuild`` protects landed data, and a pointer holds none: a
+    # shortcut and a mirror both read another target's rows, so replacing one
+    # with an owned object destroys nothing.
     prohibited = {
         identity
         for identity in impact.impacted
         if identity in repository.source_documents
         and repository.source_documents[identity].document.prohibit_rebuild
-        and not _installed_as_shortcut(registered, identity)
+        and not installed_as_pointer(registered, mirrored, identity)
     }
     # A pointer impacted through the graph is refreshed over its own address and
     # never dropped to do it: `CreateOrOverwrite` for a Lakehouse shortcut and

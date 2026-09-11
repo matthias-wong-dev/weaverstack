@@ -15,7 +15,7 @@ reads.
 ## Three sections and one status
 
 ```text
-Load    every loadable node, its current _.LoadStatus, and its freshness
+Load    every node holding rows, its current _.LoadStatus, and its freshness
 Tests   every Test and Assumption, its current _.TestStatus, and its freshness
 Build   what installed state contradicts about itself
 ```
@@ -52,7 +52,7 @@ rather than reconstructing them. See
 [Code architecture](code-architecture.md#one-graph-implementation-three-topologies).
 
 ```text
-Load subjects    dag.loadables()
+Load subjects    every node holding rows, its own or a mirror's, Views apart
 Test subjects    dag.validations()
 Build subjects   every node
 ```
@@ -64,6 +64,97 @@ incarnation the old one described, and that absence is the finding.
 A View participates in dependency traversal and is not a load subject: it owns
 no load work. A generated runtime artefact is not a subject at all: it is what
 runs a subject, and the graph holds it beside the node rather than as one.
+
+Two predicates, and they answer different questions:
+
+```text
+InstalledNode.can_load             Weaver may run a load against this node here
+participates_in_load_state(node)   this node carries _.LoadStatus state
+```
+
+`can_load` is about execution. A mirrored object answers `False`, because the
+rows it stands over are written where it mirrors. `participates_in_load_state`
+is about observation, and a mirrored object answers `True`: its source's load
+is what its rows are. A View answers `True` there and is still not a subject.
+
+`weaver load --stale` selects from `can_load`. Health assesses from
+`is_load_subject`, which is `can_load` or mirrored, with a View taken back out.
+That is the whole of the divergence: a mirrored table whose source failed is
+reported here and never run here, and a local descendant of it is selected in
+the ordinary way.
+
+A mirrored View is where the two lists come apart:
+
+```text
+local Table or Folder      load subject, lifecycle state its own
+mirrored Table or Folder   load subject, lifecycle state the source's
+View, mirrored or not      not a load subject, lifecycle state still ordered
+```
+
+---
+
+## A mirrored estate
+
+`_.Mirror` says an installed object's rows are supplied by another physical
+target. It changes two things and nothing else:
+
+```text
+The selected catalogue defines the logical estate.
+
+Mirror changes:
+- what physical object health expects at a mirrored address;
+- where Load lifecycle state for that object is read from.
+
+Inventory is always read from the destination target.
+Test state remains in the selected catalogue.
+```
+
+The physical half is already the graph's. `InstalledNode.effective_object_type`
+reads `_.Mirror` and `node.physical` carries it, so Registry recording a Table
+where a mirror put a View is not a contradiction:
+
+```text
+Registry            Table
+_.Mirror            physical View
+destination holds   View
+                    → Build green
+```
+
+The lifecycle half is `effective_load_state`:
+
+```text
+identity in _.Mirror   → source _.LoadStatus, source _.LoadStatistic
+otherwise              → this catalogue's own
+```
+
+A fork copies `_.LoadStatus` and leaves `_.LoadStatistic` behind, so a mirrored
+object carries a status row from the moment of the fork and no statistics at
+all. That copy describes the fork's moment. It is replaced by the source's row,
+and where the source holds none the object reads as Pending. When copy-on-write
+removes the `_.Mirror` row, the identity reads this catalogue's own state again
+with no further change.
+
+The summary, the activity window and the slowest loads are recounted from the
+effective statuses, so the report never assesses one estate's state while
+totalling another's. An estate with no `_.Mirror` rows takes none of this: it
+keeps its own state and its own SQL summary unchanged.
+
+Where the source catalogue is is the workspace's to say:
+
+```yaml
+catalogue: Warehouse/Weaver_Dev
+mirror: Warehouse/Weaver
+```
+
+`_.Mirror` records the source workspace, target, schema and object for each
+row, and no column naming the source catalogue. An estate holding `_.Mirror`
+rows whose workspace configures no `mirror:` is refused by `health` and by
+`load --stale`, because the copied rows would otherwise read as live state.
+Ordinary `weaver load` needs none of it.
+
+Inventory is read from this estate's destination targets and never from the
+source. The question a destination answers is whether it holds the physical
+stand-in `_.Mirror` says is there.
 
 ---
 
@@ -247,8 +338,11 @@ consults and no others:
 
 ```text
 Installation  Registry  TableDictionary  FolderDictionary  TestDictionary
-Dependency    Shortcut  LoadStatus       TestStatus
+Dependency    Shortcut  Mirror           LoadStatus        TestStatus
 ```
+
+An estate holding `_.Mirror` rows reads one table more, from the catalogue it
+mirrors: that catalogue's `_.LoadStatus`, and the statistics behind it.
 
 The dictionaries describing an object's columns and keys are absent: nothing
 health decides consults one. So are the history tables, read as one window
@@ -273,5 +367,6 @@ weaver/health.py                the report model and the evaluator, pure
 weaver/catalogue/history.py     the bounded window of _.Log and _.LoadStatistic
 weaver/operations/health.py     the operation that reads the estate into a Catalogue
 weaver/operations/load.py       the objects `weaver load --stale` selects
+weaver/operations/mirror.py     mirrored_source, the catalogue an estate mirrors
 weaver_cli/main.py              the parser, the terminal renderer and --json
 ```

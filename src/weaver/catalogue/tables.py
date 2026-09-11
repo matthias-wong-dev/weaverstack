@@ -923,10 +923,13 @@ BOOKMARK_SENTINEL = datetime(1900, 1, 1, tzinfo=timezone.utc)
 #: History is appended: a row records that something happened, and nothing that
 #: happens later makes it not have happened. Current state is merged on the
 #: table's own key: there is one row per object per incarnation, and when a build
-#: ends that incarnation the row goes with it.
+#: ends that incarnation the row goes with it. Borrowed is merged on the key too
+#: and outlives an incarnation: what ends the row is the object becoming locally
+#: owned.
 HISTORY = "history"
 CURRENT_STATE = "current_state"
-MAINTENANCE = (HISTORY, CURRENT_STATE)
+BORROWED = "borrowed"
+MAINTENANCE = (HISTORY, CURRENT_STATE, BORROWED)
 
 #: Which population's rebuild ends a current-state row's life. A loadable object
 #: carries a bookmark and a load status; a validation carries a test status.
@@ -975,6 +978,12 @@ class RuntimeTable:
 
         return self.maintenance == HISTORY
 
+    @property
+    def is_borrowed(self) -> bool:
+        """Whether one row says an object's data is supplied from elsewhere."""
+
+        return self.maintenance == BORROWED
+
     def __post_init__(self) -> None:
         names = [column.name for column in self.columns]
         if len(set(names)) != len(names):
@@ -1006,6 +1015,13 @@ class RuntimeTable:
             )
         if self.is_current_state and not self.key:
             raise ValueError(f"{self.name}: current state is keyed by an identity")
+        if self.is_borrowed and self.invalidated_by is not None:
+            raise ValueError(
+                f"{self.name}: a borrowed row outlives an incarnation, so it "
+                "names no population whose rebuild would end it"
+            )
+        if self.is_borrowed and not self.key:
+            raise ValueError(f"{self.name}: a borrowed row is keyed by an identity")
 
     @property
     def qualified(self) -> str:
@@ -1309,6 +1325,55 @@ TEST_STATUS = RuntimeTable(
 )
 
 
+MIRROR = RuntimeTable(
+    name="Mirror",
+    description=(
+        "Installed objects whose data is supplied by another physical target. "
+        "One row per mirrored object, written when a mirror is created and "
+        "removed when the object is built locally. Registry says what the "
+        "object is; this says where its rows come from and what stands at its "
+        "address."
+    ),
+    # The Registry's identity exactly: both rows describe one installed object.
+    key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
+    maintenance=BORROWED,
+    columns=(
+        *_scope(),
+        *_object(),
+        CatalogueColumn(
+            "source_workspace_name",
+            not_null=True,
+            description="The workspace the data is read from.",
+        ),
+        CatalogueColumn(
+            "source_target_name",
+            not_null=True,
+            description="The physical item the data is read from.",
+        ),
+        CatalogueColumn(
+            "source_schema_name",
+            not_null=True,
+            description="The schema the data is read from.",
+        ),
+        CatalogueColumn(
+            "source_object_name",
+            not_null=True,
+            description="The object the data is read from.",
+        ),
+        CatalogueColumn(
+            "physical_type",
+            not_null=True,
+            vocabulary=OBJECT_TYPE_VOCABULARY,
+            description=(
+                "What physically stands at this object's address while it "
+                "mirrors that source: a View over the source relation in a "
+                "Warehouse, a Table or Folder shortcut in a Lakehouse."
+            ),
+        ),
+    ),
+)
+
+
 #: The catalogue tables maintained during execution.
 RUNTIME_TABLES = (LOG, BOOKMARK, LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
 
@@ -1330,19 +1395,27 @@ CURRENT_STATE_TABLES = tuple(
 #: The runtime tables recording what happened. Never invalidated.
 HISTORY_TABLES = tuple(table for table in RUNTIME_TABLES if table.is_history)
 
-#: Every catalogue table, however it is maintained.
+#: The tables saying an object's data is supplied from elsewhere, and the one
+#: part of the catalogue no document declares. The mirror operation creates
+#: ``_.Mirror`` when it first writes a row, so a catalogue only ever reached by
+#: ``weaver build`` has none and a read of an absent one is nothing borrowed.
+BORROWED_TABLES = (MIRROR,)
+
+#: Every catalogue table the ``_weaver`` item declares, however it is
+#: maintained. ``_.Mirror`` is not one: see :data:`BORROWED_TABLES`.
 CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
 #: What a run reads. The projected tables, which say what is installed and
-#: where, and ``_.Bookmark``, which says how far each object has been loaded.
+#: where, ``_.Mirror``, which says which nodes a load may write, and
+#: ``_.Bookmark``, which says how far each object has been loaded.
 #:
 #: The other current-state tables are absent, and that is the asymmetry worth
 #: knowing: a run writes a load status and a test status and never asks what
 #: they were, while a build reads all three to decide which rows its own work has
 #: made obsolete. See :data:`weaver.catalogue.state.READ_FOR_BUILD`.
-READABLE_TABLES = PROJECTED_TABLES + (BOOKMARK,)
+READABLE_TABLES = PROJECTED_TABLES + BORROWED_TABLES + (BOOKMARK,)
 
-TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}
+TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES + BORROWED_TABLES}
 
 
 #: The ``_`` schema tables no build may drop, folded for comparison. Every
@@ -1350,9 +1423,11 @@ TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES}
 #: to installations a scoped build has no authority over, and the runtime tables
 #: hold a run's own record of what it did and how far it got. All of them are
 #: declared ``Prohibit rebuild``, so selection never offers one; this is the
-#: guard behind that declaration.
+#: guard behind that declaration. ``_.Mirror`` is here because nothing declares
+#: it, so an item-scoped prune would find it in the ``_`` inventory unclaimed.
 _PROTECTED = frozenset(
-    f"{CATALOGUE_SCHEMA}.{table.name}".casefold() for table in CATALOGUE_TABLES
+    f"{CATALOGUE_SCHEMA}.{table.name}".casefold()
+    for table in CATALOGUE_TABLES + BORROWED_TABLES
 )
 
 

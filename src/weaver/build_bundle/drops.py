@@ -57,6 +57,7 @@ def lakehouse_drop_stages(
     inventory,
     registered: Mapping | None = None,
     reused_names=(),
+    mirrored=(),
 ) -> tuple[PlannedStage, ...]:
     """Plan one Lakehouse item's managed drops."""
 
@@ -69,6 +70,7 @@ def lakehouse_drop_stages(
         registered=registered,
         renderer=_lakehouse_drop_action,
         reused_names=reused_names,
+        mirrored=mirrored,
     )
 
 
@@ -81,6 +83,7 @@ def warehouse_drop_stages(
     inventory,
     registered: Mapping | None = None,
     reused_names=(),
+    mirrored=(),
 ) -> tuple[PlannedStage, ...]:
     """Plan one Warehouse item's managed drops."""
 
@@ -93,6 +96,7 @@ def warehouse_drop_stages(
         registered=registered,
         renderer=_warehouse_drop_action,
         reused_names=reused_names,
+        mirrored=mirrored,
     )
 
 
@@ -106,11 +110,13 @@ def _item_drop_stages(
     registered,
     renderer,
     reused_names=(),
+    mirrored=(),
 ) -> tuple[PlannedStage, ...]:
     selected = {identity for identity in selected_for_drop if identity.item == item}
     if not selected:
         return ()
     registered = dict(registered or {})
+    mirrored = set(mirrored)
     graph = _drop_layers(repository, selected)
     identities = {str(identity): identity for identity in selected}
     stages = []
@@ -132,6 +138,7 @@ def _item_drop_stages(
                 target,
                 payloads,
                 installed_role=None if role is None else role.object_role,
+                borrowed=identity in mirrored,
             )
             if identity in reused_names and action.kind == DROP_SHORTCUT:
                 # This plan gives the name to an owned object, and OneLake
@@ -187,7 +194,7 @@ def _installed_kind(identity, installed_type):
 
 
 def _lakehouse_drop_action(
-    identity, installed_type, target, payloads, *, installed_role=None
+    identity, installed_type, target, payloads, *, installed_role=None, borrowed=False
 ) -> InstallAction:
     _refuse_protected(
         identity.object_id.schema, identity.object_id.object, str(identity)
@@ -195,6 +202,11 @@ def _lakehouse_drop_action(
     if installed_role == ROLE_SHORTCUT:
         return _drop_shortcut_action(identity, payloads)
     installed_kind = _installed_kind(identity, installed_type)
+    # A borrowed table or folder is a shortcut, whatever Registry calls it, and
+    # a Spark drop against one would reach the item it points at. A borrowed
+    # view is Weaver's own wrapper and comes off as a view.
+    if borrowed and installed_kind in (TABLE, FOLDER):
+        return _drop_shortcut_action(identity, payloads)
     action_slug = _slug(identity)
     if installed_kind == FOLDER:
         return InstallAction(
@@ -224,7 +236,7 @@ def _lakehouse_drop_action(
 
 
 def _warehouse_drop_action(
-    identity, installed_type, target, payloads, *, installed_role=None
+    identity, installed_type, target, payloads, *, installed_role=None, borrowed=False
 ) -> InstallAction:
     _refuse_protected(
         identity.object_id.schema, identity.object_id.object, str(identity)

@@ -852,6 +852,19 @@ published its own Installation, dictionary and Registry rows for
 and the source's are left behind: copied across, the forked catalogue would
 assert its own tables live in a catalogue it is not.
 
+**Every row is copied as it stands, `Build datetime` included.** A forked
+Registry is the installed history this estate inherits, so nothing is re-dated
+on the way across. The destination's `Warehouse/_weaver` rows are the only ones
+a fork writes for itself, being its own catalogue build's. When a mirror
+physically established something is `_.Mirror`'s audit datetime, and that is
+the one place to read it.
+
+Cross-item freshness accounts for that one written row. It compares a `_`
+surface pointer against what reads it, and leaves out the comparison against
+`Warehouse/_weaver`, which sets this catalogue's build beside the source
+estate's instants. See
+[how does build work](how-does-build-work.md#7a-cross-item-freshness).
+
 **Installation is copied as it stands.** A forked catalogue names the source's
 physical targets, so every item begins where it already is. One
 
@@ -877,6 +890,129 @@ that built them, and a fork does not touch the item. `weaver load` driven agains
 the fork records centrally and is unaffected, but `exec [_].[Load]` typed inside a
 kept item reaches the source catalogue. An item is only fully the fork's once it
 has been built into a target of its own.
+
+## Mirroring an item
+
+A fork branches the state. Each item then diverges however it needs to, and
+there are two ways.
+
+```bash
+weaver build  --item Warehouse/Model=Warehouse/Model_Dev   # rebuild it there
+weaver mirror --item Warehouse/Model=Warehouse/Model_Dev   # read the source's rows
+```
+
+A build materialises everything locally. A mirror empties the destination and
+points it at the source, in whatever form its kind mirrors:
+
+| source object | in a mirrored Warehouse | in a mirrored Lakehouse |
+|---|---|---|
+| Table | a View over the source's three-part name | a OneLake shortcut |
+| Folder | | a OneLake shortcut |
+| View | a View over the source's View | a Spark view over the source's View |
+
+Code is local either way. A Warehouse gets every procedure and function the
+source holds; a Lakehouse gets a byte copy of the source's `Files/_/Load` tree,
+which is what a run imports where Spark is. Both get the standard `_` surface
+over this catalogue, and both end with the item bound to its new target.
+
+**A pointer is recreated, not borrowed.** A fork copies `_.Shortcut`, so the
+destination certifies every shortcut the source item declared. Those hold no
+data, so there is nothing to point at another target's rows: a mirror stands
+each one up again in the item it belongs to, as a view in a Warehouse and a
+OneLake shortcut in a Lakehouse. The Registry role stays `shortcut` and no
+`_.Mirror` row is written for one, so what is borrowed and what is pointed at
+stay separate.
+
+Where a recreated pointer reads depends on which kind of target it names:
+
+| target | recreated against |
+|---|---|
+| logical | the item's final binding in this fork |
+| physical | the workspace and item it was recorded with |
+
+A logical relationship therefore moves with the fork. `Warehouse/Curated`
+pointing at `Lakehouse/Landing` becomes `Warehouse/DEV_Curated` pointing at
+`Lakehouse/DEV_Landing`, because that is where the fork leaves `Lakehouse/Landing`.
+A physical target names a Fabric item Weaver does not manage, so no binding
+moves it.
+
+**The bindings are settled before any item is touched.** The copied
+Installation says where each item already is, and each selected item's own
+destination is written over it. That map is what a logical pointer resolves
+against, so recreation does not depend on which item a run reaches first, and a
+run that rebinds one item of a pair leaves the other's pointer resolving to
+wherever Installation still says that item is. `weaver.operations.mirror`
+builds it in `_final_bindings`; `weaver.catalogue.shortcuts` reads it.
+
+A mirrored Lakehouse gets the standard `_` surface a built one gets, from the
+same `standard_surface_references` declaration, pointed at this catalogue. The
+copied `Files/_/Load` code runs inside it and reads Weaver state through that
+surface, so a mirrored item is operationally an ordinary one whose data happens
+to come from somewhere else.
+
+A Lakehouse mirror stands on the same shortcut-readiness rule an ordinary build
+uses: a table shortcut is not finished until its Spark relation and its Delta
+path can both be read. A mirrored Lakehouse therefore starts a Spark session
+even where the item declares no View.
+
+Every schema comes across, `_` included. The copied Registry certifies
+`_.[Load Wh.Product]` and `_.[Test Rpt.Reconciles]`, and `weaver test`
+dispatches those by name, so a mirrored Warehouse has the executable surface an
+ordinary build gives one. A source whose Warehouse holds less than its Registry
+certifies is named, and the item stays bound where it was.
+
+`_.Mirror` records what is borrowed: one row per object, saying whose rows it
+reads and what stands at its address.
+
+```text
+Registry   Warehouse/Model | Core | Customer | Table | Data | abc123
+Mirror     Warehouse/Model | Core | Customer | PROD_MODEL.Core.Customer | View
+```
+
+Registry still says what the object logically is. A mirror is an overlay, not a
+type or a role, so nothing downstream has a second vocabulary to learn.
+
+A source catalogue that is itself a mirror is refused for rebinding. One hop is
+all `_.Mirror` records, and an item mirrored out of a mirror has its rows two
+catalogues back. A fork alone is unaffected: it copies the rows as they stand,
+so the destination mirrors whatever the source did, one hop from the same
+estate.
+
+**Nothing declares `_.Mirror`.** A catalogue only ever reached by `weaver build`
+does not have that table. The mirror operation installs it into its destination
+when it first writes a row, prune spares it, and a read of an absent one is
+nothing borrowed. A fork carries the rows across where the source has them.
+
+**What a borrowed object changes.** Three decisions, and no others:
+
+| | |
+|---|---|
+| what stands at its address | `Catalogue.effective_physical_type` says View, so Registry Table plus a physical View is valid rather than a mismatch |
+| whether Weaver loads it | it does not: the rows belong to the target it borrows from, and a load would write through to the source |
+| whether Prohibit rebuild protects it | it does not: a mirror holds none of Weaver's data, the same reason a shortcut is replaceable |
+
+A fourth decision belongs to health, and is described in
+[health](health.md#a-mirrored-estate): a mirrored object's Load lifecycle state
+is read from the catalogue this one mirrors, because that is where its rows are
+written. A fork copies `_.LoadStatus` at the moment it is made, so the row this
+catalogue holds for a mirrored object dates from the fork.
+
+Signature comparison is untouched. An object whose declaration changed is
+selected by an ordinary build, what is borrowed comes off, the local object is
+built, and its `_.Mirror` row goes last, once that build has run. Everything
+unchanged stays borrowed.
+
+What comes off depends on what stands there, and `_.Mirror` is what says so. A
+borrowed Warehouse relation and a borrowed Lakehouse view are dropped as views.
+A borrowed Lakehouse table or folder is a shortcut, so it is removed through the
+shortcut API and its name waited on: a Spark drop would reach the storage the
+source owns. Registry still says Table throughout, and nothing encodes the
+borrowing in the logical type.
+
+Reconciliation asks the inventory for the effective type, so a build over a
+mirrored item finds every claim standing and plans nothing. Deregistration is a
+stage of the build like any other, after every physical stage and before
+publication.
 
 ## The catalogue lives in a Warehouse
 

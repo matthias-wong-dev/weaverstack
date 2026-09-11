@@ -956,20 +956,49 @@ and a missing destination is an error rather than a guess. A configuration that
 also names `mirror:` describes a fork already, so its `catalogue:` is the
 destination.
 
-The destination Warehouse is emptied first, so a non-interactive process refuses
-without `--yes`, as wipe does. Before it asks, the pair is resolved and the
-source catalogue is read, so a misspelled `--mirror` fails while the destination
-is still intact. The question names the pair that was resolved:
-
-```text
-Warehouse/DEV_Catalogue will be emptied and rebuilt from Warehouse/Catalogue.
-```
-
 `--item` selects logical items to rebind, in the grammar build uses
 (`Warehouse/Model` or `Warehouse/Model=Warehouse/Model_Dev`); omitting it selects
-every configured target. Rebinding is not implemented yet, so a run that selects
-an item says so. `--no-item` forks the catalogue and stops, and that fork plus an
-ordinary build is how one item is moved today:
+every configured target. A selected item is emptied and pointed at the source:
+Views over the source's relations for a Warehouse, OneLake shortcuts and Spark
+wrapper views for a Lakehouse. Its rows stay where they were. Code is local, so
+a Warehouse gets the source's procedures and functions and a Lakehouse gets a
+copy of its `Files/_/Load` tree.
+
+A mirrored Lakehouse reaches Spark, because a table shortcut is not finished
+until Spark can read it. A run that names Warehouse items alone, or `--no-item`,
+starts no Spark session. A run that names no item at all asks for Spark either
+way: which kinds the configured targets are is configuration's answer, read
+after the session's resources are declared.
+
+A mirror empties one Warehouse for the destination catalogue and one for each
+selected item, so a non-interactive process refuses without `--yes`, as wipe
+does. Before it asks, the whole scope is settled: the pair is resolved, the
+source catalogue is read, and every item's installed target is looked up there.
+A misspelled `--mirror` or an item the catalogue never installed fails while
+every Warehouse is intact. Naming a Warehouse as a destination says its
+contents are disposable, so the only refusals left are a plan that contradicts
+itself: a Warehouse the run both reads and empties, and two items sharing one
+destination. The question is one list, each destination first and what fills it
+second, the catalogue leading:
+
+```text
+Mirror on Analytics
+
+  Warehouse/DEV_Catalogue  <- Warehouse/Catalogue
+  Warehouse/Sales_Dev      <- Warehouse/Sales
+
+These targets will be emptied. Continue? This cannot be undone [y/N]
+```
+
+A completed run names the targets it filled, as `build` and `load` name theirs.
+Per-table row counts and per-item object counts are in `--json`:
+
+```text
+mirror succeeded: Warehouse/DEV_Catalogue, Warehouse/Sales_Dev
+```
+
+`--no-item` forks the catalogue and stops. That fork plus an ordinary build is
+the other way to diverge one item, materialising it in full:
 
 ```bash
 weaver mirror --no-item --yes

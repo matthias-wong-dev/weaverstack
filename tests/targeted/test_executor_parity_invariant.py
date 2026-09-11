@@ -67,7 +67,7 @@ def test_an_executor_never_names_a_transport(module):
     the factories exist to make once, above it.
     """
 
-    tree = ast.parse(module.read_text())
+    tree = ast.parse(module.read_text(encoding="utf-8"))
     named = (
         {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
         | {node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)}

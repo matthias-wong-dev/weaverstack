@@ -114,23 +114,43 @@ def _source_path(declaration, *, root: Location, store) -> str:
     else:
         components = tail.split("/")
 
+    return stored_path(
+        root,
+        components,
+        store=store,
+        what=(
+            f"shortcut {declaration.name} in {declaration.owner} points at "
+            f"{declaration.target}"
+        ),
+    )
+
+
+def stored_path(root: Location, components, *, store, what: str) -> str:
+    """One item-relative source path, spelled as storage spells it.
+
+    Weaver's identities are exact-case, and a Fabric estate may materialise an
+    authored ``Customer`` directory as ``customer``. The authored spelling is
+    preferred where it exists; failing that one case-insensitive match is taken,
+    and anything else is refused here rather than at install time.
+
+    ``what`` names the caller's subject, so a refusal says whose path it is.
+    """
+
     settled: list[str] = []
     for component in components:
         parent = root.join(*settled) if settled else root
-        settled.append(_stored_name(declaration, parent, component, store=store))
+        settled.append(_stored_name(what, parent, component, store=store))
     return "/".join(settled)
 
 
-def _stored_name(declaration, parent: Location, wanted: str, *, store) -> str:
+def _stored_name(what: str, parent: Location, wanted: str, *, store) -> str:
     if store.exists(parent / wanted):
         return wanted
     try:
         entries = store.list(parent)
     except Exception as exc:
         raise BuildError(
-            f"shortcut {declaration.name} in {declaration.owner} points at "
-            f"{declaration.target}, and {parent.value} could not be read: "
-            f"{type(exc).__name__}: {exc}"
+            f"{what}, and {parent.value} could not be read: {type(exc).__name__}: {exc}"
         ) from exc
     matches = sorted(
         entry.location.name
@@ -140,12 +160,8 @@ def _stored_name(declaration, parent: Location, wanted: str, *, store) -> str:
     if len(matches) == 1:
         return matches[0]
     if not matches:
-        raise BuildError(
-            f"shortcut {declaration.name} in {declaration.owner} points at "
-            f"{declaration.target}, and {wanted!r} is not in {parent.value}"
-        )
+        raise BuildError(f"{what}, and {wanted!r} is not in {parent.value}")
     raise BuildError(
-        f"shortcut {declaration.name} in {declaration.owner} points at "
-        f"{declaration.target}, and {wanted!r} matches more than one entry in "
+        f"{what}, and {wanted!r} matches more than one entry in "
         f"{parent.value}: " + ", ".join(matches)
     )
