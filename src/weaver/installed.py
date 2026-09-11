@@ -275,6 +275,16 @@ class InstalledShortcut:
     source: WeaverDocumentId | None = None
     shortcut_type: str = ""
     target_type: str = ""
+    #: The item the target names, typed. A logical target's is a Weaver item and
+    #: is bound; a physical one's is the Fabric item itself.
+    target_item: WeaverItemId | None = None
+    #: The schema or path the target sits in, as ``_.Shortcut`` recorded it, and
+    #: the object under it where the target names one.
+    target_schema: str = ""
+    target_object: str | None = None
+    #: The workspace a physical target is in. ``None`` for a logical target,
+    #: which is bound, and for a physical one in this workspace.
+    target_workspace: str | None = None
 
     @property
     def is_logical(self) -> bool:
@@ -820,25 +830,28 @@ def installed_shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
                 destination = stored_identity(item, schema_name, object_name)
             else:
                 continue
+            target_item = WeaverItemId(
+                str(row.get("target_item_type") or ""),
+                str(row.get("target_item_name") or ""),
+            )
+            target_schema = str(row.get("target_schema_name") or "")
+            target_object = str(row.get("target_object_name") or "") or None
             source = None
             if target_type == LOGICAL_TARGET:
-                target_object = str(row.get("target_object_name") or "")
                 if not target_object:
                     continue
-                source = stored_identity(
-                    WeaverItemId(
-                        str(row.get("target_item_type") or ""),
-                        str(row.get("target_item_name") or ""),
-                    ),
-                    str(row.get("target_schema_name") or ""),
-                    target_object,
-                )
+                source = stored_identity(target_item, target_schema, target_object)
             found.append(
                 InstalledShortcut(
                     destination=destination,
                     source=source,
                     shortcut_type=shortcut_type,
                     target_type=target_type,
+                    target_item=target_item,
+                    target_schema=target_schema,
+                    target_object=target_object,
+                    target_workspace=str(row.get("target_workspace_name") or "")
+                    or None,
                 )
             )
     return tuple(sorted(found, key=lambda each: str(each.destination)))

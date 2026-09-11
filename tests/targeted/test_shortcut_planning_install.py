@@ -318,6 +318,38 @@ def test_a_missing_registry_row_is_not_staleness(estate):
 
 
 @weaver_test()
+def test_the_catalogue_items_own_build_never_outdates_the_surface_over_it(estate):
+    """``Warehouse/_weaver`` is classified, so its instant is not evidence.
+
+    Every build binds the catalogue item, so a changed catalogue table is a
+    changed signature and the descendant walk carries it. It is also the one
+    row a fork writes for itself, so a forked catalogue holds its own build's
+    instant here beside the source estate's everywhere else.
+    """
+
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+
+    surface = next(
+        shortcut
+        for shortcut in estate.logical_shortcuts
+        if shortcut.source.item == BUILTIN_ITEM
+    )
+    registered = {
+        **certified(estate, SOURCE, VIEW, build_datetime="2026-01-01T00:00:00"),
+        surface.source: registered_document(
+            str(surface.source), build_datetime="2026-01-02T00:00:00"
+        ),
+        surface.destination: registered_document(
+            str(surface.destination), build_datetime="2026-01-01T00:00:00"
+        ),
+    }
+
+    stale = stale_through_shortcuts(estate, registered, bound_items={item_id(CONSUMER)})
+
+    assert surface.destination not in stale
+
+
+@weaver_test()
 def test_an_unbound_consumer_stays_behind_its_source(estate):
     """That is the deferral: a build acts only on items it was pointed at."""
 

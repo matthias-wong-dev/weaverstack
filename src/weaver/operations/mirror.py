@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import tempfile
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -59,6 +58,9 @@ class MirrorItem:
     destination: str
     relations: tuple = ()
     programmables: tuple = ()
+    #: The pointers ``_.Shortcut`` records for this item, which a mirror stands
+    #: up again rather than borrows. See :mod:`weaver.catalogue.shortcuts`.
+    shortcuts: tuple = ()
 
     @property
     def kind(self) -> str:
@@ -89,6 +91,11 @@ class ResolvedMirror:
     #: Whether the source catalogue holds a ``_.Mirror``.
     borrowed: bool = False
     items: tuple[MirrorItem, ...] = ()
+    #: Where every logical item ends up once this run has finished: the copied
+    #: Installation, with each selected item's new destination over it. Settled
+    #: before any item is touched, so a logical shortcut resolves the same way
+    #: whichever item is mirrored first.
+    bindings: Mapping[object, str] = field(default_factory=dict)
 
     @property
     def workspace(self) -> Workspace:
@@ -231,13 +238,43 @@ def resolve_mirror(
 ) -> ResolvedMirror:
     """Settle a plan against the source catalogue. ``None`` selects no item."""
 
+    items = _resolved_items(plan, catalogue) if plan.items else ()
     resolved = ResolvedMirror(
         plan=plan,
         borrowed=borrowed,
-        items=_resolved_items(plan, catalogue) if plan.items else (),
+        items=items,
+        bindings=_final_bindings(plan, catalogue, items),
     )
     _refuse_unsafe(resolved)
     return resolved
+
+
+def _final_bindings(plan: MirrorPlan, catalogue, items) -> dict:
+    """Where every logical item ends up once this run has finished.
+
+    The copied Installation says where each item already is, and a selected
+    item's own destination is written over it. Settled here, before anything is
+    emptied, so recreating a logical shortcut does not depend on which item a
+    run happens to reach first: a pointer at an item this run rebinds follows it,
+    and a pointer at one it leaves alone resolves to wherever Installation still
+    says that item is.
+    """
+
+    from ..catalogue.builtin import BUILTIN_ITEM
+    from ..catalogue.tables import INSTALLATION
+    from ..declaration.model import WeaverItemId
+
+    bound = {
+        WeaverItemId(
+            str(row.get("item_type") or ""), str(row.get("item_name") or "")
+        ): str(row.get("target_name") or "")
+        for row in catalogue.table_rows(INSTALLATION)
+    }
+    # The destination catalogue's own Warehouse, which the fork never copies:
+    # its Installation row is written by the build that made it.
+    bound[BUILTIN_ITEM] = plan.destination.name
+    bound.update({each.item: each.destination for each in items})
+    return {item: name for item, name in bound.items() if name}
 
 
 def mirror(
@@ -299,7 +336,9 @@ def mirror(
             mirrored = {}
             for each in forking.items:
                 wiped.append(_wipe_target(resolved, each, session=opened))
-                mirrored[str(each.item)] = _mirror_item(resolved, each, session=opened)
+                mirrored[str(each.item)] = _mirror_item(
+                    resolved, each, bindings=forking.bindings, session=opened
+                )
 
     return MirrorResult(
         workspace=str(resolved.workspace),
@@ -468,6 +507,7 @@ def _resolved_items(plan: MirrorPlan, catalogue) -> tuple[MirrorItem, ...]:
     from ..build_bundle.targets import parse_build_item
     from ..catalogue.borrow import borrowable, executable
     from ..catalogue.tables import INSTALLATION
+    from ..installed import installed_shortcuts
 
     installed = {
         (str(row.get("item_type")), str(row.get("item_name"))): str(
@@ -475,6 +515,7 @@ def _resolved_items(plan: MirrorPlan, catalogue) -> tuple[MirrorItem, ...]:
         )
         for row in catalogue.table_rows(INSTALLATION)
     }
+    recorded = installed_shortcuts(catalogue)
     resolved = []
     for written in plan.items:
         binding = parse_build_item(written, workspace=plan.workspace)
@@ -491,6 +532,11 @@ def _resolved_items(plan: MirrorPlan, catalogue) -> tuple[MirrorItem, ...]:
                 destination=binding.target.item.name,
                 relations=borrowable(registered, kind=item.item_type),
                 programmables=executable(registered),
+                shortcuts=tuple(
+                    shortcut
+                    for shortcut in recorded
+                    if shortcut.destination.item == item
+                ),
             )
         )
     return tuple(resolved)
@@ -517,6 +563,9 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
     is emptied and rebuilt on its own, so each needs a physical identity of its
     own, and none of them may be something the run reads.
     """
+
+    for each in resolved.items:
+        _recreatable(each, bindings=resolved.bindings)
 
     # Keyed on kind and name, which is a physical item's identity: a Lakehouse
     # and a Warehouse may share a display name. The destination catalogue is an
@@ -646,18 +695,9 @@ def _copy_catalogue_state(
     from ..targets import WarehouseTarget
 
     sql = session.sql_executor(WarehouseTarget(destination.item), workspace=workspace)
-    # One instant for the whole fork: this is when the destination's objects are
-    # published, and every copied row carries it.
-    published = datetime.now(timezone.utc).replace(tzinfo=None)
     with session.step(f"Copy catalogue state from {source}"):
         sql.execute_script(
-            "\n".join(
-                fork_statements(
-                    source_catalogue=source.name,
-                    published=published,
-                    borrowed=borrowed,
-                )
-            )
+            "\n".join(fork_statements(source_catalogue=source.name, borrowed=borrowed))
         )
     with session.step("Count what was copied"):
         rows = sql.query(_count_statement(borrowed=borrowed))
@@ -697,20 +737,27 @@ def _wipe_target(workspace: Workspace, each: MirrorItem, *, session) -> str:
     return each.target
 
 
-def _mirror_item(workspace: Workspace, each: MirrorItem, *, session) -> dict:
+def _mirror_item(
+    workspace: Workspace, each: MirrorItem, *, bindings, session
+) -> dict:
     """Point one item at another target's data, however its kind mirrors."""
 
     from ..declaration.model import LAKEHOUSE
 
     if each.kind == LAKEHOUSE:
-        return _mirror_lakehouse_item(workspace, each, session=session)
-    return _mirror_warehouse_item(workspace, each, session=session)
+        return _mirror_lakehouse_item(
+            workspace, each, bindings=bindings, session=session
+        )
+    return _mirror_warehouse_item(workspace, each, bindings=bindings, session=session)
 
 
-def _mirror_warehouse_item(workspace: Workspace, each: MirrorItem, *, session) -> dict:
-    """Point one Warehouse item at another target's rows."""
+def _mirror_warehouse_item(
+    workspace: Workspace, each: MirrorItem, *, bindings, session
+) -> dict:
+    """Point one Warehouse item at another target's rows, and stand its pointers up."""
 
-    from ..catalogue.borrow import borrow_statements
+    from ..catalogue.borrow import borrow_statements, schema_statements
+    from ..catalogue.shortcuts import schemas_of, view_statement
     from ..targets import ItemRef, WarehouseTarget
 
     sql = session.sql_executor(
@@ -724,6 +771,14 @@ def _mirror_warehouse_item(workspace: Workspace, each: MirrorItem, *, session) -
         ):
             sql.execute(statement)
 
+    pointers = _recreatable(each, bindings=bindings)
+    if pointers:
+        with session.step(f"Recreate {len(pointers)} shortcut(s) in {each.target}"):
+            for statement in schema_statements(schemas_of(pointers)):
+                sql.execute(statement)
+            for pointer in pointers:
+                sql.execute(view_statement(pointer))
+
     code = _copy_programmables(workspace, each, sql=sql, session=session)
     _record_borrowed(workspace, each, session=session)
     # Last, so a run that fails before here leaves the item installed where it
@@ -733,16 +788,43 @@ def _mirror_warehouse_item(workspace: Workspace, each: MirrorItem, *, session) -
         "source": each.source,
         "target": each.target,
         "relations": len(each.relations),
+        "pointers": len(pointers),
         "programmables": code,
     }
 
 
-def _mirror_lakehouse_item(workspace: Workspace, each: MirrorItem, *, session) -> dict:
+def _recreatable(each: MirrorItem, *, bindings) -> tuple:
+    """The pointers this item stands up again, refusing one its kind cannot.
+
+    ``_.Shortcut`` records what the source declared, so a row this item's kind
+    has no physical form for is a contradiction, and it is refused.
+    Asked while the plan is settled as well as while it runs, so a contradiction
+    fails with every Warehouse still intact.
+    """
+
+    from ..catalogue.shortcuts import recreatable, unsupported
+
+    found = recreatable(each.shortcuts, item=each.item, bindings=bindings)
+    for pointer in found:
+        why = unsupported(pointer, kind=each.kind)
+        if why is not None:
+            raise CommandError(
+                f"mirror cannot recreate {pointer.destination} in {each.target}: "
+                f"{why}"
+            )
+    return found
+
+
+def _mirror_lakehouse_item(
+    workspace: Workspace, each: MirrorItem, *, bindings, session
+) -> dict:
     """Point one Lakehouse item at another target's tables, folders and views.
 
     Storage is borrowed through OneLake shortcuts, and a source view through a
-    view of Weaver's own over the source's four-part name. The deployed load
-    tree is copied, because a run imports it where Spark is.
+    view of Weaver's own over the source's four-part name. The pointers the
+    item declared are stood up again beside them, reading what they always
+    read. The deployed load tree is copied, because a run imports it where
+    Spark is.
     """
 
     from ..build_bundle.executors.shortcut import await_addressable
@@ -753,10 +835,13 @@ def _mirror_lakehouse_item(workspace: Workspace, each: MirrorItem, *, session) -
     destination = resolver.spark_destination(ItemRef(each.destination))
     source = resolver.spark_destination(ItemRef(each.source_target))
 
-    # The borrowed data and the ``_`` surface in one submission: both are
-    # shortcuts into this Lakehouse, and both are waited on together.
-    shortcuts = _pointer_requests(workspace, each, session=session) + _surface_requests(
-        workspace, each, session=session
+    # The borrowed data, the ``_`` surface and the item's own pointers in one
+    # submission: all are shortcuts into this Lakehouse, waited on together.
+    pointers = _recreatable(each, bindings=bindings)
+    shortcuts = (
+        _pointer_requests(workspace, each, session=session)
+        + _surface_requests(workspace, each, session=session)
+        + _recreated_requests(workspace, each, pointers, session=session)
     )
     if shortcuts:
         with session.step(f"Mirror {len(shortcuts)} object(s) from {each.source}"):
@@ -796,6 +881,7 @@ def _mirror_lakehouse_item(workspace: Workspace, each: MirrorItem, *, session) -
         "target": each.target,
         "relations": len(each.relations),
         "shortcuts": len(shortcuts),
+        "pointers": len(pointers),
         "views": len(wrapped),
         "files": files,
     }
@@ -833,6 +919,47 @@ def _pointer_requests(workspace: Workspace, each: MirrorItem, *, session) -> tup
         )
 
     return pointer_shortcuts(each.relations, source=item, path_of=path_of)
+
+
+def _recreated_requests(
+    workspace: Workspace, each: MirrorItem, pointers, *, session
+) -> tuple:
+    """Each recorded pointer, addressed in its target's own spelling.
+
+    The target is read where it is: a logical one through this run's final
+    bindings, a physical one at the workspace and item it was recorded with.
+    """
+
+    from ..build_bundle.shortcut_sources import stored_path
+    from ..catalogue.shortcuts import shortcut_request
+
+    if not pointers:
+        return ()
+    resolver = session.resolver(workspace)
+    store = session.store(workspace)
+    requests = []
+    for pointer in pointers:
+        item = resolver.external_item(
+            pointer.target_name,
+            item_type=pointer.shortcut.target_item.item_type,
+            workspace=pointer.target_workspace,
+        )
+        requests.append(
+            shortcut_request(
+                pointer,
+                source=item,
+                source_path=stored_path(
+                    resolver.external_root(item),
+                    pointer.source_components,
+                    store=store,
+                    what=(
+                        f"mirror recreates {pointer.destination}, which reads "
+                        f"{pointer.target_name}"
+                    ),
+                ),
+            )
+        )
+    return tuple(requests)
 
 
 def _surface_requests(workspace: Workspace, each: MirrorItem, *, session) -> tuple:

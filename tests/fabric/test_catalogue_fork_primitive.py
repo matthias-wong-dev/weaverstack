@@ -6,9 +6,8 @@ state into it, server-side.
 
 It needs a tenant because the copy is Fabric's work. Three-part cross-Warehouse
 ``insert ... select`` is the mechanism, and whether it carries a signature
-string and a null through unchanged, and lands the fork's own
-``datetime2(6)``, is Fabric's answer. What the fork decides is settled without
-a tenant, in
+string, a ``datetime2(6)`` and a null through unchanged is Fabric's answer. What
+the fork decides is settled without a tenant, in
 ``tests/test_catalogue_fork_declaration.py`` and ``tests/test_mirror_boundary.py``.
 
 The destination is ``PYTEST_WEAVER_FORK``, which nothing else in the suite
@@ -193,32 +192,27 @@ def test_the_catalogue_owns_its_own_installation_row(forked):
 
 
 @weaver_test(remote=True, resources={"tds"})
-def test_a_signature_survives_the_copy_and_the_instant_is_the_forks(forked):
-    """What incremental selection compares, as the destination holds it.
+def test_signatures_and_instants_survive_the_copy(forked):
+    """What incremental selection compares, carried through unchanged.
 
-    A signature is what says an object is unchanged, so it comes across
-    unaltered. The build datetime is one catalogue's own publication clock, and
-    the copy writes one instant of its own over every row: see
-    :func:`weaver.catalogue.fork.copy_statement`.
+    A signature altered in transit would make every object look changed, and a
+    truncated ``Build datetime`` would re-date rows no build touched.
     """
 
-    identity = "[Item type], [Item name], [Schema name], [Object name]"
+    columns = (
+        "[Item type], [Item name], [Schema name], [Object name], "
+        "[Signature], [Build datetime]"
+    )
     registry = f"{identifier(CATALOGUE_SCHEMA)}.{identifier(REGISTRY.name)}"
     query = (
-        f"select {identity}, [Signature], [Build datetime] from {registry} "
-        f"where {NOT_THE_CATALOGUES_OWN} order by {identity}"
+        f"select {columns} from {registry} where {NOT_THE_CATALOGUES_OWN}"
+        " order by [Item type], [Item name], [Schema name], [Object name]"
     )
 
     source = [tuple(row.values()) for row in forked.source_sql.query(query)]
     destination = [tuple(row.values()) for row in forked.sql.query(query)]
 
-    assert [row[:-1] for row in destination] == [row[:-1] for row in source]
-    instants = {row[-1] for row in destination}
-    assert len(instants) == 1
-    assert None not in instants
-    # The source estate's own builds dated its rows, and one of them cannot be
-    # the fork's instant, so the fork's clock is what the destination carries.
-    assert instants.isdisjoint({row[-1] for row in source})
+    assert destination == source
 
 
 @weaver_test(remote=True, resources={"tds"})

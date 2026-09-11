@@ -1,12 +1,14 @@
-"""Selection over the catalogue a fork leaves, on one clock and on two.
+"""Selection over the estate a fork and a mirror leave, with nothing changed.
 
-A fork copies the source estate's rows and leaves the destination's own
-``Warehouse/_weaver`` rows alone.
-:func:`weaver.build_bundle.incremental.stale_through_shortcuts` reads a Registry
-build datetime to find a pointer a producer outran, and the ``_`` surface
-pointers are sourced from ``Warehouse/_weaver``. Dated on two clocks they read
-as behind the catalogue tables they stand on, and the descendant walk carries
-that into every object whose query reads the surface.
+A fork copies installed state literally, build datetimes included, and a mirror
+reproduces the physical estate: it borrows the data, recreates the pointers and
+copies the code. What that is worth is that the next build finds nothing to do.
+
+Two chains reach a mirrored object here. One runs through the ``_`` surface,
+which is how the ACQSC objects were first dragged into a build: a T-SQL body
+reading ``[_].[Bookmark]`` sits under the surface view over
+``Warehouse/_weaver``. The other runs through the item's own logical shortcut,
+the pointer a mirror recreates.
 
 Pure Python, through :func:`weaver.build_bundle.incremental.select_build` and
 the freshness read the planner performs before it.
@@ -24,6 +26,7 @@ from factories import (
     installed_catalogue,
     item_bindings,
     item_id,
+    lakehouse_table,
     schema_document,
     warehouse_table,
     warehouse_view,
@@ -45,23 +48,31 @@ ITEM = "Warehouse/Curated"
 BUILTIN = "Warehouse/_weaver"
 TARGET = "Curated_Dev"
 SOURCE_TARGET = "Curated"
+#: The item the pointer reads, which this run does not rebind.
+PRODUCER = "Lakehouse/Landing"
+PRODUCER_TARGET = "Landing"
 
-#: The instant the destination catalogue was built at, and the later one the
-#: fork copied the source estate's rows in at.
-CATALOGUE_BUILT_AT = datetime(2026, 3, 1, 0, 0, 0)
-FORKED_AT = CATALOGUE_BUILT_AT + timedelta(minutes=1)
-#: What the source estate's own builds had dated its rows to.
-SOURCE_BUILT_AT = CATALOGUE_BUILT_AT - timedelta(days=8)
+#: When the source estate's own build published its rows, and the later instant
+#: the destination catalogue was built at. A fork copies the first and writes
+#: the second, so one catalogue holds both.
+SOURCE_BUILT_AT = datetime(2026, 3, 1, 0, 0, 0)
+CATALOGUE_BUILT_AT = SOURCE_BUILT_AT + timedelta(days=8)
 
 #: A table that reads its own bookmark, which puts it under the ``_.Bookmark``
-#: surface view in the dependency graph.
+#: surface view, and reads the pointer, which puts it under that too.
 BOOKMARKED = """\
 declare @bookmark datetime2(6) = (
     select b.[Bookmark datetime]
       from [_].[Bookmark] as b
      where b.[Object name] = 'Order'
 );
-select cast(1 as int) as OrderId
+select OrderId from [Sales].[OrderDelta] where @bookmark is null or OrderId > 0
+"""
+
+#: The pointer, as ``shortcuts.yml`` declares it.
+POINTER = """\
+logical:
+  Warehouse/Curated/Sales.OrderDelta: Lakehouse/Landing/Tables/Sales.Order
 """
 
 
@@ -69,13 +80,20 @@ select cast(1 as int) as OrderId
 
 
 def _estate(root: Path):
-    """One Warehouse item: a bookmarked table, a view on it, and a plain table.
+    """One Warehouse item reading one Lakehouse item through a pointer.
 
-    The plain table reads no surface view, so it says which objects the walk
-    from a ``_`` surface pointer reaches and which it leaves.
+    ``Sales.Region`` reads neither the surface nor the pointer, so it says
+    which objects a walk reaches and which it leaves.
     """
 
+    _write(root, f"{PRODUCER}/schemas/Sales.yml", schema_document("Sales"))
+    _write(
+        root,
+        f"{PRODUCER}/Tables/Sales__Order.py",
+        lakehouse_table("Sales.Order", columns={"OrderId": "int"}),
+    )
     _write(root, f"{ITEM}/schemas/Sales.yml", schema_document("Sales"))
+    _write(root, f"{ITEM}/shortcuts.yml", POINTER)
     _write(
         root,
         f"{ITEM}/Sales.Order.sql",
@@ -107,31 +125,33 @@ def _object(name: str) -> WeaverDocumentId:
 
 
 def _bindings():
-    """The item and the catalogue item, as every build binds them."""
+    """Both items and the catalogue item, as every build binds them."""
 
     return effective_item_bindings(
-        item_bindings((ITEM, TARGET)),
+        item_bindings((ITEM, TARGET), (PRODUCER, PRODUCER_TARGET)),
         control_item=ItemRef("Weaver_Control"),
         workspace_name=WORKSPACE,
     )
 
 
-#: Every relation of the item a mirror stands over.
+#: Every relation of the Warehouse item a mirror stands over.
 BORROWED = ("Order", "OrderReport", "Region")
+#: The pointer the mirror recreates, which is not borrowed.
+RECREATED = "OrderDelta"
 
 
-def _forked(repository, *, copied_at: datetime) -> Catalogue:
-    """The destination catalogue as a fork leaves it.
+def _forked(repository) -> Catalogue:
+    """The destination catalogue as a fork and a mirror leave it.
 
+    Every copied row keeps the source estate's ``build_datetime``.
     ``Warehouse/_weaver`` is the build the fork ran to make this catalogue, so
-    its rows carry :data:`CATALOGUE_BUILT_AT`. Every other row was copied, and
-    ``copied_at`` is what the copy dated it to.
+    its rows are later, and they are the one thing a fork does not copy.
     """
 
     catalogue = installed_catalogue(repository, _bindings())
     rows = {}
     for item, tables in catalogue.rows.items():
-        instant = CATALOGUE_BUILT_AT if item.item_name == "_weaver" else copied_at
+        instant = CATALOGUE_BUILT_AT if item.item_name == "_weaver" else SOURCE_BUILT_AT
         rows[item] = {
             **{name: tuple(each) for name, each in tables.items()},
             REGISTRY.name: tuple(
@@ -157,8 +177,13 @@ def _forked(repository, *, copied_at: datetime) -> Catalogue:
     return Catalogue(rows=rows, materialised=catalogue.materialised | {MIRROR.name})
 
 
-def _inventory(repository):
-    """The Warehouse as a mirror leaves it: a View at each borrowed address."""
+def _inventory(repository, *, recreated: bool = True):
+    """The Warehouse as a mirror leaves it.
+
+    A View at each borrowed address, and one at the pointer's when the mirror
+    recreated it. ``recreated=False`` is the estate a mirror that only borrows
+    leaves: Registry certifies the pointer and its address holds nothing.
+    """
 
     bound = {each.item: each.to_bound_target() for each in _bindings().entries}
     inventory = FixtureInventory.from_repository(
@@ -168,28 +193,36 @@ def _inventory(repository):
         kind="warehouse",
         target_name=TARGET,
     )
-    names = {f"Sales.{name}" for name in BORROWED}
+    borrowed = {f"Sales.{name}" for name in BORROWED}
+    pointer = {f"Sales.{RECREATED}"}
+    views = set(inventory.views) | borrowed
+    views = views | pointer if recreated else views - pointer
     return replace(
         inventory,
-        tables=tuple(name for name in inventory.tables if name not in names),
-        views=tuple(sorted(set(inventory.views) | names)),
+        tables=tuple(name for name in inventory.tables if name not in borrowed),
+        views=tuple(sorted(views)),
     )
 
 
-def _selection(repository, catalogue):
+def _inventories(repository, **how):
+    bound = {each.item: each.to_bound_target() for each in _bindings().entries}
+    made = {item_id(ITEM): _inventory(repository, **how)}
+    for item, kind in ((PRODUCER, "lakehouse"), (BUILTIN, "warehouse")):
+        identity = item_id(item)
+        made[identity] = FixtureInventory.from_repository(
+            repository,
+            item=item,
+            target_id=bound[identity].id,
+            kind=kind,
+            target_name=bound[identity].name,
+        )
+    return made
+
+
+def _selection(repository, catalogue, **how):
     """The build's decision, with freshness read as the planner reads it."""
 
     by_item = _bindings().by_item
-    inventories = {
-        item_id(ITEM): _inventory(repository),
-        item_id(BUILTIN): FixtureInventory.from_repository(
-            repository,
-            item=BUILTIN,
-            target_id=f"warehouse:{WORKSPACE}/Weaver_Control",
-            kind="warehouse",
-            target_name="Weaver_Control",
-        ),
-    }
     registered = {
         identity: document
         for identity, document in catalogue.registered.items()
@@ -199,7 +232,7 @@ def _selection(repository, catalogue):
         repository,
         registered,
         selected=set(registered),
-        inventories=inventories,
+        inventories=_inventories(repository, **how),
         stale_consumers=stale_through_shortcuts(
             repository, catalogue.registered, bound_items=by_item
         ),
@@ -207,50 +240,103 @@ def _selection(repository, catalogue):
     )
 
 
-# --- the surface pointer, on one clock and on two -----------------------------
+# --- a mirror that left the estate complete -----------------------------------
 
 
 @weaver_test()
-def test_a_fork_dates_its_rows_so_no_surface_pointer_reads_as_behind(tmp_path):
-    """The copy carries the fork's instant, which is after the catalogue build.
+def test_an_unchanged_build_over_a_forked_estate_selects_nothing(tmp_path):
+    """A literal fork leaves the next build nothing to do.
 
-    Nothing in the estate changed, so an unchanged mirror stays a mirror: no
-    object is selected, and the ``_.Mirror`` rows that record what is borrowed
-    are left standing.
+    Every copied row carries the source estate's instant, the pointer stands
+    where Registry says it does, and the mirrors are left recorded.
     """
 
     repository = _estate(tmp_path / "repo")
-    catalogue = _forked(repository, copied_at=FORKED_AT)
+    catalogue = _forked(repository)
 
-    stale = stale_through_shortcuts(
-        repository, catalogue.registered, bound_items=_bindings().by_item
-    )
     selection = _selection(repository, catalogue)
 
-    assert stale == ()
     assert selection.selected_for_build == ()
     assert set(catalogue.mirrors) == {_object(name) for name in BORROWED}
 
 
 @weaver_test()
-def test_the_source_estates_instants_drag_every_surface_reader_into_the_build(
-    tmp_path,
-):
-    """The defect, as a copied ``build_datetime`` produced it.
+def test_the_catalogues_own_build_does_not_outdate_the_surface_it_made(tmp_path):
+    """``Warehouse/_weaver`` is the one row a fork writes for itself.
 
-    Dated by the source estate's builds, each ``_`` surface pointer is behind
-    the catalogue table it stands on, and the walk from it reaches the
-    bookmarked table and the view over it. Both are mirrors, so
-    ``prohibit_rebuild`` does not hold them, and the build gives them rows of
-    their own. ``Sales.Region`` reads no surface view and is left alone, which
-    is what says the walk is the mechanism.
+    Its instant is later than every copied one by construction. Freshness
+    leaves the catalogue item out, because every build binds it and a changed
+    catalogue table is classified by signature.
     """
 
     repository = _estate(tmp_path / "repo")
-    catalogue = _forked(repository, copied_at=SOURCE_BUILT_AT)
 
-    selection = _selection(repository, catalogue)
+    stale = stale_through_shortcuts(
+        repository, _forked(repository).registered, bound_items=_bindings().by_item
+    )
+
+    assert stale == ()
+
+
+# --- a mirror that certified a pointer it did not stand up --------------------
+
+
+@weaver_test()
+def test_a_pointer_the_mirror_did_not_recreate_is_new(tmp_path):
+    """The defect the ACQSC run exposed, at the moment it is created.
+
+    Registry certifies the pointer and the Warehouse holds nothing at its
+    address, so the build materialises it and re-dates its Registry row. The
+    next build then reads every mirrored object behind it as stale, which is
+    what took the ACQSC objects out of the mirror.
+    """
+
+    repository = _estate(tmp_path / "repo")
+
+    selection = _selection(repository, _forked(repository), recreated=False)
+
+    assert _object(RECREATED) in selection.impact.new
+    assert _object(RECREATED) in selection.selected_for_build
+
+
+@weaver_test()
+def test_a_pointer_re_dated_by_a_build_takes_the_mirrors_behind_it(tmp_path):
+    """The second half of that path, and why recreating the pointer matters.
+
+    The estate a build of the previous test leaves: the pointer carries that
+    build's instant and every mirrored object behind it still carries the
+    fork's. ``Sales.Region`` reads neither the pointer nor the surface, so it
+    stays put.
+    """
+
+    repository = _estate(tmp_path / "repo")
+    catalogue = _forked(repository)
+    rebuilt = _rebuilt(catalogue, _object(RECREATED))
+
+    selection = _selection(repository, rebuilt)
 
     assert _object("Order") in selection.selected_for_build
     assert _object("OrderReport") in selection.selected_for_build
     assert _object("Region") not in selection.selected_for_build
+
+
+def _rebuilt(catalogue: Catalogue, identity) -> Catalogue:
+    """The same catalogue, with one object dated by a later build."""
+
+    later = (CATALOGUE_BUILT_AT + timedelta(days=1)).isoformat()
+    rows = {}
+    for item, tables in catalogue.rows.items():
+        rows[item] = {
+            **{name: tuple(each) for name, each in tables.items()},
+            REGISTRY.name: tuple(
+                {**row, BUILD_DATETIME: later}
+                if (
+                    item == identity.item
+                    and str(row.get("object_name")) == identity.object_id.object
+                )
+                else row
+                for row in tables[REGISTRY.name]
+            ),
+        }
+    return Catalogue(rows=rows, materialised=catalogue.materialised)
+

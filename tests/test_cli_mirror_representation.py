@@ -273,7 +273,7 @@ def test_a_fork_is_refused_without_confirmation(monkeypatch, capsys):
     """The destination is emptied, so it asks the way ``wipe`` asks."""
 
     cli = importlib.import_module("weaver_cli.main")
-    calls = _wired(monkeypatch)
+    _wired(monkeypatch)
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
     monkeypatch.setattr(
         "weaver.mirror", lambda *_a, **_k: pytest.fail("the fork ran unconfirmed")

@@ -138,7 +138,17 @@ def stale_through_shortcuts(
 
     ``bound_items`` scopes it to what this build could act on. An absent row is
     a missing installation, which signature classification calls new.
+
+    A chain whose producer is ``Warehouse/_weaver`` is left out. Every build
+    binds the catalogue item, so a changed catalogue table is classified by
+    signature and the descendant walk carries it from there. The build datetime
+    is the evidence for a producer a build cannot classify, and this one never
+    is. It is also the one row a fork does not copy, so a forked catalogue
+    holds its own build's instant here beside the source estate's everywhere
+    else.
     """
+
+    from ..catalogue.builtin import BUILTIN_ITEM
 
     graph = repository.dependency_graph
     if graph is None:
@@ -147,6 +157,8 @@ def stale_through_shortcuts(
     by_text = {str(identity): identity for identity in registered}
     behind = []
     for shortcut in repository.logical_shortcuts:
+        if shortcut.source.item == BUILTIN_ITEM:
+            continue
         destination = shortcut.destination
         if destination.item not in bound or str(destination) not in graph:
             continue

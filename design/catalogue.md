@@ -852,15 +852,6 @@ published its own Installation, dictionary and Registry rows for
 and the source's are left behind: copied across, the forked catalogue would
 assert its own tables live in a catalogue it is not.
 
-**Every copied row is dated to the fork.** A `build_datetime` is one catalogue's
-own publication clock, and freshness compares two of that catalogue's rows on it
-(see [how does build work](how-does-build-work.md#7a-cross-item-freshness)). The
-destination's `Warehouse/_weaver` rows are the build the fork has just run, and
-they are the only rows a fork does not copy. The copy therefore writes one
-instant over the `build_datetime` of every row it moves, being when the
-destination's objects were published, which puts both sides of a `_` surface
-chain on one clock.
-
 **Installation is copied as it stands.** A forked catalogue names the source's
 physical targets, so every item begins where it already is. One
 
@@ -910,6 +901,35 @@ Code is local either way. A Warehouse gets every procedure and function the
 source holds; a Lakehouse gets a byte copy of the source's `Files/_/Load` tree,
 which is what a run imports where Spark is. Both get the standard `_` surface
 over this catalogue, and both end with the item bound to its new target.
+
+**A pointer is recreated, not borrowed.** A fork copies `_.Shortcut`, so the
+destination certifies every shortcut the source item declared. Those hold no
+data, so there is nothing to point at another target's rows: a mirror stands
+each one up again in the item it belongs to, as a view in a Warehouse and a
+OneLake shortcut in a Lakehouse. The Registry role stays `shortcut` and no
+`_.Mirror` row is written for one, so what is borrowed and what is pointed at
+stay separate.
+
+Where a recreated pointer reads depends on which kind of target it names:
+
+| target | recreated against |
+|---|---|
+| logical | the item's final binding in this fork |
+| physical | the workspace and item it was recorded with |
+
+A logical relationship therefore moves with the fork. `Warehouse/Curated`
+pointing at `Lakehouse/Landing` becomes `Warehouse/DEV_Curated` pointing at
+`Lakehouse/DEV_Landing`, because that is where the fork leaves `Lakehouse/Landing`.
+A physical target names a Fabric item Weaver does not manage, so no binding
+moves it.
+
+**The bindings are settled before any item is touched.** The copied
+Installation says where each item already is, and each selected item's own
+destination is written over it. That map is what a logical pointer resolves
+against, so recreation does not depend on which item a run reaches first, and a
+run that rebinds one item of a pair leaves the other's pointer resolving to
+wherever Installation still says that item is. `weaver.operations.mirror`
+builds it in `_final_bindings`; `weaver.catalogue.shortcuts` reads it.
 
 A mirrored Lakehouse gets the standard `_` surface a built one gets, from the
 same `standard_surface_references` declaration, pointed at this catalogue. The
