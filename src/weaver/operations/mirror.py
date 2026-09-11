@@ -258,6 +258,10 @@ def _final_bindings(plan: MirrorPlan, catalogue, items) -> dict:
     run happens to reach first: a pointer at an item this run rebinds follows it,
     and a pointer at one it leaves alone resolves to wherever Installation still
     says that item is.
+
+    A run selecting no item reads no catalogue, and the fork it performs leaves
+    every item where it already is, so the destination catalogue's own Warehouse
+    is the whole of the map.
     """
 
     from ..catalogue.builtin import BUILTIN_ITEM
@@ -268,7 +272,7 @@ def _final_bindings(plan: MirrorPlan, catalogue, items) -> dict:
         WeaverItemId(
             str(row.get("item_type") or ""), str(row.get("item_name") or "")
         ): str(row.get("target_name") or "")
-        for row in catalogue.table_rows(INSTALLATION)
+        for row in (catalogue.table_rows(INSTALLATION) if catalogue else ())
     }
     # The destination catalogue's own Warehouse, which the fork never copies:
     # its Installation row is written by the build that made it.

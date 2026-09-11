@@ -418,6 +418,25 @@ def test_the_scope_names_the_catalogue_and_every_item_target(monkeypatch):
 
 
 @weaver_test()
+def test_a_run_selecting_no_item_reads_no_catalogue(monkeypatch):
+    """``--no-item`` forks the catalogue and stops, so there is none to read.
+
+    The bindings a recreated shortcut resolves against are settled for every
+    run, and this one rebinds nothing: the destination catalogue's own
+    Warehouse is the whole of the map.
+    """
+
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+
+    plan = _plan(monkeypatch, _with_targets())
+    resolved = resolve_mirror(plan, None)
+
+    assert resolved.items == ()
+    assert resolved.bindings == {BUILTIN_ITEM: "Weaver_Dev"}
+    assert resolved.wiped == ("Warehouse/Weaver_Dev",)
+
+
+@weaver_test()
 def test_an_item_the_catalogue_never_installed_is_refused(monkeypatch):
     """There is nothing to point a View at, and the wipe has not happened yet."""
 
