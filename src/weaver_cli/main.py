@@ -45,6 +45,17 @@ You can also include Sales example source to build, load and test afterwards.
 Run `weaver initialise --workspace Analytics` to get started.\
 """
 
+#: What a wipe removes, and what it does with the catalogue.
+WIPE_DESCRIPTION = """\
+Empty physical Fabric items, and the catalogue that records them.
+
+Naming targets empties exactly those items. Naming none reads the catalogue's
+installations and empties the estate they name.
+
+A resolved catalogue is emptied too, last of all. Pass --unbind to keep it and
+remove its claims for the targets this command emptied.\
+"""
+
 #: What doctor is for, said before anybody has a project to point it at.
 DOCTOR_DESCRIPTION = """\
 Check that Weaver can reach Microsoft Fabric.
@@ -171,13 +182,27 @@ def _requires_build(args) -> frozenset[str]:
 
 
 def _requires_wipe(args) -> frozenset[str]:
-    """What emptying named physical targets will want."""
+    """What emptying physical targets will want.
 
-    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
+    TDS always, because the catalogue is a Warehouse and a wipe reads or
+    unbinds it. Naming no target discovers the estate from the catalogue, and
+    which kinds it holds is the catalogue's answer, read after this, so an
+    unscoped wipe declares the superset without Livy: emptying a Lakehouse is
+    storage and shortcuts.
+    """
 
-    return requirements(
-        AUTH, RESOLVER, TDS, *_kind_requirements(getattr(args, "targets", ()))
+    from weaver.sessions.requirements import (
+        AUTH,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
     )
+
+    targets = getattr(args, "targets", ()) or ()
+    if not targets:
+        return requirements(AUTH, RESOLVER, ONELAKE, TDS)
+    return requirements(AUTH, RESOLVER, TDS, *_kind_requirements(targets))
 
 
 def _requires_mirror(args) -> frozenset[str]:
@@ -633,20 +658,30 @@ def build_parser() -> argparse.ArgumentParser:
 
     wipe = subcommands.add_parser(
         "wipe",
-        help=(
-            "Clear a physical Lakehouse or Warehouse, and remove a resolved "
-            "catalogue's claims for it."
-        ),
+        help="Empty a physical Lakehouse or Warehouse, and its catalogue.",
+        description=WIPE_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     wipe.add_argument(
         "targets",
         nargs="*",
         metavar="TARGET",
-        help="Lakehouse/Name[/Files|/Tables] or Warehouse/Name",
+        help=(
+            "Physical items to empty, as Lakehouse/Name or Warehouse/Name. "
+            "Naming none empties the estate the catalogue records."
+        ),
     )
     _add_workspace_args(wipe)
     wipe.add_argument(
-        "--dry-run", action="store_true", help="Show what would be removed."
+        "--unbind",
+        action="store_true",
+        help=(
+            "Keep the catalogue and remove its claims for the named targets. "
+            "Requires a catalogue and at least one target."
+        ),
+    )
+    wipe.add_argument(
+        "--dry-run", action="store_true", help="Show the estate this would empty."
     )
     wipe.add_argument(
         "--yes",
@@ -1674,67 +1709,57 @@ def _ago(at, now) -> str:
 
 
 def handle_wipe(args: argparse.Namespace) -> int:
-    """Preview, confirm, then invoke the same public wipe operation."""
+    """Plan the estate, show it, obtain authorisation, then empty that plan.
+
+    The plan shown is the plan executed: nothing is discovered again after the
+    question is answered, so what a person agreed to is what is removed.
+    """
 
     import json
 
     workspace = _resolve_workspace(args)
 
-    # A preview is needed only when the command needs confirmation.
-    previewing = args.dry_run or not authorised(args)
-    if previewing:
-        with _running_session(args, workspace) as opened:
-            planned = weaver.wipe(
-                args.targets,
-                dry_run=True,
-                session=opened,
-                **_command_context(workspace),
-            )
-        print(f"wipe on {workspace.workspace}\n")
-        for report in planned.reports:
-            print(f"  {report.target}")
-            print(f"    {report.location}")
-            for name in report.removed:
-                print(f"      - {name}")
-            if not report.removed:
-                print("      (already empty)")
-        total = planned.count
-        print()
+    with _running_session(args, workspace) as opened:
+        plan = weaver.plan_wipe(
+            args.targets,
+            unbind=args.unbind,
+            session=opened,
+            **_command_context(workspace),
+        )
 
         if args.dry_run:
             if args.json:
-                print(json.dumps(planned.to_mapping(), indent=2))
+                print(json.dumps(plan.to_mapping(), indent=2))
             else:
-                print(f"{total} item(s) would be removed. Nothing was changed.")
+                print(plan.describe())
+                print("\nNothing was changed.")
             return 0
 
-        if total:
+        if not authorised(args):
+            print(plan.describe())
+            print()
+            emptied = len(plan.targets)
             if not can_prompt(args):
                 print(
-                    f"Refusing to remove {total} item(s) without confirmation. "
+                    f"Refusing to empty {emptied} item(s) without confirmation. "
                     "Pass --yes, or --dry-run to preview.",
                     file=sys.stderr,
                 )
                 return 1
             if not confirm(
-                args, f"Remove {total} item(s)? This cannot be undone [y/N] "
+                args, f"Empty {emptied} item(s)? This cannot be undone [y/N] "
             ):
                 print("Cancelled.")
                 return 1
 
-    with _running_session(args, workspace) as opened:
-        result = weaver.wipe(
-            args.targets,
-            session=opened,
-            **_command_context(workspace),
-        )
+        result = weaver.wipe(plan=plan, session=opened)
+
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
-    elif result.count:
-        for report in result.reports:
-            print(f"  {report.target}: removed {report.count}")
     else:
-        print("Nothing to remove.")
+        print("Wipe complete\n")
+        for item in result.items:
+            print(f"  {item.describe()}")
     return 0
 
 

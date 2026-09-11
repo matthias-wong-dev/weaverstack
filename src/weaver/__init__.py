@@ -47,7 +47,14 @@ from .operations.mirror import (
     plan_mirror,
 )
 from .operations.test import test
-from .operations.wipe import WipeReport, WipeResult, wipe
+from .operations.wipe import (
+    WipeItemResult,
+    WipePlan,
+    WipeReport,
+    WipeResult,
+    plan_wipe,
+    wipe,
+)
 from .operations.workspace import current_workspace
 from .sessions.public import session
 from .shortcuts import Shortcut
@@ -81,7 +88,10 @@ __all__ = [
     "plan_mirror",
     "MirrorPlan",
     "check_mirror",
+    "plan_wipe",
     "wipe",
+    "WipePlan",
+    "WipeItemResult",
     "WipeReport",
     "WipeResult",
     "load",

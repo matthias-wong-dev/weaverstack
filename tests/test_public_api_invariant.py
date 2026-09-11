@@ -41,7 +41,12 @@ def test_the_top_level_is_the_ordinary_notebook_surface_only():
         "plan_mirror",
         "MirrorPlan",
         "check_mirror",
+        # Emptying the estate: the plan settled before the question is asked,
+        # the operation that empties it, and what it did per physical item.
+        "plan_wipe",
         "wipe",
+        "WipePlan",
+        "WipeItemResult",
         "WipeReport",
         "WipeResult",
         "load",
