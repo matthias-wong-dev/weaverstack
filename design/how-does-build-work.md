@@ -304,7 +304,7 @@ managed drop a table-to-view change goes through, reading the installed role and
 the inventory's installed type, and it runs in the drop phase, ahead of both the
 shortcut phase and the build phase. A shortcut create over a name an ordinary
 folder or table occupies returns a conflict from Fabric, so a native
-`Files/ACQSC/HarmSurveyXlsx` left standing by an earlier build blocks the folder
+`Files/Sales/ReturnsXlsx` left standing by an earlier build blocks the folder
 shortcut now declared there.
 
 An identity with no Registry row is left where it stands. Nothing certified it,

@@ -78,15 +78,15 @@ def _physical(destination, *, shortcut_type: str, schema: str, workspace=None):
 
 #: The Warehouse view a logical shortcut into a Lakehouse becomes.
 DELTA = _logical(
-    _document(CURATED, "ACQSC", "ComplaintSubtypeDelta"),
-    _document(LANDING, "ACQSC", "ComplaintSubtype"),
+    _document(CURATED, "Sales", "ProductCategoryDelta"),
+    _document(LANDING, "Sales", "ProductCategory"),
     shortcut_type="view",
 )
 #: The Lakehouse folder shortcut a physical target becomes.
 XLSX = _physical(
-    _document(LANDING, "ACQSC", "HarmSurveyXlsx", is_files=True),
+    _document(LANDING, "Sales", "ReturnsXlsx", is_files=True),
     shortcut_type="folder",
-    schema="ACQSC/HarmSurveyXlsx",
+    schema="Sales/ReturnsXlsx",
     workspace="35 South Data",
 )
 #: The ``_`` surface, which a mirror stands up from its own declaration.
@@ -107,7 +107,7 @@ def test_a_pointer_is_recreated_rather_than_borrowed():
     found = recreatable([DELTA], item=CURATED, bindings=BINDINGS)
 
     assert [str(each.destination) for each in found] == [
-        "Warehouse/Curated/ACQSC.ComplaintSubtypeDelta"
+        "Warehouse/Curated/Sales.ProductCategoryDelta"
     ]
 
 
@@ -145,8 +145,8 @@ def test_a_logical_pointer_follows_the_forks_own_bindings():
 
     assert pointer.target_name == "DEV_Landing"
     assert view_statement(pointer) == (
-        "create or alter view [ACQSC].[ComplaintSubtypeDelta] as select * from "
-        "[DEV_Landing].[ACQSC].[ComplaintSubtype];"
+        "create or alter view [Sales].[ProductCategoryDelta] as select * from "
+        "[DEV_Landing].[Sales].[ProductCategory];"
     )
 
 
@@ -158,7 +158,7 @@ def test_a_physical_pointer_stays_on_the_target_it_was_recorded_with():
 
     assert pointer.target_name == "Drop"
     assert pointer.target_workspace == "35 South Data"
-    assert pointer.source_components == ("Files", "ACQSC", "HarmSurveyXlsx")
+    assert pointer.source_components == ("Files", "Sales", "ReturnsXlsx")
 
 
 @weaver_test()
@@ -193,10 +193,10 @@ def test_a_lakehouse_pointer_carries_the_two_addresses_a_shortcut_needs():
     pointer = recreatable([XLSX], item=LANDING, bindings=BINDINGS)[0]
 
     assert shortcut_request(pointer, source="item", source_path="Files/x") == {
-        "shortcut": "Lakehouse/Landing/Files/ACQSC.HarmSurveyXlsx",
+        "shortcut": "Lakehouse/Landing/Files/Sales.ReturnsXlsx",
         "type": "folder",
-        "path": "Files/ACQSC",
-        "name": "HarmSurveyXlsx",
+        "path": "Files/Sales",
+        "name": "ReturnsXlsx",
         "source": "item",
         "source_path": "Files/x",
     }
@@ -224,18 +224,14 @@ def test_a_schema_pointer_sits_directly_under_tables():
 
 @weaver_test()
 def test_a_logical_table_pointer_reads_the_targets_tables_area():
-    source = _document(LANDING, "ACQSC", "ComplaintSubtype")
+    source = _document(LANDING, "Sales", "ProductCategory")
     pointer = recreatable(
-        [
-            _logical(
-                _document(CURATED, "ACQSC", "Copy"), source, shortcut_type="view"
-            )
-        ],
+        [_logical(_document(CURATED, "Sales", "Copy"), source, shortcut_type="view")],
         item=CURATED,
         bindings=BINDINGS,
     )[0]
 
-    assert pointer.source_components == ("Tables", "ACQSC", "ComplaintSubtype")
+    assert pointer.source_components == ("Tables", "Sales", "ProductCategory")
 
 
 @weaver_test()
@@ -243,7 +239,7 @@ def test_the_schemas_a_pointer_needs_are_named():
     """A schema holding only pointers has no borrowed relation to have made it."""
 
     assert schemas_of(recreatable([DELTA], item=CURATED, bindings=BINDINGS)) == (
-        "ACQSC",
+        "Sales",
     )
 
 
@@ -271,9 +267,15 @@ def test_a_pointer_its_item_has_no_form_for_is_refused(kind, shortcut, expected)
 
 @weaver_test()
 def test_each_kind_stands_up_the_pointer_that_belongs_to_it():
-    assert unsupported(
-        recreatable([DELTA], item=CURATED, bindings=BINDINGS)[0], kind=WAREHOUSE
-    ) is None
-    assert unsupported(
-        recreatable([XLSX], item=LANDING, bindings=BINDINGS)[0], kind=LAKEHOUSE
-    ) is None
+    assert (
+        unsupported(
+            recreatable([DELTA], item=CURATED, bindings=BINDINGS)[0], kind=WAREHOUSE
+        )
+        is None
+    )
+    assert (
+        unsupported(
+            recreatable([XLSX], item=LANDING, bindings=BINDINGS)[0], kind=LAKEHOUSE
+        )
+        is None
+    )

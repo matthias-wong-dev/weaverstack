@@ -5,7 +5,7 @@ reproduces the physical estate: it borrows the data, recreates the pointers and
 copies the code. What that is worth is that the next build finds nothing to do.
 
 Two chains reach a mirrored object here. One runs through the ``_`` surface,
-which is how the ACQSC objects were first dragged into a build: a T-SQL body
+which is how mirrored objects were first dragged into a build: a T-SQL body
 reading ``[_].[Bookmark]`` sits under the surface view over
 ``Warehouse/_weaver``. The other runs through the item's own logical shortcut,
 the pointer a mirror recreates.
@@ -312,12 +312,12 @@ def test_only_the_catalogues_own_instant_is_set_aside(tmp_path):
 
 @weaver_test()
 def test_a_pointer_the_mirror_did_not_recreate_is_new(tmp_path):
-    """The defect the ACQSC run exposed, at the moment it is created.
+    """The defect a mirrored run exposed, at the moment it is created.
 
     Registry certifies the pointer and the Warehouse holds nothing at its
     address, so the build materialises it and re-dates its Registry row. The
     next build then reads every mirrored object behind it as stale, which is
-    what took the ACQSC objects out of the mirror.
+    what takes every mirrored object out of the mirror.
     """
 
     repository = _estate(tmp_path / "repo")

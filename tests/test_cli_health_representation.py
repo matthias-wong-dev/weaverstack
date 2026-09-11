@@ -57,7 +57,7 @@ def _failing_tests() -> HealthSection:
                 severity=RED,
                 status="failed",
                 message="the last run failed",
-                object_id="Warehouse/Curated/Sales.HarmTotals",
+                object_id="Warehouse/Curated/Sales.OrderTotals",
                 target="Warehouse/Curated_WH",
                 failure_count=4,
             ),
@@ -209,7 +209,7 @@ def test_a_failing_subject_is_named_with_its_message(captured, capsys):
 
     printed = capsys.readouterr().out
 
-    assert "Warehouse/Curated/Sales.HarmTotals" in printed
+    assert "Warehouse/Curated/Sales.OrderTotals" in printed
     assert "the last run failed" in printed
 
 
@@ -239,7 +239,7 @@ def test_the_slowest_loads_and_the_rows_that_moved_are_shown(captured, capsys):
     captured["report"] = _report(
         load_activity=(
             LoadActivity(
-                object_id="Lakehouse/Sales/Tables/Sales.HarmSurvey",
+                object_id="Lakehouse/Sales/Tables/Sales.Returns",
                 target="Lakehouse/Sales_LH",
                 workflow_id="workflow-1",
                 duration_ms=31200,
@@ -262,7 +262,7 @@ def test_the_slowest_loads_and_the_rows_that_moved_are_shown(captured, capsys):
 def test_an_id_longer_than_the_column_still_has_a_gap_after_it(captured, capsys):
     """A fixed column ran a long id straight into the value beside it."""
 
-    long_id = "Warehouse/Curated/ACQSC.ComplaintSubtypeReferenceTable"
+    long_id = "Warehouse/Curated/Sales.ProductCategoryReferenceTable"
     captured["report"] = _report(
         load_activity=(
             LoadActivity(
@@ -355,7 +355,7 @@ def test_json_carries_the_findings_a_consumer_acts_on(captured, capsys):
 
     assert finding["code"] == TEST_FAILED
     assert finding["status"] == "failed"
-    assert finding["object_id"] == "Warehouse/Curated/Sales.HarmTotals"
+    assert finding["object_id"] == "Warehouse/Curated/Sales.OrderTotals"
     assert finding["failure_count"] == 4
 
 
