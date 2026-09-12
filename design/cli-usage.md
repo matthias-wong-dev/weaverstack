@@ -1025,9 +1025,20 @@ plan = weaver.plan_wipe(targets, workspace="Analytics", session=session)
 result = weaver.wipe(plan=plan, session=session)
 ```
 
-`catalogue_action` names the disposition outright: `"remove"`, `"unbind"` or
-`"leave"`. Mirror uses `"unbind"` to empty one destination Warehouse, so a
-catalogue it is about to fill is one physical item and not an estate index.
+`catalogue_action` names the disposition outright:
+
+| Disposition | What it empties, and what happens to the catalogue |
+|---|---|
+| `"remove"` | the named targets, and the catalogue last |
+| `"unbind"` | the named targets; the catalogue kept and its claims for them deleted, and never itself a target |
+| `"leave"` | no catalogue resolved |
+| `"physical-only"` | exactly the named targets, and no catalogue behaviour |
+
+A command line reaches the first two: the default is `"remove"` and `--unbind`
+is `"unbind"`. `"physical-only"` is internal. An operation emptying one physical
+item asks for it, which is what mirror does for a destination catalogue it is
+about to fill: one Warehouse, no estate discovered, no claim deleted, and
+nothing appended.
 
 ## Mirror
 
