@@ -68,7 +68,7 @@ def test_cli_json_contains_the_whole_report_and_exit_status(
 ):
     cli = importlib.import_module("weaver_cli.main")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
     report = DoctorReport(
         checks=(Check("Workspace Analytics", status),),
         workspace="Analytics",

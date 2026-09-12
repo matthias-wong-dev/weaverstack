@@ -696,9 +696,14 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
 def _wipe_destination(
     workspace: Workspace, destination: CatalogueRef, *, session
 ) -> str:
-    """Empty the destination Warehouse, through the ordinary wipe."""
+    """Empty the destination Warehouse, through the ordinary wipe.
 
-    from .wipe import wipe
+    ``PHYSICAL_ONLY`` scopes the wipe to the Warehouse it names. The destination
+    catalogue is the thing being filled here, so it is one physical item and not
+    an index of an estate to empty, and preserving it is not what this does.
+    """
+
+    from .wipe import PHYSICAL_ONLY, wipe
 
     target = f"{CATALOGUE_KIND}/{destination.name}"
     with session.step(f"Empty {target}"):
@@ -709,6 +714,7 @@ def _wipe_destination(
             session=session,
             workspace=workspace.workspace,
             catalogue=workspace.catalogue,
+            catalogue_action=PHYSICAL_ONLY,
         )
     return target
 
@@ -805,9 +811,14 @@ def _count_statement(*, borrowed: bool) -> str:
 
 
 def _wipe_target(workspace: Workspace, each: MirrorItem, *, session) -> str:
-    """Empty the Warehouse a mirror is about to be built in."""
+    """Empty the Warehouse a mirror is about to be built in.
 
-    from .wipe import wipe
+    One named target, and the destination catalogue keeps every row it was just
+    given. Where each item ends up is settled in ``bindings`` and written by the
+    rebinding below, so a physical wipe deletes no claim on its way past.
+    """
+
+    from .wipe import PHYSICAL_ONLY, wipe
 
     with session.step(f"Empty {each.target}"):
         wipe(
@@ -815,6 +826,7 @@ def _wipe_target(workspace: Workspace, each: MirrorItem, *, session) -> str:
             session=session,
             workspace=workspace.workspace,
             catalogue=workspace.catalogue,
+            catalogue_action=PHYSICAL_ONLY,
         )
     return each.target
 

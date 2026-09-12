@@ -16,6 +16,15 @@ from weaver.errors import (
     WeaverError,
 )
 
+from .interaction import (
+    add_non_interactive,
+    authorised,
+    can_prompt,
+    confirm,
+    non_interactive,
+    retry_wanted,
+)
+
 #: The capacity verbs, kept here so building the parser imports nothing from
 #: `weaver.fabric`, because `weaver --help` should not pay for a transport.
 CAPACITY_ACTIONS = ("status", "resume", "suspend")
@@ -34,6 +43,17 @@ If an item doesn't exist yet, it will be created automatically.
 You can also include Sales example source to build, load and test afterwards.
 
 Run `weaver initialise --workspace Analytics` to get started.\
+"""
+
+#: What a wipe removes, and what it does with the catalogue.
+WIPE_DESCRIPTION = """\
+Empty physical Fabric items, and the catalogue that records them.
+
+Naming targets empties exactly those items. Naming none reads the catalogue's
+installations and empties the estate they name.
+
+A resolved catalogue is emptied too, last of all. Pass --unbind to keep it and
+remove its claims for the targets this command emptied.\
 """
 
 #: What doctor is for, said before anybody has a project to point it at.
@@ -162,13 +182,27 @@ def _requires_build(args) -> frozenset[str]:
 
 
 def _requires_wipe(args) -> frozenset[str]:
-    """What emptying named physical targets will want."""
+    """What emptying physical targets will want.
 
-    from weaver.sessions.requirements import AUTH, RESOLVER, TDS, requirements
+    TDS always, because the catalogue is a Warehouse and a wipe reads or
+    unbinds it. Naming no target discovers the estate from the catalogue, and
+    which kinds it holds is the catalogue's answer, read after this, so an
+    unscoped wipe declares the superset without Livy: emptying a Lakehouse is
+    storage and shortcuts.
+    """
 
-    return requirements(
-        AUTH, RESOLVER, TDS, *_kind_requirements(getattr(args, "targets", ()))
+    from weaver.sessions.requirements import (
+        AUTH,
+        ONELAKE,
+        RESOLVER,
+        TDS,
+        requirements,
     )
+
+    targets = getattr(args, "targets", ()) or ()
+    if not targets:
+        return requirements(AUTH, RESOLVER, ONELAKE, TDS)
+    return requirements(AUTH, RESOLVER, TDS, *_kind_requirements(targets))
 
 
 def _requires_mirror(args) -> frozenset[str]:
@@ -363,8 +397,9 @@ def build_parser() -> argparse.ArgumentParser:
     workflow.add_argument(
         "--yes",
         action="store_true",
-        help="Run without asking. Also authorises each command in the sequence.",
+        help="Authorise the sequence, and every command in it.",
     )
+    add_non_interactive(workflow)
     _add_workspace_args(workflow)
     workflow.set_defaults(handler=handle_workflow)
 
@@ -397,6 +432,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     doctor.add_argument("--json", action="store_true", help="emit the result as JSON")
     doctor.add_argument("--workspace", required=True, help="Fabric workspace to check.")
+    add_non_interactive(doctor)
     doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
 
     check = subcommands.add_parser(
@@ -408,6 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         help="Project folder. Defaults to the current directory.",
     )
+    add_non_interactive(check)
     check.set_defaults(handler=handle_check)
 
     build = subcommands.add_parser(
@@ -456,6 +493,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory to write a bundle created with --bundle-only.",
     )
     build.add_argument("--json", action="store_true", help="emit the result as JSON")
+    add_non_interactive(build)
     _add_workspace_args(build)
     build.set_defaults(
         handler=handle_build,
@@ -533,6 +571,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show the load plan without running it.",
     )
     load.add_argument("--json", action="store_true", help="emit the report as JSON")
+    add_non_interactive(load)
     _add_workspace_args(load)
     load.set_defaults(handler=handle_load, requires=_requires_run)
 
@@ -578,6 +617,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show the test plan without running it.",
     )
     validate.add_argument("--json", action="store_true", help="emit the report as JSON")
+    add_non_interactive(validate)
     _add_workspace_args(validate)
     validate.set_defaults(handler=handle_test, requires=_requires_run)
 
@@ -610,6 +650,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the physical read that proves certified objects are there.",
     )
     report.add_argument("--json", action="store_true", help="emit the report as JSON")
+    add_non_interactive(report)
     _add_workspace_args(report, include_environment=False)
     # No Lakehouse offer: health names items, and it reads a Lakehouse over
     # storage rather than through Spark.
@@ -617,25 +658,38 @@ def build_parser() -> argparse.ArgumentParser:
 
     wipe = subcommands.add_parser(
         "wipe",
-        help=(
-            "Clear a physical Lakehouse or Warehouse, and remove a resolved "
-            "catalogue's claims for it."
-        ),
+        help="Empty a physical Lakehouse or Warehouse, and its catalogue.",
+        description=WIPE_DESCRIPTION,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     wipe.add_argument(
         "targets",
         nargs="*",
         metavar="TARGET",
-        help="Lakehouse/Name[/Files|/Tables] or Warehouse/Name",
+        help=(
+            "Physical items to empty, as Lakehouse/Name or Warehouse/Name. "
+            "Naming none empties the estate the catalogue records."
+        ),
     )
     _add_workspace_args(wipe)
     wipe.add_argument(
-        "--dry-run", action="store_true", help="Show what would be removed."
+        "--unbind",
+        action="store_true",
+        help=(
+            "Keep the catalogue and remove its claims for the named targets. "
+            "Requires a catalogue and at least one target."
+        ),
     )
     wipe.add_argument(
-        "--yes", action="store_true", help="Skip the confirmation prompt."
+        "--dry-run", action="store_true", help="Show the estate this would empty."
+    )
+    wipe.add_argument(
+        "--yes",
+        action="store_true",
+        help="Authorise the removal without asking.",
     )
     wipe.add_argument("--json", action="store_true", help="emit the result as JSON")
+    add_non_interactive(wipe)
     wipe.set_defaults(
         handler=handle_wipe,
         requires=_requires_wipe,
@@ -675,9 +729,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_workspace_args(mirror)
     mirror.add_argument(
-        "--yes", action="store_true", help="Skip the confirmation prompt."
+        "--yes",
+        action="store_true",
+        help="Authorise emptying the destinations without asking.",
     )
     mirror.add_argument("--json", action="store_true", help="emit the result as JSON")
+    add_non_interactive(mirror)
     mirror.set_defaults(handler=handle_mirror, requires=_requires_mirror)
 
     install = subcommands.add_parser(
@@ -688,6 +745,7 @@ def build_parser() -> argparse.ArgumentParser:
         "bundle", metavar="BUNDLE", help="Bundle directory or .weaver.zip archive."
     )
     install.add_argument("--json", action="store_true", help="emit the report as JSON")
+    add_non_interactive(install)
     _add_workspace_args(install, include_catalogue=False, include_environment=False)
     install.set_defaults(handler=handle_install, requires=_requires_install)
 
@@ -729,6 +787,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Supply Weaver as a wheel built from this checkout.",
     )
+    add_non_interactive(environment_publish)
     _add_workspace_args(
         environment_publish, include_catalogue=False, include_environment=False
     )
@@ -753,6 +812,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     notebook_push.add_argument("--description")
     notebook_push.add_argument("--json", action="store_true")
+    add_non_interactive(notebook_push)
     _add_workspace_args(notebook_push, include_catalogue=False)
     notebook_push.set_defaults(handler=handle_notebook_push)
 
@@ -768,6 +828,7 @@ def build_parser() -> argparse.ArgumentParser:
     notebook_run.add_argument("--timeout", type=float, default=7200.0)
     notebook_run.add_argument("--poll-interval", type=float, default=10.0)
     notebook_run.add_argument("--json", action="store_true")
+    add_non_interactive(notebook_run)
     _add_workspace_args(notebook_run)
     notebook_run.set_defaults(handler=handle_notebook_run)
 
@@ -781,6 +842,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--subscription-id",
         help="Azure subscription ID when more than one subscription is available.",
     )
+    add_non_interactive(capacity)
     capacity.set_defaults(handler=handle_capacity)
 
     return parser
@@ -910,7 +972,7 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
             resolve_environment_owner(workspace.workspace, environment)
             workspace = replace(workspace, environment=environment)
         label = str(environment)
-    _prefer_desktop_credential()
+    _prefer_desktop_credential(args)
     from weaver.fabric import publish_environment
 
     started = time.perf_counter()
@@ -959,7 +1021,7 @@ def handle_capacity(args: argparse.Namespace) -> int:
     Fabric session touches.
     """
 
-    _prefer_desktop_credential()
+    _prefer_desktop_credential(args)
     from weaver.fabric import run_capacity_action
 
     result = run_capacity_action(
@@ -1015,11 +1077,7 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Ask for the optional names too, not only the ones a run needs.",
     )
-    parser.add_argument(
-        "--no-input",
-        action="store_true",
-        help="Never ask. A missing name is an error, which suits automation.",
-    )
+    add_non_interactive(parser)
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -1055,22 +1113,31 @@ def _add_workspace_args(
         )
 
 
-def _prefer_desktop_credential() -> None:
+def _prefer_desktop_credential(args: argparse.Namespace | None = None) -> None:
     """Choose how a desktop command signs in, and install that choice.
 
     Credential choice is the CLI's policy, not the core's. The Azure CLI where it
     can issue a token, and Microsoft browser sign-in where it cannot, so
     `pip install weaverstack` is the whole prerequisite.
 
+    ``--non-interactive`` takes the chain without browser sign-in. An
+    invocation that reaches the end of that chain fails with what each
+    credential reported.
+
     Best-effort, because with the Fabric extra absent there is nothing to sign in
     to.
     """
 
     try:
-        from weaver.fabric.auth import desktop_credential, use_credential
+        from weaver.fabric.auth import (
+            desktop_credential,
+            unattended_credential,
+            use_credential,
+        )
     except ImportError:
         return
-    use_credential(desktop_credential())
+    chain = unattended_credential if non_interactive(args) else desktop_credential
+    use_credential(chain())
 
 
 def _desktop_store(workspace):
@@ -1137,7 +1204,7 @@ def _resolve_workspace(args: argparse.Namespace):
             workspace_config=args.workspace_config,
         )
 
-    _prefer_desktop_credential()
+    _prefer_desktop_credential(args)
     return workspace
 
 
@@ -1244,31 +1311,23 @@ def handle_workflow(args: argparse.Namespace) -> int:
     return run_workflow(args)
 
 
-#: Retry controls for an interactive task failure.
-RETRY_PROMPT = "Enter to retry, Esc to exit."
-
 #: The errors a project edit clears. Each attempt re-reads the source tree,
 #: so these become a failed attempt the retry prompt offers to run again.
 #: Workspace configuration, request errors, transports and installation stay
 #: raised: another attempt reads the same argument and reaches the same host.
 SOURCE_ERRORS = (DiscoveryError, GraphError, IdentityError, MetadataError)
 
-ESC = "\x1b"
-INTERRUPT = "\x03"
-END_OF_FILE = "\x04"
-ENTER = ("\r", "\n")
 
-
-def _retry_until_fixed(attempt) -> int:
+def _retry_until_fixed(args: argparse.Namespace, attempt) -> int:
     """Run an attempt and repeat it after an interactive failure."""
 
-    if not _can_ask():
+    if not can_prompt(args):
         return attempt()
     while True:
         status = attempt()
         if not status:
             return status
-        if not _retry_wanted():
+        if not retry_wanted(args):
             return status
 
 
@@ -1278,7 +1337,7 @@ def _until_fixed(args: argparse.Namespace, attempt) -> int:
     Each retry reads fresh inputs but keeps the existing Session open.
     """
 
-    if not _can_ask():
+    if not can_prompt(args):
         return attempt()
 
     from weaver.sessions.host import use_or_create_session
@@ -1287,94 +1346,7 @@ def _until_fixed(args: argparse.Namespace, attempt) -> int:
         _session(args), workspace=_resolve_workspace(args)
     ) as session:
         args.session = session
-        return _retry_until_fixed(attempt)
-
-
-def _retry_wanted() -> bool:
-    """Read one retry decision. Enter retries; Esc leaves."""
-
-    print(f"\n{RETRY_PROMPT} ", end="", file=sys.stderr, flush=True)
-    try:
-        while True:
-            key = _read_key()
-            if key in ENTER:
-                print(file=sys.stderr)
-                return True
-            if key in (ESC, INTERRUPT, END_OF_FILE, ""):
-                # Ctrl-C and Ctrl-D decline the retry without creating another error.
-                print(file=sys.stderr)
-                return False
-    except (EOFError, KeyboardInterrupt):
-        print(file=sys.stderr)
-        return False
-
-
-def _read_key() -> str:
-    """Read one keypress without waiting for a line.
-
-    Preserve complete escape sequences so arrow keys are not treated as Esc.
-    """
-
-    try:
-        import termios
-        import tty
-    except ImportError:
-        return _read_key_windows()
-
-    descriptor = sys.stdin.fileno()
-    try:
-        saved = termios.tcgetattr(descriptor)
-    except termios.error:  # not a terminal after all
-        return sys.stdin.readline()[:1]
-
-    import os
-    import select
-
-    try:
-        tty.setcbreak(descriptor)
-        # Text buffering would hide the remaining bytes of an escape sequence.
-        key = os.read(descriptor, 1).decode(errors="replace")
-        if key == ESC:
-            while select.select([descriptor], [], [], 0.05)[0]:
-                key += os.read(descriptor, 1).decode(errors="replace")
-        return key
-    finally:
-        termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
-
-
-def _read_key_windows() -> str:
-    """One keypress on a console without POSIX terminal control.
-
-    ``msvcrt`` reads a key as it is pressed, so Esc declines a retry here as it
-    does elsewhere. Reading a line instead would wait for Enter, which is the
-    other answer.
-
-    A function or arrow key arrives as a prefix and then its code. Both are
-    returned together, so it matches neither answer and the caller asks again
-    rather than reading the code as the next keypress.
-    """
-
-    try:
-        import msvcrt
-    except ImportError:  # neither POSIX nor Windows: read a line and take one key
-        return sys.stdin.readline()[:1]
-
-    key = msvcrt.getwch()
-    if key in ("\x00", "\xe0"):
-        return key + msvcrt.getwch()
-    return key
-
-
-def _can_ask() -> bool:
-    """Whether there is somebody at a terminal to answer."""
-
-    return sys.stdin.isatty()
-
-
-def _authorised(args: argparse.Namespace) -> bool:
-    """Return whether a command has already received confirmation."""
-
-    return bool(getattr(args, "yes", False) or getattr(args, "authorised", False))
+        return _retry_until_fixed(args, attempt)
 
 
 def _refuse_retired_target(args: argparse.Namespace) -> None:
@@ -1737,66 +1709,57 @@ def _ago(at, now) -> str:
 
 
 def handle_wipe(args: argparse.Namespace) -> int:
-    """Preview, confirm, then invoke the same public wipe operation."""
+    """Plan the estate, show it, obtain authorisation, then empty that plan.
+
+    The plan shown is the plan executed: nothing is discovered again after the
+    question is answered, so what a person agreed to is what is removed.
+    """
 
     import json
 
     workspace = _resolve_workspace(args)
 
-    # A preview is needed only when the command needs confirmation.
-    previewing = args.dry_run or not _authorised(args)
-    if previewing:
-        with _running_session(args, workspace) as opened:
-            planned = weaver.wipe(
-                args.targets,
-                dry_run=True,
-                session=opened,
-                **_command_context(workspace),
-            )
-        print(f"wipe on {workspace.workspace}\n")
-        for report in planned.reports:
-            print(f"  {report.target}")
-            print(f"    {report.location}")
-            for name in report.removed:
-                print(f"      - {name}")
-            if not report.removed:
-                print("      (already empty)")
-        total = planned.count
-        print()
+    with _running_session(args, workspace) as opened:
+        plan = weaver.plan_wipe(
+            args.targets,
+            unbind=args.unbind,
+            session=opened,
+            **_command_context(workspace),
+        )
 
         if args.dry_run:
             if args.json:
-                print(json.dumps(planned.to_mapping(), indent=2))
+                print(json.dumps(plan.to_mapping(), indent=2))
             else:
-                print(f"{total} item(s) would be removed. Nothing was changed.")
+                print(plan.describe())
+                print("\nNothing was changed.")
             return 0
 
-        if total:
-            if not sys.stdin.isatty():
+        if not authorised(args):
+            print(plan.describe())
+            print()
+            emptied = len(plan.targets)
+            if not can_prompt(args):
                 print(
-                    f"Refusing to remove {total} item(s) without confirmation. "
+                    f"Refusing to empty {emptied} item(s) without confirmation. "
                     "Pass --yes, or --dry-run to preview.",
                     file=sys.stderr,
                 )
                 return 1
-            answer = input(f"Remove {total} item(s)? This cannot be undone [y/N] ")
-            if answer.strip().lower() not in {"y", "yes"}:
+            if not confirm(
+                args, f"Empty {emptied} item(s)? This cannot be undone [y/N] "
+            ):
                 print("Cancelled.")
                 return 1
 
-    with _running_session(args, workspace) as opened:
-        result = weaver.wipe(
-            args.targets,
-            session=opened,
-            **_command_context(workspace),
-        )
+        result = weaver.wipe(plan=plan, session=opened)
+
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
-    elif result.count:
-        for report in result.reports:
-            print(f"  {report.target}: removed {report.count}")
     else:
-        print("Nothing to remove.")
+        print("Wipe complete\n")
+        for item in result.items:
+            print(f"  {item.describe()}")
     return 0
 
 
@@ -1829,19 +1792,19 @@ def handle_mirror(args: argparse.Namespace) -> int:
     with _running_session(args, plan.workspace) as opened:
         resolved = weaver.check_mirror(plan, session=opened)
 
-        if not _authorised(args):
+        if not authorised(args):
             print(f"Mirror on {plan.workspace.workspace}\n\n{resolved.describe()}\n")
             emptied = ", ".join(resolved.wiped)
-            if not sys.stdin.isatty():
+            if not can_prompt(args):
                 print(
                     f"Refusing to empty {emptied} without confirmation. Pass --yes.",
                     file=sys.stderr,
                 )
                 return 1
-            answer = input(
-                "These targets will be emptied. Continue? This cannot be undone [y/N] "
-            )
-            if answer.strip().lower() not in {"y", "yes"}:
+            if not confirm(
+                args,
+                "These targets will be emptied. Continue? This cannot be undone [y/N] ",
+            ):
                 print("Cancelled.")
                 return 1
 
@@ -1919,13 +1882,13 @@ def handle_initialise(args: argparse.Namespace) -> int:
         collect_workspace,
     )
 
-    if args.interactive and args.no_input:
-        raise CommandError("--interactive asks and --no-input never does.")
-    _prefer_desktop_credential()
+    if args.interactive and non_interactive(args):
+        raise CommandError("--interactive asks and --non-interactive never does.")
+    _prefer_desktop_credential(args)
 
     # Item discovery uses the selected workspace's Session client.
-    asked = collect_workspace(args, ask=not args.no_input)
-    if args.no_input:
+    asked = collect_workspace(args)
+    if non_interactive(args):
         collect(args, ask=False)
         return _report(
             args, _initialise_once(args, session=_session(args)), asked=False
@@ -2019,7 +1982,7 @@ def handle_doctor(args: argparse.Namespace) -> int:
 
     from .doctor import render
 
-    _prefer_desktop_credential()
+    _prefer_desktop_credential(args)
     report = doctor(
         workspace=args.workspace,
         session=_session(args),
@@ -2032,7 +1995,7 @@ def handle_doctor(args: argparse.Namespace) -> int:
 
 
 def handle_check(args: argparse.Namespace) -> int:
-    return _retry_until_fixed(lambda: _check_once(args))
+    return _retry_until_fixed(args, lambda: _check_once(args))
 
 
 def _check_once(args: argparse.Namespace) -> int:

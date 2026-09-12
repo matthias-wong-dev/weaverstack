@@ -54,11 +54,12 @@ workflows:
 class _Args:
     """The parsed ``workflow`` invocation, with no workspace of its own."""
 
-    def __init__(self, name, file=None, session=None, yes=False):
+    def __init__(self, name, file=None, session=None, yes=False, non_interactive=False):
         self.name = name
         self.file = file
         self.session = session
         self.yes = yes
+        self.non_interactive = non_interactive
         self.workspace = None
         self.workspace_type = None
         self.workspace_config = None
@@ -272,8 +273,8 @@ def test_saying_no_is_not_a_failure(tmp_path, recorded, monkeypatch, capsys):
 
     calls, parser_factory, _ = recorded
     path = _write(tmp_path, DEV)
-    monkeypatch.setattr("weaver_cli.workflow._interactive", lambda stdin: True)
-    monkeypatch.setattr("weaver_cli.workflow._confirmed", lambda stdin: False)
+    monkeypatch.setattr("weaver_cli.workflow.can_prompt", lambda *_a, **_k: True)
+    monkeypatch.setattr("weaver_cli.workflow.confirm", lambda *_a, **_k: False)
 
     status = run_workflow(_Args("dev", file=str(path)), parser_factory=parser_factory)
 
@@ -369,8 +370,8 @@ def test_a_bad_entry_is_found_before_the_first_command_runs(tmp_path, recorded):
 def confirmed(monkeypatch):
     """An operator who says yes, without a terminal to type it into."""
 
-    monkeypatch.setattr("weaver_cli.workflow._interactive", lambda stdin: True)
-    monkeypatch.setattr("weaver_cli.workflow._confirmed", lambda stdin: True)
+    monkeypatch.setattr("weaver_cli.workflow.can_prompt", lambda *_a, **_k: True)
+    monkeypatch.setattr("weaver_cli.workflow.confirm", lambda *_a, **_k: True)
 
 
 @weaver_test()

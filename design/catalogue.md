@@ -308,10 +308,12 @@ build did not bind is never read, never compared against an inventory, and never
 healed — because its claims may be perfectly true about a Lakehouse this build
 cannot see, and deleting them would destroy the record of a real installation.
 
-A physical target can retain Registry rows for every item ever bound to it. Reset
-the catalogue with `weaver.wipe(...)` against a resolved catalogue rather than
-unbinding individual residue; the next build bootstraps the catalogue from the
-built-in item.
+A physical target can retain Registry rows for every item ever bound to it.
+`weaver.wipe(...)` against a resolved catalogue empties the estate the catalogue
+records and the catalogue Warehouse last, and the next build bootstraps the
+catalogue from the built-in item. `weaver.wipe(target, unbind=True)` is the
+narrower form, which keeps the catalogue and deletes its claims for one
+target.
 
 Load orchestration is where this becomes visible, because it reads the *whole*
 installed catalogue rather than one build's scope — so it is the first operation
@@ -829,7 +831,8 @@ Either side may instead be named on the command, as `--mirror` and
 `--catalogue`; see [using the CLI](cli-usage.md) for how the two are resolved
 together.
 
-The destination Warehouse is emptied by an ordinary wipe, its `_` schema is
+The destination Warehouse is emptied by an ordinary wipe, asked for one
+physical item through `catalogue_action="physical-only"`, its `_` schema is
 rebuilt by an ordinary build, and the source's rows are copied in. Running it
 again does the same work again, which is what makes a half-finished fork
 recoverable.

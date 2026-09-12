@@ -40,6 +40,18 @@ NOT_IN_A_SESSION = {
 # every available seam.
 SECONDARY_SESSION_COMMANDS = {"check", "doctor", "install"}
 
+#: The order the banner introduces the lifecycle in: a workspace is filled from
+#: another estate, built, loaded, tested, cleared, sequenced and reported on.
+SESSION_COMMAND_ORDER = (
+    "mirror",
+    "build",
+    "load",
+    "test",
+    "wipe",
+    "workflow",
+    "health",
+)
+
 EXITS = {"exit", "quit"}
 HELP = {"help", "?"}
 
@@ -309,11 +321,14 @@ def _default_workspace(args: argparse.Namespace):
 def _available(parser) -> str:
     """The commands this session accepts, from the parser rather than a list."""
 
-    return ", ".join(
-        sorted(
-            command_names(parser) - set(NOT_IN_A_SESSION) - SECONDARY_SESSION_COMMANDS
-        )
+    accepted = (
+        command_names(parser) - set(NOT_IN_A_SESSION) - SECONDARY_SESSION_COMMANDS
     )
+    ordered = [name for name in SESSION_COMMAND_ORDER if name in accepted]
+    # A command the parser accepts and the order does not name is appended, so
+    # the next lifecycle verb appears here before anybody adds it to the tuple.
+    ordered += sorted(accepted - set(SESSION_COMMAND_ORDER))
+    return ", ".join(ordered)
 
 
 def _usage(parser) -> str:
@@ -355,4 +370,4 @@ def _report_skipped(warm) -> None:
         print(f"Not started: {resource} - {reason}")
 
 
-__all__ = ["Prompt", "ScriptedInput", "run_shell"]
+__all__ = ["SESSION_COMMAND_ORDER", "Prompt", "ScriptedInput", "run_shell"]

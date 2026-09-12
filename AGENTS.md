@@ -334,11 +334,30 @@ stale_shortcut_destinations        delete-then-create shortcut replacement
 environment_packages               resolve_wheel_closure / plan_requirements
 Weaver's own dependency resolver   EnvironmentPackageConflict
 SUPPORTED_FABRIC_RUNTIMES          per-runtime wheel ABI selection
+initialise --no-input              a wipe dry run as its own preflight
+a per-command interaction check    workspace-config as the wiped estate
 ```
 
 The `provision` scope went when the suite moved to fixed items. Standing the
 estate up is `tests/fabric/provision_estate.py`, run by hand, and no test creates
 or deletes an item.
+
+Interaction is one CLI-wide policy. `--non-interactive` is the only spelling,
+`weaver_cli.interaction` is the only place a terminal, a keypress or a
+confirmation is read, and `--yes` grants authorisation and nothing else.
+
+A wipe plans before it acts. `plan_wipe` settles the estate and the catalogue
+disposition, `wipe` empties the plan it is given, and the physical mechanics in
+`physical_wipe` know nothing about authorisation or estate discovery. The estate
+an unscoped wipe empties is what `_.Installation` records.
+
+One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
+it and deletes its claims for the targets emptied and is never handed it as a
+target, `LEAVE` is the absence of one, and `PHYSICAL_ONLY` empties exactly what
+it is named and reads no catalogue. A command line reaches the first two.
+`PHYSICAL_ONLY` is internal, for an operation emptying one physical item, and
+mirror is its caller. `WipePlan.describe()` reads the target list and the claims,
+so its catalogue line says what execution does.
 
 `_.Load` and `_.Test` are checked-in `.sql` under `src/weaver/fragments/`, read by
 `read_repository_fragment` like the catalogue declaration and the standard

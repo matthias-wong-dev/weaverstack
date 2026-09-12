@@ -36,7 +36,13 @@ def test_project_folder_is_optional_for_wizard_and_explicit_for_unattended_setup
         parse("project")
     with pytest.raises(CommandError, match="--project-folder"):
         collect(
-            parse("--workspace", "Analytics", "--warehouse", "Curated", "--no-input"),
+            parse(
+                "--workspace",
+                "Analytics",
+                "--warehouse",
+                "Curated",
+                "--non-interactive",
+            ),
             ask=False,
         )
 
@@ -127,7 +133,7 @@ def test_invalid_lakehouse_answer_is_retried(capsys):
 
 
 @weaver_test()
-def test_no_input_validates_without_prompts(capsys):
+def test_non_interactive_validates_without_prompts(capsys):
     args = parse(
         "--project-folder",
         "project",
@@ -135,7 +141,7 @@ def test_no_input_validates_without_prompts(capsys):
         "Analytics",
         "--warehouse",
         "Curated",
-        "--no-input",
+        "--non-interactive",
     )
     assert collect(args, ask=False) is False
     assert not capsys.readouterr().out
@@ -167,7 +173,7 @@ def test_equivalent_command_includes_publication_and_is_parseable():
     assert (
         replay.project_folder == "my project"
         and replay.publish_environment
-        and replay.no_input
+        and replay.non_interactive
     )
 
 
@@ -194,7 +200,7 @@ def test_deferred_render_names_normal_publish_and_next_commands(capsys):
 def test_cli_passes_source_and_publication_flags_to_core(monkeypatch, tmp_path, capsys):
     cli = importlib.import_module("weaver_cli.main")
     calls = []
-    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
     monkeypatch.setattr(
         cli.weaver,
         "initialise",
@@ -211,7 +217,7 @@ def test_cli_passes_source_and_publication_flags_to_core(monkeypatch, tmp_path, 
         "--warehouse",
         "Curated",
         "--example",
-        "--no-input",
+        "--non-interactive",
         "--json",
     )
     assert cli.handle_initialise(args) == 0
@@ -243,7 +249,7 @@ def test_cancel_in_handler_never_calls_initialise(monkeypatch, capsys):
         "Curated",
         "--no-example",
     )
-    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
     monkeypatch.setattr(cli.sys, "stdin", Typed("3\n"))
     monkeypatch.setattr(
         cli,
@@ -277,7 +283,7 @@ def test_workspace_review_change_rediscovers_and_recollects_targets(
 
     cli = importlib.import_module("weaver_cli.main")
     args = parse()
-    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
     monkeypatch.setattr(
         cli.sys,
         "stdin",

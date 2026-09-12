@@ -121,7 +121,7 @@ def test_environment_publish_prints_its_result(monkeypatch, capsys):
 
     workspace = Workspace(workspace="Sales", environment="Runtime")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
-    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
     monkeypatch.setattr(cli, "_session", lambda args: _RecordingSession())
 
     import weaver.fabric as fabric
@@ -205,7 +205,7 @@ def test_a_path_reaches_the_operation_with_the_mode(monkeypatch, tmp_path, capsy
 
     workspace = Workspace(workspace="Analytics", environment="Runtime")
     monkeypatch.setattr(cli, "_resolve_workspace", lambda args: workspace)
-    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
     monkeypatch.setattr(cli, "_session", lambda args: _RecordingSession())
 
     import weaver.fabric as fabric

@@ -54,8 +54,23 @@ def _cli():
     return sys.modules["weaver_cli.main"]
 
 
+def _interaction():
+    """The module owning the CLI's interaction policy."""
+
+    import weaver_cli.interaction
+
+    return weaver_cli.interaction
+
+
 def _until_fixed(args, attempt):
     return _cli()._until_fixed(args, attempt)
+
+
+def _allow_prompting(monkeypatch, answer: bool) -> None:
+    """Set the interaction policy both the handler and the prompt read."""
+
+    monkeypatch.setattr(_cli(), "can_prompt", lambda *_a, **_k: answer)
+    monkeypatch.setattr(_interaction(), "can_prompt", lambda *_a, **_k: answer)
 
 
 ENTER = "\r"
@@ -65,7 +80,7 @@ ESC = "\x1b"
 class _Terminal:
     """Somebody at a keyboard, pressing a fixed script of keys.
 
-    Doubled at ``_read_key`` rather than at ``input``: the whole reason the
+    Doubled at ``read_key`` rather than at ``input``: the whole reason the
     prompt reads one key is that ``input()`` cannot see Esc, so a test that
     doubled ``input`` would be testing an interaction the product no longer has.
     """
@@ -73,8 +88,8 @@ class _Terminal:
     def __init__(self, monkeypatch, keys=()):
         self.keys = list(keys)
         self.presses = 0
-        monkeypatch.setattr(_cli(), "_can_ask", lambda: True)
-        monkeypatch.setattr(_cli(), "_read_key", self._read_key)
+        _allow_prompting(monkeypatch, True)
+        monkeypatch.setattr(_interaction(), "read_key", self._read_key)
 
     def _read_key(self):
         self.presses += 1
@@ -193,12 +208,12 @@ def test_an_end_of_input_declines_rather_than_looping(args, monkeypatch):
 def test_an_interrupt_at_the_prompt_declines(args, monkeypatch):
     """Ctrl-C remains an operator interrupt. It is not a failed retry."""
 
-    monkeypatch.setattr(_cli(), "_can_ask", lambda: True)
+    _allow_prompting(monkeypatch, True)
 
     def interrupted():
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(_cli(), "_read_key", interrupted)
+    monkeypatch.setattr(_interaction(), "read_key", interrupted)
 
     assert _until_fixed(args, attempts(1)) == 1
 
@@ -210,9 +225,9 @@ def test_an_interrupt_at_the_prompt_declines(args, monkeypatch):
 def test_without_a_terminal_nothing_is_ever_asked(args, monkeypatch):
     """A pipeline gets the first answer, not a prompt it cannot answer."""
 
-    monkeypatch.setattr(_cli(), "_can_ask", lambda: False)
+    _allow_prompting(monkeypatch, False)
     pressed = []
-    monkeypatch.setattr(_cli(), "_read_key", lambda: pressed.append(1) or ENTER)
+    monkeypatch.setattr(_interaction(), "read_key", lambda: pressed.append(1) or ENTER)
     attempt = attempts(1)
 
     assert _until_fixed(args, attempt) == 1
@@ -225,7 +240,7 @@ def test_a_non_interactive_run_opens_no_session_of_its_own(monkeypatch):
     """Nothing is retried, so nothing needs holding open, and resolving a
     workspace to hold it would make a failure happen in a new place."""
 
-    monkeypatch.setattr(_cli(), "_can_ask", lambda: False)
+    _allow_prompting(monkeypatch, False)
 
     def refuse(args):
         raise AssertionError("a non-interactive run resolved a workspace to retry with")
@@ -386,13 +401,13 @@ def test_every_retryable_command_offers_the_same_prompt():
 
     for command in ("_build_once", "_load_once"):
         assert f"_until_fixed(args, lambda: {command}(args))" in source
-    assert "_retry_until_fixed(lambda: _check_once(args))" in source
+    assert "_retry_until_fixed(args, lambda: _check_once(args))" in source
     assert "_until_fixed(args, lambda: _test_once(args))" not in source
 
 
 # --- the keyboard itself ------------------------------------------------------
 #
-# Everything above doubles `_read_key`, which is right for the loop's logic and
+# Everything above doubles `read_key`, which is right for the loop's logic and
 # useless for the reading. What a terminal actually delivers is only observable
 # through a terminal, and this got written wrongly twice: once returning a bare
 # Esc for an arrow key, and once reading through `sys.stdin`, whose buffering
@@ -424,16 +439,16 @@ def test_one_keypress_is_read_as_itself(sent, expected):
     probe = (
         "import sys, termios, tty;"
         f"sys.path.insert(0, {str(_SRC)!r});"
-        "from weaver_cli.main import _read_key, ESC;"
+        "from weaver_cli.interaction import read_key as _read_key, ESC;"
         # The key may only be sent once the terminal is out of canonical mode.
         # The child announces that itself, after importing and entering cbreak,
         # so the pace of the child's startup decides the timing and no sleep in
         # the parent can race it.
         #
-        # _read_key installs its cbreak mode through tty.setcbreak, whose
+        # read_key installs its cbreak mode through tty.setcbreak, whose
         # default TCSAFLUSH discards a key already queued on the pty. Pinned to
         # TCSANOW here, so a key the parent sends between the handshake and
-        # _read_key is read, so the test proves key interpretation; the
+        # read_key is read, so the test proves key interpretation; the
         # flush behaviour of the mode change is outside it.
         "_setcbreak = tty.setcbreak;"
         "tty.setcbreak = lambda fd, when=None: _setcbreak(fd, termios.TCSANOW);"

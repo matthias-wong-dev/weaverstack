@@ -437,6 +437,62 @@ def test_item_type_is_exact(tmp_path):
         parse_item_repository(Location(str(root)))
 
 
+# --- pointed at the wrong folder ----------------------------------------------
+#
+# Weaver-shaped files beside no item tree used to be reported as a directory
+# whose first path segment was wrong, which named the bystander and left the
+# folder the build was pointed at unmentioned.
+
+
+@weaver_test()
+def test_a_folder_with_no_item_tree_is_not_a_project(tmp_path):
+    _write(tmp_path, "export/Inventory/schemas/Sales.yml", _schema("Sales"))
+
+    with pytest.raises(DiscoveryError, match="not a Weaver project"):
+        parse_item_repository(Location(str(tmp_path)))
+
+
+@weaver_test()
+def test_the_guidance_names_the_item_shape_and_not_the_bystander(tmp_path):
+    _write(tmp_path, "FabricExport/Thing/schemas/Sales.yml", _schema("Sales"))
+
+    with pytest.raises(DiscoveryError) as raised:
+        parse_item_repository(Location(str(tmp_path)))
+
+    message = str(raised.value)
+    assert "Lakehouse/<Name>/" in message and "Warehouse/<Name>/" in message
+    assert "weaver initialise" in message
+    assert "FabricExport" not in message
+
+
+@weaver_test()
+def test_unrelated_directories_alone_report_the_same_thing(tmp_path):
+    _write(tmp_path, "docs/notes/shortcuts.yml", "logical:\n  a: b\n")
+
+    with pytest.raises(DiscoveryError, match="not a Weaver project"):
+        parse_item_repository(Location(str(tmp_path)))
+
+
+@weaver_test()
+def test_a_project_holding_one_item_keeps_the_specific_error(tmp_path):
+    """A genuine item tree stands, so the bystander is what is wrong."""
+
+    root = _estate(tmp_path)
+    _write(root, "FabricExport/Thing/schemas/Sales.yml", _schema("Sales"))
+
+    with pytest.raises(DiscoveryError, match="first directory must be exactly"):
+        parse_item_repository(Location(str(root)))
+
+
+@weaver_test()
+def test_a_warehouse_item_is_enough_to_make_a_project(tmp_path):
+    _write(tmp_path, "Warehouse/Reporting/schemas/Sales.yml", _schema("Sales"))
+    _write(tmp_path, "FabricExport/Thing/schemas/Sales.yml", _schema("Sales"))
+
+    with pytest.raises(DiscoveryError, match="first directory must be exactly"):
+        parse_item_repository(Location(str(tmp_path)))
+
+
 @weaver_test()
 def test_weaver_catalogue_is_a_generated_builtin_item(tmp_path):
     repository = parse_item_repository(Location(str(_estate(tmp_path))))
