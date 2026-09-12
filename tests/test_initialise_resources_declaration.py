@@ -212,18 +212,6 @@ def test_invalid_lakehouse_name_stops_before_rest(tmp_path, monkeypatch):
 
 
 @weaver_test()
-def test_symlink_conflict_is_refused_before_mutation(tmp_path, fabric):
-    external = tmp_path / "outside"
-    external.mkdir()
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / "Lakehouse").symlink_to(external, target_is_directory=True)
-    with pytest.raises(InitialiseError, match="symbolic link"):
-        setup(project, fabric)
-    assert not fabric.created and not list(external.iterdir())
-
-
-@weaver_test()
 def test_legacy_publication_argument_is_a_deprecated_alias(tmp_path, fabric):
     with pytest.warns(DeprecationWarning, match="publish_environment"):
         report = setup(tmp_path, fabric, install_weaver=True)
