@@ -351,6 +351,14 @@ disposition, `wipe` empties the plan it is given, and the physical mechanics in
 `physical_wipe` know nothing about authorisation or estate discovery. The estate
 an unscoped wipe empties is what `_.Installation` records.
 
+One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
+it and deletes its claims for the targets emptied and is never handed it as a
+target, `LEAVE` is the absence of one, and `PHYSICAL_ONLY` empties exactly what
+it is named and reads no catalogue. A command line reaches the first two.
+`PHYSICAL_ONLY` is internal, for an operation emptying one physical item, and
+mirror is its caller. `WipePlan.describe()` reads the target list and the claims,
+so its catalogue line says what execution does.
+
 `_.Load` and `_.Test` are checked-in `.sql` under `src/weaver/fragments/`, read by
 `read_repository_fragment` like the catalogue declaration and the standard
 per-item schema and folder documents. Static Weaver-owned repository content is a

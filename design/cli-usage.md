@@ -961,7 +961,9 @@ catalogue to read the estate from; it is not an instruction to keep it.
 **`--unbind` keeps the catalogue and cleans its claims.** It empties the named
 targets and deletes the catalogue rows for them, which is what decommissioning
 one target out of an estate that carries on means. It needs a catalogue and at
-least one named target, and the catalogue is not one of them.
+least one named target, and the catalogue is not one of them: emptying a
+catalogue and preserving it are two different plans, so a command asking for
+both is refused.
 
 The preflight answers one question: is this the estate I mean to destroy.
 

@@ -832,8 +832,8 @@ Either side may instead be named on the command, as `--mirror` and
 together.
 
 The destination Warehouse is emptied by an ordinary wipe, asked for one
-physical item through `catalogue_action="unbind"`, its `_` schema is rebuilt by
-an ordinary build, and the source's rows are copied in. Running it
+physical item through `catalogue_action="physical-only"`, its `_` schema is
+rebuilt by an ordinary build, and the source's rows are copied in. Running it
 again does the same work again, which is what makes a half-finished fork
 recoverable.
 

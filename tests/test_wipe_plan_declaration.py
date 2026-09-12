@@ -20,6 +20,7 @@ from weaver.errors import CommandError
 from weaver.locations import Location
 from weaver.operations.wipe import (
     LEAVE,
+    PHYSICAL_ONLY,
     REMOVE,
     UNBIND,
     WipeReport,
@@ -33,6 +34,16 @@ def _session() -> TestSession:
     """A recording Session with a store, which a Lakehouse wipe asks for."""
 
     return TestSession(store=object())
+
+
+def _cli_module():
+    """The CLI command module, not the callable the package re-exports."""
+
+    import sys
+
+    import weaver_cli.main  # noqa: F401 - imported for sys.modules
+
+    return sys.modules["weaver_cli.main"]
 
 
 def _operations():
@@ -171,25 +182,120 @@ def test_unbind_with_no_target_selection_is_refused():
         _plan(unbind=True)
 
 
-# --- what an internal caller asks for -----------------------------------------
+# --- the unbind invariants, however unbind was selected -----------------------
+#
+# `unbind=True` is what a command line says and `catalogue_action=UNBIND` what a
+# caller names outright. Both mean one thing, so both are held to it.
+
+#: The two ways one invocation asks for UNBIND.
+UNBIND_ROUTES = ({"unbind": True}, {"catalogue_action": UNBIND})
+
+
+@pytest.mark.parametrize("route", UNBIND_ROUTES, ids=("flag", "named"))
+@weaver_test()
+def test_unbind_never_includes_the_resolved_catalogue_as_a_target(route):
+    """Emptying a catalogue and preserving it are two different plans."""
+
+    with pytest.raises(CommandError, match="also names it as a target"):
+        _plan("Warehouse/Weaver", **route)
+
+
+@pytest.mark.parametrize("route", UNBIND_ROUTES, ids=("flag", "named"))
+@weaver_test()
+def test_unbind_needs_a_resolved_catalogue(route):
+    with pytest.raises(CommandError, match="resolved none"):
+        _plan("Lakehouse/Landing", catalogue=None, **route)
+
+
+@pytest.mark.parametrize("route", UNBIND_ROUTES, ids=("flag", "named"))
+@weaver_test()
+def test_unbind_needs_named_targets(route):
+    with pytest.raises(CommandError, match="needs them named"):
+        _plan(**route)
+
+
+@pytest.mark.parametrize("route", UNBIND_ROUTES, ids=("flag", "named"))
+@weaver_test()
+def test_unbind_names_the_claims_it_will_delete(route):
+    plan = _plan("Lakehouse/Landing", **route)
+
+    assert plan.catalogue_action == UNBIND
+    assert _names(plan) == ["Lakehouse/Landing"]
+    assert plan.unbound == ("Lakehouse/Landing",)
+
+
+# --- physical-only, which no command line reaches -----------------------------
 
 
 @weaver_test()
-def test_a_named_disposition_empties_one_item_and_no_estate():
-    """Mirror empties one Warehouse. A catalogue is not an estate index there."""
+def test_physical_only_empties_exactly_the_named_targets():
+    """One physical item. A catalogue is not an estate index here."""
 
-    plan = _plan("Warehouse/Sales_Dev", catalogue_action=UNBIND)
+    plan = _plan("Warehouse/Sales_Dev", catalogue_action=PHYSICAL_ONLY)
 
     assert _names(plan) == ["Warehouse/Sales_Dev"]
-    assert plan.unbound == ("Warehouse/Sales_Dev",)
 
 
 @weaver_test()
-def test_emptying_the_catalogue_itself_unbinds_nothing_from_it():
-    plan = _plan("Warehouse/Weaver", catalogue_action=UNBIND)
+def test_physical_only_adds_no_catalogue_and_removes_none():
+    """A resolved catalogue is neither appended nor taken away."""
+
+    plan = _plan("Warehouse/Sales_Dev", catalogue_action=PHYSICAL_ONLY)
+
+    assert plan.catalogue == "Warehouse/Weaver"
+    assert plan.empties_the_catalogue is False
+    assert "Warehouse/Weaver" not in _names(plan)
+
+
+@weaver_test()
+def test_physical_only_unbinds_no_claim():
+    plan = _plan("Warehouse/Sales_Dev", catalogue_action=PHYSICAL_ONLY)
+
+    assert plan.unbound == ()
+
+
+@weaver_test()
+def test_physical_only_empties_a_catalogue_it_is_handed_as_an_ordinary_item():
+    """The destination catalogue of a fork: one Warehouse, and no claims read."""
+
+    plan = _plan("Warehouse/Weaver", catalogue_action=PHYSICAL_ONLY)
 
     assert _names(plan) == ["Warehouse/Weaver"]
     assert plan.unbound == ()
+
+
+@weaver_test()
+def test_physical_only_expands_nothing(monkeypatch):
+    """It reads no catalogue, so it has no estate to discover."""
+
+    monkeypatch.setattr(
+        _operations(),
+        "_installed_estate",
+        lambda *_a, **_k: pytest.fail("a physical-only wipe discovered an estate"),
+    )
+
+    with pytest.raises(CommandError, match="physical-only"):
+        _plan(catalogue_action=PHYSICAL_ONLY)
+
+
+@weaver_test()
+def test_no_command_line_can_ask_for_physical_only():
+    """Internal. The CLI passes a selection and `--unbind`, and nothing else."""
+
+    import inspect
+
+    from weaver_cli.main import build_parser
+
+    source = inspect.getsource(_cli_module())
+    assert "catalogue_action" not in source
+    assert "PHYSICAL_ONLY" not in source
+
+    wipe = build_parser()._subparsers._group_actions[0].choices["wipe"]
+    assert "--catalogue-action" not in wipe.format_help()
+    assert "physical-only" not in wipe.format_help()
+
+
+# --- naming a disposition -----------------------------------------------------
 
 
 @weaver_test()
@@ -215,7 +321,8 @@ def test_mirror_asks_for_the_physical_only_disposition():
 
     source = inspect.getsource(sys.modules["weaver.operations.mirror"])
 
-    assert source.count("catalogue_action=UNBIND") == 2
+    assert source.count("catalogue_action=PHYSICAL_ONLY") == 2
+    assert "catalogue_action=UNBIND" not in source
     assert "plan_wipe" not in source
 
 
@@ -514,3 +621,94 @@ def test_the_preflight_says_where_claims_are_unbound():
     assert (
         "Warehouse/Weaver preserved; claims for Lakehouse/Landing unbound" in described
     )
+
+
+# --- the description is what execution does -----------------------------------
+#
+# A plan is shown, authorised, then executed. The description is the question a
+# person answers, and execution is the answer, so the two say the same thing.
+
+#: One plan per disposition, spanning what a command line and an internal caller
+#: can settle on.
+EVERY_DISPOSITION = (
+    ("remove-named", {"targets": ("Lakehouse/Landing",), "rest": {}}),
+    ("remove-estate-shaped", {"targets": ("Warehouse/Weaver",), "rest": {}}),
+    ("unbind", {"targets": ("Lakehouse/Landing",), "rest": {"unbind": True}}),
+    (
+        "physical-only",
+        {
+            "targets": ("Warehouse/Sales_Dev",),
+            "rest": {"catalogue_action": PHYSICAL_ONLY},
+        },
+    ),
+    (
+        "physical-only-on-the-catalogue",
+        {
+            "targets": ("Warehouse/Weaver",),
+            "rest": {"catalogue_action": PHYSICAL_ONLY},
+        },
+    ),
+    (
+        "leave",
+        {"targets": ("Lakehouse/Landing",), "rest": {"catalogue": None}},
+    ),
+)
+
+
+def _for(case) -> object:
+    return _plan(*case["targets"], **case["rest"])
+
+
+@pytest.mark.parametrize(
+    "case",
+    [each for _name, each in EVERY_DISPOSITION],
+    ids=[n for n, _ in EVERY_DISPOSITION],
+)
+@weaver_test()
+def test_the_description_never_calls_an_emptied_catalogue_preserved(case):
+    plan = _for(case)
+    described = plan.describe()
+
+    if plan.empties_the_catalogue:
+        assert "preserved" not in described
+    if plan.catalogue is not None and not plan.empties_the_catalogue:
+        assert "emptied last" not in described
+
+
+@pytest.mark.parametrize(
+    "case",
+    [each for _name, each in EVERY_DISPOSITION],
+    ids=[n for n, _ in EVERY_DISPOSITION],
+)
+@weaver_test()
+def test_the_description_claims_a_claim_only_where_one_is_deleted(case):
+    plan = _for(case)
+
+    assert ("unbound" in plan.describe()) is bool(plan.unbound)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [each for _name, each in EVERY_DISPOSITION],
+    ids=[n for n, _ in EVERY_DISPOSITION],
+)
+@weaver_test()
+def test_the_items_executed_are_the_items_described(case, monkeypatch):
+    """Every target the description lists is emptied, and nothing else is."""
+
+    _operations_module, reached = _emptied(monkeypatch)
+    monkeypatch.setattr(
+        _operations(), "_unbind_physical_targets", lambda *_a, **_k: {"targets": []}
+    )
+    plan = _for(case)
+
+    result = public_wipe(plan=plan, session=_session())
+
+    described = plan.describe()
+    emptied = [item.target for item in result.items if item.outcome == "emptied"]
+    assert reached == emptied == _names(plan)
+    for target in emptied:
+        assert target in described
+    # A catalogue the description calls preserved is not among them.
+    if plan.catalogue is not None and "preserved" in described:
+        assert plan.catalogue not in emptied

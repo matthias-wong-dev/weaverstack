@@ -7,8 +7,18 @@ resolved, and that lives in :mod:`weaver.operations.workspace`.
 Two decisions, made separately. Target selection names the physical items to
 empty: the ones given, or the estate the catalogue's ``_.Installation`` rows
 describe. Catalogue disposition says what happens to the catalogue itself.
-:data:`REMOVE` empties it last, :data:`UNBIND` keeps it and deletes its claims
-for the emptied targets, :data:`LEAVE` touches it not at all.
+
+.. code-block:: text
+
+    REMOVE          the named targets, and the catalogue last
+    UNBIND          the named targets; the catalogue kept, its claims for them
+                    deleted, and never itself a target
+    LEAVE           no catalogue resolved
+    PHYSICAL_ONLY   exactly the named targets, and no catalogue behaviour
+
+``REMOVE`` and ``UNBIND`` are what a command line asks for. ``PHYSICAL_ONLY`` is
+internal: an operation emptying one physical item asks for it, so a catalogue it
+is about to fill is one Warehouse and not an index of an estate to empty.
 
 :func:`plan_wipe` settles both and returns a frozen :class:`WipePlan`, and
 :func:`wipe` executes one. The plan a caller shows is the plan it runs.
@@ -32,14 +42,19 @@ from ..targets import (
 from ..workspaces import Workspace
 from .workspace import operation_workspace
 
-#: Empty the resolved catalogue as well, last of all.
+#: Empty the named targets and the resolved catalogue, that last of all.
 REMOVE = "remove"
-#: Keep the resolved catalogue, and delete its claims for the emptied targets.
+#: Empty the named targets, keep the resolved catalogue, and delete its claims
+#: for them. The catalogue is never one of the targets.
 UNBIND = "unbind"
-#: Leave the catalogue alone.
+#: No catalogue resolved, so there is nothing to do with one.
 LEAVE = "leave"
+#: Empty exactly the named targets and read no catalogue. Internal: an operation
+#: that empties one physical item asks for this, and no command line reaches it.
+#: Nothing is discovered, no claim is deleted and no catalogue is added.
+PHYSICAL_ONLY = "physical-only"
 
-CATALOGUE_ACTIONS = (REMOVE, UNBIND, LEAVE)
+CATALOGUE_ACTIONS = (REMOVE, UNBIND, LEAVE, PHYSICAL_ONLY)
 
 #: The two physical item types, as the catalogue and the target grammar spell
 #: them.
@@ -98,6 +113,12 @@ class WipePlan:
             and str(target).casefold() == self.catalogue.casefold()
         )
 
+    @property
+    def empties_the_catalogue(self) -> bool:
+        """Whether the resolved catalogue is one of the items being emptied."""
+
+        return any(self.is_catalogue(target) for target in self.targets)
+
     def describe(self) -> str:
         """The estate this wipe is pointed at, as the question a person answers.
 
@@ -114,18 +135,29 @@ class WipePlan:
             lines.append(f"  {str(target).ljust(width)}{note}".rstrip())
         lines.append("")
         lines.append("Catalogue")
-        if self.catalogue is None:
-            lines.append("  none resolved")
-            return "\n".join(lines)
-        held = self.catalogue.ljust(width)
-        if self.catalogue_action == REMOVE:
-            lines.append(f"  {held}  emptied last")
-        elif self.catalogue_action == UNBIND:
-            claims = ", ".join(self.unbound)
-            lines.append(f"  {held}  preserved; claims for {claims} unbound")
-        else:
-            lines.append(f"  {held}  untouched")
+        lines.append(f"  {self._catalogue_line(width)}")
         return "\n".join(lines)
+
+    def _catalogue_line(self, width: int) -> str:
+        """What execution does to the catalogue, read off this plan.
+
+        Read off the target list and the claims, so the line says what
+        execution does with the catalogue and not what a disposition is called.
+        """
+
+        if self.catalogue is None:
+            return "none resolved"
+        held = self.catalogue.ljust(width)
+        if self.empties_the_catalogue:
+            if self.catalogue_action == REMOVE:
+                return f"{held}  emptied last"
+            # Named as an ordinary physical item. Nothing read it as an index
+            # and no claim is deleted from it.
+            return f"{held}  emptied as a named target; no claims removed"
+        if self.unbound:
+            claims = ", ".join(self.unbound)
+            return f"{held}  preserved; claims for {claims} unbound"
+        return f"{held}  preserved; no claims removed"
 
     def to_mapping(self) -> dict:
         return {
@@ -305,21 +337,50 @@ def plan_wipe(
 def _catalogue_action(
     named: str | None, *, unbind: bool, catalogue: str | None, selected
 ) -> str:
-    """What this invocation does with the catalogue it resolved."""
+    """What this invocation does with the catalogue it resolved.
 
-    if named is not None:
-        if named not in CATALOGUE_ACTIONS:
-            raise CommandError(
-                "catalogue_action is one of "
-                f"{', '.join(CATALOGUE_ACTIONS)}, got {named!r}"
-            )
-        if unbind and named != UNBIND:
-            raise CommandError(
-                f"unbind asks for {UNBIND!r} and catalogue_action says {named!r}"
-            )
-        return named
-    if not unbind:
-        return REMOVE if catalogue else LEAVE
+    The invariants hold however an action was arrived at, so an internal caller
+    naming one outright is held to what that word means.
+    """
+
+    action = _requested_action(named, unbind=unbind, catalogue=catalogue)
+    if action == UNBIND:
+        _refuse_unusable_unbind(catalogue=catalogue, selected=selected)
+    if action == PHYSICAL_ONLY and not selected:
+        raise CommandError(
+            "a physical-only wipe empties the targets it names and reads no "
+            "catalogue, so it needs them named"
+        )
+    return action
+
+
+def _requested_action(named: str | None, *, unbind: bool, catalogue: str | None) -> str:
+    """The disposition this call asked for, before its invariants are applied."""
+
+    if named is None:
+        if not unbind:
+            return REMOVE if catalogue else LEAVE
+        return UNBIND
+    if named not in CATALOGUE_ACTIONS:
+        raise CommandError(
+            f"catalogue_action is one of {', '.join(CATALOGUE_ACTIONS)}, got {named!r}"
+        )
+    if unbind and named != UNBIND:
+        raise CommandError(
+            f"unbind asks for {UNBIND!r} and catalogue_action says {named!r}"
+        )
+    return named
+
+
+def _refuse_unusable_unbind(*, catalogue: str | None, selected) -> None:
+    """Unbinding keeps one catalogue and cleans its claims for named targets.
+
+    A catalogue is needed to hold the claims, targets are needed to say which
+    claims, and the catalogue is not one of them: emptying it and preserving it
+    are two different plans. An internal caller emptying one physical item asks
+    for :data:`PHYSICAL_ONLY`.
+    """
+
     if catalogue is None:
         raise CommandError(
             "--unbind keeps a catalogue and removes its claims, and this "
@@ -337,7 +398,6 @@ def _catalogue_action(
             f"--unbind keeps {catalogue}, and this command also names it as a "
             "target to empty"
         )
-    return UNBIND
 
 
 def _execution_order(
