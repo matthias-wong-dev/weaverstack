@@ -97,9 +97,11 @@ def run_workflow(args: argparse.Namespace, *, parser_factory=None, stdin=None) -
     # about the invocation, and it is reported here.
     parsed_commands = [_parse(parser, entry) for entry in entries]
     # The outer interaction policy is the whole invocation's, so it reaches
-    # every nested command before one of them opens a sign-in or a prompt.
+    # every nested command before one of them opens a sign-in or a prompt. It
+    # only ever tightens: an entry that asked for the policy keeps it inside an
+    # interactive workflow.
     for parsed in parsed_commands:
-        parsed.non_interactive = non_interactive(args)
+        parsed.non_interactive = non_interactive(args) or non_interactive(parsed)
     workspace = _workflow_workspace(args, parsed_commands)
 
     _show(args.name, path, entries)

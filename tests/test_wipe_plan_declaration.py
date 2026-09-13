@@ -224,6 +224,56 @@ def test_unbind_names_the_claims_it_will_delete(route):
     assert plan.unbound == ("Lakehouse/Landing",)
 
 
+# --- leave is the absence of a catalogue --------------------------------------
+
+
+@weaver_test()
+def test_leave_over_a_resolved_catalogue_is_refused():
+    """Naming it over one that resolved described an estate nobody asked for.
+
+    With no targets it would read that catalogue to discover the estate, empty
+    every physical target in it, and leave the catalogue certifying objects
+    that are gone.
+    """
+
+    with pytest.raises(CommandError, match="no catalogue resolved"):
+        _plan(catalogue_action=LEAVE)
+
+
+@weaver_test()
+def test_leave_over_a_resolved_catalogue_is_refused_with_targets_too():
+    with pytest.raises(CommandError, match="no catalogue resolved"):
+        _plan("Lakehouse/Landing", catalogue_action=LEAVE)
+
+
+@weaver_test()
+def test_the_refusal_names_the_disposition_that_does_mean_this():
+    with pytest.raises(CommandError, match="physical-only"):
+        _plan("Lakehouse/Landing", catalogue_action=LEAVE)
+
+
+@weaver_test()
+def test_leave_discovers_no_estate_before_it_is_refused(monkeypatch):
+    """Refused while every target is intact, so nothing is read to decide it."""
+
+    monkeypatch.setattr(
+        _operations(),
+        "_installed_estate",
+        lambda *_a, **_k: pytest.fail("a refused plan read the catalogue"),
+    )
+
+    with pytest.raises(CommandError, match="no catalogue resolved"):
+        _plan(catalogue_action=LEAVE)
+
+
+@weaver_test()
+def test_leave_is_what_no_resolved_catalogue_produces():
+    plan = _plan("Lakehouse/Landing", catalogue=None, catalogue_action=LEAVE)
+
+    assert plan.catalogue_action == LEAVE
+    assert plan.catalogue is None
+
+
 # --- physical-only, which no command line reaches -----------------------------
 
 
@@ -439,10 +489,44 @@ def test_a_wipe_empties_the_plan_it_was_given(monkeypatch):
     assert result.plan is plan
 
 
+# --- a settled plan answers the planning arguments ----------------------------
+#
+# A wipe is destructive, so an argument that looks like it changes the supplied
+# plan is refused instead of ignored.
+
+#: Every planning argument, beside a plan that already answers it.
+PLANNING_BESIDE_A_PLAN = (
+    {"targets": "Lakehouse/Landing"},
+    {"workspace": "Elsewhere"},
+    {"catalogue": "Warehouse/Other"},
+    {"environment": "Runtime"},
+    {"workspace_config": "dev.yml"},
+    {"unbind": True},
+    {"catalogue_action": UNBIND},
+)
+
+
+@pytest.mark.parametrize("given", PLANNING_BESIDE_A_PLAN, ids=lambda g: next(iter(g)))
 @weaver_test()
-def test_a_plan_and_a_selection_together_are_refused():
-    with pytest.raises(CommandError, match="a plan or a target selection"):
-        public_wipe("Lakehouse/Landing", plan=_plan("Warehouse/Curated"))
+def test_a_planning_argument_beside_a_plan_is_refused(given):
+    plan = _plan("Warehouse/Curated")
+    targets = given.pop("targets", ())
+
+    with pytest.raises(CommandError, match="a settled plan or the arguments"):
+        public_wipe(targets, plan=plan, session=_session(), **given)
+
+
+@weaver_test()
+def test_execution_arguments_travel_with_a_plan(monkeypatch):
+    """`session` and `dry_run` say how this runs, and a plan answers neither."""
+
+    _emptied(monkeypatch)
+
+    result = public_wipe(
+        plan=_plan("Warehouse/Curated"), session=_session(), dry_run=True
+    )
+
+    assert result.dry_run is True
 
 
 @weaver_test()
@@ -512,18 +596,25 @@ def test_one_coherent_line_per_physical_item(monkeypatch):
         "Lakehouse/Landing",
         "Warehouse/Weaver",
     ]
-    assert result.items[0].counts == {"tables": 2, "shortcuts": 1}
-    assert "2 tables" in result.items[0].describe()
+    assert result.items[0].counts == {"entries": 2, "shortcuts": 1}
+    assert "2 entries" in result.items[0].describe()
     assert "1 shortcuts" in result.items[0].describe()
 
 
 @weaver_test()
-def test_a_files_area_counts_folders(monkeypatch):
+def test_a_file_is_not_counted_as_a_folder(monkeypatch):
+    """The reports carry names and not kinds, so `entries` is what can be said.
+
+    `notes.txt` is a file. Counting it among folders was a count nobody could
+    read correctly.
+    """
+
     _emptied(monkeypatch, removed=("notes.txt", "Sales"), area="folder")
 
     result = public_wipe(plan=_plan("Lakehouse/Landing"), session=_session())
 
-    assert result.items[0].counts == {"folders": 2}
+    assert result.items[0].counts == {"entries": 2}
+    assert "folder" not in result.items[0].describe()
 
 
 @weaver_test()

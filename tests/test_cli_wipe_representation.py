@@ -281,14 +281,48 @@ def test_one_result_line_per_physical_item(monkeypatch, capsys):
 
     assert main(["wipe", "--yes"]) == 0
 
+    printed = capsys.readouterr().out
     lines = [
-        line.strip() for line in capsys.readouterr().out.splitlines() if line.strip()
+        line.strip() for line in printed.partition("Wipe complete")[2].splitlines()
     ]
-    assert lines[0] == "Wipe complete"
-    assert len(lines) == 3
-    assert lines[1].startswith("Lakehouse/Landing")
-    assert lines[2].startswith("Warehouse/Weaver")
-    assert "catalogue emptied" in lines[2]
+    lines = [line for line in lines if line]
+    assert len(lines) == 2
+    assert lines[0].startswith("Lakehouse/Landing")
+    assert lines[1].startswith("Warehouse/Weaver")
+    assert "catalogue emptied" in lines[1]
+
+
+@weaver_test()
+def test_an_authorised_wipe_still_shows_what_it_is_emptying(monkeypatch, capsys):
+    """`--yes` authorises the removal. It does not hide the estate."""
+
+    cli, _planned, executed = _wired(
+        monkeypatch, _plan("Lakehouse/Landing", "Warehouse/Weaver")
+    )
+    monkeypatch.setattr(
+        cli, "confirm", lambda *_a, **_k: pytest.fail("the question was asked")
+    )
+
+    assert main(["wipe", "--yes"]) == 0
+
+    printed = capsys.readouterr().out
+    assert "Wipe on Analytics" in printed
+    assert "Lakehouse/Landing" in printed.partition("Wipe complete")[0]
+    assert len(executed) == 1
+
+
+@weaver_test()
+def test_a_json_wipe_prints_one_document(monkeypatch, capsys):
+    """The human preflight stays off stdout, and the plan travels in the result."""
+
+    _wired(monkeypatch, _plan("Lakehouse/Landing", "Warehouse/Weaver"))
+
+    assert main(["wipe", "--yes", "--json"]) == 0
+
+    printed = capsys.readouterr().out
+    assert "Wipe on Analytics" not in printed
+    payload = json.loads(printed)
+    assert payload["plan"]["targets"][0]["target"] == "Lakehouse/Landing"
 
 
 @weaver_test()

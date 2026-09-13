@@ -415,3 +415,76 @@ def test_a_non_interactive_setup_asks_nothing_and_reads_no_stream():
 
     with pytest.raises(CommandError, match="--project-folder"):
         collect(args, stdin=_Refuses())
+
+
+# --- the policy only ever tightens --------------------------------------------
+
+
+def _workflow_args(path, **rest):
+    """A parsed ``workflow`` invocation with nothing of its own to resolve."""
+
+    return argparse.Namespace(
+        name="full",
+        file=str(path),
+        yes=True,
+        session=None,
+        timings=False,
+        workspace=None,
+        workspace_config=None,
+        catalogue=None,
+        environment=None,
+        **rest,
+    )
+
+
+def _recording_parser(seen, entries=("build",)):
+    parser = build_parser()
+    for command in entries:
+        parser._subparsers._group_actions[0].choices[command].set_defaults(
+            handler=lambda parsed: seen.append(parsed) or 0, requires=None
+        )
+    return parser
+
+
+@weaver_test()
+def test_an_interactive_workflow_keeps_a_child_that_asked_for_the_policy(
+    tmp_path, capsys
+):
+    """Policy becomes stricter as it propagates, never looser."""
+
+    from weaver_cli.workflow import run_workflow
+
+    path = tmp_path / "workflow.yml"
+    path.write_text(
+        "workflows:\n  full:\n    - build . --non-interactive\n    - load\n",
+        encoding="utf-8",
+    )
+    seen: list = []
+
+    status = run_workflow(
+        _workflow_args(path, non_interactive=False),
+        parser_factory=lambda: _recording_parser(seen, ("build", "load")),
+    )
+
+    assert status == 0
+    # The entry that asked for it keeps it; the one that did not stays as it was.
+    assert [parsed.non_interactive for parsed in seen] == [True, False]
+    capsys.readouterr()
+
+
+@weaver_test()
+def test_an_outer_policy_reaches_a_child_that_did_not_ask(tmp_path, capsys):
+    from weaver_cli.workflow import run_workflow
+
+    path = tmp_path / "workflow.yml"
+    path.write_text("workflows:\n  full:\n    - build .\n", encoding="utf-8")
+    seen: list = []
+
+    status = run_workflow(
+        _workflow_args(path, non_interactive=True),
+        parser_factory=lambda: _recording_parser(seen),
+    )
+
+    assert status == 0
+    assert [parsed.non_interactive for parsed in seen] == [True]
+    capsys.readouterr()

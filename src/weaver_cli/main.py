@@ -1713,6 +1713,11 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
     The plan shown is the plan executed: nothing is discovered again after the
     question is answered, so what a person agreed to is what is removed.
+
+    The estate is shown whether or not the command was authorised. ``--yes``
+    grants permission for the removal, and what is being removed is still worth
+    reading. ``--json`` prints one document, so the plan reaches it inside the
+    result rather than as a second thing on stdout.
     """
 
     import json
@@ -1735,9 +1740,11 @@ def handle_wipe(args: argparse.Namespace) -> int:
                 print("\nNothing was changed.")
             return 0
 
-        if not authorised(args):
+        if not args.json:
             print(plan.describe())
             print()
+
+        if not authorised(args):
             emptied = len(plan.targets)
             if not can_prompt(args):
                 print(

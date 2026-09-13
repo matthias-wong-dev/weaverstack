@@ -353,11 +353,17 @@ an unscoped wipe empties is what `_.Installation` records.
 
 One disposition, one meaning. `REMOVE` takes the catalogue last, `UNBIND` keeps
 it and deletes its claims for the targets emptied and is never handed it as a
-target, `LEAVE` is the absence of one, and `PHYSICAL_ONLY` empties exactly what
-it is named and reads no catalogue. A command line reaches the first two.
-`PHYSICAL_ONLY` is internal, for an operation emptying one physical item, and
-mirror is its caller. `WipePlan.describe()` reads the target list and the claims,
-so its catalogue line says what execution does.
+target, `LEAVE` is the absence of one and is refused over a catalogue that
+resolved, and `PHYSICAL_ONLY` empties exactly what it is named and reads no
+catalogue. A command line reaches the first two. `PHYSICAL_ONLY` is internal,
+for an operation emptying one physical item, and mirror is its caller.
+`WipePlan.describe()` reads the target list and the claims, so its catalogue
+line says what execution does.
+
+`wipe` takes a settled plan or the arguments to build one. A planning argument
+beside `plan=` is refused, because a wipe is destructive and an argument that
+reads as changing the plan would change nothing. `session` and `dry_run` say how
+an execution runs and travel with either.
 
 `_.Load` and `_.Test` are checked-in `.sql` under `src/weaver/fragments/`, read by
 `read_repository_fragment` like the catalogue declaration and the standard

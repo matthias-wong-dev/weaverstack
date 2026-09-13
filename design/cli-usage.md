@@ -1001,12 +1001,19 @@ The result is one line per physical Fabric item:
 ```text
 Wipe complete
 
-  Lakehouse/Landing_Dev       emptied, 12 tables, 2 shortcuts
+  Lakehouse/Landing_Dev       emptied, 12 entries, 2 shortcuts
   Warehouse/Curated_Dev       emptied
   Warehouse/DevCatalogue      catalogue emptied
 ```
 
-`--json` carries the same plan and result.
+An entry is whatever sat directly under an area: a schema under `Tables` on a
+schema-enabled Lakehouse, a table where there are no schemas, a file or a
+directory under `Files`. The reports carry names and not kinds, so `entries` is
+what can be said about them.
+
+The estate is shown whether or not `--yes` was passed. `--yes` authorises the
+removal, and what is being removed is still worth reading. `--json` prints one
+document, with the plan inside the result.
 
 A Lakehouse wipe clears its Files and Tables areas. **Its shortcuts go first**:
 only the pointer goes, because the data belongs to the item that produced it,
@@ -1025,13 +1032,18 @@ plan = weaver.plan_wipe(targets, workspace="Analytics", session=session)
 result = weaver.wipe(plan=plan, session=session)
 ```
 
+`wipe` takes a settled plan or the arguments to build one. A planning argument
+beside `plan=` is refused: a wipe is destructive, and an argument that reads as
+changing the plan would change nothing. `session` and `dry_run` say how an
+execution runs and travel with either.
+
 `catalogue_action` names the disposition outright:
 
 | Disposition | What it empties, and what happens to the catalogue |
 |---|---|
 | `"remove"` | the named targets, and the catalogue last |
 | `"unbind"` | the named targets; the catalogue kept and its claims for them deleted, and never itself a target |
-| `"leave"` | no catalogue resolved |
+| `"leave"` | no catalogue resolved, and naming it over one that did is refused |
 | `"physical-only"` | exactly the named targets, and no catalogue behaviour |
 
 A command line reaches the first two: the default is `"remove"` and `--unbind`

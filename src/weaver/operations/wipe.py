@@ -69,7 +69,7 @@ PRESERVED = "preserved"
 SHORTCUT_PREFIX = "shortcut:"
 
 #: The coarse counts an emptied item carries, in the order they are reported.
-COUNTED = ("tables", "folders", "shortcuts")
+COUNTED = ("entries", "shortcuts")
 
 
 @dataclass(frozen=True)
@@ -236,6 +236,12 @@ class WipeItemResult:
 
 @dataclass(frozen=True)
 class WipeResult:
+    """What one wipe did, per physical Fabric item.
+
+    ``items`` is the result. ``reports`` is the per-area detail underneath it,
+    kept for a caller that wants the names an area removed.
+    """
+
     workspace: str
     items: tuple[WipeItemResult, ...] = ()
     reports: tuple[WipeReport, ...] = ()
@@ -244,8 +250,10 @@ class WipeResult:
     dry_run: bool = False
 
     @property
-    def count(self) -> int:
-        return sum(report.count for report in self.reports)
+    def emptied(self) -> tuple[str, ...]:
+        """Every physical item this wipe emptied, in the order it emptied them."""
+
+        return tuple(item.target for item in self.items if item.outcome == EMPTIED)
 
     def to_mapping(self) -> dict:
         return {
@@ -346,6 +354,16 @@ def _catalogue_action(
     action = _requested_action(named, unbind=unbind, catalogue=catalogue)
     if action == UNBIND:
         _refuse_unusable_unbind(catalogue=catalogue, selected=selected)
+    if action == LEAVE and catalogue is not None:
+        # LEAVE is the absence of a catalogue. Naming it over one that resolved
+        # would read that catalogue to discover an estate, empty it, and leave
+        # the catalogue certifying objects that are gone. Emptying named targets
+        # and ignoring a resolved catalogue is PHYSICAL_ONLY.
+        raise CommandError(
+            f"{LEAVE!r} is what a wipe does where no catalogue resolved, and "
+            f"this one resolved {catalogue}: pass {PHYSICAL_ONLY!r} to empty "
+            "the named targets and read no catalogue"
+        )
     if action == PHYSICAL_ONLY and not selected:
         raise CommandError(
             "a physical-only wipe empties the targets it names and reads no "
@@ -446,6 +464,32 @@ def installed_targets(catalogue) -> tuple[WipeTarget, ...]:
     return tuple(found[key] for key in sorted(found))
 
 
+#: What a settled plan already answers. Passing one of these beside ``plan``
+#: reads as changing it, and a wipe is destructive, so it is refused.
+PLANNING_ARGUMENTS = (
+    "targets",
+    "workspace",
+    "catalogue",
+    "environment",
+    "workspace_config",
+    "unbind",
+    "catalogue_action",
+)
+
+
+def _refuse_planning_arguments(**given) -> None:
+    """Refuse a planning argument handed to an execution that has its plan."""
+
+    supplied = sorted(name for name in PLANNING_ARGUMENTS if given.get(name))
+    if not supplied:
+        return
+    raise CommandError(
+        "wipe takes a settled plan or the arguments to build one. "
+        f"{', '.join(supplied)} came with plan=, and a plan already answers "
+        "them: pass them to plan_wipe, or leave them out"
+    )
+
+
 def wipe(
     targets: str | Iterable[str] = (),
     *,
@@ -463,7 +507,10 @@ def wipe(
 
     ``plan`` runs an already-settled plan, which is how a caller that showed one
     to a person empties the estate it showed. The selectors are the convenience
-    form and build a plan through :func:`plan_wipe` first.
+    form and build a plan through :func:`plan_wipe` first. The two are exclusive:
+    a planning argument beside ``plan`` reads as changing it, and what it would
+    do is nothing, so it is refused. ``session`` and ``dry_run`` are how this
+    runs and travel with either.
 
     Takes a Session as the other operations do: a wipe resolves the same item
     names, reaches the same OneLake paths and opens the same Warehouse
@@ -481,8 +528,16 @@ def wipe(
             catalogue_action=catalogue_action,
             session=session,
         )
-    elif targets:
-        raise CommandError("wipe takes a plan or a target selection, not both")
+    else:
+        _refuse_planning_arguments(
+            targets=targets,
+            workspace=workspace,
+            catalogue=catalogue,
+            environment=environment,
+            workspace_config=workspace_config,
+            unbind=unbind,
+            catalogue_action=catalogue_action,
+        )
 
     resolved = plan.workspace
 
@@ -547,10 +602,15 @@ def wipe(
 def _counts(reports: Sequence[WipeReport]) -> dict[str, int]:
     """Coarse counts for one item, from what its areas reported removing.
 
-    A shortcut is a pointer taken away and the rest are directories deleted, so
-    they are counted apart. A Warehouse reports no names and counts nothing:
-    Weaver's Warehouse wipe drops object types by enumerating them, and there
-    is no list of what it dropped to count.
+    Two words, because two are what the names support. A shortcut identifies
+    itself by its prefix. Everything else is an entry directly under an area,
+    which is a schema under ``Tables`` on a schema-enabled Lakehouse, a table
+    where there are no schemas, and a file or a directory under ``Files``. The
+    reports carry names and not kinds, so ``entries`` is what can be said.
+
+    A Warehouse reports no names and counts nothing: Weaver's Warehouse wipe
+    drops object types by enumerating them, and there is no list of what it
+    dropped to count.
     """
 
     counted: dict[str, int] = {}
@@ -558,10 +618,9 @@ def _counts(reports: Sequence[WipeReport]) -> dict[str, int]:
         shortcuts = sum(
             1 for name in report.removed if name.startswith(SHORTCUT_PREFIX)
         )
-        rest = report.count - shortcuts
-        word = "tables" if report.target.startswith("delta:") else "folders"
-        if rest:
-            counted[word] = counted.get(word, 0) + rest
+        entries = report.count - shortcuts
+        if entries:
+            counted["entries"] = counted.get("entries", 0) + entries
         if shortcuts:
             counted["shortcuts"] = counted.get("shortcuts", 0) + shortcuts
     return counted
