@@ -494,21 +494,8 @@ as bronze/silver/gold is fine where it helps.
 
 ## Writing
 
-See [CLAUDE.md](CLAUDE.md) for the register and the six rules that define it.
-In short: describe, do not argue. State what a thing is, name the real components
-(TDS, Livy, OneLake, a Delta commit, a 403), and stop. No em dashes, no emphasis,
-no counterfactuals, no mental states ascribed to code.
-
-CLI help says what a command or option does. Errors state the condition and, when
-there is one, the next action. Detailed diagnostics belong in logs.
-
-Comments explain a constraint, an invariant, platform behaviour, or an edge case.
-Docstrings state a callable's purpose and its non-obvious contract. A function
-docstring runs one to three sentences, a module or class docstring about ten
-lines, a comment block three. Anything longer belongs in `design/`.
-
-Design docs explain the system for maintainers. When behaviour changes, update
-the relevant design document instead of adding a competing explanation elsewhere.
+Read [PROSE.md](PROSE.md) before changing user-facing text, documentation,
+docstrings or source comments. It is the repository's source of truth for prose.
 
 ### Terminology
 
