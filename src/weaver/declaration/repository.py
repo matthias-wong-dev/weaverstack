@@ -431,6 +431,25 @@ def _has_misplaced_weaver_structure(
     )
 
 
+#: Said when the folder holds Weaver-shaped files and no item tree.
+NOT_A_PROJECT_FOLDER = (
+    "this folder is not a Weaver project: it holds no item under "
+    "Lakehouse/<Name>/ or Warehouse/<Name>/. Name the project folder, or run "
+    "weaver initialise to set one up."
+)
+
+
+def _item_roots(discovered) -> set[tuple[str, str]]:
+    """Every ``<ItemType>/<ItemName>`` directory in one discovered tree."""
+
+    roots = set()
+    for relative, is_directory in discovered:
+        parts = relative.split("/")
+        if is_directory and len(parts) == 2 and parts[0] in ITEM_TYPES:
+            roots.add((parts[0], parts[1]))
+    return roots
+
+
 def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     """Read one repository tree as its authored declarations.
 
@@ -505,6 +524,11 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
         and _has_misplaced_weaver_structure(root, store, relative)
     )
     if misplaced_structures:
+        if not _item_roots(discovered):
+            # Weaver-shaped files beside no item tree at all. The directory
+            # holding them is a bystander, a Fabric export or a copy, and what
+            # is wrong is the folder this build was pointed at.
+            raise DiscoveryError(NOT_A_PROJECT_FOLDER)
         invalid_root = misplaced_structures[0].split("/", 1)[0]
         raise DiscoveryError(
             f"{invalid_root}: first directory must be exactly one of "

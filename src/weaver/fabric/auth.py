@@ -20,6 +20,9 @@ service principal where the standard ``AZURE_CLIENT_ID``,
 CLI where it works and Microsoft browser sign-in where it does not, and
 :func:`use_credential` makes it this process's default. That reaches every
 client, including the ones an operation constructs for itself.
+
+``weaver ... --non-interactive`` installs :func:`unattended_credential`
+instead, which is the same chain without browser sign-in.
 """
 
 from __future__ import annotations
@@ -121,6 +124,9 @@ def credential():
 #: The desktop chain, built at most once for this process.
 _desktop_chain = None
 
+#: The unattended chain, built at most once for this process.
+_unattended_chain = None
+
 
 def desktop_credential():
     """The principal where it is configured, the Azure CLI where it can issue a
@@ -168,6 +174,31 @@ def desktop_credential():
     _desktop_chain = ChainedTokenCredential(*credentials)
     _desktop_chain.diagnostic = diagnostic
     return _desktop_chain
+
+
+def unattended_credential():
+    """The service principal where it is configured, then the Azure CLI.
+
+    The chain a ``--non-interactive`` command signs in with. Browser sign-in
+    waits for a person at a browser window, so it is left out: a command that
+    reaches the end of this chain fails with what each credential reported.
+
+    Built once per process, as :func:`desktop_credential` is.
+    """
+
+    global _unattended_chain
+    if _unattended_chain is not None:
+        return _unattended_chain
+
+    from azure.identity import AzureCliCredential, ChainedTokenCredential
+
+    diagnostic = {}
+    _unattended_chain = ChainedTokenCredential(
+        DiagnosticCredential(_principal_credential(), "Service principal", diagnostic),
+        DiagnosticCredential(AzureCliCredential(), "Azure CLI", diagnostic),
+    )
+    _unattended_chain.diagnostic = diagnostic
+    return _unattended_chain
 
 
 def _principal_configured() -> bool:

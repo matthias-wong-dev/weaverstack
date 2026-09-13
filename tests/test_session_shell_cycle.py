@@ -231,14 +231,14 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
         _available,
     )
 
-    expected = sorted(
+    expected = (
         set(build_parser()._subparsers._group_actions[0].choices)
         - set(NOT_IN_A_SESSION)
         - SECONDARY_SESSION_COMMANDS
     )
 
-    assert _available(build_parser()) == ", ".join(expected)
-    assert expected == [
+    assert set(_available(build_parser()).split(", ")) == expected
+    assert expected == {
         "build",
         "health",
         "load",
@@ -246,8 +246,33 @@ def test_the_available_commands_come_from_the_parser(recorded, capsys):
         "test",
         "wipe",
         "workflow",
-    ]
+    }
     assert SECONDARY_SESSION_COMMANDS.isdisjoint(NOT_IN_A_SESSION)
+
+
+@weaver_test()
+def test_the_banner_reads_in_lifecycle_order(recorded):
+    """A workspace is filled, built, loaded, tested, cleared, sequenced, reported."""
+
+    from weaver_cli.main import build_parser
+    from weaver_cli.shell import _available
+
+    assert _available(build_parser()) == (
+        "mirror, build, load, test, wipe, workflow, health"
+    )
+
+
+@weaver_test()
+def test_a_command_the_order_does_not_name_is_appended(recorded):
+    """The tuple is a preference, and a new lifecycle verb still appears."""
+
+    from weaver_cli.main import build_parser
+    from weaver_cli.shell import _available
+
+    parser = build_parser()
+    parser._subparsers._group_actions[0].add_parser("reconcile")
+
+    assert _available(parser).endswith(", health, reconcile")
 
 
 @weaver_test()

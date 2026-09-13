@@ -609,7 +609,9 @@ def livy(monkeypatch):
     monkeypatch.setattr(
         ConsoleSession, "execute_tsql", lambda self, statement, **kwargs: None
     )
-    monkeypatch.setattr(_cli_module(), "_prefer_desktop_credential", lambda: None)
+    monkeypatch.setattr(
+        _cli_module(), "_prefer_desktop_credential", lambda *_args: None
+    )
     return _FakeLivy
 
 
