@@ -37,9 +37,10 @@ when useful information remains.
    implementations, old bugs, abandoned approaches and development history
    unless compatibility or migration depends on them.
 
-8. **Keep the real actor and action visible.** Do not make abstractions think,
-   know, want, care, decide or refuse. Do not hide the actor behind vague passive
-   prose either.
+8. **Keep the real actor and action visible when agency matters.** Do not make
+   abstractions think, know, want, care, decide or refuse. Do not hide a relevant
+   actor behind vague passive prose. Do not insert Weaver as the subject when a
+   label or direct statement of state is clearer.
 
 9. **Explain constraints, not hypothetical failure chains.** State the condition
    that matters and its consequence. Do not narrate everything that might
