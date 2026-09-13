@@ -216,7 +216,7 @@ def test_a_source_in_another_workspace_is_refused(monkeypatch):
 
     _given(monkeypatch, _workspace(mirror="Production/Warehouse/Weaver"))
 
-    with pytest.raises(CommandError, match="must be in workspace"):
+    with pytest.raises(CommandError, match="Use a source catalogue in"):
         weaver.plan_mirror(no_item=True, session=_never())
 
 
@@ -226,9 +226,7 @@ def test_a_destination_in_another_workspace_is_refused(monkeypatch):
 
     _given(monkeypatch, _workspace())
 
-    with pytest.raises(
-        CommandError, match="destination catalogue must be in workspace"
-    ):
+    with pytest.raises(CommandError, match="writes the destination catalogue"):
         weaver.plan_mirror(
             no_item=True, catalogue="Production/Warehouse/Weaver_Dev", session=_never()
         )

@@ -383,8 +383,9 @@ def _local_destination(catalogue: str, base: Workspace) -> CatalogueRef:
     parsed = CatalogueRef.parse(catalogue)
     if not parsed.is_local_to(base.workspace):
         raise CommandError(
-            f"{parsed} is in workspace {parsed.owner(base.workspace)}. The "
-            f"destination catalogue must be in workspace {base.workspace}."
+            f"{parsed} is in workspace {parsed.owner(base.workspace)}. mirror "
+            f"writes the destination catalogue in workspace {base.workspace}. "
+            f"Use a catalogue in {base.workspace}."
         )
     return CatalogueRef(workspace=base.workspace, name=parsed.name)
 
@@ -397,12 +398,14 @@ def _refuse_unusable_pair(
     # A Fabric Warehouse can copy catalogue state only within its workspace.
     if not source.is_local_to(base.workspace):
         raise CommandError(
-            f"{source} is in workspace {source.owner(base.workspace)}. The source "
-            f"catalogue must be in workspace {base.workspace}."
+            f"{source} is in workspace {source.owner(base.workspace)}. Fabric "
+            "Warehouse copies catalogue state only within one workspace. Use a "
+            f"source catalogue in {base.workspace}."
         )
     if source.name.casefold() == destination.name.casefold():
         raise CommandError(
-            f"{destination} is both the source and destination catalogue. Use a "
+            f"{destination} is both the source and destination catalogue. mirror "
+            "empties the destination before copying catalogue state. Use a "
             "different destination with "
             f"--catalogue {CATALOGUE_KIND}/<name>."
         )
