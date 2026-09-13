@@ -1,6 +1,7 @@
-"""Nodes retain all reported messages.
+"""Load-run statuses, messages, and serialisable report types.
 
-Dry-run statuses remain distinct from execution statuses.
+Nodes retain all reported messages. Dry-run statuses remain distinct from
+execution statuses.
 """
 
 from __future__ import annotations
@@ -200,6 +201,8 @@ class LoadRunReport:
 
 
 def final_status(nodes: tuple[LoadNodeReport, ...], *, dry_run: bool) -> str:
+    """Final task status depends only on the final node statuses."""
+
     if not nodes:
         return TASK_INVALID if dry_run else TASK_SUCCEEDED
     statuses = [node.status for node in nodes]

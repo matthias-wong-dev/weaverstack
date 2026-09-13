@@ -5,9 +5,9 @@ source comments. It governs wording, not product behaviour.
 
 ## Default
 
-Prefer deletion over replacement. Prose must add information that names, types
-and code do not already communicate. Delete it when it does not. Rewrite only
-when useful information remains.
+Preserve the smallest amount of prose that carries information the code does
+not. Delete everything else. Do not optimise for deletion count. Optimise for
+information density.
 
 ## Principles
 
@@ -73,26 +73,22 @@ explain unrelated architecture.
 
 ### Docstrings
 
-Delete a docstring when the name, signature, types and code already communicate
-the callable's purpose. Otherwise state only the non-obvious contract. Describe
+Identify any non-obvious purpose or contract, then preserve its shortest direct
+statement. Delete the docstring when no useful information remains. Describe
 parameters or return values only when their meaning is not clear from the
 signature and types.
 
 ### Comments
 
-Delete comments that narrate the code. Keep a comment only when it explains a
-constraint the code cannot express. Put system-wide reasoning in the relevant
-document under `design/`.
+Identify any invariant or constraint the code cannot express, then preserve its
+shortest direct statement. Delete comments that only narrate the code. Put
+system-wide reasoning in the relevant document under `design/`.
 
 ## Review
 
 For every comment, docstring, error or help string, ask:
 
-1. Does it contain information that is not already obvious from the names, types
-   and code?
-2. Is that information relevant here?
-3. Can it be stated directly in fewer words?
-4. Does it describe the current system, or defend and explain how the system got
-   here?
-
-If the answer to the first question is no, delete it.
+1. What non-obvious information, if any, is here?
+2. Does that information belong here?
+3. What is the shortest direct way to preserve it?
+4. If there is no useful information, delete it.
