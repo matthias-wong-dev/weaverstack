@@ -1,7 +1,6 @@
-"""Load-run statuses, messages, and serialisable report types.
+"""Nodes retain all reported messages.
 
-Nodes retain all reported messages. Dry-run statuses remain distinct from
-execution statuses.
+Dry-run statuses remain distinct from execution statuses.
 """
 
 from __future__ import annotations
@@ -11,13 +10,8 @@ from typing import Any, Mapping
 
 from .runtime.load_result import LoadResult
 
-# --- statuses ----------------------------------------------------------------
-
-#: Planned but not started.
 PENDING = "pending"
-#: Dispatch began.
 RUNNING = "running"
-#: Completed successfully.
 SUCCEEDED = "succeeded"
 #: Valid work completed, but the primitive reported rejected rows.
 SUCCEEDED_WITH_REJECTS = "succeeded_with_rejects"
@@ -45,8 +39,6 @@ INVALID = "invalid"
 
 VALIDATION_STATUSES = (VALIDATED, INVALID, BLOCKED)
 
-# --- final task statuses ------------------------------------------------------
-
 #: Every executable step succeeded without rejects.
 TASK_SUCCEEDED = "succeeded"
 #: Every executable branch completed, but a primitive reported rejects.
@@ -58,14 +50,7 @@ TASK_FAILED = "failed"
 #: A dry run could not resolve a valid executable plan.
 TASK_INVALID = "invalid"
 
-# --- messages -----------------------------------------------------------------
-#
-# Owned by the run package, because they are runtime vocabulary rather than load
-# vocabulary: a load, a validation and whatever runtime work comes next all
-# report through them. Re-exported here under the name this module's public
-# report has always used, so a LoadRunReport carries one message type.
-
-from .run.result import (  # noqa: E402 - the vocabulary this report projects
+from .run.result import (  # noqa: E402
     CATALOGUE_BINDING_INVALID,
     DAG_CYCLE,
     DEPENDENCY_BLOCKED,
@@ -85,18 +70,14 @@ from .run.result import (  # noqa: E402 - the vocabulary this report projects
     info,
     warning,
 )
-from .run.result import (  # noqa: E402 - same block, split by the formatter
+from .run.result import (  # noqa: E402
     RunMessage as LoadMessage,
 )
 
 
 @dataclass(frozen=True)
 class LoadNodeReport:
-    """Report for one planned node.
-
-    ``executed`` distinguishes a dry run or blocked node from work that touched
-    the target.
-    """
+    """``executed`` is true only when work touched the target."""
 
     node_id: str
     logical_id: str | None
@@ -151,17 +132,14 @@ class LoadNodeReport:
 
 @dataclass(frozen=True)
 class LoadRunReport:
-    """Report for one ``weaver.load(...)`` invocation.
-
-    Dry runs use the same shape as executions but do not have task evidence.
-    """
+    """Dry runs use the same shape as executions but do not have task evidence."""
 
     requested: tuple[str, ...]
     status: str
     dry_run: bool
     fault_tolerant: bool
-    #: Whether the run reconstructed each selected table from zero. A dry run
-    #: carries it too, which is how it reports the reload it did not do.
+    #: Whether the run reconstructed each selected table from zero. Dry runs
+    #: record the requested mode.
     reload: bool = False
     nodes: tuple[LoadNodeReport, ...] = ()
     edges: tuple[tuple[str, str], ...] = ()
@@ -200,8 +178,6 @@ class LoadRunReport:
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "LoadRunReport":
-        """Reconstruct a report returned across a process boundary."""
-
         return cls(
             requested=tuple(payload.get("requested") or ()),
             status=payload["status"],
@@ -224,13 +200,6 @@ class LoadRunReport:
 
 
 def final_status(nodes: tuple[LoadNodeReport, ...], *, dry_run: bool) -> str:
-    """The task status these node reports add up to.
-
-    Derived rather than accumulated, so the summary cannot disagree with the
-    nodes it summarises, the failure mode of a status advanced by hand as the
-    run proceeds.
-    """
-
     if not nodes:
         return TASK_INVALID if dry_run else TASK_SUCCEEDED
     statuses = [node.status for node in nodes]
