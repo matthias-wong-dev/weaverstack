@@ -19,15 +19,12 @@ from ..locations import Location
 from ..workspaces import CATALOGUE_KIND, CatalogueRef, Workspace
 from .workspace import operation_workspace
 
-#: Separator between a destination target and its source in plan output.
-#: Keep it ASCII because some Windows consoles use a non-Unicode code page.
+#: Some Windows consoles use a non-Unicode code page.
 MIRRORS = "<-"
 
 
 @dataclass(frozen=True)
 class MirrorPlan:
-    """The source, destination and selected items for a mirror operation."""
-
     workspace: Workspace
     source: CatalogueRef
     destination: CatalogueRef
@@ -50,8 +47,6 @@ class MirrorPlan:
 
 @dataclass(frozen=True)
 class MirrorItem:
-    """An item and the source and destination targets for its mirror."""
-
     item: object
     source_target: str
     destination: str
@@ -62,8 +57,6 @@ class MirrorItem:
 
     @property
     def kind(self) -> str:
-        """Return the item's physical target kind."""
-
         return self.item.item_type
 
     @property
@@ -83,8 +76,6 @@ class MirrorItem:
 
 @dataclass(frozen=True)
 class ResolvedMirror:
-    """A mirror plan resolved against the source catalogue."""
-
     plan: MirrorPlan
     #: Whether the source catalogue holds a ``_.Mirror``.
     borrowed: bool = False
@@ -113,8 +104,6 @@ class ResolvedMirror:
 
     @property
     def wiped(self) -> tuple[str, ...]:
-        """Return physical targets in wipe order."""
-
         return tuple(target for target, _source in self.mappings)
 
     def describe(self) -> str:
@@ -132,8 +121,6 @@ class ResolvedMirror:
 
 @dataclass(frozen=True)
 class MirrorResult:
-    """The result of a mirror operation."""
-
     workspace: str
     source_catalogue: str
     destination_catalogue: str
@@ -142,7 +129,6 @@ class MirrorResult:
     #: Historical catalogue tables that Weaver rebuilds without copying rows.
     uncopied: tuple[str, ...] = ()
     items: tuple[str, ...] = ()
-    #: Mirror result for each rebound item.
     mirrored: Mapping[str, Mapping] = field(default_factory=dict)
     status: str = "succeeded"
 
@@ -189,8 +175,7 @@ def plan_mirror(
         environment=environment,
         workspace_config=workspace_config,
         session=session,
-        # Which configured value is the source and which the destination depends
-        # on what else is set, so the catalogue override cannot decide it here.
+        # _resolved_pair assigns catalogue: after determining whether mirror: is set.
         needs_catalogue=False,
     )
     source, destination = _resolved_pair(base, catalogue=catalogue, mirror=mirror)
@@ -238,12 +223,10 @@ def resolve_mirror(
 
 
 def _final_bindings(plan: MirrorPlan, catalogue, items) -> dict:
-    """Resolve each logical item to its physical target.
+    """Resolve final physical targets before any destination is emptied.
 
-    Start with the source catalogue's Installation rows, replace selected items
-    with their destinations and bind the built-in catalogue item to the
-    destination catalogue. This runs before Weaver empties a destination so
-    shortcut rebuilding does not depend on item order.
+    Recreated shortcuts use this fixed map, so item order cannot change their
+    targets.
     """
 
     from ..catalogue.builtin import BUILTIN_ITEM
@@ -344,11 +327,11 @@ def mirror(
 def _resolved_pair(
     base: Workspace, *, catalogue: str | None, mirror: str | None
 ) -> tuple[CatalogueRef, CatalogueRef]:
-    """Which catalogue is read and which is written, from what is known.
+    """Resolve the source and destination catalogue roles.
 
-    A configuration naming ``catalogue:`` alone supplies the source and never
-    the destination: treating one known side as both would empty a production
-    catalogue. One naming ``mirror:`` too describes a fork already.
+    In workspace configuration, ``catalogue:`` identifies the source unless
+    ``mirror:`` is set. With ``mirror:``, ``catalogue:`` identifies the
+    destination.
     """
 
     configured = base.catalogue_ref if base.catalogue else None
@@ -371,15 +354,12 @@ def _resolved_pair(
     if destination is None:
         raise CommandError(
             "mirror needs a destination catalogue. Use "
-            f"--catalogue {CATALOGUE_KIND}/<name>. When workspace configuration "
-            "sets catalogue: without mirror:, catalogue: identifies the source."
+            f"--catalogue {CATALOGUE_KIND}/<name>."
         )
     return source, destination
 
 
 def _local_destination(catalogue: str, base: Workspace) -> CatalogueRef:
-    """Resolve a destination catalogue in the operation workspace."""
-
     parsed = CatalogueRef.parse(catalogue)
     if not parsed.is_local_to(base.workspace):
         raise CommandError(
@@ -393,8 +373,6 @@ def _local_destination(catalogue: str, base: Workspace) -> CatalogueRef:
 def _refuse_unusable_pair(
     source: CatalogueRef, destination: CatalogueRef, base: Workspace
 ) -> None:
-    """Validate that Fabric can copy from the source to the destination."""
-
     # A Fabric Warehouse can copy catalogue state only within its workspace.
     if not source.is_local_to(base.workspace):
         raise CommandError(

@@ -3,6 +3,12 @@
 Read this guide before changing user-facing text, documentation, docstrings or
 source comments. It governs wording, not product behaviour.
 
+## Default
+
+Prefer deletion over replacement. Prose must add information that names, types
+and code do not already communicate. Delete it when it does not. Rewrite only
+when useful information remains.
+
 ## Principles
 
 1. **Senior engineer to senior engineer.** Assume competence. Be clear without
@@ -11,15 +17,18 @@ source comments. It governs wording, not product behaviour.
 2. **Use plain, concrete technical language.** Name the actual thing: Weaver,
    Fabric, the catalogue, the command, the table, TDS or OneLake.
 
-3. **State what it is.** Describe the current behaviour positively. Contrast it
-   with what it is not only when that distinction is genuinely easy to miss.
+3. **State the model.** Describe the current behaviour positively. State the
+   rule or constraint, not the accident that a different design might cause.
+   Contrast it with what it is not only when that distinction is genuinely easy
+   to miss.
 
 4. **Be succinct.** Give the fact, constraint or reason needed to understand the
    issue. Stop there.
 
 5. **Stay local to the problem at hand.** Especially in user-facing prose,
    include only what affects the current action, error or decision. Do not
-   explain adjacent architecture or edge cases unless they matter now.
+   explain adjacent configuration, architecture or edge cases unless they
+   matter now. A fact being true and related is not enough reason to include it.
 
 6. **No defensiveness.** Do not justify the implementation against imaginary
    objections or alternative designs nobody proposed.
@@ -53,7 +62,8 @@ information changes how it is used.
 ### Errors and warnings
 
 State the condition first. Identify the affected command, item, table, workspace
-or path. Give a next action only when Weaver can identify one.
+or path. Give a next action only when Weaver can identify one. Do not explain
+adjacent configuration or architecture unless the user needs it to act.
 
 ### Reports
 
@@ -62,17 +72,26 @@ explain unrelated architecture.
 
 ### Docstrings
 
-State the callable's purpose and any non-obvious contract. Describe parameters
-or return values only when their meaning is not clear from the signature and
-types.
+Delete a docstring when the name, signature, types and code already communicate
+the callable's purpose. Otherwise state only the non-obvious contract. Describe
+parameters or return values only when their meaning is not clear from the
+signature and types.
 
 ### Comments
 
-Explain the constraint the code cannot express. Put system-wide reasoning in the
-relevant document under `design/`.
+Delete comments that narrate the code. Keep a comment only when it explains a
+constraint the code cannot express. Put system-wide reasoning in the relevant
+document under `design/`.
 
 ## Review
 
-Read changed help text, errors, warnings, reports, docstrings and comments in
-context. Check that each sentence names the real thing, serves the local problem
-and stops when its work is done.
+For every comment, docstring, error or help string, ask:
+
+1. Does it contain information that is not already obvious from the names, types
+   and code?
+2. Is that information relevant here?
+3. Can it be stated directly in fewer words?
+4. Does it describe the current system, or defend and explain how the system got
+   here?
+
+If the answer to the first question is no, delete it.
