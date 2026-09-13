@@ -1753,10 +1753,15 @@ def handle_wipe(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 1
+            # Under --json stdout carries one JSON document, so the question
+            # and a cancellation both go to stderr.
+            aside = sys.stderr if args.json else None
             if not confirm(
-                args, f"Empty {emptied} item(s)? This cannot be undone [y/N] "
+                args,
+                f"Empty {emptied} item(s)? This cannot be undone [y/N] ",
+                prompt_to=aside,
             ):
-                print("Cancelled.")
+                print("Cancelled.", file=aside)
                 return 1
 
         result = weaver.wipe(plan=plan, session=opened)
@@ -1775,6 +1780,11 @@ def handle_mirror(args: argparse.Namespace) -> int:
 
     The order is the safety property: a misspelled ``--mirror`` or an item the
     catalogue never installed fails while every Warehouse is still intact.
+
+    The targets are shown whether or not the command was authorised, as a wipe
+    shows its estate. ``--yes`` grants permission to empty them, and which ones
+    is still worth reading. ``--json`` prints one document, and ``wiped`` in the
+    result names them.
     """
 
     import json
@@ -1799,8 +1809,13 @@ def handle_mirror(args: argparse.Namespace) -> int:
     with _running_session(args, plan.workspace) as opened:
         resolved = weaver.check_mirror(plan, session=opened)
 
-        if not authorised(args):
+        # Under --json stdout carries one JSON document, so the question and a
+        # cancellation go to stderr and the list goes into the result.
+        aside = sys.stderr if args.json else None
+        if not args.json:
             print(f"Mirror on {plan.workspace.workspace}\n\n{resolved.describe()}\n")
+
+        if not authorised(args):
             emptied = ", ".join(resolved.wiped)
             if not can_prompt(args):
                 print(
@@ -1811,8 +1826,9 @@ def handle_mirror(args: argparse.Namespace) -> int:
             if not confirm(
                 args,
                 "These targets will be emptied. Continue? This cannot be undone [y/N] ",
+                prompt_to=aside,
             ):
-                print("Cancelled.")
+                print("Cancelled.", file=aside)
                 return 1
 
         result = weaver.mirror(plan=resolved, session=opened)

@@ -8,6 +8,9 @@ Warehouse the run empties.
 from __future__ import annotations
 
 import importlib
+import io
+import json
+import sys
 
 import pytest
 from support.weaver_test import weaver_test
@@ -347,7 +350,11 @@ def test_an_authorised_fork_reports_the_targets_it_filled(monkeypatch, capsys):
     # The CLI hands the operation a Session rather than a resolved Workspace.
     assert passed["session"].workspace is calls["plan"].workspace
     printed = capsys.readouterr().out
-    assert printed == "mirror succeeded: Warehouse/Weaver_Dev, Lakehouse/Input_Dev\n"
+    # `--yes` authorises emptying these Warehouses. It does not hide which.
+    assert "Mirror on Demo" in printed
+    assert printed.endswith(
+        "mirror succeeded: Warehouse/Weaver_Dev, Lakehouse/Input_Dev\n"
+    )
 
 
 @weaver_test()
@@ -406,3 +413,51 @@ def test_selecting_items_and_no_item_together_is_refused(monkeypatch):
                 ["mirror", "--item", "Warehouse/Model", "--no-item", "--yes"]
             )
         )
+
+
+# --- one JSON document --------------------------------------------------------
+
+
+class _Terminal(io.StringIO):
+    """A stream that reports itself as a terminal, so a question is asked."""
+
+    def isatty(self) -> bool:
+        return True
+
+
+@weaver_test()
+def test_a_json_fork_asks_on_stderr_and_leaves_stdout_parseable(monkeypatch, capsys):
+    """Stdout carries one JSON document, question or no question.
+
+    The real ``confirm`` runs here: a terminal on stdin is what makes the
+    invocation interactive, and the answer it reads is the one typed.
+    """
+
+    calls = _wired(monkeypatch)
+    monkeypatch.setattr(sys, "stdin", _Terminal("y\n"))
+
+    assert main(["mirror", "--no-item", "--workspace", "Analytics", "--json"]) == 0
+
+    printed = capsys.readouterr()
+    assert "This cannot be undone" in printed.err
+    assert "This cannot be undone" not in printed.out
+    assert "Mirror on Demo" not in printed.out
+    payload = json.loads(printed.out)
+    # The same list, carried in the result.
+    assert payload["wiped"] == ["Warehouse/Weaver_Dev"]
+    assert "mirrored" in calls
+
+
+@weaver_test()
+def test_a_declined_json_fork_leaves_stdout_empty(monkeypatch, capsys):
+    """Nothing was emptied, so there is no result document to print."""
+
+    calls = _wired(monkeypatch)
+    monkeypatch.setattr(sys, "stdin", _Terminal("n\n"))
+
+    assert main(["mirror", "--no-item", "--workspace", "Analytics", "--json"]) == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert "Cancelled." in printed.err
+    assert "mirrored" not in calls

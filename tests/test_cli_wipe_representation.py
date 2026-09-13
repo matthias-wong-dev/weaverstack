@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib
+import io
 import json
+import sys
 
 import pytest
 from support.weaver_test import weaver_test
@@ -15,6 +17,13 @@ from weaver_cli import main
 from weaver_cli.main import build_parser
 
 WORKSPACE = given_workspace(workspace="Analytics", catalogue="Warehouse/Weaver")
+
+
+class _Terminal(io.StringIO):
+    """A stream that reports itself as a terminal, so a question is asked."""
+
+    def isatty(self) -> bool:
+        return True
 
 
 def _plan(
@@ -323,6 +332,44 @@ def test_a_json_wipe_prints_one_document(monkeypatch, capsys):
     assert "Wipe on Analytics" not in printed
     payload = json.loads(printed)
     assert payload["plan"]["targets"][0]["target"] == "Lakehouse/Landing"
+
+
+@weaver_test()
+def test_a_json_wipe_asks_on_stderr_and_leaves_stdout_parseable(monkeypatch, capsys):
+    """Stdout carries one JSON document, question or no question.
+
+    The real ``confirm`` runs here: a terminal on stdin is what makes the
+    invocation interactive, and the answer it reads is the one typed.
+    """
+
+    plan = _plan("Lakehouse/Landing", "Warehouse/Weaver")
+    _cli, planned, executed = _wired(monkeypatch, plan)
+    monkeypatch.setattr(sys, "stdin", _Terminal("y\n"))
+
+    assert main(["wipe", "--json"]) == 0
+
+    printed = capsys.readouterr()
+    assert "This cannot be undone" in printed.err
+    assert "This cannot be undone" not in printed.out
+    assert json.loads(printed.out)["plan"]["catalogue_action"] == REMOVE
+    # The settled plan, executed once, and nothing planned a second time.
+    assert len(planned) == 1
+    assert [passed["plan"] for passed in executed] == [plan]
+
+
+@weaver_test()
+def test_a_declined_json_wipe_leaves_stdout_empty(monkeypatch, capsys):
+    """Nothing was emptied, so there is no result document to print."""
+
+    _cli, _planned, executed = _wired(monkeypatch, _plan("Lakehouse/Landing"))
+    monkeypatch.setattr(sys, "stdin", _Terminal("n\n"))
+
+    assert main(["wipe", "--json"]) == 1
+
+    printed = capsys.readouterr()
+    assert printed.out == ""
+    assert "Cancelled." in printed.err
+    assert executed == []
 
 
 @weaver_test()

@@ -62,13 +62,25 @@ def authorised(args: argparse.Namespace | None) -> bool:
     return bool(getattr(args, "yes", False) or getattr(args, "authorised", False))
 
 
-def confirm(args: argparse.Namespace, question: str, *, stream=None) -> bool:
-    """Read one yes or no answer. False where nobody can be asked."""
+def confirm(
+    args: argparse.Namespace, question: str, *, stream=None, prompt_to=None
+) -> bool:
+    """Read one yes or no answer. False where nobody can be asked.
+
+    ``stream`` is where the answer is read from and ``prompt_to`` where the
+    question is written, stdout by default. A command whose stdout carries one
+    JSON document writes the question to stderr.
+    """
 
     if not can_prompt(args, stream):
         return False
     reader = sys.stdin if stream is None else stream
-    print(question, end="", flush=True)
+    print(
+        question,
+        end="",
+        flush=True,
+        file=sys.stdout if prompt_to is None else prompt_to,
+    )
     answer = reader.readline()
     return answer.strip().lower() in {"y", "yes"}
 
