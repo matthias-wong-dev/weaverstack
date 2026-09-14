@@ -1,30 +1,7 @@
-"""Physical identities: the third level of the four-level model.
+"""Typed physical target identities.
 
-Weaver names things the way SQL does::
-
-    Server . Database . Schema . Object
-
-    4         3          2        1
-
-+-------+------------------------------------+
-| Level | Fabric                             |
-+=======+====================================+
-| 4     | workspace                          |
-| 3     | Lakehouse, Warehouse, Environment  |
-| 2     | schema                             |
-| 1     | table, view, folder, procedure     |
-+-------+------------------------------------+
-
-Level 4 is the only level written down in Workspace configuration. A level-3
-item is unique within its workspace, so it is named directly rather than
-aliased. Unique is not invariant, so those names are always supplied at the call
-site and never inferred.
-
-Levels 2 and 1 come from the object's own metadata (``Schema.Object``) and do
-not appear here.
-
-This module is pure identity. Nothing here resolves an item to a path, an ID or
-an endpoint. That is the resolver's job.
+Lakehouse, Warehouse and Environment names identify Fabric items within a
+Workspace. Resolution to paths, IDs and endpoints happens elsewhere.
 """
 
 from __future__ import annotations
@@ -43,7 +20,7 @@ _ILLEGAL_IN_NAME = ("/", "\\", ":", "*", "?", '"', "<", ">", "|")
 
 
 def validate_name(value: object, *, what: str) -> str:
-    """Validate one level-3 or path name and return it stripped."""
+    """Validate and strip one Fabric item or path name."""
 
     if not isinstance(value, str):
         raise IdentityError(f"{what} must be a string, got {type(value).__name__}")
@@ -68,12 +45,9 @@ def _split(text: object, *, what: str) -> list[str]:
 
 @dataclass(frozen=True)
 class ItemRef:
-    """A uniquely-named item within a workspace, at level three.
+    """A Fabric item name within a Workspace.
 
-    A Lakehouse, a Warehouse or a Fabric Environment. Which of those it must be
-    is decided by the slot it is used in, never by the name itself: the same
-    string passed as a ``delta_target`` names a Lakehouse and passed as a
-    ``sql_target`` names a Warehouse.
+    Its slot determines whether it names a Lakehouse, Warehouse or Environment.
     """
 
     name: str
@@ -94,10 +68,7 @@ class ItemRef:
 
 @dataclass(frozen=True)
 class FolderTarget:
-    """A Lakehouse Files area, written ``Sales/Files``.
-
-    Folder objects land at ``Files/<Schema>/<Object>``.
-    """
+    """A Lakehouse Files area, written ``Sales/Files``."""
 
     lakehouse: ItemRef
 
@@ -108,8 +79,7 @@ class FolderTarget:
             raise IdentityError(
                 f"folder target must be '<Lakehouse>/{FILES_AREA}', got {text!r}"
                 + (
-                    ". A folder object lands at Files/<Schema>/<Object>, so there is "
-                    "nothing to configure beneath the area"
+                    f". Remove everything after '/{FILES_AREA}'"
                     if len(segments) > 2
                     else ""
                 )
@@ -169,21 +139,12 @@ class WarehouseTarget:
         return self.warehouse.name
 
 
-# --- the one typed physical grammar the public operations share ---------------
-#
-# ``Lakehouse/Name`` and ``Warehouse/Name`` are what a caller writes at every
-# boundary that names a whole physical item: a build binding's left-hand side, a
-# wipe target, an unbind target, a load target. One parser, because four
-# spellings of one grammar is four places for it to drift, and the drift would
-# show up as one operation accepting a target another refuses.
-#
-# It returns the existing typed targets rather than a fifth wrapper, so what a
-# caller gets back is what the resolvers and executors already take.
+# --- the physical target grammar shared by public operations ------------------
 
 LAKEHOUSE_KIND = "Lakehouse"
 WAREHOUSE_KIND = "Warehouse"
 
-#: How the grammar spells each kind, in the order the error message lists them.
+#: Physical target kinds, in the order used in errors.
 PHYSICAL_KINDS = (LAKEHOUSE_KIND, WAREHOUSE_KIND)
 
 _PHYSICAL_TYPES = {LAKEHOUSE_KIND: DeltaTarget, WAREHOUSE_KIND: WarehouseTarget}
@@ -192,12 +153,10 @@ _PHYSICAL_TYPES = {LAKEHOUSE_KIND: DeltaTarget, WAREHOUSE_KIND: WarehouseTarget}
 def parse_physical_target(
     text: object, *, what: str = "target", error: type[Exception] = IdentityError
 ):
-    """``Lakehouse/Name`` or ``Warehouse/Name``, as the typed physical target.
+    """Parse ``Lakehouse/Name`` or ``Warehouse/Name``.
 
-    ``what`` names the caller's own noun so the message reads in that operation's
-    vocabulary: "a wipe target must …", "a load target must …". ``error`` is the
-    class the caller's boundary raises, because the error a malformed request
-    produces belongs to the operation and not to the grammar.
+    ``what`` names the target in errors. ``error`` preserves the calling
+    operation's exception type.
     """
 
     if not isinstance(text, str):
@@ -245,11 +204,7 @@ def physical_target_text(target) -> str:
     return f"{physical_kind(target)}/{physical_item(target).name}"
 
 
-# --- the two words a catalogue row and a plan carry ---------------------------
-#
-# What the catalogue calls each physical target kind. One spelling, used by the
-# build's bound targets, by a load plan, and by every catalogue row that names a
-# target kind.
+# --- catalogue and plan target kinds ------------------------------------------
 
 LAKEHOUSE_TARGET = "lakehouse"
 WAREHOUSE_TARGET = "warehouse"
@@ -266,12 +221,7 @@ class PhysicalTargetRef:
 
     @classmethod
     def of(cls, target) -> "PhysicalTargetRef":
-        """The reference one typed physical target makes.
-
-        The single conversion from the typed vocabulary, ``DeltaTarget`` and
-        ``WarehouseTarget``, into the two words a plan and a catalogue row carry.
-        Every operation that names a target goes through it.
-        """
+        """Convert a typed target to catalogue and plan vocabulary."""
 
         return cls(
             kind=LAKEHOUSE_TARGET
@@ -310,11 +260,10 @@ class PhysicalObjectRef:
 
 
 def lakehouse_names(targets) -> tuple[str, ...]:
-    """The Lakehouse names among some :class:`PhysicalTargetRef`, in order given.
+    """Return Lakehouse names in the order given.
 
-    What a Livy session needs a Lakehouse for is somewhere to attach, so which
-    of them is picked does not matter: every generated statement names its own
-    target in full.
+    Any may be attached for Livy because generated statements name their target
+    in full.
     """
 
     return tuple(target.name for target in targets if target.is_lakehouse)

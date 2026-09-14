@@ -1,16 +1,10 @@
-"""Pure generation of the proven Fabric Warehouse wipe batch."""
+"""Generate the Fabric Warehouse wipe batch."""
 
 from __future__ import annotations
 
 
 def generate_warehouse_wipe_sql() -> str:
-    """Return deterministic SQL that removes supported user-created objects.
-
-    Ported from the legacy implementation's Warehouse backend:
-    ``src/weaver_runtime/dbrep/sql/templates/admin/wipe.sql`` for object
-    enumeration and ordering, plus ``_drop_user_schemas`` in
-    ``src/weaver_runtime/dbrep/sql/backend.py`` for schema cleanup.
-    """
+    """Return deterministic SQL that removes supported user-created objects."""
 
     return _WAREHOUSE_WIPE_SQL
 

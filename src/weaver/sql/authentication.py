@@ -1,7 +1,6 @@
-"""Authentication records consumed by the common SQL connector.
+"""Authentication material for Warehouse SQL connections.
 
-Identity policy stays at the caller boundary.  This module only converts a
-fresh access token into the connection argument understood by
+Callers choose the identity; this module only encodes its access token for
 ``mssql-python``.
 """
 
@@ -12,7 +11,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Protocol
 
-# SQL_COPT_SS_ACCESS_TOKEN from msodbcsql.h.  mssql-python accepts the same
+# SQL_COPT_SS_ACCESS_TOKEN from msodbcsql.h. ``mssql-python`` accepts the same
 # attrs_before shape as pyodbc and exposes this value as
 # ConstantsDDBC.SQL_COPT_SS_ACCESS_TOKEN.
 SQL_ACCESS_TOKEN_ATTRIBUTE = 1256

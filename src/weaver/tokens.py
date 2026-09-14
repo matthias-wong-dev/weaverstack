@@ -1,10 +1,4 @@
-"""The one value a frozen payload cannot carry literally.
-
-Object and schema names are rendered when the bundle is generated, so the only
-substitution left is the instant an installation published its Registry.
-
-Both catalogue T-SQL and Lakehouse Spark SQL carry the token.
-"""
+"""Build-time tokens shared by catalogue T-SQL and Lakehouse Spark SQL."""
 
 from __future__ import annotations
 
@@ -12,13 +6,8 @@ import re
 
 from .errors import InstallError
 
-#: ``{{build_datetime}}``, the instant this installation published its Registry.
-#:
-#: A token rather than a literal frozen at generation time: a rendered clock
-#: would make the same repository produce different payload bytes on every run,
-#: and a bundle's identity is its bytes. One install writes rows for several
-#: items against several targets, and they all carry the same instant, or two
-#: rows published by one build would order against each other.
+#: Kept as a token so bundle bytes remain deterministic and every Registry row
+#: published by one installation receives the same instant.
 BUILD_DATETIME = re.compile(r"\{\{build_datetime\}\}")
 
 #: The payload spelling of the publication instant.
@@ -32,8 +21,8 @@ def substitute_build_datetime(text: str, build_datetime: str | None) -> str:
         return text
     if build_datetime is None:
         raise InstallError(
-            "a statement names {{build_datetime}} but this installation supplied "
-            "none, so the row it writes could not be dated"
+            "the installation has no build datetime required by a statement "
+            "containing {{build_datetime}}"
         )
     return BUILD_DATETIME.sub(build_datetime.replace("\\", "\\\\"), text)
 

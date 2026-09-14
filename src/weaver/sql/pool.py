@@ -12,19 +12,11 @@ from .authentication import SqlAuthentication
 from .connection import SqlEndpoint, connect
 from .errors import SqlPoolClosedError
 
-#: How many physical connections one pool opens. Sized for the work rather than
-#: chosen: a load holds one to run the object's procedure while the catalogue's
-#: runtime tables are written on a worker each. One for the evidence, one for
-#: the status, one for the statistics, one for the bookmark. Fewer than that and
-#: a writer waits for the reader to finish, which costs latency nothing needs to
-#: pay.
+#: Enough connections for one load procedure and concurrent catalogue writes.
 DEFAULT_MAX_CONNECTIONS = 6
 
-#: How long a connection may sit idle before it is checked rather than trusted.
-#: A Fabric SQL endpoint drops connections it considers abandoned, and it does
-#: so silently, the next statement fails with "Communication link failure",
-#: which reads as though the statement was at fault. Under this threshold the
-#: check is skipped, so a burst of work pays nothing.
+#: Validate connections idle this long before sending a statement. Fabric SQL
+#: endpoints may silently drop idle connections.
 IDLE_VALIDATION_SECONDS = 60.0
 
 ConnectionFactory = Callable[[SqlEndpoint, SqlAuthentication], Any]
@@ -79,11 +71,7 @@ class SqlConnectionPool:
             self._release(lease)
 
     def _acquire(self):
-        """Acquire a connection, validating a long-idle pooled connection first.
-
-        Validation occurs before a statement is sent, avoiding unsafe retries
-        after a possible write.
-        """
+        """Validate long-idle connections before any possibly mutating statement."""
 
         while True:
             create = False
@@ -118,8 +106,7 @@ class SqlConnectionPool:
             if _alive(connection):
                 return connection
 
-            # Dead, and this pool's to replace: give the slot back and go round,
-            # which either finds another idle connection or opens a new one.
+            # Release the dead connection's slot before finding a replacement.
             _close(connection)
             with self._condition:
                 self._physical_count -= 1
@@ -207,8 +194,6 @@ class SqlPoolRegistry:
 
 
 def _alive(connection: Any) -> bool:
-    """Whether this connection still answers: asked as cheaply as possible."""
-
     try:
         cursor = connection.cursor()
         try:

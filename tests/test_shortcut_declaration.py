@@ -702,7 +702,7 @@ def test_a_schema_shortcut_reads_a_table_by_name():
 
     shortcut = SchemaShortcut(schema="Reference")(_Owner())
 
-    with pytest.raises(LoadError, match="reads a table by name"):
+    with pytest.raises(LoadError, match="table name must be a non-empty string"):
         shortcut.table("")
 
 

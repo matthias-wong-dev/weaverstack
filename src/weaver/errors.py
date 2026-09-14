@@ -1,9 +1,4 @@
-"""The single Weaver error hierarchy.
-
-Every error Weaver raises derives from :class:`WeaverError`, including errors
-raised by the CLI adapter. Subclasses are added at the checkpoint that first
-raises them rather than declared in advance.
-"""
+"""The Weaver error hierarchy."""
 
 from __future__ import annotations
 
@@ -31,17 +26,8 @@ class MetadataError(WeaverError):
 class LoadError(WeaverError):
     """Raised when an object cannot be executed or its context is unavailable.
 
-    Three optional pieces of context, each present only where the failure carried
-    it:
-
-    ``result``
-        the load's counts when one was under way, so a caller need not query the
-        reject table to find out how many rows were refused.
-    ``report``
-        the run as far as it got, when orchestration raised: which nodes
-        succeeded, failed, or never started.
-    ``workflow_id``
-        where that run's durable evidence was written.
+    ``result`` carries load counts, ``report`` the partial run and
+    ``workflow_id`` the location of durable evidence when each is available.
     """
 
     def __init__(
@@ -61,12 +47,8 @@ class LoadError(WeaverError):
 class ValidationError(WeaverError):
     """Raised when a Test or Assumption cannot be evaluated.
 
-    Distinct from the validation failing: a Test that found discrepancies did
-    its job and reports rows. This is the other outcome, a key that does not
-    identify rows, two sides that cannot be compared, a missing primitive.
-
-    ``result`` carries the validation's own failed-to-run result where there is
-    one, so the counts need not be asked of the estate.
+    A validation that finds discrepancies reports rows instead. ``result``
+    carries a failed-to-run result when available.
     """
 
     def __init__(self, message: str, *, result: object | None = None) -> None:
@@ -83,13 +65,7 @@ class GraphError(WeaverError):
 
 
 class CatalogueStateError(WeaverError):
-    """Raised when catalogue state does not describe a managed installed estate.
-
-    A Registry row whose item has no Installation row, two rows claiming one
-    logical identity, a TestDictionary row naming a test type nothing runs.
-    Raised where the installed graph is built, so every operation reading that
-    graph fails the same way.
-    """
+    """Raised when catalogue state cannot form a managed installed graph."""
 
 
 class BuildError(WeaverError):

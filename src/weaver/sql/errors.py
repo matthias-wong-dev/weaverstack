@@ -1,8 +1,4 @@
-"""Weaver-facing SQL errors.
-
-Driver exceptions do not escape this package.  The normalised errors retain the
-selected endpoint and chain the original exception for diagnosis.
-"""
+"""SQL errors that retain the endpoint and chain the driver exception."""
 
 from __future__ import annotations
 

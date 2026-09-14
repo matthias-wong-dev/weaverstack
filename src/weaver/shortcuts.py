@@ -1,35 +1,8 @@
-"""Shortcuts, as an author declares them and as a program uses them.
+"""Authored shortcut declarations and their deployed readers.
 
-An item declares its shortcuts once, in ``shortcuts.py`` at the item root::
-
-    from weaver import Shortcut
-
-    Sales__Customer = Shortcut(
-        shortcut_type="table",
-        target_type="logical",
-        target="Lakehouse/Sales/Sales.Customer",
-    )
-
-A build reads that file rather than running it, and deploys a generated module of
-the same name beside the item's programs, so the same names are importable::
-
-    from shortcuts import Sales__Customer
-
-    Sales__Customer(self).dataframe()
-
-What a program reads is the destination item's own table or folder. A shortcut is
-materialised in the item that declares it, so nothing here opens the source item:
-which workspace and which Fabric item it was in was settled when the bundle was
-generated.
-
-A logical shortcut also carries the Weaver document its target named. Data comes
-through the local shortcut; Weaver semantics come from that identity, so a
-logical shortcut answers ``bookmark()`` and a logical Folder shortcut answers the
-three Folder change-history methods. A physical shortcut names a Fabric location,
-and those four are unavailable on one.
-
-OneLake makes a shortcut a read-write window into the item it points at, so a
-write beneath one lands in that item. These objects read and do not write.
+Builds parse an item's authored ``shortcuts.py`` and deploy a module with the
+same symbols. Logical shortcuts retain Weaver metadata; physical shortcuts do
+not. These readers never write through OneLake shortcuts.
 """
 
 from __future__ import annotations
@@ -47,12 +20,7 @@ FOLDER = "folder"
 
 @dataclass(frozen=True)
 class Shortcut:
-    """One declared shortcut, as it is written in ``shortcuts.py``.
-
-    Authored rather than executed: a build parses the file, so this carries the
-    declaration and answers nothing about the estate. The deployed runtime module
-    a program imports is generated from the same declaration.
-    """
+    """A shortcut declaration in an item's authored ``shortcuts.py``."""
 
     shortcut_type: str
     target_type: str
@@ -67,11 +35,11 @@ class Shortcut:
 
 
 class _Bound:
-    """One shortcut, addressed in the item that declares it.
+    """A shortcut addressed in the item that declares it.
 
-    ``source`` is the Weaver document a logical shortcut named, and None for a
-    physical one. It answers what Weaver records about the object on the far
-    side. Reading data uses the local destination and never this.
+    ``source`` identifies the Weaver document behind a logical shortcut and is
+    ``None`` for a physical shortcut. Data is always read from the local
+    destination.
     """
 
     def __init__(self, owner: Any, source: str | None = None) -> None:
@@ -87,20 +55,15 @@ class _Bound:
         return self._owner.lakehouse
 
     def _logical_source(self):
-        """The Weaver document this shortcut names.
-
-        Fails on a physical shortcut, which names a Fabric location. Weaver
-        records nothing about what is there.
-        """
+        """Return the Weaver document named by a logical shortcut."""
 
         from .declaration.model import WeaverDocumentId
 
         if self._source is None:
             raise LoadError(
-                "this shortcut has a physical target, so it names a Fabric "
-                "location and Weaver records nothing about what is there. "
+                "this shortcut has a physical target and no Weaver metadata. "
                 "Declare target_type='logical' to read the source object's "
-                "Weaver metadata through it."
+                "metadata."
             )
         return WeaverDocumentId.parse(self._source)
 
@@ -118,8 +81,6 @@ class _Bound:
 
 
 class _TableReader(_Bound):
-    """One table this item presents, addressed as any other Weaver table is."""
-
     def __init__(
         self, owner: Any, schema: str, name: str, source: str | None = None
     ) -> None:
@@ -128,32 +89,23 @@ class _TableReader(_Bound):
         self._name = name
 
     def dataframe(self):
-        """The rows, read from Delta by path.
-
-        The same :class:`~weaver.lakehouse.Lakehouse` addressing
-        :meth:`weaver.objects.Table.dataframe` uses, and for the same reason: a
-        path needs nothing attached, so the call serves any resolved Lakehouse.
-        """
+        """Read rows by Delta path without relying on an attached Lakehouse."""
 
         return self.spark.read.format("delta").load(
             self.lakehouse.table_path(self._schema, self._name)
         )
 
     def empty_dataframe(self):
-        """This table's shape with no rows, which is an incremental load's no-op.
-
-        Physical, as :meth:`dataframe` is, so a physical shortcut answers it too.
-        """
+        """Return this table's shape with no rows."""
 
         return self.dataframe().limit(0)
 
 
 class _FolderReader(_Bound):
-    """One folder this item presents, addressed as any other Weaver folder is.
+    """A folder presented through a shortcut.
 
-    The change history is read through the local shortcut path, because OneLake
-    presents the source's ``_changes`` directory beneath it. What the logical
-    source supplies is the claim that this folder is a Weaver-managed Folder.
+    Change history is read through the local shortcut path and requires a
+    logical source.
     """
 
     def __init__(
@@ -164,13 +116,9 @@ class _FolderReader(_Bound):
         self._name = name
 
     def path(self):
-        """The folder's location, as Python addresses it."""
-
         return self.lakehouse.folder_path(self._schema, self._name)
 
     def spark_path(self) -> str:
-        """The folder's location, as Spark addresses it."""
-
         return self.lakehouse.folder_spark_path(self._schema, self._name)
 
     def files_since(self, bookmark):
@@ -228,7 +176,7 @@ class _SchemaReader(_Bound):
 
     def table(self, name: str) -> _TableReader:
         if not isinstance(name, str) or not name.strip():
-            raise LoadError("a schema shortcut reads a table by name")
+            raise LoadError("a schema shortcut table name must be a non-empty string")
         return _TableReader(self._owner, self._schema, name)
 
     def __getattr__(self, name: str) -> _TableReader:
@@ -242,7 +190,7 @@ class _SchemaReader(_Bound):
 
 @dataclass(frozen=True)
 class TableShortcut:
-    """A deployed table shortcut. Constructed by the generated module.
+    """A deployed table shortcut.
 
     ``source`` is the Weaver document a logical declaration named, and is absent
     from a physical one.
@@ -258,7 +206,7 @@ class TableShortcut:
 
 @dataclass(frozen=True)
 class FolderShortcut:
-    """A deployed folder shortcut. Constructed by the generated module."""
+    """A deployed folder shortcut."""
 
     schema: str
     object: str
@@ -270,7 +218,7 @@ class FolderShortcut:
 
 @dataclass(frozen=True)
 class SchemaShortcut:
-    """A deployed schema shortcut. Constructed by the generated module."""
+    """A deployed schema shortcut."""
 
     schema: str
 
@@ -289,10 +237,8 @@ _RUNTIME_CLASS = {
 def render_runtime_module(declarations) -> str:
     """The deployed ``shortcuts.py`` for one item's declarations.
 
-    Generated rather than copied, because the authored file describes what to
-    create and a program needs what to read. The destination is where the data
-    is. A logical declaration also carries the Weaver document it named, which
-    is what ``bookmark()`` and the Folder change history are answered from.
+    Logical declarations retain the Weaver document used by ``bookmark()`` and
+    Folder change history.
     """
 
     lines = [

@@ -194,7 +194,7 @@ def test_a_onelake_folder_outside_fabric_says_why_it_cannot_be_reached(monkeypat
 
     lakehouse = Lakehouse(name="Sales_LH", spark_root="abfss://ws@host/lh")
 
-    with pytest.raises(LoadError, match="Fabric notebook utilities"):
+    with pytest.raises(LoadError, match="unavailable outside a Fabric session"):
         lakehouse.folder_path("Sales", "Export")
 
 

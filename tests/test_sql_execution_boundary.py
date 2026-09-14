@@ -242,7 +242,7 @@ def test_call_procedure_reports_a_procedure_that_returned_nothing():
     cursor = MultiSetCursor([([], [])])
     executor, _ = _executor([Connection(cursor)])
 
-    with pytest.raises(SqlExecutionError, match="altered outside Weaver"):
+    with pytest.raises(SqlExecutionError, match="Rebuild its item"):
         executor.call_procedure("[_].[Load Sales.Customer]", outputs=LOAD_OUTPUTS)
 
 

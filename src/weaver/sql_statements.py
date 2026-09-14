@@ -1,8 +1,4 @@
-"""Split SQL text into top-level statements without interpreting a dialect.
-
-The parser identifies statement boundaries while Spark and Warehouse validate
-statement semantics.
-"""
+"""Split SQL into top-level statements without interpreting its dialect."""
 
 from __future__ import annotations
 
@@ -26,12 +22,10 @@ class SqlToken:
 
 @dataclass(frozen=True)
 class SqlStatement:
-    """One top-level statement, as it was written.
+    """A top-level statement with exact source offsets.
 
-    ``text`` excludes the terminating semicolon, since what an engine executes
-    is the statement rather than the separator. ``terminated`` records whether
-    there was one, so a caller can enforce a termination rule without
-    re-splitting.
+    ``text`` excludes its terminating semicolon; ``terminated`` records whether
+    one was present.
     """
 
     text: str
@@ -70,17 +64,11 @@ def parse_statements(sql_text: str) -> tuple[SqlStatement, ...]:
 
 
 def split_statements(sql_text: str) -> tuple[str, ...]:
-    """One body's top-level statements as plain text, separators removed."""
-
     return tuple(statement.text for statement in parse_statements(sql_text))
 
 
 def unterminated(sql_text: str) -> SqlStatement | None:
-    """The statement that ran to the end of the text without a semicolon.
-
-    There can only be one, and it is always the last: everything before it was
-    ended by the separator that started the next.
-    """
+    """Return the final statement when it has no terminating semicolon."""
 
     statements = parse_statements(sql_text)
     if statements and not statements[-1].terminated:
@@ -89,12 +77,7 @@ def unterminated(sql_text: str) -> SqlStatement | None:
 
 
 def strip_terminator(sql_text: str) -> str:
-    """The text with one trailing statement terminator removed, if it has one.
-
-    For callers embedding an authored body into something that runs it as one
-    unit, such as a shape-only build instruction or a view definition, where the
-    separator would be a syntax error.
-    """
+    """Remove one trailing terminator before embedding SQL in another statement."""
 
     stripped = (sql_text or "").strip()
     return stripped[:-1].strip() if stripped.endswith(";") else stripped
@@ -158,8 +141,6 @@ def flatten_with_offsets(sql_text: str) -> list[SqlToken]:
 
 
 def is_only_trivia(sql_text: str) -> bool:
-    """Whether this text is entirely whitespace and comments."""
-
     return all(_is_trivia(token) for token in flatten_with_offsets(sql_text))
 
 

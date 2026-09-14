@@ -1,8 +1,6 @@
-"""The small notebook-facing Weaver interface.
+"""The notebook-facing Weaver API.
 
-Internal workspace, repository, target, storage, SQL, bundle, installer, and
-control-plane composition seams live in their owning modules.  Importing the
-product namespace remains safe without PySpark, Fabric credentials, or the
+Importing this module requires neither PySpark, Fabric credentials nor the
 optional desktop CLI.
 """
 
@@ -62,8 +60,6 @@ from .test_report import ValidationNodeReport, ValidationRunReport
 
 
 def _resolve_version() -> str:
-    """Read the git-derived installed distribution version."""
-
     try:
         from importlib.metadata import version
 

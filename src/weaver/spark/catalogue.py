@@ -1,13 +1,4 @@
-"""Catalogue operations against one Fabric Lakehouse.
-
-Every operation is a statement returning rows, so this needs a way to run Spark
-SQL rather than a session of its own. In a Fabric session that is ``spark.sql``;
-from a desktop it is the Session's Spark SQL capability, and the statements
-cross while the reading stays here.
-
-Each operation names its target in full rather than relying on the attached
-catalogue.
-"""
+"""Spark catalogue operations addressed to one Fabric Lakehouse in full."""
 
 from __future__ import annotations
 
@@ -23,8 +14,8 @@ class SparkCatalogue:
     def __init__(self, spark: Any, destination: FabricSparkTarget) -> None:
         if spark is None:
             raise InstallError(
-                f"a Spark session is needed to reach {destination.item!r}, "
-                "and none was provided"
+                f"no Spark session was provided for Lakehouse {destination.item!r}. "
+                "Provide a Spark session or use SparkCatalogue.over_sql(...)"
             )
         self.spark = spark
         self.destination = destination
@@ -32,13 +23,7 @@ class SparkCatalogue:
 
     @classmethod
     def over_sql(cls, run_sql, destination: FabricSparkTarget) -> "SparkCatalogue":
-        """A catalogue reached by running statements, with no session here.
-
-        ``run_sql(statement)`` returns the statement's rows as dictionaries, as
-        :meth:`weaver.sessions.base.Session.execute_spark_sql` does. Wherever that
-        runs
-        is where the catalogue is.
-        """
+        """Use a callable that returns each Spark SQL statement's rows as mappings."""
 
         catalogue = cls.__new__(cls)
         catalogue.spark = None
@@ -57,13 +42,9 @@ class SparkCatalogue:
     # --- execution ---------------------------------------------------------
 
     def sql(self, statement: str) -> list[dict]:
-        """Run one statement already addressed to this target."""
-
         return self._run(statement)
 
     def rows(self, statement: str) -> list[dict]:
-        """Run one statement already addressed to this destination."""
-
         return self._run(statement)
 
     # --- structure ---------------------------------------------------------
@@ -134,13 +115,7 @@ class SparkCatalogue:
         return tuple(names)
 
     def _absent_as_empty(self, statement: str) -> list[dict]:
-        """Run a listing, reading an absent schema as an empty one.
-
-        A schema that is not there holds nothing, which is the answer an
-        inventory needs, and both workspaces raise for it rather than returning
-        no rows. Everything else propagates: a real failure read as "nothing
-        here" tells the next build that nothing is managed.
-        """
+        """Read an absent schema as empty and propagate every other failure."""
 
         try:
             return self._run(statement)
@@ -150,8 +125,6 @@ class SparkCatalogue:
             raise
 
     def _present(self, statement: str) -> bool:
-        """Whether a ``DESCRIBE`` finds something, rather than reporting absence."""
-
         try:
             self._run(statement)
         except Exception as exception:
@@ -162,8 +135,6 @@ class SparkCatalogue:
 
 
 def _session_runner(spark: Any):
-    """Statements against a live session, answering rows as dictionaries."""
-
     def run(statement: str) -> list[dict]:
         result = spark.sql(statement)
         collect = getattr(result, "collect", None)
@@ -174,19 +145,15 @@ def _session_runner(spark: Any):
     return run
 
 
-#: Spark's error classes for something that is not there. A missing Lakehouse
-#: reports the schema one, which is what we want: an inventory of somewhere that
-#: is not there is empty either way.
+#: Spark reports a missing Lakehouse as a missing schema.
 _ABSENT = frozenset({"SCHEMA_NOT_FOUND", "TABLE_OR_VIEW_NOT_FOUND"})
 
 
 def is_absent(exception: Exception) -> bool:
-    """Whether this means "not created yet" rather than "went wrong".
+    """Distinguish absence from other Spark failures.
 
-    Keyed on Spark's error class where there is one, so a reworded message
-    cannot turn an infrastructure failure into an empty inventory. A
-    statement that crossed a boundary arrives as a message rather than a Spark
-    exception, so the class name is matched in the text as well.
+    Prefer the Spark error class. Cross-session failures carry only its text, so
+    class names are recognised there as well.
     """
 
     error_class = getattr(exception, "getErrorClass", None)
