@@ -1,7 +1,6 @@
-"""Resolving Fabric workspace items by name.
+"""Discover and resolve Fabric workspace items by name and type.
 
-Item names are unique within a workspace, which is the whole reason level three
-needs no configuration. This is where that assumption meets the API.
+Fabric item identity is workspace, type and name. A bare name can be ambiguous.
 """
 
 from __future__ import annotations
@@ -17,21 +16,16 @@ ENVIRONMENT = "Environment"
 NOTEBOOK = "Notebook"
 SQL_ENDPOINT = "SQLEndpoint"
 
-#: A Lakehouse grows a SQLEndpoint sibling of the same name, a little after it
-#: is created. That is a facet of the Lakehouse rather than an item anyone
-#: addresses, so it is ignored when a name is resolved without a type, item
-#: names are unique per type, not across types.
+# A Lakehouse's generated SQLEndpoint is not a separately addressed item.
 FACET_TYPES = frozenset({SQL_ENDPOINT})
 
 
 class ItemNotFoundError(CommandError):
-    """Raised when an item lookup returns no match."""
+    pass
 
 
 @dataclass(frozen=True)
 class WorkspaceItem:
-    """One Fabric workspace as the REST API returns it: an id and a name."""
-
     id: str
     name: str
 
@@ -41,8 +35,6 @@ class WorkspaceItem:
 
 @dataclass(frozen=True)
 class Item:
-    """One workspace item, a Lakehouse, a Warehouse, an Environment."""
-
     id: str
     name: str
     type: str
@@ -55,8 +47,6 @@ class Item:
 def find_workspace(
     name: str, *, client: FabricClient | None = None, workspaces=None
 ) -> WorkspaceItem:
-    """The workspace with this name."""
-
     client = client or FabricClient()
     visible = list(client.paged("workspaces")) if workspaces is None else workspaces
     matches = [
@@ -100,7 +90,6 @@ def find_item(
     item_type: str | None = None,
     client: FabricClient | None = None,
 ) -> Item:
-    """The item with this name, which is unique within a workspace."""
 
     matches = [
         item
@@ -125,17 +114,10 @@ def find_item(
 def create_lakehouse(
     workspace: WorkspaceItem, name: str, *, client: FabricClient | None = None
 ) -> Item:
-    """Create a **schema-enabled** Lakehouse. Returns the existing one if the name is taken.
+    """Create a schema-enabled Lakehouse or return the existing typed match.
 
-    Schemas are not optional and so are not a parameter. Weaver's catalogue lives
-    in a schema called ``_``, and a Lakehouse created without schema support
-    cannot hold one, so a Lakehouse made without ``enableSchemas`` is
-    unusable, and a destination made without it puts managed tables somewhere
-    other than ``Tables/<schema>/<table>``, which is the layout every resolved
-    location assumes. There is no Weaver use for a Lakehouse that has neither.
-
-    Fabric decides this only at creation, so getting it wrong means deleting the
-    item and making it again.
+    Weaver requires ``Tables/<schema>/<table>`` layout. Fabric sets schema support
+    only when the Lakehouse is created.
     """
 
     client = client or FabricClient()
@@ -158,7 +140,6 @@ def create_lakehouse(
             + (response.json().get("message") or response.text.strip()[:200])
         )
     if response.status_code == 202:
-        # Long-running create: the item exists once the operation settles.
         return _await_item(workspace, name, LAKEHOUSE, client=client)
     body = response.json()
     return Item(id=body["id"], name=name, type=LAKEHOUSE, workspace_id=workspace.id)
@@ -167,12 +148,7 @@ def create_lakehouse(
 def create_warehouse(
     workspace: WorkspaceItem, name: str, *, client: FabricClient | None = None
 ) -> Item:
-    """Create a Warehouse, returning an existing typed match under that name.
-
-    A general provisioning primitive. `weaver initialise` creates a project's
-    catalogue and destination Warehouses through it, and the Fabric test estate
-    fills in an item a tenant has not got yet.
-    """
+    """Create a Warehouse or return the existing typed match."""
 
     client = client or FabricClient()
     try:

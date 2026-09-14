@@ -1,9 +1,7 @@
-"""Turning a Fabric capacity on and off.
+"""Control Fabric capacity through the Azure CLI.
 
-Capacity is billed while it runs, so this is the first and last thing a session
-touches. It goes through the Azure CLI rather than a REST call because capacity
-lives in ARM rather than in the Fabric API, and ``az`` already holds the
-subscription context.
+Capacity lives in Azure Resource Manager rather than the Fabric REST API. The
+Azure CLI supplies the subscription context.
 """
 
 from __future__ import annotations
@@ -21,18 +19,16 @@ CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
 _AZ_VERB = {"status": "show", "resume": "resume", "suspend": "suspend"}
 
-#: Environment fallback for the subscription, when az has more than one.
+# Subscription fallback when the Azure CLI has more than one.
 SUBSCRIPTION_ENV = "FABRIC_SUBSCRIPTION_ID"
 
 
 class CapacityError(WeaverError):
-    """Raised when a capacity action cannot be run."""
+    pass
 
 
 @dataclass(frozen=True)
 class CapacityAction:
-    """The outcome of one capacity action."""
-
     action: str
     capacity: str
     state: str | None
@@ -58,12 +54,10 @@ def capacity_command(
     subscription_id: str | None = None,
     extra_args: Sequence[str] = (),
 ) -> list[str]:
-    """The Azure CLI command for one capacity action, without running it."""
-
     verb = _AZ_VERB.get(action)
     if verb is None:
         raise CapacityError(
-            f"Capacity action {action!r} is not supported. Choose from: "
+            f"Unsupported capacity action {action!r}. Choose from: "
             + ", ".join(CAPACITY_ACTIONS)
         )
     if not resource_group:
@@ -95,11 +89,9 @@ def run_capacity_action(
     subscription_id: str | None = None,
     extra_args: Sequence[str] = (),
 ) -> CapacityAction:
-    """Run a capacity action and report the resulting state."""
-
     if shutil.which("az") is None:
         raise CapacityError(
-            "Azure CLI is required for capacity commands. See "
+            "Capacity commands require the Azure CLI. Install it from "
             "https://learn.microsoft.com/cli/azure/install-azure-cli"
         )
 
@@ -113,7 +105,7 @@ def run_capacity_action(
     completed = subprocess.run(command, capture_output=True, text=True, check=False)
     if completed.returncode != 0:
         raise CapacityError(
-            f"az {action} failed for {capacity_name!r}: "
+            f"Azure CLI {action} failed for Fabric capacity {capacity_name!r}: "
             + (completed.stderr.strip() or completed.stdout.strip() or "no output")
         )
 

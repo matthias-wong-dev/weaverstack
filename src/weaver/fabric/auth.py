@@ -1,28 +1,9 @@
 """Azure tokens for Fabric, OneLake and SQL.
 
-Core does **not** decide which credential to use. It accepts an injected
-credential and, absent one, falls back to the library default,
-``DefaultAzureCredential``, without pinning the chain. Choosing a specific
-identity is a caller's policy, not the core's.
-
-That policy matters in practice: ``DefaultAzureCredential`` walks a chain and
-does not always settle on the identity you are signed in as, so on a machine
-where ``az`` works a OneLake write can still fail
-``401 Access token validation failed``. ``azure-identity`` 1.23 honours
-``AZURE_TOKEN_CREDENTIALS`` to pin the chain, and :func:`prefer_cli_credential`
-sets it to ``AzureCliCredential``. The Fabric test infrastructure invokes that.
-Core never sets it as a side effect of asking for a token.
-
-A pinned chain names one credential type and cannot express a fallback, so the
-desktop CLI installs an object instead: :func:`desktop_credential` answers a
-service principal where the standard ``AZURE_CLIENT_ID``,
-``AZURE_CLIENT_SECRET`` and ``AZURE_TENANT_ID`` variables name one, the Azure
-CLI where it works and Microsoft browser sign-in where it does not, and
-:func:`use_credential` makes it this process's default. That reaches every
-client, including the ones an operation constructs for itself.
-
-``weaver ... --non-interactive`` installs :func:`unattended_credential`
-instead, which is the same chain without browser sign-in.
+Credential selection belongs to the caller. Core accepts an injected credential
+and otherwise uses ``DefaultAzureCredential`` without pinning its chain. The
+desktop CLI installs a service principal, Azure CLI and browser sign-in chain;
+``--non-interactive`` omits browser sign-in.
 """
 
 from __future__ import annotations
@@ -32,33 +13,25 @@ from pathlib import Path
 
 from ..errors import ConfigError
 
-#: Scopes. Generic technical values, not environment-specific.
 FABRIC_SCOPE = "https://api.fabric.microsoft.com/.default"
 STORAGE_SCOPE = "https://storage.azure.com/.default"
 SQL_SCOPE = "https://database.windows.net/.default"
 
-#: Honoured by azure-identity >= 1.23 to pin DefaultAzureCredential's chain.
+# Honoured by azure-identity >= 1.23.
 CREDENTIAL_ENV = "AZURE_TOKEN_CREDENTIALS"
 DEFAULT_CREDENTIAL = "AzureCliCredential"
 
-#: Where browser sign-in keeps its tokens between commands. Without a name on
-#: disk every Weaver command would open a browser window of its own.
+# The secure token cache shared between commands.
 TOKEN_CACHE_NAME = "weaverstack"
 
-#: This user's Weaver directory, outside any repository.
 WEAVER_DIRECTORY = ".weaver"
 
-#: Identity metadata for the cached account. No token, no secret.
+# Identity metadata only; tokens remain in the secure cache.
 AUTHENTICATION_RECORD_FILE = "authentication-record.json"
 
 
 def prefer_cli_credential() -> str:
-    """Pin the credential chain to the Azure CLI, unless already chosen.
-
-    Policy, so a caller invokes it: the Fabric test infrastructure does, before
-    its suite. Core never calls it, so importing or using the core imposes no
-    credential choice.
-    """
+    """Pin ``DefaultAzureCredential`` to the Azure CLI unless already pinned."""
 
     existing = os.environ.get(CREDENTIAL_ENV)
     if existing:
@@ -68,18 +41,7 @@ def prefer_cli_credential() -> str:
 
 
 def checked_credential(supplied):
-    """One injected credential, checked for the shape Azure's protocol names.
-
-    Structural rather than an ``isinstance`` against ``TokenCredential``: the
-    protocol is what matters and a caller may pass a wrapper, a fake, or a
-    credential from a library Weaver does not import. What every one of them
-    must have is a callable ``get_token``.
-
-    Checked where it is supplied rather than where it is first used, because
-    a Session acquires its token lazily, so a wrong object handed to
-    ``weaver.session()`` would otherwise surface much later, during whichever
-    operation happened to reach Fabric first.
-    """
+    """Validate an injected credential structurally before lazy token acquisition."""
 
     if supplied is None:
         return None
@@ -92,18 +54,11 @@ def checked_credential(supplied):
     return supplied
 
 
-#: The credential a caller installed for this process, or None for the library
-#: default. Core never writes this; :func:`use_credential` is caller policy.
 _installed = None
 
 
 def use_credential(supplied):
-    """Make one credential this process's default. Caller policy, not core's.
-
-    An injected credential reaches only what receives it, and an operation
-    constructs clients of its own, so a desktop policy that has to hold
-    everywhere is installed here. Passing ``None`` restores the library default.
-    """
+    """Install a process-wide default; ``None`` restores the library default."""
 
     global _installed
     _installed = checked_credential(supplied)
@@ -111,8 +66,6 @@ def use_credential(supplied):
 
 
 def credential():
-    """The installed credential, or the library default where none was installed."""
-
     if _installed is not None:
         return _installed
 
@@ -121,38 +74,16 @@ def credential():
     return DefaultAzureCredential()
 
 
-#: The desktop chain, built at most once for this process.
 _desktop_chain = None
 
-#: The unattended chain, built at most once for this process.
 _unattended_chain = None
 
 
 def desktop_credential():
-    """The principal where it is configured, the Azure CLI where it can issue a
-    token, and browser sign-in where it cannot.
+    """Return the process-wide service principal, Azure CLI and browser chain.
 
-    An unattended process signs in as a service principal through the standard
-    ``AZURE_CLIENT_ID``, ``AZURE_TENANT_ID`` and ``AZURE_CLIENT_SECRET``
-    variables, or a certificate through ``AZURE_CLIENT_CERTIFICATE_PATH`` in
-    place of the secret; what :class:`azure.identity.EnvironmentCredential`
-    reads. Naming a client, tenant and one credential puts the principal at the
-    front of this chain. Naming none of them leaves the chain unchanged. A half
-    configured principal is reported as unavailable, and the chain moves on to
-    the interactive half.
-
-    A desktop user who has run ``az login`` keeps that identity. One who has not
-    is sent to Microsoft sign-in in a browser once. See :class:`BrowserSignIn`
-    for what a later command reuses.
-
-    ``ChainedTokenCredential`` tries the Azure CLI inside the token acquisition a
-    command was going to make anyway, moves on when it reports itself
-    unavailable, and remembers which one answered. The Azure CLI is therefore
-    asked once per process, and no command pays a round trip of its own to
-    settle the policy.
-
-    Built once per process, because the browser credential holds the token cache
-    and a second one would sign in again.
+    ``EnvironmentCredential`` reads the standard service-principal variables.
+    Browser sign-in reuses the platform's secure token cache when available.
     """
 
     global _desktop_chain
@@ -177,14 +108,7 @@ def desktop_credential():
 
 
 def unattended_credential():
-    """The service principal where it is configured, then the Azure CLI.
-
-    The chain a ``--non-interactive`` command signs in with. Browser sign-in
-    waits for a person at a browser window, so it is left out: a command that
-    reaches the end of this chain fails with what each credential reported.
-
-    Built once per process, as :func:`desktop_credential` is.
-    """
+    """Return the process-wide service principal and Azure CLI chain."""
 
     global _unattended_chain
     if _unattended_chain is not None:
@@ -202,14 +126,6 @@ def unattended_credential():
 
 
 def _principal_configured() -> bool:
-    """Whether the standard variables name a complete service principal.
-
-    A principal names its client and tenant, and holds either a secret or a
-    certificate. The certificate variable is read wherever
-    :class:`azure.identity.EnvironmentCredential` reads it; this check only
-    decides whether a principal of either shape is named at all.
-    """
-
     return bool(
         os.environ.get("AZURE_CLIENT_ID")
         and os.environ.get("AZURE_TENANT_ID")
@@ -221,25 +137,12 @@ def _principal_configured() -> bool:
 
 
 def _principal_credential():
-    """The service principal where the standard variables name one.
-
-    Built lazily inside :class:`_PrincipalCredential`, because
-    ``ChainedTokenCredential`` asks for every member at construction and an
-    unconfigured principal is a token-time "unavailable", not a failure to
-    build the chain.
-
-    A principal names its client and tenant and holds either a secret or a
-    certificate; :class:`azure.identity.EnvironmentCredential` serves both from
-    the same variables. The configuration is read where Azure's library reads
-    it.
-    """
+    """Defer service-principal configuration until the chain requests a token."""
 
     return _PrincipalCredential()
 
 
 class _PrincipalCredential:
-    """The configured service principal, or a reported absence."""
-
     def __init__(self) -> None:
         self._credential = None
 
@@ -289,8 +192,6 @@ class DiagnosticCredential:
 
 
 def _browser_credential():
-    """Microsoft sign-in in a browser, remembered where the machine can keep it."""
-
     return BrowserSignIn()
 
 
@@ -323,8 +224,6 @@ def _load_authentication_record():
 
 
 def _save_authentication_record(record) -> None:
-    """Replace the record, through a temporary file and :func:`os.replace`."""
-
     path = _authentication_record_path()
     temporary = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     try:
@@ -344,8 +243,7 @@ def _save_authentication_record(record) -> None:
 
 
 def _restrict(path: Path) -> None:
-    """Owner-only, where the platform has such a mode. Windows has not."""
-
+    # Windows does not expose this mode through chmod.
     try:
         os.chmod(path, 0o600)
     except (OSError, NotImplementedError):
@@ -355,21 +253,9 @@ def _restrict(path: Path) -> None:
 class BrowserSignIn:
     """Microsoft sign-in in a browser, reused across commands.
 
-    Cross-process reuse needs both halves:
-
-    .. code-block:: text
-
-        the encrypted token cache   the refresh token, in the platform's store
-        the AuthenticationRecord    which account that token is for
-
-    ``azure-identity`` writes the first and never the second, so Weaver keeps
-    the record under :func:`_authentication_record_path` and constructs the
-    credential with it. ``disable_automatic_authentication`` puts the transition
-    into the browser here, which is what makes the record capturable.
-
-    The cache is a Keychain item on macOS, libsecret on Linux, DPAPI on Windows,
-    and is built when the first token is asked for. A machine with none of them
-    signs in per command. An unencrypted cache is never asked for.
+    Cross-process reuse needs both the platform's encrypted token cache and its
+    ``AuthenticationRecord``. Weaver stores the record, but never requests an
+    unencrypted token cache. Without secure storage, each command signs in.
     """
 
     def __init__(self) -> None:
@@ -404,12 +290,7 @@ class BrowserSignIn:
         return self._through_the_cache(authenticate)
 
     def _through_the_cache(self, use):
-        """One call on the credential, dropping the cache where the platform
-        reports it has nowhere to keep a token.
-
-        ``get_token`` and ``authenticate`` both reach the lazily built cache, so
-        either can be the call that finds it missing.
-        """
+        """Retry without caching only when secure token storage is unavailable."""
 
         from azure.core.exceptions import ClientAuthenticationError
         from azure.identity import CredentialUnavailableError
@@ -447,8 +328,6 @@ class BrowserSignIn:
 
 
 def _authenticate_arguments(required, kwargs) -> dict:
-    """Scopes and claims from the refused request, tenant and CAE from kwargs."""
-
     arguments = {"scopes": list(required.scopes)}
     claims = getattr(required, "claims", None)
     if claims:
@@ -477,22 +356,7 @@ _EXTENSIONS = "msal_extensions"
 
 
 def _is_cache_unavailable(exc: BaseException) -> bool:
-    """Whether this failure is the token cache rather than the sign-in.
-
-    Only the recognised ways a platform says it has nowhere secure to keep a
-    token. Anything else is a defect somewhere else and propagates, because
-    signing in a second time would neither fix it nor say so honestly.
-
-    The cases, in the order a machine meets them:
-
-    .. code-block:: text
-
-        msal_extensions.PersistenceError   Keychain, DPAPI or libsecret refused
-        ValueError naming the option       Linux with no usable libsecret
-        NotImplementedError                a platform azure-identity has no store for
-        RuntimeError naming the platform   the same, from msal_extensions
-        ImportError for msal_extensions    the library holding the token is absent
-    """
+    """Recognise secure-storage failures without hiding sign-in failures."""
 
     if isinstance(exc, NotImplementedError):
         return True
@@ -511,8 +375,6 @@ def _is_cache_unavailable(exc: BaseException) -> bool:
 
 
 def _is_persistence_error(exc: BaseException) -> bool:
-    """Whether msal_extensions raised one of its own storage failures."""
-
     try:
         from msal_extensions.persistence import PersistenceError
     except ImportError:  # pragma: no cover - msal_extensions ships with the extra
@@ -521,8 +383,6 @@ def _is_persistence_error(exc: BaseException) -> bool:
 
 
 def _interactive_browser(*, cached: bool, record=None):
-    """The library's browser credential, with or without a persistent cache."""
-
     from azure.identity import (
         InteractiveBrowserCredential,
         TokenCachePersistenceOptions,
@@ -537,7 +397,6 @@ def _interactive_browser(*, cached: bool, record=None):
     )
 
 
-#: What has already been said this process. There is more than one message.
 _warned: set = set()
 
 
@@ -551,11 +410,7 @@ def _warn_once(message: str) -> None:
 
 
 def get_token(scope: str, cred=None) -> str:
-    """An access token for one scope, from an injected credential or the default.
-
-    Answers the string and drops the expiry, which suits a one-shot command and
-    nothing that outlives one. Anything long-lived needs :class:`TokenProvider`.
-    """
+    """Return a token string for one-shot use, without expiry metadata."""
 
     return (cred or credential()).get_token(scope).token
 
@@ -568,16 +423,9 @@ TOKEN_REFRESH_MARGIN_SECONDS = 300.0
 class TokenProvider:
     """A token for one scope, renewed shortly before it expires.
 
-    Holding the token string is a bug that only appears in long runs.
-    ``AzureCliCredential`` serves from the Azure CLI's own cache, so an arriving
-    token may already be most of the way through its life: the usable budget is
-    not the nominal lifetime, and a snapshotted token starts answering ``401``
-    part-way through a run.
-
-    Refetching per call is also correct and is what the SQL path does, but there
-    a token is fetched per connection. A REST client fetches per request and a
-    credential shells out to ``az``, so the expiry is kept and the token renewed
-    only when it is close.
+    A REST client calls this per request. Caching avoids invoking the Azure CLI
+    each time while expiry tracking prevents a long run from retaining a stale
+    token.
     """
 
     def __init__(
@@ -620,13 +468,7 @@ class TokenProvider:
 
 
 def token_source(token=None, *, scope: str, cred=None):
-    """Normalise what a caller supplied into a zero-argument token source.
-
-    ``None`` builds a renewing :class:`TokenProvider`. A **string** is honoured
-    exactly as given, so the caller owns it and its lifetime, which is how a Fabric
-    session passes on the identity it was handed. A **callable** is used as-is,
-    so a caller with its own refresh keeps it.
-    """
+    """Return a renewing provider, a caller's callable or its fixed token string."""
 
     if token is None:
         return TokenProvider(scope, cred)
