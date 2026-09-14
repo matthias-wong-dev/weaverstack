@@ -22,29 +22,24 @@ from .onboarding import (
 )
 from .onboarding.environment import environment_directory
 
-#: The names a caller may leave to the defaults.
 DEFAULT_CATALOGUE = "Catalogue"
 DEFAULT_ENVIRONMENT = "Weaver"
 
-#: What this run did to one Fabric item. The CLI turns these into display text.
 CREATED = "created"
 EXISTING = "existing"
 PLANNED = "planned"
 UNCHANGED = "unchanged"
 
-#: What each requested item is to the project.
 CATALOGUE_ROLE = "Catalogue"
 ENVIRONMENT_ROLE = "Environment"
 
 
 class InitialiseError(WeaverError):
-    """Raised when a project cannot be set up as it was asked for."""
+    pass
 
 
 @dataclass(frozen=True)
 class FabricItemOutcome:
-    """One requested Fabric item and its creation or reuse outcome."""
-
     role: str
     name: str
     status: str
@@ -61,8 +56,6 @@ class FabricItemOutcome:
 
 @dataclass(frozen=True)
 class ExampleOutcome:
-    """Whether Sales example source was generated."""
-
     generated: bool = False
 
     def to_mapping(self) -> dict[str, Any]:
@@ -71,8 +64,6 @@ class ExampleOutcome:
 
 @dataclass(frozen=True)
 class InitialiseReport:
-    """What one initialise run set up, for a caller to print or assert on."""
-
     project_folder: str
     workspace: str
     resources: tuple[FabricItemOutcome, ...] = ()
@@ -84,8 +75,6 @@ class InitialiseReport:
 
     @property
     def created(self) -> tuple[str, ...]:
-        """Every Fabric item this run created."""
-
         return tuple(
             f"{outcome.role}/{outcome.name}"
             for outcome in self.resources
@@ -98,13 +87,9 @@ class InitialiseReport:
 
     @property
     def next_commands(self) -> tuple[str, ...]:
-        """What to run next, from the project's own directory."""
-
         return ("weaver build", "weaver load", "weaver test")
 
     def to_mapping(self) -> dict[str, Any]:
-        """A plain structure, for a CLI to serialise. The CLI owns no semantics."""
-
         return {
             "project_folder": self.project_folder,
             "workspace": self.workspace,
@@ -117,9 +102,6 @@ class InitialiseReport:
             "dry_run": self.dry_run,
             "next_commands": list(self.next_commands),
         }
-
-
-# --- the operation -------------------------------------------------------------
 
 
 def initialise(
@@ -137,10 +119,10 @@ def initialise(
     session=None,
     client=None,
 ) -> InitialiseReport:
-    """Create the project and requested Fabric items after destination validation.
+    """Validate and create a project and its requested Fabric items.
 
-    ``example`` adds source files. ``publish_environment`` publishes the local
-    Environment definition after the project has been written.
+    ``example`` adds source files. ``publish_environment`` publishes the
+    Environment after writing the project.
     """
 
     if project_folder is None:
@@ -169,9 +151,8 @@ def initialise(
     addressed = _bare(request)
     resources = []
     with use_or_create_session(session, workspace=addressed) as opened:
-        with opened.task("Setting up your Weaver project", request.workspace):
+        with opened.task("Setting up the Weaver project", request.workspace):
             with opened.step("Checking the workspace", request.workspace):
-                # The Session's client carries its identity and records REST telemetry.
                 rest = (
                     client if client is not None else opened.resolver(addressed).client
                 )
@@ -199,7 +180,7 @@ def initialise(
                         }
                     )
                 elif (destination / directory).is_dir():
-                    # Preserve adopted packages and binary custom libraries on a rerun.
+                    # Reruns preserve adopted packages and binary custom libraries.
                     for path in (destination / directory).rglob("*"):
                         if path.is_file():
                             files[path.relative_to(destination).as_posix()] = (
@@ -280,20 +261,12 @@ def initialise(
 
 
 def _bare(request: ProjectRequest):
-    """The workspace this run addresses, before the project describes it.
-
-    Enough to open a Session on and to reach Fabric's control plane through.
-    What the project declares is read back from the file it writes.
-    """
-
     from .workspaces import Workspace
 
     return Workspace(workspace=request.workspace)
 
 
 def _workspace_name(workspace: str | None, *, session) -> str:
-    """The Fabric workspace this run addresses, named or discovered."""
-
     if workspace is not None:
         return str(workspace)
     inherited = getattr(session, "workspace", None)
@@ -305,23 +278,12 @@ def _workspace_name(workspace: str | None, *, session) -> str:
     if discovered:
         return discovered
     raise InitialiseError(
-        "A Fabric workspace could not be found.\n"
-        "\n"
-        "If you're running from your desktop, provide the workspace name:\n"
-        "\n"
-        '  weaver initialise my-project --workspace "My Fabric Workspace"\n'
-        "\n"
-        "If you're running inside a Fabric notebook, the current workspace\n"
-        "will be used automatically."
+        "A Fabric workspace is required. Pass --workspace when running outside "
+        "Fabric; a Fabric notebook uses its current workspace."
     )
 
 
-# --- the files -----------------------------------------------------------------
-
-
 def _generated_files(request: ProjectRequest) -> dict[str, str]:
-    """Every file this request writes, as project-relative path to text."""
-
     files = dict(project_files(request))
     files.update(environment_definition_files(request.environment))
     if request.example:
@@ -348,7 +310,8 @@ def _parse_generated(files, request: ProjectRequest, *, destination=None):
                 destination / WORKSPACE_CONFIG_FILE
             ).exists():
                 raise InitialiseError(
-                    "This folder contains files that conflict with a Weaver project. Choose a new project folder."
+                    "This folder contains pyproject.toml but no "
+                    f"{WORKSPACE_CONFIG_FILE}. Choose a new project folder."
                 )
             shutil.copytree(
                 destination,
@@ -363,15 +326,11 @@ def _parse_generated(files, request: ProjectRequest, *, destination=None):
                 read_environment_definition(root / directory)
             check(root)
         except WeaverError as exc:
-            raise InitialiseError(
-                f"The generated project did not parse: {exc}"
-            ) from exc
+            raise InitialiseError(f"The generated project is invalid: {exc}") from exc
     return configured
 
 
 def _refuse_overwrites(destination: Path, files: dict[str, str]) -> None:
-    """Refuse a destination where setup would replace existing content."""
-
     edited = sorted(
         relative
         for relative, text in files.items()
@@ -383,14 +342,12 @@ def _refuse_overwrites(destination: Path, files: dict[str, str]) -> None:
         return
     listed = "\n".join(f"  {relative}" for relative in edited)
     raise InitialiseError(
-        f"Initialise would overwrite files in {destination}:\n{listed}\n"
+        f"Project setup would overwrite files in {destination}:\n{listed}\n"
         "Choose another project folder."
     )
 
 
 def _write(destination: Path, files: dict[str, str]) -> None:
-    """Write every generated file, creating the directories they sit in."""
-
     for relative, text in sorted(files.items()):
         path = destination / relative
         if path.resolve() != destination.resolve() / relative or path.is_symlink():
@@ -401,16 +358,10 @@ def _write(destination: Path, files: dict[str, str]) -> None:
             path.write_bytes(content)
 
 
-# --- the Fabric Environment ----------------------------------------------------
-
-
-#: No Environment of that name in the workspace.
 MISSING = "missing"
 
 
 def available_environments(workspace: str, *, client=None) -> tuple[str, ...]:
-    """Every Fabric Environment in a workspace, by name, for a caller to offer."""
-
     from .fabric.resources import ENVIRONMENT, find_workspace, list_items
 
     physical = find_workspace(workspace, client=client)
@@ -422,21 +373,14 @@ def available_environments(workspace: str, *, client=None) -> tuple[str, ...]:
     )
 
 
-# --- the items -----------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class _Requested:
-    """One requested item, as the role it fills and the Fabric type it must be."""
-
     role: str
     name: str
     item_type: str
 
 
 def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
-    """The project's requested catalogue, targets and Environment."""
-
     from .fabric.resources import ENVIRONMENT
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import WAREHOUSE as WAREHOUSE_ITEM
@@ -451,7 +395,7 @@ def _requested(request: ProjectRequest) -> tuple[_Requested, ...]:
 
 
 def _read_the_workspace(request: ProjectRequest, *, client):
-    """Read requested item identities from one workspace listing."""
+    """Read all requested item identities from one workspace listing."""
 
     from .fabric.resources import (
         FACET_TYPES,
@@ -476,10 +420,8 @@ def _read_the_workspace(request: ProjectRequest, *, client):
             other = ", ".join(sorted(types))
             raise InitialiseError(
                 f"'{wanted.name}' already exists in '{request.workspace}' as "
-                f"{_article(other)} {other}.\n"
-                "\n"
-                f"Choose another name for the {wanted.role}, or name an item\n"
-                "that is already there."
+                f"{_article(other)} {other}. Choose another name for the "
+                f"{wanted.role}, or use an existing {wanted.item_type}."
             )
         found[wanted.role] = bool(types)
 
@@ -497,11 +439,7 @@ def _read_the_workspace(request: ProjectRequest, *, client):
 def _planned(
     request: ProjectRequest, found: dict[str, bool]
 ) -> tuple[FabricItemOutcome, ...]:
-    """What a run would do to each requested item, having changed nothing.
-
-    Reported in the order a real run reports them, so what a dry run shows and
-    what the run itself shows are the same list.
-    """
+    """Report dry-run items in the same order as a real run."""
 
     return _in_role_order(
         FabricItemOutcome(
@@ -516,8 +454,6 @@ def _planned(
 def _create_missing(
     request: ProjectRequest, found: dict[str, bool], *, physical, session, client
 ) -> tuple[FabricItemOutcome, ...]:
-    """Create missing catalogue and target items, and reuse existing ones."""
-
     from .fabric.resources import LAKEHOUSE as LAKEHOUSE_ITEM
     from .fabric.resources import create_lakehouse, create_warehouse
 
@@ -540,7 +476,6 @@ def _create_missing(
     return tuple(made)
 
 
-#: The order the resources are reported in, which is the order they are set up.
 _ROLE_ORDER = (CATALOGUE_ROLE, ENVIRONMENT_ROLE, LAKEHOUSE, WAREHOUSE)
 
 
@@ -566,8 +501,6 @@ def _check_destination_paths(destination, files):
 
 
 def available_items(workspace, kind, *, client=None):
-    """List display names of one item type for project setup."""
-
     from .fabric.resources import find_workspace, list_items
 
     return tuple(
@@ -597,5 +530,5 @@ def _creation_error(role, name, exc):
         )
     return InitialiseError(
         f"The {role} {name!r} could not be created: {exc}. "
-        "Rerun initialise after resolving the error; existing items are reused."
+        "Fix the error and rerun initialise; existing items will be reused."
     )

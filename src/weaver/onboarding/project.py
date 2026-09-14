@@ -1,10 +1,8 @@
-"""The configuration and folders a new Weaver project starts with.
+"""Generate the configuration and folders for a new Weaver project.
 
-Two files carry the project: `workspace-config.yml` names the Fabric workspace,
-the Environment, the catalogue Warehouse and the item bindings, and `workflow.yml`
-names the build, load and test sequence. Both are read back by the parsers that
-read a user's own project, `weaver.config.load_workspace` and
-`weaver_cli.workflow.load_workflow`.
+``workspace-config.yml`` names the Fabric workspace, Environment, catalogue
+Warehouse and item bindings. ``workflow.yml`` names the command sequences. The
+generated files use the same parsers as authored projects.
 
 The catalogue Warehouse holds Weaver's `_` schema and no authored objects, so it
 gets no folder here. Item folders are empty when no example was asked for, and a
@@ -19,22 +17,17 @@ from ..declaration.model import LAKEHOUSE, WAREHOUSE
 from ..errors import CommandError
 from ..targets import validate_name
 
-#: The two files a generated project is described by.
 WORKSPACE_CONFIG_FILE = "workspace-config.yml"
 WORKFLOW_FILE = "workflow.yml"
 
-#: The workflow a generated project starts with. Entries take the workspace
-#: the workflow resolved, so none of them repeats it.
+# Entries inherit the workspace resolved for the workflow.
 WORKFLOW_NAME = "full"
 
-#: Kept so an empty item folder survives a commit.
 KEEP_FILE = ".gitkeep"
 
 
 @dataclass(frozen=True)
 class ProjectRequest:
-    """The names one initialise run was given, after defaults are applied."""
-
     workspace: str
     catalogue: str
     environment: str
@@ -43,14 +36,6 @@ class ProjectRequest:
     example: bool = False
 
     def __post_init__(self) -> None:
-        """Validate every supplied name before a path is built from any of them.
-
-        These names become Fabric items and directories under the destination,
-        so they go through the identity rules first. A name carrying a separator
-        would otherwise reach the filesystem before the generated project was
-        parsed and refused.
-        """
-
         for field in ("workspace", "catalogue", "environment"):
             object.__setattr__(
                 self, field, validate_name(getattr(self, field), what=field)
@@ -75,8 +60,6 @@ class ProjectRequest:
 
     @property
     def catalogue_reference(self) -> str:
-        """The catalogue as workspace configuration writes it, typed."""
-
         return f"{WAREHOUSE}/{self.catalogue}"
 
     @property
@@ -92,8 +75,6 @@ class ProjectRequest:
 
 
 def project_files(request: ProjectRequest) -> dict[str, str]:
-    """Every project file this request produces, as relative path to text."""
-
     files = {
         WORKSPACE_CONFIG_FILE: _workspace_config(request),
         WORKFLOW_FILE: _workflow(),
@@ -108,8 +89,6 @@ def project_files(request: ProjectRequest) -> dict[str, str]:
 
 
 def _workspace_config(request: ProjectRequest) -> str:
-    """The project's one workspace configuration file."""
-
     lines = [
         f"workspace: {_scalar(request.workspace)}",
         f"environment: {_scalar(request.environment)}",
@@ -125,8 +104,6 @@ def _workspace_config(request: ProjectRequest) -> str:
 
 
 def _workflow() -> str:
-    """The build, load and test sequence a new project runs as one command."""
-
     return """workflows:
   full:
     - build
@@ -145,21 +122,19 @@ def _workflow() -> str:
 
 
 def _readme(request: ProjectRequest) -> str:
-    """Local instructions for operating the generated project."""
-
-    return f"""# Welcome to Weaver
+    return f"""# Weaver project
 
 This project describes data objects in the Microsoft Fabric workspace
 `{request.workspace}`.
 
-## The important files
+## Project files
 
 `workspace-config.yml` names the workspace, catalogue Warehouse, Environment
 and the physical target for each project item.
 
-`Environment/{request.environment}.Environment` defines the Python runtime.
-Add packages to `Libraries/PublicLibraries/environment.yml` there. Fabric
-compute settings and custom libraries are kept beside it.
+`Environment/{request.environment}.Environment` defines the Python runtime. Add
+packages to its `Libraries/PublicLibraries/environment.yml`. Fabric compute
+settings and custom libraries are kept in the same Environment definition.
 
 `workflow.yml` defines repeatable workflows: `full`, `load-only`, `build-only`
 and `wipe-all`. Wipe removes all user objects from the configured targets and
@@ -181,9 +156,8 @@ weaver workflow full
 ```
 
 Build makes Fabric structures match the project. Load runs the data work.
-A build can be run independently.
 
-## The Catalogue
+## The Weaver catalogue
 
 Warehouse/{request.catalogue} holds Weaver's build, load and test state in its
 `_` schema. The first build creates those catalogue tables.
@@ -209,9 +183,9 @@ Commands inside the session reuse Fabric connections and the Spark session.
 
 ## Try the example
 
-Choose the Sales example during initialisation to include its source files.
-Build, load and test run separately with `weaver workflow full`.
-To explore the starter example later, initialise another project folder.
+Choose the Sales example during initialisation to include its source files. Run
+build, load and test together with `weaver workflow full`. To try the example
+later, initialise a new project folder with the example.
 
 ## Check connectivity
 
@@ -225,7 +199,7 @@ Doctor checks authentication, REST, OneLake, TDS and Spark in the workspace.
 
 
 def _scalar(value: str) -> str:
-    """One YAML scalar, quoted where the plain form would not read back."""
+    """Quote a YAML scalar only when needed for a lossless read."""
 
     import yaml
 
@@ -233,7 +207,7 @@ def _scalar(value: str) -> str:
 
 
 def validate_fabric_name(name: str, kind: str) -> str:
-    """Validate known Fabric item-name constraints before provisioning."""
+    """Validate known Fabric item-name constraints before creation."""
 
     import re
 

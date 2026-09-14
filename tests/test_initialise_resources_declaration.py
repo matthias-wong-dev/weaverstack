@@ -277,7 +277,7 @@ def test_preflight_has_progress_before_any_item_creation(tmp_path, fabric, monke
 
         def run(*args, **kwargs):
             assert [frame.name for frame in fabric.session.frames] == [
-                "Setting up your Weaver project",
+                "Setting up the Weaver project",
                 step,
             ]
             assert not fabric.created

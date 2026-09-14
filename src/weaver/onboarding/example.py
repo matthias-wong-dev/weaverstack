@@ -1,10 +1,9 @@
-"""A small Sales example, generated into whichever items the project chose.
+"""Generate a Sales example for the project's chosen items.
 
-Three shapes, from the same parts. A Lakehouse holds a folder of exported
-customers, a Delta table built from it and an Assumption about that table. A
-Warehouse holds reference regions, a table joining customers to them and an
+A Lakehouse receives an export folder, a Delta table and an Assumption. A
+Warehouse receives reference regions, a joined customer table and an
 Assumption. With both, the Warehouse reads the Lakehouse's customers through a
-logical shortcut, and seeds no customers of its own.
+logical shortcut and does not seed another copy.
 
 `Sales` is the business schema and is implied by the objects themselves, so no
 schema document is written. The Fabric item names are the ones the user chose.
@@ -15,14 +14,7 @@ from __future__ import annotations
 from ..declaration.model import LAKEHOUSE, WAREHOUSE
 from .project import ProjectRequest
 
-#: The schema every generated object belongs to.
 SCHEMA = "Sales"
-
-
-#: Generated documents carry no `Revision notes:`. The key records what changed
-#: and when; a generated file has no history yet, and the same request has to
-#: produce the same bytes on any day, which is what lets a rerun converge.
-
 
 _CUSTOMERS_CSV = """\
 Customer id,Customer name,Region code
@@ -45,13 +37,11 @@ File key: "*.csv"
 Incremental: false
 
 Notes: |
-  A real deployment fetches the export here, over SFTP or from an API. This one
-  writes the file itself, so the project loads with nothing set up beside it.
+  This example writes its own export, so it loads without an external source.
 """
 
 from weaver import Folder
 
-#: The export this example stands in for.
 CUSTOMERS = """\\
 {csv}"""
 
@@ -83,8 +73,7 @@ Schema:
   Region code: string
 
 Notes: |
-  Read from the export folder, so the table can be rebuilt from files that were
-  kept.
+  The retained export files can rebuild this table.
 """
 
 from Files.Sales__Customers import Sales__Customers
@@ -112,8 +101,8 @@ Assumption ID: Sales.CustomerValid
 Description: Every customer carries a name and a region.
 
 Notes: |
-  An Assumption states something about the data on its own, and the rows it
-  returns are what contradict the statement. Holding looks like an empty result.
+  An Assumption returns rows that contradict its statement. An empty result
+  means the Assumption holds.
 """
 
 from Tables.Sales__Customer import Sales__Customer
@@ -123,8 +112,8 @@ from weaver import Assumption
 
 class Sales__CustomerValid(Assumption):
     def read(self):
-        # The dependency is the import, constructed from `self` so it resolves
-        # against the Lakehouse this Assumption was pointed at.
+        # Constructing the imported dependency from `self` preserves the
+        # Lakehouse selected for this Assumption.
         customers = Sales__Customer(self).dataframe()
         return customers.where(
             "`Customer name` is null or `Region code` is null"
@@ -202,8 +191,7 @@ Schema:
   Region name: varchar(100)
 
 Notes: |
-  Weaver reads the dependencies out of the query, so this table loads after both
-  the customers and the regions it selects from.
+  Query dependencies make this table load after Customer and Region.
 */
 
 select c.[Customer id]
@@ -232,19 +220,14 @@ select [Customer id]
 """
 
 _SHORTCUTS = """\
-# A Lakehouse table, made addressable inside the Warehouse.
-#
-# The Warehouse cannot read Delta files; it reads the Lakehouse's SQL endpoint.
-# Declaring the shortcut lets a Warehouse object select from a Lakehouse object
-# while Weaver resolves the logical names to physical Fabric items.
+# A Warehouse reads a Lakehouse table through its SQL endpoint, not its Delta
+# files. The logical shortcut keeps physical Fabric item names out of the query.
 logical:
   {warehouse_item}/{schema}.Customer: {lakehouse_item}/Tables/{schema}.Customer
 """
 
 
 def example_files(request: ProjectRequest) -> dict[str, str]:
-    """The Sales example for this project, as relative path to text."""
-
     files: dict[str, str] = {}
     if request.lakehouse:
         item = f"{LAKEHOUSE}/{request.lakehouse}"
@@ -259,8 +242,7 @@ def example_files(request: ProjectRequest) -> dict[str, str]:
             _WAREHOUSE_ASSUMPTION
         )
         if request.lakehouse:
-            # The customers come from the Lakehouse through a shortcut, so the
-            # Warehouse does not seed a second copy of them.
+            # The shortcut replaces a second seeded copy of the customers.
             files[f"{item}/shortcuts.yml"] = _SHORTCUTS.format(
                 warehouse_item=item,
                 lakehouse_item=f"{LAKEHOUSE}/{request.lakehouse}",
