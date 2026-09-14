@@ -1,19 +1,8 @@
-"""The installed managed estate, as one logical graph.
+"""The installed managed estate projected from an in-memory catalogue.
 
-Derived from a :class:`weaver.catalogue.state.Catalogue` already in memory:
-``_.Registry`` and ``_.Installation`` say what is installed and where,
-``_.TestDictionary`` says what validates it, and ``_.Dependency`` and
-``_.Shortcut`` say what reads what. Nothing here reads a repository, queries
-Fabric, or opens a physical target.
-
-The one place the persisted dependency representation is interpreted. A stored
-``dependency_reference`` is what its author wrote, being a Python import or a
-``Schema.Object``, and resolving it needs the item's shortcuts and the Registry
-alongside. Load planning, test planning and health read the resolved graph.
-
-Topology is :class:`weaver.graph.Graph`. This module owns the installed node
-metadata and the selections planning makes; ordering, layers, ancestry and
-subgraphs are the graph's.
+This is the one place that interprets persisted dependency references. Topology
+belongs to :class:`weaver.graph.Graph`; this module owns installed node metadata
+and selection.
 """
 
 from __future__ import annotations
@@ -62,37 +51,25 @@ from .targets import (
     PhysicalTargetRef,
 )
 
-#: What an installed load is, in the vocabulary dispatch branches on. Three
-#: installed artefacts. They are strings rather than a class hierarchy because
-#: they cross into a plan file and a task log, where the word itself is what
-#: appears.
-#:
-#: There is no kind for a Spark-SQL-authored table. It installs as a deployed
-#: ``SparkSqlTable`` module and dispatches as ``python_table``. The authoring
-#: language is recorded in the catalogue, not in the kind.
+#: Stable dispatch values persisted in plans and task logs. A Spark-SQL-authored
+#: table installs as a module and therefore dispatches as ``python_table``.
 WAREHOUSE_PROCEDURE = "warehouse_procedure"
 PYTHON_TABLE = "python_table"
 PYTHON_FOLDER = "python_folder"
 
-#: Which physical target kind an item type installs into. An ``Installation``
-#: row names the target, and the item type says what kind of target that is.
+#: Item type determines the kind of its named physical target.
 _TARGET_KIND_FOR_ITEM = {LAKEHOUSE: LAKEHOUSE_TARGET, WAREHOUSE: WAREHOUSE_TARGET}
 
-#: How ``TestDictionary.test_type`` spells each kind, and back. The catalogue's
-#: vocabulary is lower case and a declaration's kind is title case, so the
-#: translation is pinned in one place rather than guessed at each reader.
+#: The catalogue uses lower case; declarations use title case.
 KIND_FOR_TEST_TYPE = {"test": TEST, "assumption": ASSUMPTION}
 TEST_TYPE_FOR_KIND = {kind: name for name, kind in KIND_FOR_TEST_TYPE.items()}
 
-#: Which role a validation kind carries in the Registry.
 _ROLE_FOR_VALIDATION_KIND = {TEST: ROLE_TEST, ASSUMPTION: ROLE_ASSUMPTION}
 
-#: What separates schema from object in a Python module name. A module name
-#: cannot carry a dot, so ``Sales.Seed`` is spelled ``Sales__Seed``.
+#: A module spells ``Sales.Seed`` as ``Sales__Seed``.
 _PYTHON_ID_SEPARATOR = "__"
 
-#: The one directory beneath an item that holds runtime source rather than
-#: declarations. An import of it names a helper, never a Weaver object.
+#: Imports beneath this directory name helpers, not Weaver objects.
 LIB = "lib"
 
 
@@ -101,39 +78,29 @@ LIB = "lib"
 
 @dataclass(frozen=True)
 class InstalledNode:
-    """One managed logical node: what it is, where it lives, what runs it.
+    """A managed logical identity and its separate runnable artefact.
 
-    ``identity`` is the logical identity a caller names and the graph keys on.
-    ``artefact`` is the separate installed thing that runs it, being a load
-    procedure, a deployed module or a compiled validation. The two are kept
-    apart because a Test has an artefact and no Registry row of its own.
+    Validations have runnable artefacts but do not materialise objects under
+    their logical identities.
     """
 
     identity: WeaverDocumentId | WeaverSchemaId
     target: PhysicalTargetRef
     role: str
-    #: What Registry records this object as: table, view, folder or schema.
     #: ``None`` for a validation, which materialises nothing under its own ID.
     object_type: str | None = None
-    #: Where this node's runnable artefact belongs, derived from the identity
-    #: and the role as the build derived it. ``None`` for a View or a schema
-    #: shortcut, which run nothing.
+    #: ``None`` for a View or schema shortcut, which runs nothing.
     artefact: WeaverDocumentId | None = None
-    #: What dispatch calls the artefact: a load primitive kind for a loadable,
-    #: the Test or Assumption kind for a validation.
+    #: Dispatch kind for a loadable, or Test/Assumption for a validation.
     artefact_kind: str | None = None
-    #: What Registry records the artefact as, or ``None`` when Registry has no
-    #: row for it, which is a missing installation.
+    #: ``None`` when the runnable artefact is not installed.
     artefact_type: str | None = None
-    #: A Test's declared key, and its description, as ``_.TestDictionary`` kept
-    #: them. Empty for anything else.
+    #: A validation's declared key and description; empty for other nodes.
     primary_key: tuple[str, ...] = ()
     description: str | None = None
-    #: Whether the object is loaded once rather than refreshed, as its Table or
-    #: Folder dictionary row declared it. Carried here so nothing downstream
-    #: goes back to a dictionary row to ask.
+    #: True for an object loaded once.
     is_static: bool = False
-    #: Whose data this object reads. ``None`` where it holds its own rows.
+    #: Source ownership when another target supplies this object's data.
     mirror: InstalledMirror | None = None
 
     @property
@@ -150,68 +117,46 @@ class InstalledNode:
 
     @property
     def expects_artefact(self) -> bool:
-        """Whether this node's role names a runnable artefact at all."""
-
         return self.artefact is not None
 
     @property
     def is_installed(self) -> bool:
-        """Whether Registry certifies the artefact this node names."""
-
         return self.artefact_type is not None
 
     @property
     def is_mirrored(self) -> bool:
-        """Whether this node's data is supplied by another physical target."""
-
         return self.mirror is not None
 
     @property
     def effective_object_type(self) -> str | None:
-        """What physically stands at this node's address, borrowed or not."""
-
         return self.mirror.physical_type if self.mirror else self.object_type
 
     @property
     def can_load(self) -> bool:
         """Whether Weaver may run a load against this node in this estate.
 
-        Execution, not lifecycle. A mirrored node holds an installed load
-        primitive and answers ``False``, because the rows it stands over belong
-        to the target it mirrors. What carries Load state is a separate
-        question; see :func:`weaver.health.participates_in_load_state`.
+        A mirrored node can retain an installed load primitive, but the source
+        target owns its data. Load-state participation is a separate concern.
         """
 
         return self.role == ROLE_DATA and self.is_installed and not self.is_mirrored
 
     @property
     def load_name(self) -> str | None:
-        """``Schema.Object``, as a request selecting one node spells it.
-
-        Two installed objects may share it: a Folder and a table of one
-        ``Schema.Object`` are distinct identities in one Lakehouse. Graph
-        keying uses :attr:`load_key`, which keeps them apart.
-        """
+        """The request spelling, which may identify both a Folder and a table."""
 
         object_id = getattr(self.identity, "object_id", None)
         return None if object_id is None else object_id.qualified
 
     @property
     def load_key(self) -> str:
-        """This node's identity within its physical target.
-
-        The catalogue's own spelling, so a Lakehouse object carries its area:
-        ``Tables/Sales.Thing`` and ``Files/Sales.Thing`` are the two a Lakehouse
-        owning both keeps apart, and a Warehouse relation names none.
-        """
+        """The target-local identity, including a Lakehouse object's area."""
 
         schema, name = catalogue_columns(self.identity)
         return f"{schema}.{name}"
 
     @property
     def physical(self) -> PhysicalObjectRef:
-        """Where this node's own object sits, typed as what stands there."""
-
         schema, name = catalogue_columns(self.identity)
         return PhysicalObjectRef(
             target_id=self.target.name,
@@ -225,8 +170,6 @@ class InstalledNode:
         )
 
     def artefact_physical(self, artefact_type: str) -> PhysicalObjectRef:
-        """Where this node's runnable artefact sits in its physical target."""
-
         schema, name = catalogue_columns(self.artefact)
         return PhysicalObjectRef(
             target_id=self.target.name,
@@ -240,7 +183,7 @@ class InstalledNode:
 
 @dataclass(frozen=True)
 class InstalledEdge:
-    """One resolved managed edge: ``upstream`` is read by ``downstream``.
+    """A resolved read from ``downstream`` to ``upstream``.
 
     ``reference`` is the dependency exactly as its author wrote it, and
     ``through`` is the shortcut destination the read passed through, when it
@@ -251,39 +194,30 @@ class InstalledEdge:
     downstream: WeaverDocumentId | WeaverSchemaId
     reference: str = ""
     through: WeaverDocumentId | None = None
-    #: Whether this is a shortcut's own edge rather than a declared read. A
-    #: shortcut destination is materialised from its source, so it is ordered
-    #: behind it, and nothing declared the edge.
+    #: Shortcut destinations are materialised after their sources even though
+    #: nothing declares that read.
     is_shortcut: bool = False
 
 
 @dataclass(frozen=True)
 class InstalledShortcut:
-    """One shortcut a consuming item installed, as the catalogue kept it.
+    """An installed shortcut.
 
-    Both target types, because the declaration is what an import of
-    ``shortcuts`` names. A logical shortcut carries the managed ``source`` it
-    points at. A physical one points at an item Weaver does not manage, so its
-    source is ``None`` and it produces no edge.
-
-    ``shortcut_type`` is the destination's shape, being ``table``, ``view``,
-    ``folder`` or ``schema``. It is what separates a Folder destination from a
-    table of the same ``Schema.Object``.
+    A logical shortcut carries its managed source. A physical shortcut has no
+    source node. ``shortcut_type`` distinguishes destinations that share a
+    ``Schema.Object`` identity across Lakehouse areas.
     """
 
     destination: WeaverDocumentId | WeaverSchemaId
     source: WeaverDocumentId | None = None
     shortcut_type: str = ""
     target_type: str = ""
-    #: The item the target names, typed. A logical target's is a Weaver item and
-    #: is bound; a physical one's is the Fabric item itself.
+    #: A logical target names a Weaver item; a physical target names a Fabric item.
     target_item: WeaverItemId | None = None
-    #: The schema or path the target sits in, as ``_.Shortcut`` recorded it, and
-    #: the object under it where the target names one.
+    #: Target schema or path, and the optional object beneath it.
     target_schema: str = ""
     target_object: str | None = None
-    #: The workspace a physical target is in. ``None`` for a logical target,
-    #: which is bound, and for a physical one in this workspace.
+    #: ``None`` for logical targets and physical targets in this workspace.
     target_workspace: str | None = None
 
     @property
@@ -292,11 +226,7 @@ class InstalledShortcut:
 
     @property
     def symbol(self) -> str:
-        """The name a program imports this shortcut under.
-
-        ``Sales__Customer`` for a table, view or folder, and ``Reference`` for a
-        schema, which presents a namespace and names no object.
-        """
+        """The imported name, preserving schema shortcuts as namespaces."""
 
         if isinstance(self.destination, WeaverSchemaId):
             return self.destination.schema
@@ -309,12 +239,7 @@ class InstalledShortcut:
 
 @dataclass(frozen=True)
 class InstalledDag:
-    """The installed managed estate: its nodes, its edges and their topology.
-
-    Immutable, complete and deterministic. Every managed logical node the
-    catalogue records is here, whether or not any operation selects it, so a
-    filtered view is a subgraph of it.
-    """
+    """The complete, immutable and deterministic installed managed estate."""
 
     nodes: tuple[InstalledNode, ...]
     edges: tuple[InstalledEdge, ...]
@@ -323,31 +248,21 @@ class InstalledDag:
         default_factory=dict
     )
     shortcuts: tuple[InstalledShortcut, ...] = ()
-    #: Physical addresses two logical objects both claim, by the target they are
-    #: in. Recorded rather than raised: an estate accumulates Registry rows from
-    #: every item ever bound to a target, so a stale duplicate claim can outlive
-    #: its binding, and refusing here would stop a load of an unrelated target.
+    #: Conflicting physical addresses by target. Retained so a conflict does not
+    #: stop operations on unrelated targets.
     ambiguous: Mapping[PhysicalTargetRef, tuple[str, ...]] = field(default_factory=dict)
-    #: Registry rows whose artefact role makes them runnable rather than data.
-    #: Held so a caller can ask what an artefact identity is registered as.
+    #: Runnable artefact identities and their installed types.
     artefacts: Mapping[WeaverDocumentId, str] = field(default_factory=dict)
-    #: Reads that name a physical object directly, by the node that declared
-    #: them. A three-part reference names something outside the managed estate,
-    #: so it is no edge, and an operation reports it rather than ordering it.
+    #: Direct physical reads are reported but do not create managed edges.
     external_references: Mapping[WeaverDocumentId, tuple[str, ...]] = field(
         default_factory=dict
     )
-    #: Reads that name nothing installed, by the node that declared them, as the
-    #: message each would raise. Recorded rather than raised for the reason
-    #: :attr:`ambiguous` is: one item's dangling read must not stop an operation
-    #: on an unrelated target.
+    #: Unresolved reads by consumer. Deferred so unrelated targets remain usable.
     unresolved: Mapping[WeaverDocumentId, tuple[str, ...]] = field(default_factory=dict)
 
     # --- lookup ---------------------------------------------------------------
 
     def unresolved_for(self, node) -> tuple[str, ...]:
-        """This node's declared reads that name nothing installed."""
-
         return self.unresolved.get(getattr(node, "identity", node), ())
 
     @cached_property
@@ -356,11 +271,7 @@ class InstalledDag:
 
     @cached_property
     def _reads(self) -> Mapping[str, tuple[InstalledEdge, ...]]:
-        """The declared reads into each node, indexed once.
-
-        A shortcut edge is left out: a shortcut destination is materialised from
-        its source rather than reading it.
-        """
+        """Declared reads indexed by consumer; shortcut ordering is excluded."""
 
         found: dict[str, list[InstalledEdge]] = {}
         for edge in self.edges:
@@ -372,17 +283,14 @@ class InstalledDag:
         )
 
     def reads(self, node) -> tuple[InstalledEdge, ...]:
-        """The declared reads into this node, in resolution order."""
-
         return self._reads.get(str(node), ())
 
     def node(self, identity) -> InstalledNode:
-        """One node by identity or node id, or a refusal naming what is missing."""
-
         node = self.by_id.get(str(identity))
         if node is None:
             raise CatalogueStateError(
-                f"{identity} is not a node of the installed graph"
+                f"{identity} is not installed in this catalogue. Check the name or "
+                "build its item."
             )
         return node
 
@@ -406,35 +314,26 @@ class InstalledDag:
         target = self.installations.get(item)
         if target is None:
             raise CatalogueStateError(
-                f"{item} has no installation row in the catalogue"
+                f"The catalogue does not identify a target for {item}. "
+                f"Build {item} again."
             )
         return target
 
     # --- navigation -----------------------------------------------------------
 
     def parents(self, node) -> tuple[InstalledNode, ...]:
-        """What this node reads directly."""
-
         return self._nodes_for(self.graph.upstream_of(str(node)))
 
     def children(self, node) -> tuple[InstalledNode, ...]:
-        """What reads this node directly."""
-
         return self._nodes_for(self.graph.downstream_of(str(node)))
 
     def ancestors(self, node) -> tuple[InstalledNode, ...]:
-        """Everything reachable upstream, in dependency order."""
-
         return self._nodes_for(self.graph.ancestors(str(node)))
 
     def descendants(self, node) -> tuple[InstalledNode, ...]:
-        """Everything reachable downstream, in dependency order."""
-
         return self._nodes_for(self.graph.descendants(str(node)))
 
     def order(self) -> tuple[InstalledNode, ...]:
-        """Every node, upstream before downstream, ties broken by identity."""
-
         return self._nodes_for(self.graph.order())
 
     def _nodes_for(self, node_ids: Iterable[str]) -> tuple[InstalledNode, ...]:
@@ -454,7 +353,7 @@ class InstalledDag:
         validation: bool | None = None,
         load_names: Sequence[str] | None = None,
     ) -> tuple[InstalledNode, ...]:
-        """The nodes matching every filter given, in identity order.
+        """Nodes matching every filter, in identity order.
 
         Filters combine: a node satisfies all of them or none of it is selected.
         ``load_names`` folds case, as a request naming ``Schema.Object`` does.
@@ -491,25 +390,15 @@ class InstalledDag:
         return tuple(selected)
 
     def loadables(self, **filters) -> tuple[InstalledNode, ...]:
-        """The nodes a load may run against here, in identity order.
-
-        A mirrored node holds an installed load primitive and is not among
-        them. See :attr:`InstalledNode.can_load`.
-        """
-
         return self.select(can_load=True, **filters)
 
     def validations(self, **filters) -> tuple[InstalledNode, ...]:
-        """The Test and Assumption nodes, in identity order."""
-
         return self.select(validation=True, **filters)
 
     def nodes_for_item(self, item: WeaverItemId) -> tuple[InstalledNode, ...]:
         return self.select(items=(item,))
 
     def subgraph(self, selection, *, with_ancestors: bool = False) -> Graph:
-        """The topology over a selection, optionally widened to its ancestry."""
-
         return self.graph.subgraph(
             [str(each) for each in selection], with_ancestors=with_ancestors
         )
@@ -522,8 +411,6 @@ class InstalledDag:
 
 
 def installed_dag(catalogue: Catalogue) -> InstalledDag:
-    """The installed managed graph one catalogue describes."""
-
     return _build(catalogue)
 
 
@@ -533,16 +420,10 @@ def installed_dag(catalogue: Catalogue) -> InstalledDag:
 def primitive_candidates(
     identity: WeaverDocumentId, object_type: str
 ) -> tuple[tuple[str, WeaverDocumentId], ...]:
-    """Where an object's installed load primitive would be, and what kind it is.
+    """Candidate load artefact identities and dispatch kinds.
 
-    Derived from identity and object type alone, which is all a build has when
-    it decides where to put one: the naming is the contract. Candidates rather
-    than an answer, because one case has two: a Warehouse table's load is a
-    procedure and a Lakehouse object's is a deployed module.
-
-    A Lakehouse table has one candidate whatever it was authored in: a Spark SQL
-    table compiles to a ``SparkSqlTable`` module under the module's own name, so
-    it and a hand-written ``Sales__OrderSummary.py`` install to one path.
+    Naming depends only on identity and object type. Lakehouse tables always use
+    a deployed module, including tables authored in Spark SQL.
     """
 
     # A schema identity names a namespace, so there is no object to load and no
@@ -563,13 +444,6 @@ def primitive_candidates(
 
 
 def _deployed_file(item: WeaverItemId, relative: str) -> WeaverDocumentId:
-    """A file in the deployed runtime tree, as the Registry stores it.
-
-    The area is part of the path, because the runtime tree reproduces the
-    authored one: a Lakehouse Table module lands under ``Tables`` and a Folder
-    module under ``Files``.
-    """
-
     path = f"{LOAD_ROOT}/{relative}"
     directory, _, name = path.rpartition("/")
     return WeaverDocumentId(
@@ -581,8 +455,6 @@ def _deployed_file(item: WeaverItemId, relative: str) -> WeaverDocumentId:
 
 
 def _build(catalogue: Catalogue) -> InstalledDag:
-    """Read every node, resolve every edge, then hand the topology to Graph."""
-
     installations = installed_targets(catalogue)
     data, artefacts, ambiguous = _registered(catalogue, installations)
     validations = _validations(catalogue, installations)
@@ -591,8 +463,8 @@ def _build(catalogue: Catalogue) -> InstalledDag:
         prior = nodes.get(node.node_id)
         if prior is not None:
             raise CatalogueStateError(
-                f"{node.node_id} is both a {prior.role} and a {node.role} in the "
-                "catalogue, so it names two installed nodes at one identity"
+                f"The catalogue describes {node.node_id} as both {prior.role} and "
+                f"{node.role}, so its installed identity is ambiguous."
             )
         nodes[node.node_id] = node
 
@@ -630,13 +502,7 @@ def _build(catalogue: Catalogue) -> InstalledDag:
 def installed_targets(
     catalogue: Catalogue,
 ) -> dict[WeaverItemId, PhysicalTargetRef]:
-    """Each logical item's bound physical target, keyed for reverse lookup.
-
-    Several logical items may name one physical target, which is not an error: a
-    request names a target and means everything installed there, answerable so
-    long as no two objects claim one address. :func:`_registered` asks that
-    narrower question per object.
-    """
+    """Physical targets by logical item; several items may share one target."""
 
     bound: dict[WeaverItemId, PhysicalTargetRef] = {}
     for item, tables in catalogue.rows.items():
@@ -644,21 +510,20 @@ def installed_targets(
             name = str(row.get("target_name") or "")
             if not name:
                 raise CatalogueStateError(
-                    f"the installation row for {item} names no physical target"
+                    f"The catalogue does not identify a target for {item}. "
+                    f"Build {item} again."
                 )
             kind = _TARGET_KIND_FOR_ITEM.get(item.item_type)
             if kind is None:
                 raise CatalogueStateError(
-                    f"{item} has item type {item.item_type!r}, which names no "
-                    "physical target kind"
+                    f"The catalogue contains unsupported item type "
+                    f"{item.item_type!r} for {item}."
                 )
             bound[item] = PhysicalTargetRef(kind=kind, name=name)
     return bound
 
 
 def _registered(catalogue: Catalogue, installations):
-    """The data nodes, the runtime artefacts, and the addresses two both claim."""
-
     data: dict[WeaverDocumentId, InstalledNode] = {}
     artefacts: dict[WeaverDocumentId, str] = {}
     physical_owner: dict[tuple, WeaverDocumentId] = {}
@@ -668,17 +533,13 @@ def _registered(catalogue: Catalogue, installations):
     ):
         target = installations.get(identity.item)
         if target is None:
-            # Registry without Installation: the estate says an object is
-            # certified but not where it lives. Refused rather than skipped,
-            # because skipping it would silently shrink the graph.
+            # Missing ownership cannot be skipped because the graph must be complete.
             raise CatalogueStateError(
-                f"{identity} is registered but {identity.item} has no "
-                "installation row, so its physical target is unknown"
+                f"The catalogue contains {identity}, but does not identify a target "
+                f"for {identity.item}. Build {identity.item} again."
             )
-        # What an installed artefact is for, from the Registry row that said so,
-        # and never from its physical shape. A Test compiles to a file or a
-        # procedure exactly as a load does, so shape inference would walk
-        # validation straight into the load graph.
+        # Role, not physical shape, separates runnable artefacts from data. Tests
+        # and loads can compile to the same shape.
         if document.is_runtime_artefact:
             artefacts[identity] = document.object_type
             continue
@@ -706,9 +567,7 @@ def _registered(catalogue: Catalogue, installations):
             physical_owner[key] = identity
         data[identity] = node
 
-    # The load artefact and the declared behaviour are attached second. Both
-    # live in rows of their own, and all of them have to be read before either
-    # can be joined to the Registry row it belongs to.
+    # Join declarations and artefacts only after all installed identities are known.
     static = _static_declarations(catalogue)
     for identity, node in list(data.items()):
         if node.role != ROLE_DATA:
@@ -731,12 +590,6 @@ def _registered(catalogue: Catalogue, installations):
 
 
 def _static_declarations(catalogue: Catalogue) -> frozenset[WeaverDocumentId]:
-    """The objects declared Static, from the two dictionaries that declare it.
-
-    A Static object is loaded once rather than refreshed. Read here, where the
-    node is assembled, so nothing above the graph reads a dictionary row.
-    """
-
     found = set()
     for table in (TABLE_DICTIONARY, FOLDER_DICTIONARY):
         for row in catalogue.table_rows(table):
@@ -756,13 +609,9 @@ def _static_declarations(catalogue: Catalogue) -> frozenset[WeaverDocumentId]:
 
 
 def _validations(catalogue: Catalogue, installations):
-    """The Test and Assumption nodes ``_.TestDictionary`` declares.
+    """Validation nodes joined to artefacts by the build's identity rule.
 
-    A validation has no Registry row under its logical ID, so its installed
-    primitive is found by computing the artefact identity with
-    :func:`weaver.etl.validation_artefact_id`, the function the build claimed it
-    with. A row whose computed artefact is absent from Registry is a missing
-    installation, kept as a node that is not installed.
+    A missing artefact remains a declared but uninstalled node.
     """
 
     found: dict[WeaverDocumentId, InstalledNode] = {}
@@ -779,8 +628,8 @@ def _validations(catalogue: Catalogue, installations):
             kind = _validation_kind(row, logical)
             if target is None:
                 raise CatalogueStateError(
-                    f"{logical} is declared but {item} has no installation "
-                    "row, so its physical target is unknown"
+                    f"The catalogue contains {logical}, but does not identify a "
+                    f"target for {item}. Build {item} again."
                 )
             artefact = validation_artefact_id(item, kind, logical.object_id)
             registered = catalogue.registered.get(artefact)
@@ -804,18 +653,13 @@ def _validation_kind(row: Mapping[str, object], logical: WeaverDocumentId) -> st
     except KeyError:
         expected = ", ".join(sorted(KIND_FOR_TEST_TYPE))
         raise CatalogueStateError(
-            f"{logical} has unsupported test_type {test_type!r}; expected one of "
-            f"{expected}"
+            f"The catalogue records unsupported validation kind {test_type!r} for "
+            f"{logical}; expected one of {expected}. Build {logical.item} again."
         ) from None
 
 
 def installed_shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
-    """Every shortcut declaration the catalogue holds, by the item that made it.
-
-    Both target types. A logical shortcut carries the managed source it points
-    at. A physical one names an item outside the estate, so it carries no
-    source, and an import of it is an external read.
-    """
+    """Installed shortcuts, including managed and external sources."""
 
     found = []
     for item, tables in catalogue.rows.items():
@@ -858,16 +702,10 @@ def installed_shortcuts(catalogue: Catalogue) -> tuple[InstalledShortcut, ...]:
 
 
 def stored_identity(item: WeaverItemId, schema: str, name: str) -> WeaverDocumentId:
-    """One stored ``schema_name``/``object_name`` pair back as an object identity.
+    """Project stored catalogue columns back into an object identity.
 
-    The area the stored schema names, and the relational schema under it. What
-    names none is a Warehouse relation, which sits in no area.
-
-    An object identity, because that is what the tables keyed this way hold:
-    Registry, Bookmark, LoadStatus and LoadStatistic record what an item
-    materialises. ``_.TestStatus`` and ``_.TestDictionary`` hold validations, and
-    are read through :meth:`WeaverDocumentId.validation`. ``_.Dependency`` holds
-    both, and resolves the two against the nodes it has.
+    The stored schema may include a Lakehouse area; Warehouse relations do not.
+    Validation identities use a separate projection.
     """
 
     area, relational = stored_area(schema)
@@ -875,14 +713,7 @@ def stored_identity(item: WeaverItemId, schema: str, name: str) -> WeaverDocumen
 
 
 def _shortcut_edges(shortcuts, nodes) -> tuple[InstalledEdge, ...]:
-    """Each logical shortcut's own edge, from its source to its destination.
-
-    A shortcut destination is materialised after the object it points at, so it
-    is ordered behind it whether or not anything reads it yet. A destination
-    Registry does not certify is not a node, and contributes no edge. A physical
-    shortcut points outside the estate, so there is nothing here to order it
-    against.
-    """
+    """Order installed logical shortcut destinations after their sources."""
 
     return tuple(
         InstalledEdge(
@@ -899,23 +730,15 @@ def _shortcut_edges(shortcuts, nodes) -> tuple[InstalledEdge, ...]:
 
 @dataclass(frozen=True)
 class _DependencyRow:
-    """One ``_.Dependency`` row, joined to the node that declared it."""
-
     consumer: WeaverDocumentId
     reference: str
 
 
 def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
-    """Every dependency row whose declaring object is a node of this graph.
+    """Dependencies whose consumers are installed nodes.
 
-    A row whose declaring object is neither registered nor a declared validation
-    describes something declared and not installed, so it contributes no edge:
-    the graph is of what is there.
-
-    ``_.Dependency`` is the one table that holds both an object's rows and a
-    validation's. An object names its area and a validation names none, so the
-    stored schema usually settles it; where it does not, the nodes do, because
-    the graph holds one of the two and not the other.
+    Object and validation dependencies share one stored shape. Area usually
+    distinguishes them; otherwise membership in ``nodes`` does.
     """
 
     found = []
@@ -943,29 +766,19 @@ def _dependency_rows(catalogue: Catalogue, nodes) -> tuple[_DependencyRow, ...]:
 
 
 class _References:
-    """The one interpretation of a persisted ``dependency_reference``.
-
-    The catalogue records a dependency as its author wrote it, being a Python
-    import for a Python object and a ``Schema.Object`` for a SQL one. Resolving
-    one needs the consuming item's shortcuts and the installed objects
-    alongside, so the three are held together here and nowhere else.
-    """
+    """Resolve persisted imports and ``Schema.Object`` dependency references."""
 
     def __init__(self, *, objects, shortcuts) -> None:
         self._objects = objects
         self._shortcut_by_destination = {
             each.destination: each for each in shortcuts if each.is_logical
         }
-        #: Every shortcut by the item that declared it and the symbol a program
-        #: imports it under. An import of ``shortcuts`` names the declaration,
-        #: so it is resolved from this and never from what the destination
-        #: spelling happens to match among installed objects.
+        # Shortcut imports resolve by declaring item and symbol, not by whichever
+        # installed destination happens to share the spelling.
         self._shortcut_by_symbol = {
             (each.destination.item, each.symbol): each for each in shortcuts
         }
-        #: Reads that name a physical object directly, by declaring node.
         self.external: dict[WeaverDocumentId, list[str]] = {}
-        #: Reads that name nothing installed, by declaring node.
         self.unresolved: dict[WeaverDocumentId, list[str]] = {}
 
     def resolve(self, rows) -> tuple[InstalledEdge, ...]:
@@ -974,11 +787,8 @@ class _References:
             try:
                 found = self._one(row.consumer, row.reference)
             except CatalogueStateError as exc:
-                # Recorded rather than raised. An estate accumulates rows from
-                # every item ever built, so one item's dangling read must not
-                # stop an operation on an unrelated target. An operation that
-                # reaches this node raises; see
-                # :meth:`InstalledDag.require_resolved`.
+                # Defer failure until an operation reaches this consumer so an
+                # unrelated target remains usable.
                 self.unresolved.setdefault(row.consumer, []).append(str(exc))
                 continue
             if found is None:
@@ -986,8 +796,8 @@ class _References:
             producer, through = found
             if producer == row.consumer:
                 self.unresolved.setdefault(row.consumer, []).append(
-                    f"{row.consumer} declares dependency {row.reference!r}, "
-                    "which resolves to itself"
+                    f"{row.consumer} depends on {row.reference!r}, which resolves "
+                    "to itself. Remove the dependency and build the item again."
                 )
                 continue
             edge = InstalledEdge(
@@ -1000,12 +810,7 @@ class _References:
         return tuple(edges.values())
 
     def _one(self, consumer: WeaverDocumentId, reference: str):
-        """What one written reference names, in the consumer's own namespace.
-
-        Shortcuts are consulted before native objects, and the order matters: a
-        shortcut destination is registered in the consuming item like any other,
-        so a native lookup would find it, stop there, and lose the crossing.
-        """
+        """Resolve shortcuts before native objects to preserve the crossing."""
 
         if _is_python_module_reference(reference):
             return self._python(consumer, reference)
@@ -1022,25 +827,19 @@ class _References:
             return None
         if producer not in self._objects:
             raise CatalogueStateError(
-                f"{consumer} imports {reference!r}, which resolves to "
-                f"{producer}, which is not an installed object"
+                f"{consumer} imports {reference!r}, but {producer} is not installed. "
+                f"Install {producer} or remove the import, then build "
+                f"{consumer.item} again."
             )
         return producer, None
 
     def _shortcut(self, consumer: WeaverDocumentId, reference: str, symbol: str):
-        """What importing one shortcut symbol makes this node depend on.
-
-        The declaration answers, so a Folder shortcut and a table of one
-        ``Schema.Object`` stay apart. A logical shortcut orders the consumer
-        behind the managed object it points at. A physical one names something
-        outside the estate and is recorded as an external read.
-        """
-
         shortcut = self._shortcut_by_symbol.get((consumer.item, symbol))
         if shortcut is None:
             raise CatalogueStateError(
-                f"{consumer} imports {reference!r}, and {consumer.item} declares "
-                "no shortcut of that name"
+                f"{consumer} imports {reference!r}, but {consumer.item} has no "
+                f"shortcut named {symbol!r}. Declare the shortcut or remove the "
+                f"import, then build {consumer.item} again."
             )
         if not shortcut.is_logical:
             self.external.setdefault(consumer, []).append(reference)
@@ -1056,8 +855,8 @@ class _References:
             return None
         if len(parts) != 2:
             raise CatalogueStateError(
-                f"{consumer} declares dependency {reference!r}, which is not a "
-                "Schema.Object reference"
+                f"{consumer} has invalid dependency {reference!r}; expected "
+                f"Schema.Object. Fix the dependency and build {consumer.item} again."
             )
         candidate = WeaverDocumentId(consumer.item, ObjectId(parts[0], parts[1]))
         shortcut = self._shortcut_by_destination.get(candidate)
@@ -1069,31 +868,23 @@ class _References:
         if folder in self._objects:
             return folder, None
         raise CatalogueStateError(
-            f"{consumer} declares dependency {reference!r}, which resolves to "
-            "neither an installed object nor a shortcut in its own item"
+            f"{consumer} depends on {reference!r}, but no installed object or "
+            f"shortcut with that name exists in {consumer.item}. Install the object "
+            f"or declare the shortcut, then build {consumer.item} again."
         )
 
     def _through(self, consumer, reference, shortcut: InstalledShortcut):
         if shortcut.source not in self._objects:
             raise CatalogueStateError(
-                f"{consumer} reads shortcut {reference}, which points at "
-                f"{shortcut.source}, which is not an installed object"
+                f"{consumer} reads shortcut {reference}, but its source "
+                f"{shortcut.source} is not installed. Install the source before "
+                f"building {consumer.item} again."
             )
         return shortcut.source, shortcut
 
 
 def _is_python_module_reference(reference: str) -> bool:
-    """Whether a stored dependency names a Python module rather than an object.
-
-    The catalogue records a dependency as its author wrote it, and for a Python
-    object that is an import, such as ``.Files.Sales__Seed`` or
-    ``Files.Sales__Seed``.
-
-    A leading dot is a relative import. Otherwise the tell is the separator: a
-    module name cannot carry a dot, so a Python object module spells
-    ``Schema.Object`` as ``Schema__Object``. A shortcut import is named for the
-    module it comes from, because a schema shortcut carries no separator.
-    """
+    """Distinguish persisted Python imports from relation references."""
 
     from .declaration.item_dependencies import SHORTCUTS_MODULE
 
@@ -1107,8 +898,6 @@ def _is_python_module_reference(reference: str) -> bool:
 
 
 def _shortcut_symbol(reference: str) -> str | None:
-    """The shortcut a written import names, or ``None`` where it names none."""
-
     from .declaration.item_dependencies import SHORTCUTS_MODULE
 
     prefix = f"{SHORTCUTS_MODULE}."
@@ -1120,15 +909,10 @@ def _shortcut_symbol(reference: str) -> str | None:
 def _python_module_identity(
     consumer: WeaverDocumentId, reference: str
 ) -> WeaverDocumentId | None:
-    """The object one written import names, or ``None`` if it names none.
+    """Project a persisted import back into an object identity.
 
-    The mirror of
-    :func:`weaver.declaration.item_dependencies._python_references`: the two
-    share one rule for the ``__`` split, including a schema that is itself
-    underscores, and one rule for where a relative import starts. A document
-    beneath ``Files`` is a package deeper than one at the item root, so
-    ``.Sales__Seed`` written there names a Folder and written at the root names
-    a table.
+    This mirrors declaration parsing's ``__`` split and relative-import rule.
+    Documents beneath ``Files`` begin one package deeper than item-root modules.
     """
 
     from .declaration.source import python_id_parts
@@ -1140,25 +924,19 @@ def _python_module_identity(
         base = (area,) if area else ()
         parents = level - 1
         if parents > len(base):
-            # An import that leaves the item, which repository parsing
-            # rejects. It names no Weaver object.
+            # Imports outside the item do not name Weaver objects.
             return None
         components = base[: len(base) - parents] + components
     if not components or components[0] == LIB:
-        # A helper module. It is real source and it is not a Weaver object, so
-        # it orders nothing.
+        # Helper modules do not participate in installed ordering.
         return None
     parts = python_id_parts(components[-1])
     if len(parts) != 2 or not all(part.strip() for part in parts):
         return None
     if len(components) != 2 or components[0] not in AREAS:
-        # An object module named without its area, which is how an estate built
-        # before the areas were explicit recorded one. Refused, so an ordering
-        # edge leaves the graph only when a build says it has.
         raise CatalogueStateError(
-            f"{consumer} imports {reference!r}, which names an object module "
-            f"and no Lakehouse area. Build {consumer.item} again to record the "
-            "dependency as this Weaver spells it"
+            f"{consumer} has an incompatible dependency reference {reference!r}. "
+            f"Build {consumer.item} again."
         )
     return WeaverDocumentId(
         consumer.item,

@@ -679,7 +679,7 @@ def test_a_read_that_names_nothing_installed_is_recorded_rather_than_raised():
         f"{CURATED}/Tables/Sales.Customer",
         f"{RAW}/Tables/Sales.A",
     )
-    assert "resolves to neither an installed object" in dag.unresolved_for(consumer)[0]
+    assert "no installed object or shortcut" in dag.unresolved_for(consumer)[0]
 
 
 @weaver_test()
@@ -690,9 +690,7 @@ def test_one_identity_may_not_be_both_an_object_and_a_validation():
         .validation(f"{REPORTING}/Sales.Summary")
     )
 
-    with pytest.raises(
-        CatalogueStateError, match="two installed nodes at one identity"
-    ):
+    with pytest.raises(CatalogueStateError, match="installed identity is ambiguous"):
         estate.dag()
 
 
@@ -706,7 +704,7 @@ def test_a_registered_object_whose_item_has_no_installation_is_refused():
         }
     )
 
-    with pytest.raises(CatalogueStateError, match="has no installation row"):
+    with pytest.raises(CatalogueStateError, match="does not identify a target"):
         catalogue.dag()
 
 
@@ -723,7 +721,7 @@ def test_an_unknown_test_type_is_refused_rather_than_guessed():
         }
     )
 
-    with pytest.raises(CatalogueStateError, match="unsupported test_type"):
+    with pytest.raises(CatalogueStateError, match="unsupported validation kind"):
         catalogue.dag()
 
 
@@ -759,5 +757,5 @@ def test_two_objects_at_one_physical_address_are_recorded_rather_than_refused():
 def test_a_node_the_graph_does_not_hold_is_named_in_the_refusal():
     dag = _chain().dag()
 
-    with pytest.raises(CatalogueStateError, match="is not a node of the installed"):
+    with pytest.raises(CatalogueStateError, match="is not installed in this catalogue"):
         dag.node(f"{RAW}/Tables/Sales.Nowhere")
