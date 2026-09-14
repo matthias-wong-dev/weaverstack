@@ -1,5 +1,3 @@
-"""CLI command parsing and rendering."""
-
 from __future__ import annotations
 
 import argparse
@@ -25,81 +23,59 @@ from .interaction import (
     retry_wanted,
 )
 
-#: The capacity verbs, kept here so building the parser imports nothing from
-#: `weaver.fabric`, because `weaver --help` should not pay for a transport.
+# Keep parser construction independent of Fabric transports.
 CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
-#: Named in help text. Spelled out here rather than imported at module scope so
-#: building the parser stays free of everything ``workflow`` pulls in.
+# Keep parser construction independent of workflow imports.
 WORKFLOW_DEFAULT_FILE = "workflow.yml"
 
-#: The first thing a new user reads. Product words, and no implementation.
 INITIALISE_DESCRIPTION = """\
-Set up a new Weaver project and the Fabric items it needs.
+Set up a Weaver project and its Fabric items.
 
-You can choose a Catalogue, Environment, Lakehouse and/or Warehouse.
-If an item doesn't exist yet, it will be created automatically.
+Choose a catalogue Warehouse, Environment, Lakehouse and/or Warehouse.
+Missing items are created.
 
-You can also include Sales example source to build, load and test afterwards.
-
-Run `weaver initialise --workspace Analytics` to get started.\
+Optionally add Sales example source files.\
 """
 
-#: What a wipe removes, and what it does with the catalogue.
 WIPE_DESCRIPTION = """\
-Empty physical Fabric items, and the catalogue that records them.
+Empty physical Fabric items and the catalogue that records them.
 
-Naming targets empties exactly those items. Naming none reads the catalogue's
-installations and empties the estate they name.
+Naming targets selects exactly those physical items. Naming none selects the
+estate recorded in the catalogue.
 
-A resolved catalogue is emptied too, last of all. Pass --unbind to keep it and
-remove its claims for the targets this command emptied.\
+A resolved catalogue is emptied last. Pass --unbind to keep it and remove its
+claims for the emptied targets.\
 """
 
-#: What doctor is for, said before anybody has a project to point it at.
 DOCTOR_DESCRIPTION = """\
-Check that Weaver can reach Microsoft Fabric.
+Check Microsoft Fabric connectivity.
 
-Name a workspace to discover and probe its Fabric items:
-TDS for a Warehouse, OneLake and Livy for a Lakehouse.
-Doctor reads no project configuration.
+Name a workspace to probe its items: TDS for a Warehouse; OneLake and Livy for
+a Lakehouse. Project configuration is not read.
 
-Checking a Lakehouse starts a Fabric Spark session, which takes a minute.\
+Checking a Lakehouse starts a Fabric Spark session and can take a minute.\
 """
 
 
 # --- what each command will want ----------------------------------------------
 #
-# Declared here, from parsed arguments alone, and coarse. A Session
-# cannot work these out. It holds no notion of what a build is, and one that did
-# would be a second place deciding what an operation does. So commands declare
-# and the Session prepares.
+# Commands declare coarse requirements from parsed arguments; the Session
+# prepares them without interpreting the operation.
 #
-# These are a superset, because arguments cannot know what a project or a
-# catalogue turns out to contain. `load Lakehouse/Sales` says Livy may be needed
-# because a Lakehouse usually holds Python primitives, not because this estate
-# does. Exact routing comes later, from the BuildBundle or the RunGraph, and
-# nothing below treats a declaration as permission to acquire.
+# Arguments cannot reveal all project or catalogue contents, so declarations
+# may be supersets. The BuildBundle or RunGraph decides exact routing later.
 
 
 def _kind_and_name(value) -> tuple[str, str]:
-    """One ``Kind/Name`` token, split without validating either half.
-
-    Deliberately tolerant. This reads arguments before the command runs, so a
-    malformed value has to reach the command that reports it properly rather
-    than failing here.
-    """
+    """Split a ``Kind/Name`` token without pre-empting command validation."""
 
     kind, _, name = str(value).partition("/")
     return kind.strip().lower(), name.strip()
 
 
 def _kind_requirements(values) -> set[str]:
-    """What the named items or targets imply, by their type alone.
-
-    A Lakehouse item is installed in a Lakehouse, so the type left of the slash
-    answers for either vocabulary.
-    """
+    """Infer requirements from the type left of each item or target token."""
 
     from weaver.sessions.requirements import LIVY, ONELAKE, TDS
 
@@ -115,12 +91,7 @@ def _kind_requirements(values) -> set[str]:
 
 
 def run_items(parsed) -> tuple[str, ...]:
-    """The items one ``load`` or ``test`` names, positional first then ``--item``.
-
-    Two spellings of one selection: the positional form is what a command line
-    and a workflow entry are written in, and ``--item`` is the older one. Both
-    reach core, which parses and deduplicates them.
-    """
+    """Combine positional items with legacy ``--item`` values, in that order."""
 
     return tuple(getattr(parsed, "items", None) or ()) + tuple(
         getattr(parsed, "extra_items", None) or ()
@@ -128,14 +99,7 @@ def run_items(parsed) -> tuple[str, ...]:
 
 
 def _requires_run(args) -> frozenset[str]:
-    """What a load or test will want, from the items it names.
-
-    TDS always, because a run reads the catalogue before any Spark work.
-
-    Naming no item is every installed item, and which kinds those are is the
-    catalogue's answer, read after this. So an unscoped run declares the
-    superset.
-    """
+    """Always include catalogue TDS; unscoped runs need the coarse superset."""
 
     from weaver.sessions.requirements import (
         AUTH,
@@ -153,14 +117,10 @@ def _requires_run(args) -> frozenset[str]:
 
 
 def _requires_build(args) -> frozenset[str]:
-    """What a build will want, from the items it was told to build.
+    """Avoid Spark for Warehouse-only builds.
 
-    A build of Warehouse items needs no Spark: its objects are T-SQL and the
-    catalogue it writes is a Warehouse too. A Livy declaration costs the console a
-    minute and the capacity's only slot.
-
-    Naming no item gets the superset: items can come from workspace
-    configuration, and what a project holds is not knowable from arguments.
+    An unscoped build needs the superset because arguments do not reveal source
+    or configured items.
     """
 
     from weaver.sessions.requirements import (
@@ -182,14 +142,7 @@ def _requires_build(args) -> frozenset[str]:
 
 
 def _requires_wipe(args) -> frozenset[str]:
-    """What emptying physical targets will want.
-
-    TDS always, because the catalogue is a Warehouse and a wipe reads or
-    unbinds it. Naming no target discovers the estate from the catalogue, and
-    which kinds it holds is the catalogue's answer, read after this, so an
-    unscoped wipe declares the superset without Livy: emptying a Lakehouse is
-    storage and shortcuts.
-    """
+    """Always include catalogue TDS; Lakehouse wiping uses storage, not Livy."""
 
     from weaver.sessions.requirements import (
         AUTH,
@@ -206,16 +159,7 @@ def _requires_wipe(args) -> frozenset[str]:
 
 
 def _requires_mirror(args) -> frozenset[str]:
-    """What forking a catalogue and rebinding its items will want.
-
-    T-SQL always, because the catalogue is a Warehouse. A mirrored Lakehouse
-    adds OneLake and Livy: its shortcuts are not finished until Spark can read
-    them, and its wrapper views are Spark SQL.
-
-    Naming no item selects every configured target, and which kinds those are
-    is configuration's answer, read after this. So an unscoped run declares the
-    superset, as ``build`` does.
-    """
+    """Always include catalogue TDS; Lakehouses add OneLake and Livy."""
 
     from weaver.sessions.requirements import (
         AUTH,
@@ -236,12 +180,7 @@ def _requires_mirror(args) -> frozenset[str]:
 
 
 def _requires_health(args) -> frozenset[str]:
-    """What a health report will want.
-
-    TDS always, because the catalogue is a Warehouse. OneLake where a Lakehouse
-    item was named or where none was, since discovering the estate may find one.
-    Never Livy: health runs no authored code and reads a Lakehouse over storage.
-    """
+    """Use TDS and, where needed, OneLake; health never needs Livy."""
 
     from weaver.sessions.requirements import AUTH, ONELAKE, RESOLVER, TDS, requirements
 
@@ -255,16 +194,12 @@ def _requires_health(args) -> frozenset[str]:
 
 
 def _requires_rest(args) -> frozenset[str]:
-    """Fabric control-plane work: a credential and the resolver, nothing more."""
-
     from weaver.sessions.requirements import AUTH, RESOLVER, requirements
 
     return requirements(AUTH, RESOLVER)
 
 
 def _requires_doctor(args) -> frozenset[str]:
-    """Doctor discovers the items used to probe each Fabric transport."""
-
     from weaver.sessions.requirements import (
         AUTH,
         LIVY,
@@ -278,8 +213,6 @@ def _requires_doctor(args) -> frozenset[str]:
 
 
 def _requires_initialise(args) -> frozenset[str]:
-    """Project setup reads and creates items through Fabric REST."""
-
     from weaver.sessions.requirements import AUTH, RESOLVER, requirements
 
     return requirements(AUTH, RESOLVER)
@@ -301,15 +234,13 @@ def _requires_install(args) -> frozenset[str]:
 
 
 def command_requirements(parsed) -> frozenset[str]:
-    """What one parsed command says it will want. Empty when it says nothing."""
+    """Return the parsed command's declared requirements."""
 
     declares = getattr(parsed, "requires", None)
     return frozenset(declares(parsed)) if declares is not None else frozenset()
 
 
 def _target_lakehouses(targets) -> tuple[str, ...]:
-    """The Lakehouse names among some target tokens, in the order given."""
-
     names = []
     for value in targets or ():
         kind, name = _kind_and_name(value)
@@ -319,17 +250,11 @@ def _target_lakehouses(targets) -> tuple[str, ...]:
 
 
 def _physical_target_lakehouses(args) -> tuple[str, ...]:
-    """The Lakehouses a command whose targets are physical names outright."""
-
     return _target_lakehouses(getattr(args, "targets", None) or ())
 
 
 def _build_item_lakehouses(args) -> tuple[str, ...]:
-    """The Lakehouses a build item names on its physical side.
-
-    ``--item Lakehouse/Landing=Lakehouse/Landing_Dev`` says the physical target
-    outright. The bare form does not, and the build resolves and offers it.
-    """
+    """Return explicitly named physical Lakehouses from build item bindings."""
 
     named = []
     for value in getattr(args, "items", None) or ():
@@ -340,15 +265,10 @@ def _build_item_lakehouses(args) -> tuple[str, ...]:
 
 
 def command_lakehouses(parsed) -> tuple[str, ...]:
-    """The physical Lakehouses one parsed command names. Empty when it names none.
+    """Return physical Lakehouses named before an operation resolves its scope.
 
-    Fabric creates a Livy session against a Lakehouse, so warming Spark needs the
-    id of one and only a physical name will do. Declared per command, as
-    requirements are.
-
-    A load or a test declares none: it names logical items, and the operation
-    offers the Lakehouse once the catalogue has answered. The CLI resolves
-    nothing, so one-shot, shell, workflow and notebook paths cannot drift.
+    Spark warming needs a physical Lakehouse. Load and test name logical items,
+    so their operations provide that Lakehouse after reading the catalogue.
     """
 
     declares = getattr(parsed, "lakehouses", None)
@@ -369,13 +289,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     shell = subcommands.add_parser(
         "session",
-        help="Run multiple Weaver commands in one persistent session.",
+        help="Run multiple commands in one persistent session.",
     )
     _add_workspace_args(shell)
     shell.add_argument(
         "--timings",
         action="store_true",
-        help="Report time spent by transport when the session ends.",
+        help="Report transport timings when the session ends.",
     )
     shell.set_defaults(handler=handle_session)
 
@@ -392,12 +312,12 @@ def build_parser() -> argparse.ArgumentParser:
     workflow.add_argument(
         "--timings",
         action="store_true",
-        help="Report time spent by transport after the workflow finishes.",
+        help="Report transport timings after the workflow.",
     )
     workflow.add_argument(
         "--yes",
         action="store_true",
-        help="Authorise the sequence, and every command in it.",
+        help="Authorise the workflow and all its commands.",
     )
     add_non_interactive(workflow)
     _add_workspace_args(workflow)
@@ -409,7 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
         # out of that list: argparse renders whatever `help` holds, including
         # SUPPRESS.
         listed = (
-            {"help": "Set up a new Weaver project and the Fabric items it needs."}
+            {"help": "Set up a Weaver project and its Fabric items."}
             if name == "initialise"
             else {}
         )
@@ -426,17 +346,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = subcommands.add_parser(
         "doctor",
-        help="Check that Weaver can reach Microsoft Fabric.",
+        help="Check Microsoft Fabric connectivity.",
         description=DOCTOR_DESCRIPTION,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    doctor.add_argument("--json", action="store_true", help="emit the result as JSON")
+    doctor.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     doctor.add_argument("--workspace", required=True, help="Fabric workspace to check.")
     add_non_interactive(doctor)
     doctor.set_defaults(handler=handle_doctor, requires=_requires_doctor)
 
     check = subcommands.add_parser(
-        "check", help="Check your project folder without contacting Fabric."
+        "check", help="Check a project folder without contacting Fabric."
     )
     check.add_argument(
         "project_folder",
@@ -465,9 +385,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="ITEM[=TARGET]",
         help=(
-            "Weaver item to build. Its physical target comes from "
-            "workspace configuration, or write ITEM=TARGET to supply it. Repeat "
-            "to select more than one. Naming none builds every configured item."
+            "Weaver item to build. Its physical target comes from workspace "
+            "configuration; use ITEM=TARGET to supply or override it. Repeat to "
+            "select multiple items. Naming none builds every configured item."
         ),
     )
     build.add_argument(
@@ -492,7 +412,7 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help="Directory to write a bundle created with --bundle-only.",
     )
-    build.add_argument("--json", action="store_true", help="emit the result as JSON")
+    build.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     add_non_interactive(build)
     _add_workspace_args(build)
     build.set_defaults(
@@ -502,7 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     load = subcommands.add_parser(
-        "load", help="Load the installed objects named items own."
+        "load", help="Load objects installed for the selected items."
     )
     load.add_argument(
         "items",
@@ -518,7 +438,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="extra_items",
         action="append",
         metavar="ITEM",
-        help="Weaver item to load. The older spelling of a positional item.",
+        help="Legacy spelling for a positional Weaver item.",
     )
     load.add_argument(
         "--target",
@@ -547,8 +467,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--reload",
         action="store_true",
         help=(
-            "Reconstruct each selected table from zero: reset its bookmark, "
-            "empty it, then load. Reaches only what this command selects."
+            "Rebuild each selected table: reset its bookmark, empty it, then "
+            "load. Does not affect unselected tables."
         ),
     )
     load.add_argument(
@@ -570,13 +490,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show the load plan without running it.",
     )
-    load.add_argument("--json", action="store_true", help="emit the report as JSON")
+    load.add_argument("--json", action="store_true", help="Emit the report as JSON.")
     add_non_interactive(load)
     _add_workspace_args(load)
     load.set_defaults(handler=handle_load, requires=_requires_run)
 
     validate = subcommands.add_parser(
-        "test", help="Run the installed Tests and Assumptions named items own."
+        "test", help="Run Tests and Assumptions installed for the selected items."
     )
     validate.add_argument(
         "items",
@@ -592,7 +512,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="extra_items",
         action="append",
         metavar="ITEM",
-        help="Weaver item to validate. The older spelling of a positional item.",
+        help="Legacy spelling for a positional Weaver item.",
     )
     validate.add_argument(
         "--target",
@@ -616,7 +536,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show the test plan without running it.",
     )
-    validate.add_argument("--json", action="store_true", help="emit the report as JSON")
+    validate.add_argument(
+        "--json", action="store_true", help="Emit the report as JSON."
+    )
     add_non_interactive(validate)
     _add_workspace_args(validate)
     validate.set_defaults(handler=handle_test, requires=_requires_run)
@@ -647,13 +569,12 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument(
         "--no-inventory",
         action="store_true",
-        help="Skip the physical read that proves certified objects are there.",
+        help="Skip the physical inventory check for certified objects.",
     )
-    report.add_argument("--json", action="store_true", help="emit the report as JSON")
+    report.add_argument("--json", action="store_true", help="Emit the report as JSON.")
     add_non_interactive(report)
     _add_workspace_args(report, include_environment=False)
-    # No Lakehouse offer: health names items, and it reads a Lakehouse over
-    # storage rather than through Spark.
+    # Health reads Lakehouses through storage, not Spark.
     report.set_defaults(handler=handle_health, requires=_requires_health)
 
     wipe = subcommands.add_parser(
@@ -688,7 +609,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Authorise the removal without asking.",
     )
-    wipe.add_argument("--json", action="store_true", help="emit the result as JSON")
+    wipe.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     add_non_interactive(wipe)
     wipe.set_defaults(
         handler=handle_wipe,
@@ -709,8 +630,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="ITEM[=TARGET]",
         help=(
             "A logical item to rebind, such as Warehouse/Model or "
-            "Warehouse/Model=Warehouse/Model_Dev. Repeatable. Omitted, every "
-            "configured target is selected."
+            "Warehouse/Model=Warehouse/Model_Dev. Repeat to select multiple "
+            "items. Naming none selects every configured target."
         ),
     )
     mirror.add_argument(
@@ -723,8 +644,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="CATALOGUE",
         dest="mirror_source",
         help=(
-            "The catalogue to fork, for example Warehouse/Weaver. Outranks "
-            "mirror: in workspace configuration."
+            "Catalogue to fork, for example Warehouse/Weaver. Overrides mirror: "
+            "in workspace configuration."
         ),
     )
     _add_workspace_args(mirror)
@@ -733,7 +654,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Authorise emptying the destinations without asking.",
     )
-    mirror.add_argument("--json", action="store_true", help="emit the result as JSON")
+    mirror.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     add_non_interactive(mirror)
     mirror.set_defaults(handler=handle_mirror, requires=_requires_mirror)
 
@@ -744,16 +665,14 @@ def build_parser() -> argparse.ArgumentParser:
     install.add_argument(
         "bundle", metavar="BUNDLE", help="Bundle directory or .weaver.zip archive."
     )
-    install.add_argument("--json", action="store_true", help="emit the report as JSON")
+    install.add_argument("--json", action="store_true", help="Emit the report as JSON.")
     add_non_interactive(install)
     _add_workspace_args(install, include_catalogue=False, include_environment=False)
     install.set_defaults(handler=handle_install, requires=_requires_install)
 
-    # Fabric estate management rather than a Weaver lifecycle verb: these act on
-    # workspace items and on the capacity underneath them, and nothing they do
-    # reads or writes the catalogue.
+    # Fabric commands do not read or write the Weaver catalogue.
     fabric = subcommands.add_parser(
-        "fabric", help="Manage the Fabric estate Weaver runs on."
+        "fabric", help="Manage Fabric items, Environments, and capacity."
     )
     fabric_commands = fabric.add_subparsers(dest="fabric_command", metavar="command")
     fabric.set_defaults(handler=_group_help(fabric))
@@ -778,8 +697,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--path",
         metavar="DIRECTORY",
         help=(
-            "A local <Name>.Environment definition to publish. It names the "
-            "Environment and supplies its whole definition."
+            "Local <Name>.Environment definition directory. It names the "
+            "Environment and supplies the complete definition."
         ),
     )
     environment_publish.add_argument(
@@ -833,7 +752,7 @@ def build_parser() -> argparse.ArgumentParser:
     notebook_run.set_defaults(handler=handle_notebook_run)
 
     capacity = fabric_commands.add_parser(
-        "capacity", help="Start, stop, or report the state of a Fabric capacity."
+        "capacity", help="Resume, suspend, or report a Fabric capacity."
     )
     capacity.add_argument("action", choices=CAPACITY_ACTIONS)
     capacity.add_argument("--resource-group", required=True)
@@ -849,14 +768,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _fabric_cli_workspace(args: argparse.Namespace):
-    """Resolve the workspace the notebook utilities act in."""
-
     return _resolve_workspace(args)
 
 
 def handle_notebook_push(args: argparse.Namespace) -> int:
-    """Deploy a notebook definition without adding notebook APIs to core."""
-
     import json
 
     from weaver.fabric.notebooks import push_notebook
@@ -878,8 +793,6 @@ def handle_notebook_push(args: argparse.Namespace) -> int:
 
 
 def handle_notebook_run(args: argparse.Namespace) -> int:
-    """Run a notebook with explicit session attachments."""
-
     import json
 
     from weaver.errors import CommandError
@@ -920,16 +833,9 @@ def handle_notebook_run(args: argparse.Namespace) -> int:
 
 
 def handle_environment_publish(args: argparse.Namespace) -> int:
-    """Build Weaver from this checkout and publish it to a Fabric Environment.
+    """Publish Weaver to an Environment for notebooks and Livy sessions.
 
-    The authoritative deployment path. Afterwards a notebook, Livy session or
-    Fabric pytest run attached to the Environment can ``import weaver`` with no
-    source shipped into a Lakehouse.
-
-    The result is always printed, and it is the JSON: a command's result is what
-    it produced, not an option. Progress goes to stderr and the result to
-    stdout, so ``weaver fabric environment publish Runtime | jq`` works while a person still watches the
-    publish tick over.
+    Output is always JSON on stdout; progress goes to stderr.
     """
 
     import json
@@ -942,8 +848,8 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
 
     if args.path is not None and args.environment_ref is not None:
         raise CommandError(
-            "--path names the Environment through its directory, so ENVIRONMENT "
-            "is not given as well."
+            "--path and ENVIRONMENT cannot be used together; the directory names "
+            "the Environment."
         )
     if args.path is None and args.environment_ref is None:
         raise CommandError(
@@ -994,8 +900,6 @@ def handle_environment_publish(args: argparse.Namespace) -> int:
 
 
 def handle_install(args: argparse.Namespace) -> int:
-    """Install a frozen bundle into the selected workspace."""
-
     import json
 
     from weaver.operations.install import install
@@ -1015,12 +919,6 @@ def handle_install(args: argparse.Namespace) -> int:
 
 
 def handle_capacity(args: argparse.Namespace) -> int:
-    """Report or change a capacity's state.
-
-    Capacity is billed while it runs, so this is the first and last thing a
-    Fabric session touches.
-    """
-
     _prefer_desktop_credential(args)
     from weaver.fabric import run_capacity_action
 
@@ -1037,8 +935,6 @@ def handle_capacity(args: argparse.Namespace) -> int:
 
 
 def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
-    """The names a project is set up with, and how the missing ones are found."""
-
     parser.add_argument("--workspace", help="Fabric workspace name. It must exist.")
     parser.add_argument(
         "--project-folder",
@@ -1048,13 +944,13 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--catalogue",
-        help="Warehouse for Weaver's own tables. Defaults to Catalogue.",
+        help="Catalogue Warehouse. Defaults to Catalogue.",
     )
     parser.add_argument(
         "--environment",
         help=(
-            "Fabric Environment this project runs against. It may be one the "
-            "workspace already has. Defaults to Weaver."
+            "Fabric Environment for the project. It may already exist. Defaults "
+            "to Weaver."
         ),
     )
     parser.add_argument("--lakehouse", help="Lakehouse for Delta tables and files.")
@@ -1070,20 +966,20 @@ def _add_initialise_args(parser: argparse.ArgumentParser) -> None:
         "--no-example",
         dest="example",
         action="store_false",
-        help="Leave the example out.",
+        help="Do not add example source files.",
     )
     parser.add_argument(
         "--interactive",
         action="store_true",
-        help="Ask for the optional names too, not only the ones a run needs.",
+        help="Ask setup questions even when input is not a terminal.",
     )
     add_non_interactive(parser)
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Show what would be set up, and change nothing.",
+        help="Preview the setup without making changes.",
     )
-    parser.add_argument("--json", action="store_true", help="emit the result as JSON")
+    parser.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     parser.add_argument(
         "--publish-environment",
         action="store_true",
@@ -1114,18 +1010,10 @@ def _add_workspace_args(
 
 
 def _prefer_desktop_credential(args: argparse.Namespace | None = None) -> None:
-    """Choose how a desktop command signs in, and install that choice.
+    """Install the CLI credential policy when Fabric support is available.
 
-    Credential choice is the CLI's policy, not the core's. The Azure CLI where it
-    can issue a token, and Microsoft browser sign-in where it cannot, so
-    `pip install weaverstack` is the whole prerequisite.
-
-    ``--non-interactive`` takes the chain without browser sign-in. An
-    invocation that reaches the end of that chain fails with what each
-    credential reported.
-
-    Best-effort, because with the Fabric extra absent there is nothing to sign in
-    to.
+    Interactive commands fall back from Azure CLI to browser sign-in;
+    ``--non-interactive`` omits the browser credential.
     """
 
     try:
@@ -1141,11 +1029,7 @@ def _prefer_desktop_credential(args: argparse.Namespace | None = None) -> None:
 
 
 def _desktop_store(workspace):
-    """The store a desktop command uses to reach a workspace.
-
-    Reaching into Fabric is a crossing, so the CLI constructs the
-    OneLakeDfsClient here. Core never turns a Workspace into a DFS client.
-    """
+    """Construct the cross-boundary OneLake client in the CLI."""
 
     from weaver.fabric import OneLakeDfsClient
 
@@ -1153,14 +1037,7 @@ def _desktop_store(workspace):
 
 
 def workspace_supplied(args: argparse.Namespace) -> bool:
-    """Whether this invocation names a workspace at all.
-
-    Absence and invalidity are separate answers. A command line that named
-    neither ``--workspace`` nor ``--workspace-config``, and inherited no
-    Session, has no workspace, and a caller that can proceed without one
-    proceeds. Asking this before resolving one is what keeps the two apart:
-    :func:`_resolve_workspace` raises a ``ConfigError`` for both.
-    """
+    """Distinguish an absent workspace from one that fails resolution."""
 
     return bool(
         getattr(args, "workspace", None)
@@ -1170,24 +1047,10 @@ def workspace_supplied(args: argparse.Namespace) -> bool:
 
 
 def _resolve_workspace(args: argparse.Namespace):
-    """The workspace this command line means.
+    """Resolve against a Session's fixed workspace when one is inherited.
 
-    Inside ``weaver session`` the Fabric workspace is the session's, and it stays
-    the session's. A command line is still an ordinary Weaver command line and
-    gives its own configuration within that workspace, so ``--catalogue`` and
-    ``--environment`` apply on top of it:
-
-    .. code-block:: text
-
-        weaver session --workspace "Weaver Example" --environment weaver
-        weaver> weaver load Lakehouse/Sales --catalogue Warehouse/Reporting
-
-    Naming the workspace the session is already open on says what is already
-    true. Naming another one is refused: one Session is one Fabric workspace.
-
-    Inheritance is only ever from the session's starting workspace. A default
-    accumulated from whichever command ran last would mean the next command
-    silently borrowing another workspace's Environment.
+    Commands may override its catalogue and Environment. Each starts from the
+    Session's original configuration.
     """
 
     from weaver.config import resolve_workspace
@@ -1209,12 +1072,7 @@ def _resolve_workspace(args: argparse.Namespace):
 
 
 def _refuse_another_workspace(args: argparse.Namespace, inherited) -> None:
-    """Refuse a command addressing a workspace other than the Session's own.
-
-    A Session holds one Fabric workspace for its whole life, so a command naming
-    a different one has nowhere to run. Refused here rather than resolved and
-    then ignored.
-    """
+    """Keep every command in a Session on its fixed Fabric workspace."""
 
     from weaver.config import resolve_workspace
     from weaver.errors import CommandError
@@ -1227,18 +1085,13 @@ def _refuse_another_workspace(args: argparse.Namespace, inherited) -> None:
     if named == inherited.workspace:
         return
     raise CommandError(
-        f"This session is open on workspace '{inherited.workspace}', so "
-        f"'{named}' cannot be reached from it. Open a session on '{named}' "
-        "to run there."
+        f"Session workspace is '{inherited.workspace}'; cannot use '{named}'. "
+        f"Open a session on '{named}' to run there."
     )
 
 
 def _with_command_overrides(workspace, args: argparse.Namespace):
-    """The session's workspace, with whatever this command line said on top.
-
-    The workspace itself is never one of them. What a command may choose is
-    configuration within the workspace the session holds.
-    """
+    """Apply command configuration without changing the Session workspace."""
 
     from dataclasses import replace
 
@@ -1251,17 +1104,7 @@ def _with_command_overrides(workspace, args: argparse.Namespace):
 
 
 def _command_context(workspace, *, environment: bool = True) -> dict:
-    """What this command line settled on, for the operation to apply, as names.
-
-    Operations take names and a Session, and a borrowed Session resolves its own
-    workspace as the base. This is how a command's ``--catalogue`` and
-    ``--environment`` reach the operation, applied to the Session's workspace
-    there and changing nothing about the Session. Where this command opened the
-    Session, they are already what it carries.
-
-    ``environment`` is false for an operation that takes none. Health runs no
-    authored code, so it has no Environment argument to pass one to.
-    """
+    """Pass command-level catalogue and Environment names to an operation."""
 
     context = {"catalogue": workspace.catalogue or None}
     if environment:
@@ -1272,23 +1115,11 @@ def _command_context(workspace, *, environment: bool = True) -> dict:
 
 
 def _session(args: argparse.Namespace):
-    """The Session this command inherits, where there is one.
-
-    ``weaver session`` attaches one to every line it parses. A one-shot
-    invocation has none.
-    """
-
     return getattr(args, "session", None)
 
 
 def _running_session(args: argparse.Namespace, workspace):
-    """The Session this command runs in, borrowed or opened for it.
-
-    Operations take names and a Session, never a resolved Workspace, so the CLI,
-    which resolves one for its own inheritance and override rules, is what
-    turns it into a Session. Borrowed from ``weaver session`` where there is
-    one, and closed here only when this opened it.
-    """
+    """Borrow an inherited Session or open one for the command."""
 
     from weaver.sessions.host import use_or_create_session
 
@@ -1296,31 +1127,22 @@ def _running_session(args: argparse.Namespace, workspace):
 
 
 def handle_session(args: argparse.Namespace) -> int:
-    """Hold one console session open and run commands in it."""
-
     from .shell import run_shell
 
     return run_shell(args)
 
 
 def handle_workflow(args: argparse.Namespace) -> int:
-    """Show a named sequence, ask once, then run it in one Session."""
-
     from .workflow import run_workflow
 
     return run_workflow(args)
 
 
-#: The errors a project edit clears. Each attempt re-reads the source tree,
-#: so these become a failed attempt the retry prompt offers to run again.
-#: Workspace configuration, request errors, transports and installation stay
-#: raised: another attempt reads the same argument and reaches the same host.
+# Convert source errors into failed attempts so a retry rereads the project.
 SOURCE_ERRORS = (DiscoveryError, GraphError, IdentityError, MetadataError)
 
 
 def _retry_until_fixed(args: argparse.Namespace, attempt) -> int:
-    """Run an attempt and repeat it after an interactive failure."""
-
     if not can_prompt(args):
         return attempt()
     while True:
@@ -1332,10 +1154,7 @@ def _retry_until_fixed(args: argparse.Namespace, attempt) -> int:
 
 
 def _until_fixed(args: argparse.Namespace, attempt) -> int:
-    """Run a task and offer another attempt after an interactive failure.
-
-    Each retry reads fresh inputs but keeps the existing Session open.
-    """
+    """Retry with fresh inputs while keeping the Session open."""
 
     if not can_prompt(args):
         return attempt()
@@ -1350,15 +1169,12 @@ def _until_fixed(args: argparse.Namespace, attempt) -> int:
 
 
 def _refuse_retired_target(args: argparse.Namespace) -> None:
-    """``--target`` named a physical item; these commands name logical ones."""
-
     if getattr(args, "retired_target", None):
         raise CommandError(
             "--target is replaced by --item on build, load and test. These "
-            "commands name Weaver items; the physical target each one is "
-            "installed in comes from workspace configuration or the Weaver "
-            "catalogue.\n"
-            "New: --item Lakehouse/Landing"
+            "commands select Weaver items; physical targets come from workspace "
+            "configuration or the Weaver catalogue.\n"
+            "Use: --item Lakehouse/Landing"
         )
 
 
@@ -1368,15 +1184,7 @@ def handle_load(args: argparse.Namespace) -> int:
 
 
 def _load_once(args: argparse.Namespace) -> int:
-    """Adapt command-line values to :func:`weaver.load`, wherever it has to run.
-
-    The CLI owns exactly one thing the API does not: the host boundary. A load
-    runs where the data is, so a desktop asking for a Fabric workspace has to
-    reach into a session to get one, and that crossing is the CLI's, as it is for
-    ``build`` and ``unbind``. Resolving the workspace, validating targets,
-    planning, orchestrating and reporting all happen once, inside
-    :func:`weaver.load`, whichever side of the boundary it runs on.
-    """
+    """Run :func:`weaver.load` across the CLI's host boundary."""
 
     import json
 
@@ -1396,8 +1204,7 @@ def _load_once(args: argparse.Namespace) -> int:
             session=_session(args),
         )
     except LoadError as exc:
-        # An intolerant failure. The report is the useful half of the answer and
-        # the message is the other, so both are shown before the non-zero exit.
+        # Preserve the partial report carried by an intolerant failure.
         if getattr(exc, "report", None) is not None:
             _print_load(exc.report)
         _render_error(exc)
@@ -1424,7 +1231,6 @@ def _run_load(
     as_of=None,
     session=None,
 ):
-    """Run one load through the selected Session."""
 
     from weaver.sessions.host import use_or_create_session
 
@@ -1443,17 +1249,13 @@ def _run_load(
 
 
 def _print_load(report) -> None:
-    """One renderer, for a report produced here or one that crossed Livy."""
-
     mode = "plan" if report.dry_run else "load"
     reload = " (reload)" if getattr(report, "reload", False) else ""
     print(f"{mode}{reload} {report.status}: {', '.join(report.requested)}\n")
     for node in report.nodes:
         mark = "✗" if node.status in ("failed", "blocked", "invalid") else "✓"
         counts = ""
-        # A node that failed before it moved any rows carries a failure rather
-        # than a count, and asking one for rows read is how a rendered report
-        # turns a clear error into an AttributeError.
+        # Failures before row movement have no row-count fields.
         if node.result is not None and hasattr(node.result, "rows_read"):
             counts = (
                 f"  (read {node.result.rows_read}, "
@@ -1476,14 +1278,9 @@ def handle_test(args: argparse.Namespace) -> int:
 
 
 def _test_once(args: argparse.Namespace) -> int:
-    """Adapt command-line values to :func:`weaver.test`, wherever it has to run.
+    """Run :func:`weaver.test` across the CLI's host boundary.
 
-    The same host boundary ``load`` crosses, and for the same reason: a
-    validation reads the data, so it runs where the data is.
-
-    The report status is the validation verdict. It is not the process status:
-    a run that produced a report exits zero, and a command that could not
-    produce one exits non-zero.
+    A report is a successful command result regardless of its validation verdict.
     """
 
     import json
@@ -1512,12 +1309,7 @@ def _test_once(args: argparse.Namespace) -> int:
 
 
 def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
-    """One validation run, decided here and dispatched where each check lives.
-
-    The crossing is ``load``'s, for the reason it is ``load``'s: a Warehouse
-    validation is a stored procedure TDS reaches from anywhere, and a Lakehouse
-    one is a deployed module that belongs where the imports happen.
-    """
+    """Dispatch Warehouse validations over TDS and Lakehouse modules in-session."""
 
     from weaver.sessions.host import use_or_create_session
 
@@ -1533,8 +1325,6 @@ def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
 
 
 def _print_test(report) -> None:
-    """One renderer, for a report produced here or one that crossed Livy."""
-
     print(f"test {report.status}\n")
     for node in report.nodes:
         result = node.result
@@ -1571,7 +1361,6 @@ def _print_test(report) -> None:
     if report.workflow_id:
         print(f"  Workflow: {report.workflow_id}")
 
-    # Print requested diagnostic rows after the summary.
     for node in report.nodes:
         if not node.diagnostics:
             continue
@@ -1581,12 +1370,7 @@ def _print_test(report) -> None:
 
 
 def handle_health(args: argparse.Namespace) -> int:
-    """Adapt command-line values to :func:`weaver.health` and render the report.
-
-    Exit 0 for Green and 1 for anything worse, so a scheduled check is a
-    pipeline step. Configuration and transport failures take the ordinary
-    command error path.
-    """
+    """Return zero for Green health and one for any worse verdict."""
 
     import json
 
@@ -1607,11 +1391,7 @@ def handle_health(args: argparse.Namespace) -> int:
 
 
 def render_health(report) -> str:
-    """One health report as plain text.
-
-    The status words carry the meaning, so the output reads the same redirected
-    to a file as it does on a terminal.
-    """
+    """Render status without relying on terminal decoration."""
 
     from weaver.health import AREAS
 
@@ -1625,8 +1405,6 @@ def render_health(report) -> str:
 
 
 def _health_section(area: str, section, report) -> list[str]:
-    """One section's counts, then the objects behind them."""
-
     from weaver.health import BUILD, LOAD
 
     lines = []
@@ -1649,14 +1427,11 @@ def _health_section(area: str, section, report) -> list[str]:
     return lines
 
 
-#: The narrowest an object-id column gets, so short ids in one report still line
-#: up with a longer one in the next.
+# Minimum object-id column width across report sections.
 _ID_WIDTH = 42
 
 
 def _health_activity(report) -> list[str]:
-    """The slowest loads and the rows that moved, across current state."""
-
     lines = []
     slowest = report.slowest()
     if slowest:
@@ -1683,12 +1458,7 @@ def _health_activity(report) -> list[str]:
 
 
 def _health_row(object_id: str, value: str, among) -> str:
-    """One activity line, with the id column wide enough for the block it is in.
-
-    Each block is measured on its own, and the separator is written rather than
-    left to the padding: an id longer than the column would otherwise run
-    straight into the value beside it.
-    """
+    """Keep a separator after ids that exceed the block's minimum width."""
 
     width = max(_ID_WIDTH, *(len(str(each.object_id)) for each in among))
     return f"  {object_id:<{width}}  {value}"
@@ -1699,8 +1469,6 @@ def _titled(word: str) -> str:
 
 
 def _ago(at, now) -> str:
-    """How long ago an instant was, in hours and minutes."""
-
     if at is None:
         return "never"
     seconds = max(int((now - at).total_seconds()), 0)
@@ -1709,15 +1477,10 @@ def _ago(at, now) -> str:
 
 
 def handle_wipe(args: argparse.Namespace) -> int:
-    """Plan the estate, show it, obtain authorisation, then empty that plan.
+    """Show and authorise the exact plan passed to the destructive operation.
 
-    The plan shown is the plan executed: nothing is discovered again after the
-    question is answered, so what a person agreed to is what is removed.
-
-    The estate is shown whether or not the command was authorised. ``--yes``
-    grants permission for the removal, and what is being removed is still worth
-    reading. ``--json`` prints one document, so the plan reaches it inside the
-    result rather than as a second thing on stdout.
+    Human output shows the plan even with ``--yes``. ``--json`` keeps it inside
+    the single result document.
     """
 
     import json
@@ -1748,17 +1511,16 @@ def handle_wipe(args: argparse.Namespace) -> int:
             emptied = len(plan.targets)
             if not can_prompt(args):
                 print(
-                    f"Refusing to empty {emptied} item(s) without confirmation. "
-                    "Pass --yes, or --dry-run to preview.",
+                    f"Confirmation required to empty {emptied} item(s). "
+                    "Pass --yes or --dry-run to preview.",
                     file=sys.stderr,
                 )
                 return 1
-            # Under --json stdout carries one JSON document, so the question
-            # and a cancellation both go to stderr.
+            # Keep stdout parseable under --json.
             aside = sys.stderr if args.json else None
             if not confirm(
                 args,
-                f"Empty {emptied} item(s)? This cannot be undone [y/N] ",
+                f"Empty {emptied} item(s)? This cannot be undone. [y/N] ",
                 prompt_to=aside,
             ):
                 print("Cancelled.", file=aside)
@@ -1776,25 +1538,18 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
 
 def handle_mirror(args: argparse.Namespace) -> int:
-    """Resolve the pair, settle the scope, confirm, then mirror.
+    """Resolve and check the complete scope before authorising destructive work.
 
-    The order is the safety property: a misspelled ``--mirror`` or an item the
-    catalogue never installed fails while every Warehouse is still intact.
-
-    The targets are shown whether or not the command was authorised, as a wipe
-    shows its estate. ``--yes`` grants permission to empty them, and which ones
-    is still worth reading. ``--json`` prints one document, and ``wiped`` in the
-    result names them.
+    Human output shows the targets even with ``--yes``. ``--json`` keeps them in
+    the single result document.
     """
 
     import json
 
     if args.items and args.no_item:
-        raise CommandError("--item and --no-item cannot be used together")
+        raise CommandError("--item and --no-item cannot be used together.")
 
-    # Resolved from what this command line said, not from the workspace the CLI
-    # overlaid `--catalogue` onto: which configured value is the source and
-    # which the destination depends on what else is set.
+    # Resolve the source and destination together from the original arguments.
     plan = weaver.plan_mirror(
         args.items,
         no_item=args.no_item,
@@ -1809,8 +1564,7 @@ def handle_mirror(args: argparse.Namespace) -> int:
     with _running_session(args, plan.workspace) as opened:
         resolved = weaver.check_mirror(plan, session=opened)
 
-        # Under --json stdout carries one JSON document, so the question and a
-        # cancellation go to stderr and the list goes into the result.
+        # Keep stdout parseable under --json.
         aside = sys.stderr if args.json else None
         if not args.json:
             print(f"Mirror on {plan.workspace.workspace}\n\n{resolved.describe()}\n")
@@ -1819,13 +1573,13 @@ def handle_mirror(args: argparse.Namespace) -> int:
             emptied = ", ".join(resolved.wiped)
             if not can_prompt(args):
                 print(
-                    f"Refusing to empty {emptied} without confirmation. Pass --yes.",
+                    f"Confirmation required to empty {emptied}. Pass --yes.",
                     file=sys.stderr,
                 )
                 return 1
             if not confirm(
                 args,
-                "These targets will be emptied. Continue? This cannot be undone [y/N] ",
+                "Empty these targets? This cannot be undone. [y/N] ",
                 prompt_to=aside,
             ):
                 print("Cancelled.", file=aside)
@@ -1836,8 +1590,7 @@ def handle_mirror(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
         return 0
-    # The targets, as build and load report theirs. Per-table row counts and
-    # per-item object counts are in --json.
+    # Detailed counts remain available in --json.
     print(f"mirror {result.status}: {', '.join(result.wiped)}")
     return 0
 
@@ -1845,7 +1598,7 @@ def handle_mirror(args: argparse.Namespace) -> int:
 def handle_build(args: argparse.Namespace) -> int:
     if getattr(args, "retired_bind", None):
         raise CommandError(
-            "--bind is replaced by --item, and the two halves have swapped.\n"
+            "--bind is replaced by --item; put the Weaver item first.\n"
             "Old: --bind Lakehouse/Landing_Dev=Landing\n"
             "New: --item Lakehouse/Landing=Lakehouse/Landing_Dev"
         )
@@ -1856,8 +1609,6 @@ def handle_build(args: argparse.Namespace) -> int:
 
 
 def _build_once(args: argparse.Namespace) -> int:
-    """Adapt command-line values to :func:`weaver.build`."""
-
     import json
 
     workspace = _resolve_workspace(args)
@@ -1872,8 +1623,7 @@ def _build_once(args: argparse.Namespace) -> int:
                 **_command_context(workspace),
             )
     except SOURCE_ERRORS as exc:
-        # A project the parse rejected. Reported as a failed attempt so the
-        # retry prompt offers the next one, which re-reads the edited tree.
+        # Return a failed attempt so an interactive retry rereads the project.
         _render_error(exc)
         return 1
     payload = result.to_mapping()
@@ -1893,12 +1643,7 @@ def _build_once(args: argparse.Namespace) -> int:
 
 
 def handle_initialise(args: argparse.Namespace) -> int:
-    """Collect the names, set the project up, and say what to run next.
-
-    The Environment questions have Fabric answers behind them, so a Session is
-    open before they are asked and the operation runs in the same one. The
-    questions collect; the operation decides.
-    """
+    """Use one Session for Fabric-backed questions and project setup."""
 
     from .initialise import (
         collect,
@@ -1906,10 +1651,11 @@ def handle_initialise(args: argparse.Namespace) -> int:
     )
 
     if args.interactive and non_interactive(args):
-        raise CommandError("--interactive asks and --non-interactive never does.")
+        raise CommandError(
+            "--interactive and --non-interactive cannot be used together."
+        )
     _prefer_desktop_credential(args)
 
-    # Item discovery uses the selected workspace's Session client.
     asked = collect_workspace(args)
     if non_interactive(args):
         collect(args, ask=False)
@@ -1920,7 +1666,7 @@ def handle_initialise(args: argparse.Namespace) -> int:
     from weaver.config import resolve_workspace
 
     if not args.workspace:
-        collect(args, ask=False)  # says which options a run with no terminal needs
+        collect(args, ask=False)
     with _running_session(args, resolve_workspace(workspace=args.workspace)) as opened:
         from weaver.initialise import available_environments, available_items
 
@@ -1948,8 +1694,6 @@ def handle_initialise(args: argparse.Namespace) -> int:
 
 
 def _report(args: argparse.Namespace, report, *, asked: bool) -> int:
-    """Show one initialise result in the form this command line asked for."""
-
     import json
 
     from .initialise import equivalent_command, render, render_dry_run
@@ -1969,11 +1713,7 @@ def _report(args: argparse.Namespace, report, *, asked: bool) -> int:
 
 
 def _initialise_once(args: argparse.Namespace, *, session):
-    """Adapt command-line values to :func:`weaver.initialise`.
-
-    The catalogue and Environment defaults belong to the operation, so an option
-    nobody gave is left out of the call.
-    """
+    """Leave unspecified catalogue and Environment defaults to the operation."""
 
     named = {
         keyword: value
@@ -1997,8 +1737,6 @@ def _initialise_once(args: argparse.Namespace, *, session):
 
 
 def handle_doctor(args: argparse.Namespace) -> int:
-    """Report which Fabric crossings this installation can make."""
-
     import json
 
     from weaver.operations.doctor import doctor
@@ -2034,8 +1772,6 @@ def _check_once(args: argparse.Namespace) -> int:
 
 
 def _render_error(exc: BaseException) -> None:
-    """Print one failure, in the spelling every command uses."""
-
     print(f"error: {exc}", file=sys.stderr)
 
 
@@ -2044,7 +1780,7 @@ def _indented(text: str, prefix: str = "  ") -> str:
 
 
 def _group_help(group: argparse.ArgumentParser):
-    """A group named without a subcommand lists its own, not the whole CLI."""
+    """Show the named group's help when no subcommand is given."""
 
     def show(args: argparse.Namespace) -> int:
         group.print_help()
