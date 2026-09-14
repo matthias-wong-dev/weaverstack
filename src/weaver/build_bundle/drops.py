@@ -36,15 +36,12 @@ def _slug(value) -> str:
 
 
 def _refuse_protected(schema: str, name: str, what: str) -> None:
-    """Stop a destructive action against a Weaver catalogue table."""
-
     from ..catalogue.tables import is_protected
 
     if is_protected(schema, name):
         raise BuildError(
-            f"{what} is a Weaver catalogue table and cannot be dropped. It holds "
-            "installed state no declaration reproduces, so a build may create it "
-            "and write it but never replace it."
+            f"{what} is a Weaver catalogue table and cannot be dropped; "
+            "declarations do not reproduce its installed state."
         )
 
 
@@ -59,8 +56,6 @@ def lakehouse_drop_stages(
     reused_names=(),
     mirrored=(),
 ) -> tuple[PlannedStage, ...]:
-    """Plan one Lakehouse item's managed drops."""
-
     return _item_drop_stages(
         repository,
         selected_for_drop,
@@ -85,8 +80,6 @@ def warehouse_drop_stages(
     reused_names=(),
     mirrored=(),
 ) -> tuple[PlannedStage, ...]:
-    """Plan one Warehouse item's managed drops."""
-
     return _item_drop_stages(
         repository,
         selected_for_drop,
@@ -141,8 +134,8 @@ def _item_drop_stages(
                 borrowed=identity in mirrored,
             )
             if identity in reused_names and action.kind == DROP_SHORTCUT:
-                # This plan gives the name to an owned object, and OneLake
-                # releases it after Fabric stops listing the shortcut.
+                # OneLake may reserve the name after Fabric stops listing the
+                # shortcut, so wait before reusing it for an owned object.
                 action = replace(action, awaits_name_release=True)
             actions.append(action)
             changes.append(
@@ -202,9 +195,8 @@ def _lakehouse_drop_action(
     if installed_role == ROLE_SHORTCUT:
         return _drop_shortcut_action(identity, payloads)
     installed_kind = _installed_kind(identity, installed_type)
-    # A borrowed table or folder is a shortcut, whatever Registry calls it, and
-    # a Spark drop against one would reach the item it points at. A borrowed
-    # view is Weaver's own wrapper and comes off as a view.
+    # Borrowed tables and folders are shortcuts, regardless of Registry role. A
+    # Spark drop would reach producer data; a borrowed view is a local wrapper.
     if borrowed and installed_kind in (TABLE, FOLDER):
         return _drop_shortcut_action(identity, payloads)
     action_slug = _slug(identity)

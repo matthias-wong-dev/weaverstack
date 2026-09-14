@@ -52,15 +52,8 @@ SHORTCUT_EXECUTOR = "shortcut"
 SQL_ENDPOINT_REFRESH_EXECUTOR = "sql_endpoint_refresh"
 LOAD_FILE_EXECUTOR = "load_file"
 RUNTIME_STATE_EXECUTOR = "runtime_state"
-#: Executors a bundle may carry. ``spark_sql`` runs one finished statement, being
-#: a create, a ``CREATE SCHEMA`` or a frozen prune ``DROP``. ``spark_sql_batch``
-#: runs ordered catalogue DML as one action; ``spark_table`` completes a Spark
-#: SQL table's deferred build by running its query and creating the table;
-#: ``tsql`` runs a self-contained Warehouse script and ``tsql_batch`` an
-#: ordered array of them, each as its own batch; ``folder`` makes or removes a
-#: directory; ``shortcut`` points one Lakehouse name at another item's object;
-#: ``runtime_state`` invalidates the catalogue's current-state rows a build has
-#: ended the incarnation of
+#: Executors accepted in a bundle manifest. Batch executors preserve statement
+#: order; target-only executors carry no payload.
 VALID_EXECUTORS = frozenset(
     {
         SPARK_SQL_EXECUTOR,
@@ -75,9 +68,7 @@ VALID_EXECUTORS = frozenset(
         RUNTIME_STATE_EXECUTOR,
     }
 )
-#: Executors that run a payload, and the extension that payload must carry.
-#: ``folder`` acts on the resolved target and carries none; ``sql_endpoint_refresh`` acts
-#: on the target itself.
+#: Required payload extension by executor.
 _EXECUTOR_EXTENSION = {
     SPARK_SQL_EXECUTOR: ".spark.sql",
     SPARK_SQL_BATCH_EXECUTOR: ".spark-sql-batch.json",
@@ -85,18 +76,13 @@ _EXECUTOR_EXTENSION = {
     TSQL_EXECUTOR: ".sql",
     TSQL_BATCH_EXECUTOR: ".tsql-batch.json",
     SHORTCUT_EXECUTOR: ".shortcut.json",
-    # A deployed file's payload is its exact bytes, whether a Python module or a
-    # generated statement, so the extension names the role rather than the
-    # content, which is the one thing every load file has in common.
+    # Load payloads contain exact bytes of several content types. The extension
+    # therefore identifies the load role.
     LOAD_FILE_EXECUTOR: ".payload",
     RUNTIME_STATE_EXECUTOR: ".runtime-state.json",
 }
 _PAYLOADLESS_EXECUTORS = frozenset({FOLDER_EXECUTOR, SQL_ENDPOINT_REFRESH_EXECUTOR})
-#: Kinds that carry no payload even though their executor usually does. Only
-#: ``delete_file``: removing a deployed file needs the identity and nothing else,
-#: while writing one needs the exact bytes. Expressing it per kind keeps the
-#: strict requirement where it matters, so a ``write_file`` with no payload is
-#: still rejected here rather than at install time.
+#: Payloadless exceptions for executors that otherwise require one.
 _PAYLOADLESS_KINDS = frozenset({DELETE_FILE})
 
 
@@ -145,8 +131,6 @@ def compute_bundle_id(plan: BuildPlan) -> str:
 
 
 def plan_to_yaml(plan: BuildPlan) -> str:
-    """The human-readable canonical manifest."""
-
     return yaml.safe_dump(
         plan.to_mapping(), sort_keys=False, default_flow_style=False, allow_unicode=True
     )
@@ -230,14 +214,13 @@ def validate_bundle(location: Location, plan: BuildPlan, *, store: Store) -> Non
 
 
 def validate_plan_structure(plan: BuildPlan) -> None:
-    """Everything provable from the manifest alone, without reading payloads."""
+    """Validate the manifest without reading payloads."""
 
     if plan.format_version != SUPPORTED_FORMAT_VERSION:
         raise BuildError(
-            f"unsupported bundle format version {plan.format_version} "
-            f"(this build supports {SUPPORTED_FORMAT_VERSION}). A bundle is "
-            "installed by the identity grammar it was generated with, so "
-            "generate it again with this version of Weaver"
+            f"unsupported bundle format version {plan.format_version}; this version "
+            f"supports {SUPPORTED_FORMAT_VERSION}. Bundle identity grammar is "
+            "version-specific; generate it again with this version of Weaver"
         )
 
     for node in plan.omitted_nodes:

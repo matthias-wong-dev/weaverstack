@@ -1,28 +1,8 @@
-"""Orchestrate one item-oriented repository into a coordinated build bundle.
+"""Plan an item-oriented repository as an ordered build bundle.
 
-A build is planned as an ordered series of **item** builds. The repository owns
-an acyclic item dependency graph and its topological layers; this walks those
-layers and plans each item as one coherent group of stages:
-
-.. code-block:: text
-
-    catalogue claim removal, when required
-
-    item layer 0
-        producer item A          prune, drops, schemas, shortcuts, documents, refresh
-        independent producer B   prune, drops, schemas, shortcuts, documents, refresh
-    item layer 1
-        consumer item C          prune, drops, schemas, shortcuts, documents, refresh
-
-    final batched catalogue publication
-
-Items in the same layer share their barriers, one batch each, because nothing
-orders them against each other. Items in different layers never do: a consumer's
-shortcuts and documents cannot begin until every item it reaches into has
-finished, endpoint included.
-
-Inside an item the document dependency graph decides everything; the item graph
-is the outer boundary rather than a replacement.
+Item dependency layers are the outer barriers; document dependencies order work
+within each item. Items in one layer share stage barriers, while a consumer waits
+for every producer item, including endpoint refreshes, to finish.
 """
 
 from __future__ import annotations
@@ -82,10 +62,8 @@ def generate_item_build_bundle(
     catalogue_binding: WarehouseBinding,
     shortcut_sources: Mapping[str, object] | None = None,
 ) -> BuildBundle:
-    """Freeze the one incremental build model into an installable bundle."""
-
     if catalogue_binding is None:
-        raise BuildError("every build needs an explicit catalogue Warehouse")
+        raise BuildError("a catalogue Warehouse binding is required")
     by_item = bindings.by_item
     if not by_item:
         raise BuildError("at least one Weaver item must be bound")
@@ -93,21 +71,14 @@ def generate_item_build_bundle(
     unknown = set(by_item) - known
     if unknown:
         raise BuildError(
-            "binding names item(s) absent from the repository: "
+            "bound item(s) are absent from the repository: "
             + ", ".join(sorted(map(str, unknown)))
         )
 
-    # Four kinds of node are selectable, and most of what follows needs one of
-    # them. Documents drive prune, schemas and the physical build pipelines.
-    # Shortcut destinations are registered objects, so they take part in selection
-    # and certification, but the shortcut executor materialises them. Load
-    # artefacts are signed from their own content and installed by the item's
-    # final layer, so they stay out of anything assuming a parsed declaration.
-    #
-    # Validations are entirely logical: selected so their catalogue rows
-    # publish, and never reaching a physical stage, because nothing is
-    # materialised under a Test ID. What one compiles to is a runtime artefact
-    # with an identity of its own.
+    # Documents drive prune, schema and physical build planning. Shortcut
+    # destinations and runtime artefacts are selected separately for their own
+    # executors. Validations are selected only for catalogue publication; their
+    # compiled runtime artefacts have separate identities.
     (
         selected_documents,
         selected_shortcuts,
@@ -134,8 +105,8 @@ def generate_item_build_bundle(
                 f"inventory for {item} describes {inventory.target_id}, not {target.id}"
             )
 
-    # Freshness is read before ``registered`` is narrowed, because the whole
-    # point is to compare against an item this build does not include.
+    # Freshness may depend on an item outside this build, so read it before
+    # narrowing ``registered`` to bound items.
     stale_consumers = stale_through_shortcuts(
         repository, catalogue.registered, bound_items=by_item
     )
@@ -161,10 +132,8 @@ def generate_item_build_bundle(
         targets = targets + (catalogue_target,)
     from ..catalogue.builtin import BUILTIN_ITEM
 
-    # A logical shortcut may name a producer this build does not include. Where
-    # it does, the producer's own `_.Installation` row says where it already is,
-    # so the build binding is layered over the installed one and a downstream
-    # item stays independently rebuildable.
+    # For a shortcut producer outside this build, ``_.Installation`` supplies the
+    # target. Build bindings take precedence over installed targets.
     installed_sources = installed_shortcut_sources(
         repository,
         catalogue,
@@ -173,8 +142,7 @@ def generate_item_build_bundle(
     )
     shortcut_target_by_item = {**installed_sources, **target_by_item}
     shortcut_target_by_item.setdefault(BUILTIN_ITEM, catalogue_target)
-    # Declared, because the installer resolves a shortcut's frozen source by the
-    # target id the plan names.
+    # Shortcut actions refer to source targets by plan target id.
     declared_ids = {target.id for target in targets}
     targets = targets + tuple(
         source for source in installed_sources.values() if source.id not in declared_ids
@@ -183,17 +151,11 @@ def generate_item_build_bundle(
     stages: list[PlannedStage] = []
     omitted: list[OmittedNode] = []
 
-    # Everything this build rebuilds, not only what it drops. Certification is
-    # per object and returns after the object builds, so a pointer refreshed
-    # over its own address is decertified here like any other rebuilt object.
-    # That is also what re-dates its Registry row: ``build_datetime`` is
-    # supplied on insert, so a row that is never deleted keeps the datetime of
-    # the build that last inserted it.
+    # Decertify everything rebuilt, including pointers refreshed in place.
+    # Deleting the Registry row also lets publication record a new build_datetime.
     decertified = removed | selected_for_build
-    # Collected once and used twice. These rows are deleted before any physical
-    # work, so publication compares against the catalogue without them. An object
-    # dropped and rebuilt whose projection did not change would otherwise
-    # compare equal, produce no merge, and stay deleted.
+    # Publication must compare against the post-deletion catalogue. Otherwise an
+    # unchanged projection could compare equal and leave a rebuilt row deleted.
     deleted_claims = collect_claims(catalogue, decertified, stale_claims=stale_claims)
     catalogue_after_deletions = without_claims(catalogue, deleted_claims)
 
@@ -229,7 +191,6 @@ def generate_item_build_bundle(
     if reconciliation is not None:
         stages.append(reconciliation)
 
-    # A View is recorded by the stage below, once its DDL has run.
     view_state = view_state_establishment(
         repository,
         items=tuple(target_by_item),
@@ -277,8 +238,7 @@ def generate_item_build_bundle(
     if recorded_views is not None:
         stages.append(recorded_views)
 
-    # After the physical stages: an object stops being borrowed once the build
-    # that gave it its own rows has run.
+    # Deregister a mirror only after physical work gives the object its own rows.
     deregistered = render_mirror_deregistration(
         catalogue,
         selected_for_build,
@@ -293,8 +253,7 @@ def generate_item_build_bundle(
             selected_ids,
             target_by_item,
             catalogue_target=catalogue_target,
-            # The catalogue as the claim deletions above will leave it, not as
-            # it was read. See `without_claims`.
+            # Compare publication against the catalogue after claim deletion.
             current=catalogue_after_deletions,
         )
     )
@@ -335,11 +294,10 @@ def generate_item_build_bundle(
 
 
 def _catalogue_holds(inventories):
-    """Whether the catalogue target already holds one runtime table.
+    """Return whether the catalogue target already holds a runtime table.
 
-    The reconciliation runs ahead of physical work, so the build that creates
-    the ``_`` schema has nothing to write into yet. Its objects reach explicit
-    state on the next build or the first load.
+    Reconciliation precedes physical work, so a build creating ``_`` records its
+    objects on the next build or first load.
     """
 
     from ..catalogue.builtin import BUILTIN_ITEM
@@ -366,8 +324,6 @@ def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:
 def _selectable(
     repository: WeaverRepository, by_item: Mapping
 ) -> tuple[set, set, set, set]:
-    """The four selectable kinds, separately. See the comment at the call site."""
-
     return (
         {
             identity
@@ -398,15 +354,7 @@ def _selectable(
 
 
 def certifiable_identities(repository: WeaverRepository, by_item: Mapping) -> set:
-    """Every object a build of these items could certify.
-
-    Everything a bound item owns, whatever this build decides to do about it:
-    an object left alone because nothing changed is still certified. What a
-    build did is narrowed later, by the planner's uncertified set.
-
-    Shares ``_selectable`` with the planner rather than re-deriving the same
-    three sets, so the two cannot disagree about what a build certifies.
-    """
+    """Return every object the bound items could certify, including unchanged ones."""
 
     documents, shortcuts, loads, validations = _selectable(repository, by_item)
     return documents | shortcuts | loads | validations
@@ -416,19 +364,17 @@ def _item_layers(
     repository: WeaverRepository,
     target_by_item: Mapping[WeaverItemId, object],
 ) -> tuple[tuple[WeaverItemId, ...], ...]:
-    """Group bound items by their repository topological layer."""
-
     layers = repository.item_layers
     if not layers:
         raise BuildError(
-            f"repository {repository.name!r} carries no item dependency layers, so "
-            "the order its items must be built in is unknown"
+            f"repository {repository.name!r} has no item dependency layers; "
+            "build order is unknown"
         )
     placed = {item for layer in layers for item in layer}
     missing = set(target_by_item) - placed
     if missing:
         raise BuildError(
-            "bound item(s) absent from the repository item graph: "
+            "bound item(s) are absent from the repository item graph: "
             + ", ".join(sorted(map(str, missing)))
         )
     return tuple(
@@ -442,15 +388,11 @@ def _item_layers(
 
 @dataclass(frozen=True)
 class PlannedItem:
-    """One item's physical plan and any selected nodes it could not plan."""
+    """One item's ordered stages and unplannable selected nodes."""
 
-    #: The item's contiguous stages, in the order they must run.
     stages: tuple[PlannedStage, ...]
-    #: Selected nodes this bound item could not plan, each carrying why. The
-    #: bundle planner refuses any such result before writing a bundle.
     omitted: tuple[OmittedNode, ...]
-    #: Shortcut destinations represented by ``omitted``. This preserves the item
-    #: planning seam's complete result even though whole-bundle generation fails.
+    #: Shortcut destinations represented by ``omitted``.
     uncertified: frozenset
 
 
@@ -472,16 +414,7 @@ def plan_item_build(
     shortcut_sources=None,
     mirrored=(),
 ) -> PlannedItem:
-    """One item's physical plan, from prepared inputs.
-
-    The seam between deciding what to build and arranging a bundle: given a
-    selection already made and an inventory already read, which stages run for
-    this item against this target, and in what order.
-
-    Item layers, catalogue publication, the control-plane target, bundle
-    identity and writing all stay above it, so an ordering claim can be made
-    without generating a bundle.
-    """
+    """Plan one item's ordered physical stages from a selection and inventory."""
 
     arguments = dict(
         repository=repository,
@@ -508,8 +441,6 @@ def plan_item_build(
 
 
 def _plan_lakehouse_item(**arguments) -> PlannedItem:
-    """Plan one Lakehouse through Lakehouse-specific concern functions."""
-
     target = arguments["target"]
     return _plan_item(
         **arguments,
@@ -524,8 +455,6 @@ def _plan_lakehouse_item(**arguments) -> PlannedItem:
 
 
 def _plan_warehouse_item(**arguments) -> PlannedItem:
-    """Plan one Warehouse through Warehouse-specific concern functions."""
-
     return _plan_item(
         **arguments,
         shortcut_planner=plan_warehouse_shortcuts,
@@ -563,8 +492,6 @@ def _plan_item(
     runtime_destination,
     endpoint_planner,
 ) -> PlannedItem:
-    """Arrange one item using operations selected at item dispatch."""
-
     shortcuts = shortcut_planner(
         repository,
         item=item,
@@ -581,11 +508,8 @@ def _plan_item(
     )
     stages: list[PlannedStage] = []
 
-    # Prune is given every declared shortcut destination, never only the selected
-    # ones: a shortcut this build decided not to touch is still desired state, and
-    # a prune that could not see it would delete the thing incremental
-    # selection just chose to keep. Load artefacts are treated the same way, and
-    # the stage derives them itself.
+    # Prune sees every declared shortcut destination, not only selected ones; an
+    # unchanged shortcut remains desired state. The stage derives load artefacts.
     prune = prune_planner(
         repository,
         selected_documents,
@@ -618,10 +542,8 @@ def _plan_item(
         item=item,
         target=target,
         inventory=inventory,
-        # `_` is where a Warehouse's generated load procedures live, and no
-        # document declares an object in it, so like a shortcut's namespace it
-        # would never be created if only documents were consulted. It is derived
-        # from the artefacts, so an item with no procedures asks for no schema.
+        # Generated Warehouse load procedures require ``_``, which no document
+        # declares. Deriving it from artefacts avoids creating it without procedures.
         extra_schemas=tuple(shortcuts.schemas) + load_schemas(artefacts),
     )
     if schemas is not None:
@@ -642,10 +564,8 @@ def _plan_item(
         if refresh is not None:
             stages.append(refresh)
 
-    # The runtime layer closes the item, after its structure is built and its
-    # endpoint has caught up. Removals ride in it too: they come from the
-    # previous Registry rows rather than from any diff against the target, so
-    # they need no earlier barrier to be safe.
+    # Runtime installation closes the item after structure and endpoint refresh.
+    # Removals come from prior Registry rows, not the target diff.
     stages.extend(
         item_runtime_stages(artefacts, selected_loads, item=item, target=target)
     )
@@ -667,17 +587,10 @@ def pointers_whose_name_is_reused(
     registered: Mapping,
     mirrored=(),
 ):
-    """Pointers this plan removes and then gives to an owned object.
+    """Return dropped pointers whose names this plan reuses for owned objects.
 
-    The narrow case Fabric needs time for. A shortcut comes off through the
-    shortcut API and Fabric stops listing it at once, while OneLake keeps its
-    namespace reserved for a while longer, so an owned object created at that
-    name finds it occupied.
-
-    Three conditions, and all of them are needed. The identity is installed as a
-    pointer, this plan drops it, and this plan builds something owned at the same
-    name. A pointer replaced by another pointer is not here: it is materialised
-    over itself and never released, so nothing waits for it.
+    OneLake may reserve a shortcut's name after Fabric stops listing it. Pointer
+    replacements stay in place and do not need this wait.
     """
 
     mirrored = set(mirrored)
@@ -691,21 +604,11 @@ def pointers_whose_name_is_reused(
 
 
 def _retained_pointers(selected_shortcuts, registered: Mapping) -> set:
-    """Shortcut destinations a drop leaves alone, being pointers already.
+    """Return shortcut destinations that managed drop must leave in place.
 
-    Materialising a shortcut replaces the pointer that is there, so a destination
-    installed as a pointer is not dropped first. A destination installed as
-    something else is: the catalogue records the role it was certified under, and
-    a native folder or table standing where a shortcut is now declared occupies
-    the name Fabric would create the shortcut at.
-
-    That is the general desired-state rule rather than a shortcut rule. An
-    identity is reconciled to the form now declared for it, by the same managed
-    drop a table-to-view change goes through.
-
-    An identity with no Registry row is left alone. Nothing certified it, so what
-    stands there is not Weaver's to remove, and shortcut creation reports the
-    occupied name.
+    Existing pointers are overwritten in place. A destination certified under a
+    different role is dropped for the kind change. Without a Registry row, the
+    existing object is not Weaver's to remove.
     """
 
     retained = set()

@@ -31,15 +31,11 @@ def _slug(value) -> str:
 
 @dataclass(frozen=True)
 class RenderedAction:
-    """One authored document rendered as an action and frozen payload."""
-
     action: InstallAction
     payloads: Mapping[str, bytes]
 
 
 def render_document_build_action(identity, source, *, destination) -> RenderedAction:
-    """Render one document for a destination selected by the item planner."""
-
     action_slug = _slug(identity)
     if source.kind == FOLDER:
         return RenderedAction(
@@ -74,8 +70,6 @@ def render_document_build_action(identity, source, *, destination) -> RenderedAc
 def render_lakehouse_document_build_action(
     identity, source, *, target
 ) -> RenderedAction:
-    """Render one Lakehouse document with its Spark destination."""
-
     return render_document_build_action(
         identity, source, destination=target.spark_target
     )
@@ -84,16 +78,12 @@ def render_lakehouse_document_build_action(
 def render_warehouse_document_build_action(
     identity, source, *, target
 ) -> RenderedAction:
-    """Render one Warehouse document with its T-SQL destination."""
-
     return render_document_build_action(identity, source, destination=None)
 
 
 def lakehouse_build_stages(
     repository, selected_for_build, *, item: WeaverItemId, target
 ) -> tuple[PlannedStage, ...]:
-    """Render one Lakehouse item's document dependency layers."""
-
     return _item_build_stages(
         repository,
         selected_for_build,
@@ -106,8 +96,6 @@ def lakehouse_build_stages(
 def warehouse_build_stages(
     repository, selected_for_build, *, item: WeaverItemId, target
 ) -> tuple[PlannedStage, ...]:
-    """Render one Warehouse item's document dependency layers."""
-
     return _item_build_stages(
         repository,
         selected_for_build,

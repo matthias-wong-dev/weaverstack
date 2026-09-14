@@ -62,10 +62,10 @@ from .sql_templates import render_sql_statement, tsql_ident
 from .stages import PRUNE, PlannedStage
 from .targets import WAREHOUSE_TARGET, BoundTarget
 
-#: Weaver-owned Files areas excluded from prune.
+#: Weaver-owned Files areas that are not item Folder objects.
 _RESERVED_FILES_AREAS = frozenset({CLI_AREA})
 
-#: Delta schemas excluded from prune because Weaver does not manage them.
+#: Delta schemas Weaver does not manage.
 _RESERVED_SCHEMAS = frozenset({"dbo", CATALOGUE_SCHEMA})
 
 #: Warehouse schemas that belong to the engine rather than to any item.
@@ -83,14 +83,8 @@ class _Managed:
     folders: frozenset[str]
     tables: frozenset[str]
     views: frozenset[str]
-    #: Object names a document declares, whatever kind it declares them as. A
-    #: document installed under the other kind is a kind change, removed by the
-    #: item's managed drop, which reads the installed type from inventory, so
-    #: prune spares the name. Shortcut destinations are held out, so a shortcut
-    #: whose name is installed as the other kind is prune's to remove. Where the
-    #: installed type matches and only the role differs, a native folder standing
-    #: under a declared folder shortcut, the managed drop covers it. See
-    #: :func:`weaver.build_bundle.planner._retained_pointers`.
+    #: Document object names, independent of declared kind. Prune spares kind
+    #: changes for managed drop; shortcut destinations stay out of this set.
     declared_objects: frozenset[str]
 
 
@@ -98,9 +92,8 @@ class _Managed:
 class TargetInventory:
     """Transport-neutral physical state prepared before bundle generation.
 
-    ``files`` and ``procedures`` are what a load layer installs, read like
-    everything else here. A type the inventory could not see would be disproved
-    by every reconciliation and rebuilt on every build.
+    Load files and procedures are included because reconciliation treats an
+    absent object as stale.
     """
 
     target_id: str
@@ -121,8 +114,6 @@ class TargetInventory:
     runtime_references: tuple[str, ...] = ()
 
     def to_mapping(self) -> dict[str, object]:
-        """A versioned JSON-safe representation for remote state handover."""
-
         return {
             "format_version": 1,
             "target_id": self.target_id,
@@ -140,8 +131,6 @@ class TargetInventory:
 
     @classmethod
     def from_mapping(cls, mapping) -> "TargetInventory":
-        """Reconstruct an inventory returned by an in-Fabric state read."""
-
         version = mapping.get("format_version")
         if version != 1:
             raise BuildError(
@@ -162,19 +151,10 @@ class TargetInventory:
         )
 
     def update_using(self, plan) -> "TargetInventory":
-        """This target as the plan intends to leave it.
+        """Return the inventory predicted by this plan's declared target changes.
 
-        The build's declared effect on this target, applied. What it gives is a
-        prediction, and the value of a prediction is that it can be wrong: an
-        estate built from a repository and read back should equal the same
-        repository's declared inventory, and if applying a build's own summary to
-        the state it was planned against does not reach that, the build does not
-        converge.
-
-        Reads the summary rather than inferring one from the actions, because an
-        inference would be a model of what executors do living where no executor
-        could correct it. The summary is held to the actions separately, by
-        bijection over action ids.
+        The prediction reads the summary directly and does not model executor
+        behaviour from actions. Action ids hold the summary and actions to a bijection.
         """
 
         from .changes import apply_to
@@ -182,23 +162,16 @@ class TargetInventory:
         return apply_to(self, plan.target_changes.get(self.target_id, ()))
 
     def has_object(self, schema: str, name: str, object_type: str) -> bool:
-        """Whether the target holds this object, asked of the right collection.
+        """Return whether the matching inventory collection holds this object.
 
-        Branching on the type is not a convenience: falling through to ``tables``
-        for a type this did not know about would answer no for something that
-        is plainly there, and reconciliation reads a no as proof the claim is
-        stale.
-
-        ``schema`` is accepted as the catalogue stores it or as the target holds
-        it. A Lakehouse area is a Weaver spelling and nothing a Fabric inventory
-        reports, so it comes off here and one comparison serves both callers.
+        Catalogue area prefixes are removed because Fabric inventories report
+        Lakehouse schemas without them. Unknown object types are rejected rather
+        than treated as absent.
         """
 
         _area, schema = stored_area(schema)
         if object_type == "file":
-            # A file is addressed by path, and its schema already is the path
-            # beneath Files, so the two halves join with a separator rather than
-            # the dot a two-part object name uses.
+            # A file schema is its path beneath Files.
             return _holds(self.files, f"{schema}/{name}")
         if object_type == "stored_procedure":
             return _holds(self.procedures, f"{schema}.{name}")
@@ -219,12 +192,10 @@ class TargetInventory:
         raise BuildError(f"target inventory cannot inspect object type {object_type!r}")
 
     def physical_type(self, identity: WeaverDocumentId | WeaverSchemaId) -> str | None:
-        """The kind physically installed under one repository identity.
+        """Return the physical kind installed under a repository identity.
 
-        Inventory answers destructive truth without consulting Registry. A schema
-        shortcut names its namespace directly; a normal relation may currently be
-        either a table or a view; shaped identities name their one physical
-        collection directly.
+        Inventory, not Registry, determines destructive action. Relations may be
+        tables or views; shaped identities name one physical collection.
         """
 
         if isinstance(identity, WeaverSchemaId):
@@ -273,10 +244,8 @@ def read_lakehouse_inventory(
     files_root = resolver.files_root(lakehouse)
     enumerate_shortcuts = getattr(resolver, "onelake_shortcuts", None)
     shortcuts = tuple(enumerate_shortcuts(lakehouse)) if enumerate_shortcuts else ()
-    # A schema shortcut is a namespace owned by its source item. OneLake storage
-    # exposes the source's children beneath the local shortcut root, but they are
-    # not local objects and must never enter prune's object inventory: dropping
-    # one through the shortcut would delete the producer's data.
+    # OneLake exposes a schema shortcut's source objects beneath the local root.
+    # Exclude them: pruning through the shortcut would delete producer data.
     shortcut_schemas = {
         shortcut.name.casefold()
         for shortcut in shortcuts
@@ -301,10 +270,8 @@ def read_lakehouse_inventory(
         and catalogue.schema_exists(CATALOGUE_SCHEMA)
         and CATALOGUE_SCHEMA.casefold() not in {schema.casefold() for schema in schemas}
     ):
-        # The empty catalogue schema is catalogue state, not storage state: until
-        # its first table exists there is no Tables/_ directory for the store to
-        # discover.  The package-owned control item is the one safe exception to
-        # storage-only schema discovery because it is the attached Lakehouse.
+        # An empty catalogue schema has no Tables/_ directory. Only the control
+        # item may recover that schema from catalogue state.
         schemas += (CATALOGUE_SCHEMA,)
     tables = tuple(
         f"{schema}.{entry.name}"
@@ -312,12 +279,8 @@ def read_lakehouse_inventory(
         if schema.casefold() not in shortcut_schemas
         for entry in _child_dirs(store, tables_root / schema)
     )
-    # The same narrowing the Delta side uses, and for the same reason. The
-    # control item's Files area holds Weaver's own working directories, being the
-    # declaration, retained bundles and CLI handover, none of which is a Folder
-    # object. What it declares is the task log, under the reserved schema.
-    # Excluding the whole area instead left that folder unobservable, so every
-    # build concluded it was absent and tried to create it again.
+    # The control item's Files area also holds working directories that are not
+    # Folder objects. Inventory only its declared ``_`` area.
     folder_schema_entries = tuple(
         entry
         for entry in _child_dirs(store, files_root)
@@ -340,11 +303,8 @@ def read_lakehouse_inventory(
             if schema.casefold() not in shortcut_schemas
             for view in catalogue.views(schema)
         )
-    # Storage, not the Spark catalogue: a reference is a shortcut, and a shortcut
-    # is a directory under `Tables/_` whether or not anything has registered it
-    # as a table. Read here because `_` is dropped from `schemas` above, so
-    # nothing downstream could tell it apart from a schema the item does not
-    # declare.
+    # Runtime references are shortcuts under Tables/_, whether or not Spark has
+    # registered them as tables. The ordinary schema inventory excludes ``_``.
     references = tuple(
         table.name
         for table in STANDARD_SURFACE_TABLES
@@ -368,12 +328,10 @@ def read_lakehouse_inventory(
 
 
 def _load_files(store: Store, files_root) -> tuple[str, ...]:
-    """Every deployed load file, as the path beneath ``Files`` that names it.
+    """Return deployed load files as paths beneath ``Files``.
 
-    Scoped to the runtime tree rather than the whole Files area: a Folder
-    object's contents are data an item loaded, so walking all of Files would
-    inventory rows as artefacts. The load tree is where a build puts individual
-    files it claims one by one.
+    Only the runtime tree contains individually claimed files. Other Files
+    content may be data inside a Folder object.
     """
 
     root = files_root / LOAD_ROOT.split("/")[0]
@@ -395,11 +353,8 @@ def _load_files(store: Store, files_root) -> tuple[str, ...]:
 def read_warehouse_inventory(target: BoundTarget, *, sql) -> TargetInventory:
     """Read every Weaver-manageable schema, table, view and procedure.
 
-    For the built-in catalogue item the answer is the ``_`` schema and nothing
-    else, exactly as it is for a Lakehouse. That restriction is the whole of the
-    shared-host guarantee: the catalogue may live in a Warehouse that already
-    holds a user's schemas, and an inventory that could see them would offer
-    them to prune as orphans of an item that never declared them.
+    The built-in item exposes only ``_`` so prune cannot remove user schemas from
+    a Warehouse that also hosts the catalogue.
     """
 
     catalogue_item = target.logical_item_name == "_weaver"
@@ -476,8 +431,6 @@ def render_warehouse_inventory_prune(
     managed: _Managed,
     payloads: dict[str, bytes],
 ) -> tuple[tuple[InstallAction, ...], tuple[TargetChange, ...]]:
-    """Render Warehouse prune actions from one already-read inventory."""
-
     actions: list[InstallAction] = []
     changes: list[TargetChange] = []
 
@@ -488,15 +441,10 @@ def render_warehouse_inventory_prune(
         return folded in same_kind or folded in managed.declared_objects
 
     def protected(qualified: str) -> bool:
-        """Whether this table is a catalogue table, which prune never removes.
+        """Return whether this is a catalogue table, which prune never removes.
 
-        Asked of a table and not of a view, because the two answer differently
-        for one name: ``_.Bookmark`` is the catalogue's own table in the
-        catalogue Warehouse and a local reference to it everywhere else, and the
-        reference has the ordinary lifecycle of the keep-set it is in.
-
-        The built-in item declares every catalogue table, so a table reaching
-        here means its declaration went missing rather than that the table did.
+        A same-named view is a local reference with the ordinary keep-set
+        lifecycle. The built-in item declares every catalogue table.
         """
 
         schema, _, name = qualified.partition(".")
@@ -568,8 +516,6 @@ def render_lakehouse_inventory_prune(
     managed: _Managed,
     payloads: dict[str, bytes],
 ) -> tuple[tuple[InstallAction, ...], tuple[TargetChange, ...]]:
-    """Render Lakehouse prune actions from one already-read inventory."""
-
     actions: list[InstallAction] = []
     changes: list[TargetChange] = []
 
@@ -666,8 +612,6 @@ def managed_lakehouse_sets(
     shortcut_destinations: Iterable[WeaverDocumentId] = (),
     load_identities: Iterable[WeaverDocumentId] = (),
 ) -> _Managed:
-    """Build the keep-set for one Lakehouse item."""
-
     tables = {d.qualified for d in documents.values() if d.kind == TABLE}
     views = {d.qualified for d in documents.values() if d.kind == VIEW}
     folders = {d.qualified for d in documents.values() if d.kind == FOLDER}
@@ -697,8 +641,6 @@ def managed_warehouse_sets(
     shortcut_destinations: Iterable[WeaverDocumentId] = (),
     load_identities: Iterable[WeaverDocumentId] = (),
 ) -> _Managed:
-    """Build the keep-set for one Warehouse item."""
-
     tables = {d.qualified for d in documents.values() if d.kind == TABLE}
     views = {d.qualified for d in documents.values() if d.kind == VIEW}
     declared_objects = tables | views
@@ -722,14 +664,10 @@ def managed_warehouse_sets(
 def _finalise_managed_sets(
     *, tables, views, folders, declared_objects, shortcut_schemas, load_identities
 ) -> _Managed:
-    """Fold classified names into the inventory comparison form.
+    """Fold names for comparison and include schemas implied by load procedures.
 
-    ``load_identities`` contribute the ``_`` schema a Warehouse's generated load
-    procedures live in, which nothing declares: without it every build would
-    drop the schema it had just created. Derived from the artefacts rather than
-    added unconditionally, so the schema goes when the last procedure does. The
-    Lakehouse runtime tree needs nothing here, being a declared folder.
-
+    Deriving ``_`` from procedure artefacts keeps it only while a Warehouse has
+    generated load procedures. The Lakehouse runtime tree is a declared folder.
     """
 
     schemas = {name.split(".", 1)[0].lower() for name in tables | views}
@@ -757,8 +695,6 @@ def lakehouse_prune_stage(
     target,
     inventory,
 ) -> PlannedStage | None:
-    """Plan the authoritative inventory diff for one Lakehouse item."""
-
     return _item_prune_stage(
         repository,
         selected_ids,
@@ -778,8 +714,6 @@ def warehouse_prune_stage(
     target,
     inventory,
 ) -> PlannedStage | None:
-    """Plan the authoritative inventory diff for one Warehouse item."""
-
     return _item_prune_stage(
         repository,
         selected_ids,
