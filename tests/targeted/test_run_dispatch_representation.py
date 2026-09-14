@@ -326,5 +326,5 @@ def test_an_unknown_primitive_kind_is_refused_rather_than_guessed_at():
 
     from weaver.run.result import RunError
 
-    with pytest.raises(RunError, match="primitive kind .* is unsupported"):
+    with pytest.raises(RunError, match="deployed object type .* is unsupported"):
         dispatch_primitive(node, session=SimpleNamespace())

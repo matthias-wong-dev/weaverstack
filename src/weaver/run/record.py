@@ -66,10 +66,7 @@ def result_for(node, *, task_type: str = LOAD_TASK) -> str:
     try:
         result = RESULT_FOR_STATUS[status]
     except KeyError:
-        raise RunError(
-            f"Cannot record status {status!r}: it is not in the public Result "
-            "vocabulary"
-        ) from None
+        raise RunError(f"Cannot record unsupported status {status!r}") from None
     if result != FAILED or not getattr(node, "raised", False):
         return result
     if task_type == TEST_TASK:

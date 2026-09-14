@@ -377,7 +377,7 @@ def test_an_unknown_status_is_refused_rather_than_written():
 
     from weaver.run.result import RunError
 
-    with pytest.raises(RunError, match="public Result vocabulary"):
+    with pytest.raises(RunError, match="unsupported status"):
         result_for(_node(status="reticulating"))
 
 

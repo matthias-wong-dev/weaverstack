@@ -101,9 +101,8 @@ class RuntimeArtefact:
     def installed_bytes(self) -> bytes:
         if self.payload is None:
             raise BuildError(
-                f"Runtime artefact {self.identity} has no installed content because "
-                "it was listed without a destination. List it again with the "
-                "destination for its item"
+                f"{self.identity} has no installable content because its item has no "
+                "target. Bind the item to a target and generate the bundle again."
             )
         return self.payload
 
@@ -119,8 +118,8 @@ class RuntimeArtefact:
     def target_path(self) -> str:
         if not self.is_file:
             raise ValueError(
-                f"Runtime artefact {self.identity} is not a file. Use target_path "
-                "only for file artefacts"
+                f"{self.identity} does not install as a file. target_path applies "
+                "only to file artefacts."
             )
         return f"{self.identity.object_id.schema}/{self.identity.object_id.object}"
 

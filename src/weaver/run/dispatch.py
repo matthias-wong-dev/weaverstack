@@ -53,7 +53,9 @@ def dispatch_primitive(
         return _endpoint_refresh(node, session, workspace)
     if kind == ONELAKE_PUBLICATION:
         return _onelake_publication(node, session, workspace, publication)
-    raise RunError(f"Cannot run {node.node_id}: primitive kind {kind!r} is unsupported")
+    raise RunError(
+        f"Cannot run {node.node_id}: deployed object type {kind!r} is unsupported"
+    )
 
 
 def _validation(node, session, workspace, open_runtime, collect: bool):

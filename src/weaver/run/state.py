@@ -24,7 +24,10 @@ class RunState:
     def from_mapping(cls, mapping) -> "RunState":
         version = mapping.get("format_version")
         if version != 1:
-            raise RunError(f"Run state format {version!r} is unsupported; expected 1")
+            raise RunError(
+                f"Run state version {version!r} is unsupported; this Weaver version "
+                "supports version 1. Recreate the run state with this Weaver version."
+            )
         return cls(catalogue=Catalogue.from_mapping(mapping["catalogue"]))
 
 
@@ -38,7 +41,10 @@ def read_installed_catalogue(*, session, workspace=None, tables=None) -> Catalog
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
-        raise RunError("This run needs a Workspace with a Weaver catalogue")
+        raise RunError(
+            "This run needs a Workspace with a Weaver catalogue. Pass a Workspace "
+            "that names its catalogue Warehouse."
+        )
     return catalogue_for(
         session, workspace, tables=READABLE_TABLES if tables is None else tuple(tables)
     )

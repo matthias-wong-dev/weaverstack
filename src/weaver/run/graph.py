@@ -66,7 +66,8 @@ class RunGraph:
             return Graph((node.node_id for node in self.nodes), self.edges)
         except GraphError as exc:
             raise RunError(
-                f"Cannot plan the run because its dependencies cycle: {exc}"
+                f"Cannot plan the run because its dependencies cycle: {exc}. "
+                "Remove one dependency from the cycle."
             ) from None
 
     def upstream(self, node_id: str) -> frozenset[str]:
