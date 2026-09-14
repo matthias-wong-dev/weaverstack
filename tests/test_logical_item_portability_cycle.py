@@ -202,7 +202,7 @@ def test_a_shared_target_is_configuration_that_a_build_refuses(tmp_path, root):
     }
 
     # One build naming both, which is what naming no item would ask for.
-    with pytest.raises(BuildError, match="cannot hold two items"):
+    with pytest.raises(BuildError, match="cannot be used by more than one Weaver item"):
         _item_bindings(None, workspace)
 
 

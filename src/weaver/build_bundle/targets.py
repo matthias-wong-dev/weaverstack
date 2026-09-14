@@ -225,9 +225,8 @@ class ItemBindings:
             key = (target.physical_kind, target.item.name)
             if key in physical:
                 raise BuildError(
-                    f"{key[0]}/{key[1]} cannot hold two items. Each item is "
-                    "reconciled against the target's complete inventory, so bind "
-                    "each item to a different physical target"
+                    f"{key[0]}/{key[1]} cannot be used by more than one Weaver "
+                    "item. Bind each item to a different physical target."
                 )
             physical.add(key)
 

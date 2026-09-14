@@ -216,9 +216,9 @@ def validate_bundle(location: Location, plan: BuildPlan, *, store: Store) -> Non
 def validate_plan_structure(plan: BuildPlan) -> None:
     if plan.format_version != SUPPORTED_FORMAT_VERSION:
         raise BuildError(
-            f"unsupported bundle format version {plan.format_version}; this version "
-            f"supports {SUPPORTED_FORMAT_VERSION}. Bundle identity grammar is "
-            "version-specific; generate it again with this version of Weaver"
+            f"Bundle format version {plan.format_version} is not supported; this "
+            f"Weaver version supports {SUPPORTED_FORMAT_VERSION}. Regenerate the "
+            "bundle with this Weaver version."
         )
 
     for node in plan.omitted_nodes:

@@ -420,8 +420,7 @@ def project_bound_documents(
     unknown = selected_items - known_items
     if unknown:
         raise BuildError(
-            "binding names item(s) absent from the repository: "
-            + ", ".join(sorted(map(str, unknown)))
+            "Item(s) not found in the project: " + ", ".join(sorted(map(str, unknown)))
         )
     selected = {
         str(identity): source

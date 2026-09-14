@@ -150,14 +150,13 @@ def validate_build_request(
     unknown = set(bindings.by_item) - known
     if unknown:
         raise BuildError(
-            "binding names item(s) absent from the repository: "
-            + ", ".join(sorted(map(str, unknown)))
+            "Item(s) not found in the project: " + ", ".join(sorted(map(str, unknown)))
         )
     placed = {item for layer in repository.item_layers for item in layer}
     missing = set(bindings.by_item) - placed
     if missing:
         raise BuildError(
-            "bound item(s) absent from the repository item graph: "
+            "Cannot determine build order for item(s): "
             + ", ".join(sorted(map(str, missing)))
         )
     from ..catalogue.builtin import BUILTIN_ITEM

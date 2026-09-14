@@ -276,8 +276,8 @@ def test_a_version_two_bundle_is_refused_rather_than_reinterpreted(tmp_path):
     with pytest.raises(BuildError) as refused:
         load_bundle(location, store=store)
 
-    assert "unsupported bundle format version 2" in str(refused.value)
-    assert "generate it again" in str(refused.value)
+    assert "Bundle format version 2 is not supported" in str(refused.value)
+    assert "Regenerate the bundle" in str(refused.value)
 
 
 def _validate(plan):

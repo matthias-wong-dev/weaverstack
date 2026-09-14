@@ -357,9 +357,8 @@ def _refuse_unusable_pair(
 ) -> None:
     if not source.is_local_to(base.workspace):
         raise CommandError(
-            f"{source} is in workspace {source.owner(base.workspace)}. Fabric "
-            "Warehouse can copy catalogue state only within one workspace. Use a "
-            f"source catalogue in {base.workspace}."
+            f"Source catalogue {source} must be in workspace {base.workspace}. "
+            f"Use a catalogue in {base.workspace}."
         )
     if source.name.casefold() == destination.name.casefold():
         raise CommandError(
@@ -387,17 +386,16 @@ def _prove_source(plan: MirrorPlan, *, session) -> bool:
     found = _source_catalogue_tables(plan, session=session)
     if not found:
         raise CommandError(
-            f"{plan.source} has no catalogue tables in [_]. Name the Warehouse "
-            "that holds the Weaver catalogue."
+            f"{plan.source} does not contain a Weaver catalogue. Name the "
+            "Warehouse that holds the Weaver catalogue."
         )
     missing = [
         table.name for table in FORKED_TABLES if table.name.casefold() not in found
     ]
     if missing:
         raise CommandError(
-            f"The catalogue in {plan.source} is missing "
-            + ", ".join(f"[_].[{name}]" for name in missing)
-            + ". Build against it with this Weaver version before mirroring."
+            f"The catalogue in {plan.source} is not compatible with this Weaver "
+            "version. Build against it with this version before mirroring."
         )
     return MIRROR.name.casefold() in found
 
@@ -534,10 +532,8 @@ def _refuse_mirrored_source(resolved: ResolvedMirror) -> None:
         return
     named = ", ".join(str(each.item) for each in resolved.items)
     raise CommandError(
-        f"mirror reads {resolved.source}, which is itself a mirror: it holds "
-        f"[_].[Mirror]. Weaver records one hop, and rebinding {named} out of it "
-        "puts their rows two catalogues away. Mirror those items from the "
-        "catalogue that records their rows locally."
+        f"{resolved.source} is already a mirrored catalogue. Mirror {named} from "
+        "their source catalogue."
     )
 
 
@@ -1007,10 +1003,9 @@ def _copy_programmables(workspace: Workspace, each: MirrorItem, *, sql, session)
     )
     if absent:
         raise CommandError(
-            f"mirror cannot copy the code certified for {each.item} into "
-            f"{each.target}: {CATALOGUE_KIND}/{each.source_target} does not hold "
+            f"The source item {each.item} is missing deployed code: "
             + ", ".join(identity.object_id.qualified for identity in absent)
-            + ". Build the source item before mirroring it."
+            + f". Build {each.item} before mirroring it."
         )
     statements = programmable_statements(str(row["definition"]) for row in rows)
     if not statements:
@@ -1097,12 +1092,8 @@ def mirrored_source(
         return None
     if workspace.mirror is None:
         raise CommandError(
-            f"{operation} needs the source catalogue for live mirrored load state, "
-            "but this workspace names none. "
-            f"{len(catalogue.mirrors)} object(s) are recorded in "
-            f"{CATALOGUE_KIND}/{workspace.catalogue_item.name} as mirrored. Set "
-            f"mirror: {CATALOGUE_KIND}/<name> in workspace configuration, naming "
-            "the catalogue this one was forked from."
+            f"{operation} needs the source catalogue for mirrored objects. Set "
+            f"mirror: {CATALOGUE_KIND}/<name> in workspace configuration."
         )
     if not workspace.mirror.is_local_to(workspace.workspace):
         raise CommandError(

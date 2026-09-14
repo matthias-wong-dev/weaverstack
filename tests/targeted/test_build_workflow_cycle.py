@@ -292,7 +292,7 @@ def test_a_binding_naming_an_unknown_item_is_refused(estate):
 
     from weaver.errors import BuildError
 
-    with pytest.raises(BuildError, match="absent from the repository"):
+    with pytest.raises(BuildError, match="not found in the project"):
         build(
             estate,
             bindings=effective_item_bindings(

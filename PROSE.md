@@ -5,7 +5,13 @@ source comments. It governs wording, not product behaviour.
 
 ## Default
 
-Preserve the smallest amount of prose that carries non-obvious information.
+For comments and docstrings, preserve the smallest amount of prose that carries
+non-obvious engineering information.
+
+For user-facing text, preserve only information needed to understand the current
+result or choose the next action. Internal facts do not earn a place merely
+because they explain why Weaver behaves that way.
+
 Delete everything else. Do not optimise for deletion count. Optimise for
 information density.
 
@@ -62,9 +68,22 @@ information changes how it is used.
 
 ### Errors and warnings
 
-State the condition first. Identify the affected command, item, table, workspace
-or path. Give a next action only when Weaver can identify one. Do not explain
-adjacent configuration or architecture unless the user needs it to act.
+For every help string, prompt, warning or surfaced error:
+
+1. State the condition in the user's vocabulary.
+2. Name the affected thing.
+3. Give the next action when Weaver knows it.
+4. Delete anything that only explains the implementation.
+
+Errors are not miniature architecture documentation. Avoid internal terms such
+as Registry rows, planner structures, bindings, item graphs, four-part naming
+and transport boundaries unless the user must interact with that concept to
+resolve the error.
+
+Catalogue implementation details such as `[_]` and `[_].[Mirror]` appear in
+user-facing prose only when they are actionable. Usually name the user-visible
+condition: a Warehouse does not contain a Weaver catalogue, a catalogue is
+incompatible with this Weaver version, or a catalogue is already mirrored.
 
 ### Reports
 

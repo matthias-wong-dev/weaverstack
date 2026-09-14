@@ -71,8 +71,7 @@ def generate_item_build_bundle(
     unknown = set(by_item) - known
     if unknown:
         raise BuildError(
-            "bound item(s) are absent from the repository: "
-            + ", ".join(sorted(map(str, unknown)))
+            "Item(s) not found in the project: " + ", ".join(sorted(map(str, unknown)))
         )
 
     # Documents drive prune, schema and physical build planning. Shortcut
@@ -372,7 +371,7 @@ def _item_layers(
     missing = set(target_by_item) - placed
     if missing:
         raise BuildError(
-            "bound item(s) are absent from the repository item graph: "
+            "Cannot determine build order for item(s): "
             + ", ".join(sorted(map(str, missing)))
         )
     return tuple(

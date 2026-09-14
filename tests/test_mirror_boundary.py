@@ -216,7 +216,7 @@ def test_a_source_in_another_workspace_is_refused(monkeypatch):
 
     _given(monkeypatch, _workspace(mirror="Production/Warehouse/Weaver"))
 
-    with pytest.raises(CommandError, match="Use a source catalogue in"):
+    with pytest.raises(CommandError, match="Source catalogue .* must be in workspace"):
         weaver.plan_mirror(no_item=True, session=_never())
 
 
@@ -479,7 +479,7 @@ def test_rebinding_an_item_out_of_a_mirrored_catalogue_is_refused(monkeypatch):
     plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model"])
     installed = _installed({"Warehouse/Model": "Model"})
 
-    with pytest.raises(CommandError, match="itself a mirror"):
+    with pytest.raises(CommandError, match="already a mirrored catalogue"):
         resolve_mirror(plan, installed, borrowed=True)
 
     assert (
