@@ -1,9 +1,4 @@
-"""Public ``weaver.health(...)`` entry point.
-
-Gathers what :mod:`weaver.health` evaluates: the installed catalogue including
-its current status tables, the ``_.LoadStatistic`` rows behind current
-``_.LoadStatus`` state, and the physical inventory of each selected Lakehouse or
-Warehouse.
+"""Public ``weaver.health(...)`` operation.
 
 Every read is over TDS or OneLake. Health executes no authored load or test
 Python, so it takes no Environment, and a Warehouse-only request starts no Livy
@@ -33,19 +28,7 @@ from ..health import HealthReport, assess, resolve_as_of
 from .items import installed_targets, requested_items
 from .workspace import operation_workspace
 
-#: What health reads of the catalogue, table by table. Each one is read over
-#: TDS, so a table nothing consults is a round trip nobody needed.
-#:
-#: The installed graph is built from the first eight, and the two status tables
-#: hold current lifecycle state. ``_.TableDictionary`` and ``_.FolderDictionary``
-#: serve both: the graph reads whether an object is Static, and Build health
-#: reads what is declared and not certified. ``_.Mirror`` says what physically
-#: stands at a mirrored object's address, and which objects take their Load
-#: state from the catalogue this one mirrors.
-#:
-#: ``_.Bookmark`` is absent: it is the loader's execution cursor. So are the
-#: dictionaries describing columns and keys, and ``_.LoadStatistic``, read only
-#: as the window matching current ``_.LoadStatus`` state.
+#: Catalogue tables needed for topology and current lifecycle state.
 HEALTH_TABLES = (
     INSTALLATION,
     REGISTRY,
@@ -59,9 +42,7 @@ HEALTH_TABLES = (
     TEST_STATUS,
 )
 
-#: What health reads of the catalogue an estate mirrors: current load state and
-#: nothing else. The logical estate is the selected catalogue's, and the source
-#: contributes lifecycle evidence for the mirrored identities.
+#: Mirrored catalogues contribute only current load state.
 SOURCE_TABLES = (LOAD_STATUS,)
 
 
@@ -75,17 +56,15 @@ def health(
     inventories: bool = True,
     session=None,
 ) -> HealthReport:
-    """The installed estate's operational health.
+    """Report the installed estate's operational health.
 
     ``items`` restricts the subjects reported on. With none, every target the
     catalogue binds an item to. Managed ancestry outside the selection is still
     read, because whether a selected object is behind its sources is a question
     about the whole graph.
 
-    ``as_of`` is the instant a settled load must be no older than. It defaults
-    to one day before the operation started. An aware datetime or an ISO-8601
-    string carrying an offset is accepted; a naive one is refused, because a
-    health report crosses timezones.
+    ``as_of`` is the oldest acceptable settled load time and defaults to one day
+    before the operation started. It must include a timezone.
 
     ``inventories`` reads each selected target's physical state, so a certified
     object that is not there is reported. Turning it off leaves Build health to
@@ -124,21 +103,14 @@ def run_health(
     generated_at: datetime,
     inventories: bool = True,
 ) -> HealthReport:
-    """The whole gathering path, over a prepared session.
-
-    Separated from :func:`health` as :func:`weaver.operations.load.run_load` is:
-    workspace resolution and capability acquisition differ between positions,
-    and neither changes what health evaluates.
-    """
+    """Gather health data through a prepared Session."""
 
     from ..catalogue.connection import catalogue_connection
     from ..catalogue.state import read_installed_catalogue
 
     connection = catalogue_connection(session, workspace)
     with session.step("Read catalogue"):
-        # Current state and the statistics explaining it, in one read.
-        # Everything below reasons from this catalogue and asks the Warehouse
-        # nothing further.
+        # Read current state and its supporting statistics together.
         catalogue = read_installed_catalogue(
             connection, tables=HEALTH_TABLES, load_history=True
         )
@@ -148,8 +120,7 @@ def run_health(
         from .mirror import mirrored_source
 
         with session.step("Read the mirrored catalogue"):
-            # Current load state for the mirrored objects, from where their
-            # rows are written. The logical estate stays this catalogue's.
+            # Mirrored load state comes from the catalogue where rows are written.
             source = mirrored_source(
                 catalogue,
                 workspace=workspace,
@@ -160,9 +131,7 @@ def run_health(
             )
 
     dag = catalogue.dag()
-    # Item to target, from the same `_.Installation` a load resolves through.
-    # Inventories and the report's subjects are physical: that is where the
-    # objects are.
+    # Report physical targets bound by the catalogue's installations.
     selected = (
         dag.targets
         if not items
@@ -188,11 +157,10 @@ def run_health(
 
 
 def _inventories(session, *, workspace, targets, dag):
-    """Each selected target's physical state, read the way a build reads it.
+    """Read each selected target's physical state without starting Spark.
 
-    A Warehouse answers over TDS and a Lakehouse over its storage, so neither
-    starts a Spark session. A Lakehouse is read without a Spark catalogue, so
-    its views are not listed; see
+    Warehouse state comes over TDS and Lakehouse state from storage. Lakehouse
+    views are therefore not listed; see
     :meth:`weaver.health._Assessment._absent_from_inventory`.
     """
 

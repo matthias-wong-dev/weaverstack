@@ -1,4 +1,4 @@
-"""Public ``weaver.test(...)`` entry point and orchestration.
+"""Public ``weaver.test(...)`` operation.
 
 Item and named runs select from installed catalogue state. A file run compiles a
 source validation without installing or publishing it. Reports distinguish failed
@@ -24,9 +24,7 @@ from ..test_report import (
 from .items import requested_items, run_scope
 from .workspace import operation_workspace
 
-#: The task type this operation records under. Restated rather than imported, as
-#: :data:`weaver.operations.load.TASK_TYPE` is, and asserted equal to
-#: :data:`weaver.run.record.TEST_TASK`.
+#: Kept local to avoid importing ``weaver.run`` eagerly; must match ``TEST_TASK``.
 TASK_TYPE = "test"
 
 
@@ -48,24 +46,18 @@ def test(
     Naming no item runs every item the Weaver catalogue records an installation
     for.
 
-    ``name`` runs one installed validation and returns its diagnostic rows
-    alongside its counts; ``file`` compiles and runs a source file without
-    installing it. Mutually exclusive: one names something the estate has, the
-    other something it may not. A file run takes exactly one item, which is the
-    installed environment its source validation runs against.
+    ``name`` runs one installed validation and includes its diagnostic rows.
+    ``file`` compiles and runs an uninstalled source file against exactly one
+    item. The two options are mutually exclusive.
     """
 
     if name is not None and file is not None:
-        raise CommandError(
-            "test takes name= or file=, not both. One runs what is installed "
-            "and the other runs a source file that may not be"
-        )
+        raise CommandError("test accepts either name= or file=, not both")
 
     requested = requested_items(items, what="test")
     if file is not None and not requested:
         raise CommandError(
-            "test file= runs one source validation against one installed item. "
-            "Name the item it runs in, as Lakehouse/Name or Warehouse/Name"
+            "test file= requires one installed item: Lakehouse/Name or Warehouse/Name"
         )
     resolved = operation_workspace(
         "test",
@@ -105,16 +97,12 @@ def run_test(
     dry_run: bool = False,
     strict: bool = False,
 ) -> ValidationRunReport:
-    """The whole orchestration path, over a prepared session.
-
-    Separated from :func:`test` as :func:`weaver.operations.load.run_load` is: workspace
-    resolution and capability acquisition differ between positions, and none of
-    them changes the orchestration.
+    """Run validations through a prepared Session.
 
     ``state`` lets a caller provide an already-read catalogue snapshot.
 
-    Ordered as :func:`weaver.operations.load.run_load` is. A file run reads the
-    catalogue for the same reason: the physical target is recorded there.
+    The catalogue is read before Spark starts because it holds the physical
+    target, including for a file run.
     """
 
     from ..run import Runner, RunRequest, RunState
@@ -125,9 +113,7 @@ def run_test(
             state = RunState(
                 catalogue=read_installed_catalogue(session=session, workspace=workspace)
             )
-        # An empty scope is every installed item, resolved here as
-        # :func:`weaver.operations.load.run_load` resolves it: against the
-        # catalogue this step has just read.
+        # Resolve an empty scope against the catalogue just read.
         items, installed = run_scope(
             state.catalogue.dag(), items, what="test", catalogue=workspace.catalogue
         )
@@ -136,8 +122,7 @@ def run_test(
     _require_lakehouse_environment(
         session, workspace=workspace, targets=targets, dry_run=dry_run
     )
-    # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
-    # needs one of the Lakehouses this run is for.
+    # Fabric requires a Lakehouse attachment before Spark starts.
     session.offer_spark_home(lakehouse_names(targets))
     started = datetime.now(timezone.utc)
 
@@ -151,7 +136,7 @@ def run_test(
             started=started,
             dry_run=dry_run,
         )
-        # Source-file runs use the same report but publish no estate evidence.
+        # Source-file runs publish no estate evidence.
         return _reported(
             nodes=(node,),
             started=started,
@@ -167,10 +152,7 @@ def run_test(
                 items,
                 name=name,
                 dry_run=dry_run,
-                # Validations are independent: each reads the estate and
-                # reports, and none produces what another consumes. One that
-                # fails is a finding rather than a reason to stop asking the
-                # others.
+                # Validations are independent; a finding does not block the rest.
                 fault_tolerant=True,
             ),
             workspace=workspace,
@@ -190,8 +172,7 @@ def run_test(
     with session.step("Execute"):
         result = runner.run(
             session=session,
-            # Evidence for a caller who asked about one validation; counts alone
-            # for a whole-target run, which must not transfer diagnostic rows.
+            # Return diagnostics only when one validation was requested.
             dispatch=_dispatch_collecting(collect=name is not None),
             on_node=None if record is None else record.settled,
         )
@@ -209,8 +190,6 @@ def run_test(
 
 
 def _dispatch_collecting(*, collect: bool):
-    """The one crossing, told whether this run was asked to show its evidence."""
-
     from ..run import dispatch_primitive
 
     def dispatch(node, **asked):
@@ -220,7 +199,7 @@ def _dispatch_collecting(*, collect: bool):
 
 
 def _require_lakehouse_environment(session, *, workspace, targets, dry_run: bool):
-    """Fail before planning when a desktop Lakehouse run cannot start."""
+    """Require an Environment before planning a desktop Lakehouse run."""
 
     from ..sessions.base import ACROSS_BOUNDARY
 
@@ -237,11 +216,7 @@ def _require_lakehouse_environment(session, *, workspace, targets, dry_run: bool
 
 
 def _as_validation_node(node) -> ValidationNodeReport:
-    """One run node, in the vocabulary a validation's readers use.
-
-    A validation passes or fails rather than succeeding: a judgement about data
-    rather than about work. One internal model, two public shapes.
-    """
+    """Render work status as passed, failed or invalid validation state."""
 
     from ..run.result import INVALID as RUN_INVALID
     from ..run.result import SUCCEEDED, VALIDATED
@@ -252,10 +227,7 @@ def _as_validation_node(node) -> ValidationNodeReport:
     elif node.status == SUCCEEDED:
         status = PASSED
     elif node.status == RUN_INVALID or getattr(node, "raised", False):
-        # A check that could not be evaluated is invalid, not failed. A Test
-        # that was never installed, or whose procedure threw, found nothing, and
-        # reading that as "found no discrepancies" is the one answer a
-        # validation must never give.
+        # A validation that could not run is invalid, not a data finding.
         status = INVALID
     else:
         status = FAILED
@@ -282,8 +254,6 @@ def _as_validation_node(node) -> ValidationNodeReport:
 
 
 def _has_result_for_validation(kind, result) -> bool:
-    """Whether a result carries the counts for this validation kind."""
-
     from ..declaration.metadata import ASSUMPTION
 
     field = "violation_count" if kind == ASSUMPTION else "missing_count"
@@ -291,8 +261,6 @@ def _has_result_for_validation(kind, result) -> bool:
 
 
 def _failed_validation_result(node, result):
-    """Give an invalid validation a result in its own result vocabulary."""
-
     from ..declaration.metadata import ASSUMPTION
     from ..runtime.validation_result import AssumptionResult, TestResult
 
@@ -310,8 +278,6 @@ def _reported(
     selection: str | None,
     workflow_id: str | None,
 ) -> ValidationRunReport:
-    """Assemble the report and raise only if asked."""
-
     status = run_status(nodes)
     report = ValidationRunReport(
         status=status,

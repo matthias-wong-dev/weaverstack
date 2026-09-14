@@ -12,8 +12,6 @@ from ..store import FilesystemStore
 
 @dataclass(frozen=True)
 class CheckResult:
-    """The small successful result of checking a project folder."""
-
     project_folder: str
 
 

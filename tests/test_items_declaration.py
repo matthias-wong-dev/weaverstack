@@ -176,7 +176,7 @@ def test_a_run_item_carrying_a_physical_half_is_refused(what):
     from weaver.errors import CommandError
     from weaver.operations.items import parse_run_item
 
-    with pytest.raises(CommandError, match="comes from the Weaver catalogue"):
+    with pytest.raises(CommandError, match="catalogue supplies its physical target"):
         parse_run_item("Lakehouse/Landing=Lakehouse/Anything", what=what)
 
 
@@ -185,7 +185,7 @@ def test_the_refusal_says_what_to_write_instead():
     from weaver.errors import CommandError
     from weaver.operations.items import parse_run_item
 
-    with pytest.raises(CommandError, match=r"Write Lakehouse/Landing\."):
+    with pytest.raises(CommandError, match="Write Lakehouse/Landing"):
         parse_run_item("Lakehouse/Landing=Lakehouse/Landing_Dev", what="load")
 
 

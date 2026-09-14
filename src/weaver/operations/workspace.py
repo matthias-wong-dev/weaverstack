@@ -1,11 +1,4 @@
-"""Which workspace an operation means, resolved once for all of them.
-
-Every operation answers the same question before it does anything, and answers
-it from names: an explicit argument, then workspace configuration, then the
-Session's own context, then the workspace a Fabric notebook is running in.
-Shared, because four operations answering it four ways is four places for it to
-drift.
-"""
+"""Shared workspace resolution for public operations."""
 
 from __future__ import annotations
 
@@ -18,7 +11,7 @@ from ..workspaces import Workspace
 def _operation_workspace(
     *, workspace, workspace_config, catalogue=None, environment=None, session=None
 ) -> Workspace:
-    """Which workspace this operation means.
+    """Resolve the workspace for an operation.
 
     .. code-block:: text
 
@@ -29,32 +22,17 @@ def _operation_workspace(
                 → the workspace the notebook runs in
                   → a configuration error naming what is missing
 
-    The discovered file is what lets ``weaver.build()`` run from a project's own
-    directory with nothing else supplied. It sits below the Session, so a command
-    inside ``weaver session`` still runs in the session's workspace.
-
-    The Session's default context lets a command inside ``weaver session`` omit
-    what the session already holds:
-
-    .. code-block:: text
-
-        weaver session --workspace "Weaver Example"
-        weaver> build .
-        weaver> load Lakehouse/Sales
-
-    It is a default, so an explicit argument still outranks it.
+    A discovered project configuration ranks below the Session's workspace.
     """
 
     if isinstance(workspace, Workspace):
         raise CommandError(
-            "an operation takes a workspace name; open a Session for an "
-            "already-resolved Workspace and pass session= instead:\n"
+            "workspace must be a name, not a Workspace object. Open a Session "
+            "for the resolved Workspace and pass session= instead:\n"
             "    with weaver.session(workspace=workspace) as session:\n"
             "        weaver.build('.', session=session)"
         )
-    # The base context first, then what this call named on top of it. Split in
-    # two because the same overrides apply however the base was found, a
-    # Session's workspace, a configuration file, or a notebook's own context.
+    # Apply explicit catalogue and Environment values over any resolved base.
     if workspace is not None or workspace_config is not None:
         from ..config import resolve_workspace
 
@@ -95,12 +73,7 @@ def operation_workspace(
     session=None,
     needs_catalogue: bool = True,
 ) -> Workspace:
-    """The workspace one operation means, resolved once for all of them.
-
-    What differs between operations is only whether the catalogue is
-    required: a wipe can empty a target without one, everything else reads or
-    writes the catalogue.
-    """
+    """Resolve an operation's workspace and required catalogue."""
 
     resolved = _operation_workspace(
         workspace=workspace,
@@ -119,24 +92,16 @@ def operation_workspace(
 
 
 def current_workspace() -> Workspace:
-    """The workspace this code is running in, discovered rather than named.
-
-    Inside a Fabric notebook the session already holds the answer. This is the
-    discovery every operation does for ``workspace=None``, reachable on its own
-    for a caller that needs a resolver rather than an operation.
-
-    Outside a session there is nothing to discover, and this says so rather than
-    guessing.
-    """
+    """Discover the current project or Fabric notebook workspace."""
 
     return _operation_workspace(workspace=None, workspace_config=None)
 
 
 def _discovered_or_current() -> Workspace:
-    """The project in the working directory, or the workspace this runs in.
+    """Resolve a local project before the current Fabric workspace.
 
-    A notebook's working directory is the driver's, and a generated project sits
-    under Notebook Resources, so the two do not collide.
+    A Fabric notebook's working directory is separate from Notebook Resources,
+    so project discovery cannot shadow the notebook's workspace.
     """
 
     from ..config import discovered_workspace_config, load_workspace

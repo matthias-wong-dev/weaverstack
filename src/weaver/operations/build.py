@@ -1,8 +1,4 @@
-"""Source-neutral public build and target-oriented wipe operations.
-
-Optional platform imports remain inside the operation paths that require them,
-so importing ``weaver`` does not require Spark, Fabric credentials, or the CLI.
-"""
+"""Public build operation."""
 
 from __future__ import annotations
 
@@ -13,10 +9,6 @@ from typing import Sequence
 
 from ..errors import BuildError, CommandError
 from ..locations import Location
-
-# Position is whether this process is inside the Fabric session it addresses, and
-# what Spark it would use if it were. It is the first half of "where am I
-# running", so a Session owns it. Kept under the names this module already uses.
 from ..sessions.host import inside_fabric_session as _inside_fabric_session
 from ..store import FilesystemStore, Store
 from ..workspaces import Workspace
@@ -25,12 +17,7 @@ from .workspace import operation_workspace
 
 @dataclass(frozen=True)
 class BuildFailure:
-    """One action that failed, described the way a developer needs to read it.
-
-    ``artefact`` is the Weaver thing that failed and ``source_path`` the
-    repository file to open. Both are carried from the build rather than
-    recovered from ``action_id``, which by this point spells a slug.
-    """
+    """A failed action, with its authored artefact and source path when available."""
 
     action_id: str
     error_type: str | None
@@ -48,11 +35,7 @@ class BuildFailure:
         }
 
     def describe(self) -> str:
-        """The failure as the plan's error shape: what, where, then why.
-
-        The Weaver operation leads and the infrastructure comes last: TDS
-        raising something is how the syntax error was found, not what it was.
-        """
+        """Describe what failed, its source when available and why."""
 
         subject = self.artefact or self.action_id
         lines = [f"Error installing {subject}"]
@@ -101,25 +84,16 @@ def build(
     bundle_path: str | Path | None = None,
     session=None,
 ) -> BuildResult:
-    """Build an authored repository.
+    """Build a source.
 
     ``items`` are the Weaver items to build, each written
     ``Lakehouse/Landing`` or ``Lakehouse/Landing=Lakehouse/Landing_Dev``. Naming
     none builds every item the workspace configuration declares.
 
-    Every other value is a name: ``workspace``, ``catalogue`` and ``environment``
-    are strings, resolved the same way each operation resolves them: an explicit
-    argument, then workspace configuration, then the Session's own
-    context, then, inside a Fabric notebook, what the notebook is attached to.
-    Anything still unresolved is an error stated in one sentence.
+    ``catalogue`` names the catalogue Warehouse as ``Warehouse/Weaver``.
 
-    ``catalogue`` names where the Weaver catalogue lives, typed:
-    ``Warehouse/Weaver``. Weaver owns the ``_`` schema of that Warehouse and
-    nothing else in it, so it may be one of your own.
-
-    ``session`` is a Session to run in, and is where an already-resolved
-    ``Workspace`` travels. Supplied, its resources are reused and it is left
-    open; omitted, this operation creates and closes one.
+    A supplied ``session`` is reused and left open. Otherwise this operation
+    creates and closes one.
     """
 
     if bundle_path is not None and not bundle_only:
@@ -148,8 +122,8 @@ def build(
     )
     source_location, source_store = _repository_source(source, resolved_workspace)
 
-    # This complete parse and pure request validation is above all
-    # control-plane creation, Spark start, REST item resolution, and Livy work.
+    # Parse and validate the complete request before REST target resolution,
+    # Spark startup or Livy work.
     from ..build_bundle.workflow import prepare_repository, validate_build_request
     from ..sessions.host import use_or_create_session
 
@@ -157,8 +131,7 @@ def build(
         validate_build_request(prepared.repository, bindings, catalogue_binding=control)
         _preflight(resolved_workspace, bindings, session=session)
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
-            # Fabric attaches a Spark session to a Lakehouse, so a host that
-            # crosses needs one of the Lakehouses this build is actually for.
+            # Fabric requires a Lakehouse attachment before Spark starts.
             opened.offer_spark_home(_bound_lakehouses(bindings))
             arguments = dict(
                 repository=prepared.repository,
@@ -186,14 +159,7 @@ def _bound_lakehouses(bindings) -> tuple[str, ...]:
 
 
 def _preflight(workspace: Workspace, bindings, *, session) -> None:
-    """Prove the workspace can host this build, before anything expensive opens.
-
-    Only from a desktop: inside Fabric the items are already resolvable and one
-    workspace listing would be a REST round trip for what the session can see.
-    Every item this build needs is proved from that one listing, so a missing
-    target costs a call rather than a Livy session and a Spark traceback about
-    a catalogue.
-    """
+    """On desktop, verify all targets in one REST call before opening Spark."""
 
     if _inside_fabric_session(workspace):
         return
@@ -212,15 +178,12 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
         if not _inside_fabric_session(workspace):
             source = "."
         else:
-            # Fabric exposes built-in Notebook Resources as the notebook's
-            # process-local working tree.  No OneLake adapter is involved.
+            # Notebook Resources are exposed as the process-local working tree.
             source = Path.cwd()
     location = source if isinstance(source, Location) else Location(str(source))
     if location.value.startswith("abfss://"):
         if not _inside_fabric_session(workspace):
-            raise CommandError(
-                "an abfss repository source can be read only inside a Fabric session"
-            )
+            raise CommandError("an abfss source requires a Fabric session")
         from ..fabric.store import FabricStore
 
         return location, FabricStore()
@@ -228,11 +191,7 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
 
 
 def _item_bindings(items, workspace: Workspace):
-    """Each requested item bound to the physical target it builds into.
-
-    The one build-side resolution. An explicit ``=PHYSICAL`` wins; otherwise the
-    workspace configuration answers.
-    """
+    """Bind each item to an explicit target or its configured target."""
 
     from ..build_bundle.targets import ItemBindings, parse_build_item
 
@@ -244,7 +203,7 @@ def _item_bindings(items, workspace: Workspace):
         values = list(items)
     if not values:
         raise BuildError(
-            "build needs at least one item, or a targets: mapping in workspace "
+            "build needs at least one item or a targets mapping in workspace "
             "configuration"
         )
     return ItemBindings(
@@ -287,19 +246,7 @@ def _run_build(
     bundle_path,
     source,
 ) -> BuildResult:
-    """One build, wherever this process happens to be.
-
-    .. code-block:: text
-
-        read the build state    → through Session capabilities, per part
-        Builder                 → the bundle this estate needs
-        Installer               → each action to the capability it needs
-
-    The Session answers which Spark, which store and which resolver, so a
-    notebook build and a desktop build take this path unchanged. What differs
-    between them is what surrounds it: a desktop proves its items exist over
-    REST first, which :func:`build` does before opening anything.
-    """
+    """Run one build through the supplied Session."""
 
     from ..build_bundle import (
         build_item_repository,
@@ -307,10 +254,8 @@ def _run_build(
         read_build_state,
     )
 
-    # No wrapping Step: `read_build_state` opens one per part it reads, and a
-    # Step inside a Step would make a fourth level of a hierarchy that has
-    # three. The parts are what matter: the catalogue and the inventories are
-    # separately slow, and separately fixable.
+    # Each state part is its own Step; nesting one here would exceed the
+    # Task/Step/Sub-step telemetry hierarchy.
     state = read_build_state(
         bindings,
         required_catalogue_items=catalogue_items_for_build(repository, bindings),

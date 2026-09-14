@@ -392,7 +392,7 @@ def test_a_dry_run_reload_that_selected_a_folder_is_refused(session):
 
     from weaver.errors import CommandError
 
-    with pytest.raises(CommandError, match="reload covers tables") as raised:
+    with pytest.raises(CommandError, match="reload supports tables only") as raised:
         dry_run(session, RAW, reload=True)
 
     assert EXPORT in str(raised.value)

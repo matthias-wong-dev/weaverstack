@@ -1,8 +1,4 @@
-"""The items a run is asked for, and where each one is installed.
-
-Shared by load and test, and owned by core, so a notebook call and a command line
-accept and refuse the same text.
-"""
+"""Resolve run items and their installed targets."""
 
 from __future__ import annotations
 
@@ -15,11 +11,9 @@ from ..errors import CommandError, IdentityError
 def requested_items(
     items: str | Sequence[str] | None, *, what: str
 ) -> tuple[WeaverItemId, ...]:
-    """The items one run was asked for, in the order given, deduplicated.
+    """Return requested items in input order, deduplicated.
 
-    Naming none returns none, which a run reads as every installed item once it
-    has read the catalogue. ``what`` is the operation's own noun, so a refusal
-    reads in its vocabulary.
+    An empty result means every installed item after the catalogue is read.
     """
 
     if items is None:
@@ -29,7 +23,7 @@ def requested_items(
 
 
 def parse_run_item(text: object, *, what: str) -> WeaverItemId:
-    """One run item: ``Lakehouse/Name`` or ``Warehouse/Name``.
+    """Parse ``Lakehouse/Name`` or ``Warehouse/Name``.
 
     A value carrying ``=`` is the build grammar, refused by name so the message
     says where the physical target actually comes from.
@@ -41,8 +35,8 @@ def parse_run_item(text: object, *, what: str) -> WeaverItemId:
     if "=" in written:
         item = written.partition("=")[0].strip() or f"{LAKEHOUSE}/Name"
         raise CommandError(
-            f"{what} names installed items, and the physical target each one runs "
-            f"in comes from the Weaver catalogue. Write {item}."
+            f"{what} accepts installed item names without target bindings. "
+            f"Write {item}; the Weaver catalogue supplies its physical target."
         )
     try:
         return WeaverItemId.parse(written)
@@ -53,12 +47,7 @@ def parse_run_item(text: object, *, what: str) -> WeaverItemId:
 
 
 def run_scope(dag, items, *, what: str, catalogue: str | None = None):
-    """The items this run covers, and the physical target each one runs in.
-
-    An empty ``items`` is every installed item, resolved here because the
-    catalogue that answers it has just been read. Above this the scope is a
-    concrete tuple of item identities.
-    """
+    """Resolve the run's item scope and physical targets."""
 
     selected = tuple(items) or installed_items(dag, what=what, catalogue=catalogue)
     return selected, installed_targets(dag, selected, catalogue=catalogue)
@@ -67,11 +56,7 @@ def run_scope(dag, items, *, what: str, catalogue: str | None = None):
 def installed_items(
     dag, *, what: str, catalogue: str | None = None
 ) -> tuple[WeaverItemId, ...]:
-    """Every item the catalogue records an installation for, in identity order.
-
-    The scope comes from ``_.Installation``, so an item a workspace
-    configuration declares and no build has installed is not one of them.
-    """
+    """Return items in ``_.Installation`` in identity order."""
 
     items = tuple(sorted(dag.installations, key=str))
     if not items:
@@ -83,10 +68,7 @@ def installed_items(
 
 
 def installed_targets(dag, items, *, catalogue: str | None = None):
-    """The physical target each item is installed in, or a refusal naming the gaps.
-
-    The one place a run turns its item scope into execution addresses.
-    """
+    """Resolve each item to its physical target and report missing installations."""
 
     installed = {}
     missing = []

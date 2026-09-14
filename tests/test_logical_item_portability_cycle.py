@@ -434,7 +434,9 @@ def test_no_run_item_may_carry_a_physical_half(tmp_path, root):
     session = TestSession(workspace=workspace)
 
     for operation in (weaver.load, weaver.test):
-        with pytest.raises(CommandError, match="comes from the Weaver catalogue"):
+        with pytest.raises(
+            CommandError, match="catalogue supplies its physical target"
+        ):
             operation([f"{ITEM}=Lakehouse/Anything"], session=session)
 
 
