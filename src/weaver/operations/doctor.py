@@ -17,8 +17,6 @@ TDS_PROBE = "SELECT 1"
 
 @dataclass(frozen=True)
 class Check:
-    """One connectivity probe and the physical item used for it."""
-
     name: str
     status: str
     detail: str | None = None
@@ -35,8 +33,6 @@ class Check:
 
 @dataclass(frozen=True)
 class DoctorReport:
-    """Ordered connectivity checks for one workspace."""
-
     checks: tuple[Check, ...] = ()
     workspace: str | None = None
     authentication: dict = field(default_factory=dict)

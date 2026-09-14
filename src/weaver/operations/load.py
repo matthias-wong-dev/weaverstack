@@ -1,4 +1,4 @@
-"""Public ``weaver.load(...)`` operation."""
+"""Orchestrate the public ``weaver.load(...)`` operation."""
 
 from __future__ import annotations
 
@@ -266,8 +266,6 @@ def _reset_before(record):
 
 
 def _as_load_report(result, *, started, record) -> LoadRunReport:
-    """Render a RunResult with load counts and workflow identity."""
-
     return LoadRunReport(
         requested=result.requested,
         status=result.status,

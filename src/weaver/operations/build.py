@@ -1,4 +1,4 @@
-"""Public build operation."""
+"""Public build orchestration with platform imports kept inside operation paths."""
 
 from __future__ import annotations
 
@@ -17,8 +17,6 @@ from .workspace import operation_workspace
 
 @dataclass(frozen=True)
 class BuildFailure:
-    """A failed action, with its authored artefact and source path when available."""
-
     action_id: str
     error_type: str | None
     message: str | None
@@ -35,8 +33,6 @@ class BuildFailure:
         }
 
     def describe(self) -> str:
-        """Describe what failed, its source when available and why."""
-
         subject = self.artefact or self.action_id
         lines = [f"Error installing {subject}"]
         if self.source_path:
@@ -147,8 +143,6 @@ def build(
 
 
 def _bound_lakehouses(bindings) -> tuple[str, ...]:
-    """The physical Lakehouse names this build is bound to, in binding order."""
-
     from ..declaration.model import LAKEHOUSE
 
     return tuple(
@@ -191,8 +185,6 @@ def _repository_source(source, workspace: Workspace) -> tuple[Location, Store]:
 
 
 def _item_bindings(items, workspace: Workspace):
-    """Bind each item to an explicit target or its configured target."""
-
     from ..build_bundle.targets import ItemBindings, parse_build_item
 
     if items is None:
@@ -246,8 +238,6 @@ def _run_build(
     bundle_path,
     source,
 ) -> BuildResult:
-    """Run one build through the supplied Session."""
-
     from ..build_bundle import (
         build_item_repository,
         catalogue_items_for_build,

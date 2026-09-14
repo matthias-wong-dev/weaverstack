@@ -20,8 +20,6 @@ from .workspaces import Workspace
 
 @dataclass(frozen=True)
 class WipeReport:
-    """What a wipe removed, or would remove."""
-
     target: str
     location: Location
     removed: tuple[str, ...]

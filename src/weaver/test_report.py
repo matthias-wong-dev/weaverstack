@@ -129,8 +129,6 @@ class ValidationRunReport:
         raise KeyError(name)
 
     def totals(self) -> dict[str, int]:
-        """Return physical discrepancy and violation counts."""
-
         missing = unexpected = violations = 0
         for node in self.nodes:
             result = node.result

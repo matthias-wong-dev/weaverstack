@@ -54,8 +54,6 @@ def run_shell(
     stdin=None,
     console=None,
 ) -> int:
-    """Run a REPL in one :class:`~weaver.sessions.console.ConsoleSession`."""
-
     from weaver.sessions import ConsoleSession
 
     if parser_factory is None:

@@ -92,7 +92,7 @@ class InstalledValidation:
     def to_mapping(self) -> dict:
         """Return the settled dispatch contract as plain data.
 
-        Nothing is derived after the mapping crosses the host boundary.
+        Dispatch uses this mapping without deriving additional state.
         """
 
         return {
@@ -153,8 +153,6 @@ class ValidationEstate:
     def for_items(
         self, items: Sequence[WeaverItemId]
     ) -> tuple[InstalledValidation, ...]:
-        """Return validations owned by the named items, in ID order."""
-
         wanted = set(items)
         return tuple(
             validation
@@ -165,7 +163,7 @@ class ValidationEstate:
         )
 
     def named(self, name: str, items: Sequence[WeaverItemId]) -> InstalledValidation:
-        """Return one validation by ``Schema.Object`` within the named items."""
+        """Resolve only within the selected items; never widen the scope for a match."""
 
         candidates = [
             validation

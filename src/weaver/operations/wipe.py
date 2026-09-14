@@ -106,8 +106,6 @@ class WipePlan:
         return any(self.is_catalogue(target) for target in self.targets)
 
     def describe(self) -> str:
-        """Describe the Fabric items and catalogue disposition."""
-
         names = [str(target) for target in self.targets] + [self.catalogue or ""]
         width = max(len(name) for name in names)
         lines = [f"Wipe on {self.workspace.workspace}", "", "Empty"]
@@ -148,8 +146,6 @@ class WipePlan:
 
 @dataclass(frozen=True)
 class WipeReport:
-    """Entries removed, or to be removed, from one item area."""
-
     target: str
     location: Location
     removed: tuple[str, ...]
@@ -170,8 +166,6 @@ class WipeReport:
 
 @dataclass(frozen=True)
 class WipeItemResult:
-    """The outcome for one physical Fabric item."""
-
     target: str
     outcome: str
     is_catalogue: bool = False
@@ -312,8 +306,6 @@ def plan_wipe(
 def _catalogue_action(
     named: str | None, *, unbind: bool, catalogue: str | None, selected
 ) -> str:
-    """Validate the requested catalogue disposition."""
-
     action = _requested_action(named, unbind=unbind, catalogue=catalogue)
     if action == UNBIND:
         _refuse_unusable_unbind(catalogue=catalogue, selected=selected)
@@ -599,8 +591,6 @@ def _unbind_physical_targets(
 def unbind_catalogue_claims(
     workspace: Workspace, *, lakehouses, warehouses, session=None
 ) -> dict:
-    """Remove catalogue claims for named physical targets over T-SQL."""
-
     from ..catalogue.connection import catalogue_connection
     from ..sessions.host import use_or_create_session
     from ..unbind import unbind_targets

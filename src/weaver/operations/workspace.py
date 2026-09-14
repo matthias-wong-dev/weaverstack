@@ -1,4 +1,4 @@
-"""Shared workspace resolution for public operations."""
+"""Resolve every public operation's workspace with one shared precedence."""
 
 from __future__ import annotations
 

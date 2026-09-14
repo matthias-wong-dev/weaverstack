@@ -172,8 +172,6 @@ class EffectiveLoadState:
 
 
 def effective_load_state(catalogue: Catalogue, *, source=None) -> EffectiveLoadState:
-    """Return load state with mirrored identities taken from ``source``."""
-
     mirrored = frozenset(catalogue.mirrors)
     if not mirrored:
         return EffectiveLoadState(
@@ -274,9 +272,7 @@ def _row_identity(
 
 @dataclass(frozen=True)
 class HealthFinding:
-    """One finding in a report section.
-
-    ``severity`` is the health vocabulary and ``status`` the runtime one, so a
+    """``severity`` is the health vocabulary and ``status`` the runtime one, so a
     consumer reads how bad it is and what actually happened without either word
     standing in for the other.
     """
@@ -406,8 +402,6 @@ class CurrentLoad:
 
 @dataclass(frozen=True)
 class HealthReport:
-    """The installed estate's operational health."""
-
     generated_at: datetime
     as_of: datetime
     load: HealthSection
@@ -437,15 +431,11 @@ class HealthReport:
         return self.status == GREEN
 
     def slowest(self, limit: int = 5) -> tuple[LoadActivity, ...]:
-        """Return the longest recorded loads in the window, longest first."""
-
         timed = [each for each in self.load_activity if each.duration_ms is not None]
         timed.sort(key=lambda each: (-each.duration_ms, each.object_id))
         return tuple(timed[:limit])
 
     def moved(self, limit: int = 5) -> tuple[LoadActivity, ...]:
-        """Return loads that changed the most rows, largest first."""
-
         def changed(each: LoadActivity) -> int:
             return each.rows_inserted + each.rows_updated + each.rows_deleted
 
@@ -562,8 +552,6 @@ class LoadAssessment:
         return worst(subject.severity for subject in self.subjects)
 
     def unsettled(self) -> tuple[LoadSubjectHealth, ...]:
-        """Return non-Green subjects in subject order."""
-
         return tuple(subject for subject in self.subjects if subject.severity != GREEN)
 
     def unsettled_identities(self) -> tuple[WeaverDocumentId, ...]:

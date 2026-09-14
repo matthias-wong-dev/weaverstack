@@ -103,8 +103,6 @@ def run_health(
     generated_at: datetime,
     inventories: bool = True,
 ) -> HealthReport:
-    """Gather health data through a prepared Session."""
-
     from ..catalogue.connection import catalogue_connection
     from ..catalogue.state import read_installed_catalogue
 

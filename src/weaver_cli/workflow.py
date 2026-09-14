@@ -67,8 +67,6 @@ def _one_entry(entry, *, path: Path, name: str) -> str:
 
 
 def workflow_words(entry: str) -> list[str]:
-    """Parse one workflow entry with an optional leading ``weaver``."""
-
     return command_words(entry, excluded=NOT_IN_A_WORKFLOW)
 
 
@@ -191,7 +189,7 @@ def _show(name: str, path: Path, entries: list[str]) -> None:
 
 
 def _execute(entries, parsed_commands, *, session) -> int:
-    """Run commands in order in one Session, stopping at the first failure."""
+    """Stop at the first failed command, leaving later entries unrun."""
 
     for number, (entry, parsed) in enumerate(zip(entries, parsed_commands), start=1):
         print(f"\n[{number}/{len(entries)}] {entry}\n")

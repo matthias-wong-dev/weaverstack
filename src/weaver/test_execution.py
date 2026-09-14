@@ -68,10 +68,7 @@ def run_installed_validation(
 
 
 class _WithDiagnostics:
-    """A validation result, carrying the rows a caller asked to see.
-
-    Diagnostics belong to this invocation, not the durable runtime result.
-    """
+    """Diagnostics belong to this invocation, not the durable runtime result."""
 
     def __init__(self, result, diagnostics) -> None:
         self.result = result
@@ -89,9 +86,7 @@ class _WithDiagnostics:
 
 
 class _Capabilities:
-    """What the validation dispatchers read, taken from the Session that owns it.
-
-    Spark is acquired lazily so a Warehouse validation reached over TDS does not
+    """Spark is acquired lazily so a Warehouse validation reached over TDS does not
     require a Spark session.
     """
 

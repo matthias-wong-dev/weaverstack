@@ -1,3 +1,5 @@
+"""CLI command parsing and rendering."""
+
 from __future__ import annotations
 
 import argparse
@@ -75,8 +77,6 @@ def _kind_and_name(value) -> tuple[str, str]:
 
 
 def _kind_requirements(values) -> set[str]:
-    """Infer requirements from the type left of each item or target token."""
-
     from weaver.sessions.requirements import LIVY, ONELAKE, TDS
 
     wanted: set[str] = set()
@@ -234,8 +234,6 @@ def _requires_install(args) -> frozenset[str]:
 
 
 def command_requirements(parsed) -> frozenset[str]:
-    """Return the parsed command's declared requirements."""
-
     declares = getattr(parsed, "requires", None)
     return frozenset(declares(parsed)) if declares is not None else frozenset()
 
@@ -254,8 +252,6 @@ def _physical_target_lakehouses(args) -> tuple[str, ...]:
 
 
 def _build_item_lakehouses(args) -> tuple[str, ...]:
-    """Return explicitly named physical Lakehouses from build item bindings."""
-
     named = []
     for value in getattr(args, "items", None) or ():
         _logical, separator, physical = str(value).partition("=")
@@ -1029,8 +1025,6 @@ def _prefer_desktop_credential(args: argparse.Namespace | None = None) -> None:
 
 
 def _desktop_store(workspace):
-    """Construct the cross-boundary OneLake client in the CLI."""
-
     from weaver.fabric import OneLakeDfsClient
 
     return OneLakeDfsClient()
@@ -1119,8 +1113,6 @@ def _session(args: argparse.Namespace):
 
 
 def _running_session(args: argparse.Namespace, workspace):
-    """Borrow an inherited Session or open one for the command."""
-
     from weaver.sessions.host import use_or_create_session
 
     return use_or_create_session(_session(args), workspace=workspace)
@@ -1184,8 +1176,6 @@ def handle_load(args: argparse.Namespace) -> int:
 
 
 def _load_once(args: argparse.Namespace) -> int:
-    """Run :func:`weaver.load` across the CLI's host boundary."""
-
     import json
 
     from weaver.errors import LoadError
@@ -1278,10 +1268,7 @@ def handle_test(args: argparse.Namespace) -> int:
 
 
 def _test_once(args: argparse.Namespace) -> int:
-    """Run :func:`weaver.test` across the CLI's host boundary.
-
-    A report is a successful command result regardless of its validation verdict.
-    """
+    """A report is a successful command result regardless of its verdict."""
 
     import json
 
@@ -1780,8 +1767,6 @@ def _indented(text: str, prefix: str = "  ") -> str:
 
 
 def _group_help(group: argparse.ArgumentParser):
-    """Show the named group's help when no subcommand is given."""
-
     def show(args: argparse.Namespace) -> int:
         group.print_help()
         return 0

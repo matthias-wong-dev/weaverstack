@@ -1,4 +1,4 @@
-"""Parse written Weaver commands for sessions and workflows."""
+"""Parse session and workflow commands with the ordinary CLI parser."""
 
 from __future__ import annotations
 
@@ -72,8 +72,6 @@ def _split(text: str) -> list[str]:
 
 
 def _unquoted_operator(text: str) -> str | None:
-    """Return the first shell operator outside quotes."""
-
     quote = ""
     for character in text:
         if quote:

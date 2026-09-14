@@ -31,8 +31,6 @@ def _asking(args, stream) -> bool:
 
 
 def collect_workspace(args, *, ask=True, stdin=None):
-    """Collect the workspace needed for item discovery."""
-
     stream = stdin if stdin is not None else sys.stdin
     if args.workspace or not ask or not _asking(args, stream):
         return False
@@ -134,8 +132,6 @@ def collect(
 
 
 def _collect_workspace_items(args, stream, *, environments, items):
-    """Collect Environment and target choices from the selected workspace."""
-
     if not args.environment:
         print(
             "\nEnvironment\nWeaver uses a Fabric Environment for Python work. Add packages to its definition in this project."
@@ -273,8 +269,6 @@ def _table(report):
 
 
 def render(report):
-    """Report completed setup and next commands."""
-
     import shlex
 
     from weaver.onboarding.environment import environment_directory

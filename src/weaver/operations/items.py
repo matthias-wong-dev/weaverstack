@@ -1,4 +1,4 @@
-"""Resolve run items and their installed targets."""
+"""Resolve load and test item syntax and installed targets for the API and CLI."""
 
 from __future__ import annotations
 
@@ -47,8 +47,6 @@ def parse_run_item(text: object, *, what: str) -> WeaverItemId:
 
 
 def run_scope(dag, items, *, what: str, catalogue: str | None = None):
-    """Resolve the run's item scope and physical targets."""
-
     selected = tuple(items) or installed_items(dag, what=what, catalogue=catalogue)
     return selected, installed_targets(dag, selected, catalogue=catalogue)
 
