@@ -24,7 +24,7 @@ def _tokens():
 
 @dataclass(frozen=True)
 class RelationReference:
-    """One name a source file refers to, with its parts as written."""
+    """A relation name, preserving the parts as written."""
 
     parts: tuple[str, ...]
     #: True when the name is immediately followed by ``(``, so a table-valued
@@ -35,11 +35,7 @@ class RelationReference:
 
     @property
     def object_id(self) -> ObjectId | None:
-        """The two-part identity, or None for a call or a qualified name.
-
-        A function call is not a repository object, so it yields no object
-        identity even though it has two parts.
-        """
+        """The two-part identity; calls and qualified names have none."""
 
         if len(self.parts) != 2 or self.call:
             return None
@@ -47,8 +43,6 @@ class RelationReference:
 
     @property
     def is_qualified(self) -> bool:
-        """True when the author named a physical target rather than an object."""
-
         return len(self.parts) > 2
 
     def __str__(self) -> str:
@@ -57,7 +51,7 @@ class RelationReference:
 
 @dataclass(frozen=True)
 class PythonImport:
-    """One Python import with its relative level preserved for item resolution."""
+    """A Python import with its relative level preserved."""
 
     module: str | None
     level: int = 0
@@ -68,18 +62,13 @@ class PythonImport:
         return prefix + (self.module or "")
 
 
-# --- Python -----------------------------------------------------------------
-
-
 def extract_python_references(
     imported_modules: tuple[str, ...],
 ) -> tuple[RelationReference, ...]:
-    """Object references among a module's absolute imports.
+    """Find ``Schema__Object`` references in absolute imports.
 
-    Structural: exactly one ``__``, with both sides present and neither
-    beginning with an underscore. ``weaver`` has no ``__`` and is not a
-    reference; a helper reached as ``_helpers.dates`` contributes its package
-    name, which likewise is not one.
+    Both parts must be present and public. Other imports are not object
+    references.
     """
 
     references: list[RelationReference] = []
@@ -98,8 +87,6 @@ def extract_python_references(
             references.append(RelationReference(parts=key))
     return tuple(references)
 
-
-# --- SQL --------------------------------------------------------------------
 
 _FROM_BOUNDARY_KEYWORDS = {
     "FOR",
@@ -156,14 +143,7 @@ class _FlatToken:
 
 @dataclass(frozen=True)
 class LocatedReference:
-    """One relation reference, and where in the text it was written.
-
-    Extraction reports what a file says; a span additionally lets a caller
-    rewrite it. Build needs that: a two-part name in a view body resolves through
-    whatever catalogue the session is currently pointed at, so the planner
-    replaces each managed reference with a name that says which Lakehouse it
-    means (see :mod:`weaver.tokens`).
-    """
+    """A relation reference and its exact source span."""
 
     reference: RelationReference
     start: int
@@ -171,7 +151,7 @@ class LocatedReference:
 
 
 def extract_sql_references(sql_text: str) -> tuple[RelationReference, ...]:
-    """Ordered, de-duplicated relation references from a SQL body."""
+    """Return relation references in source order, without duplicates."""
 
     references: list[RelationReference] = []
     seen: set[tuple[str, ...]] = set()
@@ -184,15 +164,12 @@ def extract_sql_references(sql_text: str) -> tuple[RelationReference, ...]:
 
 
 def rewrite_sql_references(sql_text: str, rewrite) -> str:
-    """One body with each relation reference the caller claims replaced.
+    """Replace the relation references selected by ``rewrite``.
 
     ``rewrite`` receives a :class:`RelationReference` and returns the text to put
     in its place, or None to leave it exactly as written. Everything else in the
     body is untouched: whitespace, comments, casing, the author's own delimiters.
-    A build must not reformat a query it is going to
-    freeze and execute.
-
-    Replacements are applied last-first so an earlier span's offsets stay valid.
+    Replacements run last-first so source offsets remain valid.
     """
 
     replacements = []
@@ -207,12 +184,9 @@ def rewrite_sql_references(sql_text: str, rewrite) -> str:
 
 
 def address_managed_references(sql_text: str, destination) -> str:
-    """One body with every managed reference named as ``destination`` spells it.
+    """Qualify managed two-part references for ``destination``.
 
-    Only ordinary two-part references are rewritten, and that is exactly the set
-    the reader guarantees resolves inside the repository. What is left over is
-    outside it, being a physically-qualified name or a table-valued function, and
-    is the author naming something Weaver does not manage.
+    Physical names and table-valued function calls remain as authored.
     """
 
     def rewrite(reference):
@@ -225,10 +199,7 @@ def address_managed_references(sql_text: str, destination) -> str:
 
 
 def locate_sql_references(sql_text: str) -> tuple[LocatedReference, ...]:
-    """Every relation reference in a SQL body, in order, with its span.
-
-    Not de-duplicated: a name written three times is three places to rewrite.
-    """
+    """Locate every occurrence of each relation reference in source order."""
 
     from sqlparse.exceptions import SQLParseError
 
@@ -279,12 +250,7 @@ def locate_sql_references(sql_text: str) -> tuple[LocatedReference, ...]:
 def _dml_target(
     sql_text: str, tokens: list[_FlatToken], index: int
 ) -> LocatedReference | None:
-    """The relation a DML statement writes to.
-
-    ``insert into``, ``merge into`` and ``delete from`` may arrive as one
-    keyword token or two, depending on the dialect and on sqlparse, so an
-    intervening ``into``/``from`` is skipped when present.
-    """
+    """Find a DML target across one- or two-token keyword forms."""
 
     following = _next_significant(tokens, index + 1)
     if following is None:
@@ -297,8 +263,6 @@ def _dml_target(
 
 
 def _fallback(sql_text: str) -> tuple[LocatedReference, ...]:
-    """Scanner for bodies sqlparse cannot tokenise."""
-
     references: list[LocatedReference] = []
     seen: set[int] = set()
     keyword = re.compile(r"\b(from|join|apply|using)\b", flags=re.IGNORECASE)
@@ -314,12 +278,7 @@ def _add(
     seen: set[int],
     located: LocatedReference,
 ) -> None:
-    """Record one occurrence, by position.
-
-    Position, not name: extraction de-duplicates by name afterwards, but a
-    rewrite needs every place the name was written, and two rules can reach the
-    same place, which is the one duplicate to drop here.
-    """
+    """Record each source position once, even when two rules find it."""
 
     if located.start in seen:
         return
@@ -330,7 +289,6 @@ def _add(
 def _from_relations(
     sql_text: str, tokens: list[_FlatToken], from_index: int
 ) -> list[LocatedReference]:
-    """Every relation in one ``from`` list, including comma-separated ones."""
 
     depth = tokens[from_index].depth
     first = _next_significant(tokens, from_index + 1)
@@ -374,8 +332,6 @@ def _is_from_boundary(token: _FlatToken) -> bool:
 
 
 def _relation_at(sql_text: str, start: int) -> LocatedReference | None:
-    """A relation reference at ``start``, tagged if it is a function call."""
-
     parsed = _parse_name(sql_text, start)
     if parsed is None:
         return None
@@ -390,11 +346,10 @@ def _relation_at(sql_text: str, start: int) -> LocatedReference | None:
 
 
 def _parse_name(sql_text: str, start: int) -> tuple[tuple[str, ...], int, int] | None:
-    """The parts of a relation name, where it begins, and where it ends.
+    """Parse a replaceable name span, excluding trailing whitespace.
 
-    The end offset is where the name stops, before any trailing whitespace, so a
-    caller can tell an abutting ``(`` (a function call) from a spaced one. The
-    begin offset is what makes the name replaceable.
+    The exact end distinguishes an abutting function call from a spaced table
+    hint.
     """
 
     position = _skip_space(sql_text, start)
@@ -508,8 +463,6 @@ def _previous_significant(tokens: list[_FlatToken], index: int) -> int | None:
 
 
 def _enclosing_function(tokens: list[_FlatToken], index: int) -> str | None:
-    """The function keyword of the parenthesis enclosing ``index``, if any."""
-
     depth = 0
     for candidate in range(index - 1, -1, -1):
         value = tokens[candidate].value

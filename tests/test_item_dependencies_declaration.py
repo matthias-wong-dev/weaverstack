@@ -222,7 +222,7 @@ def test_sparse_projection_selects_only_exact_bound_items(tmp_path):
 @weaver_test()
 def test_projection_requires_at_least_one_binding(tmp_path):
     repository = parse_item_repository(Location(str(_dependency_estate(tmp_path))))
-    with pytest.raises(BuildError, match="at least one Weaver item"):
+    with pytest.raises(BuildError, match="Select at least one project item"):
         project_bound_documents(repository, [])
 
 
@@ -294,7 +294,9 @@ def test_an_import_naming_no_area_carries_the_move(tmp_path):
         ),
     )
 
-    with pytest.raises(DiscoveryError, match="import Tables.Sales__Customer") as raised:
+    with pytest.raises(
+        DiscoveryError, match=r"Import Tables\.Sales__Customer"
+    ) as raised:
         parse_item_repository(Location(str(root)))
 
     # The file to open, not the identity it declares. A logical ID names the

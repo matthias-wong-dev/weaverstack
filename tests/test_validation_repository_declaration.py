@@ -474,7 +474,7 @@ def test_nothing_depends_on_a_validation(lakehouse):
         ),
     )
 
-    with pytest.raises(DiscoveryError, match="nothing depends on a validation"):
+    with pytest.raises(DiscoveryError, match="cannot be dependency targets"):
         parse(lakehouse)
 
 
@@ -594,7 +594,7 @@ def test_a_sql_test_is_exactly_two_result_queries(warehouse):
         _tsql_test("Sales.OrderReconciliation") + "\nselect 1 as Id;\n",
     )
 
-    with pytest.raises(DiscoveryError, match="must produce exactly 2 result set"):
+    with pytest.raises(DiscoveryError, match="requires exactly 2 result set"):
         parse(warehouse)
 
 
@@ -606,7 +606,7 @@ def test_a_sql_assumption_is_exactly_one_result_query(warehouse):
         _tsql_assumption("Sales.OrdersHaveCustomers") + "\nselect 1 as Id;\n",
     )
 
-    with pytest.raises(DiscoveryError, match="must produce exactly 1 result set"):
+    with pytest.raises(DiscoveryError, match="requires exactly 1 result set"):
         parse(warehouse)
 
 
@@ -676,7 +676,7 @@ def test_setup_after_a_test_s_contract_queries_is_refused(warehouse):
         + "\nselect Id into #afterwards from Sales.Order;\n",
     )
 
-    with pytest.raises(DiscoveryError, match="Setup belongs before them"):
+    with pytest.raises(DiscoveryError, match="Move all setup before the first query"):
         parse(warehouse)
 
 
@@ -690,7 +690,7 @@ def test_setup_between_a_test_s_contract_queries_is_refused(warehouse):
     )
     _write(warehouse, "Warehouse/Reporting/tests/Sales.OrderReconciliation.sql", source)
 
-    with pytest.raises(DiscoveryError, match="Setup belongs before them"):
+    with pytest.raises(DiscoveryError, match="Move all setup before the first query"):
         parse(warehouse)
 
 
@@ -703,7 +703,7 @@ def test_setup_after_an_assumption_s_query_is_refused(warehouse):
         + "\nselect Id into #afterwards from Sales.Order;\n",
     )
 
-    with pytest.raises(DiscoveryError, match="Setup belongs before them"):
+    with pytest.raises(DiscoveryError, match="Move all setup before the first query"):
         parse(warehouse)
 
 
@@ -729,7 +729,7 @@ create or replace temporary view sneaky as select 1 as Id;
 """,
     )
 
-    with pytest.raises(DiscoveryError, match="Setup belongs before them"):
+    with pytest.raises(DiscoveryError, match="Move all setup before the first query"):
         parse(tmp_path)
 
 

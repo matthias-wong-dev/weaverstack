@@ -387,7 +387,9 @@ def test_an_external_destination_belongs_to_the_item_declaring_it(tmp_path):
         "  Warehouse/Audit/Sales.PortableCustomer: "
         "Lakehouse/Curated/Tables/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="declares Warehouse/Reporting's own"):
+    with pytest.raises(
+        DiscoveryError, match="belongs to Warehouse/Audit, not Warehouse/Reporting"
+    ):
         parse_item_repository(Location(str(root)))
 
 
@@ -601,7 +603,7 @@ def test_a_shortcut_destination_must_not_collide_with_a_native_document(tmp_path
         "logical:\n"
         "  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="the repository already declares"):
+    with pytest.raises(DiscoveryError, match="conflicts with project object"):
         parse_item_repository(Location(str(root)))
 
 

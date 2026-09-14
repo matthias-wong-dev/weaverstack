@@ -1,14 +1,8 @@
-"""Read an item's shortcut declarations.
+"""Read Lakehouse ``shortcuts.py`` and Warehouse ``shortcuts.yml`` declarations.
 
-A Lakehouse declares its shortcuts in ``shortcuts.py``, which is Python syntax
-used for static declarations. It is parsed, never executed: a build reads it to
-learn what an item points at, and the same names are importable from the item's
-own programs at load time. So the accepted syntax is narrow, and
-anything that would only have a meaning when run is refused here.
-
-A Warehouse declares its shortcuts in ``shortcuts.yml``, in two sections named
-for how the target is read. Each entry is a destination and what it points at,
-and the section says whether that target is a Weaver item or a Fabric one.
+Lakehouse declarations are parsed without execution. Warehouse declarations are
+grouped by whether their targets are logical or physical. An item's programs can
+import its declared Lakehouse shortcut names.
 """
 
 from __future__ import annotations
@@ -30,49 +24,42 @@ from .model import (
     WeaverItemId,
 )
 
-#: The file each item type declares its shortcuts in, at the item root.
 LAKEHOUSE_FILE = "shortcuts.py"
 WAREHOUSE_FILE = "shortcuts.yml"
 SHORTCUT_FILES = (LAKEHOUSE_FILE, WAREHOUSE_FILE)
 
-#: The declaration call an authored ``shortcuts.py`` is written with.
 CONSTRUCTOR = "Shortcut"
 
-#: Its parameters, in the order a positional call gives them.
+# Positional declaration arguments follow this order.
 PARAMETERS = ("shortcut_type", "target_type", "target", "workspace")
 
 
 def _literal(node: ast.AST, *, relative: str, what: str):
-    """One authored constant, or a declaration error naming what was written."""
-
     try:
         return ast.literal_eval(node)
     except ValueError:
         raise DiscoveryError(
-            f"{relative}: {what} must be a constant. {LAKEHOUSE_FILE} is read "
-            "without being run, so write the value out."
+            f"{relative}: {what} must be a literal value, not an expression. "
+            "Write the value directly."
         ) from None
 
 
 def _call(node: ast.AST, *, relative: str, name: str) -> ast.Call:
     if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-        raise DiscoveryError(
-            f"{relative}: {name} must be assigned a {CONSTRUCTOR}(...) call"
-        )
+        raise DiscoveryError(f"{relative}: {name} must use {CONSTRUCTOR}(...).")
     if node.func.id != CONSTRUCTOR:
         raise DiscoveryError(
-            f"{relative}: {name} is assigned {node.func.id}(...), and "
-            f"{LAKEHOUSE_FILE} declares {CONSTRUCTOR}s only"
+            f"{relative}: {name} must use {CONSTRUCTOR}(...), not {node.func.id}(...)."
         )
     return node
 
 
 def _arguments(call: ast.Call, *, relative: str, name: str) -> dict:
-    """The call's arguments as a mapping, positional and keyword alike."""
-
     if len(call.args) > len(PARAMETERS):
+        expected = ", ".join(PARAMETERS)
         raise DiscoveryError(
-            f"{relative}: {name} passes more arguments than {CONSTRUCTOR} takes"
+            f"{relative}: {name} passes too many arguments to {CONSTRUCTOR}. "
+            f"Use only {expected}."
         )
     arguments = {
         parameter: _literal(value, relative=relative, what=f"{name}'s {parameter}")
@@ -81,22 +68,25 @@ def _arguments(call: ast.Call, *, relative: str, name: str) -> dict:
     for keyword in call.keywords:
         if keyword.arg is None:
             raise DiscoveryError(
-                f"{relative}: {name} unpacks its arguments. Write each one out."
+                f"{relative}: {name} cannot unpack arguments with **. "
+                "Write each argument directly."
             )
         if keyword.arg not in PARAMETERS:
             expected = ", ".join(PARAMETERS)
             raise DiscoveryError(
-                f"{relative}: {name} names {keyword.arg!r}, and {CONSTRUCTOR} "
-                f"takes {expected}"
+                f"{relative}: {CONSTRUCTOR} does not accept {keyword.arg!r}. "
+                f"Use only {expected}."
             )
         if keyword.arg in arguments:
-            raise DiscoveryError(f"{relative}: {name} gives {keyword.arg!r} twice")
+            raise DiscoveryError(
+                f"{relative}: {name} gives {keyword.arg!r} twice. Remove one value."
+            )
         arguments[keyword.arg] = _literal(
             keyword.value, relative=relative, what=f"{name}'s {keyword.arg}"
         )
     for required in ("shortcut_type", "target_type", "target"):
         if required not in arguments:
-            raise DiscoveryError(f"{relative}: {name} declares no {required}")
+            raise DiscoveryError(f"{relative}: {name} must provide {required}.")
     return arguments
 
 
@@ -104,7 +94,7 @@ def _declaration_name(node: ast.Assign, *, relative: str) -> str:
     if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
         raise DiscoveryError(
             f"{relative}: each declaration assigns one name, as "
-            f"Name = {CONSTRUCTOR}(...)"
+            f"Name = {CONSTRUCTOR}(...)."
         )
     return node.targets[0].id
 
@@ -117,14 +107,14 @@ def _reject_repeat(seen: dict[str, str], name: str, *, relative: str) -> None:
             if prior == name
             else f"and {prior} differ only by case and cannot coexist"
         )
-        raise DiscoveryError(f"{relative}: {name} {detail}")
+        raise DiscoveryError(f"{relative}: {name} {detail}. Rename or remove it.")
     seen[name.casefold()] = name
 
 
 def read_lakehouse_shortcuts(
     text: str, *, owner: WeaverItemId, relative: str
 ) -> tuple[ShortcutDeclaration, ...]:
-    """Every shortcut one Lakehouse declares, read without running the file."""
+    """Read a Lakehouse's shortcut declarations without running the file."""
 
     try:
         module = ast.parse(text, filename=relative)
@@ -143,9 +133,9 @@ def read_lakehouse_shortcuts(
             continue
         if not isinstance(statement, ast.Assign):
             raise DiscoveryError(
-                f"{relative}: line {statement.lineno} is "
-                f"{type(statement).__name__.lower()}, and {LAKEHOUSE_FILE} holds "
-                f"{CONSTRUCTOR} declarations, imports and comments only"
+                f"{relative}: line {statement.lineno} is not a shortcut declaration. "
+                f"Use Name = {CONSTRUCTOR}(...); only imports and comments may appear "
+                "beside declarations."
             )
         name = _declaration_name(statement, relative=relative)
         call = _call(statement.value, relative=relative, name=name)
@@ -165,7 +155,7 @@ def read_lakehouse_shortcuts(
 def read_warehouse_shortcuts(
     text: str, *, owner: WeaverItemId, relative: str
 ) -> tuple[ShortcutDeclaration, ...]:
-    """Every shortcut one Warehouse declares, by how its target is read."""
+    """Read a Warehouse's logical and physical shortcut declarations."""
 
     from .metadata import _UniqueKeyLoader
 
@@ -177,15 +167,15 @@ def read_warehouse_shortcuts(
         return ()
     if not isinstance(loaded, dict):
         raise DiscoveryError(
-            f"{relative} holds a {LOGICAL_TARGET} and a {PHYSICAL_TARGET} "
-            "section, each mapping a destination view to what it points at"
+            f"{relative}: expected {LOGICAL_TARGET} and {PHYSICAL_TARGET} sections. "
+            "Map each destination view to its target."
         )
     unknown = sorted(str(section) for section in set(loaded) - set(TARGET_TYPES))
     if unknown:
         expected = ", ".join(TARGET_TYPES)
         raise DiscoveryError(
-            f"{relative} names section(s) {', '.join(unknown)}, and a shortcut "
-            f"target is {expected}"
+            f"{relative}: unknown section(s): {', '.join(unknown)}. "
+            f"Use only {expected}."
         )
 
     declarations: list[ShortcutDeclaration] = []
@@ -196,13 +186,14 @@ def read_warehouse_shortcuts(
             continue
         if not isinstance(entries, dict):
             raise DiscoveryError(
-                f"{relative}: the {target_type} section maps each destination "
-                "view to what it points at"
+                f"{relative}: the {target_type} section must map each destination "
+                "view to its target."
             )
         for raw_destination, raw_target in entries.items():
             if not isinstance(raw_destination, str) or not isinstance(raw_target, str):
                 raise DiscoveryError(
-                    f"{relative}: destinations and targets must be strings"
+                    f"{relative}: destinations and targets must be strings. "
+                    "Write both as quoted YAML values."
                 )
             try:
                 destination = WeaverDocumentId.parse(raw_destination)
@@ -211,8 +202,8 @@ def read_warehouse_shortcuts(
             if destination.item != owner:
                 raise DiscoveryError(
                     f"{relative}: destination {raw_destination} belongs to "
-                    f"{destination.item}, and this file declares {owner}'s own "
-                    "views"
+                    f"{destination.item}, not {owner}. Move it to that item's "
+                    "shortcuts file or change the destination."
                 )
             identity = destination.object_id
             name = f"{identity.schema}{NAME_SEPARATOR}{identity.object}"
@@ -239,12 +230,10 @@ def validate_destinations(
     documents: Mapping[WeaverDocumentId, object],
     schemas_by_item: Mapping[WeaverItemId, Iterable[str]],
 ) -> None:
-    """Hold every declared destination against what else the estate claims.
+    """Reject shortcut destinations that overlap project-owned names.
 
-    A destination may not collide with something the repository already declares,
-    and it may not sit inside a schema or folder shortcut. OneLake makes a
-    shortcut a read-write window into the item it points at, so a write beneath
-    one lands in that item.
+    A schema shortcut owns its destination namespace; writes below it land in
+    the source item.
     """
 
     shortcuts = tuple(shortcuts)
@@ -256,15 +245,14 @@ def validate_destinations(
         native = folded_documents.get(destination.casefold())
         if native is not None:
             raise DiscoveryError(
-                f"shortcut {declaration.name} in {declaration.owner} would be "
-                f"called {destination}, which the repository already declares "
-                f"as {native}"
+                f"Shortcut {declaration.name} in {declaration.owner} conflicts with "
+                f"project object {native}. Rename or remove the shortcut."
             )
         prior = claimed.get(destination.casefold())
         if prior is not None:
             raise DiscoveryError(
-                f"{declaration.owner} declares {destination} and {prior}, which "
-                "name the same destination"
+                f"{declaration.owner}: shortcuts {destination} and {prior} have the "
+                "same destination. Rename one of them."
             )
         claimed[destination.casefold()] = destination
 
@@ -289,16 +277,15 @@ def validate_destinations(
             owning = namespaces.get((item, schema))
             if owning is not None:
                 raise DiscoveryError(
-                    f"{item} declares schema {schema!r} and also shortcuts it "
-                    f"to {owning.target}. A schema shortcut presents the source "
-                    "item's namespace, so the item cannot own objects there too."
+                    f"{item}: schema {schema!r} conflicts with shortcut {owning.name}, "
+                    f"which points to {owning.target}. Remove the schema declaration "
+                    "or use a different shortcut destination."
                 )
 
 
 def _beneath(name: str, owning: ShortcutDeclaration) -> DiscoveryError:
     return DiscoveryError(
-        f"{name} sits inside the schema shortcut {owning.name} in "
-        f"{owning.owner}, which points at {owning.target}. Weaver owns the "
-        "shortcut and nothing beneath it, because anything written there is "
-        "written into the item the shortcut points at."
+        f"{name} conflicts with schema shortcut {owning.name} in {owning.owner}, "
+        f"which points to {owning.target}. Move or remove {name}, or use a different "
+        "shortcut destination."
     )
