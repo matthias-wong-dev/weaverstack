@@ -143,11 +143,16 @@ def test_an_item_with_no_configured_target_says_both_ways_to_fix_it():
     from weaver.build_bundle.targets import parse_build_item
     from weaver.errors import ConfigError
 
-    with pytest.raises(ConfigError, match="no physical target"):
+    with pytest.raises(ConfigError) as raised:
         parse_build_item(
             "Lakehouse/Landing",
             workspace=_workspace_with("Lakehouse/Other", "Other_LH"),
         )
+
+    message = str(raised.value)
+    assert "No target is configured" in message
+    assert "targets:" in message
+    assert "Lakehouse/Landing=Lakehouse/<physical name>" in message
 
 
 def _workspace_with(logical: str, physical: str):
