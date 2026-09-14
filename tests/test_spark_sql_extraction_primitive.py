@@ -152,7 +152,7 @@ def test_a_setup_statement_between_the_queries_does_not_become_one():
 
 @weaver_test()
 def test_a_primitive_with_no_program_is_refused_by_name():
-    with pytest.raises(LoadError, match="carries no program"):
+    with pytest.raises(LoadError, match="has no program"):
         read_spark_sql(_Session(), sql="", contract=_contract())
 
 
@@ -196,7 +196,7 @@ def test_a_non_incremental_table_may_not_name_explicit_deletes():
 def test_a_delete_query_returning_more_than_the_key_is_refused():
     session = _Session(columns={"gone": ("Customer id", "Amount")})
 
-    with pytest.raises(LoadError, match="exactly the primary key"):
+    with pytest.raises(LoadError, match="exactly primary key columns"):
         read_spark_sql(
             session,
             sql="select * from source;\nselect * from gone;",
@@ -208,7 +208,7 @@ def test_a_delete_query_returning_more_than_the_key_is_refused():
 def test_a_delete_query_missing_part_of_the_key_is_refused():
     session = _Session(columns={"gone": ("Customer id",)})
 
-    with pytest.raises(LoadError, match="exactly the primary key"):
+    with pytest.raises(LoadError, match="exactly primary key columns"):
         read_spark_sql(
             session,
             sql="select * from source;\nselect * from gone;",

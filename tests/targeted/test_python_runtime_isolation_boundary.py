@@ -290,7 +290,7 @@ def test_concurrent_imports_of_two_estates_do_not_collide(raw, curated):
 
 @weaver_test()
 def test_a_module_that_is_not_there_names_the_path_it_was_not_at(raw):
-    with pytest.raises(LoadError, match="no deployed module at"):
+    with pytest.raises(LoadError, match="deployed module not found"):
         import_deployed_module(
             raw, "Sales__Missing.py", expected="Sales__Missing", node_id="n"
         )
@@ -306,7 +306,9 @@ def test_a_module_that_will_not_import_is_reported_as_data(scope, tmp_path):
         ),
     )
 
-    with pytest.raises(LoadError, match="raised ModuleNotFoundError"):
+    with pytest.raises(
+        LoadError, match="failed during import with ModuleNotFoundError"
+    ):
         _customer(context)
 
 
@@ -320,7 +322,7 @@ def test_a_module_missing_its_declared_class_says_which_one(scope, tmp_path):
         ),
     )
 
-    with pytest.raises(LoadError, match="defines no class 'Sales__Customer'"):
+    with pytest.raises(LoadError, match="does not define class 'Sales__Customer'"):
         _customer(context)
 
 

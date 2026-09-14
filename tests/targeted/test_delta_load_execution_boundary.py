@@ -924,7 +924,7 @@ def test_a_non_incremental_load_refuses_a_delete_claim_before_anything_runs():
 
     spark = _Spark(counts=NO_OP)
 
-    with pytest.raises(LoadError, match="returns staging on its own"):
+    with pytest.raises(LoadError, match="returned explicit deletes"):
         load_table(
             spark,
             contract=_contract(),

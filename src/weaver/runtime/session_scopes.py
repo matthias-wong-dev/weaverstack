@@ -1,13 +1,4 @@
-"""Runtime scopes held by name, for the life of one interpreter.
-
-A run orchestrated from elsewhere opens a scope here, dispatches against it by
-name, and closes it when it is done.
-
-A registry rather than one scope, because two runs can overlap and a shared one
-would let the second use modules the first imported. Module state rather than
-anything durable, because a scope's lifetime is at most the interpreter's: a
-leaked one dies with the session.
-"""
+"""Session-local runtime scopes, isolated by run."""
 
 from __future__ import annotations
 
@@ -42,11 +33,6 @@ def open_scope(run_id: str, catalogue: dict | None = None) -> str:
 
 
 def scope_catalogue(run_id: str):
-    """The catalogue this run opened with, reconstructed from what it crossed as.
-
-    None where the run carried none, which is a run with nothing to record.
-    """
-
     from ..catalogue.state import Catalogue
 
     with _LOCK:
@@ -55,8 +41,6 @@ def scope_catalogue(run_id: str):
 
 
 def close_scope(run_id: str) -> bool:
-    """Close one scope and forget it. True if there was one to close."""
-
     with _LOCK:
         scope = _SCOPES.pop(run_id, None)
         _CATALOGUES.pop(run_id, None)
@@ -67,22 +51,16 @@ def close_scope(run_id: str) -> bool:
 
 
 def open_scopes() -> tuple[str, ...]:
-    """Which names this interpreter is currently holding scopes for."""
-
     with _LOCK:
         return tuple(sorted(_SCOPES))
 
 
 def get_scope(run_id: str):
-    """The scope these imports belong to, or a diagnosis of its absence."""
-
     with _LOCK:
         scope = _SCOPES.get(run_id)
     if scope is None:
         raise RuntimeScopeError(
-            f"run {run_id!r} has no runtime scope in this session; either "
-            "open_scope was never called, or the Spark session was replaced "
-            "underneath the run"
+            f"run {run_id!r} has no runtime scope in this Spark session; rerun the load"
         )
     return scope
 

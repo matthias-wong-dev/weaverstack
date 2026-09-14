@@ -116,7 +116,7 @@ def test_dispatching_into_a_run_with_no_scope_is_diagnosed():
         session_scopes.get_scope("run-a")
 
     assert "run-a" in str(raised.value)
-    assert "open_scope" in str(raised.value)
+    assert "rerun the load" in str(raised.value)
 
 
 # --- the handle, as the desktop submits it -----------------------------------

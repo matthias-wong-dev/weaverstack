@@ -376,7 +376,7 @@ def test_a_module_edited_after_deployment_is_read_as_it_now_stands():
 
 @weaver_test()
 def test_a_module_with_no_metadata_block_is_refused_by_name():
-    with pytest.raises(LoadError, match="Sales__Customer carries no Weaver metadata"):
+    with pytest.raises(LoadError, match="Sales__Customer.*has no Weaver metadata"):
         document_for_module(_module(""))
 
 
