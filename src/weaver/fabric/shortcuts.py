@@ -1,14 +1,7 @@
-"""Fabric OneLake shortcut operations for shortcuts.
+"""Create, inspect and delete Fabric OneLake shortcuts.
 
-A shortcut is made where one is declared and none stands, and repointed where
-the pair it declares changed. What a build leaves alone it does not touch: which
-shortcuts an installation acts on is settled in
-:mod:`weaver.build_bundle.incremental`.
-
-Creation is bulk. Fabric takes a whole batch in one submission and reports each
-member's outcome separately, so a caller sends one bulk create for a batch rather
-than one create request per shortcut. The submission is long-running, so the
-interaction also polls the operation and reads its result.
+Build planning decides which shortcuts change. Creation submits those shortcuts
+as one long-running bulk operation and handles each member's outcome separately.
 """
 
 from __future__ import annotations
@@ -22,36 +15,22 @@ from ..errors import CommandError
 from .client import FabricClient, FabricError
 from .resources import Item
 
-#: What tells Fabric to point an existing shortcut somewhere else. The default
-#: policy is ``Abort``, under which a create over a live name is a 409 and the
-#: name a delete released stays held for up to thirty-five seconds afterwards.
-#: Measured against a Fabric tenant: an overwrite of a live name answers 200 in
-#: under a second, an overwrite issued moments after a delete answers 201, and
-#: neither waits.
+#: Overwrite avoids the reservation Fabric leaves briefly after a delete.
 OVERWRITE_POLICY = "CreateOrOverwrite"
 
-#: How long to wait for a source Fabric has accepted but not yet published to
-#: OneLake. A Warehouse creates a table in its own catalogue first and publishes
-#: the Delta directory behind it a moment later, so a shortcut created in the same
-#: build as its source can arrive before there is anything to point at. Bounded,
-#: because a source that is absent has to fail.
+#: Warehouse tables can reach OneLake after their catalogue transaction settles.
 SOURCE_TIMEOUT = 120.0
 SOURCE_POLL_INTERVAL = 5.0
 
-#: The two failures a create reports as something other than success. The source
-#: is not in OneLake yet, which waiting answers; or something that is not a
-#: shortcut occupies the path, which it does not.
+#: A missing source is retried; an occupied path fails immediately.
 _SOURCE_MISSING = "Target path doesn't exist"
 _PATH_OCCUPIED = "NameConflictError"
 
-#: What Fabric calls a member that was created.
 _SUCCEEDED = "Succeeded"
 
 
 @dataclass(frozen=True)
 class Shortcut:
-    """One shortcut an item holds: where it appears, and what it points at."""
-
     path: str
     name: str
     target_workspace_id: str | None = None
@@ -64,12 +43,7 @@ class Shortcut:
 
 
 def list_shortcuts(item: Item, *, client: FabricClient) -> tuple[Shortcut, ...]:
-    """Every shortcut this item holds.
-
-    Fabric echoes a path back rooted, ``/Tables/DWG`` for the ``Tables/DWG`` it
-    was given, so the leading separator is normalised here rather than by every
-    caller.
-    """
+    """Normalise the leading separator Fabric adds to returned paths."""
 
     found = []
     for entry in client.paged(
@@ -90,8 +64,6 @@ def list_shortcuts(item: Item, *, client: FabricClient) -> tuple[Shortcut, ...]:
 
 @dataclass(frozen=True)
 class ShortcutRequest:
-    """One member of a batch: where it appears, and what it points at."""
-
     path: str
     name: str
     source: Item
@@ -103,18 +75,14 @@ class ShortcutRequest:
 
     @property
     def key(self) -> tuple[str, str]:
-        """What a response member is matched back by, rooting normalised."""
-
         return (self.path.strip("/"), self.name)
 
 
 @dataclass(frozen=True)
 class BulkShortcutResult:
-    """What one batch of shortcut creations produced.
+    """Results in request order and the number of bulk calls made.
 
-    ``created`` is one detail mapping per request, in request order. ``calls`` is
-    how many bulk requests it took, which is more than one where a source was
-    still being published when the batch reached Fabric.
+    A source still being published to OneLake can require another bulk call.
     """
 
     created: tuple[dict, ...]
@@ -127,17 +95,10 @@ def create_shortcuts(
     *,
     client: FabricClient,
 ) -> BulkShortcutResult:
-    """Point each request's ``path/name`` at its source, in one bulk request.
+    """Create or repoint shortcuts in one bulk request.
 
-    Under ``CreateOrOverwrite``: a shortcut holds no data, so an existing name is
-    repointed, and a build has to be able to run twice.
-
-    Fabric settles each member separately, so a batch can come back part
-    succeeded. What succeeded is kept. A member whose source is not published to
-    OneLake yet is sent again, and only that member: a source created earlier in
-    this same build may not be readable when the batch reaches Fabric. One
-    deadline covers the whole batch, so a source that will never appear still
-    fails.
+    Successful members are kept. Members waiting for their sources in OneLake are
+    retried under one deadline; permanent failures stop the batch.
     """
 
     if not requests:
@@ -165,7 +126,7 @@ def create_shortcuts(
                 expected=(200, 202),
             )
         except FabricError as exc:
-            # The batch was refused as a whole, so no member has an outcome.
+            # The whole batch failed before Fabric produced member outcomes.
             raise CommandError(
                 f"could not create {len(pending)} shortcut(s) in "
                 f"{destination.name}: {exc}"
@@ -196,9 +157,7 @@ def create_shortcuts(
                 "could not create the shortcut(s) "
                 + ", ".join(sorted(request.qualified for request in retry))
                 + f" in {destination.name}: their sources did not appear in "
-                f"OneLake within {SOURCE_TIMEOUT:.0f}s. A source created in this "
-                "build is published a moment after it is made; one that never "
-                "appears is not there."
+                f"OneLake within {SOURCE_TIMEOUT:.0f}s."
             )
         time.sleep(SOURCE_POLL_INTERVAL)
         pending = retry
@@ -232,12 +191,7 @@ def _detail(destination: Item, request: ShortcutRequest) -> dict:
 
 
 def _members(response, *, client: FabricClient) -> dict[tuple[str, str], dict]:
-    """Each member's outcome, keyed by the request Fabric echoes back.
-
-    Bulk creation is long-running, so a 202 carries the outcomes at the
-    operation's result address. Members are matched by the request Fabric echoes
-    back, because the order they return in is not part of the contract.
-    """
+    """Read long-running outcomes and match them by echoed request, not order."""
 
     if response.status_code == 200:
         body = response.json() if response.content else {}
@@ -256,11 +210,7 @@ def _members(response, *, client: FabricClient) -> dict[tuple[str, str], dict]:
 
 
 def _refuse_permanent(destination: Item, request: ShortcutRequest, member) -> None:
-    """Raise unless this member failed for a source still being published.
-
-    A failed member may carry no error body. Its status is then what there is to
-    report.
-    """
+    """Raise unless the source is still being published to OneLake."""
 
     error = member.get("error") or {}
     reported = (
@@ -286,12 +236,9 @@ def _refuse_permanent(destination: Item, request: ShortcutRequest, member) -> No
 def delete_shortcut(
     destination: Item, *, path: str, name: str, client: FabricClient
 ) -> None:
-    """Remove a shortcut if it is there. A 404 is the intended state, not a fault.
+    """Remove a shortcut if present, without deleting its target data.
 
-    Removing the shortcut is not removing what it points at: the data belongs to
-    the item that produced it, and this only takes away this item's name for it.
-    That distinction is the whole reason a wipe must remove shortcuts *through the
-    workspace* rather than by deleting a directory (see :mod:`weaver.physical_wipe`).
+    Wipe must therefore use the shortcut API rather than delete a directory.
     """
 
     client.request(

@@ -1,7 +1,4 @@
-"""Session-native Fabric storage backed by ``notebookutils.fs``.
-
-FabricStore operates within a Fabric session; desktop callers use OneLake DFS.
-"""
+"""Fabric-session storage backed by ``notebookutils.fs``."""
 
 from __future__ import annotations
 
@@ -18,8 +15,6 @@ _MAX_READ_BYTES = 256 * 1024 * 1024
 
 
 class FabricStore:
-    """Within-workspace Fabric storage, backed by ``notebookutils.fs``."""
-
     def __init__(self, fs: Any | None = None) -> None:
         if fs is None:
             try:
@@ -100,7 +95,7 @@ class FabricStore:
         return entries
 
     def read(self, location: Location) -> bytes:
-        """The file's bytes, decoded as the UTF-8 text a bundle is made of."""
+        """Read the UTF-8 text used by bundle files as bytes."""
 
         path = self._path(location)
         if not self.fs.exists(path):
@@ -112,7 +107,7 @@ class FabricStore:
         return text.encode("utf-8")
 
     def write(self, location: Location, data: bytes) -> None:
-        """Write UTF-8 text (a bundle manifest, a payload, an install report)."""
+        """Write bytes that contain UTF-8 text."""
 
         path = self._path(location)
         try:
@@ -166,7 +161,7 @@ class FabricStore:
             generated.unlink(missing_ok=True)
 
     def copy_from_local(self, source: Path, destination: Location) -> None:
-        """Copy one driver-local file or tree into OneLake without text decoding."""
+        """Copy a driver-local file or tree without decoding it."""
 
         origin = f"file:{source.as_posix()}"
         try:

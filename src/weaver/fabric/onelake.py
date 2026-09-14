@@ -1,8 +1,4 @@
-"""OneLake DFS storage transport for desktop access to Fabric.
-
-The client handles DFS writes and reports paged listings instead of returning a
-partial directory result.
-"""
+"""OneLake DFS storage for desktop access to Fabric Lakehouses."""
 
 from __future__ import annotations
 
@@ -23,14 +19,6 @@ DEFAULT_TIMEOUT = 120.0
 
 
 def lakehouse_artifact_segment(item: str) -> str:
-    """A OneLake path segment for a **Lakehouse**, by id or by name.
-
-    A GUID stands alone; a name needs its item type, as ``Weaver.Lakehouse``.
-    The rule is Lakehouse-specific, being the ``.Lakehouse`` suffix, which is why
-    the name says so. OneLake file paths only ever address Lakehouses; a Warehouse
-    is reached over TDS, not here.
-    """
-
     try:
         uuid.UUID(item)
         return item
@@ -46,8 +34,6 @@ def onelake_url(
     base_url: str = ONELAKE_DFS,
     query: dict[str, str] | None = None,
 ) -> str:
-    """A DFS URL beneath one item, e.g. ``…/{ws}/{lh}/Files/weaver_items/x``."""
-
     parts = [workspace, lakehouse_artifact_segment(item)]
     parts.extend(part for part in relative_path.strip("/").split("/") if part)
     url = f"{base_url.rstrip('/')}/" + "/".join(quote(part, safe="") for part in parts)
@@ -55,19 +41,11 @@ def onelake_url(
 
 
 def abfss_root(workspace_id: str, item_id: str) -> str:
-    """The Spark-facing root for an item.
-
-    Proven to list, read and write Lakehouses that are not attached to the
-    notebook, which is the whole reason destination roots are explicit.
-    """
-
     return f"abfss://{workspace_id}@onelake.dfs.fabric.microsoft.com/{item_id}"
 
 
 @dataclass(frozen=True)
 class OneLakePath:
-    """A OneLake location split back into the parts DFS needs."""
-
     workspace: str
     item: str
     relative: str
@@ -86,22 +64,10 @@ def parse_onelake(location: Location, *, base_url: str = ONELAKE_DFS) -> OneLake
     return OneLakePath(workspace=parts[0], item=parts[1], relative="/".join(parts[2:]))
 
 
-#: Where a person opens a Lakehouse. The portal, not a storage endpoint.
-
-
 class OneLakeDfsClient:
-    """An ADLS Gen2 DFS client for one workspace, used **from outside Fabric**.
+    """An ADLS Gen2 DFS client explicitly constructed outside Fabric.
 
-    This is how a local caller reaches into a workspace, whether the CLI or a
-    Fabric integration test: authenticated HTTPS to the OneLake DFS endpoint. It
-    satisfies the :class:`~weaver.store.Store` protocol so the CLI can hand it to
-    the same code a ``FilesystemStore`` drives, but it is *cross-boundary access*, not
-    the store Weaver uses when it runs inside Fabric. The in-Fabric,
-    session-native store is a separate implementation for when it exists.
-
-    Because it crosses a boundary, it is constructed explicitly by the caller
-    that crosses, and never returned by a workspace-to-store factory, which returns
-    the NotebookUtils-backed ``FabricStore`` only inside a Fabric session.
+    Inside Fabric, storage uses the NotebookUtils-backed ``FabricStore``.
     """
 
     def __init__(
@@ -169,8 +135,6 @@ class OneLakeDfsClient:
             query=query,
         )
 
-    # --- the Store protocol ----------------------------------------------
-
     def exists(self, location: Location) -> bool:
         return (
             self._request("HEAD", self._url(location), expected=(200, 404)).status_code
@@ -201,9 +165,8 @@ class OneLakeDfsClient:
         if response.status_code == 404:
             raise StoreError(f"cannot list a location that does not exist: {location}")
 
-        # A large directory pages, returning a continuation token. Until that is
-        # handled, returning only the first page would silently truncate a wipe,
-        # a sync or a reconciliation, so fail before returning anything.
+        # Never return a partial listing: callers use it for destructive and
+        # reconciliation operations.
         if response.headers.get("x-ms-continuation"):
             raise NotImplementedError("OneLake listing pagination is not implemented")
 
