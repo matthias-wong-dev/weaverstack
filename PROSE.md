@@ -5,8 +5,8 @@ source comments. It governs wording, not product behaviour.
 
 ## Default
 
-Preserve the smallest amount of prose that carries information the code does
-not. Delete everything else. Do not optimise for deletion count. Optimise for
+Preserve the smallest amount of prose that carries non-obvious information.
+Delete everything else. Do not optimise for deletion count. Optimise for
 information density.
 
 ## Principles
