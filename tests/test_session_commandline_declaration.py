@@ -150,7 +150,7 @@ def test_a_refused_operator_is_named_with_what_to_do_about_it():
         command_words("weaver build . --workspace Research & Development")
 
     assert "&" in str(raised.value)
-    assert "quote it" in str(raised.value)
+    assert "quote it" in str(raised.value).lower()
 
 
 @weaver_test()

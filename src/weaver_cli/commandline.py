@@ -1,16 +1,4 @@
-"""Reading a Weaver command line that was written down as text.
-
-``weaver session`` and ``weaver workflow`` both take command lines a person
-typed or pasted, so they read them the same way: ``shlex`` quoting, an optional
-leading ``weaver``, and the few commands the context cannot run. A line copied
-from a terminal, a workflow file or the documentation means the same thing in
-all three places.
-
-What a line means is argparse's answer, not this module's. Nothing here
-decides whether a command exists or whether its options are valid; the words go
-to the CLI's own parser, so ``weaver --help`` and ``weaver --version`` behave at
-a prompt as they do in a terminal.
-"""
+"""Parse written Weaver commands for sessions and workflows."""
 
 from __future__ import annotations
 
@@ -20,19 +8,13 @@ from typing import Mapping
 
 from weaver.errors import CommandError
 
-#: The program name a command line may carry.
 PROGRAM = "weaver"
 
-#: Shell operators a Weaver command line does not carry. Weaver commands are
-#: run by the CLI's own handlers, so there is no shell to interpret these, and
-#: only outside quoting, where they would be operators. Quoted, they are
-#: ordinary characters in an argument such as "Research & Development".
+#: Shell operators are refused outside quotes because no shell interprets them.
 SHELL_OPERATORS = ("|", ">", "<", "&", ";", "$", "`")
 
 
 def command_names(parser: argparse.ArgumentParser) -> frozenset[str]:
-    """Every command name ``parser`` accepts at the top level."""
-
     for action in parser._subparsers._group_actions:
         if action.choices:
             return frozenset(action.choices)
@@ -44,31 +26,31 @@ def command_words(
     *,
     excluded: Mapping[str, str] | None = None,
 ) -> list[str]:
-    """The arguments one written Weaver command line means.
+    """Tokenise a command with optional leading ``weaver``.
 
-    The leading ``weaver`` is optional. ``excluded`` maps a command name to the
-    reason it cannot run in this context.
+    The CLI parser validates the resulting command names and options.
+    ``excluded`` maps commands to context-specific refusal reasons.
     """
 
     text = line.strip()
     if "\n" in text:
-        raise CommandError("a Weaver command line is one line")
+        raise CommandError("A Weaver command line must be one line.")
     operator = _unquoted_operator(text)
     if operator is not None:
         raise CommandError(
-            f"{text!r} is not a Weaver command line. Shell syntax such as "
-            f"{operator} is not accepted; quote it to pass it as an argument."
+            f"Shell syntax {operator!r} is not accepted in {text!r}. "
+            "Quote it to pass it as an argument."
         )
     try:
         words = _split(text)
     except ValueError as exc:
         raise CommandError(f"{text!r}: {exc}") from exc
     if not words:
-        raise CommandError("a Weaver command line cannot be empty")
+        raise CommandError("A Weaver command line cannot be empty.")
 
     rest = words[1:] if words[0] == PROGRAM else words
     if not rest:
-        raise CommandError(f"{text!r} names no command")
+        raise CommandError(f"{text!r} names no command.")
 
     refusal = (excluded or {}).get(rest[0])
     if refusal is not None:
@@ -77,14 +59,9 @@ def command_words(
 
 
 def _split(text: str) -> list[str]:
-    """Split a command line into arguments, keeping every backslash.
+    """Split arguments without treating backslashes as escapes.
 
-    :func:`shlex.split` reads a backslash as an escape, which eats the
-    separators of an ordinary Windows path, ``C:\\Users\\repo`` arrives as
-    ``C:Usersrepo``, so a line copied from PowerShell does not reach argparse
-    intact. Quoting is what a command line uses to hold a value together and is
-    kept exactly as it was; escaping is not, so a backslash is an ordinary
-    character wherever it appears.
+    Standard :func:`shlex.split` would corrupt unquoted Windows paths.
     """
 
     lexer = shlex.shlex(text, posix=True)
@@ -95,11 +72,7 @@ def _split(text: str) -> list[str]:
 
 
 def _unquoted_operator(text: str) -> str | None:
-    """The first shell operator standing outside quoting, where it would be one.
-
-    Quoting follows :func:`_split`, which reads the line afterwards: either
-    quote character opens a quoted run, and nothing escapes.
-    """
+    """Return the first shell operator outside quotes."""
 
     quote = ""
     for character in text:

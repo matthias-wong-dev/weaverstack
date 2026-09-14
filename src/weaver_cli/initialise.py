@@ -20,11 +20,9 @@ GAP = 2
 
 
 def _asking(args, stream) -> bool:
-    """Whether this setup asks its questions.
+    """Apply ``--non-interactive`` before forced or terminal interaction.
 
-    ``--non-interactive`` asks nowhere. ``--interactive`` asks over a scripted
-    stream as well as a terminal, which is how a setup run from a script still
-    collects the optional names.
+    ``--interactive`` also permits questions over a scripted input stream.
     """
 
     if non_interactive(args):
@@ -68,7 +66,7 @@ def collect(
         args.project_folder, suggested_folder = _project_folder(stream, args.workspace)
     if not args.catalogue:
         print(
-            "\nCatalogue\nThe Catalogue is a Warehouse where Weaver keeps its build, load and test state."
+            "\nCatalogue\nThe Weaver catalogue is a Warehouse that stores build, load and test state."
         )
         args.catalogue = _item_answer(
             stream, "Catalogue name", "Warehouse", default=DEFAULT_CATALOGUE
@@ -140,7 +138,7 @@ def _collect_workspace_items(args, stream, *, environments, items):
 
     if not args.environment:
         print(
-            "\nEnvironment\nWeaver uses a Fabric Environment for Python work. Its definition is kept in this project so you can add packages later."
+            "\nEnvironment\nWeaver uses a Fabric Environment for Python work. Add packages to its definition in this project."
         )
         available = tuple(environments(args.workspace)) if environments else ()
         print("1. Use an existing Environment\n2. Create a new Environment")
@@ -152,7 +150,7 @@ def _collect_workspace_items(args, stream, *, environments, items):
             ]
         else:
             if not available:
-                print("This workspace has no Environments yet.")
+                print("This workspace has no Environments.")
             args.environment = _item_answer(
                 stream, "Environment name", "Environment", default=DEFAULT_ENVIRONMENT
             )
@@ -173,10 +171,8 @@ def _collect_workspace_items(args, stream, *, environments, items):
 
 
 def _project_folder(stream, workspace):
-    """Return the folder and whether the workspace-derived suggestion was accepted."""
-
     print(
-        "\nProject folder\nA project folder contains the local files that define your Weaver project: its Fabric items, data logic, tests and Environment."
+        "\nProject folder\nA project folder contains the local files that define Fabric items, data logic, tests and the Environment."
     )
     typed = _read(stream, f"Project folder [{workspace}]: ")
     return typed or workspace, not bool(typed)
@@ -184,9 +180,9 @@ def _project_folder(stream, workspace):
 
 def _validate(args):
     if not args.workspace:
-        raise CommandError("Provide --workspace.")
+        raise CommandError("Pass --workspace.")
     if not args.project_folder:
-        raise CommandError("Provide --project-folder for unattended setup.")
+        raise CommandError("Pass --project-folder for non-interactive setup.")
     ProjectRequest(
         workspace=args.workspace,
         catalogue=args.catalogue or DEFAULT_CATALOGUE,
@@ -202,7 +198,8 @@ def _read(stream, prompt):
     line = stream.readline()
     if line == "":
         raise CommandError(
-            "The answers ran out before the questions did. Provide the names and --non-interactive, or run at a terminal."
+            "Input ended before setup was complete. Pass all required options with "
+            "--non-interactive, or run in a terminal."
         )
     return line.strip()
 
@@ -214,7 +211,7 @@ def _answer(stream, label, *, default=None, skippable=False):
             return typed or default
         if skippable:
             return None
-        print(f"{label} is needed to continue.")
+        print(f"{label} is required.")
 
 
 def _item_answer(stream, label, kind, **kwargs):
@@ -276,21 +273,21 @@ def _table(report):
 
 
 def render(report):
-    """Report completed setup and the commands to run from the project."""
+    """Report completed setup and next commands."""
 
     import shlex
 
     from weaver.onboarding.environment import environment_directory
 
     _table(report)
-    print(f"\nYour Weaver project is ready in {report.project_folder}.")
+    print(f"\nWeaver project ready in {report.project_folder}.")
     print(f"\nNext:\n\n  cd {shlex.quote(report.project_folder)}")
     if report.environment_publication == "deferred":
         name = next(
             item.name for item in report.resources if item.role == "Environment"
         )
-        print("\nEnvironment publication was deferred.")
-        print("Publish before your first load that needs Python execution.\n")
+        print("\nEnvironment publication deferred.")
+        print("Publish it before the first load that runs Python.\n")
         print(
             f"  weaver fabric environment publish --path {shlex.quote(environment_directory(name))}"
         )
