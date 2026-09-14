@@ -142,7 +142,7 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
             "X = Shortcut(\n"
             + _declaration("view", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
             + ")",
-            "belongs to a Warehouse item",
+            "must belong to a Warehouse item",
         ),
         (
             "Sales__X = Shortcut(\n"
@@ -159,7 +159,7 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
             "Reference = Shortcut(\n"
             + _declaration("schema", "logical", "Lakehouse/Raw/Sales")
             + ")",
-            "target must be physical",
+            "must use a physical target",
         ),
         (
             "Landed = Shortcut(\n"
@@ -197,7 +197,7 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
                 "table", "logical", "Lakehouse/Curated/Tables/Sales.Customer"
             )
             + ")",
-            "which is the item declaring it",
+            "points into its declaring item",
         ),
     ],
 )
@@ -760,7 +760,7 @@ def test_a_logical_lakehouse_table_target_names_its_area(tmp_path):
         + ")\n",
     )
 
-    with pytest.raises(DiscoveryError, match="is not a managed object"):
+    with pytest.raises(DiscoveryError, match="does not identify an object"):
         _parse(root)
 
 

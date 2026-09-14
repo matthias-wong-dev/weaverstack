@@ -59,7 +59,7 @@ def test_item_type_and_shape_are_strict(text):
 
 @weaver_test()
 def test_files_documents_only_belong_to_lakehouses():
-    with pytest.raises(IdentityError, match="is a Lakehouse area"):
+    with pytest.raises(IdentityError, match="must not include the Lakehouse area"):
         WeaverDocumentId.parse("Warehouse/Reporting/Files/Sales.Export")
     with pytest.raises(IdentityError, match="only belong to a Lakehouse"):
         WeaverDocumentId(
@@ -199,7 +199,7 @@ def test_a_warehouse_validation_keeps_the_object_shape():
 
 @weaver_test()
 def test_the_validation_shape_is_refused_for_a_warehouse():
-    with pytest.raises(IdentityError, match="occupies no Lakehouse area"):
+    with pytest.raises(IdentityError, match="must use the object shape"):
         WeaverDocumentId(
             WeaverItemId.parse("Warehouse/Reporting"),
             ObjectId("Sales", "CustomerCount"),

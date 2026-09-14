@@ -104,8 +104,6 @@ def _read_validation(
     store: Store,
     source_documents: dict[WeaverDocumentId, SourceDocument],
 ) -> None:
-    """Read one validation file into the repository."""
-
     directory = within[0]
     kind = VALIDATION_DIRECTORIES[directory]
     if len(within) != 2:
@@ -120,8 +118,8 @@ def _read_validation(
         raise DiscoveryError(f"{relative}: not a Weaver validation file")
     if language == PYTHON and item.item_type != LAKEHOUSE:
         raise DiscoveryError(
-            f"{relative}: Python validation runs through Spark, so it belongs to a "
-            f"Lakehouse item. Write a {kind} for a {item.item_type} in SQL"
+            f"{relative}: a Python {kind} must belong to a Lakehouse item. Move it "
+            f"to a Lakehouse item or write the {kind} in SQL"
         )
 
     source = read_source_document(
@@ -222,8 +220,6 @@ def merge_repository(*parts: RepositoryPart) -> RepositoryPart:
 def _merge_keyed(
     contributions: Iterable[tuple[str, Mapping[_Key, _Value]]], *, what: str
 ) -> dict[_Key, _Value]:
-    """Identity-keyed declarations from every part, refusing a collision."""
-
     merged: dict[_Key, _Value] = {}
     folded: dict[str, object] = {}
     for label, contributed in contributions:
@@ -236,8 +232,6 @@ def _merge_keyed(
 def _merge_destinations(
     contributions: Iterable[tuple[str, Iterable[_Declaration]]], *, what: str
 ) -> tuple[_Declaration, ...]:
-    """The same, for the shortcut collections, which are keyed by destination."""
-
     merged: dict[str, _Declaration] = {}
     folded: dict[str, object] = {}
     for label, contributed in contributions:
@@ -249,8 +243,6 @@ def _merge_destinations(
 
 
 def _claim(folded: dict[str, object], key, label: str, *, what: str) -> None:
-    """Reserve one identity, refusing a repeat and a case-only variant."""
-
     rendered = str(key)
     prior = folded.get(rendered.casefold())
     if prior is not None:
@@ -275,9 +267,9 @@ def parse_item_repository(
 
     store = store or FilesystemStore()
     if not store.exists(root):
-        raise DiscoveryError(f"source root does not exist: {root}")
+        raise DiscoveryError(f"source does not exist: {root}")
     if not store.is_directory(root):
-        raise DiscoveryError(f"source root is not a directory: {root}")
+        raise DiscoveryError(f"source is not a directory: {root}")
 
     authored = _read_authored_repository(root, store)
     merged = merge_repository(
@@ -340,8 +332,6 @@ def _documents_of(part: RepositoryPart, item: WeaverItemId) -> list[SourceDocume
 
 
 def _catalogue_part() -> RepositoryPart:
-    """Weaver's catalogue declaration, composed into every repository."""
-
     from ..catalogue.builtin import BUILTIN_ITEM
     from ..fragments import CATALOGUE, fragment_files
 
@@ -392,8 +382,6 @@ _DECLARED_DIRECTORY = {
 
 
 def _declared_directory(root: Location, store: Store, relative: str) -> str | None:
-    """Where a misplaced source file belongs, from the key it declares."""
-
     if not relative.endswith((".py", ".sql")):
         return None
     data = store.read(root.join(*relative.split("/")))
@@ -404,16 +392,12 @@ def _declared_directory(root: Location, store: Store, relative: str) -> str | No
 
 
 def _looks_like_weaver_declaration(root: Location, store: Store, relative: str) -> bool:
-    """Whether a misplaced source file carries Weaver declaration metadata."""
-
     return _declared_directory(root, store, relative) is not None
 
 
 def _has_misplaced_weaver_structure(
     root: Location, store: Store, relative: str
 ) -> bool:
-    """Whether a non-item root contains an unmistakable Weaver surface."""
-
     parts = relative.split("/")
     if len(parts) < 3:
         return False
@@ -440,8 +424,6 @@ NOT_A_PROJECT_FOLDER = (
 
 
 def _item_roots(discovered) -> set[tuple[str, str]]:
-    """Every ``<ItemType>/<ItemName>`` directory in one discovered tree."""
-
     roots = set()
     for relative, is_directory in discovered:
         parts = relative.split("/")
@@ -480,8 +462,8 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     )
     if authored_builtin:
         raise DiscoveryError(
-            f"{authored_builtin[0]}: {builtin_prefix} is package-owned and must "
-            "not be authored"
+            f"{authored_builtin[0]}: {builtin_prefix} is reserved by Weaver and "
+            "must not be authored; remove it from the project"
         )
 
     for surface in SHORTCUT_FILES:
@@ -616,8 +598,7 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
 
         if within[-1] == "__init__.py" and (len(within) == 1 or within[0] == "lib"):
             raise DiscoveryError(
-                f"{relative}: user-authored __init__.py is not allowed; "
-                "Weaver supplies package loading"
+                f"{relative}: a project must not include __init__.py here; remove it"
             )
 
         if within == [LAKEHOUSE_FILE]:
@@ -750,10 +731,8 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
     )
     if reserved:
         raise DiscoveryError(
-            f"{reserved[0]}: schema {ETL_SCHEMA!r} is reserved for Weaver. It "
-            "holds the runtime tree a load is deployed into, the generated load "
-            "and validation procedures, and the item's surface over the "
-            "catalogue, so an item may not author into it"
+            f"{reserved[0]}: schema {ETL_SCHEMA!r} is reserved for Weaver and "
+            "cannot contain authored files; move this file to another schema"
         )
 
     shortcuts = _read_item_declarations(
@@ -805,8 +784,6 @@ def _read_authored_repository(root: Location, store: Store) -> RepositoryPart:
 
 
 def _valid_object_placement(item_type: str, *, area: str | None, source) -> bool:
-    """Whether an object document occupies a valid location in its owning item."""
-
     if item_type == WAREHOUSE:
         return area is None and source.language == SQL and source.kind in (TABLE, VIEW)
     if area == FILES:
@@ -859,8 +836,6 @@ def compose_repository(
     root: Location,
     store: Store,
 ) -> WeaverRepository:
-    """Sign and resolve a merged part into the final repository."""
-
     from .source import content_hash
 
     support_hashes = {
@@ -939,8 +914,6 @@ def compose_repository(
 
 
 def _repository_signature(part: RepositoryPart, store: Store, root: Location) -> str:
-    """Hash every declaration file the repository is composed from."""
-
     from .source import content_hash
 
     digest = hashlib.sha256()
@@ -1164,16 +1137,12 @@ def _insert_exact_case(
 
 
 def _builtin_item() -> WeaverItemId:
-    """The reserved catalogue item identity, imported late to avoid a cycle."""
-
     from ..catalogue.builtin import BUILTIN_ITEM
 
     return BUILTIN_ITEM
 
 
 def _read_item_declarations(root, store, files, *, read):
-    """Read one declaration surface for every item that has it."""
-
     declarations = []
     for item in sorted(files):
         relative = files[item]
@@ -1219,8 +1188,8 @@ def _logical_pairs(
             case_match = managed_folded.get(str(source).casefold())
             detail = f"; declared spelling is {case_match}" if case_match else ""
             raise DiscoveryError(
-                f"{item}: logical target {source} is not a managed object in this "
-                f"repository{detail}"
+                f"{item}: logical target {source} does not identify an object in "
+                f"this project{detail}"
             )
         declared_schemas = {schema.schema for schema in schemas_by_item[item]}
         if destination.object_id.schema not in declared_schemas:
@@ -1255,12 +1224,7 @@ def _ignored(relative: str) -> bool:
 
 
 def importable_module_name(relative_path: str) -> str | None:
-    """The full dotted module a repository-relative path is importable as.
-
-    ``_helpers/dates.py`` is ``_helpers.dates``, not ``dates``. A nested module
-    lives in its package's namespace and cannot shadow a top-level one.
-    ``_helpers/__init__.py`` is the package itself, ``_helpers``.
-    """
+    """Return the full dotted name, preserving nested package namespaces."""
 
     if not relative_path.endswith(".py"):
         return None

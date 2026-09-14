@@ -260,7 +260,7 @@ def test_python_validation_belongs_to_a_lakehouse(warehouse):
         _python_test("Sales.OrderReconciliation"),
     )
 
-    with pytest.raises(DiscoveryError, match="belongs to a Lakehouse item"):
+    with pytest.raises(DiscoveryError, match="must belong to a Lakehouse item"):
         parse(warehouse)
 
 
@@ -550,7 +550,7 @@ def test_a_test_may_not_author_read(lakehouse):
     )
     _write(lakehouse, "Lakehouse/Sales/tests/Sales__OrdersReconcile.py", source)
 
-    with pytest.raises(DiscoveryError, match="which a Test may not"):
+    with pytest.raises(DiscoveryError, match="must not define read"):
         parse(lakehouse)
 
 

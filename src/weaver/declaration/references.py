@@ -25,13 +25,7 @@ IDENTITY_COLUMN_NOTE = (
 
 @dataclass(frozen=True)
 class ResolvedText:
-    """One piece of metadata, split into its text and where the text came from.
-
-    ``literal`` is the prose, written here or copied from the end of a reference
-    chain, or ``None`` when a reference could not be followed.
-    ``reference`` is the ``$Schema.Object[Column]`` as written, or ``None`` when
-    the prose was written here.
-    """
+    """Resolved metadata text and its authored reference, when present."""
 
     literal: str | None = None
     reference: str | None = None
@@ -48,12 +42,7 @@ def resolve_text(
     documents: Iterable[SourceDocument],
     shortcuts: Iterable[RepositoryShortcut] = (),
 ) -> ResolvedText:
-    """Follow one piece of metadata to its literal prose.
-
-    ``documents`` is every object in the repository, because resolution needs
-    siblings.
-    Raises :class:`~weaver.errors.DiscoveryError` when the chain cycles.
-    """
+    """Resolve metadata text across the repository; cycles raise ``DiscoveryError``."""
 
     if text is None:
         return ResolvedText()
@@ -95,13 +84,12 @@ def _follow(
     shortcut_index: Mapping[str, str],
     seen: list[tuple[str, str]],
 ) -> str | None:
-    """The literal at the end of a chain, or None when it cannot be followed."""
-
     target = _target(reference, referrer, index, shortcut_index=shortcut_index)
     if target is None:
         if referrer.logical_id is not None:
             raise DiscoveryError(
-                f"{referrer.node_id}: metadata reference {reference} does not resolve exactly"
+                f"{referrer.node_id}: metadata reference {reference} does not identify "
+                "exactly one project object; check its spelling and qualification"
             )
         return None
 
@@ -111,8 +99,8 @@ def _follow(
             f"{node}[{column}]" if column else node for node, column in seen
         )
         raise DiscoveryError(
-            f"metadata reference cycle: {trail} -> {target.node_id}. A reference "
-            "copies text from its target, so a cycle has no text to copy"
+            f"metadata reference cycle: {trail} -> {target.node_id}; replace one "
+            "reference with text"
         )
 
     text = _text_of(target, reference.column)
@@ -120,7 +108,8 @@ def _follow(
         if referrer.logical_id is not None:
             suffix = f" column {reference.column!r}" if reference.column else " text"
             raise DiscoveryError(
-                f"{referrer.node_id}: metadata reference {reference} names no{suffix}"
+                f"{referrer.node_id}: metadata reference {reference} names no{suffix}; "
+                "add the text or change the reference"
             )
         return None
     if not text.is_reference:
@@ -141,14 +130,7 @@ def _target(
     *,
     shortcut_index: Mapping[str, str],
 ) -> SourceDocument | None:
-    """The object a documentation reference names, excluding the referrer itself.
-
-    Excluding self is what makes the cross-target case work: the Warehouse
-    ``Sales.Customer`` naming ``$Sales.Customer`` means the Delta table, because
-    it cannot sensibly mean itself. With more than one candidate left, the
-    referrer's own namespace wins; failing that the reference is ambiguous and is
-    left unresolved rather than guessed.
-    """
+    """Resolve without choosing the referrer or guessing between ambiguous matches."""
 
     if referrer.logical_id is not None:
         item = (
@@ -186,8 +168,6 @@ def validate_repository_metadata(
     *,
     shortcuts: Iterable[RepositoryShortcut] = (),
 ) -> None:
-    """Eagerly validate every logical metadata pointer in an item repository."""
-
     documents = tuple(documents)
     shortcuts = tuple(shortcuts)
     index = _index(documents)
@@ -218,25 +198,19 @@ def validate_repository_metadata(
             if target is None:
                 raise DiscoveryError(
                     f"{source.node_id}: foreign key target {reference.target} "
-                    "does not resolve exactly"
+                    "does not identify exactly one project object; check its spelling "
+                    "and qualification"
                 )
 
 
 def _text_of(document: SourceDocument, column: str | None) -> MetadataText | None:
-    """The referenced text on a target: its description, or one column's note."""
-
     if column is None:
         return document.document.description
     return column_note(document, column)
 
 
 def column_note(document: SourceDocument, column: str) -> MetadataText | None:
-    """One column's declared note, however the object declares its shape.
-
-    A declared schema carries notes on its columns. An inferred one has no
-    declared columns to carry them, so its notes stay in the raw metadata block.
-    The same split :func:`weaver.ses.columns.metadata_column_references` makes.
-    """
+    """Read from declared columns, or raw metadata when SQL infers the schema."""
 
     ses = document.document
     for declared in ses.schema:
@@ -258,13 +232,7 @@ def column_note(document: SourceDocument, column: str) -> MetadataText | None:
 def declared_column_notes(
     document: SourceDocument,
 ) -> tuple[tuple[str, MetadataText], ...]:
-    """Every column that carries a note, in declared order, plus the identity.
-
-    This is the whole of what the catalogue's column dictionary describes: the
-    columns an author said something about, and Weaver's own surrogate, which is
-    given a generic note because no author writes one. Ordinals, types and
-    nullability are physical and are recorded elsewhere.
-    """
+    """Return authored column notes in order, plus Weaver's identity-column note."""
 
     ses = document.document
     notes: list[tuple[str, MetadataText]] = []
