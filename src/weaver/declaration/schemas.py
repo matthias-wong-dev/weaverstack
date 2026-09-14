@@ -2,8 +2,8 @@
 
 Object identities imply their schemas. A schema file can add metadata or declare
 an otherwise empty schema, and its filename must match ``Schema ID`` exactly.
-Declaring a schema creates nothing physically; build planning derives physical
-schemas from object identities.
+Reading the declaration creates nothing physically; a build creates schemas from
+the item's declarations.
 """
 
 from __future__ import annotations
