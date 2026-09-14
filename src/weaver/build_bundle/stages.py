@@ -12,7 +12,7 @@ from .models import BuildBatch, BuildSequence
 from .payloads import payload_path
 
 #: Prune and drops precede creation. Schemas precede shortcuts, which precede
-#: builds. Endpoint refresh then closes physical work before runtime publication.
+#: builds. Endpoint refresh completes before runtime publication.
 PRUNE = "prune"
 DROP = "drop"
 SCHEMA = "schema"

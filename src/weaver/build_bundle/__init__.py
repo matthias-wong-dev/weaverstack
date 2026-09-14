@@ -1,4 +1,9 @@
-"""Build planning, bundle serialization, and installation."""
+"""Build planning, bundle serialization, and installation.
+
+Planning owns selection, ordering, generated payloads, and certification. The
+installer validates and executes the finished bundle without reading the source
+repository or making planning decisions.
+"""
 
 from __future__ import annotations
 

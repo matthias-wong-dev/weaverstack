@@ -23,8 +23,6 @@ class Builder:
     source_store: Store
 
     def build(self, *, output: Location | None = None) -> BuildBundle:
-        """Write the planned bundle tree to ``output``."""
-
         from ..catalogue.state import reconcile_catalogue_state
         from .planner import generate_item_build_bundle
         from .workflow import validate_build_request

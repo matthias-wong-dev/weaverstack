@@ -1,7 +1,8 @@
-"""Validated bundle execution and installation reporting.
+"""Validate and execute planned build bundles.
 
 Sequences are barriers. A failed sequence skips all later sequences, and every
-planned action receives one result. Planning remains outside the installer.
+planned action receives one result. The installer resolves target capabilities
+through the Session; it never reads the source repository or changes the plan.
 """
 
 from __future__ import annotations
@@ -146,7 +147,7 @@ class Installer:
         if isinstance(bundle, Location):
             bundle = load_bundle(bundle, store=self.store)
         else:
-            # Revalidate pre-loaded bundles at the execution boundary.
+            # Revalidate pre-loaded bundles immediately before execution.
             validate_bundle(
                 bundle.location, bundle.plan, store=bundle.store or self.store
             )
@@ -202,8 +203,6 @@ _WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
 
 
 def _sequence_label(sequence: BuildSequence, resolved: dict) -> str:
-    """Combine the planner description with the sequence's target names."""
-
     text = (sequence.description or "").strip()
     said = text[:1].upper() + text[1:] if text else "Install"
     names: list[str] = []

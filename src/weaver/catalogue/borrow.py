@@ -127,7 +127,7 @@ def pointer_shortcuts(borrowed: Sequence[Borrowed], *, source, path_of) -> tuple
     """Return shortcut requests for borrowed tables and folders.
 
     ``path_of`` supplies the source's physical spelling. The destination retains
-    the logical address recorded by the estate. The mapping serves both shortcut
+    the recorded logical address. The mapping serves both shortcut
     creation and the readiness wait.
     """
 

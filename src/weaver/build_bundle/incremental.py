@@ -131,7 +131,7 @@ def stale_through_shortcuts(
     impact root. Missing rows remain new-installation cases.
 
     Skip the source comparison for ``Warehouse/_weaver`` because a fork records
-    its own catalogue-item time alongside source-estate times. Pointer-to-consumer
+    its own catalogue-item time alongside source catalogue times. Pointer-to-consumer
     comparisons remain valid.
     """
 

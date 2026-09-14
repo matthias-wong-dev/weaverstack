@@ -4,7 +4,7 @@ A mirror recreates each copied ``_.Shortcut`` row as a Warehouse view or OneLake
 shortcut. A shortcut owns no data, so it remains a Registry ``shortcut`` and
 gets no ``_.Mirror`` row.
 
-A logical target follows this estate's own bindings, so a pointer at
+A logical target follows the destination's bindings, so a pointer at
 ``Lakehouse/Landing`` in the source stands at ``Lakehouse/DEV_Landing`` here. A
 physical target names a Fabric item directly and is recreated as recorded.
 
@@ -39,13 +39,13 @@ from .tsql import identifier
 
 
 class UnresolvedShortcut(WeaverError):
-    """A recorded shortcut has no resolvable target in this estate."""
+    """A recorded shortcut has no resolvable destination target."""
 
 
 @dataclass(frozen=True)
 class Recreated:
     shortcut: InstalledShortcut
-    #: The physical item the target resolves to for this estate.
+    #: The physical item the target resolves to in the destination.
     target_name: str
     #: The workspace that item is in, or ``None`` for the one being built.
     target_workspace: str | None = None
@@ -103,8 +103,8 @@ def recreatable(
 ) -> tuple[Recreated, ...]:
     """Resolve one item's recorded shortcuts to physical targets.
 
-    ``bindings`` is the estate's final Installation map, allowing logical targets
-    to move with the fork. Every selected shortcut must resolve.
+    ``bindings`` is the destination's final Installation map, allowing logical
+    targets to move with the fork. Every selected shortcut must resolve.
     """
 
     found = []

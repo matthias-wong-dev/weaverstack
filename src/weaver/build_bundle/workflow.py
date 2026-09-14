@@ -179,7 +179,7 @@ def read_build_state(
     sql_by_item=None,
     shortcuts=(),
 ) -> BuildState:
-    """Read the catalogue and selected targets into one planner handover."""
+    """Read the catalogue and selected target state for build planning."""
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:

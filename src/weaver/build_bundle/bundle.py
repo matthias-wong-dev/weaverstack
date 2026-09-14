@@ -214,8 +214,6 @@ def validate_bundle(location: Location, plan: BuildPlan, *, store: Store) -> Non
 
 
 def validate_plan_structure(plan: BuildPlan) -> None:
-    """Validate the manifest without reading payloads."""
-
     if plan.format_version != SUPPORTED_FORMAT_VERSION:
         raise BuildError(
             f"unsupported bundle format version {plan.format_version}; this version "

@@ -69,8 +69,6 @@ class BoundTarget:
 
     @property
     def display(self) -> str:
-        """Return the physical target label, such as ``Lakehouse/Sales``."""
-
         kind = (self.kind or "").strip()
         return f"{kind.title()}/{self.name}" if kind else str(self.name)
 

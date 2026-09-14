@@ -29,7 +29,7 @@ from .tables import (
 )
 from .tsql import identifier, literal
 
-#: Current installed state, excluding history owned by the source estate.
+#: Current installed state, excluding history owned by the source installation.
 FORKED_TABLES = PROJECTED_TABLES + CURRENT_STATE_TABLES
 
 _AUDIT_TYPE = "datetime2(6)"

@@ -244,7 +244,7 @@ def mirror(
     workspace_config: str | Path | None = None,
     session=None,
 ) -> MirrorResult:
-    """Fork another catalogue's installed estate into this workspace.
+    """Fork another catalogue's installed state into this workspace.
 
     ``items`` are the logical items to rebind, written the way ``build`` writes
     them: ``Warehouse/Model`` or ``Warehouse/Model=Warehouse/Model_Dev``. Naming
@@ -537,7 +537,7 @@ def _refuse_mirrored_source(resolved: ResolvedMirror) -> None:
         f"mirror reads {resolved.source}, which is itself a mirror: it holds "
         f"[_].[Mirror]. Weaver records one hop, and rebinding {named} out of it "
         "puts their rows two catalogues away. Mirror those items from the "
-        "estate that holds their rows."
+        "catalogue that records their rows locally."
     )
 
 
@@ -590,7 +590,7 @@ def _refuse_unsafe(resolved: ResolvedMirror) -> None:
 def _wipe_destination(
     workspace: Workspace, destination: CatalogueRef, *, session
 ) -> str:
-    """Empty the destination as one physical Warehouse, not as an estate."""
+    """Empty only the destination Warehouse, not its recorded installation."""
 
     from .wipe import PHYSICAL_ONLY, wipe
 
@@ -662,8 +662,6 @@ def _copy_catalogue_state(
     borrowed: bool,
     session,
 ) -> dict[str, int]:
-    """Copy catalogue rows and count the resulting destination state."""
-
     from ..catalogue.fork import copied_tables, fork_statements
     from ..targets import WarehouseTarget
 
@@ -724,8 +722,6 @@ def _mirror_item(workspace: Workspace, each: MirrorItem, *, bindings, session) -
 def _mirror_warehouse_item(
     workspace: Workspace, each: MirrorItem, *, bindings, session
 ) -> dict:
-    """Mirror Warehouse rows and recreate its shortcuts."""
-
     from ..catalogue.borrow import borrow_statements, schema_statements
     from ..catalogue.shortcuts import schemas_of, view_statement
     from ..targets import ItemRef, WarehouseTarget

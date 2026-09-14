@@ -310,8 +310,6 @@ def _catalogue_holds(inventories):
 
 
 def _refuse_selected_omissions(omitted: list[OmittedNode]) -> None:
-    """Fail when a bound item's selected object has no materialisation plan."""
-
     if not omitted:
         return
     details = "; ".join(
@@ -564,7 +562,7 @@ def _plan_item(
         if refresh is not None:
             stages.append(refresh)
 
-    # Runtime installation closes the item after structure and endpoint refresh.
+    # Runtime installation follows structure and endpoint refresh.
     # Removals come from prior Registry rows, not the target diff.
     stages.extend(
         item_runtime_stages(artefacts, selected_loads, item=item, target=target)
