@@ -1,24 +1,8 @@
-"""Spark SQL table build: shape inference and creation in one action.
+"""Infer and create a Spark SQL table within one action.
 
-A Spark SQL table's shape is settled by asking Spark about its query, so the
-payload is a JSON instruction rather than finished SQL
-(:func:`weaver.declaration.ddl._spark_table_ddl`). This executor completes it:
-
-1. ``DESCRIBE QUERY``, after whatever setup the body needs, as one piece of work,
-   so a temporary view the query reads is registered in the session describing it;
-2. validate the columns with the guards a declared schema passes at parse
-   (:func:`weaver.declaration.columns.validate_build_columns`);
-3. choose the physical business columns, declared types when declared and the
-   query's otherwise;
-4. append Weaver's own columns, the audit columns and a keyed table's row
-   signature;
-5. create the table with strict ``CREATE TABLE``.
-
-Only 1 and 5 reach Spark. ``DESCRIBE QUERY`` returns the output columns in order
-and each type in ``simpleString`` form without reading a row.
-
-A Delta table has no identity column, so the ``Identity`` header is a
-Warehouse-only declaration the parser refuses elsewhere.
+Setup and ``DESCRIBE QUERY`` run in one session, then declared-column constraints
+are applied and Weaver audit columns are appended before strict ``CREATE TABLE``.
+Only describe and create reach Spark; shape inference reads no data rows.
 """
 
 from __future__ import annotations
@@ -37,13 +21,10 @@ from ...errors import InstallError
 from ..models import InstallAction
 from .base import InstallationContext
 
-#: Reserved audit names, in the Delta (underscored) spelling, for collision
-#: detection against an inferred query's own output columns.
+# Delta audit names reserved from inferred business columns.
 _AUDIT_NAMES = {audit_column_name(logical, PYTHON).lower() for logical in AUDIT_COLUMNS}
 
-#: The row signature, in the same spelling and for the same check. A keyed
-#: table's load writes it, so a query producing a column of that name would
-#: reach the create twice over.
+# A keyed load writes this internal column, so inferred output cannot also own it.
 _SIGNATURE_NAME = signature_column_name(PYTHON).lower()
 
 
@@ -65,20 +46,12 @@ class SparkTableExecutor:
             )
 
         instruction = json.loads(payload.decode("utf-8"))
-        # Both sides are resolved against the batch's destination: the table this
-        # creates, and every managed object its query reads. Inferring the shape
-        # from a query that resolved through the session's own catalogue would
-        # read some other Lakehouse's table of that name, and then create a table
-        # of that shape, silently, in the right place.
+        # Both the query and table are fully qualified for the batch target;
+        # session catalogue defaults must not influence inferred shape.
         qualified = instruction["object"]
         query = instruction["source_query"]
 
-        # Fabric defaults case-sensitive analysis off, and Weaver identities are
-        # exact, so the query and the DDL share one scope. Otherwise a table
-        # created as ``CustomerEnriched`` cannot be read by the next action.
-
-        # The setup and the describe are one piece of work: a view registered in
-        # a different session is one the query cannot see.
+        # Setup and describe share one submission so temporary views remain visible.
         setup = list(instruction.get("setup") or ())
         query_columns, query_types = self._query_shape(
             [*setup, f"DESCRIBE QUERY {query}"],
@@ -132,11 +105,7 @@ class SparkTableExecutor:
         action: InstallAction,
         qualified: str,
     ) -> tuple[tuple[str, ...], dict[str, str]]:
-        """The query's output columns, in order, with each column's type.
-
-        A query that does not resolve fails here rather than at the create, so
-        the failure names the action and carries Spark's message.
-        """
+        """Read ordered output names and types, reporting shape failures here."""
 
         try:
             rows = context.spark_sql_batch(statements, exact_case=True)
@@ -153,8 +122,8 @@ class SparkTableExecutor:
             data_type = row.get("data_type")
             if not name or not data_type:
                 raise InstallError(
-                    f"spark_table action {action.id!r}: DESCRIBE QUERY answered "
-                    f"for {qualified} with a row naming no column and type: {row!r}"
+                    f"spark_table action {action.id!r}: DESCRIBE QUERY returned a "
+                    f"row without a column name and data type for {qualified}: {row!r}"
                 )
             columns.append(name)
             types[name] = data_type
@@ -173,12 +142,10 @@ class SparkTableExecutor:
         query_types: dict[str, str],
         references: tuple[tuple[str, str], ...],
     ) -> list[tuple[str, str, bool]]:
-        """The business columns as ``(name, type, not_null)``.
+        """Return business columns as ``(name, type, not_null)``.
 
-        Declared columns carry their declared type and not-null. Inferred columns
-        take the query's type and are not null when the primary key or a
-        ``Not null`` names them, the same loading contract, applied to a shape
-        the query supplied rather than a declaration.
+        Declared columns retain their type and nullability. Inferred columns use
+        query types and apply declared primary-key and not-null references.
         """
 
         collisions = [name for name in business_columns if name.lower() in _AUDIT_NAMES]

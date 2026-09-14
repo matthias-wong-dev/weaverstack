@@ -1,9 +1,4 @@
-"""Spark SQL execution: run the generated statement against the batch's target.
-
-The payload is the single executable unit ``create_ddl`` produced: a ``CREATE OR
-REPLACE VIEW``/``TABLE``, a ``CREATE SCHEMA``, or a frozen prune ``DROP``. It
-arrives fully addressed, so this runs it as written.
-"""
+"""Run one fully addressed Spark SQL payload against its batch target."""
 
 from __future__ import annotations
 

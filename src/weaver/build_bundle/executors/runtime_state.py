@@ -1,10 +1,6 @@
-"""Write one build's decision about the catalogue's current-state rows.
+"""Apply a build's structured runtime-state intent to the catalogue.
 
-The payload is structured intent naming the table and the rows, so the decision
-can be inspected. This writes the rows the build establishes, then removes the
-rows it ended.
-
-See :mod:`weaver.catalogue.runtime_state` for what the intent holds.
+Established rows are written before ended rows are removed.
 """
 
 from __future__ import annotations

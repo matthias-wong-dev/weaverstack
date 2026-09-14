@@ -42,14 +42,7 @@ def collect_claims(
     *,
     stale_claims: Iterable[CatalogueClaim] = (),
 ) -> tuple[CatalogueClaim, ...]:
-    """Every catalogue claim this build must delete before it does physical work.
-
-    Two sources, and they are symmetric: claims reconciliation already disproved
-    against the inventory, and claims held by the objects this build is about to
-    drop or remove. Both are passed in rather than one being read off the
-    catalogue, because a catalogue describes what is claimed, not which of those
-    claims some earlier step decided were wrong.
-    """
+    """Return stale claims and claims held by objects this build will remove."""
 
     claims = list(stale_claims)
     for identity in sorted(set(identities), key=str):
@@ -167,19 +160,11 @@ def render_catalogue_before_build(
 
 
 def _item_signature(repository, item) -> str:
-    """The item's own signature, which is what an Installation row records."""
-
     return next(model.signature for model in repository.items if model.identity == item)
 
 
 def _with_installation_rows(desired: Catalogue, installation) -> Catalogue:
-    """Put each item's binding facts into the desired catalogue.
-
-    A repository-derived catalogue cannot know them and must not invent them:
-    which physical target an item is bound to, and which Weaver published it, are
-    facts about this build, not about the source. They are folded in here so
-    the diff compares complete rows against complete rows.
-    """
+    """Add build-time target and Weaver bindings to repository-derived rows."""
 
     from types import MappingProxyType
 
@@ -198,18 +183,10 @@ def desired_catalogue(
     selected_ids: Iterable[WeaverDocumentId],
     target_by_item: Mapping,
 ) -> Catalogue:
-    """The catalogue state a successful build of ``selected_ids`` would leave.
+    """Return the post-build catalogue state for ``selected_ids``.
 
-    Logical, then narrowed, then bound, in that order and visibly so. The
-    narrowing is what keeps a Registry row meaning "this succeeded"; the binding
-    is what lets a shortcut be certified as the thing it physically is, and what
-    supplies the Installation facts a repository cannot know.
-
-    Named and separate because it is both halves of the fixed point. It is what
-    publication compares the persisted catalogue against, and it is therefore
-    exactly what the catalogue should already contain when nothing has changed, so
-    a test can feed it back as the current state and hold the build to
-    producing nothing, without restating any of this arithmetic itself.
+    Narrowing precedes binding so Registry rows certify only selected objects,
+    while shortcut and Installation rows carry their physical targets.
     """
 
     from .. import __version__
@@ -247,8 +224,6 @@ def render_mirror_deregistration(
     *,
     catalogue_target,
 ) -> PlannedStage | None:
-    """Stop recording as borrowed every object this build materialised locally."""
-
     materialised = sorted(
         (identity for identity in built_ids if identity in catalogue.mirrors),
         key=str,
@@ -266,8 +241,6 @@ def render_mirror_deregistration(
 
 
 def _mirror_keys(identities: Iterable[WeaverDocumentId]) -> tuple[dict, ...]:
-    """Each object as the key row identifying its ``_.Mirror`` row."""
-
     return tuple(
         {
             SCOPE_ITEM_TYPE: identity.item.item_type,
@@ -289,22 +262,16 @@ def render_catalogue_after_build(
 ) -> tuple[PlannedStage, ...]:
     """Publish dictionaries and Installation in one batch, Registry last.
 
-    Nothing closes the build. Catalogue rows are written over TDS into the
-    Warehouse that holds them, so they are readable as soon as they are
-    committed and there is no endpoint standing between the write and the next
-    reader.
+    TDS writes are readable when committed; no SQL endpoint refresh closes the
+    build.
     """
 
     desired = desired_catalogue(repository, selected_ids, target_by_item)
 
-    # The publication is a genuine diff against what is persisted: a table whose
-    # rows are all unchanged produces no statement, so an identical second build
-    # appends nothing here.
+    # Diff against persisted rows so an unchanged table produces no statement.
     publication = publish(current or Catalogue(rows={}), desired)
 
-    # Registry last, in its own barrier. Taken from the structure rather than
-    # recovered from the SQL, so the ordering invariant is carried by the type
-    # instead of by a string match.
+    # Registry stays in its own final barrier; table plans carry the ordering.
     catalogue_statements: list[str] = [
         statement
         for table_plan in (*publication.dictionaries, publication.installation)

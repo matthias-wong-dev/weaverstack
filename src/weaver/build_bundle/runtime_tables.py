@@ -1,35 +1,10 @@
-"""What a build writes into the catalogue's runtime tables.
+"""Plan runtime-state writes around physical build work.
 
-Runtime-table references themselves are ordinary shortcut declarations, composed
-into the repository and planned by the shortcut planner.
-
-Before any physical work:
-
-.. code-block:: text
-
-    a rebuilt table or folder      LoadStatus Pending, Bookmark at the sentinel
-    a rebuilt Test or Assumption   TestStatus Pending
-    no longer declared             the row goes
-
-After the physical work succeeds:
-
-.. code-block:: text
-
-    a rebuilt View                 LoadStatus Succeeded, dated by the build
-
-A View is Succeeded once its DDL has run: the build is what establishes it, and
-there is nothing further to run. A View has no bookmark.
-
-The reset runs before physical work, and that ordering is the safety property. A
-bookmark at the sentinel makes the next load read the whole source, while a
-cursor left in place over a recreated table makes it read almost nothing. So a
-build that fails in between leaves work to repeat.
-
-The scope is the items this build reconciles and nothing wider, because the
-tables are shared across the estate.
-
-See ``design/how-does-build-work.md`` for where this sits in a build, and
-``design/catalogue.md`` for the model.
+Before physical work, rebuilt loadables become Pending with sentinel bookmarks,
+rebuilt validations become Pending, and undeclared rows are removed. Resetting
+bookmarks first makes a failed build repeat the next load in full. Successful
+View DDL records Succeeded afterwards. All writes are scoped to the items being
+reconciled because these tables are shared across installations.
 """
 
 from __future__ import annotations
@@ -73,31 +48,18 @@ from .models import (
 from .payloads import sha256_hex
 from .stages import CATALOGUE, PlannedStage
 
-#: What the reconciliation stage's action and payload are named after.
 RECONCILE_SLUG = "runtime-state-reconciliation"
 
-#: The stage that records the Views a build created.
 VIEW_STATE_SLUG = "view-state"
-
-# --- which rows a build ends the life of --------------------------------------
 
 
 def _identity_row(identity: WeaverDocumentId) -> dict:
-    """One current-state row's identity, spelled as the Registry spells it.
-
-    A Folder keeps its ``Files/`` prefix, so a Folder and a Table of the same
-    name are not one key.
-    """
+    """Preserve the ``Files/`` prefix that distinguishes Folders from Tables."""
 
     return bookmark_row(identity)
 
 
-#: How each population is read from the repository. The table declares which one
-#: invalidates it, so nothing here decides that twice.
-#:
-#: ``_.LoadStatus`` covers every data node, because a View carries lifecycle
-#: state too. ``_.Bookmark`` covers loadables alone: a cursor belongs to
-#: something that reads a source.
+# Views have lifecycle state but no cursor; bookmarks cover loadables only.
 _POPULATIONS = {
     BY_DATA_NODE: item_data_nodes,
     BY_LOADABLE: item_bookmarkable_objects,
@@ -112,12 +74,7 @@ def runtime_state_invalidation(
     selected_for_build: Iterable[WeaverDocumentId],
     catalogue,
 ) -> tuple[RuntimeStateInvalidation, ...]:
-    """The current-state rows this build removes.
-
-    Only objects the repository no longer declares. A rebuilt object keeps its
-    row and has new state written over it by
-    :func:`runtime_state_establishment`.
-    """
+    """Return rows for undeclared objects; rebuilt rows are overwritten instead."""
 
     scoped = {item for item in items if not _is_builtin(item)}
     if not scoped:
@@ -153,15 +110,11 @@ def runtime_state_establishment(
     selected_for_build: Iterable[WeaverDocumentId],
     holds_table=None,
 ) -> tuple[RuntimeStateEstablishment, ...]:
-    """The state this build writes before it touches anything physical.
-
-    A rebuilt table or folder is ``Pending`` with its bookmark at the sentinel,
-    and a rebuilt validation is ``Pending``. Bounded by ``selected_for_build``,
-    so an object left alone keeps the state it had.
+    """Return state written before physical work for selected objects only.
 
     ``holds_table`` says whether the catalogue already has a table. This runs
-    before the physical work that creates them, so the build that creates the
-    ``_`` schema writes into none.
+    before catalogue tables are created, so an initial build writes only to
+    tables already present.
     """
 
     scoped = sorted({item for item in items if not _is_builtin(item)}, key=str)
@@ -187,8 +140,6 @@ def runtime_state_establishment(
 
 
 def _load_status_state(repository, *, item, selected) -> list[dict]:
-    """A rebuilt table or folder holds nothing until it loads."""
-
     return [
         {**_identity_row(identity), "result": PENDING}
         for identity in item_bookmarkable_objects(repository, item=item)
@@ -197,8 +148,6 @@ def _load_status_state(repository, *, item, selected) -> list[dict]:
 
 
 def _bookmark_state(repository, *, item, selected) -> list[dict]:
-    """A rebuilt loadable has read nothing, so its cursor is the sentinel."""
-
     return [
         bookmark_row(identity, BOOKMARK_SENTINEL_TEXT)
         for identity in item_bookmarkable_objects(repository, item=item)
@@ -207,8 +156,6 @@ def _bookmark_state(repository, *, item, selected) -> list[dict]:
 
 
 def _test_status_state(repository, *, item, selected) -> list[dict]:
-    """A rebuilt validation has not run against what this build installed."""
-
     from ..catalogue.projection import TEST_TYPE_FOR_KIND
 
     return [
@@ -222,7 +169,6 @@ def _test_status_state(repository, *, item, selected) -> list[dict]:
     ]
 
 
-#: What each current-state table holds once a build has reset the object.
 _ESTABLISHED = {
     LOAD_STATUS.name: _load_status_state,
     BOOKMARK.name: _bookmark_state,
@@ -236,11 +182,7 @@ def view_state_establishment(
     items: Sequence[WeaverItemId],
     selected_for_build: Iterable[WeaverDocumentId],
 ) -> tuple[RuntimeStateEstablishment, ...]:
-    """The Views this build rebuilt, as the state a successful build leaves.
-
-    Rendered into a stage that follows the physical work, so a View that was
-    never created carries no Succeeded row.
-    """
+    """Return Succeeded rows for Views whose physical work has completed."""
 
     scoped = sorted({item for item in items if not _is_builtin(item)}, key=str)
     selected = set(selected_for_build)
@@ -265,14 +207,10 @@ def view_state_establishment(
 
 
 def _key(table, row: Row) -> tuple:
-    """One row's identity, as its table keys it."""
-
     return tuple(row.get(name) for name in table.key)
 
 
 def _item_of(row: Row) -> WeaverItemId:
-    """Which logical item a current-state row belongs to."""
-
     return WeaverItemId(
         str(row.get(SCOPE_ITEM_TYPE) or ""), str(row.get(SCOPE_ITEM_NAME) or "")
     )
@@ -287,8 +225,6 @@ def render_runtime_state_reconciliation(
     description: str = "reconcile runtime state before physical work",
     index: int = 0,
 ) -> PlannedStage | None:
-    """One stage carrying a runtime-state decision, as one action."""
-
     if not any(one.rows for one in (*invalidation, *establishment)):
         return None
 

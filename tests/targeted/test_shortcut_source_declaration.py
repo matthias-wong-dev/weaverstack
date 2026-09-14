@@ -141,4 +141,4 @@ def test_a_files_shortcut_refuses_a_warehouse_because_it_has_no_files_area():
             store=Store(),
         )
 
-    assert "has none" in str(raised.value)
+    assert "has no Files area" in str(raised.value)

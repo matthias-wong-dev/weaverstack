@@ -1,34 +1,17 @@
-"""Planning each declared shortcut as one physical action.
+"""Plan each declared shortcut as part of its destination item's work.
 
-A shortcut is the consuming item's own name for something else: another Weaver
-item's document, or a physical Fabric item that Weaver does not manage. It is
-owned by its destination item, so it is planned as part of that item's work and
-ahead of every document the item declares, because those documents are written
-against the namespace it establishes.
-
-What a declaration becomes depends on the target it is bound to, and that is a
-planning decision because it is a decision about the target kind:
+Shortcuts precede the documents that use their namespace. Their physical form is
+fixed by the destination target:
 
 ===============================  ==============================================
 Lakehouse                        a OneLake shortcut, made over REST
 Warehouse                        a frozen view over the source's three-part name
 ===============================  ==============================================
 
-Both are one ``create_shortcut`` action, and the payload says which it is: a
-Lakehouse entry carries the shortcut's type, and a Warehouse entry is a T-SQL
-batch. Only the Warehouse form is spelled out in SQL, because only there is the
-statement itself the decision. A shortcut carries one frozen decision: this
-destination, that source.
-
-**Weaver owns the shortcut root and nothing reachable through it.** OneLake makes
-a shortcut a read-write window into the item it points at, so a write beneath one
-lands in that item. Nothing is planned inside a schema or folder shortcut, and
-:func:`weaver.declaration.shortcuts.validate_destinations` refuses a repository
-that declares something there.
-
-A selected declaration the current bindings give no physical form is reported to
-the bundle planner, which refuses the build. That is a planning decision: the
-installer may only run an action already frozen for it.
+One action carries the item's frozen destination-source pairs. Weaver owns each
+shortcut root, never the data reachable through it, so no object may be declared
+beneath a schema or folder shortcut. The bundle planner reports unsupported
+selected declarations; installation runs only frozen actions.
 """
 
 from __future__ import annotations
@@ -75,14 +58,7 @@ FILES_AREA = "Files"
 
 @dataclass(frozen=True)
 class ResolvedShortcutSource:
-    """The physical address a direct shortcut points at, frozen at generation.
-
-    Resolved where the estate can be read, and carried in the bundle from there:
-    Fabric validates a shortcut's target when it is created and its paths are
-    case-sensitive, so an address guessed at install time is a 400 rather than a
-    wrong answer. Freezing it also keeps the installer free of cross-workspace
-    resolution, which nothing else needs.
-    """
+    """A direct source's case-exact address, frozen during generation."""
 
     workspace_id: str
     item_id: str
@@ -95,36 +71,25 @@ def _slug(value) -> str:
 
 
 def shortcut_node_id(destination) -> str:
-    """How a shortcut is named in a plan.
-
-    Prefixed, because a shortcut destination is not a repository document:
-    nothing declares it, and no dependency layer contains it.
-    """
+    """Prefix destinations that are not repository document nodes."""
 
     return f"shortcut:{destination}"
 
 
 @dataclass(frozen=True)
 class ItemShortcutPlan:
-    """One item's planned shortcuts, schemas, and selected planning failures."""
+    """One item's shortcut stage, prerequisite schemas and omissions."""
 
     stage: PlannedStage | None = None
     schemas: tuple[str, ...] = ()
     omitted: tuple[OmittedNode, ...] = ()
-    #: The destinations behind ``omitted``, as identities rather than node ids.
     omitted_destinations: tuple[object, ...] = ()
 
 
 def _is_the_catalogue_itself(
     target: BoundTarget, catalogue: BoundTarget | None
 ) -> bool:
-    """Whether this target is the Warehouse the catalogue lives in.
-
-    Compared on kind and ``item_id``, which is the physical item. ``id`` carries
-    the logical item name as well, so two bindings onto one Warehouse have
-    different ``id`` values and the same ``item_id``. This is the pairing
-    :func:`weaver.build_bundle.planner._catalogue_target` matches on.
-    """
+    """Compare physical kind and item id, not the logical binding id."""
 
     return (
         catalogue is not None
@@ -134,8 +99,6 @@ def _is_the_catalogue_itself(
 
 
 def _references_the_catalogue(declaration, logical_sources) -> bool:
-    """Whether this declaration is one of Weaver's own runtime references."""
-
     from ..catalogue.builtin import BUILTIN_ITEM
 
     source = logical_sources.get(declaration.destination)
@@ -152,8 +115,6 @@ def plan_lakehouse_shortcuts(
     sources: Mapping[str, ResolvedShortcutSource] | None = None,
     catalogue_target: BoundTarget | None = None,
 ) -> ItemShortcutPlan:
-    """Plan OneLake shortcuts selected for one Lakehouse item."""
-
     return _plan_item_shortcuts(
         repository,
         item=item,
@@ -176,8 +137,6 @@ def plan_warehouse_shortcuts(
     sources: Mapping[str, ResolvedShortcutSource] | None = None,
     catalogue_target: BoundTarget | None = None,
 ) -> ItemShortcutPlan:
-    """Plan T-SQL shortcut views selected for one Warehouse item."""
-
     return _plan_item_shortcuts(
         repository,
         item=item,
@@ -201,17 +160,10 @@ def _plan_item_shortcuts(
     sources: Mapping[str, ResolvedShortcutSource] | None = None,
     catalogue_target: BoundTarget | None = None,
 ) -> ItemShortcutPlan:
-    """Plan the shortcuts this build selected.
+    """Plan selected shortcuts while retaining every prerequisite schema.
 
-    ``selected`` is what incremental selection chose to rebuild. A declaration
-    absent from it is current: unchanged, its destination there, and its source
-    not rebuilt since. So it is left alone rather than replaced, exactly as an
-    unchanged document is.
-
-    Its schema is still reported. A retained shortcut lives in a namespace the
-    item must have, and a build that created only the schemas its rebuilt
-    shortcuts needed would leave the others homeless. A schema shortcut reports
-    none, because it is the namespace and the item does not own it.
+    Unselected shortcuts remain in place, but their schemas are still required.
+    A schema shortcut reports no prerequisite because it is the namespace.
     """
 
     sources = dict(sources or {})
@@ -227,10 +179,8 @@ def _plan_item_shortcuts(
         pair.destination: pair.source for pair in repository.logical_shortcuts
     }
     if _is_the_catalogue_itself(target, catalogue_target):
-        # This item is bound to the Warehouse holding the catalogue, so `_` and
-        # its tables are already there. A two-part `[_].[Bookmark]` in a
-        # generated procedure reaches the real table, and a view of that name
-        # over itself is what T-SQL refuses to alter.
+        # The catalogue Warehouse already owns `_`; a runtime view there would
+        # point at itself and T-SQL would refuse it.
         declarations = [
             declaration
             for declaration in declarations
@@ -284,10 +234,8 @@ def _plan_item_shortcuts(
             sources=sources,
             logical_sources=logical_sources,
         )
-        # One action stands for every declaration the item consumes, so it
-        # produces several changes. Each names what the destination physically
-        # is at this binding, which is the same question the Registry row
-        # answers.
+        # One action creates several destinations, so it records one change per
+        # declaration in the inventory form selected by this binding.
         stage = PlannedStage(
             phase=SHORTCUT,
             slug="item-shortcuts",
@@ -320,8 +268,6 @@ def _plan_item_shortcuts(
 
 
 def declaration_key(declaration) -> str:
-    """How a declaration names its resolved source, where one is frozen."""
-
     return f"{declaration.owner}/{declaration.name}"
 
 
@@ -331,8 +277,6 @@ def _unsupported(
     source_target: BoundTarget | None,
     sources: Mapping[str, ResolvedShortcutSource],
 ) -> str | None:
-    """Why this declaration has no physical form here, or None when it has one."""
-
     if not declaration.is_logical:
         if declaration.is_view:
             return None
@@ -362,11 +306,6 @@ def _unsupported(
 
 
 def _change_kind(declaration) -> str:
-    """What a destination will look like to an inventory.
-
-    The destination declaration supplies schema, folder and object shape.
-    """
-
     if declaration.is_view:
         return VIEW_KIND
     if declaration.destination_identity is not None:
@@ -380,10 +319,8 @@ def _change_name(declaration) -> str:
     if declaration.is_schema:
         return declaration.name
     if declaration.destination_identity is not None and not declaration.is_view:
-        # A target inventory reports runtime references by table name beneath
-        # a Lakehouse's ``Tables/_``. The schema is fixed by the collection
-        # itself. A Warehouse reports its corresponding views as qualified
-        # relation names through the ordinary view collection.
+        # Lakehouse runtime references are table names under ``Tables/_``;
+        # Warehouse references are qualified views in the ordinary collection.
         return declaration.destination.object_id.object
     return declaration.destination.object_id.qualified
 
@@ -396,12 +333,6 @@ def _warehouse_shortcut_action(
     sources: Mapping[str, ResolvedShortcutSource],
     logical_sources: Mapping,
 ) -> InstallAction:
-    """Render one T-SQL batch action for a Warehouse item's shortcuts.
-
-    The T-SQL batch executor submits the view statements as one action. The
-    stage changes retain one entry for each destination.
-    """
-
     item_slug = _slug(item)
     content = (
         json.dumps(
@@ -419,8 +350,7 @@ def _warehouse_shortcut_action(
     return InstallAction(
         id=f"shortcuts-{item_slug}",
         kind=CREATE_SHORTCUT,
-        # No single resource: this action stands for every declaration the item
-        # consumes, and the payload names them.
+        # The payload names every destination; no single resource identifies it.
         resource_node_id=None,
         executor="tsql_batch",
         payload=filename,
@@ -436,8 +366,6 @@ def _lakehouse_shortcut_action(
     sources: Mapping[str, ResolvedShortcutSource],
     logical_sources: Mapping,
 ) -> InstallAction:
-    """Render one OneLake action for a Lakehouse item's shortcuts."""
-
     item_slug = _slug(item)
     content = shortcut_payload(
         supported, sources=sources, logical_sources=logical_sources
@@ -455,24 +383,11 @@ def _lakehouse_shortcut_action(
 
 
 def view_statement(declaration, source_target, logical_sources=None) -> str:
-    """A Warehouse shortcut, as the one statement that materialises it.
+    """Render one Warehouse shortcut as a rerunnable view statement.
 
-    Public because Weaver's own infrastructure references become the same thing:
-    ``_.Bookmark`` in a built Warehouse is this statement over the catalogue's
-    table, and one implementation of "what a view shortcut is" is the point.
-
-    The source is named by its three-part spelling, which is how a Fabric
-    Warehouse reaches another item in the same workspace, and is frozen here for
-    the same reason an authored three-part reference is: it is the semantic
-    decision, not transport. A bound reference is spelled with the item its
-    binding resolved to; a direct one with the physical item the author named.
-
-    ``CREATE OR ALTER`` rather than a drop and a create. A view over another
-    item holds no data, so replacing one is not a destructive transition needing
-    proof of prior state, and a build that could not run twice over its own
-    views would not be re-runnable at all. It is also the only *single-statement*
-    way to say that, and T-SQL requires ``CREATE VIEW`` to be the first statement
-    in its batch.
+    The source's three-part target spelling is frozen during generation.
+    ``CREATE OR ALTER`` must run in its own batch because T-SQL requires
+    ``CREATE VIEW`` to be the first statement.
     """
 
     destination = declaration.destination
@@ -493,17 +408,10 @@ def view_statement(declaration, source_target, logical_sources=None) -> str:
 
 
 def shortcut_payload(supported, *, sources, logical_sources=None) -> bytes:
-    """This item's Lakehouse shortcuts, as the frozen addresses they stand for.
+    """Freeze Lakehouse shortcut addresses for one item.
 
-    Public for the reason :func:`view_statement` is: an infrastructure reference
-    is frozen the same way a declared one is.
-
-    A bound source is named by target id: the installer already resolves every
-    target the plan declares through its own environment, so it is addressed
-    exactly as the destination is and the bundle carries no path from the machine
-    that wrote it. A direct source is named by the workspace and item it was
-    resolved to, because it is not a target of this build and nothing at install
-    time would know where to look.
+    Bound sources use a plan target id and are resolved like destinations. Direct
+    sources carry the workspace, item and path resolved during generation.
     """
 
     frozen = []
@@ -545,13 +453,7 @@ def shortcut_payload(supported, *, sources, logical_sources=None) -> bytes:
 
 
 def shortcut_removal_payload(destination) -> bytes:
-    """One pointer to unpick, as the two parts Fabric addresses a shortcut by.
-
-    The counterpart of :func:`shortcut_payload`, and it names the destination the
-    same way: the area from whether the identity sits under ``Files``, then the
-    schema, then the object. A removal has no source, because what a shortcut
-    pointed at is not this build's to touch.
-    """
+    """Name one shortcut root for removal without naming its source."""
 
     area = FILES_AREA if destination.is_files else TABLES_AREA
     return (
@@ -574,12 +476,7 @@ def shortcut_removal_payload(destination) -> bytes:
 
 
 def _destination_path(declaration) -> str:
-    """Where the shortcut is created, as Fabric addresses it.
-
-    A schema shortcut sits directly under ``Tables`` and is named for the schema
-    it presents; everything else sits under its schema. Measured against Fabric:
-    a schema shortcut is ``path=Tables, name=<Schema>``.
-    """
+    """Place schema shortcuts at ``Tables`` and other shortcuts under a schema."""
 
     if declaration.is_schema:
         return TABLES_AREA
@@ -594,8 +491,6 @@ def _destination_name(declaration) -> str:
 
 
 def _target_item_name(declaration) -> str:
-    """The item a physical target names, however the reference spells it."""
-
     named = getattr(declaration, "target_item_name", None)
     return named if named is not None else declaration.target_item.item_name
 
