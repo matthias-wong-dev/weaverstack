@@ -243,9 +243,7 @@ def test_an_object_the_catalogue_does_not_record_is_refused():
             is_files=False,
         )
 
-    assert "not an object the Weaver catalogue records as installed" in str(
-        raised.value
-    )
+    assert "not recorded as an installed object" in str(raised.value)
 
 
 @weaver_test()

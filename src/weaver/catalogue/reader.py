@@ -1,15 +1,8 @@
-"""Read catalogue tables through their expected schema, over TDS.
+"""Read catalogue tables through their expected schema over TDS.
 
-Two absences are ordinary and read as data: a missing table is bootstrap, since
-the build that writes the catalogue is the build that creates it, and a missing
-column is upgrade, where a newer Weaver compares against a table an older one
-created.
-
-Neither is recognised from a failure. The connection asks the ``_`` schema what
-it holds, once, and a table or column absent from that answer is absent, so a
-permission error or a broken connection stays a failure rather than
-reading as "no rows", which would tell the next build that nothing is
-catalogued. That is a licence to remove an estate.
+Missing tables are bootstrap state and missing columns are compatible older
+state. Both are determined from the cached ``_`` schema, never from query
+failures, so transport and permission errors remain failures.
 """
 
 from __future__ import annotations
@@ -30,25 +23,10 @@ def read_table(
     order: Sequence[str] = (),
     top: int | None = None,
 ) -> tuple[Row, ...]:
-    """Every row of one catalogue table, projected through its expected schema.
+    """Read rows projected through the expected catalogue schema.
 
-    ``catalogue`` is a :class:`CatalogueConnection` bound to the Warehouse the
-    catalogue lives in.
-
-    ``scope`` narrows the read to one installation, which is what a build needs:
-    it compares and writes within one item and has no business seeing another's
-    rows.
-
-    ``predicate``, ``order`` and ``top`` bound a read of a growing table. They
-    are rendered into the statement so the engine does the work: a history table
-    is read as a window, and materialising it to slice it in Python would grow
-    with the estate's age. ``order`` names internal columns and is required for
-    ``top``, because a prefix of an unordered result is a different prefix each
-    time.
-
-    Returns plain dictionaries under the internal snake-case keys, with stored
-    vocabularies mapped back, in the same shape the projection produces, so the
-    two can be compared directly.
+    Scope predicates stay in SQL. ``order`` names internal columns and is
+    required with ``top``. Returned mappings use internal keys and vocabulary.
     """
 
     if catalogue is None:
@@ -58,14 +36,12 @@ def read_table(
         )
     if top is not None and not order:
         raise ValueError(
-            f"reading the first {top} rows of {table.qualified} needs an order; "
-            "a prefix of an unordered result is a different prefix each time"
+            f"reading the first {top} rows of {table.qualified} needs an order"
         )
 
     present = catalogue.columns_of(table)
     if present is None:
-        # Bootstrap: the build that writes the catalogue is the build that
-        # creates it, so an absent table is state rather than a failure.
+        # The build that first writes the catalogue also creates its tables.
         return ()
 
     projected = ", ".join(
@@ -91,23 +67,15 @@ def read_table(
 
 
 def _projected_column(table: CatalogueTable, column, present: dict[str, str]) -> str:
-    """One column of the expected schema, as a select expression.
-
-    Aliased back to the internal name, so nothing above the reader sees the
-    public spelling.
-    """
-
     actual = present.get(column.public_name.casefold())
     alias = identifier(column.name)
     if actual is None:
-        # Older shape: give this Weaver the column it expects, as a typed null.
+        # Older catalogues expose newly expected columns as typed nulls.
         return f"CAST(NULL AS {column.warehouse_type}) AS {alias}"
     return f"CAST({identifier(actual)} AS {column.warehouse_type}) AS {alias}"
 
 
 def _internal(table: CatalogueTable, row) -> Row:
-    """One stored row under internal keys, with vocabularies mapped back."""
-
     values = dict(row)
     return {
         column.name: column.from_public(_python(values.get(column.name), column))
@@ -116,12 +84,6 @@ def _internal(table: CatalogueTable, row) -> Row:
 
 
 def _python(value, column):
-    """One stored value as the projection would have produced it.
-
-    A ``bit`` comes back as 0 or 1 and a projection holds a bool, so a
-    comparison between them would differ for a row that has not changed.
-    """
-
     from .tables import BOOLEAN
 
     if value is None:
@@ -134,11 +96,7 @@ def _python(value, column):
 def read_installation(
     catalogue: Any, *, scope: InstallationScope, tables=None
 ) -> dict[str, tuple[Row, ...]]:
-    """Every catalogue table, read for one installation.
-
-    Keyed by table name, so a caller compares table by table against the
-    projection without repeating the scope.
-    """
+    """Read selected catalogue tables for one installation."""
 
     from .tables import PROJECTED_TABLES
 
@@ -151,22 +109,12 @@ def read_installation(
 def read_installations(
     catalogue: Any, *, scopes: InstallationScopes, tables=None
 ) -> dict[str, tuple[Row, ...]]:
-    """Every catalogue table, read **once** for every installation at issue.
-
-    Bound items share the same physical tables, so reading per item would cost
-    ``catalogue tables × bound items`` round trips to answer what one predicate
-    per table already answers. Rows come back for every scope together and the
-    grouping is done in Python. See
-    :func:`weaver.catalogue.state.read_catalogue_state`.
-
-    Still scoped: nothing outside ``scopes`` is returned.
-    """
+    """Read each selected table once across all requested installation scopes."""
 
     from .tables import PROJECTED_TABLES
 
     wanted = tables if tables is not None else PROJECTED_TABLES
     if not scopes:
-        # Nothing was asked for. Reading with no predicate would return the whole
-        # catalogue, so the answer is stated rather than queried.
+        # An empty scope must not become an unscoped whole-catalogue read.
         return {table.name: () for table in wanted}
     return {table.name: read_table(catalogue, table, scope=scopes) for table in wanted}

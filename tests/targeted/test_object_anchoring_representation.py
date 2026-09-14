@@ -114,9 +114,7 @@ def test_anchoring_resolves_the_identity_at_construction(lakehouse):
     with pytest.raises(ConfigError) as raised:
         DWG__Order(object(), lakehouse=lakehouse).with_catalogue(never("DWG.Customer"))
 
-    assert "not an object the Weaver catalogue records as installed" in str(
-        raised.value
-    )
+    assert "not recorded as an installed object" in str(raised.value)
 
 
 @weaver_test()

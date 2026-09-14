@@ -1,9 +1,7 @@
 """Weaver's central catalogue, scoped by logical item.
 
-An installation is identified by ``(item_type, item_name)`` and an object by
-that item identity plus ``(schema_name, object_name)``. Files objects use
-``Files/<schema>`` as their catalogue schema, so the same four-part identity
-covers them without a namespace column.
+Objects add ``(schema_name, object_name)`` to the installation identity. File
+objects store ``Files/<schema>`` as their catalogue schema.
 """
 
 from __future__ import annotations
