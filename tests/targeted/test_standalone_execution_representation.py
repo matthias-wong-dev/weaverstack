@@ -159,7 +159,7 @@ def test_a_refused_load_is_recorded_and_then_raised(lakehouse):
         MockSpark(), lakehouse=lakehouse, catalogue=catalogue
     )
 
-    with pytest.raises(LoadError, match="cannot return None"):
+    with pytest.raises(LoadError, match="returned None for a non-incremental table"):
         table.load()
 
     assert catalogue.writer.rows(LOAD_STATUS.name)[0]["result"] == "failed"

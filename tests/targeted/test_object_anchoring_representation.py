@@ -90,7 +90,7 @@ def test_a_freestanding_object_has_no_place_in_the_catalogue(lakehouse):
     assert table.installed is None
     with pytest.raises(LoadError) as raised:
         table.bookmark()
-    assert "cannot read its bookmark or record one" in str(raised.value)
+    assert "not anchored to the Weaver catalogue" in str(raised.value)
 
 
 @weaver_test()
@@ -478,7 +478,7 @@ def test_a_freestanding_object_does_not_load(monkeypatch, lakehouse):
     with pytest.raises(LoadError) as raised:
         _loaded(monkeypatch, table)
 
-    assert "cannot read its bookmark or record one" in str(raised.value)
+    assert "not anchored to the Weaver catalogue" in str(raised.value)
     assert "catalogue=" in str(raised.value)
 
 

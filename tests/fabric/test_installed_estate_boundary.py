@@ -158,8 +158,8 @@ def test_an_anchored_object_resolves_and_records_itself_in_fabric(
 
     # Freestanding: no identity, no bookmark to give, and no load.
     assert seen["freestanding_identity"] is None
-    assert "cannot read its bookmark or record one" in seen["freestanding_bookmark"]
-    assert "cannot read its bookmark or record one" in seen["freestanding_load"]
+    assert "not anchored to the Weaver catalogue" in seen["freestanding_bookmark"]
+    assert "not anchored to the Weaver catalogue" in seen["freestanding_load"]
 
     # Anchored, and the identity is the Registry's, the item that declared the
     # folder, under its files identity, rather than the Lakehouse it was built into.

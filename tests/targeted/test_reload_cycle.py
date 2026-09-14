@@ -502,7 +502,7 @@ def test_a_folder_refuses_reload_and_says_what_it_covers():
         _Spark(), lakehouse=_lakehouse(), catalogue=never("DWG.Export", files=True)
     )
 
-    with pytest.raises(LoadError, match="reload covers tables"):
+    with pytest.raises(LoadError, match="is a Folder and cannot be reloaded"):
         folder.load(reload=True)
 
 
