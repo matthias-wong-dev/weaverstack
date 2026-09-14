@@ -1,9 +1,7 @@
-"""Build the physical load graph from the installed managed graph.
+"""Plan physical work from the installed managed graph.
 
-What depends on what is :mod:`weaver.installed`'s answer; this module decides
-which of those nodes run, where a barrier goes between two of them, and in what
-order. Selection is by item; each node keeps the physical target dispatch and
-barrier placement need.
+Dependency direction comes from the installed graph. This module selects nodes,
+inserts endpoint and publication barriers, and orders their physical dispatch.
 """
 
 from __future__ import annotations
@@ -26,9 +24,7 @@ from .installed import (
 from .load_report import DEPENDENCY_EXTERNAL, LoadMessage, info
 from .targets import PhysicalObjectRef, PhysicalTargetRef
 
-#: The two barriers a planner inserts between installed loads. Strings rather
-#: than a class hierarchy because they cross into a plan file and a task log,
-#: where the word itself is what appears.
+#: Barrier kinds written to plan files and task logs.
 ENDPOINT_REFRESH = "endpoint_refresh"
 ONELAKE_PUBLICATION = "onelake_publication"
 
@@ -52,7 +48,7 @@ class OneLakeReadiness:
 
 @dataclass(frozen=True)
 class LoadNode:
-    """One unit of physical load work, or the barrier between two of them."""
+    """One unit of physical load work, or a barrier between units."""
 
     node_id: str
     logical_id: WeaverDocumentId | None
@@ -122,8 +118,6 @@ class LoadDag:
 
     @cached_property
     def topology(self) -> Graph:
-        """The generic topology over these nodes, built once and kept."""
-
         try:
             return Graph((node.node_id for node in self.nodes), self.edges)
         except GraphError as exc:
@@ -179,12 +173,6 @@ def load_dag(
 
 
 class _Planner:
-    """One planning run's working state.
-
-    A class rather than free functions because the traversal, the barrier
-    placement and the message stream all read the same installed graph.
-    """
-
     def __init__(
         self,
         dag: InstalledDag,
@@ -239,8 +227,6 @@ class _Planner:
         *,
         names: tuple[str, ...],
     ) -> tuple[InstalledNode, ...]:
-        """The loadables the caller selected, before any ordering is applied."""
-
         available = self.dag.loadables(items=requested)
         if not names:
             return self._chosen(available)
@@ -259,8 +245,6 @@ class _Planner:
         return self._chosen(tuple(selected))
 
     def _chosen(self, nodes: tuple[InstalledNode, ...]) -> tuple[InstalledNode, ...]:
-        """The nodes the selection keeps."""
-
         if self.selection is None:
             return nodes
         return tuple(node for node in nodes if node.identity in self.selection)
@@ -287,7 +271,7 @@ class _Planner:
             known = ", ".join(sorted({node.load_key for node in available}))
             raise LoadError(
                 f"no loadable object named {name!r} is installed in the "
-                f"requested item(s). Installed: {known or 'none'}"
+                f"requested items. Installed: {known or 'none'}"
             )
         if len(candidates) == 1:
             return candidates[0]
@@ -330,8 +314,6 @@ class _Planner:
         *,
         allowed_items: frozenset[WeaverItemId],
     ) -> str:
-        """Add one in-scope loadable and its in-scope ordering constraints."""
-
         node = self._load_node(installed)
         if installed.node_id in visited:
             return node.node_id
@@ -358,8 +340,6 @@ class _Planner:
         return node.node_id
 
     def _report_external(self, installed: InstalledNode) -> None:
-        """Say which of this node's reads name a physical object directly."""
-
         for reference in self.dag.external_references.get(installed.identity, ()):
             self.messages.append(
                 info(

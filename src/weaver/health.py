@@ -1,6 +1,4 @@
-"""What the installed estate's operational state adds up to.
-
-Three sections over one installed graph.
+"""Assess the installed estate's operational state.
 
 .. code-block:: text
 
@@ -8,22 +6,16 @@ Three sections over one installed graph.
     Tests   every Test and Assumption, its current _.TestStatus, and its freshness
     Build   what installed state contradicts itself
 
-Overall health is the worst section. Nothing here holds a status of its own that
-section state could disagree with.
-
-Health overlays evidence onto :class:`weaver.installed.InstalledDag`. Dependency
-direction, ancestry and what is installed are that graph's answers, read here and
-not recomputed.
+Overall health is the worst section. Health reads dependencies, ancestry and
+installation state from :class:`weaver.installed.InstalledDag`.
 
 Load freshness reads ``_.LoadStatus``. A load settles a table or a folder, and a
 successful build settles a View. ``as_of`` against a subject's completion instant
 says whether it is overdue, and the same instant against its ancestors' says
 whether it is behind its sources.
 
-A Static object is asked neither question. It is loaded once, so it stays Green
-however long ago that was. Its own load still counts against everything
-downstream, which is what makes a reload of a reference table put its consumers
-behind.
+A Static object is exempt from both freshness checks. Its load still counts when
+assessing downstream objects.
 
 This module is pure. Everything it reads is on the catalogue it is given: the
 graph, the status tables, and the current load state that catalogue was read
@@ -56,20 +48,20 @@ from .declaration.model import WeaverDocumentId, WeaverItemId
 from .installed import InstalledDag, InstalledNode, stored_identity
 from .targets import PhysicalTargetRef
 
-#: The whole severity vocabulary, and the order that makes one worse.
+#: Severity vocabulary, ordered from best to worst.
 GREEN = "green"
 AMBER = "amber"
 RED = "red"
 SEVERITIES = (GREEN, AMBER, RED)
 _WORSE = {severity: rank for rank, severity in enumerate(SEVERITIES)}
 
-#: The three sections a report carries, in the order it renders them.
+#: Report sections, in rendering order.
 LOAD = "load"
 TESTS = "tests"
 BUILD = "build"
 AREAS = (LOAD, TESTS, BUILD)
 
-#: Stable machine-readable finding codes, so a JSON consumer never parses prose.
+#: Stable machine-readable finding codes.
 LOAD_PENDING = "load_pending"
 LOAD_FAILED = "load_failed"
 LOAD_REJECTED = "load_rejected"
@@ -85,8 +77,7 @@ CERTIFIED_MISSING = "certified_missing"
 DEPENDENCY_UNRESOLVED = "dependency_unresolved"
 AMBIGUOUS_INSTALLATION = "ambiguous_installation"
 
-#: How long an installed object may go without a settled load before it reads
-#: as stale. One day, resolved against the clock at the start of the operation.
+#: Default age of a settled load before it is stale.
 DEFAULT_AGE_HOURS = 24
 
 #: Load outcomes that establish nothing about the data. A blocked node did no
@@ -119,8 +110,6 @@ FORMAT_VERSION = 2
 
 
 def worst(severities) -> str:
-    """The worst of some severities, or Green where there are none."""
-
     return max((*severities, GREEN), key=lambda severity: _WORSE[severity])
 
 
@@ -129,8 +118,6 @@ def worst(severities) -> str:
 
 @dataclass(frozen=True)
 class RuntimeStatus:
-    """One ``_.LoadStatus`` or ``_.TestStatus`` row, as health reads it."""
-
     identity: WeaverDocumentId
     result: str
     workflow_id: str | None = None
@@ -140,8 +127,6 @@ class RuntimeStatus:
 
 
 def load_statuses(catalogue: Catalogue) -> Mapping[WeaverDocumentId, RuntimeStatus]:
-    """Every current load status the catalogue holds, by logical identity."""
-
     return _statuses(catalogue, LOAD_STATUS)
 
 
@@ -176,12 +161,10 @@ def _statuses(
 class EffectiveLoadState:
     """Current load state for the estate a report is about.
 
-    A mirrored object's rows are written where it mirrors, so its lifecycle
-    state is the source catalogue's. Everything else is the selected
-    catalogue's. A fork copies ``_.LoadStatus`` when it is made, so a mirrored
-    object carries a row here from the moment of the fork; that copy is
-    replaced, and where the source holds nothing the object reads as
-    unestablished.
+    A mirrored object's lifecycle state comes from its source catalogue.
+    Everything else comes from the selected catalogue.
+    A fork copies ``_.LoadStatus``; if the source no longer holds a mirrored
+    identity, that identity is unestablished.
     """
 
     statuses: Mapping[WeaverDocumentId, RuntimeStatus]
@@ -189,11 +172,7 @@ class EffectiveLoadState:
 
 
 def effective_load_state(catalogue: Catalogue, *, source=None) -> EffectiveLoadState:
-    """One estate's load state, with mirrored identities taken from ``source``.
-
-    With no ``_.Mirror`` rows this is the catalogue's own state unchanged, which
-    is every estate that forks nothing.
-    """
+    """Return load state with mirrored identities taken from ``source``."""
 
     mirrored = frozenset(catalogue.mirrors)
     if not mirrored:
@@ -295,7 +274,7 @@ def _row_identity(
 
 @dataclass(frozen=True)
 class HealthFinding:
-    """One thing worth an operator's attention, in one section.
+    """One finding in a report section.
 
     ``severity`` is the health vocabulary and ``status`` the runtime one, so a
     consumer reads how bad it is and what actually happened without either word
@@ -316,7 +295,7 @@ class HealthFinding:
 
     @property
     def sort_key(self) -> tuple:
-        """Worst first, then by code and by the object it is about."""
+        """Sort worst first, then by code, target and object."""
 
         return (
             -_WORSE[self.severity],
@@ -343,8 +322,6 @@ class HealthFinding:
 
 @dataclass(frozen=True)
 class HealthSection:
-    """One area's findings and the counts behind them."""
-
     area: str
     findings: tuple[HealthFinding, ...] = ()
     counts: Mapping[str, int] = field(default_factory=dict)
@@ -353,8 +330,6 @@ class HealthSection:
 
     @property
     def status(self) -> str:
-        """The worst finding's severity, or Green where there are none."""
-
         return worst(finding.severity for finding in self.findings)
 
     def to_mapping(self) -> dict:
@@ -368,8 +343,6 @@ class HealthSection:
 
 @dataclass(frozen=True)
 class LoadActivity:
-    """What one recorded load did, as counts."""
-
     object_id: str
     target: str | None
     workflow_id: str
@@ -433,7 +406,7 @@ class CurrentLoad:
 
 @dataclass(frozen=True)
 class HealthReport:
-    """What the installed estate's operational state adds up to."""
+    """The installed estate's operational health."""
 
     generated_at: datetime
     as_of: datetime
@@ -447,8 +420,6 @@ class HealthReport:
 
     @property
     def status(self) -> str:
-        """The worst section's status."""
-
         return worst(section.status for section in self.sections)
 
     @property
@@ -466,14 +437,14 @@ class HealthReport:
         return self.status == GREEN
 
     def slowest(self, limit: int = 5) -> tuple[LoadActivity, ...]:
-        """The longest recorded loads in the window, longest first."""
+        """Return the longest recorded loads in the window, longest first."""
 
         timed = [each for each in self.load_activity if each.duration_ms is not None]
         timed.sort(key=lambda each: (-each.duration_ms, each.object_id))
         return tuple(timed[:limit])
 
     def moved(self, limit: int = 5) -> tuple[LoadActivity, ...]:
-        """The recorded loads that changed the most rows, largest first."""
+        """Return loads that changed the most rows, largest first."""
 
         def changed(each: LoadActivity) -> int:
             return each.rows_inserted + each.rows_updated + each.rows_deleted
@@ -502,8 +473,6 @@ class HealthReport:
 
 
 def current_load(history) -> CurrentLoad | None:
-    """The window a catalogue was read with, as a report carries it."""
-
     if history is None:
         return None
     return CurrentLoad(
@@ -562,8 +531,7 @@ def _count(row, name: str) -> int:
 class LoadSubjectHealth:
     """One loadable, its ``_.LoadStatus`` row and its findings.
 
-    No findings is Green. ``runtime_status`` is carried so a report can render
-    what happened.
+    No findings means Green. ``runtime_status`` lets a report render the outcome.
     """
 
     node: InstalledNode
@@ -594,7 +562,7 @@ class LoadAssessment:
         return worst(subject.severity for subject in self.subjects)
 
     def unsettled(self) -> tuple[LoadSubjectHealth, ...]:
-        """The subjects that are not Green, in subject order."""
+        """Return non-Green subjects in subject order."""
 
         return tuple(subject for subject in self.subjects if subject.severity != GREEN)
 
@@ -612,8 +580,6 @@ class LoadAssessment:
         )
 
     def to_health_section(self) -> HealthSection:
-        """The Load section of a health report."""
-
         findings: list[HealthFinding] = []
         counts: dict[str, int] = {}
         for subject in self.subjects:
@@ -629,7 +595,7 @@ class LoadAssessment:
 
 
 class _LoadHealth:
-    """What a loadable's Load health is.
+    """Assess load state and freshness.
 
     ``as_of`` against its completion instant says whether the object is overdue,
     and the same instant against its ancestors' says whether it is behind its
@@ -692,12 +658,6 @@ class _LoadHealth:
             )
 
     def _freshness(self, node: InstalledNode, status):
-        """Whether this object is overdue, and whether it is behind its sources.
-
-        A Static object is asked neither. It is loaded once, so age says nothing
-        about it and neither does an ancestor that settled since.
-        """
-
         if status is None or status.result in _NO_DATA_ESTABLISHED:
             return
         if node.is_static:
@@ -766,8 +726,6 @@ class _LoadHealth:
         return status.completed_at
 
     def _unestablished_ancestor(self, node: InstalledNode) -> str | None:
-        """The ancestor that has not settled since it was built."""
-
         behind = [
             ancestor.node_id
             for ancestor in self._lifecycle_ancestors(node)
@@ -819,14 +777,10 @@ def is_load_subject(node: InstalledNode) -> bool:
 
 
 def is_view_node(node: InstalledNode) -> bool:
-    """Whether this node is a View this repository authored."""
-
     return node.role == ROLE_DATA and node.object_type == VIEW_OBJECT_TYPE
 
 
 def load_health(catalogue: Catalogue, *, as_of: datetime, source=None) -> _LoadHealth:
-    """The Load rules, bound to one catalogue's graph and its effective state."""
-
     return _LoadHealth(
         catalogue.dag(),
         statuses=effective_load_state(catalogue, source=source).statuses,
@@ -868,9 +822,9 @@ def assess_load(
 def resolve_as_of(value, *, started: datetime) -> datetime:
     """The freshness cutoff, always UTC.
 
-    Omitted, it is :data:`DEFAULT_AGE_HOURS` before the operation started. A
-    naive datetime is refused: an instant with no zone names a different moment
-    on every machine that reads it.
+    Omitted, it is :data:`DEFAULT_AGE_HOURS` before the operation started. Naive
+    datetimes are refused because the cutoff must name the same instant on every
+    host.
     """
 
     from .errors import CommandError
@@ -952,8 +906,6 @@ def assess(
 
 
 class _Assessment:
-    """One evaluation's working state, over one installed graph."""
-
     def __init__(
         self,
         dag: InstalledDag,
@@ -989,8 +941,6 @@ class _Assessment:
     # --- load -----------------------------------------------------------------
 
     def load(self) -> HealthSection:
-        """Every object holding rows in scope, as the Load assessment."""
-
         return self.load_health.assess(
             self._subjects(
                 tuple(node for node in self.dag.nodes if is_load_subject(node))
@@ -1000,8 +950,6 @@ class _Assessment:
     # --- tests ----------------------------------------------------------------
 
     def tests(self) -> HealthSection:
-        """Every validation node in scope, its result and its freshness."""
-
         findings: list[HealthFinding] = []
         counts: dict[str, int] = {}
         subjects = self._subjects(self.dag.validations())
@@ -1115,8 +1063,6 @@ class _Assessment:
             )
 
     def _declared_but_not_installed(self):
-        """A dictionary row Registry does not certify: declared, not installed."""
-
         for table in (TABLE_DICTIONARY, FOLDER_DICTIONARY):
             for row in self.catalogue.table_rows(table):
                 identity = _row_identity(row)
@@ -1131,7 +1077,7 @@ class _Assessment:
                     area=BUILD,
                     code=NOT_INSTALLED,
                     severity=RED,
-                    message=f"{table.name} declares it and Registry does not certify it",
+                    message=f"{table.name} declares this object, but Registry does not certify it",
                     object_id=str(identity),
                     target=str(target),
                 )
@@ -1207,8 +1153,6 @@ def _finding(
     message: str,
     status: RuntimeStatus | None = None,
 ) -> HealthFinding:
-    """One finding about one installed node, carrying the status behind it."""
-
     return HealthFinding(
         area=area,
         code=code,
@@ -1233,7 +1177,7 @@ def _word(status: RuntimeStatus | None) -> str:
 
 
 def _aware(at) -> datetime | None:
-    """One stored instant, always aware and always UTC.
+    """Return a stored instant as an aware UTC datetime.
 
     The ``_`` schema holds ``datetime2``, which carries no zone, and every
     instant Weaver writes there is UTC.

@@ -81,14 +81,12 @@ def _clear(
 def _remove_shortcuts(
     resolver, lakehouse: ItemRef, *, prefix: str, dry_run: bool
 ) -> tuple[str, ...]:
-    """Take away this Lakehouse's shortcuts beneath ``prefix``, before storage is swept.
+    """Remove this Lakehouse's shortcuts beneath ``prefix`` before storage is swept.
 
-    Scoped by path prefix, so a wipe of one area leaves the other's pointers
-    alone, so a Files wipe does not take away a shortcut under ``Tables/``.
+    The path prefix keeps a wipe of one area from removing the other's shortcuts.
 
-    Reported as ``shortcut:<path>/<name>`` so a dry run distinguishes a pointer
-    being taken away from a directory being deleted. They are not the same act,
-    and only one of them destroys data.
+    Reports use ``shortcut:<path>/<name>`` to distinguish pointers from deleted
+    directories. Removing a shortcut does not delete its source data.
 
     """
 
@@ -111,8 +109,6 @@ def _remove_shortcuts(
 
 
 def _store_for(workspace: Workspace, session):
-    """The store, from the Session that owns one, or acquired for this call."""
-
     return session.store(workspace) if session is not None else store_for(workspace)
 
 
@@ -137,7 +133,7 @@ def wipe_folder_target(
     dry_run: bool = False,
     session=None,
 ) -> WipeReport:
-    """Empty a folder target, keeping the Files area itself."""
+    """Empty a folder target while keeping its Files area."""
 
     store = store or _store_for(workspace, session)
     resolver = _resolver_for(workspace, session)
@@ -163,10 +159,8 @@ def wipe_delta_target(
 ) -> WipeReport:
     """Remove every Delta table in a Lakehouse, keeping the Tables area.
 
-    A table is a directory. There is no catalogue to enumerate from and none to
-    leave behind, because Weaver never registered one. There is one exception, and
-    it is why shortcuts go first: a table shortcut is a directory whose bytes
-    belong to another item.
+    Tables are discovered from storage. Shortcuts are removed first because their
+    directories refer to data owned by another item.
     """
 
     store = store or _store_for(workspace, session)
@@ -190,11 +184,7 @@ def wipe_sql_target(
     *,
     sql=None,
 ) -> None:
-    """Clear a Warehouse through the common SQL capability.
-
-    The default is Fabric-native.  A desktop caller crossing into
-    Fabric constructs and injects ``desktop_sql_executor`` explicitly.
-    """
+    """Clear a Warehouse with an injected or Fabric-native SQL executor."""
 
     from .sql import SqlError, SqlExecutionError, generate_warehouse_wipe_sql
 
@@ -231,8 +221,7 @@ def wipe(
 ) -> tuple[WipeReport, ...]:
     """Wipe each supplied target. At least one is required.
 
-    Targets are independently optional, so a development loop can clear the
-    Delta tables while leaving downloaded source files alone.
+    Targets are independent; an omitted target is left untouched.
     """
 
     if not any((folder_target, delta_target, sql_target)):
@@ -279,9 +268,7 @@ def wipe_lakehouse(
 ) -> tuple[WipeReport, ...]:
     """Clear both areas of a Lakehouse, its Files and its Tables.
 
-    The item is resolved as a Lakehouse, so there is no untyped "what is this
-    name?" discovery: a Warehouse of the same name resolves elsewhere and is not
-    reached here. A destructive operation must not depend on name inference.
+    The item is resolved by type. A same-named Warehouse is not reached.
 
     ``session`` supplies the store and the resolver where the caller has one, so
     the name this wipe resolves is the name the build before it already
@@ -292,8 +279,7 @@ def wipe_lakehouse(
     resolver = _resolver_for(workspace, session)
     if not _lakehouse_exists(resolver, lakehouse):
         raise CommandError(
-            f"no Lakehouse named {lakehouse.name!r} on this workspace, so there is "
-            "nothing to wipe"
+            f"no Lakehouse named {lakehouse.name!r} exists in this workspace"
         )
     return (
         wipe_folder_target(
@@ -314,11 +300,7 @@ def wipe_lakehouse(
 
 
 def _lakehouse_exists(resolver, lakehouse: ItemRef) -> bool:
-    """Whether the Lakehouse is there, resolved as a Lakehouse.
-
-    Resolving it by type both proves it exists and refuses a same-named
-    Warehouse, which matters here because the caller is about to delete.
-    """
+    """Check existence by type so a same-named Warehouse cannot be deleted."""
 
     from .errors import CommandError as _CommandError
 

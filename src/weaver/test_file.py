@@ -33,8 +33,6 @@ def source_file_node(
     started: datetime,
     dry_run: bool = False,
 ) -> ValidationNodeReport:
-    """Compile one source file and run it against one physical target."""
-
     if len(targets) != 1:
         raise CommandError(
             "test file= runs one validation against one item, and "
@@ -65,10 +63,7 @@ def source_file_node(
 
 
 def _read(path: Path, target: PhysicalTargetRef):
-    """Parse a file through the ordinary validation reader.
-
-    Source files receive the same structural checks as committed validations.
-    """
+    """Parse a file with the structural checks for committed validations."""
 
     from .declaration import read_source_document
 
@@ -139,12 +134,7 @@ def _execute(session, *, document, target, path: Path, started: datetime):
 
 
 def _run_warehouse(session, document, target: PhysicalTargetRef):
-    """Execute the generated batch directly, creating no procedure.
-
-    A temporary stored procedure would leave something behind for a run whose
-    whole promise is that it does not, and the batch is what the procedure's
-    body is anyway, so nothing is lost by running it as itself.
-    """
+    """Run the generated batch directly so no procedure is left behind."""
 
     from .declaration.tsql_validation import generate_tsql_validation_batch
     from .targets import ItemRef as _ItemRef
@@ -153,8 +143,7 @@ def _run_warehouse(session, document, target: PhysicalTargetRef):
     executor = session.sql_executor(_WarehouseTarget(_ItemRef(target.name)))
     if executor is None:
         raise ValidationError(
-            f"{target} needs a SQL capability to run a validation, and this run "
-            "has none"
+            f"a SQL capability is required to run this validation against {target}"
         )
     batch = generate_tsql_validation_batch(document.document, document.sql_body or "")
 
@@ -182,7 +171,7 @@ def _run_warehouse(session, document, target: PhysicalTargetRef):
 
 
 def _run_spark(session, document, target: PhysicalTargetRef):
-    """Run the authored Spark SQL program through the same runtime a module uses."""
+    """Run the Spark SQL program through the same runtime as an installed module."""
 
     from . import tokens
     from .lakehouse import lakehouse_for

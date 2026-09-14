@@ -33,7 +33,7 @@ def run_installed_validation(
     runtime_scope=None,
     collect_diagnostics: bool = False,
 ):
-    """One installed validation, run through the Session that owns the engines.
+    """Run one installed validation through the Session.
 
     Returns the result the validation produced, with any diagnostic rows
     attached. A run's status is the Runner's to decide from that result, as it
@@ -52,9 +52,8 @@ def run_installed_validation(
                 validation, environment, collect_diagnostics
             )
     except Exception as exc:  # noqa: BLE001 - a check that could not run is evidence
-        # Raised so the run records that nothing was evaluated, and carrying a result
-        # of the *validation's* own kind so its reader gets the counts that
-        # belong to it, a load result here would offer counts it does not have.
+        # Preserve the validation's result kind so its reader gets that kind's
+        # counts. A load result would expose counts the validation does not have.
         message = f"{type(exc).__name__}: {exc}"
         failed = (
             AssumptionResult.failed_to_run(message)
@@ -71,9 +70,7 @@ def run_installed_validation(
 class _WithDiagnostics:
     """A validation result, carrying the rows a caller asked to see.
 
-    A wrapper rather than a field on the result: the result types belong to the
-    validation runtime, and diagnostics are a property of this run having asked
-    for them.
+    Diagnostics belong to this invocation, not the durable runtime result.
     """
 
     def __init__(self, result, diagnostics) -> None:
@@ -94,10 +91,8 @@ class _WithDiagnostics:
 class _Capabilities:
     """What the validation dispatchers read, taken from the Session that owns it.
 
-    ``spark`` is a property rather than a value, which is why this is a class:
-    asked for eagerly, a Warehouse validation reached over TDS could not run
-    from a desktop, because assembling the capabilities failed before anything
-    looked at which one it wanted.
+    Spark is acquired lazily so a Warehouse validation reached over TDS does not
+    require a Spark session.
     """
 
     def __init__(self, session, workspace, runtime_scope) -> None:
@@ -123,8 +118,6 @@ def _capabilities(session, workspace, runtime_scope):
 
 
 def primitive_kind(validation: InstalledValidation) -> str:
-    """How this validation is reached, from where it is installed."""
-
     if validation.target.kind == LAKEHOUSE_TARGET:
         return PYTHON_VALIDATION
     return WAREHOUSE_PROCEDURE
@@ -148,8 +141,8 @@ def _dispatch_warehouse(
     executor = environment.sql_for(validation.target)
     if executor is None:
         raise ValidationError(
-            f"{validation.logical} runs in {validation.target}, and this run has "
-            "no SQL capability for it"
+            f"no SQL capability is available for {validation.logical} in "
+            f"{validation.target}"
         )
     procedure = _procedure_name(validation)
     outputs = RESULT_PARAMETERS[validation.kind]
@@ -203,7 +196,7 @@ def _dispatch_python(validation: InstalledValidation, environment: Any, collect:
 
     if environment.spark is None:
         raise ValidationError(
-            f"{validation.logical} needs a Spark session, and this run has none"
+            f"{validation.logical} needs a Spark session, but none is available"
         )
     lakehouse = lakehouse_for(environment.resolver, ItemRef(validation.target.name))
     runtime_root = _join(lakehouse.files_root(), *LOAD_ROOT.split("/"))
@@ -229,11 +222,7 @@ def _dispatch_python(validation: InstalledValidation, environment: Any, collect:
 
 
 def _class_name(validation: InstalledValidation) -> str:
-    """``Sales__OrdersReconcile``, from the deployed module's own filename.
-
-    From the file rather than the logical ID, because the file is what was
-    installed. The two agree by construction: one function computed the path.
-    """
+    """``Sales__OrdersReconcile``, from the installed module's filename."""
 
     name = validation.artefact.object_id.object
     return name[: -len(".py")] if name.endswith(".py") else name
