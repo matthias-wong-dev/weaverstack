@@ -15,12 +15,9 @@ from .sql_shaping import QuerySpan, query_spans, selects_into, top_level_go
 
 @dataclass(frozen=True)
 class TsqlStatement:
-    """One piece of an authored program, and whether it yields rows.
+    """A source-preserving slice of an authored program.
 
-    ``sql`` is sliced out of the body rather than reassembled, so an author's
-    formatting, comments and case survive into the generated artefact exactly as
-    written, which is what makes a generated procedure readable by the person who
-    wrote the query in it.
+    Source slices preserve formatting, comments and case.
     """
 
     sql: str
@@ -29,14 +26,10 @@ class TsqlStatement:
 
 @dataclass(frozen=True)
 class TsqlProgram:
-    """One authored body, split and classified, in source order."""
-
     statements: tuple[TsqlStatement, ...]
 
     @property
     def queries(self) -> tuple[TsqlStatement, ...]:
-        """The statements that produce rows, in the order they appear."""
-
         return tuple(
             statement for statement in self.statements if statement.produces_result
         )
@@ -49,36 +42,28 @@ class TsqlProgram:
 
     @property
     def staging(self) -> TsqlStatement | None:
-        """The query that produces the object's rows, if it has one."""
-
         queries = self.queries
         return queries[0] if queries else None
 
     @property
     def deletes(self) -> TsqlStatement | None:
-        """The query naming the keys to delete, if the author wrote one."""
-
         queries = self.queries
         return queries[1] if len(queries) > 1 else None
 
 
 def parse_tsql_program(body: str, *, what: str, error: type[Exception]) -> TsqlProgram:
-    """Split and classify one authored T-SQL body.
+    """Split and classify a T-SQL body, rejecting ``GO``.
 
-    ``GO`` is refused rather than split on. It is a client-side batch separator
-    with no meaning to the server, and the load installs the body inside a
-    stored procedure, where it is a syntax error, so a body containing one could
-    never load, and saying so here costs an author a clear message instead
-    of an obscure failure at install time.
+    Generated loads place the body inside a stored procedure, where the
+    client-side batch separator is invalid.
     """
 
     text = body or ""
     marker = top_level_go(text)
     if marker is not None:
         raise error(
-            f"{what}: GO is a batch separator for a client tool, and the "
-            "generated load runs this body inside a stored procedure, where it "
-            "cannot appear. Separate the statements with ';'."
+            f"{what}: GO cannot appear in a generated load procedure. Separate "
+            "the statements with ';'."
         )
 
     spans = query_spans(text)
@@ -94,52 +79,38 @@ def validate_query_contract(
     incremental: bool,
     error: type[Exception],
 ) -> None:
-    """Refuse a program whose queries cannot mean a load.
-
-    Called from repository parsing, where it stops a build, and again from load
-    generation, where the answer has to hold for the procedure being written.
-    """
+    """Validate the staging and delete-query contract."""
 
     queries = program.queries
     if not queries:
         raise error(
-            f"{what}: a Warehouse table must produce its rows from a visible "
-            "SELECT, and this body has none. Setup statements alone stage "
-            "nothing, and a result set inside EXEC or sp_executesql is not one "
-            "Weaver can see. End the body with the SELECT that produces the "
-            "rows."
+            f"{what}: the Warehouse table has no top-level SELECT that produces "
+            "rows. Add a staging query; SELECT inside EXEC or sp_executesql does "
+            "not count."
         )
     if len(queries) > 2:
         raise error(
-            f"{what}: a Warehouse table produces its rows and, at most, the keys "
-            f"to delete, and {len(queries)} statements produce results. Divert the "
-            "intermediate ones with SELECT … INTO #temp."
+            f"{what}: the Warehouse table has {len(queries)} result queries; at "
+            "most two are allowed. Divert intermediate results with SELECT … INTO."
         )
     if len(queries) == 1:
         return
     if not primary_key:
         raise error(
-            f"{what}: a second query names the rows to delete, which needs a "
-            "primary key to name them by. Declare one, or return one query"
+            f"{what}: the delete query requires a Primary key. Declare one or "
+            "remove the second query."
         )
     if not incremental:
         raise error(
-            f"{what}: a non-incremental table cannot name explicit deletes. The "
-            "source is the whole truth, so a row's absence from the staging "
-            "query is what retires it. Return one query, or declare "
-            "Incremental: true."
+            f"{what}: a non-incremental table cannot have a delete query. Remove "
+            "the second query or declare Incremental: true."
         )
 
 
 def _in_source_order(
     text: str, results: tuple[QuerySpan, ...]
 ) -> tuple[TsqlStatement, ...]:
-    """The body cut at its result queries, everything between them setup.
-
-    Order is the whole of what a load needs: setup written between two queries
-    was written there, and running it anywhere else would change
-    what the second query sees.
-    """
+    """Slice result queries and intervening setup without changing source order."""
 
     statements: list[TsqlStatement] = []
     cursor = 0
@@ -154,12 +125,10 @@ def _in_source_order(
 
 
 def _setup_between(text: str, start: int, end: int) -> list[TsqlStatement]:
-    """The setup in one gap, as separate statements where it separates.
+    """Split terminated setup statements without reassembling their text.
 
-    Terminated statements come apart cleanly; an unterminated run of them stays
-    in one piece, which is harmless because setup is emitted exactly as authored
-    either way. Splitting is for legibility of the generated artefact, not for
-    meaning.
+    An unterminated run remains one slice. Splitting affects only generated-text
+    legibility, because every slice is emitted in order.
     """
 
     return [

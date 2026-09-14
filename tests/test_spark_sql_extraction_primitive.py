@@ -160,7 +160,7 @@ def test_a_primitive_with_no_program_is_refused_by_name():
 def test_an_unterminated_program_is_refused_before_anything_runs():
     session = _Session()
 
-    with pytest.raises(LoadError, match="must end with ';'"):
+    with pytest.raises(LoadError, match="does not end with ';'"):
         read_spark_sql(session, sql="select 1 as x", contract=_contract())
 
     assert session.submitted == []
@@ -170,7 +170,7 @@ def test_an_unterminated_program_is_refused_before_anything_runs():
 def test_a_program_that_produces_nothing_is_refused_before_anything_runs():
     session = _Session()
 
-    with pytest.raises(LoadError, match="must end in a query"):
+    with pytest.raises(LoadError, match="has no query that produces rows"):
         read_spark_sql(
             session,
             sql="create or replace temporary view v as select 1;",
@@ -182,7 +182,9 @@ def test_a_program_that_produces_nothing_is_refused_before_anything_runs():
 
 @weaver_test()
 def test_a_non_incremental_table_may_not_name_explicit_deletes():
-    with pytest.raises(LoadError, match="non-incremental table cannot name"):
+    with pytest.raises(
+        LoadError, match="non-incremental table cannot have a delete query"
+    ):
         read_spark_sql(
             _Session(),
             sql="select * from source;\nselect `Customer id` from gone;",

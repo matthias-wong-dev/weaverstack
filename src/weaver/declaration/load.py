@@ -1,8 +1,4 @@
-"""Generate load definitions from validated Weaver document sources.
-
-Warehouse tables generate installer scripts; Spark SQL tables generate Python
-modules; Python tables and folders use their authored modules.
-"""
+"""Generate load definitions from validated sources."""
 
 from __future__ import annotations
 
@@ -14,37 +10,25 @@ from .metadata import SPARK_SQL, SQL, TABLE
 if TYPE_CHECKING:
     from .source import SourceDocument
 
-#: Signature salts for generated load output. Increment the corresponding value
-#: whenever that generator changes.
+#: Increment the relevant salt whenever generated load output changes.
 TSQL_LOAD_VERSION = 15
 SPARK_LOAD_VERSION = 9
 
-#: What object a generated load installs, in the catalogue's vocabulary. A
-#: Warehouse load is a stored procedure; a Lakehouse load is a file in the
-#: deployed runtime tree.
+#: Generated Warehouse loads are procedures; Lakehouse loads are deployed files.
 PROCEDURE_OBJECT = "stored_procedure"
 FILE_OBJECT = "file"
 
 TSQL_LOAD_EXTENSION = ".sql"
-#: A Spark SQL table's load is a deployed Python module, so it is spelled as one.
 SPARK_LOAD_EXTENSION = ".py"
 
 
 @dataclass(frozen=True)
 class GeneratedLoad:
-    """One source's generated load payload: installable, not yet executable.
+    """An installable load payload and the generator version that signs it.
 
-    ``payload`` is what the bundle carries and what the installer is handed. It
-    is not a finished program: a Warehouse load is a script that
-    assembles the procedure server-side, and a Spark SQL load is an instruction
-    the executor renders once it can see the built table. Calling it a completed
-    executable definition would misdescribe both, and invite code that wrote
-    the file down unchanged.
-
-    ``template_version`` is the generator's version, carried out so the artefact
-    layer can salt a signature with it without knowing which generator ran. That
-    is what makes a change to load generation rebuild exactly the loads it
-    changed, and leave deployed Python, signed by its own bytes, alone.
+    The payload is passed to the installer, not executed directly. The template
+    version lets generated output change its signature independently of authored
+    Python.
     """
 
     object_type: str
@@ -56,11 +40,9 @@ class GeneratedLoad:
 def generate_load(
     document: "SourceDocument", *, destination=None, item=None
 ) -> GeneratedLoad:
-    """The installable load payload for one validated source.
+    """Generate the installable load payload for a table.
 
-    Only a table has one. A Folder's load is its authored module and a View has
-    no load at all, so neither reaches here. :func:`has_generated_load` is the
-    question to ask first.
+    Call :func:`has_generated_load` before this function.
     """
 
     if document.kind != TABLE:
@@ -78,27 +60,12 @@ def generate_load(
 
 
 def load_identity(document: "SourceDocument") -> tuple[str, int]:
-    """One generated load's object type and template version, without rendering.
-
-    What an artefact is does not depend on where it is bound, so a caller
-    listing identities and signatures asks this instead of generating a payload
-    it would throw away and, for a Spark load, could not render at all without a
-    destination.
-    """
-
     if document.language == SQL:
         return PROCEDURE_OBJECT, TSQL_LOAD_VERSION
     return FILE_OBJECT, SPARK_LOAD_VERSION
 
 
 def has_generated_load(document: "SourceDocument") -> bool:
-    """Whether this source's load is generated rather than deployed verbatim.
-
-    A table declaring ``Has load procedure: false`` has no load at all: something
-    other than Weaver populates it, so there is nothing to generate and nothing to
-    install.
-    """
-
     if not document.document.has_load_procedure:
         return False
     return document.kind == TABLE and document.language in (SQL, SPARK_SQL)
@@ -126,10 +93,8 @@ def _spark_load(document: "SourceDocument", destination) -> GeneratedLoad:
     from .metadata import extract_sql_metadata_and_body
     from .spark_sql_module import addressed, render_spark_sql_module
 
-    # The finished module, not an instruction. Nothing here needs the built
-    # table: the primitive reads its own contract from the docstring and its own
-    # columns from the target when it runs, which is the same question answered
-    # at the same place a Python-authored table answers it.
+    # The primitive reads its contract and target columns when it runs. This
+    # payload is therefore the finished module.
     header, _body = extract_sql_metadata_and_body(document.text)
     content = render_spark_sql_module(
         document.document,

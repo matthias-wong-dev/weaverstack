@@ -282,7 +282,7 @@ def test_a_result_hidden_inside_dynamic_sql_is_not_a_query():
 
     assert program.queries == ()
     assert program.staging is None
-    with pytest.raises(LoadError, match="visible SELECT"):
+    with pytest.raises(LoadError, match="no top-level SELECT"):
         _validate(body)
 
 
@@ -331,13 +331,13 @@ select 2 as [Customer id];
 
 select 3 as [Customer id]"""
 
-    with pytest.raises(LoadError, match="3 statements produce results"):
+    with pytest.raises(LoadError, match="3 result queries"):
         _validate(body)
 
 
 @weaver_test()
 def test_no_visible_query_is_refused():
-    with pytest.raises(LoadError, match="visible SELECT"):
+    with pytest.raises(LoadError, match="no top-level SELECT"):
         _validate("select [Customer id] into #Working from [Sales].[Customer];")
 
 
@@ -345,7 +345,7 @@ def test_no_visible_query_is_refused():
 def test_a_second_query_needs_a_primary_key():
     body = "select 1 as a;\n\nselect 1 as a;"
 
-    with pytest.raises(LoadError, match="needs a primary key"):
+    with pytest.raises(LoadError, match="delete query requires a Primary key"):
         _validate(body, primary_key=())
 
 
@@ -353,7 +353,9 @@ def test_a_second_query_needs_a_primary_key():
 def test_a_second_query_needs_incremental():
     body = "select 1 as a;\n\nselect 1 as a;"
 
-    with pytest.raises(LoadError, match="non-incremental table cannot name"):
+    with pytest.raises(
+        LoadError, match="non-incremental table cannot have a delete query"
+    ):
         _validate(body, incremental=False)
 
 
@@ -373,7 +375,7 @@ def test_go_is_refused():
 GO
 select [Customer id] from #Retired"""
 
-    with pytest.raises(LoadError, match="batch separator"):
+    with pytest.raises(LoadError, match="GO cannot appear"):
         _program(body)
 
 
@@ -414,7 +416,9 @@ select [Customer id] from #Retired""",
 
 @weaver_test()
 def test_the_repository_refuses_a_second_query_without_incremental():
-    with pytest.raises(DiscoveryError, match="non-incremental table cannot name"):
+    with pytest.raises(
+        DiscoveryError, match="non-incremental table cannot have a delete query"
+    ):
         _document(
             """select [Customer id] from #Working;
 
@@ -424,7 +428,7 @@ select [Customer id] from #Retired"""
 
 @weaver_test()
 def test_the_repository_refuses_three_queries():
-    with pytest.raises(DiscoveryError, match="produce results"):
+    with pytest.raises(DiscoveryError, match="3 result queries"):
         _document(
             """select 1 as [Customer id];
 
@@ -437,7 +441,7 @@ select 3 as [Customer id]""",
 
 @weaver_test()
 def test_the_repository_refuses_a_body_with_no_visible_query():
-    with pytest.raises(DiscoveryError, match="visible SELECT"):
+    with pytest.raises(DiscoveryError, match="no top-level SELECT"):
         _document("exec sp_executesql N'select [Customer id] from [Sales].[Customer]';")
 
 
