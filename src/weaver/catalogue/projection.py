@@ -1,19 +1,10 @@
-"""Projecting one logical item's catalogue rows from a prepared repository.
+"""Project bound items' catalogue rows from prepared repository intent.
 
-Nothing here re-reads a source file, imports an object module, or asks a
-physical table what shape it is: every value comes from the validated
-declaration or its resolved graph.
-
-Only bound items are projected. Objects owned by unbound items are out of scope
-rather than deleted. Projecting them would invite a comparison that removed them.
-
-Every row is stamped with the same item scope, passed in once, so no projector
-can derive a different one and write into the wrong installation.
-
-A shortcut is not a dependency. A dependency row records the reference as the
-author wrote it; :data:`~weaver.catalogue.tables.SHORTCUT` records what the
-consuming item's shortcut points at. Keeping them apart is what stops one item
-appearing to depend directly on another's physical object.
+Projection performs no source reads, module imports or physical inspection. All
+rows carry the supplied installation scope. Projection includes only bound
+items; unbound items are not deletion candidates. Shortcuts remain distinct from
+dependencies: dependencies preserve authored references, while shortcut rows
+record destinations.
 """
 
 from __future__ import annotations
@@ -62,29 +53,20 @@ from .tables import (
     CatalogueTable,
 )
 
-# Catalogue projection consumes the stable persisted target-kind vocabulary; it
-# does not depend on build-package binding classes. Keeping these values here
-# also prevents importing the build package while catalogue reconciliation is
-# still initialising.
+# Keep projection independent of build-package binding classes.
 LAKEHOUSE_TARGET = "lakehouse"
 WAREHOUSE_TARGET = "warehouse"
 
-#: Map Weaver document kinds to the catalogue's lower-case vocabulary.
 OBJECT_TYPE_FOR_KIND = {FOLDER: "folder", TABLE: "table", VIEW: "view"}
 
-#: What a schema shortcut is registered as: the namespace it presents.
 SCHEMA_TYPE = "schema"
 
-#: How a validation kind names itself in ``TestDictionary.test_type``. Separate
-#: from the Registry's ``object_role``: the dictionary describes the Test, the
-#: Registry certifies the procedure or module it compiled to.
+# TestDictionary describes the validation; Registry certifies its compiled artefact.
 TEST_TYPE_FOR_KIND = {TEST: "test", ASSUMPTION: "assumption"}
 
 
 @dataclass(frozen=True)
 class CatalogueProjection:
-    """Every catalogue row one build invocation needs, for one installation."""
-
     scope: InstallationScope
     rows: Mapping[str, tuple[Row, ...]]
 
@@ -102,32 +84,20 @@ def project_item_catalogue(
     item: WeaverItemId,
     retained: Iterable[WeaverDocumentId],
 ) -> CatalogueProjection:
-    """One item's catalogue rows, from prepared logical intent and nothing else.
+    """Project one item's authored and package-owned catalogue relations.
 
-    Every value is a function of repository intent: authored declarations plus
-    package-owned relations introduced during preparation. Nothing about a
-    build, a binding or a target reaches it.
-
-    It says what the repository declares; whether any of it is installed, where,
-    and by which Weaver are composed at publication.
-
-    No Registry row is written for a shortcut destination here. The logical
-    relation belongs in this projection whether it is authored or package-owned;
-    the Registry row certifies that a physical object exists at that name and
-    what it is, which needs a binding. See :func:`project_shortcut_registry`.
+    Shortcut Registry rows are excluded because their physical type requires a
+    target binding. :func:`project_shortcut_registry` adds them.
     """
 
     scope = InstallationScope(item.item_type, item.item_name)
     retained = tuple(sorted(set(retained), key=str))
     if any(identity.item != item for identity in retained):
-        raise ValueError(f"item projection {item} received a document owned elsewhere")
+        raise ValueError(
+            f"item projection for {item} includes a document owned by another item"
+        )
 
-    # ``retained`` carries every kind of registered object. Splitting them here
-    # rather than at the call site keeps the caller from having to know which is
-    # which, because the repository already does.
-    # Every declaration, not only the logical ones: a shortcut destination is
-    # not a source document whichever kind of target it names, and what follows
-    # projects tables, columns and keys that it has none of.
+    # Shortcut destinations have no table, column or key declarations to project.
     shortcut_by_destination = {
         declaration.destination: declaration
         for declaration in repository.shortcuts
@@ -150,9 +120,7 @@ def project_item_catalogue(
     retained_artefacts = tuple(
         installed[identity] for identity in retained if identity in installed
     )
-    # A validation carries the item's ordinary logical identity and is not a data
-    # object, so it is separated here for the same reason a shortcut is: what
-    # follows projects tables, columns and keys, and a Test has none of them.
+    # Validations have logical identities but materialise no data objects.
     retained_validations = tuple(
         identity
         for identity in retained
@@ -253,11 +221,7 @@ def project_item_catalogue(
             _foreign_keys(source, identity, scope, signature)
         )
 
-    # A validation claims TestDictionary and its dependencies, and nothing else.
-    # In particular it claims no Registry row: Registry certifies a physical
-    # object that exists, and nothing is materialised under the logical Test ID.
-    # What is certified is the procedure or module the validation compiles to,
-    # and that artefact has an identity of its own.
+    # Registry certifies the validation's compiled artefact, not its logical ID.
     for identity in retained_validations:
         source = repository.source_documents[identity]
         document = source.document
@@ -266,22 +230,14 @@ def project_item_catalogue(
                 **_identity(scope, identity),
                 "test_type": TEST_TYPE_FOR_KIND[document.kind],
                 **_described(source, all_documents, repository),
-                # Correlation information about a Test, and structurally absent
-                # from an Assumption, which has one side to correlate.
+                # Assumptions have one side and therefore no correlation key.
                 "primary_key": column_set(document.primary_key) or None,
                 "signature": source.effective_signature,
             }
         )
 
-    # A runtime artefact claims the Registry and nothing else. It has no columns
-    # to describe, no keys to record and no dependencies to keep. It is a deployed
-    # module or a generated statement, and what the catalogue records
-    # about it is that Weaver installed it, what it is for, and at what
-    # signature.
-    #
-    # The role is the artefact's own. A Test module and a load module are the
-    # same shape, so this row is the only place the difference survives, and
-    # everything downstream that must not run a Test as a load reads it here.
+    # Runtime artefacts claim only Registry. Their role distinguishes otherwise
+    # identical load and Test modules for downstream dispatch.
     for artefact in retained_artefacts:
         rows[REGISTRY.name].append(
             {
@@ -292,9 +248,7 @@ def project_item_catalogue(
             }
         )
 
-    # A validation's dependencies belong to its logical identity, exactly as an
-    # object's do. That is what lets the graph say Sales.Orders precedes
-    # Sales.OrdersUpToDate without a Registry row standing in for the Test.
+    # Validation dependencies use the logical identity, not the compiled artefact.
     consumers = set(retained) | validation_set
     for edge in repository.dependency_edges:
         if edge.consumer not in consumers:
@@ -305,8 +259,7 @@ def project_item_catalogue(
             {
                 **_identity_as(scope, edge.consumer, role="referencing"),
                 "dependency_reference": edge.reference,
-                # Null where the edge did not resolve, being an authored physical
-                # name or a reference that leaves the item through a shortcut.
+                # Unresolved physical and shortcut references have no producer ID.
                 "referenced_item_type": (
                     producer.item.item_type if producer is not None else None
                 ),
@@ -330,19 +283,13 @@ def project_item_catalogue(
         rows[SHORTCUT.name].append(
             {
                 **_scope(scope),
-                # The declaration as written, which is also the key, and the
-                # same schema/object pair Registry names an object by.
                 "shortcut_id": declaration.shortcut_id,
-                # The destination identity as Registry stores it, so a Folder
-                # keeps its ``Files/`` prefix and stays apart from a table of
-                # the same Schema.Object. A schema shortcut names a namespace,
-                # which has no area to prefix.
+                # Folder destinations keep their area prefix; schema shortcuts do not.
                 "schema_name": (
                     declaration.schema
                     if declaration.is_schema
                     else _catalogue_schema(declaration.destination)
                 ),
-                # A schema shortcut presents a namespace, so it names no object.
                 "object_name": (
                     None
                     if declaration.is_schema
@@ -352,10 +299,7 @@ def project_item_catalogue(
                 "target_type": declaration.target_type,
                 "target_item_type": declaration.target_item.item_type,
                 "target_item_name": declaration.target_item.item_name,
-                # A logical target is a Weaver document, so its identity is
-                # stored whole and the same way Registry stores one. A Folder
-                # source keeps its ``Files/`` prefix, which is what separates it
-                # from a table of the same Schema.Object.
+                # Logical targets use Registry identity, including Folder area.
                 "target_schema_name": (
                     _catalogue_schema(declaration.logical_source)
                     if declaration.is_logical
@@ -371,9 +315,7 @@ def project_item_catalogue(
             }
         )
 
-    # Package-owned logical shortcuts have no authored declaration, but an
-    # installed operation has no repository to recover them from. Persist the
-    # same producer pair an authored logical shortcut persists.
+    # Persist package-owned logical shortcuts for operation without a repository.
     for shortcut in sorted(
         (
             shortcut
@@ -408,8 +350,6 @@ def project_item_catalogue(
     used_schemas = sorted(
         {
             (_catalogue_schema(identity), identity.object_id.schema)
-            # A validation names a schema the item declares, and putting one to
-            # use is what makes it a schema the installation uses.
             for identity in retained + retained_validations
         }
         | {
@@ -418,15 +358,11 @@ def project_item_catalogue(
                 declaration.destination.object_id.schema,
             )
             for declaration in retained_shortcuts
-            # A schema shortcut presents the source item's namespace, so the
-            # item does not own that schema and never declares it.
+            # A schema shortcut presents a namespace owned by its source item.
             if not declaration.is_schema
         }
-        # A generated load procedure puts a schema into use that no document
-        # declares an object in, so it would otherwise be a schema the
-        # installation uses and does not describe. A deployed file contributes
-        # nothing here: its schema half is a path, and the namespace it sits in
-        # is described by the folder document that owns the tree.
+        # Procedures can use schemas with no declared object. Deployed files do
+        # not: their schema is a path described by the owning folder document.
         | {
             (artefact.identity.object_id.schema, artefact.identity.object_id.schema)
             for artefact in retained_artefacts
@@ -460,18 +396,11 @@ def project_shortcut_registry(
     retained: Iterable[WeaverDocumentId],
     target_kind: str,
 ) -> tuple[Row, ...]:
-    """Registry rows certifying this item's shortcut destinations, given a binding.
+    """Project Registry certification for bound shortcut destinations.
 
-    Separate from :func:`project_item_catalogue` because it is the one part of
-    an item's catalogue that source cannot derive: a shortcut is registered as
-    what it physically is, which depends on its binding.
-
-    The kind is required rather than defaulted, because a default would record a
-    Warehouse view as a table.
-
-    A schema shortcut is registered as the schema it presents, and what is inside
-    one is not: those objects belong to the item the shortcut points at and can
-    change without a build.
+    Target kind is required because Warehouse shortcuts are views. A schema
+    shortcut certifies only its presented namespace; its contents belong to the
+    source item and may change without a build.
     """
 
     scope = InstallationScope(item.item_type, item.item_name)
@@ -495,15 +424,7 @@ def project_shortcut_registry(
 
 
 def _shortcut_object_type(declaration, target_kind: str) -> str:
-    """What a shortcut destination physically is, in the catalogue's vocabulary.
-
-    Not a type of its own: a shortcut is registered as what it is, so existence,
-    addressing and dropping are the ordinary operations for that type. That a
-    Lakehouse table shortcut is a OneLake shortcut is execution detail.
-
-    What it is for is the object role, which is ``shortcut``, and where it
-    points is :data:`~weaver.catalogue.tables.SHORTCUT`.
-    """
+    """Return the destination's physical type in catalogue vocabulary."""
 
     if declaration.is_schema:
         return SCHEMA_TYPE
@@ -523,11 +444,10 @@ def _catalogue_schema(identity: WeaverDocumentId) -> str:
 
 
 def _identity(scope: InstallationScope, identity) -> dict:
-    """The two columns every catalogue table names an object by.
+    """Return catalogue identity columns.
 
-    A schema shortcut presents a namespace, so it names the schema and the
-    schema is also what it installs: the object half repeats it rather than
-    being null, because the Registry keys on both.
+    Schema shortcuts repeat the schema as the object because Registry keys both
+    columns.
     """
 
     if isinstance(identity, WeaverSchemaId):
@@ -546,11 +466,7 @@ def _identity(scope: InstallationScope, identity) -> dict:
 def _identity_as(
     scope: InstallationScope, identity: WeaverDocumentId, *, role: str
 ) -> dict:
-    """The owning object's identity under a relationship's own column names.
-
-    A relationship table names both sides, so neither can be the unqualified
-    ``schema_name``/``object_name`` pair every other table uses.
-    """
+    """Return an object's identity under one side of a relationship."""
 
     return {
         **_scope(scope),
@@ -606,8 +522,7 @@ def _foreign_keys(source, identity, scope, signature) -> list[dict]:
                 "foreign_column_set": column_set(key.columns),
                 "primary_item_type": primary_item.item_type,
                 "primary_item_name": primary_item.item_name,
-                # Stored as Registry stores the object it names, area and all,
-                # so the two sides of a relationship are looked up one way.
+                # Relationship identities use Registry naming, including area.
                 "primary_schema_name": _catalogue_schema(
                     WeaverDocumentId(
                         primary_item,

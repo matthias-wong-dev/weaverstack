@@ -25,21 +25,11 @@ from .tables import (
 
 
 def catalogue_schema(identity: WeaverDocumentId) -> str:
-    """The ``schema_name`` this identity is stored under.
+    """Return the stored ``schema_name`` for an identity.
 
-    The area a Lakehouse document sits in, then its relational schema:
-    ``Tables/Sales`` for a Table or a View and ``Files/Sales`` for a Folder. The
-    area is what separates a Folder from a table of one ``Schema.Object``, and
-    storing it on one of them and not the other made two identities that read
-    back the same way look different and two that differ look alike.
-
-    Everything else stores its schema alone. A Warehouse has no areas. A
-    validation occupies neither, because it materialises nothing. A load
-    artefact's schema is already the real thing, being the containing path for a
-    file and the Warehouse schema for a procedure, and prefixing it would store
-    something that is not the target's own name.
-
-    :func:`stored_area` reads it back. The two are one rule.
+    Lakehouse data objects include their area, separating ``Tables/Schema`` from
+    ``Files/Schema``. Warehouses, validations and runtime artefacts store their
+    schema unchanged. :func:`stored_area` is the inverse.
     """
 
     area = identity.area
@@ -48,12 +38,7 @@ def catalogue_schema(identity: WeaverDocumentId) -> str:
 
 
 def stored_area(stored: str) -> tuple[str | None, str]:
-    """One stored ``schema_name`` as the area it names and the schema it holds.
-
-    The inverse of :func:`catalogue_schema`. A stored value that names no area is
-    a Warehouse relation, a validation or a load artefact, and its schema is the
-    whole of it.
-    """
+    """Split a stored ``schema_name`` into an optional area and schema."""
 
     head, separator, tail = stored.partition("/")
     if separator and head in AREAS:
@@ -62,11 +47,9 @@ def stored_area(stored: str) -> tuple[str | None, str]:
 
 
 def catalogue_columns(identity) -> tuple[str, str]:
-    """The ``schema_name`` and ``object_name`` this identity is stored under.
+    """Return the stored schema and object identity columns.
 
-    A schema shortcut presents a namespace, so it names the schema in both
-    columns. One reader for what :func:`weaver.catalogue.projection._identity`
-    writes, so the two cannot drift.
+    Schema shortcuts repeat the schema because Registry keys both columns.
     """
 
     from ..declaration.model import WeaverSchemaId
@@ -77,11 +60,9 @@ def catalogue_columns(identity) -> tuple[str, str]:
 
 
 def bookmark_row(identity: WeaverDocumentId, at=None) -> dict:
-    """One ``_.Bookmark`` row for an object, keyed as the Registry keys it.
+    """Build a ``_.Bookmark`` row using Registry identity.
 
-    One builder for every writer, being a build's invalidation, a run's advance
-    and a standalone load's, so the four columns are spelled the same way wherever
-    a bookmark is written. ``at`` is left out when only the key is wanted.
+    ``at`` is omitted when only the key is needed.
     """
 
     row = {
@@ -97,8 +78,6 @@ def bookmark_row(identity: WeaverDocumentId, at=None) -> dict:
 
 @dataclass(frozen=True)
 class CatalogueClaimRule:
-    """One table a document type may populate and how it owns its rows."""
-
     table: CatalogueTable
     predicate_columns: tuple[str, str] = ("schema_name", "object_name")
 
@@ -115,8 +94,6 @@ class CatalogueClaimRule:
 
 @dataclass(frozen=True)
 class CatalogueClaim:
-    """A concrete document claim collected for deletion."""
-
     identity: WeaverDocumentId
     rule: CatalogueClaimRule
 
@@ -125,8 +102,7 @@ _COMMON_OBJECT_RULES = (
     CatalogueClaimRule(REGISTRY),
     CatalogueClaimRule(COLUMN_DICTIONARY),
     CatalogueClaimRule(KEY_DICTIONARY),
-    # A relationship table names both sides, so the owning object is found under
-    # the side it declares rather than under a bare schema/object pair.
+    # Relationship ownership uses the declaring side's identity columns.
     CatalogueClaimRule(
         FOREIGN_KEY_DICTIONARY,
         predicate_columns=("foreign_schema_name", "foreign_object_name"),
@@ -137,7 +113,7 @@ _COMMON_OBJECT_RULES = (
     ),
 )
 
-# Each Registry object type requires an ownership declaration before reconciliation.
+# Every Registry object type requires an ownership declaration.
 CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = {
     "folder": (
         _COMMON_OBJECT_RULES[0],
@@ -154,14 +130,10 @@ CATALOGUE_CLAIMS_BY_OBJECT_TYPE: Mapping[str, tuple[CatalogueClaimRule, ...]] = 
         CatalogueClaimRule(TABLE_DICTIONARY),
         *_COMMON_OBJECT_RULES[1:],
     ),
-    # A load artefact claims the Registry and nothing else. It declares no
-    # columns, no keys, no relationships and no dependencies. It is a deployed
-    # module or a generated statement, and the only thing the catalogue records
-    # about it is that Weaver installed it and at what signature.
+    # Runtime artefacts claim only Registry.
     "file": (CatalogueClaimRule(REGISTRY),),
     "stored_procedure": (CatalogueClaimRule(REGISTRY),),
-    # A schema shortcut claims its repeated Schema/Schema Registry identity and
-    # no dictionary row: it presents a namespace that its source item owns.
+    # Schema shortcuts certify a namespace owned by their source item.
     "schema": (CatalogueClaimRule(REGISTRY),),
 }
 
@@ -177,22 +149,14 @@ def claim_rules_for_object_type(object_type: str) -> tuple[CatalogueClaimRule, .
 
 
 def without_claims(catalogue, claims):
-    """The catalogue as the build's claim-deletion stage will leave it.
+    """Apply the build's pre-work claim deletion in memory.
 
-    A build removes the catalogue claims of everything it is about to drop
-    before it does any physical work, so a row can never stay certified while
-    the object behind it is being replaced. The catalogue the planner read still
-    contains those rows, having been read before any of this was decided.
+    Claims are removed before physical work, so an object is not certified while
+    it is being replaced.
 
-    That matters now that publication is a difference. An object dropped and
-    rebuilt whose projection did not change would compare equal against the
-    catalogue as read, produce no merge, and stay deleted: the before-stage
-    removed it and nothing put it back. Comparing against the state the deletes
-    will actually produce is what makes "unchanged" mean unchanged.
-
-    It is a narrowing, never a widening, since rows are only removed here, so the
-    worst a mistake in it can do is publish a row that did not need
-    publishing.
+    Publication compares against this narrowed state, not the earlier catalogue
+    read. A rebuilt object whose projection is unchanged must still be
+    republished after its certification was removed.
     """
 
     from types import MappingProxyType

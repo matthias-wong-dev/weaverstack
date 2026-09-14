@@ -1,12 +1,8 @@
-"""Render catalogue projections as deterministic T-SQL statements.
+"""Render catalogue projections as deterministic Warehouse T-SQL.
 
-The catalogue is a set of Warehouse tables under ``_``, so every statement here
-is T-SQL and reaches the Warehouse over TDS. Publication timestamps are supplied
-at installation time and are excluded from projection comparison.
-
-Layers above hold plain Python values under internal snake-case keys. The
-translation into the public column names and stored vocabularies the ``_`` schema
-publishes happens here and nowhere else.
+This module owns translation from internal keys and values to public catalogue
+columns and vocabularies. Publication timestamps are supplied at installation
+and excluded from projection comparison.
 """
 
 from __future__ import annotations
@@ -30,26 +26,16 @@ from .tables import (
 )
 from .tsql import TIMESTAMP_TYPE, identifier, literal, qualified_name, typed_literal
 
-#: What these renderers work on. A projected catalogue table and a
-#: runtime-maintained one are merged, deleted and compared identically; what
-#: differs is which side decides the rows, not how a statement is written.
 Table = CatalogueTable | RuntimeTable
 
-#: A row as projected: column name to value. Values are ``str``, ``bool`` or
-#: ``None``, so nothing needs a renderer of its own.
 Row = Mapping[str, object]
 
-#: What T-SQL spells "now".
 NOW = "SYSDATETIME()"
 
 
 @dataclass(frozen=True)
 class InstallationScope:
-    """The one installation a statement may touch.
-
-    Carried as a value rather than passed as two strings, so a renderer cannot be
-    called without it and a caller cannot supply half of it.
-    """
+    """The complete installation scope a statement may touch."""
 
     item_type: str
     item_name: str
@@ -85,16 +71,9 @@ class InstallationScope:
 
 @dataclass(frozen=True)
 class InstallationScopes:
-    """Several installations addressed by one statement.
+    """The exact installation scopes addressed by one statement.
 
-    A build's items share the same physical catalogue tables, so addressing them
-    one at a time costs a round trip per item per table for an answer one
-    predicate contains.
-
-    Still a bounded address: the predicate names exactly the scopes it was
-    given, so widening what a build touches means widening this at the call
-    site. An empty collection is refused rather than rendered, because ``WHERE``
-    with no predicate is every row in the catalogue.
+    Empty scopes are rejected because they would produce an unbounded predicate.
     """
 
     scopes: tuple[InstallationScope, ...]
@@ -120,27 +99,17 @@ class InstallationScopes:
         return self.predicate_for()
 
     def predicate_for(self, qualifier: str = "") -> str:
-        """The scopes as one predicate, safe to compose with ``AND``.
+        """Render the scopes for composition with ``AND``.
 
-        The outer parentheses are load-bearing: removing them loses data.
-        ``AND`` binds tighter than ``OR``, so a bare ``(a AND b) OR (c AND d)``
-        embedded in
-
-        .. code-block:: text
-
-            WHERE <scopes> AND NOT (<keep>)
-
-        reassociates to ``(a AND b) OR ((c AND d) AND NOT (<keep>))``, and the
-        first scope's rows are then deleted unconditionally, keep-list and all.
-        The same reassociation in a ``MERGE`` ``ON`` clause makes every source
-        row match every target row in the later scopes. Both are silent until
-        a second installation exists.
+        Multiple scopes require outer parentheses because ``AND`` binds more
+        tightly than ``OR``; omitting them can delete or merge outside the keep
+        condition.
         """
 
         if not self.scopes:
             raise BuildError(
-                "an installation-scope predicate over no scopes would address "
-                "the whole catalogue; the caller must not reach a statement"
+                "cannot render an installation-scope predicate without scopes; "
+                "it would address the whole catalogue"
             )
         if len(self.scopes) == 1:
             return self.scopes[0].predicate_for(qualifier)
@@ -157,11 +126,9 @@ class InstallationScopes:
 
 
 def column_set(columns: Iterable[str]) -> str | None:
-    """A comma-separated column set, declared order preserved.
+    """Join columns without sorting; key order is significant.
 
-    Order is meaning, and ``(Region, Country)`` is not the key
-    ``(Country, Region)`` is, so this never sorts. An empty set is null rather
-    than an empty string: "no key" and "a key of no columns" are different claims.
+    An empty set is null, distinguishing no key from a key with no columns.
     """
 
     joined = ", ".join(columns)
@@ -170,10 +137,8 @@ def column_set(columns: Iterable[str]) -> str | None:
 
 # --- null-safe comparison -----------------------------------------------------
 #
-# T-SQL has no null-safe equality operator, and the catalogue is full of nullable
-# columns. Written out rather than approximated, because both halves are wrong in
-# a way that is silent: `a = b` skips rows where either side is null, and
-# `NOT (a = b)` is UNKNOWN, and not TRUE, when exactly one side is.
+# T-SQL has no null-safe equality; ordinary equality and negation both mishandle
+# nullable catalogue columns.
 
 
 def _same(left: str, right: str) -> str:
@@ -192,8 +157,6 @@ def _differs(left: str, right: str) -> str:
 
 
 def sorted_rows(table: Table, rows: Iterable[Row]) -> tuple[Row, ...]:
-    """Rows in key order, the canonical order every statement renders in."""
-
     def sort_key(row: Row) -> tuple[str, ...]:
         return tuple(str(row.get(name) or "") for name in table.key)
 
@@ -204,10 +167,7 @@ def _public(table: Table, name: str) -> str:
     return identifier(table.public_name_of(name))
 
 
-#: How many rows one table value constructor carries. T-SQL accepts at most a
-#: thousand, and a catalogue table passes that without the estate being large:
-#: a thousand described columns is an ordinary repository. So the rows are
-#: chunked, and the chunk is the engine's limit rather than a guess.
+# T-SQL limits a table value constructor to 1,000 rows.
 VALUES_ROWS = 1000
 
 
@@ -217,25 +177,12 @@ def render_merge(
     *,
     scope: InstallationScope | InstallationScopes,
 ) -> str | None:
-    """A scoped ``MERGE`` that inserts new rows and updates changed ones.
+    """Render scoped inserts and changed-row updates.
 
-    Returns None when there is nothing to merge, so a caller emits no action
-    rather than an empty statement.
-
-    An unchanged row is a no-op: the ``MATCHED`` branch is guarded by a
-    null-safe comparison of every non-key column, so it neither writes nor
-    advances ``row_update_datetime``.
-
-    A published column is set on insert and never on update. Every object a
-    build rebuilds reaches this statement as an insert, being either new or
-    stripped of its Registry claim before any physical work began. So an update
-    can only be a row whose projection changed while the object was left alone.
-    Dating such a row to this build would say it was rebuilt when it was not.
-
-    Above :data:`VALUES_ROWS` the result is several ``MERGE`` statements rather
-    than one. They are returned together because they are one decision and one
-    action; T-SQL is content with several statements in a batch, and each is
-    idempotent, so the split changes nothing observable.
+    Unchanged rows do not advance ``row_update_datetime``. Publication columns
+    are set only on insert, because an update may describe an object this build
+    did not rebuild. Large inputs are split at :data:`VALUES_ROWS` into
+    idempotent statements in one batch. Returns ``None`` for no rows.
     """
 
     rows = sorted_rows(table, rows)
@@ -265,9 +212,7 @@ def _merge_statement(
         _same(f"target.{_public(table, name)}", f"source.{_public(table, name)}")
         for name in table.key
     )
-    # The target side is narrowed to this installation as well as matched on the
-    # key. The key already carries the scope, so this is belt and braces, and it
-    # is the belt that shows in a review.
+    # Keep the installation boundary explicit even though the key also carries it.
     scoped = scope.predicate_for("target")
 
     comparison = table.comparison_columns
@@ -283,21 +228,14 @@ def _merge_statement(
         + [f"target.{_public(table, AUDIT_UPDATE_COLUMN)} = {NOW}"]
     )
 
-    # Named rather than positional: the audit columns are appended by the build in
-    # a fixed order, and pairing values to that order by position would put the
-    # sentinel in the wrong column the day the order changed.
+    # Name audit values so column-order changes cannot misplace the sentinel.
     supplied = {
         AUDIT_INSERT_COLUMN: NOW,
         AUDIT_UPDATE_COLUMN: NOW,
-        # A live row's delete datetime is a sentinel maximum, never null, because
-        # all three audit columns are physically not null.
+        # All three audit columns are physically not null.
         AUDIT_DELETE_COLUMN: literal(AUDIT_LIVE_DELETE_DATETIME, "timestamp"),
     }
-    # A published column appears here and in no other clause. Not in the source
-    # relation, because no projection carries it; not in the comparison, because a
-    # value that is new every build would make every row differ; and not in the
-    # UPDATE, which is the substantive decision. See the note above the
-    # statement.
+    # Publication timestamps are insert-only: comparing them would change every row.
     supplied.update(
         {
             name: f"CAST('{BUILD_DATETIME_TOKEN}' AS {TIMESTAMP_TYPE})"
@@ -323,12 +261,9 @@ def _merge_statement(
 
 
 def _source_relation(table: Table, rows: Sequence[Row]) -> str:
-    """The merge source: one table value constructor, cast by a projection over it.
+    """Render a typed merge source.
 
-    The casts sit outside rather than in every row. A ``VALUES`` constructor
-    unifies each column's type across its rows, so an all-null column would take
-    whatever type the engine inferred and could fail to match the target; one
-    enclosing ``CAST`` settles it whatever the rows hold.
+    Casts outside ``VALUES`` settle the type of all-null columns.
     """
 
     tuples = ",\n                    ".join(
@@ -340,8 +275,7 @@ def _source_relation(table: Table, rows: Sequence[Row]) -> str:
         + ")"
         for row in rows
     )
-    # Positional names for the raw relation, so a value column cannot be confused
-    # with the aliased output of the same name.
+    # Positional raw names remain distinct from public output aliases.
     raw = [f"c{index}" for index, _name in enumerate(table.column_names)]
     projected = ", ".join(
         f"CAST({identifier(raw[index])} AS {table.column(name).warehouse_type})"
@@ -358,19 +292,10 @@ def _source_relation(table: Table, rows: Sequence[Row]) -> str:
 
 
 def render_keyed_merge(table: Table, rows: Sequence[Row]) -> str | None:
-    """A ``MERGE`` that updates rows by their whole key, or inserts them.
+    """Merge runtime rows by their complete keys.
 
-    For runtime state a run writes as it goes, such as ``_.Bookmark``, rather than
-    for a build's projection, so there is no installation scope: the key carries
-    item, so the ``ON`` clause identifies exactly the rows named and nothing
-    wider. That is the whole difference from :func:`render_merge`, which narrows
-    the target to the installation it is publishing.
-
-    Later rows win where a batch names one key twice. An earlier value for the
-    same object is superseded rather than a conflict, and T-SQL refuses a
-    ``MERGE`` whose source matches one target row twice.
-
-    Returns None when there is nothing to write.
+    Later rows win when a batch repeats a key, avoiding an invalid T-SQL source
+    that matches one target twice. Returns ``None`` for no rows.
     """
 
     latest: dict[tuple, Row] = {}
@@ -432,25 +357,12 @@ def render_delete_obsolete(
     *,
     scope: InstallationScope | InstallationScopes,
 ) -> str | None:
-    """A scoped ``DELETE`` of everything in this installation the rows do not claim.
+    """Delete scoped rows absent from the projection.
 
-    An installation projecting no rows for a table gets a plain scoped delete;
-    rendering nothing would leave stale rows behind forever.
-
-    Returns None only for a table keyed by the installation scope itself
-    (:data:`~weaver.catalogue.tables.INSTALLATION`): there is at most one such
-    row per scope, so a predicate over no columns beyond the scope would delete
-    the row about to be merged.
-
-    The rows the build keeps are a relation rather than a predicate. A
-    disjunction of key equalities grows a term per row per key column, and
-    ColumnDictionary holds a row per column of every object: five hundred
-    objects of fifteen columns reach the engine's expression limit. A table
-    value constructor grows in rows only, so the comparison is written once.
-
-    Unlike :func:`render_merge`, this cannot be split into several statements,
-    because each part deletes what the others keep, so the constructor's
-    thousand-row cap is met with ``UNION ALL`` inside the one statement.
+    An empty projection produces a scoped delete. The Installation table instead
+    returns ``None`` because its key is the scope itself. Keep rows form a
+    relation to avoid T-SQL's expression limit; batches use ``UNION ALL`` within
+    one statement because separate deletes would remove rows another batch keeps.
     """
 
     rows = sorted_rows(table, rows)
@@ -462,18 +374,11 @@ def render_delete_obsolete(
     if not beyond:
         return None
 
-    # Which key columns the kept rows are identified by, and the one place the
-    # aggregated form differs. Within one installation the scope is
-    # already in the WHERE, so the columns beyond it identify a row. Across
-    # several, they do not: two installations can hold the same `DWG.Customer`,
-    # and a keep-list naming only the object would spare one installation's row
-    # because another installation still claims that name. So the aggregated
-    # delete identifies rows by the whole key, scope columns included.
+    # Across scopes, the complete key prevents one installation's matching object
+    # from preserving another installation's row.
     identity = table.key if isinstance(scope, InstallationScopes) else beyond
 
-    # The target is named in full rather than aliased: a DELETE that aliases its
-    # target needs T-SQL's second FROM clause, and the qualified name correlates
-    # without it.
+    # A qualified target correlates without T-SQL's second FROM clause.
     matched = "\n                     AND ".join(
         _same(
             f"keep.{_public(table, name)}",
@@ -495,16 +400,7 @@ def render_delete_obsolete(
 
 
 def render_delete_rows(table: Table, rows: Sequence[Row]) -> str | None:
-    """A ``DELETE`` of exactly these rows, identified by the table's own key.
-
-    The counterpart to :func:`render_delete_obsolete`, for a caller that has read
-    the table and knows which rows are going. It names what it removes rather
-    than what it keeps, so the statement grows with the rows removed instead of
-    with the estate, and the bundle shows which rows those are.
-
-    Needs no installation scope: the key of a runtime table carries the scope
-    already, so the rows name themselves in full.
-    """
+    """Delete exactly the rows named by their complete table keys."""
 
     rows = sorted_rows(table, rows)
     if not rows:
@@ -530,13 +426,7 @@ def render_delete_rows(table: Table, rows: Sequence[Row]) -> str | None:
 
 
 def _keep_relation(table: Table, rows: Sequence[Row], identity: Sequence[str]) -> str:
-    """The rows a build still claims, as one relation.
-
-    The casts sit outside the constructor for the reason they do in
-    :func:`_source_relation`: a column of all nulls would otherwise take
-    whatever type the engine inferred, and here the branches must agree as well
-    as match the target.
-    """
+    """Render kept identities with explicit types across all branches."""
 
     raw = [f"c{index}" for index, _name in enumerate(identity)]
     projected = ", ".join(
@@ -569,23 +459,16 @@ def render_delete_scope(
     *,
     scope: InstallationScope | InstallationScopes,
 ) -> str:
-    """A scoped ``DELETE`` of whole installations from one table.
+    """Delete whole installations during explicit target decommissioning.
 
-    Installation pruning: what decommissioning a target does, and never what an
-    ordinary build does. A build that did not include a target type has no
-    opinion about it.
+    An ordinary build must not interpret an omitted target type as removal.
     """
 
     return f"DELETE FROM {qualified_name(table)}\n WHERE {scope.predicate}\n"
 
 
 def _check_unique_keys(table: Table, rows: Sequence[Row]) -> None:
-    """Refuse a merge whose source holds two rows with one key.
-
-    T-SQL refuses a ``MERGE`` when several source rows match one target row, and
-    it refuses at install time, long after the bundle was reviewed. Caught here
-    it is a generation error naming the table and the key.
-    """
+    """Reject duplicate merge-source keys during generation."""
 
     seen: dict[tuple, int] = {}
     for row in rows:
@@ -597,8 +480,8 @@ def _check_unique_keys(table: Table, rows: Sequence[Row]) -> None:
             ", ".join(str(part) for part in key) for key in duplicated[:3]
         )
         raise ValueError(
-            f"{table.qualified}: {len(duplicated)} duplicated key(s) in the projected "
-            f"rows ({shown}). A merge source must hold one row per key"
+            f"{table.qualified}: projected rows contain {len(duplicated)} duplicate "
+            f"key(s) ({shown}); each merge source key must be unique"
         )
 
 
@@ -607,11 +490,7 @@ def _check_scope(
     rows: Iterable[Row],
     scope: InstallationScope | InstallationScopes,
 ) -> None:
-    """Refuse to render a statement over rows from another installation.
-
-    The consequence is invisible: a stray row would be merged into the wrong
-    installation's scope and read as truth.
-    """
+    """Reject rows outside the statement's installation scope."""
 
     stray = [row for row in rows if not scope.owns(row)]
     if stray:

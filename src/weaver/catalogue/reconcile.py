@@ -31,7 +31,7 @@ from .tables import (
 
 @dataclass(frozen=True)
 class TableChanges:
-    """What reconciling one table would do. Reporting only, per the module note."""
+    """Counts one table's projected changes without executing them."""
 
     table: CatalogueTable
     inserted: int = 0
@@ -56,20 +56,12 @@ class TableChanges:
 
 @dataclass(frozen=True)
 class TableReconciliation:
-    """One table's scoped statements, in the order they must run.
-
-    The unconditional form. See :func:`reconcile`. Ordinary build uses
-    :class:`TablePublication`, which emits nothing for a table with nothing to
-    do.
-    """
+    """One table's unconditional delete-before-merge statements."""
 
     table: CatalogueTable
-    #: None only for Installation, whose key is the installation scope: there is
-    #: at most one such row, so there is never an obsolete one to remove and the
-    #: merge alone keeps it current.
+    #: None only for Installation, whose key is the installation scope.
     delete: str | None
-    #: None when the projection has no rows for this table. There is nothing to
-    #: merge, and an empty statement is worse than no action.
+    #: None when the projection has no rows for this table.
     merge: str | None
 
     @property
@@ -83,12 +75,10 @@ class TableReconciliation:
 
 @dataclass(frozen=True)
 class CatalogueReconciliation:
-    """One installation's catalogue statements, unconditionally.
+    """One installation's unconditional catalogue statements.
 
-    The grouping is the contract: dictionaries in any order among themselves,
-    then Installation, then Registry. A caller turns each group into a barrier.
-
-    Not what a build produces. See :class:`CataloguePublication`.
+    Groups are execution barriers: dictionaries, then Installation, then
+    Registry certification. Builds use :class:`CataloguePublication` instead.
     """
 
     scope: InstallationScope
@@ -106,8 +96,6 @@ class CatalogueReconciliation:
 
     @property
     def statements(self) -> tuple[str, ...]:
-        """Every statement, in execution order. Registry's are last."""
-
         return tuple(
             statement
             for _description, group in self.groups
@@ -117,16 +105,10 @@ class CatalogueReconciliation:
 
 
 def reconcile(projection: CatalogueProjection) -> CatalogueReconciliation:
-    """Authoritative scoped replacement of one installation, from its projection.
+    """Render authoritative scoped replacement from desired state alone.
 
-    Not the build path: a build publishes a difference (:func:`publish`), so an
-    unchanged table produces no statement. This renders one installation from
-    the desired side alone. The delete keeps exactly the keys the projection
-    claims and the merge is idempotent, so the pair is correct against any prior
-    state, including one nobody read.
-
-    That is what an explicit repair mode needs and what ordinary build must not
-    have, so the two are kept apart by name rather than by a flag.
+    Delete-then-merge is correct without reading prior state. This is for repair;
+    ordinary builds publish only differences through :func:`publish`.
     """
 
     scope = projection.scope
@@ -155,12 +137,9 @@ def _for_table(
     )
 
 
-# --- what it would change ----------------------------------------------------
-
-
 @dataclass(frozen=True)
 class TablePublication:
-    """One physical catalogue table's statements, aggregated across scopes."""
+    """One catalogue table's changed statements across installation scopes."""
 
     table: CatalogueTable
     #: Present only when a scope holds rows absent from the desired state.
@@ -184,10 +163,9 @@ class TablePublication:
 
 @dataclass(frozen=True)
 class CataloguePublication:
-    """Every catalogue statement one build appends, grouped by when it may run.
+    """Changed catalogue statements grouped by execution barrier.
 
-    The grouping is the contract: dictionaries in any order among themselves,
-    then Installation, then Registry.
+    Dictionaries run first, then Installation, then Registry certification.
     """
 
     dictionaries: tuple[TablePublication, ...]
@@ -217,12 +195,7 @@ class CataloguePublication:
 
 
 def publish(current, desired) -> CataloguePublication:
-    """The statements that move ``current`` to ``desired``, table by table.
-
-    Read it as persisted → certified. Only the items ``desired`` names are
-    considered, so a scoped build cannot touch an installation it was not
-    pointed at.
-    """
+    """Move named installation scopes from persisted to certified state."""
 
     return CataloguePublication(
         dictionaries=tuple(
@@ -235,12 +208,10 @@ def publish(current, desired) -> CataloguePublication:
 
 
 def _publish_table(table: CatalogueTable, *, current, desired) -> TablePublication:
-    """One table's delete and merge, across every scope that needs them.
+    """Render one table's deletes and merges across changed scopes.
 
-    The two take different row sets, and conflating them loses data. The merge
-    carries only new or changed rows. The delete is given every desired row for
-    the scopes it covers, because it works by keeping what is claimed: handed
-    only the changed rows, it would delete every unchanged one.
+    Merges receive changed rows; deletes receive every desired row in their
+    scopes so unchanged rows remain in the keep relation.
     """
 
     changed: list[Row] = []
@@ -300,11 +271,7 @@ def _keyed(table: CatalogueTable, rows: Iterable[Row]) -> dict[tuple, Row]:
 def compare(
     table: CatalogueTable, desired: Iterable[Row], existing: Iterable[Row]
 ) -> TableChanges:
-    """How one table's rows differ from what is there, for review and not DML.
-
-    A row is unchanged when every non-key column matches, which is what the
-    merge's ``MATCHED`` guard tests, so a reported no-op is a real one.
-    """
+    """Compare rows using the same non-key columns as the merge guard."""
 
     wanted = _keyed(table, desired)
     found = _keyed(table, existing)
@@ -327,28 +294,16 @@ def compare(
     )
 
 
-# --- the explicit prune scopes -----------------------------------------------
-
-
 def prune_installation(
     scope: InstallationScope | InstallationScopes,
 ) -> tuple[str, ...]:
-    """Remove whole installations, in dependency-safe order.
+    """Remove explicitly decommissioned installations in dependency-safe order.
 
-    What decommissioning a target does, and never what a build does: a build
-    that did not include a target type has no opinion about it. Nothing in the
-    build path may reach this.
-
-    Registry goes first, so no row is left certified while what described it is
-    gone.
-
-    Several installations go in one statement per table, because a statement is
-    a round trip to the Warehouse whether it removes one row or a thousand.
+    Registry goes first to remove certification; Installation goes last.
+    Multiple scopes share one statement per table.
     """
 
-    # Uncertify first, remove dependent dictionaries next, and remove the
-    # installation root last. A Fabric Warehouse declares foreign keys without
-    # enforcing them, so this is the explicit ordered equivalent of
-    # ON DELETE CASCADE.
+    # Fabric Warehouse does not enforce its declared foreign keys, so ordering
+    # provides the equivalent of ON DELETE CASCADE.
     ordered = (REGISTRY, *reversed(DICTIONARY_TABLES), INSTALLATION)
     return tuple(render_delete_scope(table, scope=scope) for table in ordered)

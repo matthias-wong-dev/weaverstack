@@ -121,7 +121,7 @@ def test_a_payload_version_this_weaver_cannot_read_is_refused():
 def test_an_invalidation_names_a_table():
     """A row set with no table is not a decision about anything."""
 
-    with pytest.raises(BuildError, match="names a table"):
+    with pytest.raises(BuildError, match="must name a table"):
         RuntimeStateInvalidation(table="", rows=(CUSTOMER,))
 
 

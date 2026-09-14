@@ -156,7 +156,7 @@ def test_history_cannot_be_merged_into():
 
     writer = CatalogueWriter(lambda table: _flusher(table, Recorder()))
 
-    with pytest.raises(FlushError, match="is history"):
+    with pytest.raises(FlushError, match="history table"):
         writer.update(APPENDED, {"log_sk": "a"})
 
 

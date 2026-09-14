@@ -1,12 +1,7 @@
-"""Asynchronous batched writes to a Warehouse table.
+"""Batch asynchronous writes to one Warehouse table.
 
-Rows are queued to one worker. Session close is the durability barrier.
-
-Two ways to write, and a row carries which it is. ``submit`` appends, for
-evidence a run accumulates. ``update`` upserts by the table's key, for state a
-run maintains, ``_.Bookmark``, where the row for an object is the same row
-every time. The two never share a statement, because one is an INSERT and the
-other a MERGE.
+``submit`` appends evidence; ``update`` upserts current state by key. They use
+separate INSERT and MERGE batches. Session close is the durability barrier.
 """
 
 from __future__ import annotations
@@ -24,13 +19,10 @@ from .render import render_keyed_merge
 from .tables import TIMESTAMP, RuntimeTable
 from .tsql import identifier, literal, qualified_name, typed_literal
 
-#: How many rows one INSERT carries. Large enough that a busy run writes a
-#: handful of statements rather than hundreds; small enough to stay well inside
-#: what a Warehouse accepts in one batch.
+# Keep INSERT batches within Warehouse limits without frequent round trips.
 BATCH_ROWS = 50
 
-#: How long ``flush`` and ``close`` wait for the worker before giving up. A
-#: bounded wait, so a wedged connection cannot hang a run that has finished.
+# A wedged connection must not hang a completed run indefinitely.
 DRAIN_TIMEOUT = 60.0
 
 
@@ -40,8 +32,6 @@ class FlushError(WeaverError):
 
 @dataclass(frozen=True)
 class FlusherKey:
-    """Identity of one Warehouse write stream."""
-
     workspace: str
     warehouse: str
     schema: str
@@ -49,11 +39,7 @@ class FlusherKey:
 
 
 class WarehouseFlusher:
-    """Queues rows for one table and writes them on a worker thread.
-
-    One thread and one connection per flusher, never per row. ``submit`` costs
-    a queue put; everything else happens behind it.
-    """
+    """Queue one table's rows for a single worker and connection."""
 
     def __init__(
         self,
@@ -81,13 +67,10 @@ class WarehouseFlusher:
     # --- the contract ---------------------------------------------------------
 
     def submit(self, row: Mapping[str, Any], *, keyed: bool = False) -> None:
-        """Accept one row for writing. Does not wait for the Warehouse.
+        """Queue a row without waiting for the Warehouse.
 
-        Accepting and queueing happen under one lock, so ``close`` cannot put
-        the stop sentinel between them: the worker would stop before reaching
-        the row, and close would return reporting nothing wrong. Queueing costs
-        nothing to hold the lock for, the queue is unbounded and the worker
-        never blocks a put.
+        Acceptance and queueing share a lock so ``close`` cannot place its stop
+        sentinel before an accepted row.
         """
 
         with self._lock:
@@ -103,21 +86,15 @@ class WarehouseFlusher:
             self._queue.put(_QueuedRow(row, context, keyed=keyed))
 
     def update(self, row: Mapping[str, Any]) -> None:
-        """Accept one keyed row, to be merged rather than appended.
-
-        For state whose row already exists as often as not. The write is an
-        upsert, so a row nothing has written yet is inserted rather than lost.
-        """
-
         if not getattr(self.table, "is_current_state", bool(self.table.key)):
             raise FlushError(
-                f"{self.table.qualified} is history, so a row cannot be merged "
-                "into it, append it with submit()"
+                f"Cannot merge a row into history table {self.table.qualified}; "
+                "append it with submit()"
             )
         self.submit(row, keyed=True)
 
     def flush(self, *, timeout: float = DRAIN_TIMEOUT) -> None:
-        """Wait for every accepted row to be written, and surface any failure."""
+        """Wait for accepted rows and surface any write failure."""
 
         if self._worker is None:
             self._raise_any_failure()
@@ -126,12 +103,6 @@ class WarehouseFlusher:
         self._raise_any_failure()
 
     def _wait_for_empty(self, timeout: float) -> None:
-        """Block until the worker has written everything accepted so far.
-
-        Bounded, unlike ``Queue.join``: a wedged connection must not hang a run
-        that has otherwise finished.
-        """
-
         deadline = time.monotonic() + timeout
         while self._pending > 0:
             if time.monotonic() >= deadline:
@@ -142,15 +113,14 @@ class WarehouseFlusher:
             time.sleep(0.01)
 
     def close(self, *, timeout: float = DRAIN_TIMEOUT) -> None:
-        """Stop accepting, write what was accepted, and stop the worker."""
+        """Stop after writing every accepted row."""
 
         with self._lock:
             was_accepting = self._accepting
             self._accepting = False
             worker = self._worker
-            # Under the lock, so the sentinel is behind every row already
-            # accepted. Joining is not: the worker settles a batch under the
-            # same lock, and waiting for it while holding one would deadlock.
+            # Queue the sentinel under the lock, but join outside it because the
+            # worker acquires the same lock when settling a batch.
             if worker is not None and was_accepting:
                 self._queue.put(_STOP)
         if worker is None:
@@ -168,12 +138,7 @@ class WarehouseFlusher:
     # --- the worker -----------------------------------------------------------
 
     def _ensure_worker(self) -> None:
-        """Start the thread on the first row, never when the flusher is made.
-
-        Opening a Session must not start a worker or a connection: most
-        Sessions never log anything.
-        """
-
+        """Start the worker lazily so idle Sessions open no connection."""
         if self._worker is not None:
             return
         self._worker = threading.Thread(
@@ -184,11 +149,7 @@ class WarehouseFlusher:
         self._worker.start()
 
     def _drain(self) -> None:
-        """Accumulate into a batch, and settle a row only once it is written.
-
-        ``_pending`` drops after the write, never before, so a caller that
-        waited on it has the rows in the Warehouse rather than in this queue.
-        """
+        """Settle rows only after their batch has been written."""
 
         batch: list[dict] = []
         context = None
@@ -200,8 +161,7 @@ class WarehouseFlusher:
                 self._settle(len(batch))
                 return
             row, item_context = item, item.context
-            # A batch is one statement, so a row that would need the other kind
-            # of statement closes the one being accumulated.
+            # One batch cannot mix statement kinds or reporting contexts.
             if batch and (item_context != context or item.keyed != keyed):
                 self._write(batch, context, keyed=keyed)
                 self._settle(len(batch))
@@ -223,12 +183,7 @@ class WarehouseFlusher:
             self._pending -= count
 
     def _write(self, rows: list[dict], context=None, *, keyed: bool = False) -> None:
-        """One statement for a batch, in the order the rows were submitted.
-
-        A failure is remembered and the rows are dropped rather than retried:
-        retrying a batch whose statement the engine refused would fail the same
-        way for as long as the run lasted.
-        """
+        """Write one ordered batch, recording failure without retrying it."""
 
         if not rows:
             return
@@ -247,23 +202,10 @@ class WarehouseFlusher:
                 self._failure = exc
 
     def _merge(self, rows: list[dict]) -> str | None:
-        """One MERGE carrying the batch, keyed on the table's own key.
-
-        The audit trio is supplied by the renderer: an inserted row is dated
-        now, and a matched row's update datetime moves only when a value
-        actually changed.
-        """
-
         return render_keyed_merge(self.table, rows)
 
     def _insert(self, rows: list[dict]) -> str:
-        """One INSERT carrying the batch, audit columns supplied here.
-
-        The audit trio is physically not null on every table Weaver builds, so
-        an append supplies all three: the insert datetime is the row's own, and
-        the other two take the same live values an unmodified row carries
-        anywhere else in the catalogue.
-        """
+        """Render an INSERT with all three non-null audit values."""
 
         columns = [self.table.column(name) for name in self.table.column_names]
         names = ", ".join(
@@ -292,8 +234,6 @@ class WarehouseFlusher:
 
 
 def _audit_values(row: Mapping[str, Any]) -> str:
-    """Weaver's audit trio for one appended row, as rendered literals."""
-
     from ..declaration.metadata import AUDIT_LIVE_DELETE_DATETIME
 
     written = row.get("row_insert_datetime") or datetime.now(timezone.utc)
@@ -307,8 +247,6 @@ def _audit_values(row: Mapping[str, Any]) -> str:
 
 
 class _Stop:
-    """The sentinel that ends the worker loop."""
-
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return "<stop>"
 
@@ -317,8 +255,6 @@ _STOP = _Stop()
 
 
 class _QueuedRow(dict):
-    """A row carrying the reporting context and the statement it needs."""
-
     def __init__(self, row: Mapping[str, Any], context, *, keyed: bool = False) -> None:
         super().__init__(row)
         self.context = context
