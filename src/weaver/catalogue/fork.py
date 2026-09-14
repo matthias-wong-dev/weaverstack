@@ -1,9 +1,8 @@
-"""The statements that copy one catalogue's installed state into another.
+"""Copy one catalogue's installed state into another.
 
-Three rules decide what moves. History stays where it happened, so ``_.Log`` and
-``_.LoadStatistic`` are left. The destination's own ``Warehouse/_weaver`` rows
-are its build's, so the source's are excluded. ``_.Mirror`` moves only where the
-source has one, since nothing declares that table.
+History stays where it happened, so ``_.Log`` and ``_.LoadStatistic`` remain in
+the source. The destination keeps the ``Warehouse/_weaver`` rows from its own
+build. ``_.Mirror`` moves only when present because no document declares it.
 
 The copy is server-side: Fabric spells another Warehouse in the same workspace
 three-part, so each table moves in one statement.
@@ -30,23 +29,14 @@ from .tables import (
 )
 from .tsql import identifier, literal
 
-#: The declared catalogue tables a fork copies. Everything but history, which
-#: belongs to the estate whose runs produced it.
+#: Current installed state, excluding history owned by the source estate.
 FORKED_TABLES = PROJECTED_TABLES + CURRENT_STATE_TABLES
 
-#: What the three audit columns are physically, as every catalogue table
-#: carries them.
 _AUDIT_TYPE = "datetime2(6)"
 
 
 def source_relation(catalogue_name: str, table) -> str:
-    """One source catalogue table, three-part.
-
-    Three parts because the connection is open against the destination
-    Warehouse, and three-part is how a Fabric Warehouse reaches another item in
-    the same workspace. See :func:`weaver.build_bundle.shortcuts.view_statement`,
-    which spells a Warehouse's ``_`` surface views the same way.
-    """
+    """Name a same-workspace source table from the destination connection."""
 
     return ".".join(
         identifier(part) for part in (catalogue_name, CATALOGUE_SCHEMA, table.name)
@@ -54,16 +44,11 @@ def source_relation(catalogue_name: str, table) -> str:
 
 
 def local_relation(table) -> str:
-    """One table of this catalogue, as a statement running against it names it."""
-
     return f"{identifier(CATALOGUE_SCHEMA)}.{identifier(table.name)}"
 
 
 def create_statement(table) -> str:
-    """The table, created where this catalogue has none.
-
-    For ``_.Mirror`` alone, which no document declares and no build makes.
-    """
+    """Create ``_.Mirror`` when absent; no build document declares it."""
 
     definitions = ",\n    ".join(
         f"{identifier(table.public_name_of(name))} {_definition(table, name)}"
@@ -76,13 +61,7 @@ def create_statement(table) -> str:
 
 
 def _definition(table, name: str) -> str:
-    """One column as the Warehouse declares it: its type, and whether it is null.
-
-    The audit trio is not among a table's own columns, so its type comes from
-    the one every catalogue table carries. All three are written on every row,
-    so none has a valid null state.
-    """
-
+    # Audit columns are outside each table contract and are always written.
     if name in AUDIT_COLUMN_NAMES:
         return f"{_AUDIT_TYPE} not null"
     column = table.column(name)
@@ -90,13 +69,10 @@ def _definition(table, name: str) -> str:
 
 
 def copy_statement(table, *, source_catalogue: str) -> str:
-    """Copy one table's rows from ``source_catalogue`` into this one.
+    """Copy one table's rows from ``source_catalogue`` into this catalogue.
 
-    Columns are named rather than starred, so the statement says which value
-    lands where and does not depend on two catalogues declaring their columns in
-    one order. Every value is the source's, ``build_datetime`` included: a
-    forked Registry is the installed history this estate inherits, and when a
-    mirror physically established something is what ``_.Mirror`` records.
+    Named columns make the copy independent of declaration order. All values,
+    including ``build_datetime``, retain their source values.
     """
 
     columns = ", ".join(identifier(name) for name in table.public_columns)
@@ -109,12 +85,7 @@ def copy_statement(table, *, source_catalogue: str) -> str:
 
 
 def _excluding_builtin(table) -> str:
-    """Keep every row but the ones scoped to ``Warehouse/_weaver``.
-
-    Both scope columns are not null on every forked table, so a plain negated
-    conjunction is exact here and needs no null-safe form.
-    """
-
+    # Both scope columns are non-null, so the negated conjunction is exact.
     item_type = identifier(table.public_name_of(SCOPE_ITEM_TYPE))
     item_name = identifier(table.public_name_of(SCOPE_ITEM_NAME))
     return (
@@ -126,11 +97,7 @@ def _excluding_builtin(table) -> str:
 def fork_statements(
     *, source_catalogue: str, borrowed: bool = False
 ) -> tuple[str, ...]:
-    """Every statement that copies one catalogue's state into this one.
-
-    ``borrowed`` says the source holds a ``_.Mirror``. Set, the destination is
-    given one and its rows come across.
-    """
+    """Return the state-copy statements, including ``_.Mirror`` when present."""
 
     statements = [
         copy_statement(table, source_catalogue=source_catalogue)
@@ -143,29 +110,19 @@ def fork_statements(
 
 
 def copied_tables(*, borrowed: bool = False) -> tuple:
-    """What a fork copies, in the order it copies them.
-
-    ``_.Mirror`` is last, and only where the source has one.
-    """
-
+    """Return copied tables in order, with an existing ``_.Mirror`` last."""
     return FORKED_TABLES + (MIRROR,) if borrowed else FORKED_TABLES
 
 
 def forked_table_names(*, borrowed: bool = False) -> tuple[str, ...]:
-    """What a fork copies, by table name, for a caller reporting the work."""
-
     return tuple(table.name for table in copied_tables(borrowed=borrowed))
 
 
 def uncopied_table_names() -> tuple[str, ...]:
-    """What a fork leaves behind, by table name."""
-
     return tuple(table.name for table in HISTORY_TABLES)
 
 
 def _every_declared_table_is_accounted_for() -> bool:
-    """Whether the two halves cover the declared catalogue. Held by a test."""
-
     return {table.name for table in FORKED_TABLES} | {
         table.name for table in HISTORY_TABLES
     } == {table.name for table in CATALOGUE_TABLES}

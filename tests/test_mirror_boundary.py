@@ -199,7 +199,7 @@ def test_a_named_destination_outranks_the_configured_one(monkeypatch):
 def test_a_workspace_naming_neither_side_says_what_to_set(monkeypatch):
     _given(monkeypatch, Workspace(workspace=WORKSPACE))
 
-    with pytest.raises(CommandError, match="needs the catalogue to fork"):
+    with pytest.raises(CommandError, match="needs a source catalogue"):
         weaver.plan_mirror(no_item=True, session=_never())
 
 
@@ -226,7 +226,9 @@ def test_a_destination_in_another_workspace_is_refused(monkeypatch):
 
     _given(monkeypatch, _workspace())
 
-    with pytest.raises(CommandError, match="writes the destination catalogue"):
+    with pytest.raises(
+        CommandError, match="destination catalogue must be in workspace"
+    ):
         weaver.plan_mirror(
             no_item=True, catalogue="Production/Warehouse/Weaver_Dev", session=_never()
         )
