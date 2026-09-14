@@ -228,7 +228,7 @@ def _write_valid(tmp_path):
 def test_load_rejects_a_corrupt_payload(tmp_path):
     store, location = _write_valid(tmp_path)
     store.write(location.join(*VIEW_PATH.split("/")), b"tampered\n")
-    with pytest.raises(BuildError, match="hash mismatch"):
+    with pytest.raises(BuildError, match="does not match its checksum"):
         load_bundle(location, store=store)
 
 
@@ -303,7 +303,7 @@ def test_validate_rejects_duplicate_action_ids():
     )  # collides with the view id
     batch = BuildBatch(id="b-dup", target_id=TARGET.id, actions=(dup,))
     bad = replace(plan, sequences=plan.sequences + (BuildSequence(60, "d", (batch,)),))
-    with pytest.raises(BuildError, match="duplicate action id"):
+    with pytest.raises(BuildError, match="repeats installation action"):
         _validate(bad)
 
 
@@ -315,7 +315,7 @@ def test_validate_rejects_payload_executor_extension_mismatch():
     )  # spark_sql needs .spark.sql
     batch = BuildBatch(id="b-x", target_id=TARGET.id, actions=(bad_action,))
     bad = replace(plan, sequences=(replace(plan.sequences[1], batches=(batch,)),))
-    with pytest.raises(BuildError, match="extension"):
+    with pytest.raises(BuildError, match="must end in"):
         _validate(bad)
 
 
@@ -325,7 +325,7 @@ def test_validate_rejects_a_payload_on_a_payloadless_executor():
     bad_action = replace(_folder_action(), payload="payload/x/thing.spark.sql")
     batch = BuildBatch(id="b-x", target_id=TARGET.id, actions=(bad_action,))
     bad = replace(plan, sequences=(replace(plan.sequences[0], batches=(batch,)),))
-    with pytest.raises(BuildError, match="takes no payload"):
+    with pytest.raises(BuildError, match="unexpected file"):
         _validate(bad)
 
 
@@ -335,7 +335,7 @@ def test_validate_rejects_payload_outside_the_bundle():
     bad_action = replace(_view_action(), payload="../escape.spark.sql")
     batch = BuildBatch(id="b-x", target_id=TARGET.id, actions=(bad_action,))
     bad = replace(plan, sequences=(replace(plan.sequences[1], batches=(batch,)),))
-    with pytest.raises(BuildError, match="traverse|under"):
+    with pytest.raises(BuildError, match="invalid"):
         _validate(bad)
 
 
@@ -345,7 +345,7 @@ def test_validate_rejects_an_action_targeting_an_omitted_node():
     bad_action = replace(_folder_action(), resource_node_id="sql:Reporting.Report")
     batch = BuildBatch(id="b-x", target_id=TARGET.id, actions=(bad_action,))
     bad = replace(plan, sequences=(replace(plan.sequences[0], batches=(batch,)),))
-    with pytest.raises(BuildError, match="omitted node"):
+    with pytest.raises(BuildError, match="omitted object"):
         _validate(bad)
 
 

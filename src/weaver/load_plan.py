@@ -121,7 +121,10 @@ class LoadDag:
         try:
             return Graph((node.node_id for node in self.nodes), self.edges)
         except GraphError as exc:
-            raise LoadError(f"the load graph contains a cycle: {exc}") from None
+            raise LoadError(
+                f"Installed load dependencies contain a cycle: {exc}. Remove one "
+                "dependency from the cycle and rebuild."
+            ) from None
 
     def upstream(self, node_id: str) -> frozenset[str]:
         return frozenset(self.topology.upstream_of(node_id))
@@ -344,8 +347,8 @@ class _Planner:
             self.messages.append(
                 info(
                     DEPENDENCY_EXTERNAL,
-                    f"{installed.identity} reads {reference}, which names a "
-                    "physical object directly and is not part of the load graph",
+                    f"{installed.identity} reads physical object {reference} directly. "
+                    "Weaver will not use this reference to order loads.",
                     source="load_plan",
                 )
             )

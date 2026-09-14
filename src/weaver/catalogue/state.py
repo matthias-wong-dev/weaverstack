@@ -643,21 +643,28 @@ def _registered_documents(
             object_type = str(row.get("object_type") or "")
             if object_type not in OBJECT_TYPES:
                 expected = ", ".join(OBJECT_TYPES)
+                identity = f"{item}/{row.get('schema_name')}.{row.get('object_name')}"
                 raise BuildError(
-                    f"Registry row for {item}/{row.get('schema_name')}."
-                    f"{row.get('object_name')} has unsupported object_type "
-                    f"{object_type!r}; expected one of {expected}"
+                    f"The Weaver catalogue has unsupported object type "
+                    f"{object_type!r} for {identity}; expected one of {expected}. "
+                    "Use the Weaver version that created this catalogue or repair "
+                    "the catalogue before building."
                 )
             identity = _row_identity(item, row, object_type)
             signature = str(row.get("signature") or "")
             if not signature:
-                raise BuildError(f"Registry row for {identity} has no signature")
+                raise BuildError(
+                    f"The Weaver catalogue is missing build state for {identity}. "
+                    f"Build {identity.item} before retrying."
+                )
             object_role = str(row.get("object_role") or "")
             if object_role not in OBJECT_ROLES:
                 expected = ", ".join(OBJECT_ROLES)
                 raise BuildError(
-                    f"Registry row for {identity} has unsupported object_role "
-                    f"{object_role!r}; expected one of {expected}"
+                    f"The Weaver catalogue has unsupported object role "
+                    f"{object_role!r} for {identity}; expected one of {expected}. "
+                    "Use the Weaver version that created this catalogue or repair "
+                    "the catalogue before building."
                 )
             document = RegisteredDocument(
                 identity,
@@ -668,7 +675,10 @@ def _registered_documents(
             )
             prior = registered.get(identity)
             if prior is not None and prior != document:
-                raise BuildError(f"Registry contains conflicting rows for {identity}")
+                raise BuildError(
+                    f"The Weaver catalogue has conflicting entries for {identity}. "
+                    "Repair the catalogue before building."
+                )
             registered[identity] = document
     return MappingProxyType(registered)
 
@@ -682,10 +692,11 @@ def _installed_mirrors(
             physical_type = str(row.get("physical_type") or "")
             if physical_type not in OBJECT_TYPES:
                 expected = ", ".join(OBJECT_TYPES)
+                identity = f"{item}/{row.get('schema_name')}.{row.get('object_name')}"
                 raise BuildError(
-                    f"Mirror row for {item}/{row.get('schema_name')}."
-                    f"{row.get('object_name')} has unsupported physical_type "
-                    f"{physical_type!r}; expected one of {expected}"
+                    f"The mirrored catalogue has unsupported physical type "
+                    f"{physical_type!r} for {identity}; expected one of {expected}. "
+                    "Recreate the mirror with this Weaver version."
                 )
             identity = _row_identity(item, row, physical_type)
             mirrors[identity] = InstalledMirror(
@@ -837,8 +848,8 @@ def read_installed_catalogue(
             item = _item_of(row)
             if not item.item_type or not item.item_name:
                 raise BuildError(
-                    f"{table.qualified} holds a row with no installation scope; "
-                    "every catalogue row names the logical item it belongs to"
+                    "The Weaver catalogue contains an entry that is not assigned "
+                    "to an item. Repair the catalogue before retrying."
                 )
             rows.setdefault(item, {}).setdefault(table.name, []).append(row)
     return Catalogue(

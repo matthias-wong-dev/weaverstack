@@ -63,10 +63,10 @@ def generate_item_build_bundle(
     shortcut_sources: Mapping[str, object] | None = None,
 ) -> BuildBundle:
     if catalogue_binding is None:
-        raise BuildError("a catalogue Warehouse binding is required")
+        raise BuildError("Select a catalogue Warehouse before building")
     by_item = bindings.by_item
     if not by_item:
-        raise BuildError("at least one Weaver item must be bound")
+        raise BuildError("Select at least one Weaver item to build")
     known = {item.identity for item in repository.items}
     unknown = set(by_item) - known
     if unknown:

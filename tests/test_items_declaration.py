@@ -181,7 +181,7 @@ def test_a_run_item_carrying_a_physical_half_is_refused(what):
     from weaver.errors import CommandError
     from weaver.operations.items import parse_run_item
 
-    with pytest.raises(CommandError, match="catalogue supplies its physical target"):
+    with pytest.raises(CommandError, match="reads its target from the catalogue"):
         parse_run_item("Lakehouse/Landing=Lakehouse/Anything", what=what)
 
 

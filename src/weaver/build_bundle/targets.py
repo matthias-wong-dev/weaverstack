@@ -184,8 +184,8 @@ class ItemBinding:
     def __post_init__(self) -> None:
         if self.item.item_type != self.target.physical_kind:
             raise BuildError(
-                f"{self.item} requires a {self.item.item_type} binding, "
-                f"not a {self.target.physical_kind} one"
+                f"{self.item} must target a {self.item.item_type}, not a "
+                f"{self.target.physical_kind}. Update its targets: entry."
             )
 
     def to_bound_target(self) -> BoundTarget:
@@ -217,7 +217,9 @@ class ItemBindings:
         physical: set[tuple[str, str]] = set()
         for binding in self.entries:
             if binding.item in seen:
-                raise BuildError(f"item is bound more than once: {binding.item}")
+                raise BuildError(
+                    f"{binding.item} is selected more than once. Remove the duplicate."
+                )
             seen.add(binding.item)
             if binding.item == BUILTIN_ITEM:
                 continue
@@ -246,8 +248,8 @@ def effective_item_bindings(
 
     if not workspace_name:
         raise BuildError(
-            "the catalogue binding requires the workspace display name used in "
-            "four-part naming"
+            "The catalogue Warehouse cannot be named because the Workspace name is "
+            "missing. Set the Workspace name and rebuild."
         )
 
     from ..catalogue.builtin import BUILTIN_ITEM
@@ -255,7 +257,8 @@ def effective_item_bindings(
     builtin = BUILTIN_ITEM
     if builtin in bindings.by_item:
         raise BuildError(
-            "Warehouse/_weaver is bound implicitly and must not be selected"
+            "The Weaver catalogue item is selected automatically. Remove it from "
+            "the selected items."
         )
     return ItemBindings(
         bindings.entries

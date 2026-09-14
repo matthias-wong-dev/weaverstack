@@ -291,7 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     shell.add_argument(
         "--timings",
         action="store_true",
-        help="Report transport timings when the session ends.",
+        help="Report Fabric access timings when the session ends.",
     )
     shell.set_defaults(handler=handle_session)
 
@@ -308,7 +308,7 @@ def build_parser() -> argparse.ArgumentParser:
     workflow.add_argument(
         "--timings",
         action="store_true",
-        help="Report transport timings after the workflow.",
+        help="Report Fabric access timings after the workflow.",
     )
     workflow.add_argument(
         "--yes",

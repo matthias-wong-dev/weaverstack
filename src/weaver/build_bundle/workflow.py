@@ -143,9 +143,9 @@ def validate_build_request(
     catalogue_binding: WarehouseBinding,
 ) -> tuple[WeaverItemId, ...]:
     if catalogue_binding is None:
-        raise BuildError("every build needs an explicit catalogue Warehouse")
+        raise BuildError("Select a catalogue Warehouse before building")
     if not bindings.entries:
-        raise BuildError("at least one Weaver item must be bound")
+        raise BuildError("Select at least one Weaver item to build")
     known = {item.identity for item in repository.items}
     unknown = set(bindings.by_item) - known
     if unknown:
@@ -163,9 +163,11 @@ def validate_build_request(
 
     binding = bindings.by_item.get(BUILTIN_ITEM)
     if binding is not None and binding.target.kind != WAREHOUSE_TARGET:
-        raise BuildError("Warehouse/_weaver requires a Warehouse binding")
+        raise BuildError("The Weaver catalogue must target a Warehouse")
     if binding is not None and binding.target.item.name != catalogue_binding.item.name:
-        raise BuildError("Warehouse/_weaver must be bound to the catalogue Warehouse")
+        raise BuildError(
+            "The Weaver catalogue must use the selected catalogue Warehouse"
+        )
     return catalogue_items_for_build(repository, bindings)
 
 
@@ -567,7 +569,8 @@ def read_target_inventories(
                 if sql is None:
                     if workspace is None:
                         raise BuildError(
-                            f"reading Warehouse inventory for {binding.item} needs a Workspace"
+                            f"Cannot inspect the Warehouse target for {binding.item} "
+                            "without a Workspace. Pass the Workspace and retry."
                         )
                     from ..targets import WarehouseTarget
 

@@ -314,11 +314,12 @@ def _raise_for_failure(report: LoadRunReport) -> None:
         first.result.error_message if first.result is not None else None,
     )
     blocked = sum(1 for node in report.nodes if node.status == BLOCKED)
+    subject = first.logical_id or first.physical_target
     raise LoadError(
-        f"{first.node_id} failed"
+        f"Load failed for {subject}"
         + (f": {detail}" if detail else "")
-        + (f"; {len(failed)} node(s) failed" if len(failed) > 1 else "")
-        + (f", {blocked} blocked" if blocked else ""),
+        + (f"; {len(failed)} loads failed" if len(failed) > 1 else "")
+        + (f", {blocked} loads blocked" if blocked else ""),
         result=first.result,
         report=report,
         workflow_id=report.workflow_id,

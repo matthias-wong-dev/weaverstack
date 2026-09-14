@@ -35,8 +35,8 @@ def parse_run_item(text: object, *, what: str) -> WeaverItemId:
     if "=" in written:
         item = written.partition("=")[0].strip() or f"{LAKEHOUSE}/Name"
         raise CommandError(
-            f"{what} accepts installed item names without target bindings. "
-            f"Write {item}; the Weaver catalogue supplies its physical target."
+            f"{what} accepts installed item names only. Write {item}; Weaver reads "
+            "its target from the catalogue."
         )
     try:
         return WeaverItemId.parse(written)

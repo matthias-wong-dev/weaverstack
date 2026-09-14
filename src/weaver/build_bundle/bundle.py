@@ -224,17 +224,23 @@ def validate_plan_structure(plan: BuildPlan) -> None:
     for node in plan.omitted_nodes:
         if node.reason not in OMISSION_REASONS:
             raise BuildError(
-                f"omitted node {node.node_id!r} has unknown reason {node.reason!r}"
+                f"The build bundle is invalid: omitted item {node.node_id!r} has "
+                f"unsupported reason {node.reason!r}. Regenerate the bundle with "
+                "this Weaver version."
             )
     omitted_ids = {node.node_id for node in plan.omitted_nodes}
 
     target_ids = plan.target_ids
     if len(target_ids) != len(plan.targets):
-        raise BuildError("duplicate target id in plan")
+        raise BuildError(
+            "The build bundle contains duplicate targets. Regenerate it with this "
+            "Weaver version."
+        )
     for target in plan.targets:
         if (target.logical_item_type is None) != (target.logical_item_name is None):
             raise BuildError(
-                f"target {target.id!r} carries an incomplete logical item identity"
+                f"The build bundle does not completely identify the Weaver item for "
+                f"target {target.id!r}. Regenerate it with this Weaver version."
             )
         if target.logical_item_type is not None:
             expected = {
@@ -243,8 +249,9 @@ def validate_plan_structure(plan: BuildPlan) -> None:
             }.get(target.logical_item_type)
             if expected != target.kind:
                 raise BuildError(
-                    f"target {target.id!r} binds logical {target.logical_item_type} "
-                    f"to physical kind {target.kind!r}"
+                    f"The build bundle sends a {target.logical_item_type} item to "
+                    f"incompatible target {target.id!r} of type {target.kind!r}. "
+                    "Regenerate it with this Weaver version."
                 )
 
     seen_numbers: list[int] = []
@@ -255,17 +262,28 @@ def validate_plan_structure(plan: BuildPlan) -> None:
         seen_numbers.append(sequence.number)
         for batch in sequence.batches:
             if not batch.target_id:
-                raise BuildError(f"batch {batch.id!r} has no target")
+                raise BuildError(
+                    f"The build bundle has an installation stage {batch.id!r} with "
+                    "no target. Regenerate it with this Weaver version."
+                )
             if batch.target_id not in target_ids:
                 raise BuildError(
-                    f"batch {batch.id!r} names unknown target {batch.target_id!r}"
+                    f"The build bundle names unknown target {batch.target_id!r} in "
+                    f"installation stage {batch.id!r}. Regenerate it with this "
+                    "Weaver version."
                 )
             if batch.id in batch_ids:
-                raise BuildError(f"duplicate batch id {batch.id!r}")
+                raise BuildError(
+                    f"The build bundle repeats installation stage {batch.id!r}. "
+                    "Regenerate it with this Weaver version."
+                )
             batch_ids.add(batch.id)
             for action in batch.actions:
                 if action.id in action_ids:
-                    raise BuildError(f"duplicate action id {action.id!r}")
+                    raise BuildError(
+                        f"The build bundle repeats installation action {action.id!r}. "
+                        "Regenerate it with this Weaver version."
+                    )
                 action_ids.add(action.id)
                 _validate_action_shape(action, omitted_ids)
 
@@ -273,44 +291,52 @@ def validate_plan_structure(plan: BuildPlan) -> None:
         set(seen_numbers)
     ):
         raise BuildError(
-            f"sequence numbers must be unique and ascending, got {seen_numbers}"
+            f"The build bundle's installation stages are not uniquely ordered: "
+            f"{seen_numbers}. Regenerate it with this Weaver version."
         )
 
 
 def _validate_action_shape(action, omitted_ids) -> None:
     if action.executor not in VALID_EXECUTORS:
         raise BuildError(
-            f"action {action.id!r} uses unsupported executor {action.executor!r}"
+            f"The build bundle uses unsupported installation method "
+            f"{action.executor!r} for action {action.id!r}. Regenerate it with this "
+            "Weaver version."
         )
     if action.resource_node_id is not None and action.resource_node_id in omitted_ids:
         raise BuildError(
-            f"action {action.id!r} targets omitted node {action.resource_node_id!r}"
+            f"The build bundle tries to install omitted object "
+            f"{action.resource_node_id!r}. Regenerate it with this Weaver version."
         )
 
     if action.payload is None:
         if action.payload_sha256 is not None:
             raise BuildError(
-                f"action {action.id!r} has no payload but carries a payload hash"
+                f"The build bundle has a checksum but no installation file for "
+                f"action {action.id!r}. Regenerate it with this Weaver version."
             )
         if (
             action.executor not in _PAYLOADLESS_EXECUTORS
             and action.kind not in _PAYLOADLESS_KINDS
         ):
             raise BuildError(
-                f"action {action.id!r} uses executor {action.executor!r}, which needs a payload"
+                f"The build bundle has no installation file for action {action.id!r}. "
+                "Regenerate it with this Weaver version."
             )
         return
 
     if action.executor in _PAYLOADLESS_EXECUTORS or action.kind in _PAYLOADLESS_KINDS:
         raise BuildError(
-            f"action {action.id!r} is a {action.kind!r}, which takes no payload"
+            f"The build bundle gives installation action {action.id!r} an unexpected "
+            "file. Regenerate it with this Weaver version."
         )
     _check_payload_path(action.payload)
     extension = _EXECUTOR_EXTENSION[action.executor]
     if not action.payload.endswith(extension):
         raise BuildError(
-            f"action {action.id!r} payload {action.payload!r} does not match "
-            f"executor {action.executor!r} extension {extension!r}"
+            f"The build bundle gives action {action.id!r} installation file "
+            f"{action.payload!r}; it must end in {extension!r}. Regenerate the "
+            "bundle with this Weaver version."
         )
 
 
@@ -321,25 +347,36 @@ def _validate_payload_integrity(location, plan: BuildPlan, store: Store) -> None
         payload_location = location.join(*action.payload.split("/"))
         if not store.exists(payload_location):
             raise BuildError(
-                f"action {action.id!r} payload is missing: {action.payload!r}"
+                f"The build bundle is missing installation file {action.payload!r} "
+                f"for action {action.id!r}. Regenerate it with this Weaver version."
             )
         digest = hashlib.sha256(store.read(payload_location)).hexdigest()
         if digest != action.payload_sha256:
             raise BuildError(
-                f"action {action.id!r} payload hash mismatch for {action.payload!r} "
-                f"(manifest {action.payload_sha256}, file {digest})"
+                f"Installation file {action.payload!r} in the build bundle does not "
+                f"match its checksum for action {action.id!r}. Regenerate the bundle "
+                "with this Weaver version."
             )
 
 
 def _check_payload_path(payload: str) -> None:
     _check_relative(payload, what="payload path")
     if not payload.startswith(PAYLOAD_DIR + "/"):
-        raise BuildError(f"payload {payload!r} must live under {PAYLOAD_DIR!r}/")
+        raise BuildError(
+            f"Build bundle file {payload!r} is outside {PAYLOAD_DIR!r}/. Regenerate "
+            "the bundle with this Weaver version."
+        )
 
 
 def _check_relative(path: str, *, what: str) -> None:
     if path.startswith("/") or ":" in path:
-        raise BuildError(f"{what} must be relative and stay in the bundle: {path!r}")
+        raise BuildError(
+            f"Build bundle {what} {path!r} is not relative. Regenerate the bundle "
+            "with this Weaver version."
+        )
     parts = path.split("/")
     if any(part in ("", "..", ".") for part in parts):
-        raise BuildError(f"{what} must not be empty or traverse: {path!r}")
+        raise BuildError(
+            f"Build bundle {what} {path!r} is invalid. Regenerate the bundle with "
+            "this Weaver version."
+        )
