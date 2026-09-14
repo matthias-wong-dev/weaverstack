@@ -1,8 +1,4 @@
-"""Dispatch an installed runtime primitive through Session capabilities.
-
-Runner controls scheduling and Session controls engine access. This module maps
-the installed primitive reference to the appropriate Session operation.
-"""
+"""Dispatch installed runtime primitives through a Session."""
 
 from __future__ import annotations
 
@@ -30,26 +26,20 @@ def dispatch_primitive(
     collect=False,
     publication=None,
 ):
-    """Run one installed primitive and return what it reported.
+    """Dispatch one installed primitive.
 
-    ``open_runtime`` is called only by branches that import a deployed module.
-    Warehouse-only runs therefore do not open a Spark runtime.
-
-    ``reload`` reaches the two branches that load an object, where each engine
-    clears the target before running the authored source. Only a table arrives
-    here with it set; :func:`weaver.operations.load.run_load` refuses the rest.
+    The runtime scope opens only for deployed Python modules. ``reload`` is
+    passed only to table loads; planning accepts it for no other work.
     """
 
     if session is None:
         raise RunError(
-            f"{node.node_id} needs a Session to reach {node.physical_target}; "
-            "a run with no Session must be given a dispatch of its own"
+            f"Cannot run {node.node_id} against {node.physical_target} without a "
+            "Session. Provide a Session or a custom dispatch."
         )
 
     kind = node.primitive_kind
     if getattr(node, "installed", None) is not None:
-        # A validation reads the estate and reports a judgement about it. The
-        # Runner treats it as any other node; only the engine differs.
         return _validation(node, session, workspace, open_runtime, collect)
     if kind == WAREHOUSE_PROCEDURE:
         return _warehouse_procedure(
@@ -63,19 +53,10 @@ def dispatch_primitive(
         return _endpoint_refresh(node, session, workspace)
     if kind == ONELAKE_PUBLICATION:
         return _onelake_publication(node, session, workspace, publication)
-    raise RunError(f"{node.node_id} names unknown primitive kind {kind!r}")
+    raise RunError(f"Cannot run {node.node_id}: primitive kind {kind!r} is unsupported")
 
 
 def _validation(node, session, workspace, open_runtime, collect: bool):
-    """One installed Test or Assumption, run where it is installed.
-
-    Delegated rather than reimplemented: what a validation means, comparing
-    two sides, counting violations, deciding what a discrepancy is, belongs to
-    the validation runtime and is proven against real engines. What belongs here
-    is the same thing that belongs here for a load: reaching the engine through
-    the Session that owns it.
-    """
-
     from ..test_execution import primitive_kind, run_installed_validation
 
     installed = node.installed
@@ -95,25 +76,20 @@ def _validation(node, session, workspace, open_runtime, collect: bool):
 
 
 def _scope(open_runtime, node):
-    """This run's scope, opened now because something is about to import."""
-
     if open_runtime is None:
-        raise RunError(f"{node.node_id} needs a runtime scope, and this run has none")
+        raise RunError(
+            f"Cannot run {node.node_id}: no runtime scope is available for its module"
+        )
     return open_runtime.get()
 
 
 def _warehouse_procedure(
     node, session, workspace, fault_tolerant: bool, publication, reload: bool = False
 ):
-    """The installed load procedure, called by name over the Session's TDS.
+    """Call the object's procedure without the self-recording wrapper.
 
-    The object's own procedure, not the generic ``_.Load`` wrapper: the run
-    records what settled itself, so one row has one writer.
-
-    Asked for by name rather than by result set: the procedure's authored setup
-    may run EXEC and return rows of its own, so "the result set it produced" is
-    not something a caller can identify. The outputs are, and they are in its
-    signature.
+    Output parameters identify its result because authored setup may return
+    unrelated result sets.
     """
 
     from ..declaration.tsql_load import (
@@ -146,12 +122,7 @@ def _warehouse_procedure(
 
 
 def _onelake_publication(node, session, workspace, publication):
-    """Wait for this Warehouse load's publication to reach its consumers.
-
-    The Warehouse-side counterpart of the SQL endpoint refresh, and a node for the
-    same reasons: its own progress line, its own timing, and a failure that blames
-    the boundary rather than the load that already committed.
-    """
+    """Wait for this Warehouse load to become readable by its consumers."""
 
     from ..runtime.load_result import LoadResult
     from .publication import await_publication
@@ -183,29 +154,17 @@ def _python(
     open_runtime,
     reload: bool = False,
 ):
-    """One deployed Python primitive, run where its module can be imported.
-
-    A deployed module is imported inside the session that owns the Spark it will
-    use, so on a desktop this crosses. What crosses is the handful of strings
-    the import and the construction need, not a serialisation of the Runner's
-    node, which carries typed identities the far side has no use for and would
-    then have to be kept in step with.
-
-    Which of the two happens is the scope's to answer, not this function's: a
-    remote scope dispatches into the interpreter holding it.
-    """
+    """Run a deployed Python primitive in the scope that imports its module."""
 
     expected = getattr(resolved, "expected_class", None)
     if expected is None:
         raise RunError(
-            f"{node.node_id} names a deployed module whose expected class is unknown"
+            f"Cannot run {node.node_id}: its deployed module has no expected class. "
+            "Rebuild and reinstall the project."
         )
 
     from ..runtime.load_result import LoadResult
 
-    # The scope answers with the row the primitive reported, in either position.
-    # What that row means is settled here, which is the one module a load's
-    # vocabulary belongs in.
     return LoadResult.from_row(
         _scope(open_runtime, node).dispatch_python(
             node,
@@ -232,19 +191,10 @@ def python_primitive(
     node_identity=None,
     reload: bool = False,
 ):
-    """Import the deployed module, construct its object, and load it.
+    """Import and load a deployed Python primitive.
 
-    Host-neutral: what differs between a notebook and a Livy interpreter is
-    answered by the Session it is given, so both sides of a decomposed run call
-    this one implementation.
-
-    The destination is resolved here and handed in, never inferred: an authored
-    object with no Lakehouse falls back to the session's attachment, which in an
-    orchestrated run decides.
-
-    The import goes through a runtime context rather than ``sys.path``, because
-    two Lakehouses may each deploy a ``lib/dates.py`` and ``sys.modules`` is
-    consulted before any path is searched.
+    Resolve the destination explicitly. The runtime context keeps identically
+    named modules deployed by different Lakehouses isolated from ``sys.modules``.
     """
 
     from ..etl import LOAD_ROOT
@@ -294,7 +244,6 @@ def python_primitive(
 
 
 def _endpoint_refresh(node, session, workspace):
-    """Refresh one Lakehouse's SQL analytics endpoint. No rows, so no counts."""
 
     from ..runtime.load_result import LoadResult
     from ..targets import ItemRef
@@ -302,7 +251,10 @@ def _endpoint_refresh(node, session, workspace):
     resolver = session.resolver(workspace)
     refresh = getattr(resolver, "refresh_sql_endpoint", None)
     if refresh is None:
-        raise RunError(f"{node.node_id}: this host cannot refresh a SQL endpoint")
+        raise RunError(
+            f"Cannot refresh the SQL endpoint for {node.physical_target}: this "
+            "Session does not support endpoint refresh"
+        )
     refresh(ItemRef(node.physical_target.name))
     return LoadResult(succeeded=True)
 
@@ -312,11 +264,6 @@ def _join(root: str, *parts: str) -> str:
 
 
 def can_refresh(session, workspace=None) -> bool:
-    """Whether this host has a SQL analytics endpoint to refresh at all.
-
-    A Warehouse has none of its own, so the Runner is told and skips the node
-    rather than failing it.
-    """
 
     if session is None:
         return False

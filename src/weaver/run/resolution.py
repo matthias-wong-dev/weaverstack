@@ -11,7 +11,6 @@ from .result import (
     warning,
 )
 
-#: Who noticed, for following a node's messages across layers.
 SOURCE = "run.resolution"
 
 #: Primitive kinds this module reasons about. A kind not named here
@@ -34,7 +33,7 @@ ENDPOINT_SUFFIX = "sql_endpoint"
 
 @dataclass(frozen=True)
 class Resolved:
-    """One node with the address and metadata needed for dispatch."""
+    """A node with the address and metadata needed for dispatch."""
 
     node: object
     expected_class: str | None = None
@@ -44,15 +43,12 @@ class Resolved:
 
     @property
     def valid(self) -> bool:
-        """No error stops this node. A warning is a finding, not a refusal."""
-
         from .result import SEVERITY_ERROR
 
         return not any(one.severity == SEVERITY_ERROR for one in self.messages)
 
 
 def resolve(node, *, can_refresh: bool = True) -> Resolved:
-    """Derive dispatch metadata without reading the physical target."""
 
     if node.primitive_kind == ENDPOINT_REFRESH:
         return _refresh(node, can_refresh=can_refresh)
@@ -65,8 +61,8 @@ def resolve(node, *, can_refresh: bool = True) -> Resolved:
             messages.append(
                 error(
                     MODULE_IMPORT_FAILURE,
-                    f"{node.node_id} names a deployed module whose expected "
-                    "class cannot be derived from its filename",
+                    f"Cannot run {node.node_id}: its deployed Python filename does "
+                    "not identify the expected class. Rebuild and reinstall the project.",
                     source=SOURCE,
                 )
             )
@@ -78,8 +74,8 @@ def resolve(node, *, can_refresh: bool = True) -> Resolved:
         messages.append(
             error(
                 DISPATCH_LOCATION_MISSING,
-                f"{node.node_id} names primitive kind {node.primitive_kind!r}, "
-                "which no runtime can address",
+                f"Cannot run {node.node_id}: primitive kind "
+                f"{node.primitive_kind!r} is unsupported",
                 source=SOURCE,
             )
         )
@@ -93,15 +89,13 @@ def resolve(node, *, can_refresh: bool = True) -> Resolved:
 
 
 def _refresh(node, *, can_refresh: bool) -> Resolved:
-    """A barrier resolves to a capability, and its absence is not a failure."""
 
     messages: list = []
     if not can_refresh:
         messages.append(
             warning(
                 DISPATCH_LOCATION_MISSING,
-                "SQL endpoint refresh is unsupported in this environment; "
-                f"{node.node_id} will be skipped",
+                f"Skipped {node.node_id}: this Session cannot refresh SQL endpoints",
                 source=SOURCE,
             )
         )
@@ -114,13 +108,7 @@ def _refresh(node, *, can_refresh: bool) -> Resolved:
 
 
 def _where(node) -> str | None:
-    """The installed thing this node would reach for, named logically.
-
-    A Warehouse node means a procedure; a Python node means a deployed module.
-    Both are addressable from the node alone, the absolute path is the
-    resolver's business, and a dry run that had to resolve one would have to
-    reach a workspace to say what it intends.
-    """
+    """Name the installed procedure or module without resolving a physical path."""
 
     if node.primitive_kind == WAREHOUSE_PROCEDURE:
         from ..etl import load_procedure_name
@@ -139,12 +127,7 @@ def _where(node) -> str | None:
 
 
 def _module_class(node) -> str | None:
-    """``Sales__Order.py`` names class ``Sales__Order``.
-
-    The same rule the authoring surface applies to a class name and the
-    repository parser applies to a filename, so a deployed module's class is
-    found by the rule that put it there rather than by importing and looking.
-    """
+    """Derive the deployed class without importing the module."""
 
     reference = node.primitive_object
     filename = getattr(reference, "object", None)

@@ -312,7 +312,7 @@ def test_a_run_with_no_session_says_what_it_needed():
         physical_target=REPORTING,
     )
 
-    with pytest.raises(RunError, match="needs a Session"):
+    with pytest.raises(RunError, match="without a Session"):
         dispatch_primitive(node, session=None)
 
 
@@ -326,5 +326,5 @@ def test_an_unknown_primitive_kind_is_refused_rather_than_guessed_at():
 
     from weaver.run.result import RunError
 
-    with pytest.raises(RunError, match="unknown primitive kind"):
+    with pytest.raises(RunError, match="primitive kind .* is unsupported"):
         dispatch_primitive(node, session=SimpleNamespace())

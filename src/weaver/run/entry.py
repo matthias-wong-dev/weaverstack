@@ -1,13 +1,7 @@
-"""What a submitted statement calls: the far side of a decomposed run.
+"""Stable entry points for runtime work submitted to Fabric.
 
-A deployed Python primitive is imported where Spark is, so a run orchestrated
-elsewhere submits a statement per node and these are what it calls. Each unpacks
-flat arguments into the values an in-session run already holds and calls the same
-function that run calls.
-
-This is the surface the published wheel exports, so it stays two named functions:
-the wheel and the desktop are independently versioned, and widening the surface
-between them is what has caused Fabric failures.
+Keep this surface narrow because the published wheel and desktop may have
+different versions.
 """
 
 from __future__ import annotations
@@ -30,7 +24,6 @@ def run_python_primitive(
     session=None,
     workspace=None,
 ) -> dict:
-    """Run one deployed Python primitive in a named scope, and report rows."""
 
     from ..declaration.model import WeaverItemId, parse_installed_identity
     from ..runtime.session_scopes import scope_catalogue
@@ -64,11 +57,6 @@ def run_validation_primitive(
     session=None,
     workspace=None,
 ) -> dict:
-    """Run one installed Lakehouse validation in a named scope.
-
-    It crosses as the estate's own description of it, the Registry row saying
-    where the primitive lives and what it compares.
-    """
 
     from ..test_execution import run_installed_validation
     from ..test_plan import InstalledValidation
@@ -87,12 +75,6 @@ def run_validation_primitive(
 
 
 def _session(session, workspace):
-    """The Session these run against.
-
-    The submitted body builds one around the interpreter's own ``spark`` global;
-    one built here would have to go looking for an active session instead. A
-    notebook calling these directly supplies none, and the host decides.
-    """
 
     if session is not None:
         return session

@@ -94,8 +94,7 @@ def test_endpoint_refresh_is_skipped_when_the_host_cannot_do_it(catalogue):
     assert resolved.unsupported
     assert resolved.valid
     assert [message.message for message in resolved.messages] == [
-        "SQL endpoint refresh is unsupported in this environment; "
-        f"{REFRESH} will be skipped"
+        f"Skipped {REFRESH}: this Session cannot refresh SQL endpoints"
     ]
 
 

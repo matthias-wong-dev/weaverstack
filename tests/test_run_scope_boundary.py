@@ -616,5 +616,5 @@ def test_a_live_session_that_could_not_release_a_scope_is_reported():
     scope.close()  # does not raise: the run is finished
 
     assert len(session.warnings) == 1
-    assert "not released" in session.warnings[0]
+    assert "left imported modules in the Fabric session" in session.warnings[0]
     assert "TypeError" in session.warnings[0]

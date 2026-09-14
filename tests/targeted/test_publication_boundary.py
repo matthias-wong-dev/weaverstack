@@ -161,8 +161,8 @@ def test_a_publication_that_never_arrives_names_the_stale_snapshot(tmp_path):
             poll=0.0,
         )
 
-    assert "published no new Delta commit" in str(raised.value)
-    assert "previous snapshot" in str(raised.value)
+    assert "No new OneLake Delta commit appeared" in str(raised.value)
+    assert "Retry after publication completes" in str(raised.value)
 
 
 @weaver_test()

@@ -1,4 +1,4 @@
-"""Plan and execute a RunGraph through an injected primitive dispatcher."""
+"""Plan and execute a runtime graph."""
 
 from __future__ import annotations
 
@@ -25,15 +25,7 @@ from .state import RunState
 
 
 def node_label(node) -> str:
-    """One node, named by what it does and the logical object it does it to.
-
-    The canonical logical identity, so what a run prints is what the repository
-    declares and what a request selects: ``Load Lakehouse/Landing/Tables/
-    Sales.Customer``. A Folder and a table of one ``Schema.Object`` read apart
-    because the area is part of the name. Where an item is bound is
-    Installation's to say, and a physical operation says it: an endpoint refresh
-    and a OneLake publication name the target because the target is the subject.
-    """
+    """Label a node with its action and canonical logical identity."""
 
     from .resolution import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 
@@ -49,7 +41,6 @@ def node_label(node) -> str:
 
     what = node.logical_id
     if what is None:
-        # Barriers and directly constructed nodes have no logical label.
         return node.node_id
     # Validations use their Test or Assumption kind in the display label.
     verb = "Load" if node.role == LOAD else "Test"
@@ -58,7 +49,6 @@ def node_label(node) -> str:
 
 @contextmanager
 def _node_substep(session, node):
-    """Return a node timing frame when the Runner has a Session."""
 
     if session is None or not hasattr(session, "substep"):
         yield None
@@ -75,10 +65,9 @@ TEST = "test"
 
 @dataclass(frozen=True)
 class RunRequest:
-    """The items a run was asked for, and the policy it is executed under.
+    """A run selection and its execution policy.
 
-    Selection is by item, so two items installed in one physical target do not
-    select each other's work.
+    Item selection remains logical even when items share a physical target.
     """
 
     kind: str
@@ -104,22 +93,20 @@ class RunRequest:
         from ..errors import CommandError
 
         if not self.items:
-            raise CommandError(f"{self.kind} needs at least one logical item")
+            raise CommandError(f"{self.kind} needs at least one item")
         if self.name is not None and self.file is not None:
             raise CommandError(
-                "a run selects name= or file=, not both. One names something "
-                "the estate has and the other something it may not"
+                "Select either an installed validation with name= or a source "
+                "file with file=, not both"
             )
         if self.kind == LOAD and (self.name is not None or self.file is not None):
-            raise CommandError("a load selects installed objects with names=")
+            raise CommandError("Select installed load objects with names=")
         if self.kind == TEST and self.names:
-            raise CommandError("a test selects one installed validation with name=")
+            raise CommandError("Select one installed validation with name=")
         if self.selected is not None and self.kind != LOAD:
-            raise CommandError(
-                "selected= filters installed loadables, so it is a load mode"
-            )
+            raise CommandError("selected= applies only to loads")
         if self.reload and self.kind != LOAD:
-            raise CommandError("reload is a load mode")
+            raise CommandError("reload applies only to loads")
 
     @classmethod
     def load(cls, items: Sequence, **policy) -> "RunRequest":
@@ -134,7 +121,6 @@ class RunRequest:
 
     @property
     def selection(self) -> str | tuple[str, ...] | None:
-        """What was selected within the targets, for a report to record."""
 
         if self.file is not None:
             return self.file
@@ -163,20 +149,19 @@ def _now() -> str:
 
 
 def _blocked_by(node, upstream, *, validated: bool = False):
-    """Return the dependency-blocked message for a node."""
 
     from .result import DEPENDENCY_BLOCKED, error
 
     what = "did not validate" if validated else "did not succeed"
     return error(
         DEPENDENCY_BLOCKED,
-        f"{node.node_id} cannot run: " + ", ".join(sorted(upstream)) + f" {what}",
+        f"Cannot run {node.node_id}: " + ", ".join(sorted(upstream)) + f" {what}",
         source="run.runner",
     )
 
 
 class Runner:
-    """Execute one run graph and collect its results."""
+    """Execute a runtime graph and collect its results."""
 
     def __init__(
         self,
@@ -198,7 +183,6 @@ class Runner:
 
     @property
     def graph(self) -> RunGraph:
-        """Return the graph implied by this request."""
 
         if self._graph is None:
             self._graph = graph_for(self.request, self.state)
@@ -209,23 +193,17 @@ class Runner:
 
     @property
     def events(self) -> tuple[dict, ...]:
-        """Return the settled node events in order."""
 
         return tuple(self._events)
 
     def resolve(self, node):
-        """Derive the node's dispatch address from the graph."""
 
         from .resolution import resolve
 
         return resolve(node, can_refresh=self.can_refresh)
 
     def runtime_scope(self, session=None):
-        """This run's deployed-module scope, held unopened until something imports.
-
-        A Warehouse-only run never calls ``get()``, so it opens no scope and,
-        on a desktop, submits nothing to open one.
-        """
+        """Open the deployed-module scope only when a node imports from it."""
 
         if self._runtime_scope is None:
             from .runtime_boundary import LazyRunScope, open_runtime_scope
@@ -242,7 +220,6 @@ class Runner:
 
     @property
     def publication(self):
-        """What this run's publication barriers need from the loads they follow."""
 
         if self._publication is None:
             from .publication import PublicationLedger
@@ -258,7 +235,6 @@ class Runner:
         return self._publication
 
     def _close_runtime(self) -> None:
-        """Close the run's deployed-module scope."""
 
         holder, self._runtime_scope = self._runtime_scope, None
         if holder is not None:
@@ -272,11 +248,10 @@ class Runner:
         on_node: Callable | None = None,
         before_node: Callable | None = None,
     ) -> RunResult:
-        """Execute the graph and return a result for every planned node.
+        """Execute the graph and return every planned node's result.
 
-        ``on_node`` receives each result when its status settles. ``before_node``
-        receives each node the run is about to dispatch; nothing blocked, skipped
-        or unresolved reaches it.
+        ``before_node`` runs only before dispatch. ``on_node`` runs whenever a
+        node settles, including blocked, skipped and unresolved nodes.
         """
 
         started = _now()
@@ -374,7 +349,6 @@ class Runner:
         return self._result(nodes, started=started)
 
     def _dry_run(self, ordered) -> tuple:
-        """Resolve and classify every node without dispatching it."""
 
         resolutions = {node.node_id: self.resolve(node) for node in ordered}
         invalid = {node_id for node_id, one in resolutions.items() if not one.valid}
@@ -420,11 +394,7 @@ class Runner:
     def _dispatched(
         self, node, *, dispatch, session, resolved=None, before=None
     ) -> RunNodeResult:
-        """Dispatch one node and record failures as node results.
-
-        ``before`` runs inside the same try, so a failure in it settles as this
-        node's failure rather than the run's.
-        """
+        """Dispatch one node, treating ``before`` failures as node failures."""
 
         from .outcome import settle
 

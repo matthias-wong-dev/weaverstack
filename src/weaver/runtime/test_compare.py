@@ -1,8 +1,4 @@
-"""Compare expected and actual relations for a validation.
-
-The comparison returns physical discrepancy rows and uses declared primary keys
-only to correlate matching rows.
-"""
+"""Compare Test relations, using the Primary key only to correlate rows."""
 
 from __future__ import annotations
 
@@ -11,20 +7,15 @@ from typing import Any, Sequence
 from ..errors import ValidationError
 from .delta_sql import blank_key_predicate
 
-#: Which side of the comparison a diagnostic row came from.
 SIDE_COLUMN = "_weaver_side"
 
-#: The correlation key. Runtime information, not a serialized copy of the
-#: declared primary key, because what matters is which rows pair, not which
-#: columns paired them.
+#: Runtime correlation identity, not a serialised copy of the Primary key.
 SK_COLUMN = "_weaver_sk"
 
 EXPECTED = "expected"
 ACTUAL = "actual"
 
-#: Reserved on a Test's own result columns, because the diagnostic frame puts
-#: them beside the author's. A Test that already returned one would silently
-#: have it overwritten.
+#: Diagnostic columns must not overwrite columns returned by the Test.
 RESERVED_COLUMNS = (SIDE_COLUMN, SK_COLUMN)
 
 
@@ -35,15 +26,10 @@ def compare(
     primary_key: Sequence[str] = (),
     what: str = "Test",
 ) -> Any:
-    """The rows on which ``expected`` and ``actual`` disagree.
+    """Return discrepancies, refusing shapes or keys that cannot be compared.
 
-    Empty when the Test passes. Each row carries :data:`SIDE_COLUMN` and
-    :data:`SK_COLUMN` ahead of the Test's own columns.
-
-    Raises :class:`~weaver.errors.ValidationError` for anything that makes the
-    comparison meaningless rather than failing: mismatched shapes, or a declared
-    key that does not identify rows. Those are execution failures, and reporting
-    them as zero discrepancies would say the Test passed.
+    Each row carries :data:`SIDE_COLUMN` and :data:`SK_COLUMN` before the Test's
+    columns. Invalid comparisons raise and cannot appear to pass.
     """
 
     key = tuple(primary_key)
@@ -82,28 +68,20 @@ def _quoted(column: str) -> str:
 def _check_shape(
     expected: Any, actual: Any, *, key: tuple[str, ...], what: str
 ) -> None:
-    """Refuse a comparison the engine would perform and nobody could read.
-
-    An explicit error here rather than whatever ``EXCEPT`` says about mismatched
-    relations: the low-level message is about a query plan, and the author's
-    mistake is about two relations they believe are the same shape.
-    """
 
     left, right = list(expected.columns), list(actual.columns)
 
     reserved = [column for column in left + right if column in RESERVED_COLUMNS]
     if reserved:
         raise ValidationError(
-            f"{what}: {', '.join(sorted(set(reserved)))} is reserved. Weaver adds "
-            f"{SIDE_COLUMN} and {SK_COLUMN} to the diagnostic rows, so a Test's own "
-            "columns may not carry those names"
+            f"{what}: {', '.join(sorted(set(reserved)))} is reserved for "
+            "diagnostics. Rename the Test column."
         )
 
     if len(left) != len(right):
         raise ValidationError(
-            f"{what}: expected has {len(left)} column(s) and actual has "
-            f"{len(right)}. The two sides of a Test must be the same shape to be "
-            "compared. "
+            f"{what}: expected has {len(left)} column(s), but actual has "
+            f"{len(right)}. Return the same columns from both sides. "
             f"expected: {', '.join(left) or 'none'}; actual: {', '.join(right) or 'none'}"
         )
 
@@ -133,13 +111,7 @@ def _check_shape(
 
 
 def _check_key(frame: Any, *, side: str, key: tuple[str, ...], what: str) -> None:
-    """A declared key that does not identify rows cannot correlate them.
-
-    Blank and null are refused together, and duplicates are refused, on the same
-    terms a load refuses them. See
-    :func:`weaver.runtime.delta_sql.blank_key_predicate`. A Test whose key
-    repeats would pair rows arbitrarily and call the result evidence.
-    """
+    """Require a declared Primary key to identify rows uniquely."""
 
     if not key:
         return
