@@ -1,14 +1,4 @@
-"""Weaver build: planning a declaration into a bundle, and installing it.
-
-The boundary is deliberate::
-
-    WeaverRepository -> planner -> BuildBundle -> installer -> workspaces
-
-The planner owns every decision, item selection, ordering, executable
-generation, certification. The installer owns execution only: it validates a
-bundle and runs it, and never reads the source declaration, resolves a
-dependency or selects a target.
-"""
+"""Build planning, bundle serialization, and installation."""
 
 from __future__ import annotations
 
@@ -76,9 +66,6 @@ __all__ = [
     "Impact",
     "BuildSelection",
     "determine_impact",
-    # The three narrow seams: one document rendered, one item planned, one
-    # action executed. Each is the lowest layer that can answer its own
-    # question, so a failure localises there rather than in a whole build.
     "RenderedAction",
     "render_document_build_action",
     "PlannedItem",

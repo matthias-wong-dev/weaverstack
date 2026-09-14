@@ -1,9 +1,6 @@
-"""Source preparation, state handover, bundle generation, and installation.
+"""Build orchestration from source snapshot through installation.
 
-A repository source is independent of the target estate: remote sources are
-materialised onto the local filesystem, and parsing and request validation
-finish before any target state is read. The four stages then run in one process
-whichever position that is, reaching the estate through Session capabilities.
+Source parsing and request validation finish before target state is read.
 """
 
 from __future__ import annotations
@@ -55,24 +52,18 @@ ARCHIVE_SUFFIX = ".weaver.zip"
 
 @dataclass(frozen=True)
 class MaterialisedTree:
-    """A source tree copied onto the current process's local filesystem."""
-
     location: Location
     store: FilesystemStore
 
 
 @dataclass(frozen=True)
 class PreparedRepository:
-    """A parsed repository and the process-local store that owns its files."""
-
     repository: WeaverRepository
     store: FilesystemStore
 
 
 @dataclass(frozen=True)
 class ItemBuildResult:
-    """Durable in-memory result of a temporary in-environment build."""
-
     plan: BuildPlan
     report: InstallationReport
     repository_signature: str
@@ -85,12 +76,9 @@ class ItemBuildResult:
 
 @dataclass(frozen=True)
 class BuildState:
-    """Authoritative target state handed from Fabric to a local planner."""
-
     catalogue: Catalogue
     target_inventories: Mapping[WeaverItemId, TargetInventory]
-    #: Where each direct shortcut points, resolved while the estate was
-    #: readable. Keyed by ``<owner>/<name>``.
+    #: Direct shortcut destinations, keyed by ``<owner>/<name>``.
     shortcut_sources: Mapping[str, ResolvedShortcutSource] = field(default_factory=dict)
 
     def to_mapping(self) -> dict[str, object]:
@@ -137,7 +125,7 @@ class BuildState:
 def catalogue_items_for_build(
     repository: WeaverRepository, bindings: ItemBindings
 ) -> tuple[WeaverItemId, ...]:
-    """Catalogue scope needed for selection and cross-item shortcut freshness."""
+    """Include external shortcut producers needed for freshness checks."""
 
     bound = set(bindings.by_item)
     items = bound | {
@@ -154,8 +142,6 @@ def validate_build_request(
     *,
     catalogue_binding: WarehouseBinding,
 ) -> tuple[WeaverItemId, ...]:
-    """Validate repository-dependent input before any target is contacted."""
-
     if catalogue_binding is None:
         raise BuildError("every build needs an explicit catalogue Warehouse")
     if not bindings.entries:
@@ -193,19 +179,13 @@ def read_build_state(
     sql_by_item=None,
     shortcuts=(),
 ) -> BuildState:
-    """Read only the authoritative state a source-independent planner needs.
-
-    The boundary between the physical estate and the Builder: the catalogue and
-    every selected target, assembled into one handover a Builder takes directly
-    and a test can construct without an estate.
-    """
+    """Read the catalogue and selected targets into one planner handover."""
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
         raise BuildError("every build needs a Workspace with a Weaver catalogue")
 
-    # Before the inventories, because this is one small read and they are a
-    # round trip per target, and before anything asks for Spark.
+    # Check occupancy before the slower per-target inventory and Spark reads.
     with session.step("Check target occupancy"):
         _refuse_occupied_targets(bindings, session=session, workspace=workspace)
     with session.step("Read target inventories"):
@@ -237,17 +217,12 @@ def read_build_state(
 def _refuse_occupied_targets(bindings: ItemBindings, *, session, workspace) -> None:
     """Refuse a target already installed to by an item outside this build.
 
-    item-specific prune planner diffs one item's
-    keep-set against the whole target inventory, so building into a target
-    holding another item's objects would prune them.
-
     Occupancy is read unscoped, because a build's own catalogue read is scoped to
-    the items it was pointed at and an occupying item is by definition outside
-    that scope.
+    its selected items. Item-specific pruning compares one item's keep-set with
+    the whole target inventory and would otherwise prune another item's objects.
 
-    ``Warehouse/_weaver`` is exempt both ways. Its inventory is read as the ``_``
-    schema and nothing else, and every other item's excludes ``_``, so the
-    catalogue shares a host with proven isolation. See
+    ``Warehouse/_weaver`` is exempt: its inventory contains only ``_``, which
+    every other item's inventory excludes. See
     :func:`weaver.build_bundle.prune.read_warehouse_inventory`.
     """
 
@@ -277,12 +252,7 @@ def _refuse_occupied_targets(bindings: ItemBindings, *, session, workspace) -> N
 
 
 def _read_catalogue(*, session, workspace, required):
-    """The catalogue a build plans against.
-
-    The catalogue is Warehouse tables under ``_``, so reading it is T-SQL over
-    TDS. The statements go through the Session and the rows are assembled here,
-    in whichever position that is. Neither needs Spark.
-    """
+    """Read the Warehouse catalogue over TDS without starting Spark."""
 
     from ..catalogue.connection import catalogue_connection
 
@@ -290,15 +260,7 @@ def _read_catalogue(*, session, workspace, required):
 
 
 def session_catalogue(session, workspace, item: ItemRef):
-    """Spark catalogue operations against one Lakehouse, through the Session.
-
-    A destination Lakehouse's views live only in the Spark catalogue, so
-    reading its inventory needs Spark. The Weaver catalogue does not come
-    through here: it is a Warehouse, read over TDS.
-
-    The one construction, both positions: in a session the statements run
-    against its Spark, from a desktop they cross. Nothing above it can tell.
-    """
+    """Access a Lakehouse's Spark-only views through the Session."""
 
     from ..spark import SparkCatalogue
 
@@ -316,11 +278,9 @@ def materialise_tree(
     store: Store,
     prefix: str = "weaver-source-",
 ) -> Iterator[MaterialisedTree]:
-    """Copy a store tree once to a temporary local directory.
+    """Copy a store tree to a temporary local directory.
 
-    FabricStore uses one recursive ``notebookutils.fs.cp``. A generic Store
-    falls back to one listing and one read per file, so the same contract is
-    testable without Fabric.
+    Stores may provide a recursive local copy; others use listing and file reads.
     """
 
     if not store.exists(source):
@@ -343,14 +303,7 @@ def materialise_tree(
 
 
 def _snapshot_name(source: Location) -> str:
-    """A usable directory name for the snapshot of ``source``.
-
-    ``.`` and ``..`` are ordinary ways to name a repository and neither can name
-    a directory: joined onto the temporary root, either addresses the root
-    itself. A filesystem source is resolved first, so the snapshot is named for
-    the directory it copies. Anything leaving no final segment falls back to a
-    fixed name; a snapshot's identity is its contents.
-    """
+    """Return a child-directory name even when ``source`` is ``.`` or ``..``."""
 
     name = source.name if source.is_url else source.path.resolve().name
     return name if name and name not in (".", "..") else "repository"
@@ -362,8 +315,6 @@ def prepare_repository(
     *,
     source_store: Store,
 ) -> Iterator[PreparedRepository]:
-    """Snapshot a repository to a temporary copy, then parse it completely."""
-
     with _temp_copy(source, source_store, prefix="weaver-repository-") as root:
         store = FilesystemStore()
         repository = parse_item_repository(Location(root.as_posix()), store=store)
@@ -389,8 +340,6 @@ def _copy_tree_through_store(source: Location, store: Store, destination: Path) 
 
 
 def timestamped_archive_name(at: datetime | None = None) -> str:
-    """A sortable, collision-resistant physical name for an optional record."""
-
     at = at or datetime.now(timezone.utc)
     if at.tzinfo is None:
         at = at.replace(tzinfo=timezone.utc)
@@ -404,7 +353,7 @@ def persist_bundle_archive(
     *,
     store: Store,
 ) -> Location:
-    """Persist a complete bundle as one deterministic ZIP file."""
+    """Persist a bundle as a deterministic ZIP file."""
 
     if not destination.name.endswith(ARCHIVE_SUFFIX):
         raise BuildError(
@@ -436,7 +385,7 @@ def materialise_bundle_archive(
     *,
     store: Store,
 ) -> Iterator[BuildBundle]:
-    """Copy one archive locally, extract safely, and load its validated bundle."""
+    """Copy an archive locally and safely extract its validated bundle."""
 
     if not archive.name.endswith(ARCHIVE_SUFFIX):
         raise BuildError(f"not a Weaver bundle archive: {archive.value}")
@@ -463,8 +412,6 @@ def install_bundle_archive(
     workspace=None,
     executors=None,
 ) -> InstallationReport:
-    """Install a handover archive entirely from its temporary local extraction."""
-
     with materialise_bundle_archive(archive, store=archive_store) as bundle:
         return Installer(session, workspace=workspace, executors=executors).install(
             bundle
@@ -483,19 +430,7 @@ def build_item_repository(
     output: Location | None = None,
     executors=None,
 ) -> ItemBuildResult:
-    """Decide, then install: a convenience over the two doers, not a third one.
-
-    .. code-block:: text
-
-        Repository + BuildState → Builder → BuildBundle → Installer
-
-    Both halves are separately callable and testable; this exists so the common
-    case reads as one call, and adds no decisions of its own.
-
-    ``output`` places the generated bundle tree somewhere durable instead of the
-    temporary directory. Only a caller that needs the bundle afterwards passes
-    it.
-    """
+    """Build and install, optionally retaining the generated bundle at ``output``."""
 
     installer = Installer(session, workspace=workspace, executors=executors)
 
@@ -528,12 +463,7 @@ def build_repository_bundle(
     source_store: Store,
     output: Location,
 ) -> BuildBundle:
-    """Build one durable bundle from a parsed repository and observed state.
-
-    This is the boundary between planning and installation. It has
-    no Session: target state is already represented by ``state`` and mutation
-    belongs to :class:`Installer`.
-    """
+    """Build a bundle without target access or mutation."""
 
     return Builder(
         repository=repository,
@@ -556,17 +486,12 @@ def build_item_repository_source(
     sql_by_item=None,
     executors=None,
 ) -> ItemBuildResult:
-    """Prepare an explicit source independently from the target, then build it."""
-
     with prepare_repository(source, source_store=source_store) as prepared:
         repository = prepared.repository
         validate_build_request(
             repository, bindings, catalogue_binding=catalogue_binding
         )
-        # The unreconciled catalogue. Reconciliation is a
-        # decision and belongs to the Builder; handing it an already-reconciled
-        # catalogue would hand it one whose stale claims had already been
-        # removed, so the bundle would never be told to prune them.
+        # The Builder needs stale claims, so reconciliation must happen there.
         state = read_build_state(
             bindings,
             required_catalogue_items=catalogue_items_for_build(repository, bindings),
@@ -598,16 +523,9 @@ def read_reconciled_catalogue(
 ) -> Reconciliation:
     """Read the Weaver catalogue and prove selected claims physically.
 
-    The read covers the bound items and, when a ``repository`` is given, the
-    items that produce what those items shortcut. Those producers are not being
-    built and nothing about them will be written. Their Registry rows carry the
-    build that published them, and comparing that against the rows of the objects
-    reading through the shortcut is the only way to learn that a producer moved on
-    while this consumer was not looking (see
+    External shortcut producers are read for freshness comparison (see
     :func:`~weaver.build_bundle.incremental.stale_through_shortcuts`).
-
-    They are read without an inventory, so nothing about them is reconciled away:
-    a build has no business proving claims about a target it was not pointed at.
+    They have no inventory here, so their claims are not reconciled or written.
     """
 
     items = {binding.item for binding in bindings.entries}
@@ -636,17 +554,12 @@ def read_target_inventories(
     workspace=None,
     sql_by_item=None,
 ) -> dict:
-    """Read every selected physical target into one planning snapshot."""
-
     supplied_sql = sql_by_item or {}
     workspace = workspace if workspace is not None else session.workspace
     inventories = {}
     delta = []
 
-    # A Warehouse is its own read over TDS and gets its own Sub-step; the
-    # Lakehouses are named together, as the one read they are. Each line says
-    # what it is doing rather than only what it is doing it to, because children
-    # print above the parent they belong to.
+    # Warehouse inventories are separate TDS reads; Lakehouses share one substep.
     for binding in bindings.entries:
         target = binding.to_bound_target()
         if target.kind == WAREHOUSE_TARGET:
@@ -681,11 +594,7 @@ def read_target_inventories(
 
 
 def _lakehouse_inventories(targets, *, session, workspace) -> dict:
-    """Every named Lakehouse's inventory.
-
-    Mostly storage, since a Delta table is a directory, and Spark SQL for the
-    views, which exist only in the catalogue.
-    """
+    """Read Delta objects from storage and views from the Spark catalogue."""
 
     resolver = session.resolver(workspace)
     store = session.transport_store(workspace)
@@ -707,16 +616,10 @@ def _temp_copy(
     *,
     prefix: str,
 ) -> Iterator[Path]:
-    """Always copy ``source`` to a temporary tree, whatever store holds it.
+    """Snapshot every source, including local ones, before parsing.
 
-    There is no shortcut for a source that is already on this
-    filesystem. A build that parsed the caller's own directory would be reading a
-    tree the caller can still edit, so a repository could change between parsing
-    and bundle generation, and the bundle would describe a source that never
-    existed as a whole. Copying every source makes the snapshot the only thing
-    the build ever reads, and makes that true identically in a notebook, on a
-    desktop and over OneLake rather than only where the transport happened to
-    force it.
+    The build reads only the copy, so caller edits cannot change the repository
+    between parsing and bundle generation.
     """
 
     with materialise_tree(source, store=store, prefix=prefix) as tree:

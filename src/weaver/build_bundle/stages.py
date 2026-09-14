@@ -1,18 +1,4 @@
-"""Logical stages, and the one place a sequence number is chosen.
-
-A planning component says what has to happen and in what order relative to its
-siblings, never which sequence number that is: a number is a property of the
-finished plan, and reserved regions constrain the plan rather than describe it.
-
-Each component returns :class:`PlannedStage` values: a phase, a description,
-target-bound batches, and the payloads those batches need. The planner
-concatenates them in execution order and :func:`enumerate_stages` numbers them,
-rewriting each payload into ``payload/<number>-<slug>/<filename>`` so the bundle
-directory reads top to bottom in deployment order.
-
-Numbering last means no stage can collide with another's region, and there is no
-headroom to run out of.
-"""
+"""Logical build stages and final sequence numbering."""
 
 from __future__ import annotations
 
@@ -25,16 +11,8 @@ from .changes import merge as merge_changes
 from .models import BuildBatch, BuildSequence
 from .payloads import payload_path
 
-#: The phases one item's work is made of, in the order they must run.
-#:
-#: Prune and managed drops come first, as the destructive reconciliation of what
-#: is already there. Schemas precede shortcuts so a Warehouse-view shortcut has a
-#: schema to be created in, and shortcuts precede builds so every document is built
-#: against a namespace holding what the item imports. The refresh closes the
-#: item: until a mutated Lakehouse's SQL endpoint has caught up, a dependent
-#: item's view or shortcut would be built over stale metadata. The runtime
-#: artefacts follow it, unordered within their own layer, because nothing here
-#: runs them.
+#: Prune and drops precede creation. Schemas precede shortcuts, which precede
+#: builds. Endpoint refresh then closes physical work before runtime publication.
 PRUNE = "prune"
 DROP = "drop"
 SCHEMA = "schema"
@@ -59,20 +37,10 @@ _PHASE_RANK = {phase: rank for rank, phase in enumerate(_PHASE_ORDER)}
 
 @dataclass(frozen=True)
 class PlannedStage:
-    """One barrier's worth of work, before it is given a number.
+    """An unnumbered barrier with target batches, payloads, and declared changes.
 
-    ``phase`` and ``index`` place the stage among its siblings: ``index``
-    separates the dependency layers within a phase, so two items in the same
-    topological item layer can have their layer n merged into one barrier.
-
-    ``slug`` names the stage's payload directory. ``payloads`` is keyed by bare
-    filename within it, because the directory's name is not known until the
-    stage has a number.
-
-    ``changes`` is what this stage's actions mean for each target, keyed by target
-    id. Rendered beside the actions rather than inferred from them, so the
-    statement of effect and the thing that has the effect are written in one
-    place. See :mod:`weaver.build_bundle.changes`.
+    ``index`` separates dependency layers within a phase. Payload keys are bare
+    filenames until final numbering assigns their directories.
     """
 
     phase: str
@@ -103,14 +71,7 @@ class PlannedStage:
 
 
 def merge_layer_stages(stages: Iterable[PlannedStage]) -> tuple[PlannedStage, ...]:
-    """Fold same-phase, same-index stages from one item layer into one barrier.
-
-    Items in the same topological layer have no ordering between them, so their
-    work belongs in the same barriers: one batch per item, exactly as a
-    single-layer build already produces. Merging here is what keeps the
-    invariant that matters, that nothing in a later item layer starts before this
-    layer has completed, without serialising items that never needed it.
-    """
+    """Merge same-phase, same-index work without crossing dependency layers."""
 
     grouped: dict[tuple[int, int], list[PlannedStage]] = {}
     for stage in stages:
@@ -150,18 +111,12 @@ def enumerate_stages(
     dict[str, bytes],
     dict[str, tuple[TargetChange, ...]],
 ]:
-    """Number the assembled plan and resolve every payload path.
-
-    Batch ids gain the same number prefix, so a batch is still identifiable in a
-    report and still unique across the plan without any component having to know
-    what else is being planned.
-    """
+    """Number populated stages and resolve their payload paths and batch ids."""
 
     sequences: list[BuildSequence] = []
     payloads: dict[str, bytes] = {}
     changes: list[Mapping[str, tuple[TargetChange, ...]]] = []
-    # An empty stage is not a barrier. It is a phase this build had no work for,
-    # so it takes no number and leaves no gap.
+    # Empty stages are not barriers and leave no numbering gap.
     populated = [stage for stage in stages if stage.batches]
     for number, stage in enumerate(populated, start=1):
         resolved = {}
