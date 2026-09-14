@@ -98,14 +98,14 @@ def test_make_directory_is_idempotent(store, root):
 
 @weaver_test()
 def test_listing_a_missing_location_is_an_error(store, root):
-    with pytest.raises(StoreError, match="does not exist"):
+    with pytest.raises(StoreError, match="missing location"):
         store.list(root / "absent")
 
 
 @weaver_test()
 def test_the_local_store_refuses_url_locations(store):
     remote = Location("abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Files")
-    with pytest.raises(CommandError, match="URL location"):
+    with pytest.raises(CommandError, match="cannot access URL"):
         store.exists(remote)
 
 

@@ -1,16 +1,15 @@
-"""Session: where Weaver is running, and what it already has.
+"""Session owns workspace resources and execution capabilities.
 
 One of Weaver's four doers:
 
 .. code-block:: text
 
-    Session     where and how work reaches physical systems
+    Session     acquire resources and execute physical work
     Builder     what should be installed
     Installer   install that decision
     Runner      what runs next, and what happened
 
-Import the contract from here; the host implementations decide how each
-capability is met.
+Import the contract from here.
 """
 
 from __future__ import annotations

@@ -1,9 +1,8 @@
-"""Host-neutral access to workspace resources and execution capabilities.
+"""Session resource ownership and execution capabilities.
 
 A Session scopes cached resources to a workspace context and exposes operations
-such as ``execute_python`` without exposing the underlying transport. Builder,
-Installer, and Runner retain planning and orchestration responsibilities. See
-``design/code-architecture.md`` for the layer boundaries.
+such as ``execute_python`` without exposing the transport. Builder, Installer,
+and Runner retain planning and orchestration responsibilities.
 """
 
 from __future__ import annotations
@@ -38,15 +37,11 @@ def workspace_context(workspace: Workspace) -> tuple:
     )
 
 
-#: Where a Session's data engineering happens, relative to this process. One
-#: consumer: choosing which run scope to open, because a run's deployed modules
-#: are imported where Spark is. Everything else asks for a capability instead.
+#: Where execution happens relative to this process. Run scope uses this because
+#: deployed modules are imported where Spark is.
 
-#: Weaver is running where the data is: a Fabric notebook.
 IN_SESSION = "in_session"
-#: This process reaches into a workspace it is not running inside.
 ACROSS_BOUNDARY = "across_boundary"
-#: No workspace is named, so there is nothing to reach into.
 UNPLACED = "unplaced"
 
 #: The reporting hierarchy: task, step, then physical sub-step. Failures attach
@@ -67,8 +62,7 @@ class ReportingFrame:
     kind: str
     name: str
     detail: str | None = None
-    #: How deep this sits in the frames open when it started, so the output can
-    #: indent without reconstructing the stack.
+    #: Depth in the frame stack when this frame started.
     depth: int = 0
     started: float = field(default_factory=time.monotonic)
     elapsed: float | None = None
@@ -76,8 +70,6 @@ class ReportingFrame:
 
     @property
     def age(self) -> float:
-        """Seconds since this frame opened, whether or not it has closed."""
-
         return (
             self.elapsed
             if self.elapsed is not None
@@ -99,7 +91,7 @@ class ReportingFrame:
 
 
 class Session(ABC):
-    """A reusable execution scope: resolution, resources and host capabilities.
+    """A reusable execution scope for resolution, resources, and execution.
 
     Concrete hosts are :class:`~weaver.sessions.console.ConsoleSession`, Weaver on
     a desktop reaching into Fabric, and
@@ -123,22 +115,16 @@ class Session(ABC):
         self._scopes: dict[tuple, "WorkspaceScope"] = {}
         self._scope_lock = threading.Lock()
         self._frames: list[ReportingFrame] = []
-        #: Every frame that has closed, in the order it closed. The logical
-        #: ledger, beside :attr:`telemetry`'s transport one: this says a Step
-        #: took eight seconds, that says the eight seconds were four Livy
-        #: submissions, and neither can be derived from the other.
+        #: Closed reporting frames, in closing order. These record logical work;
+        #: telemetry separately records physical operations.
         self.timings: list[ReportingFrame] = []
-        #: Everything this Session has warned about, in order.
         self.warnings: list[str] = []
-        #: Warehouse flushers handed out, by write stream. Created on demand:
-        #: opening a Session must not start a worker or a TDS connection, and
-        #: most Sessions never append a row.
+        #: Warehouse flushers by write stream. Creating a Session must not start
+        #: a worker or TDS connection.
         self._flushers: dict = {}
         self._workflow_id: str | None = None
         self._closed = False
-        #: Between the start of `close` and the Session actually closing. The
-        #: flushers are still writing through it, so it is not closed, but it
-        #: hands out no new stream.
+        #: True while flushers drain through an otherwise open Session.
         self._draining = False
 
     # --- context ------------------------------------------------------------
@@ -156,13 +142,9 @@ class Session(ABC):
 
     @property
     def workspace(self) -> Workspace | None:
-        """The default context, where the caller supplied one. Not an identity."""
-
         return self._default_workspace
 
     def workspace_or_default(self, workspace: Workspace | None) -> Workspace:
-        """The workspace this command means, or a failure naming what is missing."""
-
         resolved = workspace if workspace is not None else self._default_workspace
         if resolved is None:
             raise CommandError(
@@ -176,10 +158,8 @@ class Session(ABC):
     ) -> None:
         """Name Lakehouses a Spark session may attach to for this work.
 
-        Called by an operation with the physical Lakehouses it was actually
-        asked for. A host that already runs where Spark is has nothing to
-        attach and ignores it; a host that crosses needs one, because Fabric
-        creates a Livy session against a Lakehouse.
+        Notebook execution ignores the offer. Desktop execution needs it because
+        Fabric creates a Livy session against a Lakehouse.
         """
 
         self.scope(workspace).offer_spark_home(lakehouses)
@@ -190,8 +170,6 @@ class Session(ABC):
 
     @contextmanager
     def workflow(self, workflow_id: str) -> Iterator[str]:
-        """Share one correlation identity across a composed sequence."""
-
         previous = self._workflow_id
         self._workflow_id = workflow_id
         try:
@@ -200,11 +178,9 @@ class Session(ABC):
             self._workflow_id = previous
 
     def position(self, workspace: Workspace | None = None) -> str:
-        """Where this Session's data engineering happens, as a named value.
+        """Return whether execution is in-session, across-boundary, or unplaced.
 
-        Derived from ``executes_here`` rather than declared twice. A Session
-        that cannot place itself against a workspace has nothing to reach into,
-        so that is an answer here rather than an error for a caller to read.
+        A Session with no workspace is unplaced.
         """
 
         try:
@@ -215,11 +191,9 @@ class Session(ABC):
 
     @abstractmethod
     def executes_here(self, workspace: Workspace | None = None) -> bool:
-        """Whether this process is already where the data engineering happens."""
+        """Whether execution uses this process's Fabric session."""
 
     def scope(self, workspace: Workspace | None = None) -> "WorkspaceScope":
-        """The cached resources for one workspace context, created on demand."""
-
         resolved = self.workspace_or_default(workspace)
         key = workspace_context(resolved)
         with self._scope_lock:
@@ -233,37 +207,28 @@ class Session(ABC):
 
     @abstractmethod
     def _new_scope(self, workspace: Workspace) -> "WorkspaceScope":
-        """The resources this host holds for one workspace context."""
+        pass
 
     # --- resolution ---------------------------------------------------------
 
     def resolver(self, workspace: Workspace | None = None):
-        """The one resolver for this workspace context, with its own cache.
-
-        One per Session lifetime: rebuilt per call, its cache would always be
-        empty and every operation would re-ask what the same names mean.
-        """
+        """Return the Session-owned resolver and its persistent item cache."""
 
         return self.scope(workspace).resolver
 
     def store(self, workspace: Workspace | None = None):
-        """The within-workspace store for this context."""
-
         return self.scope(workspace).store
 
     def transport_store(self, workspace: Workspace | None = None):
-        """The store this host writes across the boundary with.
+        """The store used to transfer files into the workspace.
 
-        The same as :meth:`store` wherever Weaver is already inside the
-        workspace. A console reaching into Fabric has no within-workspace store,
-        so this is where a bundle archive crosses.
+        This is :meth:`store` in Fabric. A ConsoleSession uses its OneLake DFS
+        client because NotebookUtils is unavailable on a desktop.
         """
 
         return self.scope(workspace).transport_store
 
     def resolve_workspace(self, workspace: Workspace | None = None):
-        """The physical workspace this context names."""
-
         return self.scope(workspace).resolve_workspace()
 
     def resolve_item(
@@ -282,7 +247,7 @@ class Session(ABC):
         reference = item if isinstance(item, ItemRef) else ItemRef(item)
         return self.scope(workspace).resolve_item(reference, item_type=item_type)
 
-    # --- host-neutral capabilities ------------------------------------------
+    # --- execution capabilities ---------------------------------------------
 
     @abstractmethod
     def execute_python(
@@ -292,10 +257,10 @@ class Session(ABC):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        """Run a Python program where this host's data engineering happens.
+        """Run a Python program in Fabric and return its result.
 
-        The program returns a value by calling ``emit(...)``. A console reaching
-        into Fabric crosses Livy here; a notebook is already there.
+        A ConsoleSession runs remote source through Livy, where ``emit(...)``
+        returns the result. A NotebookSession calls the in-process form directly.
         """
 
     @abstractmethod
@@ -307,15 +272,13 @@ class Session(ABC):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        """Run ordered Spark SQL statements together, and return the last one's rows.
+        """Run ordered Spark SQL statements and return the last one's rows.
 
-        One submission wherever they cross, because statements belonging to one
-        action are one piece of work: a setup that registers a temporary view
-        and the query reading it only mean anything in the same session.
+        Desktop execution uses one Livy submission, so setup statements and the
+        final query share temporary views and session state.
 
-        ``exact_case`` travels with the statements because a desktop caller has
-        no Spark to set a conf on, and a statement analysed under the host's
-        default case is a different statement.
+        ``exact_case`` applies to the whole batch because a desktop caller cannot
+        set the remote Spark configuration directly.
 
         The other statements are run for their effect, as they are in a session.
         """
@@ -328,7 +291,6 @@ class Session(ABC):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        """Run one Spark SQL statement and return its rows."""
 
         return self.execute_spark_sql_batch(
             [statement],
@@ -346,13 +308,10 @@ class Session(ABC):
         workspace: Workspace | None = None,
         parameters: Sequence[Any] | None = None,
     ) -> None:
-        """Run one T-SQL statement against a named Warehouse, over TDS.
+        """Run a T-SQL statement against a Warehouse and discard its results.
 
-        A statement, not a question: nothing comes back. Asking is
-        :meth:`query_tsql`, and a batch that answers more than once needs
-        ``query_result_sets``. Reading only the first result set of several answers
-        with whichever came back first, which is how a failing check
-        reports as passing.
+        Use :meth:`query_tsql` for one result set and ``query_result_sets`` for
+        multiple result sets.
         """
 
     @abstractmethod
@@ -364,7 +323,7 @@ class Session(ABC):
         workspace: Workspace | None = None,
         parameters: Sequence[Any] | None = None,
     ) -> Any:
-        """Ask one T-SQL question of a named Warehouse, and return its rows."""
+        """Run a T-SQL query against a Warehouse and return its rows."""
 
     # --- asynchronous appends -------------------------------------------------
 
@@ -372,9 +331,8 @@ class Session(ABC):
         """The flusher for one Warehouse write stream, created on first use.
 
         One flusher per stream, so two callers appending to the same table
-        share a worker and a connection rather than racing. Identity carries
-        enough to keep unrelated streams apart: the same table in two
-        Warehouses, or reached through two workspaces, is not one stream.
+        share a worker and connection. Workspace, Warehouse, schema, and table
+        identity keep unrelated streams separate.
         """
 
         from ..catalogue.flusher import FlusherKey, WarehouseFlusher
@@ -390,9 +348,9 @@ class Session(ABC):
         )
         with self._scope_lock:
             if self._closed:
-                raise CommandError("this Session is closed and appends nothing")
+                raise CommandError("Cannot append: the Session is closed.")
             if self._draining:
-                raise CommandError("this Session is closing and appends nothing")
+                raise CommandError("Cannot append: the Session is closing.")
             existing = self._flushers.get(key)
             if existing is not None:
                 return existing
@@ -409,8 +367,6 @@ class Session(ABC):
             return created
 
     def flush(self) -> None:
-        """Wait for every flusher this Session handed out."""
-
         with self._scope_lock:
             flushers = list(self._flushers.values())
         for flusher in flushers:
@@ -418,9 +374,7 @@ class Session(ABC):
 
     # --- reporting context --------------------------------------------------
     #
-    # What is currently being presented and timed, and nothing more. A Session
-    # records that a Step is running, and not what the Step decided, which
-    # node it belonged to, or whether the run as a whole succeeded.
+    # Reporting records elapsed work, not planning decisions or run state.
 
     @property
     def frames(self) -> tuple[ReportingFrame, ...]:
@@ -459,45 +413,33 @@ class Session(ABC):
     ) -> None:
         self._exit("substep", name, error=error)
 
-    # --- the paired form, which is the one to use ----------------------------
+    # --- paired reporting ----------------------------------------------------
     #
-    # An unclosed frame swallows everything nested under it and reports a
-    # duration for work that stopped, so instrumentation is written as a `with`.
-    # The explicit pairs above remain for callers that cannot bracket their work
-    # in one place.
+    # Prefer these context managers so failures always close their frames. The
+    # explicit pairs remain for callers that cannot bracket work in one place.
 
     @contextmanager
     def task(self, name: str, detail: str | None = None) -> Iterator[ReportingFrame]:
-        """One thing a person asked for, timed whatever happens to it."""
-
         yield from self._framed(TASK, name, detail)
 
     @contextmanager
     def step(self, name: str, detail: str | None = None) -> Iterator[ReportingFrame]:
-        """One boundary within a Task that is worth waiting at."""
-
         yield from self._framed(STEP, name, detail)
 
     @contextmanager
     def substep(self, name: str, detail: str | None = None) -> Iterator[ReportingFrame]:
-        """One physical unit within a Step."""
-
         yield from self._framed(SUBSTEP, name, detail)
 
     def _framed(self, kind: str, name: str, detail: str | None):
         if kind == TASK:
-            # The one safe moment to replace a dead resource. A Livy session
-            # that dies mid-Task takes its RuntimeScopes with it, so a run
-            # continuing on a replacement would dispatch against scopes that no
-            # longer exist. The Task fails; the next one acquires afresh.
+            # A Livy replacement invalidates its RuntimeScopes. Recover only
+            # between Tasks so a run never continues with stale scopes.
             self.recover()
         frame = self._enter(kind, name, detail)
         try:
             yield frame
         except BaseException as exc:
-            # An interrupt closes its frame and travels on, exactly as a failure
-            # does: the timing of work that was cancelled is still the timing of
-            # work that happened.
+            # Interrupted work still contributes a closed, failed timing.
             self._close(frame, error=exc)
             raise
         self._close(frame)
@@ -513,19 +455,16 @@ class Session(ABC):
 
     def _close(self, frame: ReportingFrame, error: BaseException | None = None) -> None:
         if frame.elapsed is not None:
-            return  # already closed, by an inner unwind or an explicit pair
+            return  # closed by an inner unwind or explicit pair
         if frame in self._frames:
-            # Everything still open beneath it goes too, closed in the order a
-            # reader would expect rather than left dangling.
+            # Closing an outer frame also closes every nested frame.
             index = self._frames.index(frame)
             for orphan in reversed(self._frames[index + 1 :]):
                 self._close(orphan, error=error)
             del self._frames[index:]
             self.telemetry.set_frames(self._frames)
         frame.elapsed = time.monotonic() - frame.started
-        # Not an overwrite: a caller may have marked the frame failed from
-        # inside it, which is how work whose failure is data, such as a run node
-        # that reports a failure rather than raising one, still reads as failed.
+        # Keep failures reported as data when the frame closes normally.
         frame.failed = frame.failed or error is not None
         self.timings.append(frame)
         self.present(frame, "failed" if frame.failed else "completed", error)
@@ -540,8 +479,6 @@ class Session(ABC):
                 return
 
     def recover(self) -> None:
-        """At a Task boundary, let anything that died be acquired once more."""
-
         with self._scope_lock:
             scopes = list(self._scopes.values())
         for scope in scopes:
@@ -550,17 +487,16 @@ class Session(ABC):
     def present(
         self, frame: ReportingFrame, event: str, error: BaseException | None = None
     ) -> None:
-        """Show one reporting event. Silent by default; hosts specialise it."""
+        """Present a reporting event. Silent by default."""
 
     def stop_presenting(self) -> None:
-        """Take down anything a host is drawing. Nothing to do by default."""
+        pass
 
     def warn(self, message: str) -> None:
         """Tell the operator something they should know but need not act on now.
 
-        Overridable, so a notebook can render it and a test can collect it. The
-        default reaches stderr: a mismatched deployment that warned about
-        nothing stays invisible until it fails somewhere confusing.
+        Subclasses may render the warning differently. The default writes to
+        stderr.
         """
 
         import sys
@@ -573,22 +509,17 @@ class Session(ABC):
     def close(self) -> None:
         """Release every resource this Session acquired, and nothing it was given.
 
-        Closing is the durability barrier for asynchronous logging, so the order
-        here is the guarantee. A flusher writes through this Session, and a
-        closed Session refuses to hand out a scope, so the flushers drain while the
-        Session is still open, and only then is it marked closed and its
-        resources released. Marking it closed first would fail exactly the
-        writes this barrier exists to complete, and only under enough load for
-        the worker to still be behind.
+        Closing is the durability barrier for asynchronous logging. Flushers
+        drain while the Session remains open; then the Session closes and
+        releases its resources.
         """
 
         self.stop_presenting()
         with self._scope_lock:
             if self._closed or self._draining:
                 return
-            # No new stream from here on. The Session is still open, because the
-            # flushers below write through it, but one handed out after this
-            # point would hold rows nobody waits for.
+            # Reject new streams while existing flushers drain through the
+            # still-open Session.
             self._draining = True
             flushers = list(self._flushers.values())
         failures = []
@@ -615,10 +546,10 @@ class Session(ABC):
 
 
 class WorkspaceScope:
-    """One workspace's resolver, store and expensive resources, for a Session.
+    """Resources shared for one workspace during a Session.
 
-    It holds no execution semantics, only what is expensive to acquire and safe
-    to share for as long as the Session lives.
+    It owns the reusable resolver, store, and resource handles. Operations retain
+    execution semantics.
     """
 
     def __init__(
@@ -636,21 +567,17 @@ class WorkspaceScope:
         self._resolver = resolver
         self._store = store
         self._resources: list[Resource] = []
-        #: Lakehouses offered as somewhere a Spark session could attach. A
-        #: transport detail rather than a destination; see
-        #: :meth:`offer_spark_home`.
+        #: Candidate Lakehouses for Livy attachment, not execution destinations.
         self._offered_spark_homes: set[str] = set()
-        # Reentrant: acquiring a resource asks this scope for the resolver that
-        # names it, and a scope that deadlocked on its own bookkeeping would do
-        # so only under the concurrency this Session exists to allow.
+        # Acquisition may re-enter the scope to resolve the resource.
         self._lock = threading.RLock()
 
     def offer_spark_home(self, lakehouses) -> None:
         """Note Lakehouses a Spark session may attach to, if this host needs one.
 
-        Fabric creates a Livy session against a Lakehouse, so a host that
-        crosses needs the id of one. Which one does not affect where work lands:
-        every generated statement names its own target in full.
+        Desktop execution needs a Lakehouse id because Fabric attaches Livy to a
+        Lakehouse. This does not select an execution destination: every generated
+        statement names its target in full.
         """
 
         names = {str(name) for name in lakehouses or () if name}
@@ -661,11 +588,10 @@ class WorkspaceScope:
 
     @property
     def spark_home(self) -> str | None:
-        """The offered Lakehouse to attach a Spark session to, where one was.
+        """Return a stable Livy attachment from the offered Lakehouses.
 
-        A plain name, the first by name, so a scope answers the same way twice.
-        None means nothing was offered, and the caller falls back to the
-        workspace's own.
+        The first name in sorted order keeps attachment stable. None lets the
+        caller fall back to the workspace configuration.
         """
 
         with self._lock:
@@ -694,8 +620,6 @@ class WorkspaceScope:
 
     @property
     def transport_store(self):
-        """Where Weaver is already inside the workspace, its own store."""
-
         return self.store
 
     def resolve_workspace(self):
@@ -703,7 +627,7 @@ class WorkspaceScope:
         physical = getattr(resolver, "workspace", None)
         if physical is None:
             raise CommandError(
-                f"{type(resolver).__name__} resolves no physical workspace"
+                f"{type(resolver).__name__} cannot resolve a physical workspace."
             )
         return physical
 
@@ -712,11 +636,10 @@ class WorkspaceScope:
         resolve = getattr(resolver, "resolve", None)
         if resolve is None:
             raise CommandError(
-                f"{type(resolver).__name__} does not resolve items by type"
+                f"{type(resolver).__name__} cannot resolve items by type."
             )
-        # The resolver owns the cache, so it owns the hit count too; this reads
-        # the count rather than reimplementing the lookup, because a hit is the
-        # absence of a call and only the resolver can see one.
+        # Only the resolver can identify a cache hit without repeating lookup
+        # logic.
         before = getattr(resolver, "cache_hits", 0)
         with self.telemetry.timing("resolve.item"):
             resolved = resolve(item, item_type=item_type)
@@ -727,11 +650,10 @@ class WorkspaceScope:
     # --- resources ----------------------------------------------------------
 
     def recover(self) -> None:
-        """Permit one further acquisition of anything that failed here.
+        """Permit each failed resource one bounded reacquisition.
 
-        Bounded by the resource's own allowance, and quiet when it is spent: a
-        resource that will not come back says so to whoever uses it, rather than
-        failing a Task before it has begun.
+        Exhaustion is reported when the resource is next used, not before the
+        Task starts.
         """
 
         from .resources import ResourceError, ResourceState
@@ -745,8 +667,6 @@ class WorkspaceScope:
                 pass
 
     def track(self, resource: Resource) -> Resource:
-        """Own a resource for this scope's lifetime, closing it with the scope."""
-
         with self._lock:
             self._resources.append(resource)
         return resource
@@ -759,11 +679,7 @@ class WorkspaceScope:
 
 
 def run_spark_statements(spark: Any, statements: Sequence[str]) -> list[dict]:
-    """Run each statement in order against a live session; collect only the last.
-
-    Spark executes a command when it is asked for, so collecting the earlier
-    results would materialise what nothing reads.
-    """
+    """Run statements in order and materialise only the final result."""
 
     for statement in statements[:-1]:
         spark.sql(statement)

@@ -49,7 +49,7 @@ def _declared(*words: str) -> set[str]:
 def test_a_declaration_is_checked_against_the_vocabulary():
     """A typo must be a failure, not a requirement nobody honours."""
 
-    with pytest.raises(ValueError, match="unknown resource requirement"):
+    with pytest.raises(ValueError, match="Unknown resource requirement"):
         requirements(AUTH, "sparkle")
 
 

@@ -1,4 +1,4 @@
-"""The Session a caller opens by name.
+"""Public construction of a reusable Session.
 
 ``weaver.session(...)`` is the reusable form of every operation: names in, one
 Session out, and each operation given it rather than opening its own.
@@ -16,17 +16,14 @@ Session out, and each operation given it rather than opening its own.
         weaver.load("Lakehouse/Sales", session=session)
         weaver.test("Lakehouse/Sales", session=session)
 
-What the Session holds is what is expensive: the credential, the resolved items
-and their cache, the REST client, the OneLake transport, the Livy session and one
-TDS connection per Warehouse. Four operations that share one pay for them once.
+The Session reuses credentials, resolved items, clients, the Livy session, and
+one TDS connection per Warehouse.
 
-Everything is lazy. Opening a Session resolves no items, starts no Livy session,
-opens no connection and publishes nothing, a caller that opens one and does
-nothing has cost a credential object.
+Opening a Session resolves no items, starts no Livy session, opens no connection,
+and publishes nothing.
 
-Which host it is depends on where this runs, and the caller does not choose: a
-notebook inside the workspace gets the session it is already in, and a desktop
-gets one that reaches across.
+Construction selects a NotebookSession inside the target workspace and a
+ConsoleSession elsewhere.
 """
 
 from __future__ import annotations
@@ -51,16 +48,11 @@ def session(
     ``workspace_config`` reads the same file the CLI's ``--workspace-config``
     does, and explicit arguments win over it.
 
-    ``credential`` accepts anything offering a callable ``get_token``, which is
-    the ``azure.core`` ``TokenCredential`` shape. Without one the library
-    default is used and no chain is pinned: which credential to authenticate
-    with is a caller's policy, never the core's. It is validated here and
-    acquired later, so a wrong object is refused at the call that supplied it
-    rather than during whichever operation first reaches Fabric.
+    ``credential`` accepts an object with the ``azure.core`` ``TokenCredential``
+    shape. Without one, the library default is used; the core does not select a
+    credential chain. Credentials are validated here and acquired on first use.
 
-    Other host-specific options are absent. Whether a Livy session
-    needs the published wheel, and where a timing tree is drawn, are a console's
-    business; a caller who needs to set them constructs that host directly.
+    Construct a concrete Session directly to set implementation-specific options.
     """
 
     from ..config import resolve_workspace
@@ -70,8 +62,7 @@ def session(
     if isinstance(workspace, Workspace):
         if workspace_config is not None:
             raise CommandError(
-                "a resolved Workspace arrives complete, so workspace_config "
-                "would have nothing to add to it"
+                "workspace_config cannot be combined with a resolved Workspace."
             )
         resolved = workspace
     else:

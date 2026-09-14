@@ -1,8 +1,7 @@
 """A Session for Weaver running on a desktop, reaching into Fabric.
 
-Every capability crosses: Spark SQL and Python over Livy, storage over OneLake,
-T-SQL over TDS, everything else over REST. There is no Spark session here. See
-:mod:`weaver.sessions.notebook` for the position that has one.
+Desktop execution uses Livy for Spark SQL and Python, OneLake for storage, TDS
+for T-SQL, and REST for Fabric APIs. There is no local Spark session.
 
 Resources are cached per workspace for reuse across commands.
 """
@@ -22,9 +21,6 @@ from .resources import Resource
 
 
 def _duration(seconds: float | None) -> str:
-    """A duration a person reads: two significant figures, which is all anybody
-    acts on, and a column a nested name needs more."""
-
     if seconds is None:
         return ""
     if seconds < 60:
@@ -34,8 +30,6 @@ def _duration(seconds: float | None) -> str:
 
 
 def _environment_publish_command(workspace: Workspace) -> str:
-    """Return the publish command for a Workspace's Environment reference."""
-
     reference = workspace.environment
     if reference is None:
         return "`weaver fabric environment publish <environment>`"
@@ -49,11 +43,7 @@ def _environment_publish_command(workspace: Workspace) -> str:
 
 @dataclass(frozen=True)
 class WarmUp:
-    """What a warm-up started, and what it declined to start and why.
-
-    The reason is the useful half: naming the Environment a caller did not pass
-    tells them what to do.
-    """
+    """Resources started or skipped by a warm-up, with reasons."""
 
     started: tuple[str, ...] = ()
     skipped: tuple[tuple[str, str], ...] = ()
@@ -64,9 +54,9 @@ class WarmUp:
 
 
 class ConsoleSession(Session):
-    """A reusable console-process execution scope.
+    """A reusable desktop execution scope.
 
-    ``workspace`` is a default context and nothing more: ``weaver session``
+    ``workspace`` is only a default context: ``weaver session``
     starts without one, and every command may name its own.
     """
 
@@ -83,20 +73,15 @@ class ConsoleSession(Session):
         super().__init__(**kwargs)
         from ..fabric.auth import checked_credential
 
-        # Checked here, where it was supplied. A Session acquires its token
-        # lazily, so a wrong object would otherwise surface during whichever
-        # operation first reached Fabric.
+        # Validate the supplied credential now; acquire its token lazily.
         self._given_credential = checked_credential(credential)
         self._given_livy = livy
         self._given_store = store
         self._given_resolver = resolver
-        #: Where the timing tree is written. stderr by default, because stdout
-        #: is a command's answer and several commands emit JSON on it, so progress
-        #: interleaved into that would make the answer unparseable. ``False``
-        #: silences it.
+        #: Progress goes to stderr so stdout remains valid command output.
+        #: ``False`` disables progress.
         self._progress = progress
-        #: How many characters of transient line are currently on screen, and
-        #: the lock that keeps the ticker thread from drawing over a completion.
+        #: Width and lock for the transient progress line.
         self._painted = 0
         self._progress_lock = threading.Lock()
         self._ticker = None
@@ -104,27 +89,19 @@ class ConsoleSession(Session):
 
     # --- progress -----------------------------------------------------------
 
-    #: The narrowest the name column may be; the real width comes from the
-    #: terminal (:meth:`_width`). A fixed column is only ever right for one
-    #: estate. A name like
-    #: ``Warehouse/Reporting/Reporting.CustomerRevenuePresent`` runs past it and
-    #: pushes its own duration out of alignment.
+    #: Minimum width of the progress name column.
     PROGRESS_WIDTH = 52
 
     #: Kept back from the terminal's own width so the duration never wraps.
     DURATION_WIDTH = 8
 
-    #: How often the live line redraws while work is in flight. Slow enough to
-    #: cost nothing, fast enough that the elapsed figure is visibly moving, which
-    #: is what says the wait is alive rather than hung.
+    #: Seconds between redraws of the live progress line.
     PROGRESS_TICK = 1.0
 
     def present(self, frame, event: str, error: BaseException | None = None) -> None:
-        """Keep the open work visible, and record each frame as it closes.
+        """Display completed frames and the innermost active frame.
 
-        A closed frame is written as a permanent line, since its duration is
-        only known then. Children appear above their parent with the parent's
-        total underneath, the way ``du`` reads:
+        Completed frames are permanent. Children precede their parent's total:
 
         .. code-block:: text
 
@@ -136,16 +113,14 @@ class ConsoleSession(Session):
               Install Lakehouse/Sales                    18.6s
             ✓ Build                                      40.7s
 
-        Below that sits a transient line, rewritten in place, naming the
-        innermost frame still open and how long it has been running:
+        A transient line shows the innermost active frame:
 
         .. code-block:: text
 
             ⋯ Unbind catalogue claims                     1m47s
 
-        It is erased before anything permanent is written, so it never lands in
-        the transcript. Live output needs a terminal to rewrite: piped or
-        captured, this degrades to the completed lines alone.
+        The transient line is available only on a terminal and is erased before
+        permanent output.
         """
 
         stream = self._progress_stream()
@@ -174,16 +149,13 @@ class ConsoleSession(Session):
         self._start_ticking()
 
     def _label(self, frame) -> str:
-        """A Task heads its own block, so its Steps are the first indent level."""
-
         return "  " * max(frame.depth - 1, 0) + frame.name
 
     def _width(self) -> int:
-        """The name column, from the terminal, never below :attr:`PROGRESS_WIDTH`.
+        """Return a name-column width that follows terminal resizing.
 
-        Read per line rather than cached, because a terminal can be resized
-        mid-run and an ``ioctl`` is free against work measured in seconds. With
-        no terminal, ``get_terminal_size`` answers 80 columns.
+        Reading per line makes mid-run resizing take effect. Without a terminal,
+        ``get_terminal_size`` returns 80 columns.
         """
 
         import shutil
@@ -194,8 +166,6 @@ class ConsoleSession(Session):
     # --- the live line ------------------------------------------------------
 
     def _paint(self, stream) -> None:
-        """Draw the innermost open frame, without ending the line."""
-
         if not self._live(stream):
             return
         frame = self._innermost()
@@ -210,8 +180,6 @@ class ConsoleSession(Session):
         self._painted = len(text)
 
     def _erase(self, stream) -> None:
-        """Take the transient line back before anything permanent is written."""
-
         if not self._painted:
             return
         stream.write("\r" + " " * self._painted + "\r")
@@ -219,30 +187,17 @@ class ConsoleSession(Session):
         self._painted = 0
 
     def _innermost(self):
-        """The deepest frame still open, which is what the wait is for.
-
-        A Task names the command, which the heading already said; the useful
-        answer to "what is it doing" is the smallest thing currently in flight.
-        """
-
         frames = self.frames
         return frames[-1] if frames else None
 
     def _live(self, stream) -> bool:
-        """Whether this stream can have a line rewritten in it."""
-
         try:
             return bool(stream.isatty())
         except (AttributeError, ValueError):
             return False
 
     def _start_ticking(self) -> None:
-        """Keep the elapsed figure moving while a frame is open.
-
-        Otherwise the line is painted only when another frame opens or closes,
-        which during a long wait is never. A daemon thread, so it cannot hold
-        the process open.
-        """
+        """Redraw elapsed time in a daemon thread while work is active."""
 
         stream = self._progress_stream()
         if stream is None or not self._live(stream) or self._ticker is not None:
@@ -270,13 +225,7 @@ class ConsoleSession(Session):
                 self._paint(stream)
 
     def warn(self, message: str) -> None:
-        """A warning, on a line of its own, with the live line taken back first.
-
-        The transient line is mid-write when a warning arrives, so without the
-        erase the two collide::
-
-            ⋯   Read target inventories  40.0swarning: this console runs ...
-        """
+        """Write a warning without colliding with the transient progress line."""
 
         stream = self._progress_stream()
         if stream is not None:
@@ -289,8 +238,6 @@ class ConsoleSession(Session):
                 self._paint(stream)
 
     def stop_presenting(self) -> None:
-        """Stop the ticker and leave no half-drawn line behind."""
-
         self._ticking = False
         stream = self._progress_stream()
         if stream is not None:
@@ -321,35 +268,27 @@ class ConsoleSession(Session):
     # --- readiness ----------------------------------------------------------
 
     def warm(self, workspace: Workspace | None = None) -> "WarmUp":
-        """Begin acquiring what every command needs, without waiting.
+        """Begin acquiring the credential without waiting.
 
-        The credential, and nothing a command has to ask for: opening a session
-        does not yet know whether Spark is wanted, or which Lakehouse a Livy
-        session would attach to. Nothing here fails a caller, and a warm-up that
-        cannot complete is reported by whichever command needs the resource.
+        Command-specific resources are not acquired until requested. Speculative
+        failures are reported by the operation that uses the resource.
         """
 
         return self.scope(workspace).warm()
 
     def prepare(self, required, *, workspace: Workspace | None = None) -> "WarmUp":
-        """Begin acquiring exactly what a caller said it would need.
+        """Begin acquiring the declared resources without waiting.
 
-        The Session is told rather than inferring, so it is not a second place
-        deciding what an operation does.
-
-        Preparing is not using: this gives a head start to acquisitions that are
-        coming anyway. A command that declares Livy and needs none opens no
-        Spark session.
+        Preparation starts acquisitions but does not count as use. An unused
+        Livy requirement opens no Spark session.
         """
 
         return self.scope(workspace).warm(required)
 
     def executes_here(self, workspace: Workspace | None = None) -> bool:
-        """A console is never where the data engineering happens; it crosses."""
-
         return False
 
-    # --- host-neutral capabilities ------------------------------------------
+    # --- execution capabilities ---------------------------------------------
 
     def execute_python(
         self,
@@ -358,14 +297,10 @@ class ConsoleSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        # No frame is opened here: a crossing is how the caller's work happens
-        # rather than a second thing that happened, and framing it printed the
-        # program's name above the frame that asked for it: two lines, one
-        # duration. The cost is still recorded in telemetry.
+        # The caller owns the reporting frame; telemetry records the Livy cost.
         scope = self.scope(workspace)
-        # A program is Python that imports Weaver where Spark is, so this is the
-        # one crossing that waits on Environment publication. Spark SQL and TDS reach
-        # the same workspace without it.
+        # Remote Python imports Weaver, so it requires a published Environment.
+        # Spark SQL and TDS do not.
         scope._check_weaver_available()
         livy = self._foreground_livy(scope)
         scope.ensure_weaver(livy=livy)
@@ -396,9 +331,7 @@ class ConsoleSession(Session):
         if not ordered:
             return []
         scope = self.scope(workspace)
-        # Spelled out rather than imported on the far side: this is a Session
-        # capability, and reaching into the build package for a context manager
-        # would point the dependency the wrong way for a two-line conf dance.
+        # Keep the submitted program independent of build-package internals.
         source = (
             f"_statements = {ordered!r}\n"
             f"_exact = {bool(exact_case)!r}\n"
@@ -420,10 +353,8 @@ class ConsoleSession(Session):
         return scope.livy_run(source, name="spark_sql", timeout=timeout, livy=livy)
 
     def _foreground_livy(self, scope: "ConsoleScope"):
-        """The shared Livy session, reporting only a caller's blocking wait."""
-
         if scope.livy is None:
-            raise CommandError("this workspace has no Livy session")
+            raise CommandError("No Livy session is available for this workspace.")
         if scope.livy.ready:
             return scope.livy.get()
         with self.substep("Wait for Spark session"):
@@ -452,18 +383,16 @@ class ConsoleSession(Session):
         return executor.query(statement, parameters or ())
 
     def sql_executor(self, target: Any, *, workspace: Workspace | None = None):
-        """The reused TDS capability for one Warehouse.
+        """Return the Session-owned TDS executor for one Warehouse.
 
-        Handed out rather than hidden, because the SQL executor is itself the
-        boundary object readers, wipes and Warehouse primitives take. It is
-        acquired once per Warehouse per Session.
+        Readers, wipes, and Warehouse primitives accept this executor directly.
         """
 
         return self.scope(workspace).sql_for(target)
 
 
 class ConsoleScope(WorkspaceScope):
-    """One workspace's resources, held for the life of a console session."""
+    """One workspace's resources for a desktop Session."""
 
     def __init__(
         self,
@@ -476,9 +405,7 @@ class ConsoleScope(WorkspaceScope):
         super().__init__(workspace, **kwargs)
         self.name = str(getattr(workspace, "workspace", workspace))
         self._sql: dict[str, Resource] = {}
-        #: The credential this scope authenticates with. None means the library
-        #: default, chosen when it is first needed rather than now: acquiring a
-        #: token is a network call, and opening a Session must not make one.
+        #: None defers credential selection and token acquisition until use.
         self._credential = credential
         self._transport_store = None
         self._version_checked = False
@@ -501,11 +428,10 @@ class ConsoleScope(WorkspaceScope):
         )
 
     def _given_or_acquired(self, name, given, acquire, *, release) -> Resource:
-        """A resource this scope acquires, or one it was handed and must not close.
+        """Wrap an owned resource or a borrowed value.
 
-        A Session closes what it opened and nothing it was given, which is what
-        lets a suite hand in the one Livy session a capacity permits, and a
-        notebook hand in the Spark session it is running inside.
+        A Session closes what it opened, not borrowed values. This lets callers
+        share a constrained Livy session safely.
         """
 
         if given is None:
@@ -527,10 +453,8 @@ class ConsoleScope(WorkspaceScope):
         Speculative throughout: a failure here leaves the resource unstarted and
         the real attempt reports in its own terms.
 
-        No declaration means the resources every command needs whatever it turns
-        out to be, which is the credential. Spark is asked for by name: a Livy
-        session costs a minute and a capacity's only slot, and a Warehouse-only
-        command never submits one.
+        No declaration warms only the credential. Livy is warmed only when named;
+        a Warehouse-only command must not consume a Spark session.
 
         Livy is warmed only where it can start: a workspace naming no
         Environment cannot have a session created against it, and Fabric needs a
@@ -542,7 +466,7 @@ class ConsoleScope(WorkspaceScope):
 
         started: list[str] = []
         skipped: list[tuple[str, str]] = []
-        # None is "the reusable ones", not "everything": see above.
+        # No declaration warms only resources shared by every command.
         wanted = {AUTH} if required is None else set(required)
 
         if self.auth is not None and AUTH in wanted:
@@ -584,14 +508,13 @@ class ConsoleScope(WorkspaceScope):
 
     @property
     def store(self):
-        """The store a console reaches this workspace with.
+        """The supplied store or this Session's OneLake DFS client.
 
         A store the Session was given wins outright; the caller owns it and is
         holding it open.
 
-        Otherwise it is the DFS transport. A console has no within-workspace
-        store at all, ``FabricStore`` goes through NotebookUtils, which exists
-        only inside a session.
+        ``FabricStore`` is unavailable on a desktop because it requires
+        NotebookUtils.
         """
 
         if self._store is not None:
@@ -600,8 +523,6 @@ class ConsoleScope(WorkspaceScope):
 
     @property
     def transport_store(self):
-        """How a console writes into a workspace it is not running inside."""
-
         with self._lock:
             if self._transport_store is None:
                 from ..fabric import OneLakeDfsClient
@@ -612,9 +533,7 @@ class ConsoleScope(WorkspaceScope):
     def _fabric_client(self):
         from ..fabric.client import FabricClient
 
-        # One client, carrying the Session's own renewing token source, so every
-        # REST call in this Session shares one credential rather than shelling
-        # out to the Azure CLI per operation.
+        # Share one renewing token source across this Session's REST calls.
         return FabricClient(token=self.token_provider(), telemetry=self.telemetry)
 
     def token_provider(self):
@@ -628,19 +547,16 @@ class ConsoleScope(WorkspaceScope):
 
     def _acquire_token_provider(self):
         provider = self.token_provider()
-        provider()  # pay the acquisition here, in the background, once
+        provider()  # acquire once during background warm-up
         return provider
 
     # --- Livy ---------------------------------------------------------------
 
     def _acquire_livy(self):
-        """A Livy session that is running, rather than constructed.
+        """Acquire a running, bootstrapped Livy session.
 
-        ``for_workspace`` builds the object; ``start`` asks Fabric for the
-        session, waits for idle and runs the bootstrap. Returning the unstarted
-        object would look acquired to everything above: the state would say
-        ready, a second caller would share it, and the first statement would
-        fail with no session ever appearing in the workspace.
+        ``start`` waits for Fabric to report the session idle and completes its
+        bootstrap before the shared resource becomes ready.
         """
 
         from ..fabric import LivySession
@@ -657,20 +573,15 @@ class ConsoleScope(WorkspaceScope):
         return session
 
     def _check_weaver_available(self) -> None:
-        """Validate what a remote program needs before Spark is acquired."""
-
         if self.livy is None:
-            raise CommandError("this workspace has no Livy session")
+            raise CommandError("No Livy session is available for this workspace.")
         if not self.workspace.environment:
-            # Before `livy.get()`, which starts a Spark session this work could
-            # not use anyway.
+            # Fail before starting a Spark session the program cannot use.
             from ..fabric.livy import missing_environment
 
             raise CommandError(missing_environment(self.workspace))
 
     def ensure_weaver(self, *, livy=None) -> None:
-        """Assert the Livy session can import the published Weaver."""
-
         self._check_weaver_available()
         if livy is None:
             livy = self.livy.get()
@@ -678,14 +589,9 @@ class ConsoleScope(WorkspaceScope):
             livy.ensure_weaver()
 
     def check_published_version(self, warn, *, livy=None) -> None:
-        """Compare this checkout's Weaver with the one published in the workspace.
+        """Warn once when local and published Weaver versions differ.
 
-        The two are independently versioned halves of one deployment and can
-        drift. A difference warns and names the fix rather
-        than refusing, because it is usually harmless.
-
-        Asked once per workspace context, on the first crossing: a warning
-        repeated per command is one nobody reads.
+        Version drift and version-check failures do not block work.
         """
 
         with self._lock:
@@ -705,10 +611,9 @@ class ConsoleScope(WorkspaceScope):
             return
         if published and published != local:
             warn(
-                f"this console runs weaverstack {local}; {self.name} has "
-                f"{published} published. Run "
-                f"{_environment_publish_command(self.workspace)} if the difference "
-                "matters"
+                f"Local weaverstack is {local}; {self.name} has {published}. "
+                f"To publish the local version, run "
+                f"{_environment_publish_command(self.workspace)}."
             )
 
     def livy_run(
@@ -730,7 +635,7 @@ class ConsoleScope(WorkspaceScope):
         from ..fabric import LivyError, LivyStatementError
 
         if self.livy is None:
-            raise CommandError("this workspace has no Livy session")
+            raise CommandError("No Livy session is available for this workspace.")
         if livy is None:
             livy = self.livy.get()
         with self.telemetry.external("livy", name):
@@ -740,23 +645,21 @@ class ConsoleScope(WorkspaceScope):
             except LivyStatementError as exc:
                 raise self._statement_failure(exc, name) from exc
             except LivyError:
-                # The session itself is gone, not the statement.
+                # Only a transport failure invalidates the shared Livy resource.
                 self.livy.fail()
                 raise
         if not result.returned:
             raise CommandError(
-                f"{name} ran in Fabric but returned nothing; see the Livy "
-                "session output"
+                f"{name} returned no result from Fabric. See the Livy session output."
             )
         return result.payload
 
     def _statement_failure(self, exc, name: str):
-        """The remote failure, said in terms that can be acted on.
+        """Add publishing guidance when remote Weaver cannot be imported.
 
-        A program that could not import Weaver is almost always a wheel older
-        than the console that submitted it, and the raw ``ModuleNotFoundError``
-        points at a missing package rather than at publishing.
-        Everything else is passed through as it came.
+        A missing Weaver import means the published Environment lacks code the
+        submitted program needs.
+        Other statement failures pass through unchanged.
         """
 
         missing = (exc.ename or "") in ("ModuleNotFoundError", "ImportError")
@@ -764,18 +667,15 @@ class ConsoleScope(WorkspaceScope):
             from .. import __version__
 
             return CommandError(
-                f"{name} could not run: the Weaver published in {self.name} is "
-                f"older than this console ({__version__}) and does not carry "
-                f"{exc.evalue}. Publish the current wheel with "
-                f"{_environment_publish_command(self.workspace)}"
+                f"{name} could not run in {self.name}: {exc.evalue}. "
+                f"Publish weaverstack {__version__} with "
+                f"{_environment_publish_command(self.workspace)}."
             )
         return exc
 
     # --- SQL ----------------------------------------------------------------
 
     def sql_for(self, target: Any):
-        """The TDS capability for one Warehouse, acquired once per Session."""
-
         warehouse = (
             target
             if isinstance(target, WarehouseTarget)

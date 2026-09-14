@@ -157,5 +157,5 @@ def test_a_scope_with_no_livy_says_so_rather_than_asserting_nothing(monkeypatch)
     scope = session.scope(None)
     scope.livy = None
 
-    with pytest.raises(CommandError, match="no Livy session"):
+    with pytest.raises(CommandError, match="No Livy session"):
         scope.ensure_weaver()

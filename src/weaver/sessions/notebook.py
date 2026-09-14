@@ -1,8 +1,7 @@
-"""Session implementation for Weaver running inside a Fabric host.
+"""Session implementation for Weaver running inside Fabric.
 
-The session uses notebook-provided Spark, storage, and resolution resources for
-its attached Workspace. It exposes the same host-neutral capabilities as a
-console Session.
+The Session uses Spark, storage, and resolution resources supplied by the
+notebook runtime.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from .resources import Resource
 
 
 class NotebookSession(Session):
-    """A Session for Weaver running inside a Fabric notebook or Livy session."""
+    """A Session for Weaver running in a Fabric notebook or Livy session."""
 
     def __init__(
         self,
@@ -30,7 +29,6 @@ class NotebookSession(Session):
         super().__init__(**kwargs)
         if self.workspace is None:
             raise CommandError("A NotebookSession requires its attached Workspace.")
-        # Reuse resources supplied by the notebook host.
         self._spark = spark
         self._given_store = store
         self._given_resolver = resolver
@@ -38,8 +36,8 @@ class NotebookSession(Session):
     def _new_scope(self, workspace: Workspace) -> "NotebookScope":
         if workspace.workspace != self.workspace.workspace:
             raise CommandError(
-                f"this notebook is attached to {self.workspace.workspace}; it "
-                f"cannot execute against {getattr(workspace, 'workspace', workspace)}"
+                f"This notebook is attached to {self.workspace.workspace} and cannot "
+                f"execute against {getattr(workspace, 'workspace', workspace)}."
             )
         return NotebookScope(
             workspace,
@@ -58,7 +56,7 @@ class NotebookSession(Session):
     def spark(self, workspace: Workspace | None = None):
         return self.scope(workspace).spark()
 
-    # --- host-neutral capabilities ------------------------------------------
+    # --- execution capabilities ---------------------------------------------
 
     def execute_python(
         self,
@@ -67,10 +65,8 @@ class NotebookSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        # Framed by the caller, not here. See ConsoleSession.execute_python for
-        # why. Both hosts have to agree about this or the same operation reads
-        # differently depending on where it ran.
-        self.scope(workspace)  # the attachment check, before any work happens
+        # Callers frame execution so reporting is identical in both positions.
+        self.scope(workspace)  # validate the attachment before running the program
         with self.telemetry.timing(f"python.{program.name}"):
             return program.call()
 
@@ -82,11 +78,10 @@ class NotebookSession(Session):
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
-        """Ordered Spark SQL statements against the attached session.
+        """Run statements in one identifier-case scope.
 
-        Nothing crosses here, so a batch is a batch only in that the statements
-        share one identifier-case scope, which is what makes a setup and the
-        query that reads it mean the same thing in both positions.
+        Inside Fabric, batching keeps setup and query statements under the same
+        identifier-case setting.
         """
 
         ordered = list(statements)
@@ -126,7 +121,7 @@ class NotebookSession(Session):
 
 
 class NotebookScope(WorkspaceScope):
-    """The attached notebook's own resources: mostly things it already has."""
+    """Resources supplied by the attached notebook runtime."""
 
     def __init__(self, workspace: Workspace, *, spark: Any = None, **kwargs) -> None:
         super().__init__(workspace, **kwargs)
@@ -145,8 +140,6 @@ class NotebookScope(WorkspaceScope):
         return self._spark
 
     def sql_for(self, target: Any):
-        """Warehouse SQL, authenticated Fabric-natively, once per Warehouse."""
-
         from ..targets import ItemRef, WarehouseTarget
 
         warehouse = (

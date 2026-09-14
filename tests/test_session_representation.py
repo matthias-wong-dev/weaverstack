@@ -424,7 +424,7 @@ def test_a_wheel_too_old_to_import_weaver_says_to_publish():
     ) as raised:
         scope.livy_run("emit(1)", name="read_build_state")
 
-    assert "older than this console" in str(raised.value)
+    assert "Publish weaverstack" in str(raised.value)
     session.close()
 
 
