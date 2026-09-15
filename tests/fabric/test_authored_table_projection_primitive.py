@@ -63,9 +63,14 @@ installed = spark.createDataFrame(
         "row_signature string"
     ),
 )
+# Column mapping, because Delta refuses a space in a column name without it.
+# Weaver's own DDL sets the same property, so this is the shape a Weaver table
+# is actually installed in rather than a shape invented for the probe.
 installed.write.format("delta").mode("overwrite").option(
     "overwriteSchema", "true"
-).save(path)
+).option("delta.columnMapping.mode", "name").option(
+    "delta.minReaderVersion", "2"
+).option("delta.minWriterVersion", "5").save(path)
 
 business = probe.dataframe()
 audited = probe.dataframe(row_audit_columns=True)
@@ -126,7 +131,7 @@ AUDIT = ["row_insert_datetime", "row_update_datetime", "row_delete_datetime"]
 BUSINESS = ["Order Id", "Order.Date", "Amount"]
 
 
-@weaver_test(hosted=True, resources={"livy"})
+@weaver_test(hosted=True)
 def test_a_table_projects_its_declared_shape_out_of_a_real_delta_table(livy_session):
     seen = livy_session.run(PROBE).payload
 
@@ -159,9 +164,9 @@ def test_a_table_projects_its_declared_shape_out_of_a_real_delta_table(livy_sess
     # manufactured. Spark's own analysis error, whatever this runtime calls it.
     assert seen["missing_refused"] is not None
 
-    # Why dataframe() quotes what columns() reports. Spark splits an unquoted
-    # dotted identifier into struct field access, so the names-only spellings
-    # columns() returns do not survive select() unquoted. An author writing
-    # `select(*self.columns())` over a table with a dotted column name has to
-    # quote them, which is the case for the declaration parser refusing one.
-    assert seen["unquoted_refused"] is not None
+    # Why dataframe() quotes what columns() reports: Spark reads the unquoted
+    # name as field `Date` of a column `Order` and refuses, even though a column
+    # literally named `Order.Date` is there. So `select(*self.columns())`, the
+    # authored pattern, is not safe for a dotted column name, which is the case
+    # for the declaration parser refusing to accept one.
+    assert seen["unquoted_refused"] == "AnalysisException"
