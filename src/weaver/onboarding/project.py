@@ -159,8 +159,8 @@ Build makes Fabric structures match the project. Load runs the data work.
 
 ## The Weaver catalogue
 
-Warehouse/{request.catalogue} holds Weaver's build, load and test state in its
-`_` schema. The first build creates those catalogue tables.
+Warehouse/{request.catalogue} holds Weaver's build, load and test state. The
+first build creates those catalogue tables.
 
 ## The Environment
 

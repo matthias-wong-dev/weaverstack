@@ -28,13 +28,12 @@ cd analytics
 weaver build
 ```
 
-With `--non-interactive`, the CLI requires an existing Azure CLI sign-in and
-does not open a browser. Omit it to allow Microsoft sign-in in a browser.
+With `--non-interactive`, Weaver uses a configured service principal or Azure
+CLI sign-in and does not open a browser.
 
 ## Documentation
 
 - [Website](https://weaverstack.dev)
-- [Documentation](https://docs.weaverstack.dev)
 - [Source](https://github.com/matthias-wong-dev/weaverstack)
 
 ## Licence
