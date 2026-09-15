@@ -333,11 +333,7 @@ continue to write ordinary Python and SQL.
 For example,
 
 ```python
-Sales__Customer(self).current_dataframe()
-```
-
-```python
-self.delta_history()
+Sales__Customer(self).dataframe()
 ```
 
 ```sql
@@ -346,6 +342,58 @@ FROM Sales.Customer
 ```
 
 Weaver provides the execution context without a template language.
+
+## What a table tells its own code
+
+A table's declaration is already the authority on its shape and its key, so
+authored code asks the object rather than repeating either.
+
+| method | what it returns |
+|---|---|
+| `columns()` | the business column names, in declared order |
+| `primary_key_columns()` | the declared primary key, in declaration order, or `()` |
+| `dataframe()` | the stored rows, business columns only |
+| `dataframe(row_audit_columns=True)` | the same, with the three row audit datetimes after them |
+| `empty_dataframe()` | the same shape with no rows |
+
+`columns()` is the projection that settles a staging frame:
+
+```python
+return staged.select(*self.columns())
+```
+
+That enforces the declared shape, puts the columns in declared order and drops
+anything the source carried and the table does not declare. A column the frame
+does not carry fails there, which is the point: an absence a source genuinely
+has is written as an explicit expression beside the others, so it cannot be
+confused with a parser that silently dropped a column.
+
+```python
+staged = staged.select(
+    ...,
+    F.lit(None).cast("string").alias("settlement_reference"),
+    ...,
+)
+return staged.select(*self.columns())
+```
+
+`primary_key_columns()` is what a delete claim projects, so the key is declared
+once:
+
+```python
+return staged, existing.where(F.col("source_filename").isin(*withdrawn)).select(
+    *self.primary_key_columns()
+)
+```
+
+The row audit datetimes and the row signature are Weaver's, not the table's, so
+neither `columns()` nor `dataframe()` reports them. The audits are readable on
+request because they answer a question about the data; the signature is load
+bookkeeping and has no author-facing opt-in.
+
+A table that leaves its schema to be inferred, which only a Spark SQL table
+does, has no declared columns to read, so `columns()` reports what the installed
+table holds, less Weaver's own, in physical order.
 
 ## Folder loads and changes
 

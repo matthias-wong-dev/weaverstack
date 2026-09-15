@@ -39,7 +39,6 @@ class CUR__Customer(Table):
         changed = source.where(source.UpdatedAt > self.bookmark())
         # The source is the whole customer list, so anything the target holds and
         # the source no longer offers has been retired at the source.
-        retired = (
-            self.dataframe().select("CustomerId").subtract(source.select("CustomerId"))
-        )
+        keys = self.primary_key_columns()
+        retired = self.dataframe().select(*keys).subtract(source.select(*keys))
         return changed, retired

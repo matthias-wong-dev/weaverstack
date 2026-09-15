@@ -217,6 +217,23 @@ def _sentinel():
     return BOOKMARK_SENTINEL
 
 
+def _audit_names() -> tuple[str, ...]:
+    """The three row audit columns, in their physical Delta spelling."""
+
+    from .declaration.metadata import AUDIT_COLUMNS, PYTHON, audit_column_name
+
+    return tuple(audit_column_name(logical, PYTHON) for logical in AUDIT_COLUMNS)
+
+
+def _business_names(physical) -> tuple[str, ...]:
+    """Physical columns less the ones Weaver owns, in physical order."""
+
+    from .declaration.metadata import PYTHON, signature_column_name
+
+    managed = {*_audit_names(), signature_column_name(PYTHON)}
+    return tuple(name for name in physical if name not in managed)
+
+
 def _recorded_load(object, **policy) -> "LoadResult":
     """Run one object and write its operational record before returning.
 
@@ -518,12 +535,69 @@ class Table(WeaverObject):
     what retires the row and there is nothing a second value could say.
     """
 
-    def dataframe(self) -> Any:
-        """Read this table from its resolved Lakehouse's Delta path."""
+    def columns(self) -> tuple[str, ...]:
+        """This table's business column names, in declared order.
+
+        The projection that settles a staging frame::
+
+            return frame.select(*self.columns())
+
+        A column the frame does not carry fails there, so an absence a source
+        genuinely has must be written as an explicit expression. Weaver's own
+        audit and signature columns are never reported.
+        """
+
+        return self._business_columns()
+
+    def primary_key_columns(self) -> tuple[str, ...]:
+        """The declared primary key, in declaration order, or ``()`` when unkeyed.
+
+        A delete claim is that projection of the rows the load retires::
+
+            return frame.where(...).select(*self.primary_key_columns())
+        """
+
+        return tuple(self._document().primary_key)
+
+    def dataframe(self, row_audit_columns: bool = False) -> Any:
+        """Read this table from its resolved Lakehouse's Delta path.
+
+        Returns the business columns. ``row_audit_columns`` appends the three
+        row audit datetimes after them. The row signature is Weaver's load
+        bookkeeping and is never returned.
+        """
+
+        frame = self._physical_dataframe()
+        return frame.select(*self._projection(frame, row_audit_columns))
+
+    def _physical_dataframe(self) -> Any:
+        """The stored table as it is, Weaver's own columns included."""
 
         return self.spark.read.format("delta").load(
             self.lakehouse.table_path(*self.identity)
         )
+
+    def _business_columns(self, frame=None) -> tuple[str, ...]:
+        """The declared columns, or what an inferred table's own frame holds.
+
+        ``frame`` is the physical frame when the caller already has one, so a
+        projection reads the table once.
+        """
+
+        declared = self._document().schema
+        if declared:
+            return tuple(column.name for column in declared)
+        physical = self._physical_dataframe() if frame is None else frame
+        return _business_names(physical.columns)
+
+    def _projection(self, frame, row_audit_columns: bool) -> tuple[str, ...]:
+        """The author-facing column list for a frame already read."""
+
+        business = self._business_columns(frame)
+        if not row_audit_columns:
+            return business
+        carried = set(frame.columns)
+        return business + tuple(name for name in _audit_names() if name in carried)
 
     def _staged(self, contract) -> tuple[Any, Any]:
         """Return staging and any permitted delete claim from ``read()``.
@@ -546,13 +620,15 @@ class Table(WeaverObject):
             _refuse_no_staging(contract, "table", "the staging frame")
         return staged, deletes
 
-    def empty_dataframe(self) -> Any:
+    def empty_dataframe(self, row_audit_columns: bool = False) -> Any:
         """Return this table's existing shape with no rows.
 
-        The physical table must already exist.
+        The same shape as :meth:`dataframe` with the same argument, so a
+        deletion-only load stages a business-shaped frame. The physical table
+        must already exist.
         """
 
-        return self.dataframe().limit(0)
+        return self.dataframe(row_audit_columns=row_audit_columns).limit(0)
 
     def load(
         self,

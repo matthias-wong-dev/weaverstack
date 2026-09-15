@@ -22,28 +22,52 @@ from weaver.errors import LoadError
 from weaver.runtime.load_result import LoadResult
 from weaver.spark import FabricSparkTarget
 
+#: What an installed Delta table carries: the business columns a load writes,
+#: then Weaver's own. A projection is only observable against a frame that has
+#: the columns it has to leave out.
+PHYSICAL_COLUMNS = (
+    "order_id",
+    "order_date",
+    "amount",
+    "row_insert_datetime",
+    "row_update_datetime",
+    "row_delete_datetime",
+    "row_signature",
+)
+
+AUDIT_COLUMNS = (
+    "row_insert_datetime",
+    "row_update_datetime",
+    "row_delete_datetime",
+)
+
 
 @dataclass
 class FakeFrame:
-    """Just enough DataFrame for ``empty_dataframe`` to be observable."""
+    """Just enough DataFrame for a projection and a row limit to be observable."""
 
+    columns: tuple = PHYSICAL_COLUMNS
     rows: tuple = ((1,), (2,))
 
+    def select(self, *names: str) -> "FakeFrame":
+        return FakeFrame(columns=tuple(names), rows=self.rows)
+
     def limit(self, count: int) -> "FakeFrame":
-        return FakeFrame(rows=self.rows[:count])
+        return FakeFrame(columns=self.columns, rows=self.rows[:count])
 
 
 @dataclass
 class FakeReader:
     calls: list = field(default_factory=list)
     fmt: str | None = None
+    frame: FakeFrame = field(default_factory=FakeFrame)
 
     def format(self, fmt: str) -> "FakeReader":
-        return FakeReader(calls=self.calls, fmt=fmt)
+        return FakeReader(calls=self.calls, fmt=fmt, frame=self.frame)
 
     def load(self, path: str) -> FakeFrame:
         self.calls.append((self.fmt, path))
-        return FakeFrame()
+        return self.frame
 
 
 @dataclass
@@ -73,12 +97,42 @@ LAKEHOUSE = Lakehouse(
 )
 
 
+DECLARED_SCHEMA = ("order_id: string", "order_date: date", "amount: decimal(18,2)")
+
+
+def _declared(
+    identifier: str, *, primary_key: str = "order_id", schema=DECLARED_SCHEMA
+):
+    """One parsed Python table document, standing in for the module docstring."""
+
+    from weaver.declaration.metadata import PYTHON, parse_document
+
+    lines = [
+        f"Table ID: {identifier}",
+        "",
+        "Description: One row per order.",
+        "",
+        "Lineage: The sales system.",
+        "",
+    ]
+    if primary_key:
+        lines += [f"Primary key: {primary_key}", ""]
+    lines += ["Schema:"] + [f"  {column}" for column in schema]
+    return parse_document("\n".join(lines), language=PYTHON)
+
+
 class Sales__Order(Table):
+    def _document(self):
+        return _declared("Sales.Order")
+
     def read(self):
         return [], []
 
 
 class Sales__Customer(Table):
+    def _document(self):
+        return _declared("Sales.Customer")
+
     def read(self):
         return [], []
 
@@ -237,6 +291,164 @@ def test_an_empty_dataframe_is_the_existing_table_with_no_rows(spark):
     assert spark.read.calls == [
         ("delta", "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Order")
     ]
+
+
+# --- the authored shape of a table ------------------------------------------
+
+
+def _table(document, *, physical=PHYSICAL_COLUMNS):
+    """One table with a given declaration over a given installed shape."""
+
+    class Sales__Shaped(Table):
+        def _document(self):
+            return document
+
+        def read(self):
+            return []
+
+    spark = FakeSpark(read=FakeReader(frame=FakeFrame(columns=tuple(physical))))
+    return Sales__Shaped(spark, lakehouse=LAKEHOUSE)
+
+
+@weaver_test()
+def test_columns_are_the_declared_business_columns_in_declared_order():
+    assert _table(_declared("Sales.Order")).columns() == (
+        "order_id",
+        "order_date",
+        "amount",
+    )
+
+
+@weaver_test()
+def test_columns_exclude_the_columns_weaver_owns():
+    """Declared or inferred, the audit trio and the signature are Weaver's."""
+
+    declared = _table(_declared("Sales.Order")).columns()
+    inferred = _table(_inferred("Sales.OrderSummary")).columns()
+
+    for reported in (declared, inferred):
+        assert not {*AUDIT_COLUMNS, "row_signature"} & set(reported)
+
+
+@weaver_test()
+def test_a_single_column_primary_key_is_reported():
+    assert _table(_declared("Sales.Order")).primary_key_columns() == ("order_id",)
+
+
+@weaver_test()
+def test_a_composite_primary_key_keeps_its_declared_order():
+    document = _declared("Sales.Order", primary_key="order_date, order_id")
+
+    assert _table(document).primary_key_columns() == ("order_date", "order_id")
+
+
+@weaver_test()
+def test_an_unkeyed_table_reports_no_primary_key():
+    document = _declared("Sales.Order", primary_key="")
+
+    assert _table(document).primary_key_columns() == ()
+
+
+@weaver_test()
+def test_a_dataframe_returns_the_business_columns(spark):
+    frame = Sales__Order(spark, lakehouse=LAKEHOUSE).dataframe()
+
+    assert frame.columns == ("order_id", "order_date", "amount")
+    assert spark.read.calls == [
+        ("delta", "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Order")
+    ]
+
+
+@weaver_test()
+def test_row_audits_are_opt_in_and_follow_the_business_columns(spark):
+    frame = Sales__Order(spark, lakehouse=LAKEHOUSE).dataframe(row_audit_columns=True)
+
+    assert frame.columns == ("order_id", "order_date", "amount") + AUDIT_COLUMNS
+
+
+@pytest.mark.parametrize("audits", [False, True])
+@weaver_test()
+def test_the_row_signature_is_never_returned(spark, audits):
+    """Load bookkeeping, with no author-facing opt-in through dataframe()."""
+
+    frame = Sales__Order(spark, lakehouse=LAKEHOUSE).dataframe(row_audit_columns=audits)
+
+    assert "row_signature" not in frame.columns
+
+
+@pytest.mark.parametrize("audits", [False, True])
+@weaver_test()
+def test_an_empty_dataframe_has_the_same_shape_as_the_dataframe(spark, audits):
+    order = Sales__Order(spark, lakehouse=LAKEHOUSE)
+
+    empty = order.empty_dataframe(row_audit_columns=audits)
+
+    assert empty.rows == ()
+    assert empty.columns == order.dataframe(row_audit_columns=audits).columns
+
+
+@weaver_test()
+def test_a_declared_column_is_named_even_where_the_frame_lacks_it():
+    """Weaver reports what the table declares, and never narrows or fabricates.
+
+    So ``select(*self.columns())`` is what fails on a source that dropped a
+    column, instead of the column arriving as valid null data. An absence a
+    source genuinely has is written as an explicit expression to be legitimate.
+    """
+
+    order = _table(_declared("Sales.Order"), physical=("order_id",))
+
+    assert order.columns() == ("order_id", "order_date", "amount")
+    # Asked for in full, so Spark refuses rather than returning a narrower frame.
+    assert order.dataframe().columns == ("order_id", "order_date", "amount")
+
+
+def _inferred(identifier: str):
+    """A Spark SQL table that leaves its shape to the query."""
+
+    from weaver.declaration.metadata import SPARK_SQL, parse_document
+
+    return parse_document(
+        "\n".join(
+            [
+                f"Table ID: {identifier}",
+                "",
+                "Description: Order totals by customer.",
+                "",
+                "Lineage: Aggregated from the order table.",
+                "",
+                "Primary key: order_id",
+                "",
+                "Dependencies:",
+                "  - Sales.Order",
+            ]
+        ),
+        language=SPARK_SQL,
+    )
+
+
+@weaver_test()
+def test_an_inferred_table_reports_the_columns_the_installed_table_holds():
+    """Its declaration names no columns, so the installed table is what says."""
+
+    summary = _table(_inferred("Sales.OrderSummary"))
+
+    assert summary.columns() == ("order_id", "order_date", "amount")
+    assert summary.dataframe().columns == ("order_id", "order_date", "amount")
+
+
+@weaver_test()
+def test_an_inferred_table_keeps_its_physical_column_order():
+    physical = ("amount", "row_insert_datetime", "order_id", "row_signature")
+
+    summary = _table(_inferred("Sales.OrderSummary"), physical=physical)
+
+    assert summary.columns() == ("amount", "order_id")
+    assert summary.dataframe(row_audit_columns=True).columns == (
+        "amount",
+        "order_id",
+        "row_insert_datetime",
+    )
 
 
 def _customer(returned, *, incremental: bool):
