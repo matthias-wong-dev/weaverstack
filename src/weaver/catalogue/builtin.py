@@ -1,12 +1,7 @@
-"""The Weaver-owned ``Warehouse/_weaver`` item, and the surface it presents.
+"""The Weaver-owned ``Warehouse/_weaver`` item and its standard surface.
 
-Weaver's catalogue is declared as ordinary Weaver documents, checked into
-:mod:`weaver.fragments` and read through the ordinary repository readers like
-any authored tree. A change to a catalogue table is a change to its document.
-
-``tests/targeted/test_builtin_catalogue_declaration.py`` holds the documents
-against :mod:`weaver.catalogue.tables`, so a table that gains a column without
-its document changing is refused before it can reach a build.
+Catalogue tables are ordinary checked-in Weaver documents read through the
+repository readers.
 """
 
 from __future__ import annotations
@@ -19,12 +14,10 @@ BUILTIN_ITEM = WeaverItemId(WAREHOUSE, "_weaver")
 
 
 def standard_surface_references(item: WeaverItemId):
-    """The standard Weaver catalogue surface one normal item presents.
+    """Declare logical shortcuts from an item's ``_`` schema to ``_weaver``.
 
-    Each surface table is an ordinary logical shortcut declaration from the
-    item's ``_`` namespace to the built-in item. The destination carries its
-    identity rather than decoding one from a ``Schema__Object`` name, because
-    the schema is Weaver's ``_`` and not something the item declares.
+    Destinations carry explicit identities because ``_`` is not an authored
+    schema from which identity can be decoded.
     """
 
     from ..declaration.metadata import ObjectId

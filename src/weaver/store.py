@@ -1,4 +1,4 @@
-"""Location-based file transport primitives.
+"""File transport primitives.
 
 Store handles listing, reading, writing, and deletion. Higher-level operations
 own synchronization and deletion policy; listings include metadata for their
@@ -18,12 +18,12 @@ from .locations import Location
 
 
 class StoreError(WeaverError):
-    """Raised when a store operation fails."""
+    pass
 
 
 @dataclass(frozen=True)
 class Entry:
-    """One listed item, with enough metadata to diff without reading."""
+    """A listed item with metadata for comparison without reading it."""
 
     location: Location
     is_directory: bool
@@ -38,14 +38,7 @@ class Entry:
 
 @runtime_checkable
 class Store(Protocol):
-    """File transport within one workspace.
-
-    A within-workspace store operates beneath a local root or through Fabric's
-    session-native utilities. A cross-boundary caller may also implement this
-    protocol (the desktop's OneLake DFS client) and inject it explicitly, but
-    moving files from a laptop into Fabric remains CLI orchestration rather than
-    a workspace default.
-    """
+    """File transport within one workspace."""
 
     def exists(self, location: Location) -> bool: ...
 
@@ -73,12 +66,10 @@ class FilesystemStore:
     def _local(self, location: Location) -> Path:
         if not isinstance(location, Location):
             raise CommandError(
-                f"store operations take a Location, got {type(location).__name__}"
+                f"Store operations require a Location, got {type(location).__name__}."
             )
         if location.is_url:
-            raise CommandError(
-                f"FilesystemStore cannot address the URL location {location.value!r}"
-            )
+            raise CommandError(f"FilesystemStore cannot access URL {location.value!r}.")
         return location.path
 
     def exists(self, location: Location) -> bool:
@@ -90,11 +81,9 @@ class FilesystemStore:
     def list(self, location: Location, *, recursive: bool = False) -> list[Entry]:
         root = self._local(location)
         if not root.exists():
-            raise StoreError(
-                f"cannot list a location that does not exist: {location.value}"
-            )
+            raise StoreError(f"Cannot list missing location {location.value}.")
         if not root.is_dir():
-            raise StoreError(f"cannot list a file: {location.value}")
+            raise StoreError(f"Cannot list file {location.value}.")
         paths = sorted(root.rglob("*") if recursive else root.glob("*"))
         return [self._entry(path, location, root) for path in paths]
 
@@ -114,7 +103,7 @@ class FilesystemStore:
         try:
             return path.read_bytes()
         except OSError as exc:
-            raise StoreError(f"cannot read {location.value}: {exc}") from exc
+            raise StoreError(f"Cannot read {location.value}: {exc}") from exc
 
     def write(self, location: Location, data: bytes) -> None:
         path = self._local(location)
@@ -122,7 +111,7 @@ class FilesystemStore:
         try:
             path.write_bytes(data)
         except OSError as exc:
-            raise StoreError(f"cannot write {location.value}: {exc}") from exc
+            raise StoreError(f"Cannot write {location.value}: {exc}") from exc
 
     def delete(self, location: Location, *, recursive: bool = False) -> None:
         path = self._local(location)
@@ -139,7 +128,7 @@ class FilesystemStore:
         if path.is_dir():
             if not recursive:
                 raise StoreError(
-                    f"{location.value} is a directory. Pass recursive=True to delete it"
+                    f"{location.value} is a directory. Pass recursive=True to delete it."
                 )
             shutil.rmtree(path)
         else:
@@ -149,8 +138,6 @@ class FilesystemStore:
         self._local(location).mkdir(parents=True, exist_ok=True)
 
     def copy_to_local(self, source: Location, destination: Path) -> None:
-        """Copy one local file or tree to an exact driver-local path."""
-
         source_path = self._local(source)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if source_path.is_dir():
@@ -159,8 +146,6 @@ class FilesystemStore:
             shutil.copy2(source_path, destination)
 
     def copy_from_local(self, source: Path, destination: Location) -> None:
-        """Copy one driver-local file or tree to an exact local location."""
-
         destination_path = self._local(destination)
         destination_path.parent.mkdir(parents=True, exist_ok=True)
         if source.is_dir():

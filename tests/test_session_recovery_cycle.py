@@ -6,7 +6,7 @@ the next started fresh. With one session shared for a console's lifetime, a
 death was permanent: `livy_run` marked the resource failed, `reacquire()` was
 never called by anything, and every later command answered
 
-    the livy resource failed and has not been reacquired
+    The livy resource failed and has not been reacquired
 
 **Recovery belongs at a Task boundary, and nowhere else.** A `Resource.get()`
 that healed itself would hand a replacement Livy interpreter to a run already
@@ -109,7 +109,7 @@ def test_the_allowance_is_bounded():
     resource.get()
     resource.fail(RuntimeError("dead again"))
 
-    with pytest.raises(ResourceError, match="will not be acquired again"):
+    with pytest.raises(ResourceError, match="cannot be acquired again"):
         resource.reacquire()
 
 

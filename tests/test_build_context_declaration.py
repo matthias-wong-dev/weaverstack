@@ -321,7 +321,7 @@ def test_a_resolved_workspace_and_a_configuration_file_is_refused_by_the_session
     config = tmp_path / "ws.yml"
     config.write_text("workspace: Other\n", encoding="utf-8")
 
-    with pytest.raises(CommandError, match="nothing to add"):
+    with pytest.raises(CommandError, match="workspace_config cannot be combined"):
         weaver.session(
             workspace=Workspace(workspace="Demo", catalogue="Warehouse/Weaver"),
             workspace_config=config,

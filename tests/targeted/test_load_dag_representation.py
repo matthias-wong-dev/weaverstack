@@ -86,7 +86,7 @@ def test_the_installed_graph_answers_where_one_logical_item_lives(estate):
     assert estate.target_for(PRODUCER) == RAW
     assert estate.target_for(CONSUMER) == REPORTING
 
-    with pytest.raises(CatalogueStateError, match="has no installation row"):
+    with pytest.raises(CatalogueStateError, match="does not identify a target"):
         estate.target_for(WeaverItemId.parse("Lakehouse/Absent"))
 
 
@@ -732,7 +732,7 @@ def test_load_dag_rejects_missing_bindings():
         }
     )
 
-    with pytest.raises(CatalogueStateError, match="has no installation row"):
+    with pytest.raises(CatalogueStateError, match="does not identify a target"):
         catalogue.dag()
 
 
@@ -760,7 +760,7 @@ def test_load_dag_rejects_unresolved_dependencies():
     )
     estate = catalogue.dag()
 
-    with pytest.raises(LoadError, match="resolves to neither an installed object"):
+    with pytest.raises(LoadError, match="no installed object or shortcut"):
         load_dag(estate, items=(PRODUCER,))
 
 
@@ -795,7 +795,7 @@ def test_a_stored_import_naming_no_area_is_refused():
         }
     )
 
-    with pytest.raises(LoadError, match="names an object module"):
+    with pytest.raises(LoadError, match="incompatible dependency reference"):
         load_dag(catalogue.dag(), items=(PRODUCER,))
 
 

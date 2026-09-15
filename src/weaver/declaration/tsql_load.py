@@ -1,16 +1,8 @@
-"""Generate one Warehouse table's load procedure.
+"""Generate a Warehouse table's load procedure.
 
-The build payload installs a procedure that derives target columns from
-``sys.columns``. Procedure result counts use output parameters, and rejected
-rows remain in the reject table for inspection.
-
-A keyed load runs one state machine and the generated procedure shows it in
-order: raw staging, every refusal discovered into ``_Reject``, the rejection
-gate, the purge that makes staging the clean incoming state, ``_Delete``, an
-``_Upsert`` of new and changed rows only, merge uniqueness, the stability gate,
-then the target. What each phase means, and why, is
-``design/keyed-load.md``; the Delta half of it is
-:mod:`weaver.runtime.table_load`.
+Keyed loads preserve this order: stage, discover rejects, apply the rejection
+gate, purge rejects, settle deletes and upserts, validate the proposed target,
+then mutate the target. Rejected rows remain available for inspection.
 """
 
 from __future__ import annotations
@@ -39,30 +31,18 @@ from .metadata import (
 from .sql_shaping import insert_select_into, render_sql_template, temp_table_name
 from .tsql_program import TsqlProgram, parse_tsql_program, validate_query_contract
 
-#: Columns the generated procedure adds to a working relation. Named to be
-#: unmistakably Weaver's: they sit beside the author's own columns, so a name an
-#: author might have chosen would be a collision waiting to happen.
+#: Reserved working-column names avoid collisions with authored columns.
 RANK_COLUMN = "__weaver_rank"
 WORKING_SIGNATURE_COLUMN = "__weaver_signature"
 SURVIVOR_COLUMN = "__weaver_survivor"
 
-#: What marks a row of the upsert set as one the target does not yet hold.
-#: Membership already means new or changed, so this only says which.
+#: Distinguishes inserts from updates within the upsert set.
 IS_NEW_COLUMN = "_Is new row"
 
-#: The placeholder the installer fills with the canonical payload the row
-#: signature is taken over. Left to install time because the payload has to name
-#: each comparison column's physical type, and an inferred table's types are only
-#: known once the table exists.
+#: Filled at install time, after inferred physical column types are known.
 SIGNATURE_PAYLOAD = "__SIGNATURE_PAYLOAD__"
 
-#: The procedure's result, as parameters rather than as a projection, and their
-#: T-SQL types. One definition, read from both ends: the generator writes the
-#: signature from it and :mod:`weaver.load_execution` declares locals to match,
-#: so a field cannot be added to one and forgotten in the other.
-#:
-#: Ordered as :data:`weaver.runtime.load_result.RESULT_COLUMNS` is, and named
-#: identically, because a caller reads the two as one contract.
+#: Ordered and named to match ``runtime.load_result.RESULT_COLUMNS``.
 RESULT_PARAMETERS = (
     ("succeeded", "bit"),
     ("rows_read", "bigint"),
@@ -75,9 +55,7 @@ RESULT_PARAMETERS = (
     ("is_static_skip", "bit"),
 )
 
-#: The generated procedure's private parameter namespace, mapped back to the
-#: stable logical result contract above. Callers project the logical names, so
-#: this physical ABI never leaks into :class:`LoadResult`.
+#: Maps private procedure parameters to the stable logical result contract.
 RESULT_PARAMETER_NAMES = {
     logical: f"weaver_{logical}" for logical, _type_name in RESULT_PARAMETERS
 }
@@ -90,51 +68,36 @@ PROCEDURE_RESULT_PARAMETERS = tuple(
 
 
 def logical_result_row(row) -> dict:
-    """Map a generated procedure's private output names to ``LoadResult`` names."""
-
     return {
         logical: row[RESULT_PARAMETER_NAMES[logical]]
         for logical, _type_name in RESULT_PARAMETERS
     }
 
 
-#: The suffixes of the intermediate tables, in the object's own schema.
 STAGING_SUFFIX = "_Staging"
 UPSERT_SUFFIX = "_Upsert"
 REJECT_SUFFIX = "_Reject"
 DELETE_SUFFIX = "_Delete"
 
-#: What a run reports when it refused to start, and when it went ahead anyway.
-#: Both say rejects occurred; they differ in what happened to the target, which
-#: is the only thing ``fault_tolerant`` changes.
+#: Rejection status records whether the target was left unchanged.
 INTOLERANT_MESSAGE = (
     "rows were rejected and fault_tolerant = 0, so the target was not modified"
 )
 TOLERATED_MESSAGE = "rows were rejected and excluded from the load"
 
-#: What a run reports when its proposed changes do not describe a valid target.
-#: Not a row-level reject and not governed by ``fault_tolerant``: the incoming
-#: rows are individually fine, and it is the state they would leave that is not.
+#: Proposed-target conflicts are not row-level rejects or fault-tolerant.
 MERGE_CONFLICT_MESSAGE = (
     "the proposed changes would leave a declared unique key held by two rows, "
     "so the target was not modified"
 )
 
-#: Banners marking where the author's own code sits in the generated procedure.
-#: A generated artefact is read when something has gone wrong, and the first
-#: question is which of it the author wrote.
+#: Delimit authored SQL in the generated procedure.
 PREPROCESSING_BANNER = "/*-- Pre-processing --*/"
 TRANSFORMATION_BANNER = "/*---- Data transformation ----*/"
 END_TRANSFORMATION_BANNER = "/*---- End data transformation ----*/"
 POSTPROCESSING_BANNER = "/*-- Post-processing --*/"
 
-#: The physical Warehouse types a built table can hold, and the canonical text
-#: each is spelled as before it enters the row signature. Read at install time
-#: against ``sys.types``, so the payload is type-aware for an inferred table too.
-#:
-#: Each spelling is exact and stable for one value: a style is named wherever the
-#: default rendering is locale- or precision-dependent, because a signature that
-#: moved with the session's settings would report every row as changed.
+#: Canonical, locale-independent text for physical values in row signatures.
 _CANONICAL_TEXT = {
     "date": "convert(varchar(10), {column}, 23)",
     "datetime2": "convert(varchar(27), {column}, 126)",
@@ -146,29 +109,19 @@ _CANONICAL_TEXT = {
     "uniqueidentifier": "cast({column} as varchar(36))",
 }
 
-#: What every other type is spelled as. A Warehouse table holds no type whose
-#: text form is ambiguous once the cases above are named: ``varchar`` is itself,
-#: and the exact numerics render their declared scale.
+#: Remaining supported types have stable default text representations.
 _CANONICAL_FALLBACK = "cast({column} as varchar(max))"
 
-#: The text of a null comparison value. It cannot be confused with a present
-#: value, because a present value is written as its byte length, a colon, and
-#: then itself, so it always begins with a digit.
+#: Present values start with their byte length, so this cannot collide with one.
 _NULL_MARKER = "~"
 
 
 def generate_tsql_load_script(
     document: SesDocument, body: str, *, procedure_name: str, item
 ) -> str:
-    """The installer script for one Warehouse table's load procedure.
+    """Generate an installer script for one Warehouse load procedure.
 
-    ``body`` is the table's own query, the same text its build materialises to
-    settle its shape. A load runs it for real.
-
-    ``item`` is the logical Weaver item the table belongs to. A document knows
-    its ``Schema.Object`` and not which item declares it, and the procedure needs
-    both: its bookmark row is keyed by the same four-part identity the Registry
-    uses, and the procedure maintains that row itself when it is run by hand.
+    ``item`` completes the four-part identity used for the procedure's bookmark.
     """
 
     contract = LoadContract.from_document(document)
@@ -196,9 +149,7 @@ def generate_tsql_load_script(
         result_parameters=_result_parameters(),
         result_assignment=_indent(
             _result_assignment(
-                # The instant this load began, reported only when the load was
-                # clean. A caller advances a bookmark to an instant a load
-                # established, and one that rejected a row established none.
+                # Only a clean load establishes a new bookmark instant.
                 bookmark_datetime=(
                     "case when @weaver_error is null and @weaver_rows_rejected = 0 "
                     "then @weaver_load_datetime end"
@@ -226,15 +177,8 @@ def generate_tsql_load_script(
     )
 
 
-# --- the result, as a signature ----------------------------------------------
-
-
 def _result_parameters() -> str:
-    """The result fields, declared as optional outputs on the procedure.
-
-    Optional so ``exec [_].[Load Sales.Customer];`` still works by hand without
-    declaring seven variables first.
-    """
+    """Declare optional outputs so the procedure also runs directly."""
 
     return "\n".join(
         f"  , @{RESULT_PARAMETER_NAMES[name]} {type_name} = null output"
@@ -243,11 +187,9 @@ def _result_parameters() -> str:
 
 
 def _result_assignment(**values: str) -> str:
-    """Fill the output parameters, at one of the procedure's exits.
+    """Assign every output at each procedure exit.
 
-    Every exit assigns all of them: an unset field would read as its ``null``
-    default and be indistinguishable from a real one. The defaults exist to make
-    the parameters optional rather than to be observed.
+    Defaults make parameters optional; they are never observable results.
     """
 
     defaults = {
@@ -258,14 +200,9 @@ def _result_assignment(**values: str) -> str:
         "rows_deleted": "@weaver_rows_deleted",
         "rows_rejected": "@weaver_rows_rejected",
         "error_message": "@weaver_error",
-        # Null unless a clean load actually ran. A caller advances a bookmark
-        # only to an instant a load established. An exit that read nothing, being
-        # a Static skip, a refused breach or a load that rejected rows, reports
-        # none and the bookmark it already had stands.
+        # Static skips, rejection gates and loads with rejects establish no bookmark.
         "bookmark_datetime": "null",
-        # Reported rather than inferred from the counts: a Static skip and a load
-        # that read an empty window are both a success with nothing moved, and
-        # only the procedure knows which of the two happened.
+        # Counts cannot distinguish a Static skip from an empty successful load.
         "is_static_skip": "cast(0 as bit)",
     }
     defaults.update(values)
@@ -275,25 +212,12 @@ def _result_assignment(**values: str) -> str:
     )
 
 
-# --- the pieces of the procedure ---------------------------------------------
-
-
 def _static_gate(contract: LoadContract) -> str:
-    """The check a ``Static`` object makes before it does anything else.
+    """Skip an already-loaded Static object before reading its source.
 
-    Baked into the procedure rather than performed by its caller, because the
-    procedure is independently runnable: running it by hand must give the same
-    answer an orchestrated run gets.
-
-    The bookmark answers it, not the target's contents. What ``Static`` means is
-    "load this once", and the record of whether that has happened is the
-    bookmark, so a table populated by hand is still loaded and a table a clean
-    load emptied is still skipped. Before the staging query, so a
-    loaded object costs no source read.
-
-    ``@reload`` passes through it: a reload asks for this one to be loaded again.
-
-    A non-static object gets a comment rather than a disabled branch.
+    The bookmark, not target contents, records whether it loaded. ``@reload``
+    bypasses the gate. Keeping this check in the procedure makes direct and
+    orchestrated runs agree.
     """
 
     if not contract.static:
@@ -314,29 +238,16 @@ def _static_gate(contract: LoadContract) -> str:
 
 
 def _sentinel_literal() -> str:
-    """The bookmark sentinel, as T-SQL compares it."""
-
     from ..catalogue.tables import BOOKMARK_SENTINEL_TEXT
 
     return f"convert(datetime2(6), '{BOOKMARK_SENTINEL_TEXT}')"
 
 
 def _bookmark_key(document: SesDocument, item, contract: LoadContract) -> str:
-    """This object's bookmark row, read into a local before anything else.
+    """Read only a Static object's bookmark before any source work.
 
-    Only a ``Static`` object reads it, because only a ``Static`` object decides
-    anything from it: every other load writes its bookmark at the end and never
-    asks what it was. In every Warehouse but the catalogue's, this table is a
-    view across databases, so the read a load does not need is a round trip it
-    should not pay for.
-
-    The identity is baked in: the procedure is one object's, so which row it
-    means is a fact about the procedure rather than an argument to it.
-
-    An installed loadable holds one row for as long as it is installed, and the
-    sentinel is what says no clean load has established a cursor for its current
-    incarnation. A null local means the same, for a catalogue written before the
-    row was always there.
+    Other dispositions avoid the cross-Warehouse read. Null and the sentinel
+    both mean that no clean load established a cursor.
     """
 
     if not contract.static:
@@ -360,20 +271,15 @@ def _bookmark_table() -> str:
 
 
 def _bookmark_identity(document: SesDocument, item) -> dict:
-    """The four values that key this object's bookmark row.
-
-    Built through the identity the catalogue writers use, so a procedure reads
-    the row a run wrote. A Warehouse relation names no Lakehouse area, and the
-    one rule is what says so.
-    """
+    """Return the four values that key the object's bookmark row."""
 
     from ..catalogue.claims import bookmark_row
     from .model import WeaverDocumentId
 
     if item is None:
         raise DiscoveryError(
-            f"{document.qualified}: a load procedure is keyed by the logical item "
-            "that declares it, and none was supplied"
+            f"{document.qualified}: no declaring item was supplied for the load "
+            "procedure. Supply the table's logical item."
         )
     return bookmark_row(WeaverDocumentId(item, document.object_id))
 
@@ -383,11 +289,9 @@ def _key_literal(value: str) -> str:
 
 
 def _staging_sql(names: dict, program: TsqlProgram, contract: LoadContract) -> str:
-    """Run the author's program, materialising each query it produces.
+    """Materialise result queries without moving intervening setup.
 
-    The body is emitted in the order it was written, so a setup statement
-    between two queries runs between them: an author may build a working table,
-    stage from it, then build another and name the retired keys from that.
+    Later setup may depend on staging and prepare the delete query.
     """
 
     pieces = [TRANSFORMATION_BANNER]
@@ -406,16 +310,10 @@ def _staging_sql(names: dict, program: TsqlProgram, contract: LoadContract) -> s
 
 
 def _staging_table_sql(names: dict, query: str, contract: LoadContract) -> str:
-    """Materialise the object's rows, exactly as the author produced them.
+    """Divert the staging query without changing its authored text.
 
-    Staging carries business columns and nothing else. Weaver adds no rank and no
-    signature here: what it needs of both is computed later, over the rows that
-    survive validation, rather than over every row a source produced.
-
-    A keyed load places ``INTO`` in the query by the same offset-exact transform
-    the shape-only build uses, because ``with … select …`` is a legal statement
-    and an illegal derived table, so a body opening with a CTE cannot be wrapped
-    and has to be run as the statement it is.
+    Offset-exact ``INTO`` insertion supports CTE-led queries that cannot be
+    wrapped as derived tables.
     """
 
     if not contract.primary_key:
@@ -424,20 +322,10 @@ def _staging_table_sql(names: dict, query: str, contract: LoadContract) -> str:
 
 
 def _delete_claim_sql(names: dict, query: str, contract: LoadContract) -> str:
-    """Settle which target rows the author's second query actually names.
+    """Materialise distinct, nonblank delete keys that exist in the target.
 
-    Narrowed here rather than at the delete, so the stability threshold is
-    checked against what will really be removed rather than what was asked for:
-
-    .. code-block:: text
-
-        distinct      naming a key twice is one deletion, not two
-        not blank     whitespace identifies no row a person would call a match
-        in the target claiming a key that was never there deletes nothing
-
-    The table is both the count and the driver, so ``rows_deleted`` reports rows
-    actually removed. The target is read before anything modifies it, which
-    makes the guard a decision not to start rather than an unwind.
+    This happens before target mutation so stability checks can stop before any
+    write and ``rows_deleted`` counts rows actually removed.
     """
 
     claim = temp_table_name("#weaver_delete_claim", names["object"])
@@ -485,9 +373,7 @@ def _primary_key_body(names: dict, contract: LoadContract, claims_deletes: bool)
         intolerant_message=_escape_literal(INTOLERANT_MESSAGE),
         tolerated_message=_escape_literal(TOLERATED_MESSAGE),
         breach_result_assignment=_indent(
-            # A refused load wrote nothing, so the three counts of what it wrote
-            # are zero rather than whatever they had reached. rows_read stands:
-            # the source really was read, which is how the breach was measured.
+            # A refusal preserves rows_read but reports no target writes.
             _result_assignment(
                 succeeded="cast(0 as bit)",
                 rows_inserted="cast(0 as bigint)",
@@ -507,34 +393,21 @@ def _full_replace_body(names: dict) -> str:
     ).rstrip()
 
 
-# --- the row signature -------------------------------------------------------
-
-
 def _signature_expression() -> str:
-    """The digest of one staged row's comparison state.
+    """Hash one staged row's canonical comparison payload.
 
-    ``N''`` opens the payload so the expression is complete even for a table
-    whose comparison columns are empty. Every row then signs identically, which
-    is what "nothing to compare" means.
+    The empty prefix keeps the expression valid with no comparison columns; all
+    rows then share a signature.
     """
 
     return f"convert(varbinary(32), hashbytes('SHA2_256', N''{SIGNATURE_PAYLOAD}))"
 
 
-# --- discovering what to refuse ----------------------------------------------
-
-
 def _reject_discovery(names: dict, contract: LoadContract) -> str:
-    """Everything this load refuses, in one statement.
+    """Discover rejects sequentially in one CTE chain.
 
-    One statement because the stages are sequential and the chain says so
-    directly: each unique key reads the rows that survived the ones before it, so
-    a row already refused never becomes the arbitrary survivor of a later group.
-    Splitting them would mean either mutating staging before the gate, or
-    reading a half-written reject table to find out what had been refused.
-
-    Every scan here is narrow. A duplicate is found by grouping, and the only
-    window is over rows already known to sit in a duplicate primary key group.
+    Each unique key sees only rows that survived earlier checks, preserving key
+    declaration order without mutating staging before the rejection gate.
     """
 
     ctes = [
@@ -584,9 +457,7 @@ def _reject_discovery(names: dict, contract: LoadContract) -> str:
         ctes.append(
             (
                 "weaver_unique_key",
-                # One row per surviving primary key. From here on the key
-                # identifies a row, which is what lets a unique key name its
-                # losers by key rather than by materialising them.
+                # Later unique keys identify losers by the surviving primary key.
                 f"select __STAGING_SELECT_COLUMNS__\n"
                 f"from weaver_valid as s\n"
                 f"where not exists (\n"
@@ -620,8 +491,6 @@ def _reject_discovery(names: dict, contract: LoadContract) -> str:
 
 
 def _reject_projection(reason: str) -> str:
-    """One refused row, and why: the staged row itself plus the reason."""
-
     return f"    __STAGING_SELECT_COLUMNS__\n  , {reason} as {_quote(REJECTION_REASON)}"
 
 
@@ -637,17 +506,10 @@ def _unique_key_ctes(
     source: str,
     followed: bool,
 ) -> list[tuple[str, str]]:
-    """One unique key's duplicate group, its losers, and what survives it.
+    """Choose one survivor from each duplicate unique-key group.
 
-    A row whose key tuple contains a null does not take part: a null is not a
-    value, so two rows carrying one are not two rows claiming the same thing.
-    ``group by`` would put them in one group, which would refuse rows the
-    declaration permits.
-
-    Which row survives a group is arbitrary and settled cheaply. A single-column
-    primary key gives an aggregate to settle it with; a composite one has none,
-    so those groups are ranked, over the duplicate groups alone and never over
-    the whole population.
+    Null-bearing keys do not participate. Composite primary keys require ranking,
+    but only rows in duplicate groups are ranked.
     """
 
     reason = duplicate_unique_reason(unique_key)
@@ -734,13 +596,7 @@ def _unique_key_ctes(
 
 
 def _violation_predicate(contract: LoadContract, alias: str = "s") -> str:
-    """A row that cannot be loaded whatever else is true of it.
-
-    An unusable primary key, and a declared not-null column left empty. Only
-    declared ones: a business column is nullable unless the object said
-    otherwise, so checking every column would refuse rows the declaration
-    permits.
-    """
+    """Match rows with an unusable key or a declared not-null violation."""
 
     prefix = f"{alias}." if alias else ""
     predicates = [_blank_key_predicate(contract.primary_key, alias=alias)]
@@ -751,12 +607,7 @@ def _violation_predicate(contract: LoadContract, alias: str = "s") -> str:
 
 
 def _violation_reason(contract: LoadContract, alias: str = "s") -> str:
-    """Which of those a row failed, taking the first that applies.
-
-    One reason per refused row. A row that is wrong twice over is still one row
-    the load will not take, and counting it twice would let it weigh twice
-    against the rejection threshold.
-    """
+    """Return one reason per refused row so thresholds count each row once."""
 
     width = REJECTION_REASON_WIDTH
     if not contract.not_null_columns:
@@ -774,11 +625,7 @@ def _violation_reason(contract: LoadContract, alias: str = "s") -> str:
 
 
 def _duplicate_key_count(names: dict, contract: LoadContract) -> str:
-    """How many rows lost a duplicate primary key group.
-
-    Read from the reject table, so the staging purge knows whether it has any
-    physical duplicates to remove without asking staging a second time.
-    """
+    """Count primary-key duplicates from the collected reject evidence."""
 
     return (
         f"select @weaver_duplicate_keys = count(*)\n"
@@ -787,28 +634,19 @@ def _duplicate_key_count(names: dict, contract: LoadContract) -> str:
     )
 
 
-# --- staging becomes the clean incoming state --------------------------------
-
-
 def _staging_purge(names: dict, contract: LoadContract) -> str:
-    """Remove the refused rows, once the gate has let the load continue.
+    """Remove rejects in the same order in which they were discovered.
 
-    Nothing here runs for a load that refused nothing, which is the ordinary
-    case: staging is then already the clean incoming state.
-
-    In order, and the order is what makes it agree with discovery. Unusable rows
-    go first, so the duplicate ranking sees the same population discovery ranked;
-    each unique key then reads a staging table the keys before it have already
-    been taken out of, which is the sequence the chain expressed with CTEs.
+    Unusable rows go first. Each unique key then sees the population left by the
+    preceding keys.
     """
 
     steps = [
         f"delete from {names['staging']}\nwhere {_violation_predicate(contract, '')};"
     ]
     steps.append(
-        # Fabric will delete through a CTE only when it reads one base table, so
-        # the rank cannot be narrowed to duplicate groups by joining. It is
-        # narrowed by not running at all unless a duplicate was found.
+        # Fabric deletes through a CTE only when it reads one base table. Avoid a
+        # full ranking pass by running it only when a duplicate was discovered.
         f"if @weaver_duplicate_keys > 0\n"
         f"begin\n"
         f"{_indent(_ranked_purge(names, contract), 4)}\n"
@@ -823,14 +661,10 @@ def _staging_purge(names: dict, contract: LoadContract) -> str:
 
 
 def _ranked_purge(names: dict, contract: LoadContract) -> str:
-    """Keep one physical row per duplicate primary key group.
+    """Keep the same duplicate row that reject discovery selected.
 
-    Ordered by the row signature rather than arbitrarily, so this keeps the row
-    discovery kept: an arbitrary order would be free to choose differently, and
-    the reject table would then name a row the load had gone on to write.
-
-    A delete through a ranked CTE, because rows sharing a key may be identical
-    in every column and no predicate can tell one of them from the other.
+    Identical rows cannot be separated by a predicate, so deletion uses a CTE
+    ranked by row signature.
     """
 
     return (
@@ -847,11 +681,7 @@ def _ranked_purge(names: dict, contract: LoadContract) -> str:
 def _unique_key_purge(
     names: dict, contract: LoadContract, unique_key: tuple[str, ...]
 ) -> str:
-    """Remove the rows that lost one unique key's duplicate groups.
-
-    By key: staging holds one row per primary key by now, so naming the losers is
-    enough and nothing has to be materialised to identify them.
-    """
+    """Remove unique-key losers by their now-unique primary keys."""
 
     key_columns = _bare_columns(unique_key)
     participates = " and ".join(
@@ -911,30 +741,17 @@ def _unique_key_purge(
     )
 
 
-# --- what leaves the target --------------------------------------------------
-
-
 def _has_delete_relation(contract: LoadContract, claims_deletes: bool) -> bool:
-    """Whether this load materialises a delete table at all.
-
-    An incremental object that named no keys to retire deletes nothing, so it has
-    no relation and nothing reads one.
-    """
-
     return claims_deletes or contract.deletes_absent_rows
 
 
 def _delete_derivation(
     names: dict, contract: LoadContract, claims_deletes: bool
 ) -> str:
-    """Settle the keys this load removes, before it removes any.
+    """Settle delete keys before target mutation.
 
-    Which rows those are is what ``Incremental`` decides. A non-incremental
-    source is the whole truth, so a key clean staging no longer carries is
-    retired, including one whose only staged row was refused, which is why this
-    reads staging after the purge rather than before it. An incremental source is
-    a window, so only an explicit second query can retire anything, and that
-    query's claim was already narrowed when it ran.
+    Non-incremental loads compare the target with staging after rejects are
+    purged. Incremental loads use only an explicit delete query.
     """
 
     if claims_deletes:
@@ -967,7 +784,6 @@ def _delete_derivation(
 def _prospective_deletes(
     names: dict, contract: LoadContract, claims_deletes: bool
 ) -> str:
-    """Count prospective deletes before the load applies them."""
 
     if not _has_delete_relation(contract, claims_deletes):
         return "-- Incremental: nothing is deleted, so there is nothing to count."
@@ -978,8 +794,6 @@ def _prospective_deletes(
 
 
 def _reconciliation(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
-    """Remove the target rows this load retires, as a physical delete."""
-
     if not _has_delete_relation(contract, claims_deletes):
         return "-- Incremental, and no delete query: absence retires nothing."
     join = _join("d", "c", contract.primary_key)
@@ -991,26 +805,11 @@ def _reconciliation(names: dict, contract: LoadContract, claims_deletes: bool) -
     )
 
 
-# --- would the proposed changes leave a valid target? ------------------------
-
-
 def _merge_uniqueness(names: dict, contract: LoadContract, has_delete: bool) -> str:
-    """The one question an incremental load with unique keys has to ask.
+    """Reject an incremental change that would violate a target unique key.
 
-    If every surviving delete and upsert were applied, would a declared unique
-    key still be held by another target row? A non-incremental load never asks:
-    it leaves the target equal to clean staging, and staging has already been
-    made unique.
-
-    A holder gives its value up in two ways: the load deletes it, or the load
-    moves it off that value. Being in the upsert set is not one of them, and a
-    row may be changing something else entirely and keeping the value it has. So
-    a swap, and a cycle whose proposed state is unique, both pass, and a claim
-    against an untouched holder does not.
-
-    Any collision that remains stops the load. There is no partial application
-    and no closure to compute: the proposed target state is either valid under
-    the declared keys or it is not.
+    A holder releases a value only when deleted or moved off it. Swaps and cycles
+    pass when the complete proposed target is unique. This gate precedes mutation.
     """
 
     if not contract.checks_merge_uniqueness:
@@ -1075,16 +874,8 @@ def _merge_conflict_branch(
     )
 
 
-# --- the working tables ------------------------------------------------------
-
-
 def _cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
-    """Drop whatever a previous run left behind, newest dependency first.
-
-    Only the tables this procedure makes. An unkeyed load has no reject, upsert
-    or delete table; dropping them anyway would hide the
-    statement that creates them.
-    """
+    """Drop only this procedure's working tables, newest dependency first."""
 
     if not contract.primary_key:
         keys = ("staging",)
@@ -1100,14 +891,7 @@ def _cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
 
 
 def _end_cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> str:
-    """Clear the intermediate tables, unless they are the evidence of a problem.
-
-    A run that rejected nothing leaves nothing to look at, so its artefacts go.
-    One that rejected rows keeps them all: the reject table names what was
-    refused, and the others make the rejection explicable.
-
-    A run that stopped at a gate never reaches here, so its tables stand too.
-    """
+    """Keep working tables when a load rejects rows or stops at a gate."""
 
     cleanup = _cleanup(names, contract, claims_deletes)
     if not contract.primary_key:
@@ -1115,15 +899,8 @@ def _end_cleanup(names: dict, contract: LoadContract, claims_deletes: bool) -> s
     return f"if @weaver_rows_rejected = 0\nbegin\n{_indent(cleanup, 4)}\nend;"
 
 
-# --- the installer's column metadata -----------------------------------------
-
-
 def _column_metadata_sql(names: dict, contract: LoadContract) -> str:
-    """Read the target's loadable columns, and what an update sets.
-
-    Weaver's own columns are excluded because the load supplies them itself, and
-    identity is excluded because the engine does.
-    """
+    """Read target columns, excluding engine- and Weaver-supplied values."""
 
     reserved = ", ".join(
         _sql_literal(name) for name in (*AUDIT_COLUMNS, SIGNATURE_COLUMN)
@@ -1143,15 +920,10 @@ def _column_metadata_sql(names: dict, contract: LoadContract) -> str:
 def _signature_payload_select(
     names: dict, contract: LoadContract, source_column_filter: str
 ) -> str:
-    """Build the canonical payload the row signature is taken over.
+    """Build an unambiguous, type-aware row-signature payload.
 
-    Assembled here rather than by the generator because it names each comparison
-    column's physical type, and an inferred table's types are settled by the
-    build rather than by the declaration.
-
-    Each value is written as its byte length, a colon, and its canonical text, so
-    a value containing whatever separator was chosen cannot be read as two
-    values, and a null, written ``~``, cannot be read as an empty string.
+    Inferred physical types are available only at install time. Prefixing each
+    canonical value with its byte length keeps separators and nulls distinct.
     """
 
     if not contract.primary_key:
@@ -1162,8 +934,7 @@ def _signature_payload_select(
         )
         comparison_filter = f"lower(c.name) in ({names_in})"
     else:
-        # No declared comparison set and no declared schema: every business
-        # column except the key, which is what a declared schema's default is.
+        # With no declared schema or comparison set, compare every non-key column.
         keys = ", ".join(
             _sql_literal(column.lower()) for column in contract.primary_key
         )
@@ -1211,13 +982,7 @@ def _signature_payload_select(
 def _update_select(
     names: dict, contract: LoadContract, source_column_filter: str
 ) -> str:
-    """Build the UPDATE SET list: every loadable column except the key.
-
-    The key is excluded because it is what matched the rows. Weaver's own columns
-    are appended unconditionally: an updated row's update time, live sentinel and
-    row signature are Weaver's to state, and the signature is copied from the
-    upsert set rather than computed again.
-    """
+    """Build updates from non-key loadable columns plus managed state."""
 
     if not contract.primary_key:
         return "set @weaver_update_set_columns = N'';"
@@ -1256,16 +1021,8 @@ def _update_select(
     )
 
 
-# --- names and text ----------------------------------------------------------
-
-
 def _table_names(document: SesDocument, procedure_name: str) -> dict:
-    """The five names one load deals in, quoted once here and reused.
-
-    The intermediate tables sit in the object's own schema beside it: they
-    belong to the object being loaded, not to the generated ``_`` schema, which
-    holds procedures.
-    """
+    """Quote target and working-table names in the object's own schema."""
 
     schema = document.object_id.schema
     obj = document.object_id.object
@@ -1282,11 +1039,7 @@ def _table_names(document: SesDocument, procedure_name: str) -> dict:
 
 
 def _join(left: str, right: str, columns: tuple[str, ...], *, indent: int = 4) -> str:
-    """Two relations matched on every key column.
-
-    ``indent`` is where a continued ``and`` line starts, so a composite key reads
-    straight however deeply the join is nested.
-    """
+    """Join two relations on every key column with stable indentation."""
 
     separator = "\n" + " " * indent + "and "
     return separator.join(
@@ -1303,15 +1056,7 @@ def _aliased_columns(alias: str, columns: tuple[str, ...]) -> str:
 
 
 def _blank_key_predicate(columns: tuple[str, ...], *, alias: str = "s") -> str:
-    """A key column that is null, empty or only spaces is not a key.
-
-    Blank is rejected alongside null: a whitespace key matches nothing a person
-    would call a match, and would create a row nobody can find again, or claim
-    one on the delete side.
-
-    ``alias`` is empty where the predicate is applied to one table with no
-    relation to qualify, as the staging purge does.
-    """
+    """Match key columns that are null, empty or whitespace."""
 
     prefix = f"{alias}." if alias else ""
     predicates = [
@@ -1332,11 +1077,7 @@ def _sql_literal(text: str) -> str:
 
 
 def _escape_literal(text: str) -> str:
-    """Text going inside an already-quoted literal in the procedure template.
-
-    The procedure is itself embedded in a string literal by the installer, so a
-    quote here is doubled twice over: once at each layer.
-    """
+    """Escape text for both nested T-SQL string-literal layers."""
 
     return text.replace("'", "''")
 

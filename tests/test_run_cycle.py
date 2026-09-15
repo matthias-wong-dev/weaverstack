@@ -888,5 +888,5 @@ def test_an_ordinary_run_dispatches_without_reload():
 def test_reload_is_a_load_mode():
     from weaver.errors import CommandError
 
-    with pytest.raises(CommandError, match="reload is a load mode"):
+    with pytest.raises(CommandError, match="reload applies only to loads"):
         RunRequest.test([SALES], reload=True)

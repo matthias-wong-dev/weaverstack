@@ -1,20 +1,8 @@
-"""The Fabric Environment definition, and where Weaver sits inside one.
+"""Read and edit Weaver's parts of a Fabric Environment definition.
 
-An Environment item's definition is four kinds of part: ``.platform``,
-``Setting/Sparkcompute.yml``, ``Libraries/PublicLibraries/environment.yml`` and
-any number of ``Libraries/CustomLibraries/*`` files. A local ``*.Environment``
-directory holds the same paths, and the REST API carries them as InlineBase64.
-
-Two things are Weaver's and nothing else is: the ``weaverstack`` requirement in
-the external library list, and ``weaverstack-*.whl`` among the custom libraries.
-Released mode owns the first and removes the second. Development mode owns the
-second, removes the first, and names Weaver's Fabric requirements so the wheel's
-imports resolve, because a Fabric custom wheel does not pull its own transitive
-dependencies.
-
-The external library list is edited as text. A YAML round trip would drop the
-comments and the layout the file was written with, and pip options such as
-``--index-url`` sit in the same list as the requirements.
+Released mode owns the ``weaverstack`` requirement; development mode owns its
+custom wheel and explicit Fabric dependencies. External libraries are edited as
+text to preserve comments, layout and pip options.
 """
 
 from __future__ import annotations
@@ -28,22 +16,18 @@ import yaml
 
 from ..errors import CommandError
 
-#: The definition part paths Fabric accepts, other than a custom library.
 PLATFORM = ".platform"
 EXTERNAL_LIBRARIES = "Libraries/PublicLibraries/environment.yml"
 SPARK_COMPUTE = "Setting/Sparkcompute.yml"
 
-#: Every custom library sits directly under this prefix.
 CUSTOM_LIBRARIES = "Libraries/CustomLibraries/"
 
-#: What a directory holding one Environment definition is called.
 DIRECTORY_SUFFIX = ".Environment"
 
 DISTRIBUTION = "weaverstack"
 
 _SINGLE_PARTS = frozenset({PLATFORM, EXTERNAL_LIBRARIES, SPARK_COMPUTE})
 
-#: An external library list with nothing but Weaver in it.
 _MINIMAL_EXTERNAL = "dependencies:\n  - pip:\n"
 
 
@@ -57,13 +41,11 @@ def normalise_distribution(name: str) -> str:
 
 @dataclass(frozen=True)
 class EnvironmentDefinition:
-    """One Environment definition, as part path to decoded bytes."""
+    """Decoded definition parts keyed by their Fabric paths."""
 
     parts: Mapping[str, bytes]
 
     def custom_libraries(self) -> tuple[str, ...]:
-        """Every custom library filename, in path order."""
-
         return tuple(
             sorted(
                 path[len(CUSTOM_LIBRARIES) :]
@@ -73,8 +55,6 @@ class EnvironmentDefinition:
         )
 
     def external_libraries(self) -> str:
-        """The external library list, as the text of an ``environment.yml``."""
-
         return self.parts.get(EXTERNAL_LIBRARIES, b"").decode("utf-8")
 
 
@@ -97,8 +77,6 @@ def environment_name_from_path(path: Path | str) -> str:
 
 
 def read_environment_definition(path: Path | str) -> EnvironmentDefinition:
-    """Read one local ``*.Environment`` directory as a definition."""
-
     directory = Path(path)
     if not directory.exists():
         raise CommandError(f"{directory}: no such Environment definition.")
@@ -131,8 +109,6 @@ def read_environment_definition(path: Path | str) -> EnvironmentDefinition:
 
 
 def definition_payload(definition: EnvironmentDefinition) -> dict:
-    """The definition as Fabric's create and update APIs take it."""
-
     return {
         "parts": [
             {
@@ -146,23 +122,14 @@ def definition_payload(definition: EnvironmentDefinition) -> dict:
 
 
 def definition_from_payload(payload: Mapping) -> EnvironmentDefinition:
-    """One definition read back from Fabric, decoded."""
-
     parts = {}
     for part in (payload.get("definition") or payload).get("parts") or ():
         parts[str(part["path"])] = base64.b64decode(part["payload"])
     return EnvironmentDefinition(parts=parts)
 
 
-# --- the external library list -------------------------------------------------
-
-
 def pip_entries(text: str, *, source: str) -> tuple[str, ...]:
-    """The pip list an ``environment.yml`` declares, validated.
-
-    Raises when ``dependencies`` is shaped in a way a requirement cannot be
-    added to or removed from safely.
-    """
+    """Validate and return the pip list that can be edited safely."""
 
     if not text.strip():
         return ()
@@ -196,7 +163,7 @@ def pip_entries(text: str, *, source: str) -> tuple[str, ...]:
 
 
 def requirement_name(entry: str) -> str | None:
-    """The distribution one pip entry names, or nothing for an option."""
+    """Return the distribution name, or ``None`` for a pip option."""
 
     text = entry.strip()
     if not text or text.startswith("-"):
@@ -225,8 +192,6 @@ def pip_scalar(item: str) -> str | None:
 
 
 def weaver_requirement(entries: Iterable[str]) -> str | None:
-    """The Weaver requirement a pip list already carries, as it is written."""
-
     for entry in entries:
         if requirement_name(entry) == DISTRIBUTION:
             return entry.strip()
@@ -268,16 +233,10 @@ def released_external_libraries(
 def development_external_libraries(
     text: str, *, requirements: Iterable[str], source: str
 ) -> str:
-    """The list with Weaver's Fabric requirements and no ``weaverstack``.
+    """Replace ``weaverstack`` with the checkout wheel's requirements.
 
-    The checkout's wheel is the Weaver a development publication installs, so a
-    PyPI requirement alongside it would resolve to a published version. Its
-    imports still have to resolve, and a custom wheel brings no dependencies of
-    its own, so Weaver's own requirements are named here.
-
-    An entry the Environment already carries keeps its authored specifier only
-    where that specifier can satisfy Weaver's. One that cannot is reported here,
-    before anything is staged.
+    Fabric does not install a custom wheel's dependencies. Existing compatible
+    specifiers are preserved; conflicts fail before anything is staged.
     """
 
     wanted = tuple(requirements)
@@ -288,13 +247,7 @@ def development_external_libraries(
 def _check_authored_constraints(
     entries: Iterable[str], requirements: Iterable[str], *, source: str
 ) -> None:
-    """Refuse an authored requirement that excludes what Weaver needs.
-
-    ``sqlparse==0.5.3`` beside a Weaver requirement of ``sqlparse>=0.6.0`` gives
-    a published Environment Weaver cannot import from, and the failure would
-    surface as an ImportError in the first notebook cell. It is a comparison of
-    two specifiers, so it needs no resolver.
-    """
+    """Refuse authored requirements that exclude Weaver's requirements."""
 
     from packaging.requirements import InvalidRequirement, Requirement
 
@@ -363,8 +316,6 @@ def _satisfiable(authored, required) -> bool:
 
 
 def _versions(specifier, operators):
-    """Every parsable version the specifier names with one of these operators."""
-
     from packaging.version import InvalidVersion, Version
 
     found = []
@@ -379,14 +330,10 @@ def _versions(specifier, operators):
 
 
 def _pinned(specifier):
-    """The exact versions a specifier pins to."""
-
     return _versions(specifier, {"=="})
 
 
 def _lower(specifier):
-    """The highest lower bound a specifier states, and whether it includes it."""
-
     closed = _versions(specifier, {">=", "==", "~="})
     open_ = _versions(specifier, {">"})
     highest = max(closed + open_, default=None)
@@ -397,8 +344,6 @@ def _lower(specifier):
 
 
 def _upper(specifier):
-    """The lowest upper bound a specifier states, and whether it includes it."""
-
     closed = _versions(specifier, {"<=", "=="})
     open_ = _versions(specifier, {"<"})
     lowest = min(closed + open_, default=None)
@@ -469,8 +414,6 @@ def _edit_pip(
 
 
 def _pip_header(lines: list[str]) -> tuple[int, str] | None:
-    """Where the ``- pip:`` list starts, and the indent its dash sits at."""
-
     for index, line in enumerate(lines):
         stripped = line.strip()
         if stripped in ("- pip:", "-pip:") or stripped == "- pip:":
@@ -479,29 +422,20 @@ def _pip_header(lines: list[str]) -> tuple[int, str] | None:
 
 
 def _with_pip_section(lines: list[str]) -> list[str]:
-    """The same list, with an empty ``- pip:`` under ``dependencies``."""
-
     for index, line in enumerate(lines):
         if line.strip() in ("dependencies:", "dependencies: "):
             return lines[: index + 1] + ["  - pip:"] + lines[index + 1 :]
     return [*lines, "dependencies:", "  - pip:"]
 
 
-#: Requirements Weaver needs on a desktop and never inside Fabric. A published
-#: Environment installs what runs there, and these are the transports and the
-#: build tooling a console uses to reach it.
+#: Desktop transports and build tools are not installed into Fabric.
 DESKTOP_ONLY = frozenset(
     {"azure-identity", "requests", "build", "prompt-toolkit", "packaging"}
 )
 
 
 def runtime_requirements(root: Path) -> tuple[str, ...]:
-    """Weaver's Fabric requirements, read from ``pyproject.toml``.
-
-    What a development publication has to name alongside the checkout's wheel:
-    a Fabric custom wheel installs no dependencies of its own, so an unnamed
-    requirement is an ``ImportError`` in the first notebook cell.
-    """
+    """Return dependencies a Fabric custom wheel cannot install for itself."""
 
     import tomllib
 

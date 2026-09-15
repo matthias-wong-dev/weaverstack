@@ -313,7 +313,7 @@ def test_a_runtime_artefact_is_known_by_its_role_not_its_shape():
 
 @weaver_test()
 def test_an_unknown_role_is_refused_rather_than_guessed():
-    with pytest.raises(BuildError, match="unsupported object_role"):
+    with pytest.raises(BuildError, match="unsupported object role"):
         _read_back(_registry_row("Order", object_role="whatever"))
 
 
@@ -322,7 +322,7 @@ def test_a_missing_role_is_refused_rather_than_assumed_to_be_data():
     row = _registry_row("Order", object_role=ROLE_DATA)
     del row["object_role"]
 
-    with pytest.raises(BuildError, match="unsupported object_role"):
+    with pytest.raises(BuildError, match="unsupported object role"):
         _read_back(row)
 
 

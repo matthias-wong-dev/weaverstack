@@ -56,8 +56,8 @@ def test_wizard_explains_choices_and_defaults_to_source_only_and_deferred(capsys
     assert args.example is False and args.publish_environment is False
     text = capsys.readouterr().out
     for phrase in (
-        "Warehouse where Weaver keeps",
-        "definition is kept in this project",
+        "Warehouse that stores",
+        "Add packages to its definition",
         "Press Enter",
         "Change an answer",
         "Publish the Environment now? [y/N]",
@@ -151,7 +151,7 @@ def test_non_interactive_validates_without_prompts(capsys):
 
 @weaver_test()
 def test_exhausted_input_stops_the_wizard():
-    with pytest.raises(CommandError, match="answers ran out"):
+    with pytest.raises(CommandError, match="Input ended"):
         collect(parse("--project-folder", "project"), stdin=Typed(""))
 
 
@@ -187,7 +187,7 @@ def test_deferred_render_names_normal_publish_and_next_commands(capsys):
         )
     )
     text = capsys.readouterr().out
-    assert "publication was deferred" in text
+    assert "publication deferred" in text
     assert (
         "weaver fabric environment publish --path Environment/Weaver.Environment"
         in text

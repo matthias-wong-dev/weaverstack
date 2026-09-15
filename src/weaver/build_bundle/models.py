@@ -24,15 +24,10 @@ BUILD_FOLDER = "build_folder"
 BUILD_TABLE = "build_table"
 BUILD_VIEW = "build_view"
 
-#: One Lakehouse's SQL analytics endpoint catching up with the Delta mutations
-#: just made in it. It closes an item's physical work: a dependent item's
-#: Warehouse view or OneLake shortcut reads that endpoint's metadata, so it must
-#: not be created while the endpoint still describes the previous shape.
+#: Refresh the SQL analytics endpoint before dependent items read its metadata.
 REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 
-#: Load kinds, meaning what an item's final layer installs. ``write_file`` puts one
-#: deployed module or generated statement into the runtime tree;
-#: ``build_procedure`` creates or replaces one generated load procedure.
+#: Runtime artefacts installed in an item's final layer.
 WRITE_FILE = "write_file"
 BUILD_PROCEDURE = "build_procedure"
 
@@ -46,11 +41,7 @@ DROP_VIEW = "drop_view"
 #: would reach that item's data.
 DROP_SHORTCUT = "drop_shortcut"
 
-#: Removals of runtime artefacts whose source has stopped claiming them.
-#: Distinct from prune because they come from the catalogue rather than from a
-#: diff against the target: the previous Registry row says what was installed
-#: and where, so a deleted or renamed source produces the removal without
-#: anything having to enumerate the runtime tree.
+#: Prior Registry claims determine runtime artefact removals.
 DELETE_FILE = "delete_file"
 DROP_PROCEDURE = "drop_procedure"
 
@@ -61,22 +52,16 @@ PRUNE_VIEW = "prune_view"
 PRUNE_SCHEMA = "prune_schema"
 PRUNE_FOLDER = "prune_folder"
 
-#: Refresh the SQL analytics endpoint for one Lakehouse after its Delta tables
-#: have changed. The action is target-bound and payloadless: the planner decides
-#: which Lakehouses need it, while the executor performs or explicitly skips it
-#: for the current host.
+#: Target-bound, payloadless endpoint refresh after Delta changes.
 REFRESH_SQL_ENDPOINT = "refresh_sql_endpoint"
 
-#: Catalogue kinds. These write the central catalogue in its Warehouse
-#: rather than the destination. Claim deletion leads physical work; batched
-#: publication concludes it, with Registry visibly last in the manifest.
+#: Catalogue actions target the central Warehouse. Claim deletion precedes
+#: physical work; publication follows it with Registry last.
 DELETE_CATALOGUE_CLAIMS = "delete_catalogue_claims"
 PUBLISH_CATALOGUE = "publish_catalogue"
 PUBLISH_REGISTRY = "publish_registry"
-#: Bring the catalogue's current-state tables into line with what this build will
-#: leave installed: remove the rows of objects it no longer runs, and the rows of
-#: the incarnations it is replacing. It leads physical work for the reason claim
-#: deletion does. See :mod:`weaver.build_bundle.runtime_tables`.
+#: Remove current-state rows for retired and replaced object incarnations before
+#: physical work.
 RECONCILE_RUNTIME_STATE = "reconcile_runtime_state"
 CATALOGUE_KINDS = frozenset(
     {
@@ -87,14 +72,11 @@ CATALOGUE_KINDS = frozenset(
     }
 )
 
-#: Reasons a repository node is not in the plan. A missing target is visible,
-#: not a mysterious absence.
+#: Reasons a repository node is not in the plan.
 OMIT_TARGET_UNBOUND = "target_unbound"
 OMIT_DEPENDS_ON_OMITTED = "depends_on_omitted_node"
 OMIT_UNSUPPORTED_EXECUTOR = "unsupported_executor"
-#: A shortcut the current bindings give no physical form. The planner decides
-#: this, never the installer, which may only run a shortcut action already frozen
-#: for it, and records it so the absence is stated rather than a gap.
+#: A shortcut for which current bindings provide no physical form.
 OMIT_SHORTCUT_UNSUPPORTED = "shortcut_unsupported"
 OMISSION_REASONS = frozenset(
     {
@@ -133,32 +115,13 @@ class OmittedNode:
 class InstallAction:
     """One independently executable unit.
 
-    ``payload`` is a bundle-relative path to the generated definition, or None
-    for an action that carries no payload (an explicit no-op). ``payload_sha256``
-    hashes that payload so corruption is caught before anything runs.
+    ``payload`` is a bundle-relative path and ``payload_sha256`` protects its
+    contents. ``source_path`` preserves the authored relative path for failure
+    reporting; it is never reconstructed from generated names.
 
-    ``source_path`` is the authored repository file this action came from,
-    relative to the repository root, for actions that have one. It exists so a
-    failure can name the file the developer should open:
-
-    .. code-block:: text
-
-        Error installing Warehouse/Reporting/Sales.CustomerRevenue
-        Source: Warehouse/Reporting/Sales.CustomerRevenue.sql
-
-    Carried from where the authored file was parsed, never reconstructed from
-    ``id`` or a payload name: several authored files can compile to one deployed
-    spelling, so a path derived later would be a guess.
-
-    An action with no authored source has None: a shortcut, an endpoint refresh, a
-    prune, a catalogue publication.
-
-    ``awaits_name_release`` is set on the one drop whose name this same plan then
-    gives to an owned object. Fabric stops listing a deleted shortcut before
-    OneLake releases its namespace, so that removal waits for the name to become
-    reusable before the build that reuses it runs. No other action waits: an
-    ordinary deletion, a pointer replaced by another pointer, and a name nothing
-    reuses all proceed immediately.
+    ``awaits_name_release`` marks a dropped shortcut whose name this plan reuses
+    for an owned object. Fabric may stop listing the shortcut before OneLake
+    releases its namespace.
     """
 
     id: str
@@ -206,8 +169,6 @@ class InstallAction:
 
 @dataclass(frozen=True)
 class BuildBatch:
-    """A group of actions against exactly one target."""
-
     id: str
     target_id: str
     actions: tuple[InstallAction, ...]
@@ -268,19 +229,11 @@ class BuildPlan:
     sequences: tuple[BuildSequence, ...]
     selection: BuildSelection
     omitted_nodes: tuple[OmittedNode, ...] = ()
-    #: What this plan means for each bound target, keyed by target id: the objects
-    #: it adds and removes. Part of the manifest, and therefore of
-    #: the bundle identity, so the summary a reviewer reads is the summary the
-    #: installation was certified with. A sibling file outside the hash could be
-    #: edited after certification, which is the thing frozen payloads exist to
-    #: prevent.
+    #: Added and removed objects by target id. This is part of the manifest and
+    #: bundle identity, so the certified summary cannot change independently.
     target_changes: Mapping[str, tuple[TargetChange, ...]] = field(default_factory=dict)
-    #: The catalogue's current-state rows this plan ends the life of, by table.
-    #: Declared beside the action that performs it, as ``target_changes`` is
-    #: declared beside the actions that change a target: the reconciliation
-    #: action's payload is what runs, and this is what it means, so a
-    #: :class:`~weaver.catalogue.state.Catalogue` applying the plan in memory gets
-    #: the decision without parsing DML.
+    #: Current-state rows invalidated by the plan, declared beside the action so
+    #: in-memory application does not parse DML.
     runtime_state: tuple[RuntimeStateInvalidation, ...] = ()
     runtime_state_established: tuple[RuntimeStateEstablishment, ...] = ()
 
@@ -335,8 +288,6 @@ class BuildPlan:
                 for one in mapping.get("runtime_state_established", ())
             ),
         )
-
-    # --- convenience views ------------------------------------------------
 
     @property
     def target_ids(self) -> frozenset[str]:

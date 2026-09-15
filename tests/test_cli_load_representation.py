@@ -636,7 +636,7 @@ def test_a_session_that_returns_nothing_is_an_error_rather_than_a_success(livy, 
     exit_code = main(_fabric())
 
     assert exit_code == 1
-    assert "returned nothing" in capsys.readouterr().err
+    assert "returned no result" in capsys.readouterr().err
 
 
 # --- the CLI owns no semantics ------------------------------------------------

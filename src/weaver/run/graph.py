@@ -13,22 +13,17 @@ from .result import RunError
 
 @dataclass(frozen=True)
 class RunNode:
-    """One unit of installed runtime work, or a barrier between two of them."""
+    """Installed runtime work or a barrier between units of work."""
 
     node_id: str
     physical_target: object
     primitive_kind: str
     logical_id: object | None = None
     physical_object: object | None = None
-    #: The installed primitive itself, the procedure or the deployed file.
-    #: ``None`` for a refresh, which is a capability rather than an artefact.
     primitive_id: object | None = None
     primitive_object: object | None = None
-    #: What this node is for, where one graph carries more than one kind.
     role: str | None = None
-    #: The installed thing this node runs, as the estate describes it. Opaque
-    #: to the Runner: the Runner decides when a node
-    #: runs, and only dispatch needs to know what it is.
+    #: Opaque to the Runner; only dispatch interprets the installed description.
     installed: object | None = None
     #: A publication barrier only: the Warehouse table it waits on, the consuming
     #: shortcut paths, and the load node that publishes what it waits for.
@@ -38,17 +33,7 @@ class RunNode:
 
     @property
     def sort_key(self) -> tuple[str, str, str, str, str]:
-        """What orders two nodes that became ready at the same moment.
-
-        Target kind, then target, then logical identity, then primitive kind, so
-        the order a graph prints is a property of the estate rather than of the
-        dictionary iteration that built it.
-
-        ``node_id`` breaks the last tie. Without it, two nodes alike in all four
-        fall back to the order the graph happened to be built in, which is the
-        very thing the sort exists to remove, and a run whose order depends on
-        construction is one a log cannot reproduce.
-        """
+        """Order ready nodes reproducibly from estate identity, then ``node_id``."""
 
         return (
             getattr(self.physical_target, "kind", ""),
@@ -75,30 +60,24 @@ class RunGraph:
 
     @cached_property
     def topology(self) -> Graph:
-        """The generic topology over these nodes, built once and kept.
-
-        Built on first use, so a cycle surfaces where a run would meet it.
-        """
+        """Build the topology lazily so cycles surface during run planning."""
 
         try:
             return Graph((node.node_id for node in self.nodes), self.edges)
         except GraphError as exc:
-            raise RunError(f"the run graph contains a cycle: {exc}") from None
+            raise RunError(
+                f"Cannot plan the run because its dependencies cycle: {exc}. "
+                "Remove one dependency from the cycle."
+            ) from None
 
     def upstream(self, node_id: str) -> frozenset[str]:
         return frozenset(self.topology.upstream_of(node_id))
 
     def descendants(self, node_id: str) -> frozenset[str]:
-        """Every node that may not run once ``node_id`` has failed."""
-
         return frozenset(self.topology.descendants(node_id))
 
     def order(self) -> tuple[RunNode, ...]:
-        """The deterministic topological order, or a refusal if there is a cycle.
-
-        Ties break on :attr:`RunNode.sort_key`, so a run reads target by
-        target and a log reproduces.
-        """
+        """Return a deterministic topological order."""
 
         found = self.by_id
         return tuple(
@@ -108,11 +87,7 @@ class RunGraph:
 
 
 def graph_for(request, state) -> RunGraph:
-    """The graph one request implies against one observed estate.
-
-    Selection is where the kinds of run differ, and it is the only place they
-    do: what runs is a different question per kind, how a run behaves is not.
-    """
+    """Build the graph selected by a request against the observed estate."""
 
     from .runner import LOAD, TEST
 
@@ -120,7 +95,7 @@ def graph_for(request, state) -> RunGraph:
         return _load_graph(request, state)
     if request.kind == TEST:
         return _test_graph(request, state)
-    raise RunError(f"no selection rule for a {request.kind!r} run")
+    raise RunError(f"Cannot plan a {request.kind!r} run: no selection rule exists")
 
 
 def _load_graph(request, state) -> RunGraph:

@@ -1,8 +1,4 @@
-"""Public ``weaver.load(...)`` entry point and orchestration.
-
-Read the catalogue, resolve the requested items, construct and resolve a physical
-DAG, dispatch primitives, record what each one did.
-"""
+"""Orchestrate the public ``weaver.load(...)`` operation."""
 
 from __future__ import annotations
 
@@ -29,10 +25,7 @@ from ..load_report import (
 from ..targets import lakehouse_names
 from .items import requested_items, run_scope
 
-#: The task type this operation records under. Restated rather than imported,
-#: because this module reaches ``weaver.run`` inside the function that needs it;
-#: ``tests/targeted/test_run_record_representation.py`` asserts it matches
-#: :data:`weaver.run.record.LOAD_TASK`.
+#: Kept local to avoid importing ``weaver.run`` eagerly; must match ``LOAD_TASK``.
 TASK_TYPE = "load"
 
 
@@ -74,17 +67,7 @@ def load(
     Selecting nothing is a success. ``as_of`` is the freshness cutoff that
     selection measures against, and it requires ``stale``.
 
-    ``workspace``, ``catalogue`` and ``environment`` are names, resolved as
-    ``build`` resolves them; ``session`` is where an already-resolved
-    ``Workspace`` travels.
-
-    .. code-block:: text
-
-        an explicit name
-          → a workspace configuration file
-            → the Session's own workspace
-              → what the notebook is attached to
-                → a configuration error naming what is missing
+    A supplied ``session`` carries its resolved Workspace and is left open.
     """
 
     started = datetime.now(timezone.utc)
@@ -127,8 +110,6 @@ def load(
 
 
 def _refuse_conflicting_modes(*, stale: bool, reload: bool, as_of) -> None:
-    """Stop a request that names two loads at once."""
-
     if stale and reload:
         raise CommandError("--reload and --stale cannot be used together")
     if as_of is not None and not stale:
@@ -150,9 +131,8 @@ def run_load(
 ) -> LoadRunReport:
     """Run the catalogue graph through a Session.
 
-    Ordered so the catalogue read comes before the Spark home is offered: the
-    physical Lakehouse to attach to is recorded there, and a missing installation
-    is therefore refused before Livy starts.
+    The catalogue is read before Spark starts because it holds the physical
+    Lakehouse attachment and may show that the installation is missing.
 
     ``stale`` assesses the catalogue this read and runs the subjects that are
     not green. ``as_of`` is the freshness cutoff, resolved by the caller.
@@ -170,24 +150,18 @@ def run_load(
 
     started = datetime.now(timezone.utc)
     with session.step("Read catalogue"):
-        # One catalogue, read once: what is installed, and how far each object
-        # has been loaded. A run of two hundred objects would otherwise be two
-        # hundred round trips for one table's contents.
+        # Read installation and load state together to avoid one trip per object.
         catalogue = (
             state.catalogue
             if state is not None
             else read_installed_catalogue(
                 session=session,
                 workspace=workspace,
-                # Stale-only assesses Load health, which reads _.LoadStatus.
-                # The one catalogue read, widened to carry it. _.Mirror is in
-                # READABLE_TABLES already, being what says a node may be written.
+                # Stale selection also needs current load state.
                 tables=(*READABLE_TABLES, LOAD_STATUS) if stale else None,
             )
         )
-        # An empty scope is every installed item, and it is resolved here: the
-        # catalogue that answers it has just been read, and everything below
-        # takes a concrete tuple of item identities.
+        # Resolve an empty scope against the catalogue just read.
         items, installed = run_scope(
             catalogue.dag(), items, what="load", catalogue=workspace.catalogue
         )
@@ -196,10 +170,8 @@ def run_load(
     if stale:
         from .mirror import mirrored_source
 
-        # A mirrored ancestor's load is recorded where its rows are written, so
-        # stale selection reads that catalogue too. The mirrored nodes are never
-        # selected; their local descendants are, which is how a source that
-        # advanced reaches this estate.
+        # Mirrored load state is recorded at its source. Only local descendants
+        # are eligible for stale selection.
         source = mirrored_source(
             catalogue,
             workspace=workspace,
@@ -214,8 +186,7 @@ def run_load(
             source=source,
         ).unsettled_identities()
 
-    # Fabric attaches a Spark session to a Lakehouse, so a host that crosses
-    # needs one of the Lakehouses this load is for.
+    # Fabric requires a Lakehouse attachment before Spark starts.
     session.offer_spark_home(lakehouse_names(installed.values()))
 
     with session.step("Build run graph"):
@@ -235,12 +206,10 @@ def run_load(
             can_refresh=can_refresh(session, workspace),
         )
         if reload:
-            # Before execution and before a dry run reports.
+            # Refuse unsupported work before execution or dry-run reporting.
             _refuse_unsupported_reload(runner.plan())
 
-    # A dry run writes nothing durable: a row for work nobody did would be
-    # evidence of a load that never happened, and a bookmark it moved would make
-    # the next real load skip a window nothing had read.
+    # A dry run must not create run evidence or move bookmarks.
     record = (
         None
         if dry_run
@@ -257,8 +226,7 @@ def run_load(
         )
 
     if record is not None:
-        # Before the report, and before any failure is raised: a caller told the
-        # load succeeded must be able to rely on what it recorded being durable.
+        # Flush durable evidence before reporting success or raising failure.
         with session.step("Record what the run did"):
             record.flush()
 
@@ -273,14 +241,12 @@ RELOADABLE_KINDS = (WAREHOUSE_PROCEDURE, PYTHON_TABLE)
 
 
 def _refuse_unsupported_reload(graph) -> None:
-    """Stop a reload that selected something it cannot reconstruct."""
-
     refused = sorted(
         node.node_id for node in graph.nodes if node.primitive_kind == PYTHON_FOLDER
     )
     if refused:
         raise CommandError(
-            "reload covers tables, and this selection holds folders: "
+            "reload supports tables only; this selection includes folders: "
             + ", ".join(refused)
             + ". Select the tables by name, or load without reload."
         )
@@ -300,12 +266,6 @@ def _reset_before(record):
 
 
 def _as_load_report(result, *, started, record) -> LoadRunReport:
-    """One RunResult, rendered as the shape a load's readers expect.
-
-    One internal model, several public shapes. A load reader needs rows moved
-    and a workflow to correlate its evidence by.
-    """
-
     return LoadRunReport(
         requested=result.requested,
         status=result.status,
@@ -339,18 +299,7 @@ def _as_load_report(result, *, started, record) -> LoadRunReport:
 
 
 def _raise_for_failure(report: LoadRunReport) -> None:
-    """Turn an intolerant run's recorded failure into the exception it is.
-
-    Everything durable is written first: every planned node has its final
-    record and the completion document says the task reached a decided outcome,
-    so a missing completion still means an interruption rather than a handled
-    failure.
-
-    Only then does this raise. ``fault_tolerant=False`` means stop if anything
-    fails, and an ordinary report would be indistinguishable from success. The
-    exception carries the failing node's counts, the partial report, and where
-    the evidence went.
-    """
+    """Raise only after the run's final state has been recorded durably."""
 
     failed = [node for node in report.nodes if node.status == FAILED]
     if not failed:
@@ -365,11 +314,12 @@ def _raise_for_failure(report: LoadRunReport) -> None:
         first.result.error_message if first.result is not None else None,
     )
     blocked = sum(1 for node in report.nodes if node.status == BLOCKED)
+    subject = first.logical_id or first.physical_target
     raise LoadError(
-        f"{first.node_id} failed"
+        f"Load failed for {subject}"
         + (f": {detail}" if detail else "")
-        + (f"; {len(failed)} node(s) failed" if len(failed) > 1 else "")
-        + (f", {blocked} blocked" if blocked else ""),
+        + (f"; {len(failed)} loads failed" if len(failed) > 1 else "")
+        + (f", {blocked} loads blocked" if blocked else ""),
         result=first.result,
         report=report,
         workflow_id=report.workflow_id,
@@ -381,18 +331,11 @@ _STEP_TYPES = {ENDPOINT_REFRESH: "refresh", ONELAKE_PUBLICATION: "publication"}
 
 
 def _step_type(report: LoadNodeReport) -> str:
-    """The broad kind a step file's name carries."""
-
     return _STEP_TYPES.get(report.primitive_kind, "load")
 
 
 def _completion_document(report: LoadRunReport, timings=()) -> dict:
-    """What the run added up to, reconciled from the steps rather than tallied.
-
-    ``timings`` are the frames this run closed, in closing order. They ride the
-    completion document rather than a file of their own: how long a step took is
-    a property of that step.
-    """
+    """Reconcile totals and closing-order timings from the run's steps."""
 
     counted = {status: 0 for status in ("executed", "succeeded", "failed", "blocked")}
     rows = {
@@ -416,9 +359,7 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
         counted["failed"] += 1 if node.status == "failed" else 0
         counted["blocked"] += 1 if node.status == "blocked" else 0
         if node.result is not None:
-            # What the result actually measured. A node that failed without
-            # reaching its primitive reports no counts at all, and it
-            # contributes none, which is true because nothing was written.
+            # A node that never reached its primitive contributes no row counts.
             for name in rows:
                 rows[name] += getattr(node.result, name, 0)
     return {
@@ -436,13 +377,11 @@ def _completion_document(report: LoadRunReport, timings=()) -> dict:
 
 
 def _load_names(names: str | Sequence[str] | None) -> tuple[str, ...]:
-    """Normalise the notebook convenience spelling into the request contract."""
-
     if names is None:
         return ()
     values = (names,) if isinstance(names, str) else tuple(names)
     if not values:
-        raise CommandError("load names= needs at least one load selector")
+        raise CommandError("load names= must contain at least one load selector")
     return tuple(str(value) for value in values)
 
 

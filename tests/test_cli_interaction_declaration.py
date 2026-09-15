@@ -174,7 +174,7 @@ def test_the_option_carries_one_help_text():
     parser = argparse.ArgumentParser()
     add_non_interactive(parser)
 
-    assert "Never ask" in parser.format_help()
+    assert "open browser sign-in" in " ".join(parser.format_help().split())
 
 
 # --- no command decides interaction for itself --------------------------------

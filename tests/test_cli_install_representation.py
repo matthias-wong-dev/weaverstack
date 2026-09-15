@@ -172,7 +172,7 @@ def test_a_path_and_a_named_environment_are_not_both_given(monkeypatch):
         ["fabric", "environment", "publish", "Runtime", "--path", "x/R.Environment"]
     )
 
-    with pytest.raises(CommandError, match="is not given as well"):
+    with pytest.raises(CommandError, match="cannot be used together"):
         handle_environment_publish(args)
 
 

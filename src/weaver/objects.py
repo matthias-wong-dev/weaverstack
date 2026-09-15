@@ -1,7 +1,4 @@
-"""Base classes for Python-authored Weaver objects.
-
-Objects receive a Spark session, resolved Lakehouse destination, and identity.
-"""
+"""Base classes for Python-authored Weaver objects."""
 
 from __future__ import annotations
 
@@ -18,45 +15,29 @@ if TYPE_CHECKING:  # pragma: no cover - for type readers only
     from .runtime.folder_load import StagingFolder
     from .runtime.load_result import LoadResult
 
-#: What Weaver names a folder's staging sibling. Repeated from
-#: :mod:`weaver.runtime.folder_load` rather than imported: the authoring surface
-#: stays importable without the runtime beneath it. ``tests/test_objects.py``
-#: asserts the two are identical.
+#: Repeated here so the authoring surface does not import the runtime.
 STAGING_SUFFIX = "_Staging"
 
-#: What separates schema from object in a class name: a module name cannot carry
-#: a dot, so ``Sales.Order`` is spelled ``Sales__Order``. Repeated from
-#: :func:`weaver.declaration.source.object_id_for_filename` because the authoring
-#: surface must not import the parser.
+#: ``Sales.Order`` is spelled ``Sales__Order`` because module names cannot contain dots.
 CLASS_ID_SEPARATOR = "__"
 
-#: The two kinds of validation, as their declarations spell them. Repeated from
-#: :mod:`weaver.declaration.metadata` for the same reason: this module is
-#: imported by authored code and pulls in no parser.
-#: ``tests/test_objects_declaration.py`` asserts the two are identical.
+#: Repeated here so authored code does not import the declaration parser.
 TEST = "Test"
 ASSUMPTION = "Assumption"
 
 
 class WeaverObject:
-    """Base for every authored object.
+    """Base class for authored objects.
 
-    ``spark`` is mandatory. Another Weaver object may be passed in its place, and
-    the new object inherits that one's session, Lakehouse and catalogue::
+    Pass a Spark session, or another object whose session, Lakehouse and
+    catalogue this object should inherit::
 
         My__Table(spark)                               # freestanding
         My__Table(spark, catalogue="Warehouse/Weaver")  # anchored
 
-    ``catalogue`` names the Warehouse holding the catalogue, or is a
-    :class:`~weaver.catalogue.state.Catalogue` already read. Named, it opens and
-    owns the Session it reads and writes through; handed one, it reuses that
-    one's. Without it the object is freestanding: ``read()`` works and ``load()``
-    raises. With it, construction resolves which installed object this is and
-    raises :class:`~weaver.errors.ConfigError` if the catalogue records it zero
-    times or twice.
-
-    An orchestrated run supplies its catalogue through :meth:`with_catalogue`, so
-    a deployed primitive's constructor stays ``cls(spark, lakehouse=...)``.
+    ``catalogue`` may name its Warehouse or supply an already-read
+    :class:`~weaver.catalogue.state.Catalogue`. Without it, ``read()`` works but
+    ``load()`` and ``run()`` do not.
     """
 
     def __init__(
@@ -72,12 +53,11 @@ class WeaverObject:
             spark = owner.spark
             if lakehouse is None:
                 lakehouse = owner.lakehouse
-            # The catalogue, never a value read from it: a child resolves its
-            # own identity and its own bookmark against the same catalogue.
+            # A child resolves its own identity and bookmark against the same catalogue.
             inherited = owner._catalogue
         if spark is None:
             raise LoadError(
-                f"{type(self).__name__} needs the Spark session it runs through. "
+                f"{type(self).__name__} needs a Spark session. "
                 f"Construct it as {type(self).__name__}(spark), or as "
                 f"{type(self).__name__}(self) from another object"
             )
@@ -90,30 +70,21 @@ class WeaverObject:
         if lakehouse is not None and not isinstance(lakehouse, Lakehouse):
             raise LoadError(
                 f"{type(self).__name__} takes a resolved Lakehouse, got "
-                f"{type(lakehouse).__name__}"
+                f"{type(lakehouse).__name__}. Resolve the Lakehouse first with "
+                "weaver.lakehouse_for()"
             )
 
-        #: The session this object reads and writes through.
         self.spark = spark
-        #: The destination this object materialises into, resolved once.
         self.lakehouse: Lakehouse = (
             lakehouse if lakehouse is not None else default_lakehouse(spark)
         )
-        #: The destination's root, which is what Spark and Hadoop address. Tables and
-        #: folders both hang off it, so nothing an object reaches needs a mount.
         self.spark_root = self.lakehouse.spark_root
 
-        #: The catalogue this object is anchored to, or None if freestanding.
-        #: Private: authored code asks the object about itself, not about how the
-        #: answer was obtained.
         self._catalogue = None
-        #: This object's installed identity, resolved once with the anchor.
         self._installed = None
         from .catalogue.state import Catalogue as _Catalogue
 
         if isinstance(catalogue, _Catalogue):
-            # One already read, and its Session with it: a run and an authored
-            # notebook that has one both hand it over rather than pay again.
             self.with_catalogue(catalogue)
         elif catalogue is not None:
             from .runtime.anchor import anchored
@@ -139,14 +110,10 @@ class WeaverObject:
     # --- the catalogue this object is anchored to --------------------------
 
     def with_catalogue(self, catalogue: Any, identity: Any = None) -> "WeaverObject":
-        """Anchor this object to an already-populated catalogue, and return it.
+        """Anchor this object to an already-read catalogue and return it.
 
-        How an orchestrated run supplies what a standalone load names with
-        ``catalogue=``. Set after construction, so a deployed primitive's
-        constructor stays ``cls(spark, lakehouse=...)``.
-
-        ``identity`` is this object's installed identity where the caller has it,
-        as a run does. Resolved from the catalogue otherwise.
+        ``identity`` supplies the installed identity when it is already known;
+        otherwise the catalogue resolves it.
         """
 
         from .runtime.anchor import resolved_identity
@@ -163,75 +130,44 @@ class WeaverObject:
 
         return self._installed
 
-    #: Whether this object's catalogue identity carries the ``Files/`` prefix. A
-    #: Folder and a Table of the same name are two objects, and one bookmark
-    #: cannot stand for both.
+    #: The ``Files/`` prefix keeps Folder and Table bookmarks distinct.
     _is_files = False
 
     def bookmark(self):
-        """The UTC instant immediately before this object's last clean load began.
+        """Return the UTC instant before this object's last clean load began.
 
-        An aware datetime, always. An object with no bookmark row for its current
-        physical incarnation reads as the sentinel, so an incremental read asks
-        for everything::
+        The result is always timezone-aware. An object with no bookmark returns
+        the sentinel, so an incremental read asks for everything::
 
             def read(self):
                 return Source__Export(self).files_since(self.bookmark())
 
-        Answerable only by a catalogue-anchored object. A freestanding one raises,
-        and can still be constructed and read: it is :meth:`load` that needs the
-        catalogue this answers from.
+        Only a catalogue-anchored object has a bookmark.
         """
 
         return self._anchor().bookmark(self._installed)
 
     def _anchor(self):
-        """The catalogue this object is anchored to, or a failure saying it is not.
-
-        Asked by every load, because a load records how far it read. Required
-        here rather than where the row is written.
-        """
-
         if self._catalogue is not None:
             return self._catalogue
         raise LoadError(
-            f"{self.object_id} is not anchored to the Weaver catalogue, so it "
-            "cannot read its bookmark or record one, and a load needs both. "
-            "Construct it as "
+            f"{self.object_id} is not anchored to the Weaver catalogue. Construct it as "
             f'{type(self).__name__}(spark, catalogue="Warehouse/<name>").'
         )
 
     def _bookmarked(self, result, began):
-        """One load's result, carrying the instant a clean run of it began.
-
-        Reported and never written: whoever records the load advances the
-        bookmark, and this is where the instant comes from. Taken by the engine
-        that ran the load. Only a clean success, because a load that rejected a
-        row has not read its window.
-        """
-
         from dataclasses import replace as _replace
 
+        # Only a clean load has consumed its complete source window.
         if not result.succeeded or result.rows_rejected:
             return result
         return _replace(result, bookmark_datetime=began)
 
     def _physical_target(self) -> str:
-        """The physical target this object materialises into, as a log names it.
-
-        A Python object materialises into a Lakehouse: rows as Delta files, files
-        under the Files area, both beneath the destination it resolved.
-        """
-
         return f"Lakehouse/{self.lakehouse.name}"
 
     def _record(self, settled) -> None:
-        """Record one settled unit of this object's own work, and wait for it.
-
-        Synchronous. An orchestrated run records every node through one queue and
-        flushes at the end; a caller who ran this object by hand is told it
-        finished once the record has landed.
-        """
+        """Record standalone work synchronously before returning."""
 
         from .run.record import RunRecord, new_workflow_id
 
@@ -243,16 +179,12 @@ class WeaverObject:
         record.settled(settled)
         record.flush()
 
-    #: What this object's work is recorded as. A load unless a subclass says
-    #: otherwise; a validation says otherwise.
     _task_type = "load"
 
     def read(self):
         raise NotImplementedError(f"{type(self).__name__} must implement read()")
 
     def _read_result(self):
-        """Run ``read()`` and return its normalised load result."""
-
         from .runtime.load_contract import normalise_read_result
 
         return normalise_read_result(self.read())
@@ -260,11 +192,7 @@ class WeaverObject:
     # --- the load contract, read from this module's own docstring ----------
 
     def _document(self):
-        """This object's parsed declaration, from the module it was defined in.
-
-        Read on every call rather than cached, so an edit takes effect on the
-        next reload.
-        """
+        """Parse the declaration on every call so a reloaded module takes effect."""
 
         import sys
 
@@ -274,7 +202,8 @@ class WeaverObject:
         if module is None:  # pragma: no cover - a class with no importable module
             raise LoadError(
                 f"{type(self).__name__} was defined outside an importable module, "
-                "so its Weaver metadata cannot be read"
+                "so its Weaver metadata cannot be read. Define it in an importable "
+                "module"
             )
         return document_for_module(module)
 
@@ -283,29 +212,21 @@ class WeaverObject:
 
 
 def _sentinel():
-    """What an object no clean load has run for reads as. See `Catalogue.bookmark`."""
-
     from .catalogue.tables import BOOKMARK_SENTINEL
 
     return BOOKMARK_SENTINEL
 
 
 def _recorded_load(object, **policy) -> "LoadResult":
-    """One object's load, with its operational record written before it returns.
+    """Run one object and write its operational record before returning.
 
-    Anything the load raises is recorded and then re-raised unchanged. A refusal
-    Weaver itself named is Failed and anything else is Error, which is the line
-    ``_.Load`` draws from ``error_number()``.
-
-    ``reload`` in ``policy`` invalidates the object's load state before the load
-    is called to clear the target and run.
+    Exceptions are recorded and re-raised unchanged. Weaver errors are Failed;
+    other exceptions are Error. ``reload`` resets load state before execution.
     """
 
     from .run.record import RunRecord, new_workflow_id
 
-    # Before anything else, so the refusal to start is never recorded: an
-    # unanchored object has no catalogue to record into and no identity to
-    # record against.
+    # An unanchored refusal cannot be recorded without a catalogue or identity.
     catalogue = object._anchor()
     reload = bool(policy.get("reload", False))
     record = RunRecord(
@@ -335,15 +256,11 @@ def _recorded_load(object, **policy) -> "LoadResult":
 
 
 def _settle(record, settled) -> None:
-    """Record one settled unit of work, and wait for it."""
-
     record.settled(settled)
     record.flush()
 
 
 def _settled(object, result, *, started, raised: bool = False, refused: bool = False):
-    """One standalone load, in the terms every runtime table records."""
-
     from .run.record import settled_load
 
     return settled_load(
@@ -358,8 +275,6 @@ def _settled(object, result, *, started, raised: bool = False, refused: bool = F
 
 
 def _carried(raised: BaseException):
-    """Whatever counts the failure was carrying, or none it can report."""
-
     from .runtime.load_result import LoadResult
 
     carried = getattr(raised, "result", None)
@@ -371,21 +286,11 @@ def _carried(raised: BaseException):
 
 
 def _refuse_no_staging(contract, what: str, instead: str) -> None:
-    """``None`` from a non-incremental ``read()``, which cannot mean "no work".
-
-    For a non-incremental source, staging is the whole truth: an explicitly
-    empty relation or folder retires everything the target holds, which is a
-    load. So there is nothing ``None`` could be read as, and an author is told
-    what to write instead.
-    """
-
     if contract.incremental:
         return
     raise LoadError(
-        f"{contract.qualified}: a non-incremental {what}'s read() cannot return "
-        "None. The source is the whole truth, so an empty one retires everything "
-        f"the target holds. Return {instead}, or declare Incremental: true, where "
-        "None means there is no work."
+        f"{contract.qualified}.read() returned None for a non-incremental {what}. "
+        f"Return {instead}, or declare Incremental: true when there is no work."
     )
 
 
@@ -396,13 +301,10 @@ class Folder(WeaverObject):
     When an incremental folder needs explicit deletes, it returns
     ``(staging_folder, files_to_delete)`` instead.
 
-    Its location has two spellings, and neither converts to the other by string
-    surgery: :meth:`path` is a :class:`pathlib.Path` for ordinary Python,
-    :meth:`spark_path` the ``abfss://`` string an engine needs.
+    :meth:`path` returns a :class:`pathlib.Path`; :meth:`spark_path` returns its
+    ``abfss://`` address.
     """
 
-    #: A Folder's catalogue identity carries the ``Files/`` prefix, so a Folder
-    #: and a Table of the same name keep separate bookmarks.
     _is_files = True
 
     def __init__(self, spark: Any, **kwargs: Any) -> None:
@@ -416,8 +318,7 @@ class Folder(WeaverObject):
         if authored_read is None:
             return
 
-        # Authors override read(), so this is the boundary that also covers a
-        # direct obj.read() call without changing that public API.
+        # Wrap the authored override so direct read() calls also reset staging.
         @wraps(authored_read)
         def read_with_staging(self, *args, **read_kwargs):
             self._clear_read_staging()
@@ -426,35 +327,29 @@ class Folder(WeaverObject):
         cls.read = read_with_staging
 
     def path(self) -> Path:
-        """This folder's materialised location, as Python addresses it::
+        """Return this folder's mounted path for Python file access::
 
             for file in Sales__Export(self).path().glob("*.json"):
                 ...
 
-        In OneLake this is Weaver's mount of the root the Lakehouse resolved to,
-        never ``/lakehouse/default``. That names whatever a notebook attached,
-        and a load runs detached against Lakehouses it resolved by name.
+        The path uses the resolved Lakehouse rather than the notebook's default.
         """
 
         return self.lakehouse.folder_path(*self.identity)
 
     def spark_path(self) -> str:
-        """This folder's location, as Spark addresses it::
+        """Return this folder's ``abfss://`` address for Spark::
 
-            rows = self.spark.read.json(Sales__Export(self).spark_path())
-
-        The ``abfss://`` form, which is what Spark reads.
+        rows = self.spark.read.json(Sales__Export(self).spark_path())
         """
 
         return self.lakehouse.folder_spark_path(*self.identity)
 
     def files_since(self, bookmark: datetime) -> dict[Path, datetime]:
-        """Current files changed strictly after an aware ``bookmark``, and when::
+        """Return files changed strictly after an aware ``bookmark`` and their UTC times::
 
-            for path in Sales__Landing(self).files_since(bookmark):
-                ...
-
-        Keys are full paths ordinary Python can open; values are UTC.
+        for path in Sales__Landing(self).files_since(bookmark):
+            ...
         """
 
         from .runtime.folder_load import files_since
@@ -462,14 +357,14 @@ class Folder(WeaverObject):
         return files_since(self.path(), bookmark)
 
     def latest_files(self) -> dict[Path, datetime]:
-        """The current files from the newest change that left files in place."""
+        """Return current files from the latest change that left files in place."""
 
         from .runtime.folder_load import latest_files
 
         return latest_files(self.path())
 
     def deleted_since(self, bookmark: datetime) -> dict[Path, datetime]:
-        """Files deleted strictly after an aware ``bookmark``, and when.
+        """Return files deleted strictly after an aware ``bookmark`` and their UTC times.
 
         A returned path is the file the deletion retired, so it normally does
         not exist.
@@ -480,7 +375,7 @@ class Folder(WeaverObject):
         return deleted_since(self.path(), bookmark)
 
     def staging_folder(self) -> "StagingFolder":
-        """The staging directory available to this ``read()``.
+        """Return the staging directory available to this ``read()``.
 
         A load receives its fixed sibling staging directory. A standalone
         ``read()`` receives a temporary directory, reused until the next
@@ -501,8 +396,6 @@ class Folder(WeaverObject):
         return staging
 
     def _clear_read_staging(self) -> None:
-        """Remove the temporary staging directory from a previous read."""
-
         staging = getattr(self, "_read_staging", None)
         if staging is None:
             return
@@ -515,55 +408,38 @@ class Folder(WeaverObject):
             self._read_staging = None
 
     def __del__(self) -> None:
-        """Best-effort cleanup for staging a caller did not consume."""
-
         try:
             self._clear_read_staging()
         except Exception:
             pass
 
     def _staging_path(self) -> Path:
-        """Where staging goes: the destination's own path, with a suffix.
-
-        The same sibling ``folder_staging`` the resolver exposes
-        issues.
-        """
-
         destination = self.path()
         return destination.with_name(f"{destination.name}{STAGING_SUFFIX}")
 
     def load(self, fault_tolerant: bool = False, reload: bool = False) -> "LoadResult":
-        """Run this folder's load and record what it did.
+        """Run and record this folder's load.
 
         Independently runnable, needing no repository and no bundle::
 
             Sales__Export(spark, catalogue="Warehouse/Weaver").load()
 
-        The standalone interface: it needs the catalogue, records this folder's
-        operational state, and flushes before returning. An orchestrated run
-        calls :meth:`_load` and records what settled itself, so one row has one
-        writer.
-
-        ``reload`` is refused: clearing a folder is a file reconciliation Weaver
-        does not do.
+        This standalone interface requires a catalogue and flushes its record
+        before returning. Folders do not support ``reload``.
         """
 
         if reload:
             raise LoadError(
-                f"{self.object_id}: reload covers tables. A folder's contents are "
-                "files, and clearing them is a reconciliation Weaver does not do "
-                "here. Load it without reload."
+                f"{self.object_id} is a Folder and cannot be reloaded. Load it "
+                "without reload."
             )
         return _recorded_load(self, fault_tolerant=fault_tolerant)
 
     def _load(self, fault_tolerant: bool = False) -> "LoadResult":
-        """Run this folder's ``read()`` and publish what it staged.
-
-        The load itself and nothing else: it writes no operational state, so
-        whoever called it owns the record.
+        """Run ``read()`` and publish its staging without recording the load.
 
         Staging is reset, issued to ``read()``, published, and removed on
-        success. It is retained on failure, as the one directory worth opening.
+        success. It is retained on failure for inspection.
         """
 
         self._anchor()
@@ -577,20 +453,15 @@ class Folder(WeaverObject):
         from .runtime.load_contract import FolderLoadContract
         from .runtime.load_result import LoadResult
 
-        # Before the gate and before read(), so the instant a clean load is
-        # bookmarked at precedes everything it read.
+        # A clean load's bookmark must precede everything read in its window.
         began = datetime.now(timezone.utc)
         contract = FolderLoadContract.from_document(self._document())
-        # A static folder bypasses staging, source reads and file reconciliation.
-        # The bookmark decides it, not the folder's contents: Static means "load
-        # this once", and a bookmark is the record of whether that has happened.
+        # The bookmark, not current contents, records whether Static loaded once.
         if contract.static and self.bookmark() > _sentinel():
             return LoadResult(succeeded=True, is_static_skip=True)
 
-        # Before read(), so what the authored code sees through files_since() and
-        # its bookmark is a history that accounts for the files already there. A
-        # Static folder is left alone: loading it once is the whole contract, and
-        # its files are the thing that was loaded.
+        # Adopt before read() so file history includes existing destination files.
+        # Static folders retain their original load-once contents.
         if not contract.static:
             adopt_existing_files(self.path())
 
@@ -601,14 +472,8 @@ class Folder(WeaverObject):
             if staged is None:
                 _refuse_no_staging(contract, "folder", "self.staging_folder()")
             if staged is None and deletes is None:
-                # An incremental source that has already found nothing to
-                # do: no file is staged and none is claimed, so nothing is
-                # scanned and nothing is published.
                 result = LoadResult(succeeded=True)
             elif staged is None:
-                # Deletion only. The issued staging is empty, which for an
-                # incremental folder already means "nothing new", so the
-                # reconciliation retires exactly the files claimed.
                 result = load_folder(
                     contract=contract,
                     destination=self.path(),
@@ -631,8 +496,7 @@ class Folder(WeaverObject):
                     fault_tolerant=fault_tolerant,
                 )
         finally:
-            # Cleared whatever happened, so a second load cannot be handed the
-            # first one's directory.
+            # Never hand a later load this load's staging directory.
             self._issued_staging = None
         remove_staging(issued.path)
         return self._bookmarked(result, began)
@@ -655,26 +519,17 @@ class Table(WeaverObject):
     """
 
     def dataframe(self) -> Any:
-        """This table as it currently stands, read from its Delta files.
-
-        By path rather than catalogue name: a path needs nothing attached, so
-        the same call serves any resolved Lakehouse.
-        """
+        """Read this table from its resolved Lakehouse's Delta path."""
 
         return self.spark.read.format("delta").load(
             self.lakehouse.table_path(*self.identity)
         )
 
     def _staged(self, contract) -> tuple[Any, Any]:
-        """What ``read()`` staged, and the delete claim it was allowed to make.
+        """Return staging and any permitted delete claim from ``read()``.
 
         A non-incremental table returns staging on its own, and is refused on the
-        shape of what it returned rather than on what the second value holds: no
-        Spark job runs to establish that a frame was empty, and an author reading
-        the message is told what to write instead.
-
-        :func:`weaver.runtime.table_load._delete_driver` holds the same rule at
-        the other end, for rows that reach a load without passing through here.
+        returned shape without running Spark to inspect the second value.
         """
 
         from .runtime.load_contract import normalise_read_result
@@ -682,9 +537,8 @@ class Table(WeaverObject):
         returned = self.read()
         if not contract.incremental and isinstance(returned, tuple):
             raise LoadError(
-                f"{contract.qualified}: a non-incremental table returns staging "
-                "on its own. The source is the whole truth, so a row's absence "
-                "from it is what retires the row. Return the staging frame, or "
+                f"{contract.qualified}.read() returned a pair for a non-incremental "
+                "Table. Return the staging frame alone, or "
                 "declare Incremental: true."
             )
         staged, deletes = normalise_read_result(returned)
@@ -693,10 +547,9 @@ class Table(WeaverObject):
         return staged, deletes
 
     def empty_dataframe(self) -> Any:
-        """This table's shape with no rows, which is an incremental load's no-op.
+        """Return this table's existing shape with no rows.
 
-        Taken from the table itself, so the columns are the ones the load has to
-        match. The physical table must therefore already exist.
+        The physical table must already exist.
         """
 
         return self.dataframe().limit(0)
@@ -707,16 +560,14 @@ class Table(WeaverObject):
         ignore_stability_threshold: bool = False,
         reload: bool = False,
     ) -> "LoadResult":
-        """Run this table's load and record what it did.
+        """Run and record this table's load.
 
         Independently runnable, needing no repository and no bundle::
 
             Sales__Customer(spark, catalogue="Warehouse/Weaver").load()
 
-        The standalone interface: it needs the catalogue, records this table's
-        operational state, and flushes before returning. An orchestrated run
-        calls :meth:`_load` and records what settled itself, so one row has one
-        writer.
+        This standalone interface requires a catalogue and flushes its record
+        before returning.
 
         ``reload`` reconstructs the table from zero: the bookmark row is
         removed, ``_.LoadStatus`` goes to Pending, the target is emptied, and the
@@ -736,10 +587,7 @@ class Table(WeaverObject):
         ignore_stability_threshold: bool = False,
         reload: bool = False,
     ) -> "LoadResult":
-        """Run this table's ``read()`` and write what it staged.
-
-        The load itself and nothing else: it writes no operational state, so
-        whoever called it owns the record.
+        """Run ``read()`` and write its staging without recording the load.
 
         ``ignore_stability_threshold`` waives the declared delete and update
         limits for one run, for when a very large change is the correct answer.
@@ -755,15 +603,11 @@ class Table(WeaverObject):
         from .runtime.load_result import LoadResult
         from .runtime.table_load import clear_table, load_table
 
-        # Before the gate and before read(), so the instant a clean load is
-        # bookmarked at precedes everything it read.
+        # A clean load's bookmark must precede everything read in its window.
         began = datetime.now(timezone.utc)
         contract = LoadContract.from_document(self._document())
-        # Before read(), so a seeded static object costs no source query. The
-        # bookmark decides it, not the table's contents. Static means "load this
-        # once", and the bookmark records whether that has happened, so a table
-        # populated by hand is still loaded and a table a clean load emptied is
-        # still skipped. A reload asks for it again.
+        # The bookmark, not current contents, records whether Static loaded once.
+        # Reload resets that state before reaching this gate.
         if not reload and contract.static and self.bookmark() > _sentinel():
             return LoadResult(succeeded=True, is_static_skip=True)
 
@@ -771,17 +615,11 @@ class Table(WeaverObject):
             # Clear before read(): incremental source logic may inspect the target.
             clear_table(self.spark, contract=contract, lakehouse=self.lakehouse)
 
-        # Staging: unvalidated, unreconciled, nothing yet classified as new or
-        # changed.
         staged, deletes = self._staged(contract)
         if staged is None and deletes is None:
-            # An incremental source that has already found nothing to do.
-            # Nothing is staged and nothing is claimed, so no Spark job runs to
-            # establish that a frame the author never built would have been empty.
             return self._bookmarked(LoadResult(succeeded=True), began)
         if staged is None:
-            # Deletion only. The target's own shape stands in for staging, so the
-            # reconciliation retires exactly the rows claimed and inserts none.
+            # A deletion-only load uses the target's shape without inserting rows.
             staged = self.empty_dataframe()
         return self._bookmarked(
             load_table(
@@ -800,21 +638,17 @@ class Table(WeaverObject):
 class SparkSqlTable(Table):
     """A table whose ``read()`` is a Spark SQL program rather than Python.
 
-    **Generated, not authored.** A developer writes ``Sales.OrderSummary.sql``
-    and Weaver installs ``Sales__OrderSummary.py``, which is this class with the
-    authored SQL attached::
+    Weaver generates this class from an authored ``Sales.OrderSummary.sql``::
 
         class Sales__OrderSummary(SparkSqlTable):
             sql = SQL
 
-    Public because the deployed module imports it, not as a second way to author
-    an object: a repository ``.py`` subclassing this is refused.
+    Repository Python may not subclass this class directly.
 
     The program's shape is its contract: one query stages, a second names the
     keys to delete. See :mod:`weaver.declaration.spark_sql_program`.
     """
 
-    #: The authored program, addressed and embedded when the module was built.
     sql: str = ""
 
     def _document(self):
@@ -834,16 +668,13 @@ class SparkSqlTable(Table):
         if module is None:  # pragma: no cover - a class with no importable module
             raise LoadError(
                 f"{type(self).__name__} was defined outside an importable module, "
-                "so its Weaver metadata cannot be read"
+                "so its Weaver metadata cannot be read. Define it in an importable "
+                "module"
             )
         return parse_document(module_metadata_text(module), language=SPARK_SQL)
 
     def read(self):
-        """Run the embedded program and return what it staged.
-
-        The same shapes an authored ``read()`` returns: staging on its own, and
-        for an incremental table naming keys to delete, the two together.
-        """
+        """Run the embedded program and return staging with any delete keys."""
 
         from .runtime.load_contract import LoadContract
         from .runtime.spark_sql_table import read_spark_sql
@@ -856,57 +687,36 @@ class SparkSqlTable(Table):
 
 
 class View(WeaverObject):
-    """A view over other objects, declared in SQL.
-
-    A view has no ``read()``: its definition is its query.
-    """
+    """A SQL view, whose query is its definition and has no ``read()``."""
 
     def dataframe(self) -> Any:
-        """This view's contents.
-
-        By name, not by path: a view exists only in the catalogue.
-        """
+        """Read this view by its catalogue name."""
 
         return self.spark.table(self.lakehouse.qualify(*self.identity))
 
 
 class _Validation(WeaverObject):
-    """What a Test and an Assumption share: they judge rather than materialise.
+    """Shared execution contract for Tests and Assumptions.
 
-    A validation has two interfaces, and they divide the same way a loadable
-    object's do.
-
-    ``read()`` is the primitive: it evaluates the validation and returns the rows
-    that are the evidence: the discrepancies for a Test, the contradicting rows
-    for an Assumption. It records nothing and needs no catalogue, so an author
-    can call it and look at what came back. An orchestrated run calls it and
-    records centrally.
-
-    ``run()`` is the standalone interface: it needs the catalogue, calls
-    ``read()``, records what the validation found, and flushes before returning::
+    ``read()`` returns evidence without recording it. ``run()`` requires a
+    catalogue, records the result, and flushes before returning::
 
         Sales__OrdersReconcile(spark, catalogue="Warehouse/Weaver").run()
     """
 
-    #: A validation's work is recorded as a test, whichever kind it is: the two
-    #: are told apart by the row's own ``Test type``.
+    #: The recorded row's ``Test type`` distinguishes the validation kind.
     _task_type = "test"
 
-    #: Which kind of validation this is, as its declaration spells it.
     _validation_kind = ""
 
     def run(self):
-        """Evaluate this validation and record what it found.
+        """Evaluate and record this validation.
 
-        Returns the validation's own result, discrepancy counts for a Test and
-        violation counts for an Assumption, rather than the rows. The rows are
-        what ``read()`` gives; a durable record of them would put whatever the
-        validation selected into the estate's own evidence.
+        Returns discrepancy counts for a Test or violation counts for an
+        Assumption. Use ``read()`` for the evidence rows.
 
-        A validation that could not be evaluated is recorded as an Error and then
-        raised. It found nothing, and reporting zero discrepancies for it is the
-        one answer a validation must never give. The generated ``_.Test`` does
-        the same inside its own TRY/CATCH.
+        An evaluation error is recorded as Error and re-raised; it never reports
+        zero failures.
         """
 
         self._anchor()
@@ -926,16 +736,12 @@ class _Validation(WeaverObject):
         return result
 
     def _evaluated(self):
-        """What this validation found, from the rows its ``read()`` returned."""
-
         from .runtime.validation_result import result_from_rows
 
         result, _rows = result_from_rows(self.read(), kind=self._validation_kind)
         return result
 
     def _failed_to_run(self, message: str):
-        """A result in this validation's own vocabulary, carrying no counts."""
-
         from .runtime.validation_result import AssumptionResult, TestResult
 
         kind = TestResult if self._validation_kind == TEST else AssumptionResult
@@ -976,9 +782,8 @@ class Assumption(_Validation):
                 orders = Sales__Orders(self).dataframe()
                 return orders.where(...)   # empty when the assumption holds
 
-    What ``read()`` returns is the evidence itself, so there is nothing to
-    correlate and an Assumption may not declare a primary key. In every other
-    way it is an ordinary Weaver object.
+    An Assumption may not declare a primary key because its returned rows are the
+    evidence rather than two relations to correlate.
     """
 
     _validation_kind = ASSUMPTION
@@ -1016,18 +821,15 @@ class Test(_Validation):
             def actual(self):
                 return Sales__Orders(self).dataframe()
 
-    The author writes the two sides; ``read()`` is Weaver's symmetric difference
-    and may not be overridden, so passing means the same for every Test. The
-    parser refuses an override too.
+    Implement ``expected()`` and ``actual()``. ``read()`` is their symmetric
+    difference and may not be overridden.
 
     The declared primary key correlates diagnostic rows across the two sides and
     changes nothing about what is compared. See
     :mod:`weaver.runtime.test_compare`.
     """
 
-    #: Not a pytest test class. Weaver's Test is a data validation and pytest's
-    #: collector recognises only the name, so it would warn about every module
-    #: that imports this one into a test.
+    #: Prevent pytest from collecting Weaver validation classes.
     __test__ = False
 
     _validation_kind = TEST
@@ -1036,8 +838,8 @@ class Test(_Validation):
         super().__init_subclass__(**kwargs)
         if "read" in cls.__dict__:
             raise LoadError(
-                f"{cls.__name__} defines read(), which a Test may not: Weaver "
-                "compares the two sides. Write expected() and actual(), or "
+                f"{cls.__name__} defines read(), but a Test compares two sides. "
+                "Write expected() and actual(), or "
                 "declare an Assumption to return the rows directly."
             )
 
@@ -1054,12 +856,7 @@ class Test(_Validation):
         )
 
     def _sides(self):
-        """The two relations to compare, as a pair.
-
-        The hook a compiled Test overrides. A Spark SQL Test's sides come from
-        one program: running it twice would compare two snapshots of whatever
-        its setup materialised and report the difference as failure.
-        """
+        """Return both relations from one execution when a compiled Test overrides it."""
 
         return self.expected(), self.actual()
 
@@ -1083,14 +880,8 @@ class Test(_Validation):
 
 
 class _SparkSqlValidation:
-    """What the two generated validation bases share.
+    """Shared base for generated, not directly authored, SQL validations."""
 
-    Generated, not authored: a developer writes ``Sales.OrdersReconcile.sql``
-    and Weaver installs ``Sales__OrdersReconcile.py``, one of these classes with
-    the authored SQL attached. A repository ``.py`` subclassing one is refused.
-    """
-
-    #: The authored program, addressed and embedded when the module was built.
     sql: str = ""
 
     def _document(self):
@@ -1109,7 +900,8 @@ class _SparkSqlValidation:
         if module is None:  # pragma: no cover - a class with no importable module
             raise LoadError(
                 f"{type(self).__name__} was defined outside an importable module, "
-                "so its Weaver metadata cannot be read"
+                "so its Weaver metadata cannot be read. Define it in an importable "
+                "module"
             )
         return parse_document(module_metadata_text(module), language=SPARK_SQL)
 
@@ -1125,8 +917,6 @@ class SparkSqlTest(_SparkSqlValidation, Test):
     __test__ = False
 
     def _sides(self):
-        """Both relations, from one execution of the program."""
-
         from .runtime.spark_sql_validation import read_spark_sql_test
 
         return read_spark_sql_test(self.spark, sql=self.sql, what=type(self).__name__)
@@ -1155,10 +945,8 @@ class SparkSqlAssumption(_SparkSqlValidation, Assumption):
 def _identity(class_name: str) -> tuple[str, str]:
     """``Sales__Order`` → ``("Sales", "Order")``; ``___Load`` → ``("_", "Load")``.
 
-    A run of leading underscores is read as a schema plus the separator: ``_``
-    is a real schema, so ``_.Load`` spells as three. The rule is the parser's
-    (:func:`weaver.declaration.source.python_id_parts`), repeated here rather
-    than imported.
+    Leading underscores include the schema and separator, so ``_.Load`` uses
+    three underscores. This repeats the parser's rule without importing it.
     """
 
     leading = len(class_name) - len(class_name.lstrip("_"))
@@ -1178,11 +966,7 @@ def _identity(class_name: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-#: The authoring base classes, by the metadata kind that selects them.
-#:
-#: :class:`SparkSqlTable` is absent: it is the generated form of a ``.sql``
-#: table, and admitting it would make one object authorable two ways, with two
-#: parsers that could disagree about what it declared.
+#: ``SparkSqlTable`` is generated and cannot be selected as an authoring base.
 BASE_CLASSES = {
     "Folder": Folder,
     "Table": Table,

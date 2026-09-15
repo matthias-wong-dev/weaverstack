@@ -1,23 +1,8 @@
 """Publish Weaver into a Fabric Environment.
 
-Two switches, independent of each other:
-
-``--path``
-    where the Environment definition comes from. Absent, the Environment in the
-    workspace is authoritative and Weaver is added to what is already staged.
-    Present, the local ``*.Environment`` directory is authoritative and its
-    definition is sent whole.
-
-``--dev``
-    how Weaver itself is supplied. Released, one PyPI ``weaverstack``
-    requirement and no Weaver custom wheel. Development, the checkout's wheel
-    and no PyPI requirement, with Weaver's own Fabric requirements named because
-    a Fabric custom wheel installs no dependencies of its own.
-
-One overlay, two transports. Without ``--path`` the staging library APIs carry
-it, which leaves Spark compute and every unrelated library untouched, including
-edits a user has staged and not yet published. With ``--path`` the item
-definition APIs carry it. The local directory is never written to.
+Without ``--path``, only Weaver's staged libraries change. With ``--path``, the
+local ``*.Environment`` definition is sent whole. Development mode installs the
+checkout wheel and its Fabric dependencies instead of the PyPI requirement.
 """
 
 from __future__ import annotations
@@ -73,8 +58,6 @@ UNCHANGED = "unchanged"
 
 
 def project_root() -> Path:
-    """Return the nearest ancestor containing ``pyproject.toml``."""
-
     here = Path(__file__).resolve()
     for parent in here.parents:
         if (parent / "pyproject.toml").is_file():
@@ -86,20 +69,14 @@ def project_root() -> Path:
 
 
 def runtime_dependencies(root: Path | None = None) -> list[str]:
-    """Return Weaver's Fabric requirements from ``pyproject.toml``."""
-
     return list(runtime_requirements(root or project_root()))
 
 
 def is_weaver_wheel(filename: str) -> bool:
-    """Return whether Weaver owns this custom-library filename."""
-
     return filename.startswith(WHEEL_PREFIX) and filename.endswith(WHEEL_SUFFIX)
 
 
 def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> Path:
-    """Build a wheel from the checkout and return its exact path."""
-
     root = root or project_root()
     output_dir = output_dir or (root / "dist")
     before = set(output_dir.glob(f"{WHEEL_PREFIX}*{WHEEL_SUFFIX}"))
@@ -143,8 +120,6 @@ def build_wheel(root: Path | None = None, *, output_dir: Path | None = None) -> 
 def resolve_environment_owner(
     workspace_name: str | None, environment: EnvironmentRef | str
 ) -> tuple[str, EnvironmentRef]:
-    """Resolve an Environment reference and reject conflicting workspaces."""
-
     reference = EnvironmentRef.parse(environment)
     if (
         workspace_name is not None
@@ -168,8 +143,6 @@ def resolve_environment_owner(
 def find_existing_environment(
     workspace_name: str, environment_name: str, *, client: FabricClient
 ) -> tuple[WorkspaceItem, Item]:
-    """Resolve an existing Environment and report the provisioning action."""
-
     workspace = find_workspace(workspace_name, client=client)
     try:
         environment = find_item(
@@ -184,9 +157,6 @@ def find_existing_environment(
     return workspace, environment
 
 
-# --- the Fabric surface --------------------------------------------------------
-
-
 def _staging_base(environment: Item) -> str:
     return (
         f"workspaces/{environment.workspace_id}/environments/{environment.id}/staging"
@@ -198,8 +168,6 @@ def _environment_base(environment: Item) -> str:
 
 
 def read_staging(environment: Item, *, client: FabricClient) -> dict:
-    """Return the Environment's GA staging library list."""
-
     libraries = client.paged(
         f"{_staging_base(environment)}/libraries?beta=false",
         key="libraries",
@@ -209,8 +177,6 @@ def read_staging(environment: Item, *, client: FabricClient) -> dict:
 
 
 def read_published(environment: Item, *, client: FabricClient) -> dict:
-    """Return the Environment's GA published library list."""
-
     libraries = client.paged(
         f"{_environment_base(environment)}/libraries?beta=false",
         key="libraries",
@@ -220,14 +186,10 @@ def read_published(environment: Item, *, client: FabricClient) -> dict:
 
 
 def read_published_spark_compute(environment: Item, *, client: FabricClient) -> dict:
-    """Return the Environment's published GA Spark compute configuration."""
-
     return client.get_json(f"{_environment_base(environment)}/sparkcompute?beta=false")
 
 
 def library_wheels(libraries: dict) -> list[str]:
-    """Return Custom library names from a GA library response."""
-
     return [
         str(entry.get("name") or "")
         for entry in libraries.get("libraries", ())
@@ -239,7 +201,7 @@ staged_wheels = library_wheels
 
 
 def read_staging_external_libraries(environment: Item, *, client: FabricClient) -> str:
-    """The staged ``environment.yml``, which is published plus pending."""
+    """Read published and pending external libraries from staging."""
 
     path = f"{_staging_base(environment)}/libraries/exportExternalLibraries"
     try:
@@ -254,7 +216,7 @@ def read_staging_external_libraries(environment: Item, *, client: FabricClient) 
 def import_external_libraries(
     environment: Item, text: str, *, client: FabricClient
 ) -> None:
-    """Replace the staged external library list with this ``environment.yml``."""
+    """Replace the staged external library list."""
 
     import requests
 
@@ -266,8 +228,8 @@ def import_external_libraries(
             url,
             headers={
                 "Authorization": f"Bearer {client.token}",
-                # The file's bytes, as the custom library upload takes them.
-                # Fabric answers a multipart body with EnvironmentValidationFailed.
+                # Fabric rejects multipart uploads here with
+                # EnvironmentValidationFailed.
                 "Content-Type": "application/octet-stream",
             },
             data=text.encode("utf-8"),
@@ -284,16 +246,12 @@ def import_external_libraries(
 
 
 def publish_state(environment: Item, *, client: FabricClient) -> str:
-    """Return the Environment's last publish state."""
-
     info = client.get_json(_environment_base(environment))
     details = (info.get("properties") or {}).get("publishDetails") or {}
     return details.get("state", "")
 
 
 def upload_wheel(environment: Item, wheel: Path, *, client: FabricClient) -> None:
-    """Upload one custom wheel through the GA staging endpoint."""
-
     import requests
 
     path = f"{_staging_base(environment)}/libraries/{quote(wheel.name, safe='')}"
@@ -326,8 +284,6 @@ def delete_stale_wheels(
     *,
     client: FabricClient,
 ) -> list[str]:
-    """Remove staged Weaver wheels other than ``keep``."""
-
     removed = []
     for filename in staged:
         if filename == keep or not is_weaver_wheel(filename):
@@ -360,8 +316,6 @@ def publish_and_wait(
     timeout: float = 1800.0,
     poll_interval: float = 15.0,
 ) -> str:
-    """Publish staged libraries and return the terminal state."""
-
     client.request(
         "POST",
         f"{_staging_base(environment)}/publish?beta=false",
@@ -380,13 +334,10 @@ def publish_and_wait(
     )
 
 
-# --- the definition surface ----------------------------------------------------
-
-
 def read_definition(
     environment: Item, *, client: FabricClient
 ) -> EnvironmentDefinition:
-    """The Environment's current definition, through the long-running read."""
+    """Read the definition, waiting for Fabric's long-running operation."""
 
     response = client.request(
         "POST", f"{_environment_base(environment)}/getDefinition", expected=(200, 202)
@@ -403,8 +354,6 @@ def read_definition(
 def update_definition(
     environment: Item, definition: EnvironmentDefinition, *, client: FabricClient
 ) -> None:
-    """Send a complete definition to an Environment that already exists."""
-
     query = "?updateMetadata=true" if PLATFORM in definition.parts else ""
     response = client.request(
         "POST",
@@ -422,8 +371,6 @@ def create_with_definition(
     *,
     client: FabricClient,
 ) -> Item:
-    """Create an Environment from a complete definition and resolve it."""
-
     response = client.request(
         "POST",
         f"workspaces/{workspace.id}/environments",
@@ -434,12 +381,7 @@ def create_with_definition(
     return find_item(workspace, name, item_type=ENVIRONMENT, client=client)
 
 
-# --- the overlay ---------------------------------------------------------------
-
-
 def _weaver_parts(definition: EnvironmentDefinition) -> tuple[str, ...]:
-    """Every custom-library part Weaver owns in a definition."""
-
     return tuple(
         path
         for path in definition.parts
@@ -455,11 +397,10 @@ def overlay_weaver(
     requirements: tuple[str, ...] = (),
     source: str,
 ) -> EnvironmentDefinition:
-    """The same definition with Weaver supplied the way this mode supplies it.
+    """Overlay the Weaver libraries for released or development mode.
 
-    Everything Weaver does not own is carried through byte for byte: the
-    platform metadata, the Spark compute settings, every other custom library
-    and every other entry in the external library list.
+    Platform metadata, Spark settings, other custom libraries and other external
+    requirements are preserved byte for byte.
     """
 
     parts = dict(definition.parts)
@@ -485,18 +426,13 @@ _TEXT_PARTS = frozenset({PLATFORM, EXTERNAL_LIBRARIES, SPARK_COMPUTE})
 
 
 def _comparable(definition: EnvironmentDefinition) -> dict:
-    """One definition reduced to what a change is judged on.
+    """Reduce a definition to the content Fabric preserves.
 
     A Weaver wheel compares by its path alone, because the filename carries the
-    content-addressed version and a rebuild of an unchanged checkout produces the
-    same version in a differently compressed zip. Every other custom library
-    compares by its bytes.
+    content-addressed version. Every other custom library compares by its bytes.
 
-    The three text parts compare by what they say. Fabric returns them with the
-    line endings and the quoting it stores, so a checkout written on Windows
-    reads back with ``\\n`` for its ``\\r\\n`` and ``runtime_version: '1.3'``
-    reads back as ``runtime_version: 1.3``. Comparing those bytes makes every
-    publication a change, and each one costs a Fabric publish.
+    Text parts compare as parsed content because Fabric normalises line endings
+    and removes quotes around ``runtime_version``.
     """
 
     weaver = set(_weaver_parts(definition))
@@ -512,12 +448,7 @@ def _comparable(definition: EnvironmentDefinition) -> dict:
 
 
 def _text_content(content: bytes, path: str):
-    """One text part as its parsed content, or as text when it will not parse.
-
-    Parsing is what makes the line endings irrelevant, and scalar types are kept
-    as they parse, so ``{"value": 1}`` and ``{"value": "1"}`` stay different
-    documents.
-    """
+    """Parse text without collapsing distinct YAML scalar types."""
 
     import json
 
@@ -540,12 +471,7 @@ _RESTRINGIFIED = {SPARK_COMPUTE: frozenset({"runtime_version"})}
 
 
 def _as_fabric_stores(value, path: str):
-    """The parsed part with the fields Fabric requotes read as text.
-
-    ``runtime_version: '1.3'`` comes back as ``runtime_version: 1.3``, which YAML
-    loads as a float. That one field is compared as text so the round trip is not
-    a change. Every other scalar keeps the type it parsed as.
-    """
+    """Normalise fields whose quoting Fabric does not preserve."""
 
     fields = _RESTRINGIFIED.get(path)
     if not fields or not isinstance(value, dict):
@@ -556,13 +482,8 @@ def _as_fabric_stores(value, path: str):
     }
 
 
-# --- the result ----------------------------------------------------------------
-
-
 @dataclass
 class EnvironmentPublishResult:
-    """What one Environment publication did, serialisable for the CLI."""
-
     workspace_name: str
     workspace_id: str
     environment_name: str
@@ -596,12 +517,7 @@ class EnvironmentPublishResult:
 
 
 def _settled(status: str, environment: Item, *, client: FabricClient) -> None:
-    """Raise unless the publish succeeded, naming the component that did not.
-
-    Fabric publishes Spark settings and Spark libraries separately and reports a
-    state for each. A library it cannot resolve fails the publish, so the
-    per-component states are what say where to look.
-    """
+    """Raise with the failed Spark settings or libraries component."""
 
     if status.casefold() in {"success", "succeeded"}:
         return
@@ -689,8 +605,6 @@ def _publish_definition(
     step,
     timings: dict,
 ) -> EnvironmentPublishResult:
-    """The local definition is authoritative: send it whole, then publish."""
-
     directory = Path(path)
     name = environment_name_from_path(directory)
     local = read_environment_definition(directory)
@@ -771,8 +685,6 @@ def _publish_libraries(
     step,
     timings: dict,
 ) -> EnvironmentPublishResult:
-    """The Environment is authoritative: change only Weaver's own libraries."""
-
     owner_name, reference = resolve_environment_owner(workspace_name, environment)
     with step("Find the Environment"):
         workspace, item = find_existing_environment(
@@ -860,8 +772,6 @@ def _result(
     requirement=None,
     wheel_filename=None,
 ) -> EnvironmentPublishResult:
-    """One result, however the publication reached it."""
-
     if desired is not None:
         entries = _pip_entries(desired.external_libraries(), source="definition")
         requirement = weaver_requirement(entries)

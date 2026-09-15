@@ -1,9 +1,4 @@
-"""Resolution from inside a Microsoft Fabric session.
-
-The desktop resolver crosses into Fabric through REST. This resolver stays
-inside the current workspace: NotebookUtils supplies the workspace identity and
-resolves Lakehouse names, and the resulting locations are native ``abfss``.
-"""
+"""Resolve Fabric items from inside the current workspace session."""
 
 from __future__ import annotations
 
@@ -25,7 +20,7 @@ def _value(record: Any, name: str) -> Any:
 
 
 class FabricSessionResolver(FabricResolver):
-    """Resolve names without leaving the Fabric session."""
+    """Resolve names with NotebookUtils and native ``abfss`` locations."""
 
     def __init__(
         self,
@@ -115,13 +110,11 @@ class FabricSessionResolver(FabricResolver):
         return Location(abfss_root(self.workspace.id, resolved.id))
 
     def external_root(self, item) -> Location:
-        """As :meth:`lakehouse` addresses one here: ``abfss://``, for the session."""
-
         return Location(abfss_root(item.workspace_id, item.id))
 
     @property
     def client(self):
-        """Fabric REST on this session's identity. Built on first use."""
+        """Build a Fabric REST client lazily with the session identity."""
 
         if self._client is None:
             credentials = self._credentials

@@ -1,31 +1,12 @@
-"""Materialising one Lakehouse shortcut, in whatever form the host has.
+"""Create and remove frozen OneLake shortcut addresses.
 
-The payload names two addresses and nothing else: where the shortcut appears in
-this item, and what it points at. A **bound** source names another target of this
-build, resolved through the environment the same way every other action's
-destination is, so the bundle carries no path from the machine that wrote it. A
-**direct** source carries the workspace, item and path resolved when the bundle
-was generated, because it is not a target of this build and nothing here would
-know where to look.
+Bound sources resolve through another build target; direct sources carry the
+workspace, item and path frozen during generation. Actions use the shortcut API
+because deleting a shortcut through storage or Spark could reach source data.
 
-The pointer is a OneLake shortcut in the destination Lakehouse, created through
-the workspace's own API. One action's shortcuts are created as one batch: one
-bulk create submission for the action rather than one create request per
-shortcut. A payload naming ``remove`` instead unpicks the pointers it lists,
-through the same API and for the same reason: a shortcut is a read-write window
-into the item it points at, so removing the name over storage or over Spark would
-reach that item's data.
-
-Which shortcut, over what, is settled in the manifest; how a name is made to
-point somewhere is the transport's business. A shortcut holds no data, so an
-existing one is replaced rather than treated as a collision: a build has to run
-twice.
-
-**The action is not finished until a table shortcut can be read both ways.**
-Fabric creates a shortcut synchronously and discovers its named relation and
-physical Delta path asynchronously. Those surfaces may settle at different
-times, and consumers use both. A schema shortcut is not waited on: what it
-presents is the source item's, and its contents can change without a build.
+Table creation completes only when both the named relation and Delta path are
+readable. Schema shortcuts expose a changing source namespace and are not waited
+on.
 """
 
 from __future__ import annotations
@@ -44,18 +25,11 @@ from .base import InstallationContext, ResolvedTarget
 
 FILES_AREA = "Files"
 
-#: How long a freshly created shortcut may take to become addressable, and how
-#: often to ask. Discovery normally takes seconds; the bound exists so a
-#: never-appearing shortcut fails naming itself rather than as an obscure error in
-#: whatever statement reads it next.
+# Bound discovery reports a missing shortcut before its consumer runs.
 ADDRESSABLE_TIMEOUT = 300.0
 ADDRESSABLE_POLL_INTERVAL = 5.0
 
-#: How long to wait for OneLake to release the namespace a removed shortcut held,
-#: and only where this plan gives that name to an owned object. Fabric stops
-#: listing the shortcut first, and release has been observed to take tens of
-#: seconds. Bounded, and a spent wait falls through to the create, which reports
-#: the occupied name itself.
+# OneLake may retain a removed shortcut's namespace after it stops listing it.
 NAME_RELEASE_TIMEOUT = 300.0
 NAME_RELEASE_POLL_INTERVAL = 3.0
 
@@ -85,10 +59,7 @@ class ShortcutExecutor:
                 "environment offers no way to create a OneLake shortcut"
             )
 
-        # Every source is addressed before anything is sent, so the action
-        # makes one bulk create submission. Addressing a bound source reads
-        # storage to settle the spelling Fabric published it under, which stays
-        # per shortcut.
+        # Resolve every case-exact source before the single bulk create request.
         requested = [self._request(each, context) for each in frozen]
         created = create(context.target.lakehouse, requested)
         made = [
@@ -97,8 +68,7 @@ class ShortcutExecutor:
         ]
 
         details: dict[str, Any] = {"shortcuts": made}
-        # Every shortcut is created before anything waits, so the cost is one
-        # discovery window rather than one per shortcut.
+        # Wait for all created shortcuts in one discovery window.
         waited = self._await_addressable(context, frozen)
         if waited is not None:
             details["addressable_after_seconds"] = waited
@@ -107,12 +77,7 @@ class ShortcutExecutor:
     def _remove(
         self, action: InstallAction, frozen: list, context: InstallationContext
     ) -> dict[str, Any]:
-        """Unpick the pointers this action names, and nothing they point at.
-
-        Through the workspace's shortcut API. A shortcut is a read-write window
-        into the item it points at, so removing the name over storage or over
-        Spark would reach that item's data.
-        """
+        """Remove pointer roots through the API without touching source data."""
 
         remove = getattr(context.resolver, "remove_onelake_shortcut", None)
         if remove is None:
@@ -132,17 +97,10 @@ class ShortcutExecutor:
     def _await_name_release(
         self, context: InstallationContext, frozen: list
     ) -> float | None:
-        """Wait until the names these pointers held can be used again.
+        """Wait one window for removed paths to release their names.
 
-        Fabric has already stopped listing the shortcut when this runs, so what
-        remains is OneLake's namespace and the reliable question is whether the
-        path still answers. Only reached where the plan goes on to create an
-        owned object at the same name, and every name is waited on together, so
-        several removals cost one release window.
-
-        A spent wait returns rather than raising. The create that follows reports
-        the occupied name, which says more about what is wrong than a timeout
-        here would.
+        A spent wait returns so the following create can report the occupied
+        name directly.
         """
 
         store = getattr(context, "store", None)
@@ -160,8 +118,6 @@ class ShortcutExecutor:
         return round(time.monotonic() - started, 1)
 
     def _request(self, frozen: dict, context) -> dict:
-        """One batch member, from whichever kind of source the plan froze."""
-
         if "source_target_id" in frozen:
             source = context.resolved(frozen["source_target_id"])
             source_item = source.lakehouse
@@ -171,8 +127,7 @@ class ShortcutExecutor:
                 f"{frozen['source_area']}/{frozen['source_schema']}/{source_name}"
             )
         else:
-            # Already resolved, and case-exact: Fabric validates a shortcut's
-            # target when it is created and its paths are case-sensitive.
+            # Direct addresses are already resolved and case-exact.
             source_item = ExternalItem(
                 id=frozen["source_item_id"],
                 name=frozen["source_item_name"],
@@ -192,9 +147,7 @@ class ShortcutExecutor:
         self, context: InstallationContext, frozen: list
     ) -> float | None:
         if context.spark_sql is None:
-            # Loud rather than silent: every context the Installer builds has
-            # this, so its absence means one was assembled by hand, and not
-            # waiting is the race this exists to prevent.
+            # Skipping the wait would expose the discovery race this executor owns.
             raise InstallError(
                 "a table shortcut was created but this context offers no way to "
                 "ask Spark whether it is readable yet, so the discovery wait "
@@ -223,13 +176,8 @@ class ShortcutExecutor:
 def await_addressable(frozen, *, destination, location, spark_sql) -> float | None:
     """Wait until every table shortcut's relation and Delta path can be read.
 
-    Reads rather than catalogue or storage lookups, because Fabric can report
-    the shortcut's metadata before either consumer surface is ready. All of them
-    are waited on together, so several shortcuts cost one discovery window.
-
-    Shared with :func:`weaver.operations.mirror`: a mirrored Lakehouse stands on
-    the same shortcuts a build makes, and one weaker readiness rule for it would
-    be a second contract.
+    Metadata can appear before either consumer surface is ready. Mirror uses this
+    same readiness contract.
     """
 
     tables = [each for each in frozen if each.get("type", "table") == "table"]
@@ -260,10 +208,9 @@ def await_addressable(frozen, *, destination, location, spark_sql) -> float | No
                     else f"SELECT * FROM delta.`{address}` LIMIT 0"
                 )
                 try:
-                    # The probes cross; the waiting does not.
                     spark_sql(statement, exact_case=True)
                     del surfaces[surface]
-                except Exception as exc:  # not discovered yet, or never will be
+                except Exception as exc:
                     failure = exc
             if not surfaces:
                 del pending[shortcut]
@@ -281,12 +228,7 @@ def await_addressable(frozen, *, destination, location, spark_sql) -> float | No
 
 @dataclass(frozen=True)
 class ExternalItem:
-    """A physical item outside this build, as the shortcut API addresses it.
-
-    Enough of an item to be a shortcut's source and nothing more. It carries no
-    binding, because a direct shortcut points at something Weaver does not
-    manage.
-    """
+    """The shortcut API identity of an unbound item outside this build."""
 
     id: str
     name: str
@@ -313,17 +255,15 @@ def _location(
 
 
 def _physical_source_name(frozen: dict, context: InstallationContext, source) -> str:
-    """Return the source's storage spelling, which Fabric may have folded.
+    """Return the source's case-exact storage spelling.
 
-    Logical identity remains exact-case, but OneLake shortcut target paths are
-    physical and case-sensitive. Some Fabric estates materialise an authored
-    ``Customer`` table directory as ``customer``. Prefer the authored spelling
-    when it exists; otherwise resolve one case-insensitive storage match.
+    Prefer authored spelling when present; otherwise require one
+    case-insensitive match.
     """
 
     if source.bound.kind == WAREHOUSE_TARGET:
-        # A Warehouse publishes its table at the declared OneLake spelling, but
-        # it has no Lakehouse Spark location for the store resolver to inspect.
+        # Warehouses publish declared spelling and expose no Lakehouse location
+        # for storage inspection.
         return frozen["source_object"]
 
     producer = _location(source, frozen, context, source=True)

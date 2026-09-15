@@ -405,7 +405,7 @@ def test_a_missing_dictionary_table_beside_a_populated_catalogue_is_refused():
         table.name for table in PROJECTED_TABLES if table.name != "TableDictionary"
     ]
 
-    with pytest.raises(BuildError, match="catalogue is incomplete"):
+    with pytest.raises(BuildError, match="Catalogue is incomplete"):
         read_catalogue_state(_shaped(*all_but_one), ())
 
 
@@ -416,7 +416,7 @@ def test_a_missing_registry_beside_a_populated_catalogue_is_refused():
     from weaver.catalogue.state import read_catalogue_state
     from weaver.errors import BuildError
 
-    with pytest.raises(BuildError, match="catalogue is incomplete"):
+    with pytest.raises(BuildError, match="Catalogue is incomplete"):
         read_catalogue_state(_shaped("Installation", "TableDictionary"), ())
 
 
@@ -425,7 +425,7 @@ def test_a_missing_installation_beside_a_populated_catalogue_is_refused():
     from weaver.catalogue.state import read_catalogue_state
     from weaver.errors import BuildError
 
-    with pytest.raises(BuildError, match="catalogue is incomplete"):
+    with pytest.raises(BuildError, match="Catalogue is incomplete"):
         read_catalogue_state(_shaped("Registry", "TableDictionary"), ())
 
 
@@ -455,7 +455,7 @@ def test_the_incomplete_catalogue_error_sends_the_reader_to_a_repair():
         read_catalogue_state(_shaped("Registry", "Installation"), ())
 
     message = str(raised.value)
-    assert "repair" in message
+    assert "Repair" in message
     assert "scoped build" in message
 
 
@@ -501,7 +501,7 @@ def test_an_introduced_table_does_not_excuse_a_genuinely_damaged_catalogue():
         if table.name not in INTRODUCED_TABLES and table.name != "TableDictionary"
     ]
 
-    with pytest.raises(BuildError, match="catalogue is incomplete") as raised:
+    with pytest.raises(BuildError, match="Catalogue is incomplete") as raised:
         read_catalogue_state(_shaped(*damaged), ())
 
     message = str(raised.value)

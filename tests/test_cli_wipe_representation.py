@@ -211,7 +211,7 @@ def test_a_non_interactive_wipe_without_yes_refuses_before_mutation(
     assert len(planned) == 1 and executed == []
     printed = capsys.readouterr()
     assert "Wipe on Analytics" in printed.out
-    assert "without confirmation" in printed.err
+    assert "Confirmation required" in printed.err
 
 
 @weaver_test()
@@ -229,7 +229,7 @@ def test_a_wipe_with_no_terminal_refuses_without_yes(monkeypatch, capsys):
 
     assert main(["wipe", "Lakehouse/Sales"]) == 1
     assert executed == []
-    assert "without confirmation" in capsys.readouterr().err
+    assert "Confirmation required" in capsys.readouterr().err
 
 
 # --- what preflight shows -------------------------------------------------------

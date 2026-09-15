@@ -1,32 +1,8 @@
-"""Current load state, and the statistics that explain it.
+"""Read current load state and its matching statistics.
 
-``_.LoadStatus`` is the estate's current load state: one row per loadable
-object, carrying how that object's load ended, when, and the workflow that ran
-it. :func:`read_load_history` summarises that table and nothing else, so the
-summary covers every current object including the ones no statistic describes.
-A Blocked load settles a status row and appends no ``_.LoadStatistic`` row.
-
-``_.LoadStatistic`` then enriches those states with what each load moved,
-matched on the workflow and the object's four-part logical identity:
-
-.. code-block:: text
-
-    _.LoadStatus                     the current-state summary
-        + workflow id
-        + item type, item name
-        + schema name, object name
-             ↓
-    _.LoadStatistic                  what those loads moved
-
-``_.LoadStatistic`` accumulates, so it is never read whole. The match is the
-bound: it holds the read to the current estate, which is one row per loadable
-object at most.
-
-The window is carried on a :class:`weaver.catalogue.state.Catalogue` as
-:attr:`~weaver.catalogue.state.Catalogue.load_history`, apart from ``rows``.
-``Catalogue.table_rows`` answers for a materialised table, and a window is not
-one. Rows come back under the internal keys every other catalogue read uses;
-what they mean to an operator is :mod:`weaver.health`'s to say.
+``_.LoadStatus`` has one current row per loadable object. ``_.LoadStatistic`` is
+historical, so reads are bounded to matching workflow and object identities.
+Blocked loads have status but no statistic.
 """
 
 from __future__ import annotations
@@ -41,34 +17,20 @@ from .render import Row
 from .tables import LOAD_RESULT_VOCABULARY, LOAD_STATISTIC, LOAD_STATUS
 from .tsql import identifier, qualified_name
 
-#: What identifies one object's load on both sides of the match. The workflow
-#: alone would carry every other object that workflow loaded, and the object
-#: alone would carry every historical execution of it.
+# Workflow and object identity together select one object's load execution.
 _MATCH = ("workflow_id", "item_type", "item_name", "schema_name", "object_name")
 
-#: What orders the statistic rows, so a report lists them the same way twice.
 _STATISTIC_ORDER = ("item_type", "item_name", "schema_name", "object_name")
 
-#: The alias current state is matched under, inside the statistic read.
 _STATUS = "weaver_status"
 
 
 @dataclass(frozen=True)
 class LoadHistory:
-    """What the estate's current load state is, and what those loads moved.
+    """Current load outcomes and the statistics behind them.
 
-    ``counts``, ``workflow_ids``, ``started_at`` and ``completed_at`` summarise
-    ``_.LoadStatus``, so they cover every current object. ``statistics`` are the
-    ``_.LoadStatistic`` rows behind those states, which is a subset: a Blocked
-    load has a status and no statistic.
-
-    ``workflow_ids`` are sorted, which is an order for reading and not a
-    chronology. Current state spans as many workflows as it took to reach,
-    because a partial load leaves the objects it did not touch explained by the
-    load that last did.
-
-    The runtime records orchestrated and standalone loads under one task type,
-    so none of this says who started any of them.
+    Sorted ``workflow_ids`` are for stable display, not chronology. A partial
+    load leaves untouched objects associated with earlier workflows.
     """
 
     workflow_ids: tuple[str, ...] = ()
@@ -80,11 +42,7 @@ class LoadHistory:
 
 
 def read_load_history(catalogue: Any) -> LoadHistory | None:
-    """Current load state, and the statistics behind it.
-
-    ``None`` where ``_.LoadStatus`` holds no row, which is bootstrap: nothing
-    has settled a load yet.
-    """
+    """Return ``None`` until ``_.LoadStatus`` has a settled load."""
 
     summary = _current_state(catalogue)
     if summary is None:
@@ -100,12 +58,7 @@ def read_load_history(catalogue: Any) -> LoadHistory | None:
 
 
 def _current_state(catalogue: Any):
-    """``_.LoadStatus`` summarised: results, workflows, and the span they cover.
-
-    One aggregate, so the cost is the number of result and workflow pairs rather
-    than the number of objects. ``None`` where the table holds nothing, which is
-    what separates bootstrap from an estate whose every object failed.
-    """
+    """Summarise statuses by result and workflow, including their time span."""
 
     if catalogue.columns_of(LOAD_STATUS) is None:
         return None
@@ -140,12 +93,7 @@ def _current_state(catalogue: Any):
 
 
 def _statistics(catalogue: Any) -> tuple[Row, ...]:
-    """The statistic row behind each current status row, matched by the engine.
-
-    A semi-join rather than an inner one: ``_.LoadStatus`` is keyed by the
-    object, so matching cannot multiply a statistic row, and the read stays one
-    table's projection.
-    """
+    """Read statistics selected by current status through a semi-join."""
 
     return read_table(
         catalogue,
@@ -156,8 +104,6 @@ def _statistics(catalogue: Any) -> tuple[Row, ...]:
 
 
 def _matches_current_state() -> str:
-    """A statistic row that one current ``_.LoadStatus`` row points at."""
-
     status = identifier(_STATUS)
     conditions = " AND ".join(
         f"{status}.{identifier(LOAD_STATUS.public_name_of(name))} "
@@ -172,8 +118,6 @@ def _matches_current_state() -> str:
 
 
 def _internal_result(stored: str) -> str:
-    """One stored ``[Result]`` value back in the vocabulary Weaver writes."""
-
     for internal, public in LOAD_RESULT_VOCABULARY.items():
         if public.casefold() == stored.casefold():
             return internal

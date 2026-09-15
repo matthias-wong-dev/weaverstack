@@ -142,7 +142,7 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
             "X = Shortcut(\n"
             + _declaration("view", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
             + ")",
-            "belongs to a Warehouse item",
+            "must belong to a Warehouse item",
         ),
         (
             "Sales__X = Shortcut(\n"
@@ -159,7 +159,7 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
             "Reference = Shortcut(\n"
             + _declaration("schema", "logical", "Lakehouse/Raw/Sales")
             + ")",
-            "target must be physical",
+            "must use a physical target",
         ),
         (
             "Landed = Shortcut(\n"
@@ -197,7 +197,7 @@ def test_a_warehouse_declares_its_shortcuts_by_section(tmp_path):
                 "table", "logical", "Lakehouse/Curated/Tables/Sales.Customer"
             )
             + ")",
-            "which is the item declaring it",
+            "points into its declaring item",
         ),
     ],
 )
@@ -229,23 +229,23 @@ def test_a_target_type_is_compared_rather_than_coerced():
 @pytest.mark.parametrize(
     ("body", "expected"),
     [
-        ("for name in ('a',):\n    pass\n", "declarations, imports and comments only"),
+        ("for name in ('a',):\n    pass\n", "not a shortcut declaration"),
         (
             'Sales__X = Shortcut(shortcut_type=KIND, target_type="logical", target="a/b/c.d")\n',
-            "must be a constant",
+            "must be a literal value",
         ),
         (
             'Sales__X = other(shortcut_type="table", target_type="logical", target="Lakehouse/Raw/Tables/Sales.Customer")\n',
-            "declares Shortcuts only",
+            r"must use Shortcut\(\.\.\.\)",
         ),
-        ('Sales__X = Shortcut(shortcut_type="table")\n', "declares no target_type"),
+        ('Sales__X = Shortcut(shortcut_type="table")\n', "must provide target_type"),
         (
             "Sales__X = Shortcut(\n"
             + _declaration(
                 "table", "logical", "Lakehouse/Raw/Tables/Sales.Customer", mode="fast"
             )
             + ")\n",
-            "names 'mode'",
+            "does not accept 'mode'",
         ),
     ],
 )
@@ -266,7 +266,7 @@ def test_an_unknown_warehouse_section_is_refused(tmp_path):
         "Warehouse/Reporting/shortcuts.yml",
         "bound:\n  Warehouse/Reporting/Sales.X: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="names section\\(s\\) bound"):
+    with pytest.raises(DiscoveryError, match="unknown section\\(s\\): bound"):
         _parse(root)
 
 
@@ -297,7 +297,7 @@ def test_a_shortcut_may_not_be_called_what_the_item_already_declares(tmp_path):
         + _declaration("table", "logical", "Lakehouse/Raw/Tables/Sales.Customer")
         + ")\n",
     )
-    with pytest.raises(DiscoveryError, match="already declares"):
+    with pytest.raises(DiscoveryError, match="conflicts with project object"):
         _parse(root)
 
 
@@ -336,7 +336,7 @@ def test_nothing_may_be_declared_inside_a_schema_shortcut(tmp_path):
         )
         + ")\n",
     )
-    with pytest.raises(DiscoveryError, match="Weaver owns the shortcut and nothing"):
+    with pytest.raises(DiscoveryError, match="conflicts with schema shortcut"):
         _parse(root)
 
 
@@ -363,7 +363,7 @@ def test_a_table_shortcut_may_not_sit_inside_a_schema_shortcut(tmp_path):
         )
         + ")\n",
     )
-    with pytest.raises(DiscoveryError, match="Weaver owns the shortcut and nothing"):
+    with pytest.raises(DiscoveryError, match="conflicts with schema shortcut"):
         _parse(root)
 
 
@@ -454,7 +454,7 @@ def test_importing_a_name_no_shortcut_declares_says_what_is_declared(tmp_path):
             "from shortcuts import Sales__Missing\n\nfrom weaver import Table",
         ),
     )
-    with pytest.raises(DiscoveryError, match="declares Sales__Landed"):
+    with pytest.raises(DiscoveryError, match="Import one of: Sales__Landed"):
         _parse(root)
 
 
@@ -702,7 +702,7 @@ def test_a_schema_shortcut_reads_a_table_by_name():
 
     shortcut = SchemaShortcut(schema="Reference")(_Owner())
 
-    with pytest.raises(LoadError, match="reads a table by name"):
+    with pytest.raises(LoadError, match="table name must be a non-empty string"):
         shortcut.table("")
 
 
@@ -760,7 +760,7 @@ def test_a_logical_lakehouse_table_target_names_its_area(tmp_path):
         + ")\n",
     )
 
-    with pytest.raises(DiscoveryError, match="is not a managed object"):
+    with pytest.raises(DiscoveryError, match="does not identify an object"):
         _parse(root)
 
 

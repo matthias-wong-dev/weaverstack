@@ -1,12 +1,7 @@
-"""The files `weaver initialise` writes into a new project.
+"""Generate files for ``weaver initialise`` without writing them.
 
-Three generators, each producing text and nothing else: the project's own
-configuration, the Fabric Environment definition, and the optional Sales
-example. Nothing here reaches Fabric or the filesystem beyond the destination it
-is given, so what a run would write can be listed without writing it.
-
-The generated project is parsed by the same readers a user's own project is, and
-`weaver.initialise` validates it that way before anything is created.
+``weaver.initialise`` validates the generated project with the authored-project
+readers before creating anything.
 """
 
 from __future__ import annotations

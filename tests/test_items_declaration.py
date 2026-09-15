@@ -143,11 +143,16 @@ def test_an_item_with_no_configured_target_says_both_ways_to_fix_it():
     from weaver.build_bundle.targets import parse_build_item
     from weaver.errors import ConfigError
 
-    with pytest.raises(ConfigError, match="no physical target"):
+    with pytest.raises(ConfigError) as raised:
         parse_build_item(
             "Lakehouse/Landing",
             workspace=_workspace_with("Lakehouse/Other", "Other_LH"),
         )
+
+    message = str(raised.value)
+    assert "No target is configured" in message
+    assert "targets:" in message
+    assert "Lakehouse/Landing=Lakehouse/<physical name>" in message
 
 
 def _workspace_with(logical: str, physical: str):
@@ -176,7 +181,7 @@ def test_a_run_item_carrying_a_physical_half_is_refused(what):
     from weaver.errors import CommandError
     from weaver.operations.items import parse_run_item
 
-    with pytest.raises(CommandError, match="comes from the Weaver catalogue"):
+    with pytest.raises(CommandError, match="reads its target from the catalogue"):
         parse_run_item("Lakehouse/Landing=Lakehouse/Anything", what=what)
 
 
@@ -185,7 +190,7 @@ def test_the_refusal_says_what_to_write_instead():
     from weaver.errors import CommandError
     from weaver.operations.items import parse_run_item
 
-    with pytest.raises(CommandError, match=r"Write Lakehouse/Landing\."):
+    with pytest.raises(CommandError, match="Write Lakehouse/Landing"):
         parse_run_item("Lakehouse/Landing=Lakehouse/Landing_Dev", what="load")
 
 

@@ -1,4 +1,4 @@
-"""Detect Weaver's position and obtain the matching Session.
+"""Select a Session for the current process and workspace.
 
 Operations take a Session and never open one twice:
 
@@ -8,9 +8,8 @@ Operations take a Session and never open one twice:
         with use_or_create_session(session, workspace=workspace) as session:
             ...
 
-A Session that was passed in is borrowed and not closed here; one created for a
-standalone command is owned and closes with it. That is the difference between a
-console that starts Livy once and one that starts it per command.
+A passed Session is borrowed. A Session created for one operation closes with
+that operation.
 """
 
 from __future__ import annotations
@@ -26,8 +25,8 @@ from .base import Session
 def inside_fabric_session(workspace: Workspace) -> bool:
     """Whether this process is running inside the Fabric workspace it addresses.
 
-    The workspace matters: a notebook attached to one workspace reaching into
-    another is a console caller as far as that other workspace is concerned.
+    A notebook uses its in-Fabric Session only for the attached workspace. It
+    uses a ConsoleSession for another workspace.
     """
 
     try:
@@ -43,12 +42,7 @@ def inside_fabric_session(workspace: Workspace) -> bool:
 
 
 def current_workspace_name() -> str | None:
-    """The Fabric workspace this process is running in, or None outside one.
-
-    Read from the notebook runtime rather than from configuration, because it is
-    the one thing a process inside Fabric can tell about itself that no caller had
-    to tell it.
-    """
+    """The workspace reported by the Fabric runtime, or None outside Fabric."""
 
     try:
         from notebookutils import runtime
@@ -64,8 +58,6 @@ def current_workspace_name() -> str | None:
 
 
 def active_spark():
-    """The Spark session this process is already running in."""
-
     try:
         from importlib import import_module
 
@@ -81,7 +73,7 @@ def active_spark():
 
 
 def session_for(workspace: Workspace | None, **kwargs) -> Session:
-    """The Session this host would use for ``workspace``.
+    """Select the Session implementation for ``workspace``.
 
     Inside the Fabric session being addressed, that is a
     :class:`~weaver.sessions.notebook.NotebookSession`; from a desktop reaching
@@ -91,9 +83,8 @@ def session_for(workspace: Workspace | None, **kwargs) -> Session:
     if workspace is not None and inside_fabric_session(workspace):
         from .notebook import NotebookSession
 
-        # A notebook is already authenticated by the host it runs in, so a
-        # credential has nothing to do there. Dropped explicitly rather than
-        # passed and ignored, so the difference is stated once here.
+        # Fabric supplies notebook authentication; desktop credentials do not
+        # apply inside the notebook session.
         kwargs.pop("credential", None)
         return NotebookSession(workspace=workspace, **kwargs)
     from .console import ConsoleSession

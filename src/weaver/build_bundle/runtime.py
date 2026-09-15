@@ -27,8 +27,6 @@ def _slug(value) -> str:
 
 
 def render_runtime_build_action(artefact) -> RenderedAction:
-    """Render one runtime artefact as an action and frozen payload."""
-
     action_slug = _slug(artefact.identity)
     if artefact.is_file:
         filename = f"{action_slug}.payload"
@@ -53,8 +51,6 @@ def render_runtime_build_action(artefact) -> RenderedAction:
 def item_runtime_stages(
     artefacts, selected_for_build, *, item: WeaverItemId, target
 ) -> tuple[PlannedStage, ...]:
-    """Plan one item's selected runtime artefacts."""
-
     selected = [
         artefact
         for artefact in artefacts
@@ -97,8 +93,6 @@ def item_runtime_stages(
 def item_runtime_removals(
     removed, *, item: WeaverItemId, target, registered
 ) -> tuple[PlannedStage, ...]:
-    """Plan removals for runtime artefacts no longer claimed by the source."""
-
     selected = sorted(
         (
             identity

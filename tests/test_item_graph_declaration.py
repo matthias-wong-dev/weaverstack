@@ -133,7 +133,7 @@ def test_an_item_cycle_is_rejected_even_when_no_document_cycle_exists(tmp_path):
         "logical:\n  Warehouse/Reporting/Sales.Landed: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
 
-    with pytest.raises(GraphError, match="item dependency cycle"):
+    with pytest.raises(GraphError, match="cannot be built in dependency order"):
         parse_item_repository(Location(str(root)))
 
 

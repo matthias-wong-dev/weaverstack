@@ -43,7 +43,10 @@ def push_item_repository(
     source_store = source_store or FilesystemStore()
     repository = parse_item_repository(source, store=source_store)
     if source_store is destination_store and source == destination:
-        raise CommandError("push source and destination are the same repository")
+        raise CommandError(
+            f"push source and destination are both {source}. Choose a different "
+            "destination"
+        )
 
     prefix = source.value.rstrip("/") + "/"
     files: list[tuple[str, bytes]] = []

@@ -1,11 +1,7 @@
-"""Where a run's deployed Python primitives are imported.
+"""Hold deployed Python imports for exactly one run.
 
-One interface, :class:`RunScope`, and two implementations: :class:`DirectRunScope`
-imports in this process, :class:`FabricRunScope` names a scope in a Fabric
-session and submits to it. The Runner is told neither.
-
-A scope belongs to one run and is closed with it. One that outlived its run
-would let the next run import modules a rebuild had replaced.
+Closing each scope prevents a later run from reusing modules replaced by a
+rebuild.
 """
 
 from __future__ import annotations
@@ -15,19 +11,14 @@ from typing import Any, Protocol
 
 from ..sessions.program import RemoteProgram
 
-#: How a dead interpreter announces itself. The Livy states Weaver already
-#: treats as "this session is finished" (``LivySession.active``), plus the
-#: resource layer's own word for a capability it could not hand over.
+#: Livy states and resource wording that mean the interpreter released the scope.
 _INTERPRETER_GONE = ("dead", "killed", "shutting_down", "error", "not usable")
 
 
 def _interpreter_is_gone(exc: BaseException) -> bool:
-    """Whether this failure means the scope was released by the session dying.
+    """Return whether a dead interpreter already released the scope.
 
-    Matched on the error type first, because that is the structural answer, and
-    on the message only for :class:`~weaver.fabric.livy.LivyError`, which
-    reports the session's state as text. A cleanup failure that is not one of
-    these is a defect worth hearing about, so the default is False.
+    Only Livy state lacks a typed signal and requires message matching.
     """
 
     from ..fabric.livy import LivyError
@@ -42,17 +33,12 @@ def _interpreter_is_gone(exc: BaseException) -> bool:
 
 
 class RunScope(Protocol):
-    """Where a run's deployed modules are imported, and how it dispatches into them."""
+    """A run-scoped importer and dispatcher for deployed modules."""
 
     def dispatch_python(
         self, node, *, expected_class: str, fault_tolerant: bool, reload: bool = False
     ) -> dict:
-        """Run one deployed module and answer with the row it reported.
-
-        A row rather than a load result: it is what both positions produce
-        without depending on a load's vocabulary. :mod:`weaver.run.dispatch`
-        settles what it means.
-        """
+        """Run one deployed module and return its transport-neutral row."""
 
     def dispatch_validation(self, installed, *, collect: bool) -> Any: ...
 
@@ -60,12 +46,7 @@ class RunScope(Protocol):
 
 
 class DirectRunScope:
-    """Imports in this process, against the Spark it is running in.
-
-    Wraps a :class:`~weaver.runtime.python_context.RuntimeScope` rather than
-    extending it: giving `runtime` a dispatch method would point it at `run`,
-    which imports it.
-    """
+    """Dispatch through a runtime scope in this process."""
 
     def __init__(
         self, runtime_scope, session=None, workspace=None, *, catalogue=None
@@ -112,12 +93,7 @@ class DirectRunScope:
 
 
 def open_runtime_scope(session, *, workspace=None, catalogue=None) -> RunScope:
-    """The scope this run's Python primitives will be imported into.
-
-    The run's catalogue travels with it, because it has the same lifetime and
-    crosses for the same reason: read once for the run, and read from there by
-    every object the run dispatches.
-    """
+    """Open the scope that will import this run's Python primitives."""
 
     from ..runtime.python_context import RuntimeScope
     from ..sessions.base import ACROSS_BOUNDARY
@@ -135,23 +111,13 @@ def open_runtime_scope(session, *, workspace=None, catalogue=None) -> RunScope:
 
 
 def _as_data(catalogue) -> dict | None:
-    """One run's catalogue as a submitted program can carry it.
-
-    The catalogue's own serialisation, because a catalogue crossing a boundary is
-    a solved problem and a second representation would be one more thing to keep
-    in step.
-    """
+    """Use the catalogue's canonical boundary representation."""
 
     return None if catalogue is None else catalogue.to_mapping()
 
 
 class FabricRunScope:
-    """One run's imports, in the Fabric session that can perform them.
-
-    Holds a name and no modules, because loaded module objects cannot cross a
-    process boundary, so everything it does is a program submitted through the
-    Session.
-    """
+    """A named import scope held by a Fabric session."""
 
     def __init__(self, session, workspace, run_id: str) -> None:
         self._session = session
@@ -179,11 +145,7 @@ class FabricRunScope:
     def dispatch_python(
         self, node, *, expected_class: str, fault_tolerant: bool, reload: bool = False
     ):
-        """One deployed Python primitive, run in this scope.
-
-        The node is flattened rather than serialised, so the far side never has
-        to be kept in step with the Runner's model.
-        """
+        """Dispatch a flattened node without serialising the Runner model."""
 
         from .entry import run_python_primitive
 
@@ -205,7 +167,6 @@ class FabricRunScope:
         )
 
     def dispatch_validation(self, installed, *, collect: bool):
-        """One installed Lakehouse validation, run in this scope."""
 
         from .entry import run_validation_primitive
 
@@ -221,12 +182,9 @@ class FabricRunScope:
         return _carried(carried, installed)
 
     def close(self) -> None:
-        """Release the far side's imports. Never fails a run that has finished.
+        """Release imports without changing the outcome of a finished run.
 
-        A dead interpreter took the scope with it, so there is nothing to
-        report. Any other failure leaves a scope open in a live session, where
-        the next run would inherit stale modules, so it is warned about and
-        counted, and the run still succeeds.
+        Ignore a dead interpreter; warn when a live session may retain modules.
         """
 
         from ..runtime.session_scopes import close_scope
@@ -242,7 +200,6 @@ class FabricRunScope:
             self._report_leak(exc)
 
     def _report_leak(self, exc: BaseException) -> None:
-        """Say that a live session is still holding a scope, and count it."""
 
         telemetry = getattr(self._session, "telemetry", None)
         if telemetry is not None:
@@ -250,23 +207,17 @@ class FabricRunScope:
         warn = getattr(self._session, "warn", None)
         if warn is not None:
             warn(
-                f"the runtime scope for run {self.run_id} was not released: "
-                f"{type(exc).__name__}: {exc}. The Fabric session is still up, so "
-                "it still holds this run's imported modules. Restart it if a "
-                "rebuilt primitive appears not to have taken effect."
+                f"Run {self.run_id} left imported modules in the Fabric session: "
+                f"{type(exc).__name__}: {exc}. Restart the session before running "
+                "rebuilt primitives."
             )
 
     # --- the crossing --------------------------------------------------------
 
     def _submit(self, here, arguments: dict, *, addressed=True, detail=None):
-        """Call one named function, on this side or the far one.
+        """Submit the exact function used locally.
 
-        The function is passed rather than looked up by name, so the submitted
-        import is written from the thing this side would have called and the two
-        halves cannot drift apart.
-
-        ``addressed`` says whether the call takes a workspace and a Session:
-        opening and closing a scope touches no estate, dispatching does.
+        ``addressed`` adds a Workspace and Session only for estate operations.
         """
 
         workspace = self._workspace
@@ -307,7 +258,6 @@ class FabricRunScope:
 
 
 def _carried(payload, installed):
-    """A remote validation's judgement, rebuilt as the value a run settles on."""
 
     from ..declaration.metadata import ASSUMPTION
     from ..runtime.validation_result import AssumptionResult, TestResult
@@ -331,10 +281,7 @@ def _workspace_literal(workspace) -> str:
 
 
 class LazyRunScope:
-    """A run's scope, opened only when something imports.
-
-    ``close()`` never opens, so a Warehouse-only run opens no scope at all.
-    """
+    """A lazy scope whose ``close()`` never opens it."""
 
     def __init__(self, open_scope) -> None:
         self._open = open_scope

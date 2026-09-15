@@ -1,8 +1,4 @@
-"""Read and validate one authored Weaver source file.
-
-A SourceDocument retains its metadata, source text, language, hash, and parsed
-Python or SQL representation.
-"""
+"""Read and validate authored Weaver source files."""
 
 from __future__ import annotations
 
@@ -63,12 +59,7 @@ def content_hash(data: bytes) -> str:
 
 
 def salted_signature(signature: str, version: int) -> str:
-    """A signature over what something is rendered from, and by what.
-
-    Both halves are needed: the document alone leaves everything Weaver generates
-    stale after the generator changes, and the version alone rebuilds the estate
-    whenever anything is edited.
-    """
+    """Hash authored content with the version of the generator that renders it."""
 
     digest = hashlib.sha256()
     digest.update(signature.encode("ascii"))
@@ -78,19 +69,12 @@ def salted_signature(signature: str, version: int) -> str:
 
 
 def sql_dialect_for_item_type(item_type: str) -> str:
-    """The SQL a ``.sql`` file speaks inside an item of this type.
-
-    Why a Weaver document needs no dialect suffix: the containing item decides.
-    A Lakehouse materialises Delta through Spark; a Warehouse materialises
-    tables and views through T-SQL.
-    """
+    """Select Spark SQL for a Lakehouse and T-SQL for a Warehouse."""
 
     return SPARK_SQL if item_type == LAKEHOUSE else SQL
 
 
 def language_for_filename(filename: str, item_type: str) -> str | None:
-    """The language a filename declares, or None if it is not an object file."""
-
     if filename.endswith(PYTHON_SUFFIX):
         return PYTHON
     if filename.endswith(SQL_SUFFIX):
@@ -99,8 +83,6 @@ def language_for_filename(filename: str, item_type: str) -> str | None:
 
 
 def _stem(filename: str) -> str:
-    """The filename with its object suffix removed."""
-
     name = filename.rsplit("/", 1)[-1]
     for suffix in (PYTHON_SUFFIX, SQL_SUFFIX):
         if name.endswith(suffix):
@@ -125,28 +107,21 @@ def python_id_parts(stem: str) -> list[str]:
     return stem.split(PYTHON_ID_SEPARATOR)
 
 
-#: Private alias, so the helper reads as an implementation detail at its one
-#: internal call site while staying importable for the authoring surface.
 _python_id_parts = python_id_parts
 
 
 def object_id_for_filename(filename: str, language: str) -> ObjectId:
-    """The ID a filename claims, before the document is consulted."""
-
     stem = _stem(filename)
     if language == PYTHON:
         if "." in stem:
             raise DiscoveryError(
-                f"{filename}: a Python object file separates schema and object with "
-                f"{PYTHON_ID_SEPARATOR!r}, not '.', because a module name cannot "
-                "contain a dot. Expected Schema__Object.py"
+                f"{filename}: a Python object filename must be Schema__Object.py"
             )
         parts = _python_id_parts(stem)
     else:
         if PYTHON_ID_SEPARATOR in stem:
             raise DiscoveryError(
-                f"{filename}: a SQL object file separates schema and object with '.', "
-                f"not {PYTHON_ID_SEPARATOR!r}. Expected Schema.Object{SQL_SUFFIX}"
+                f"{filename}: a SQL object filename must be Schema.Object.sql"
             )
         parts = stem.split(".")
     parts = [part.strip() for part in parts]
@@ -177,8 +152,6 @@ class SqlAnalysis:
 
 @dataclass(frozen=True)
 class SourceDocument:
-    """One object's source file, parsed and structurally checked."""
-
     relative_path: str
     language: str
     text: str
@@ -217,14 +190,10 @@ class SourceDocument:
 
     @property
     def is_validation(self) -> bool:
-        """Whether this declares a Test or an Assumption rather than an object."""
-
         return self.document.is_validation
 
     @property
     def effective_signature(self) -> str:
-        """The exact authored implementation this physical object represents."""
-
         return self.build_signature or self.source_hash
 
     @property
@@ -248,10 +217,7 @@ class SourceDocument:
 
     @property
     def node_id(self) -> str:
-        """Identity within the repository: owning item and ID together.
-
-        The ID alone is not unique across authored items.
-        """
+        """The item-qualified identity; object IDs alone are not repository-unique."""
 
         if self.logical_id is not None:
             return str(self.logical_id)
@@ -259,8 +225,6 @@ class SourceDocument:
 
     @property
     def namespace(self) -> str:
-        """The execution namespace this object's references bind in."""
-
         if self.logical_id is not None:
             return self.logical_id.item.item_type
         return self.item_type
@@ -281,8 +245,6 @@ class SourceDocument:
 
     @property
     def qualified_references(self) -> tuple[RelationReference, ...]:
-        """Three- and four-part references, the physical targets an author named."""
-
         return tuple(
             reference
             for reference in self.discovered_references
@@ -291,8 +253,6 @@ class SourceDocument:
 
     @property
     def call_references(self) -> tuple[RelationReference, ...]:
-        """Two-part function calls, named like relations and resolved as functions."""
-
         return tuple(
             reference
             for reference in self.discovered_references
@@ -321,45 +281,21 @@ class SourceDocument:
 
     @property
     def module_name(self) -> str | None:
-        """The importable module name, for Python objects."""
-
         if self.language != PYTHON:
             return None
         return self.relative_path[: -len(PYTHON_SUFFIX)]
 
     def create_ddl(self, *, destination=None) -> "GeneratedDdl":
-        """The generated, installable create definition for this source.
-
-        Delegates to :mod:`weaver.ses.ddl`. The source owns it because it knows
-        its language, kind, ID and validated body; a planner calls it with the
-        destination the object is bound to and never re-derives create syntax.
-        """
-
         from .ddl import generate_ddl
 
         return generate_ddl(self, destination=destination)
 
     def create_load(self, *, destination=None, item=None) -> "GeneratedLoad":
-        """The generated, installable load definition for this source.
-
-        The sibling of :meth:`create_ddl`, and owned here for the same reason:
-        the source alone knows its language, kind, ID and validated body. The
-        load artefact layer asks for this and carries what it gets rather than
-        rendering anything itself.
-        """
-
         from .load import generate_load
 
         return generate_load(self, destination=destination, item=item)
 
     def create_validation(self, *, destination=None) -> "GeneratedValidation":
-        """The generated, installable primitive for this validation declaration.
-
-        The third sibling of :meth:`create_ddl` and :meth:`create_load`, owned
-        here for the same reason: the source alone knows its language, kind, ID
-        and validated body.
-        """
-
         from .validation import generate_validation
 
         return generate_validation(self, destination=destination)
@@ -368,8 +304,6 @@ class SourceDocument:
 def read_source_document(
     relative_path: str, data: bytes, item_type: str
 ) -> SourceDocument:
-    """Parse and structurally validate one object file."""
-
     language = language_for_filename(relative_path, item_type)
     if language is None:
         raise DiscoveryError(f"{relative_path}: not a Weaver object file")
@@ -419,10 +353,7 @@ def _read_python(
     _check_declared_id(relative_path, document, filename_id)
 
     if document.kind == VIEW:
-        raise DiscoveryError(
-            f"{relative_path}: a View is declared in SQL, not Python. Its query "
-            "is its definition"
-        )
+        raise DiscoveryError(f"{relative_path}: declare a View in SQL, not Python")
 
     module = ast.parse(text)
     expected_class = _stem(relative_path)
@@ -437,8 +368,8 @@ def _read_python(
     ]
     if not candidates:
         raise DiscoveryError(
-            f"{relative_path}: must define a class inheriting "
-            f"{BASE_CLASSES[document.kind].__name__} directly, and none does"
+            f"{relative_path}: define one class that directly inherits "
+            f"{BASE_CLASSES[document.kind].__name__}"
         )
     if len(candidates) > 1:
         found = ", ".join(node.name for node in candidates)
@@ -450,8 +381,8 @@ def _read_python(
     declared = candidates[0]
     if declared.name != expected_class:
         raise DiscoveryError(
-            f"{relative_path}: defines class {declared.name!r} but the file names "
-            f"{expected_class!r}. The class, the file and the ID carry one name"
+            f"{relative_path}: class {declared.name!r} does not match filename "
+            f"{expected_class!r}; rename the class to {expected_class!r}"
         )
 
     _check_base_class(relative_path, declared, document.kind)
@@ -503,15 +434,7 @@ def _check_read_method(relative_path: str, declared: ast.ClassDef) -> None:
 def _check_validation_methods(
     relative_path: str, declared: ast.ClassDef, kind: str
 ) -> None:
-    """The method contract that makes a validation mean what its kind says.
-
-    A Test declares two relations and Weaver compares them; an Assumption
-    declares the violating rows directly. So a Test writes ``expected()`` and
-    ``actual()`` and must not write ``read()``.
-
-    The runtime refuses the same override; this exists as well so a repository
-    need not be executed to be refused.
-    """
+    """A Test defines expected/actual relations; an Assumption defines violating rows."""
 
     if kind == ASSUMPTION:
         _require_method(relative_path, declared, "read")
@@ -519,10 +442,8 @@ def _check_validation_methods(
 
     if _methods(declared, "read"):
         raise DiscoveryError(
-            f"{relative_path}: class {declared.name!r} declares a Test and "
-            "defines read(), which a Test may not: Weaver compares the two "
-            "sides. Define expected() and actual(), or declare an Assumption to "
-            "author the returned rows directly."
+            f"{relative_path}: Test class {declared.name!r} must not define read(). "
+            "Define expected() and actual(), or declare an Assumption."
         )
     for name in ("expected", "actual"):
         _require_method(relative_path, declared, name)
@@ -546,7 +467,7 @@ def _require_method(relative_path: str, declared: ast.ClassDef, name: str) -> No
     if len(found) > 1:
         raise DiscoveryError(
             f"{relative_path}: class {declared.name!r} defines {name}() "
-            f"{len(found)} times. The later one replaces the earlier"
+            f"{len(found)} times; remove the duplicate definitions"
         )
     if isinstance(found[0], ast.AsyncFunctionDef):
         raise DiscoveryError(f"{relative_path}: {name}() must not be async")
@@ -589,8 +510,6 @@ def _imported_name(module: str) -> str:
 
 
 def _python_imports(module: ast.Module) -> tuple[PythonImport, ...]:
-    """All imports needed for item-package dependency resolution."""
-
     imports: list[PythonImport] = []
     for node in ast.walk(module):
         if isinstance(node, ast.ImportFrom):
@@ -623,10 +542,7 @@ def _read_sql(
     _check_declared_id(relative_path, document, filename_id)
 
     if document.kind == FOLDER:
-        raise DiscoveryError(
-            f"{relative_path}: a Folder is declared in Python. It stages files "
-            "rather than returning rows"
-        )
+        raise DiscoveryError(f"{relative_path}: declare a Folder in Python, not SQL")
 
     analysis = analyse_sql(body)
 
@@ -646,9 +562,8 @@ def _read_sql(
 
     if document.kind == VIEW and analysis.statement_count > 1:
         raise DiscoveryError(
-            f"{relative_path}: a View is one query. Weaver wraps it in the CREATE "
-            f"VIEW, and a view definition cannot carry preceding statements. Found "
-            f"{analysis.statement_count}."
+            f"{relative_path}: a View must contain one query; found "
+            f"{analysis.statement_count} statements"
         )
 
     if document.kind == TABLE and language in (SPARK_SQL, SQL):
@@ -680,12 +595,7 @@ def _read_sql(
 def _check_sql_validation_program(
     relative_path: str, document: SesDocument, body: str, language: str
 ) -> None:
-    """Refuse a SQL validation whose queries cannot be its contract.
-
-    Through the dialect's own parser, as a SQL table's contract is, because each
-    dialect has its own idea of where a statement ends. What it produces then
-    meets one counting rule. See :mod:`weaver.declaration.validation_program`.
-    """
+    """Validate the query contract with the parser for the source dialect."""
 
     from .validation_program import validate_validation_contract
 
@@ -703,16 +613,7 @@ def _check_sql_validation_program(
 def _check_sql_table_program(
     relative_path: str, document: SesDocument, body: str, language: str
 ) -> None:
-    """Refuse an authored SQL table body that cannot mean a load.
-
-    The same checks the generated artefact depends on, made here so a body that
-    could never load is refused by a build rather than discovered by one.
-
-    A body whose result-set count is beyond static reach, such as dynamic SQL,
-    is not
-    refused. The contract is about the queries Weaver can see; ``EXEC`` is setup
-    like any other statement.
-    """
+    """Validate the load contract when the SQL result sets can be determined."""
 
     if language == SPARK_SQL:
         from .spark_sql_program import (
@@ -756,13 +657,7 @@ _PERMANENT_DDL = re.compile(
 
 
 def _permanent_ddl(statements: tuple[str, ...]) -> tuple[str, ...]:
-    """Statements that appear to create a permanent object.
-
-    The author writes the query and Weaver writes the ``CREATE``, so one of
-    these usually means the wrapper was written by hand. Recorded rather than
-    refused: there may be a legitimate reason to create something durable inside
-    a body, and the build would produce the error anyway.
-    """
+    """Record apparent permanent DDL for linting without refusing it."""
 
     return tuple(
         statement
@@ -827,8 +722,6 @@ def _is_only_comments(statement) -> bool:
 
 
 def _returns_rows(statement) -> bool:
-    """A statement returns rows when it selects and does not divert the result."""
-
     if statement.get_type() != "SELECT":
         return False
     # T-SQL `select … into #tmp` materialises instead of returning; Spark SQL

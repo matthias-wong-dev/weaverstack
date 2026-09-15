@@ -126,13 +126,13 @@ def test_setup_and_queries_keep_the_order_they_were_written_in():
 
 @weaver_test()
 def test_an_unterminated_final_statement_is_refused():
-    with pytest.raises(LoadError, match="must end with ';'"):
+    with pytest.raises(LoadError, match="does not end with ';'"):
         _program("select 1 as x")
 
 
 @weaver_test()
 def test_an_unterminated_statement_is_refused_when_the_repository_is_parsed():
-    with pytest.raises(DiscoveryError, match="must end with ';'"):
+    with pytest.raises(DiscoveryError, match="does not end with ';'"):
         _document("select `Customer id`, `Total amount` from Sales.Order")
 
 
@@ -148,7 +148,7 @@ def test_a_terminated_body_parses_as_a_repository_document():
 
 @weaver_test()
 def test_a_body_that_produces_no_rows_is_not_a_table():
-    with pytest.raises(LoadError, match="must end in a query"):
+    with pytest.raises(LoadError, match="has no query that produces rows"):
         _validate("create or replace temporary view v as select 1 as x;")
 
 
@@ -167,7 +167,7 @@ def test_two_queries_are_staging_and_the_keys_to_delete():
 
 @weaver_test()
 def test_three_queries_are_ambiguous_and_refused():
-    with pytest.raises(LoadError, match="3 statements produce results"):
+    with pytest.raises(LoadError, match="3 result queries"):
         _validate(
             "select 1 as x;\nselect 2 as x;\nselect 3 as x;",
             incremental=True,
@@ -176,7 +176,7 @@ def test_three_queries_are_ambiguous_and_refused():
 
 @weaver_test()
 def test_a_delete_query_needs_a_primary_key_to_name_rows_by():
-    with pytest.raises(LoadError, match="needs a primary key"):
+    with pytest.raises(LoadError, match="delete query requires a Primary key"):
         _validate(
             "select 1 as x;\nselect 2 as x;",
             primary_key=(),
@@ -186,13 +186,17 @@ def test_a_delete_query_needs_a_primary_key_to_name_rows_by():
 
 @weaver_test()
 def test_a_non_incremental_table_cannot_name_explicit_deletes():
-    with pytest.raises(LoadError, match="non-incremental table cannot name"):
+    with pytest.raises(
+        LoadError, match="non-incremental table cannot have a delete query"
+    ):
         _validate("select 1 as x;\nselect 2 as x;", incremental=False)
 
 
 @weaver_test()
 def test_a_second_query_is_refused_when_the_repository_is_parsed():
-    with pytest.raises(DiscoveryError, match="non-incremental table cannot name"):
+    with pytest.raises(
+        DiscoveryError, match="non-incremental table cannot have a delete query"
+    ):
         _document(
             "select `Customer id`, `Total amount` from Sales.Order;\n"
             "select `Customer id` from Sales.Cancelled;"

@@ -1,20 +1,7 @@
-"""The refresh that closes one Lakehouse item's physical work.
+"""Place Lakehouse SQL endpoint refreshes at item boundaries.
 
-A Fabric Lakehouse presents its Delta tables twice: natively to Spark, and
-through a SQL analytics endpoint whose metadata is synchronised behind the
-mutation rather than with it. Everything that reads a Lakehouse as SQL reads
-that endpoint, a Warehouse view over another item, a report, a downstream
-shortcut, so a build that created a table and immediately built a dependent view
-over it could and did see the previous shape.
-
-The refresh therefore sits at the item boundary rather than in a tail after all
-physical work: it is the completion barrier for the item that mutated Delta, and
-it has to be behind that item and ahead of any later item layer. A global tail
-would leave a consumer's Warehouse view created against metadata that had not
-caught up.
-
-Placement is this module's business; the refresh itself belongs to
-:mod:`weaver.build_bundle.executors.sql_endpoint_refresh`.
+Endpoint metadata lags Delta mutations, so refresh must complete before a later
+item layer builds against it. The executor owns the refresh mechanism.
 """
 
 from __future__ import annotations
@@ -36,9 +23,7 @@ from .models import (
 from .stages import REFRESH, PlannedStage
 from .targets import BoundTarget
 
-#: Everything that leaves a Lakehouse's endpoint metadata stale. Shortcut creation
-#: and removal are here because a OneLake shortcut appears in the destination as a
-#: table.
+#: OneLake shortcuts appear as tables and therefore also stale endpoint metadata.
 _ENDPOINT_MUTATING_KINDS = frozenset(
     {
         BUILD_TABLE,
@@ -60,8 +45,6 @@ def lakehouse_endpoint_refresh_stage(
     item: WeaverItemId,
     target: BoundTarget,
 ) -> PlannedStage | None:
-    """Plan one refresh when this Lakehouse item's work mutated Delta."""
-
     if not any(
         action.kind in _ENDPOINT_MUTATING_KINDS
         for stage in stages

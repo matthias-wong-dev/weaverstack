@@ -186,7 +186,7 @@ def test_a_reference_that_names_nothing_is_rejected_when_read(tmp_path):
         "Description: One row per confirmed customer order.",
         "Description: $Sales.Elsewhere",
     )
-    with pytest.raises(DiscoveryError, match="does not resolve exactly"):
+    with pytest.raises(DiscoveryError, match="does not identify exactly one"):
         _repo(tmp_path, {"Sales.OrderCopy.sql": child})
 
 

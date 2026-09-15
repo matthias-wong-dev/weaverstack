@@ -8,8 +8,6 @@ from .base import InstallationContext, SkippedExecution
 
 
 class SqlEndpointRefreshExecutor:
-    """Perform the planned refresh, or explicitly skip an unsupported host."""
-
     name = "sql_endpoint_refresh"
 
     def execute(self, action, payload, context: InstallationContext):

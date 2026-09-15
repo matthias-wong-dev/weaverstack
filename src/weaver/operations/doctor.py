@@ -17,8 +17,6 @@ TDS_PROBE = "SELECT 1"
 
 @dataclass(frozen=True)
 class Check:
-    """One probe and the physical item used to perform it."""
-
     name: str
     status: str
     detail: str | None = None
@@ -35,8 +33,6 @@ class Check:
 
 @dataclass(frozen=True)
 class DoctorReport:
-    """Ordered connectivity evidence for one named workspace."""
-
     checks: tuple[Check, ...] = ()
     workspace: str | None = None
     authentication: dict = field(default_factory=dict)
@@ -118,7 +114,7 @@ def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
                 OK if visible else FAILED,
                 f"{len(visible)} workspaces visible"
                 if visible
-                else "Fabric responded, but this identity cannot see any workspaces.",
+                else "No workspaces are visible to this identity.",
             )
         )
         if not visible:
@@ -128,7 +124,7 @@ def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
                 Check(
                     f"Workspace {workspace}",
                     MISSING,
-                    f"This identity cannot see {workspace}.",
+                    f"Workspace {workspace} is not visible to this identity.",
                 )
             )
             return report()
@@ -203,7 +199,7 @@ def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
 
 
 def _attempt(name, work, *, via=None, remedy=None):
-    """Distinguish rejected probes from transport and runtime errors."""
+    """Classify rejected probes separately from runtime errors."""
 
     from ..fabric.client import FabricError
     from ..fabric.livy import LivyError, LivyStatementError
@@ -212,9 +208,7 @@ def _attempt(name, work, *, via=None, remedy=None):
     try:
         result = work()
         if result is False:
-            return Check(
-                name, FAILED, "The probe returned a negative result.", remedy, via
-            )
+            return Check(name, FAILED, "Probe returned a negative result.", remedy, via)
     except FabricError as exc:
         status = FAILED if exc.status_code in (400, 401, 403, 404, 409) else ERROR
         return Check(name, status, str(exc), remedy, via)

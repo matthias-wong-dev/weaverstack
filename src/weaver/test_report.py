@@ -1,4 +1,4 @@
-"""Serializable reports for validation runs.
+"""Serialisable reports for validation runs.
 
 Mappings retain counts and statuses. Targeted diagnostics remain local to the
 report object because they may be large or contain sensitive data.
@@ -23,8 +23,6 @@ STATUSES = (PASSED, FAILED, INVALID, PLANNED)
 
 @dataclass(frozen=True)
 class ValidationNodeReport:
-    """What became of one validation."""
-
     logical_id: str
     kind: str
     physical_target: str
@@ -46,10 +44,7 @@ class ValidationNodeReport:
 
     @classmethod
     def from_mapping(cls, payload: dict[str, Any]) -> "ValidationNodeReport":
-        """Read one node report from a transport mapping.
-
-        Transported reports include durable counts but not diagnostic rows.
-        """
+        """Read a transported node report, which excludes diagnostic rows."""
 
         from .runtime.validation_result import AssumptionResult, TestResult
 
@@ -102,8 +97,6 @@ class ValidationNodeReport:
 
 @dataclass(frozen=True)
 class ValidationRunReport:
-    """One whole run: every validation, and what the run as a whole did."""
-
     status: str
     nodes: tuple[ValidationNodeReport, ...] = ()
     workflow_id: str | None = None
@@ -136,8 +129,6 @@ class ValidationRunReport:
         raise KeyError(name)
 
     def totals(self) -> dict[str, int]:
-        """Return the report's physical discrepancy and violation counts."""
-
         missing = unexpected = violations = 0
         for node in self.nodes:
             result = node.result

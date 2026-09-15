@@ -185,7 +185,7 @@ def test_an_item_with_no_inventory_has_nothing_disproved():
 def test_a_registry_row_with_an_unsupported_object_type_is_rejected():
     """Weaver drops what it certified by the type it certified: never a guess."""
 
-    with pytest.raises(BuildError, match="unsupported object_type"):
+    with pytest.raises(BuildError, match="unsupported object type"):
         reconcile(
             FixtureCatalogue.from_registry_rows(
                 registry_row("DWG.Load", object_type="procedure")
@@ -198,7 +198,7 @@ def test_a_registry_row_with_an_unsupported_object_type_is_rejected():
 def test_a_registry_row_without_a_signature_is_rejected():
     """No signature means no basis for deciding changed, and so no build."""
 
-    with pytest.raises(BuildError, match="no signature"):
+    with pytest.raises(BuildError, match="missing build state"):
         reconcile(
             FixtureCatalogue.from_registry_rows(
                 registry_row("DWG.Customer", signature="")

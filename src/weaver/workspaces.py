@@ -1,9 +1,4 @@
-"""Workspace configuration.
-
-A Workspace identifies where resources live: one Microsoft Fabric workspace, by
-name. It does not say where Weaver code executes. Desktop or notebook is a
-Session question.
-"""
+"""Workspace configuration identifies Fabric resources, not where Weaver runs."""
 
 from __future__ import annotations
 
@@ -15,11 +10,10 @@ from .declaration.model import LAKEHOUSE, WeaverItemId
 from .errors import ConfigError
 from .targets import validate_name
 
-if TYPE_CHECKING:  # names used only in annotations
+if TYPE_CHECKING:
     from .targets import ItemRef
 
-#: Where the Weaver catalogue lives. A Warehouse: catalogue state is read and
-#: written over TDS, and needs no Spark session to reach it.
+# The catalogue is a Warehouse so its state is available over TDS without Spark.
 CATALOGUE_KIND = "Warehouse"
 
 CLI_AREA = "cli"
@@ -27,8 +21,6 @@ CLI_AREA = "cli"
 
 @dataclass(frozen=True)
 class EnvironmentRef:
-    """A Fabric Environment name and its optional owning workspace."""
-
     workspace: str | None
     name: str
 
@@ -64,8 +56,6 @@ class EnvironmentRef:
         )
 
     def owner(self, workload_workspace: str) -> str:
-        """Return the workspace that owns this Environment."""
-
         return self.workspace or validate_name(
             workload_workspace, what="workload workspace"
         )
@@ -76,13 +66,7 @@ class EnvironmentRef:
 
 @dataclass(frozen=True)
 class CatalogueRef:
-    """A Weaver catalogue's address: its Warehouse, and the workspace holding it.
-
-    ``Warehouse/Weaver`` names one in the workspace the command is running
-    against. ``Prod/Warehouse/Weaver`` names one in another workspace. The second
-    form parses so an address written today keeps its meaning, and
-    :meth:`is_local_to` is the check an operation bounded to one workspace makes.
-    """
+    """A catalogue Warehouse, optionally qualified by its workspace."""
 
     workspace: str | None
     name: str
@@ -125,22 +109,16 @@ class CatalogueRef:
 
     @property
     def item(self) -> "ItemRef":
-        """The Warehouse as a resolvable item."""
-
         from .targets import ItemRef
 
         return ItemRef(self.name)
 
     def owner(self, workload_workspace: str) -> str:
-        """The workspace holding this catalogue."""
-
         return self.workspace or validate_name(
             workload_workspace, what="workload workspace"
         )
 
     def is_local_to(self, workload_workspace: str) -> bool:
-        """Whether this catalogue is in the workspace a command runs against."""
-
         return (
             self.owner(workload_workspace).casefold()
             == (workload_workspace or "").casefold()
@@ -148,12 +126,6 @@ class CatalogueRef:
 
     @property
     def local(self) -> "CatalogueRef":
-        """The same catalogue, named without the workspace holding it.
-
-        How configuration writes one in its own workspace, and how an operation
-        that has established it is local reports it.
-        """
-
         return CatalogueRef(workspace=None, name=self.name)
 
     def __str__(self) -> str:
@@ -162,8 +134,6 @@ class CatalogueRef:
 
 
 def _catalogue_value(value: object) -> str:
-    """One ``Warehouse/Name`` catalogue, checked and returned as written."""
-
     if not isinstance(value, str) or "/" not in value:
         raise ConfigError(
             f"catalogue must be typed as '{CATALOGUE_KIND}/Name', got {value!r}"
@@ -179,8 +149,6 @@ def _catalogue_value(value: object) -> str:
 
 @dataclass(frozen=True)
 class ExecutionSettings:
-    """Technical parallelism settings for a Workspace or one Weaver item."""
-
     parallel_workers: int | None = None
 
     def __post_init__(self) -> None:
@@ -193,13 +161,8 @@ class ExecutionSettings:
 
 @dataclass(frozen=True)
 class TargetDeclaration:
-    """Where one Weaver item deploys in this environment.
+    """A Fabric item name; the key in ``Workspace.targets`` supplies its type."""
 
-    The item is the mapping key in :attr:`Workspace.targets`, and its type
-    decides the physical kind, so this carries one display name.
-    """
-
-    #: The environment-specific Fabric item display name.
     physical: str
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
 
@@ -209,8 +172,6 @@ class TargetDeclaration:
         )
 
     def target_for(self, item: WeaverItemId):
-        """The typed physical target this declaration names for ``item``."""
-
         from .targets import DeltaTarget, ItemRef, WarehouseTarget
 
         ref = ItemRef(self.physical)
@@ -220,11 +181,7 @@ class TargetDeclaration:
 def _target_declarations(
     declarations: Mapping[WeaverItemId, TargetDeclaration],
 ) -> Mapping[WeaverItemId, TargetDeclaration]:
-    """Validate one item-keyed target mapping.
-
-    Two items naming one physical target is accepted here. A build into a target
-    another item is installed to is refused there.
-    """
+    """Allow shared targets here; builds reject conflicting installations."""
 
     resolved: dict[WeaverItemId, TargetDeclaration] = {}
     for key, declaration in dict(declarations).items():
@@ -237,24 +194,15 @@ def _target_declarations(
 
 @dataclass(frozen=True, kw_only=True)
 class Workspace:
-    """One Microsoft Fabric workspace, and the configuration it carries.
-
-    Identifies where the resources are. It does not say where Weaver's own code
-    runs. Desktop or notebook is a Session question.
-    """
+    """Fabric resource configuration, independent of where Weaver runs."""
 
     workspace: str
     environment: EnvironmentRef | str | None = None
-    #: Where the Weaver catalogue lives, typed: ``Warehouse/Weaver``. Typed so the
-    #: value says which kind of item it names rather than relying on the field's
-    #: name to imply it.
+    #: Typed as ``Warehouse/Name``.
     catalogue: str | None = None
-    #: The installed estate this one forks, as the address of the catalogue
-    #: holding it. Set, ``weaver mirror`` reads that catalogue's installed state
-    #: and reproduces it here. Unset, this workspace forks nothing.
+    #: The catalogue whose installed state ``weaver mirror`` reproduces here.
     mirror: "CatalogueRef | str | None" = None
     execution: ExecutionSettings = field(default_factory=ExecutionSettings)
-    #: Where each Weaver item is deployed in this environment, keyed by the item.
     targets: Mapping[WeaverItemId, TargetDeclaration] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -277,37 +225,27 @@ class Workspace:
 
     @property
     def catalogue_item(self) -> "ItemRef":
-        """The catalogue as a resolvable item, or a failure saying it is unset.
-
-        Callers name the item rather than re-parsing the typed string, so where
-        the Weaver catalogue lives is read in one place.
-        """
-
         from .targets import ItemRef
 
         if not self.catalogue:
             raise ConfigError(
-                "this Workspace names no catalogue; pass catalogue="
+                "No catalogue is configured for this Workspace. Pass catalogue="
                 "'Warehouse/Weaver' or set it in workspace configuration"
             )
         return ItemRef(self.catalogue.split("/", 1)[1])
 
     @property
     def catalogue_ref(self) -> CatalogueRef:
-        """The catalogue this workspace writes, as an address."""
-
         return CatalogueRef(workspace=self.workspace, name=self.catalogue_item.name)
 
     def target_for(self, item: WeaverItemId):
-        """Where this configuration deploys one item, typed. A build's answer."""
-
         return self._declaration(item).target_for(item)
 
     def _declaration(self, item: WeaverItemId) -> TargetDeclaration:
         declaration = self.targets.get(item)
         if declaration is None:
             raise ConfigError(
-                f"{item} has no physical target in this Workspace configuration. "
+                f"No target is configured for {item} in this Workspace. "
                 f"Add a targets: entry for {item}, or name the target as "
                 f"{item}={item.item_type}/<physical name>."
             )
@@ -315,16 +253,11 @@ class Workspace:
 
     @property
     def configured_items(self) -> tuple[WeaverItemId, ...]:
-        """Every item this configuration deploys, in identity order."""
-
         return tuple(sorted(self.targets, key=str))
 
     @property
     def configured_lakehouses(self) -> tuple[str, ...]:
-        """The Lakehouses this configuration deploys into, sorted.
-
-        What a Livy session falls back to when no operation offered it one.
-        """
+        """Lakehouses a Livy session may use when an operation names none."""
 
         return tuple(
             sorted(
@@ -337,12 +270,7 @@ class Workspace:
         )
 
     def settings_for(self, item: WeaverItemId) -> ExecutionSettings:
-        """Parallelism for one Weaver item, or the workspace's own.
-
-        Keyed by the item an operation selected. A physical Warehouse two items
-        may deploy to carries no settings of its own, so what one item declares
-        reaches only that item's own work.
-        """
+        """Use item-specific parallelism when set, otherwise the workspace default."""
 
         declaration = self.targets.get(item)
         if declaration is None or declaration.execution.parallel_workers is None:

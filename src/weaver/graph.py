@@ -1,9 +1,4 @@
-"""Deterministic directed-acyclic-graph primitives.
-
-The one topology implementation. The authored repository graphs, the installed
-estate graph and the runtime graph each carry their own node metadata and hand
-the ordering, the layers and the traversal here.
-"""
+"""Deterministic directed-acyclic-graph operations."""
 
 from __future__ import annotations
 
@@ -32,9 +27,7 @@ class Graph:
         self, nodes: Iterable[str], edges: Iterable[tuple[str, str]] = ()
     ) -> None:
         self._nodes = tuple(sorted(set(nodes)))
-        # Held rather than rebuilt per lookup: membership is asked of a graph in
-        # a loop, once per changed root, when impact expansion decides whether a
-        # root starts a walk.
+        # Impact expansion tests membership once per changed root.
         self._known = frozenset(self._nodes)
         known = self._known
 
@@ -61,7 +54,7 @@ class Graph:
             self._downstream[edge.upstream].append(edge.downstream)
             self._upstream[edge.downstream].append(edge.upstream)
 
-        # Fail on construction: an unorderable graph is not a graph worth holding.
+        # Construction rejects cycles, so every held graph is orderable.
         self._order = self._topological_order()
 
     @property
@@ -83,25 +76,17 @@ class Graph:
             raise GraphError(f"unknown node: {node!r}")
 
     def upstream_of(self, node: str) -> tuple[str, ...]:
-        """What this node depends on directly."""
-
         self._require(node)
         return tuple(sorted(self._upstream[node]))
 
     def downstream_of(self, node: str) -> tuple[str, ...]:
-        """What depends on this node directly."""
-
         self._require(node)
         return tuple(sorted(self._downstream[node]))
 
     def roots(self) -> tuple[str, ...]:
-        """Nodes that depend on nothing."""
-
         return tuple(node for node in self._nodes if not self._upstream[node])
 
     def leaves(self) -> tuple[str, ...]:
-        """Nodes nothing depends on."""
-
         return tuple(node for node in self._nodes if not self._downstream[node])
 
     # --- ordering ---------------------------------------------------------
@@ -134,11 +119,7 @@ class Graph:
         return tuple(tuple(sorted(grouped[level])) for level in sorted(grouped))
 
     def _topological_order(self, key=None) -> tuple[str, ...]:
-        """Kahn's algorithm, taking ready nodes in a settled order.
-
-        Sorting the ready set is what makes a plan inspectable, a log
-        reproducible and a test stable.
-        """
+        """Take ready nodes in a settled order for reproducible plans and logs."""
 
         rank = (lambda node: node) if key is None else key
         remaining = {node: len(self._upstream[node]) for node in self._nodes}
@@ -162,8 +143,6 @@ class Graph:
         return tuple(ordered)
 
     def _find_cycle(self, candidates: set[str]) -> list[str]:
-        """One concrete cycle, so the message names the objects involved."""
-
         path: list[str] = []
         on_path: set[str] = set()
         seen: set[str] = set()
@@ -195,11 +174,7 @@ class Graph:
     # --- traversal --------------------------------------------------------
 
     def descendants(self, node: str) -> tuple[str, ...]:
-        """Everything reachable downstream, in dependency order.
-
-        This is what a rebuild must uncertify: an object whose upstream
-        definition is being rebuilt cannot stay certified.
-        """
+        """Everything reachable downstream, in dependency order."""
 
         return self._reach(node, self._downstream)
 

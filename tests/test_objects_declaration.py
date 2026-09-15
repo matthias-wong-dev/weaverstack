@@ -111,7 +111,7 @@ def test_an_object_binds_a_session_and_a_resolved_lakehouse(spark):
 
 @weaver_test()
 def test_the_session_is_mandatory():
-    with pytest.raises(LoadError, match="needs the Spark session"):
+    with pytest.raises(LoadError, match="needs a Spark session"):
         Sales__Order(None, lakehouse=LAKEHOUSE)
 
 
@@ -338,7 +338,7 @@ def test_a_non_incremental_table_returning_a_tuple_is_refused(spark, monkeypatch
     monkeypatch.setattr(table_load, "load_table", load_table)
     table = _customer((object(), []), incremental=False)
 
-    with pytest.raises(LoadError, match="returns staging on its own"):
+    with pytest.raises(LoadError, match="returned a pair for a non-incremental Table"):
         table(spark, lakehouse=LAKEHOUSE).with_catalogue(
             never(table.__name__.replace("__", "."))
         ).load()
@@ -454,7 +454,7 @@ def test_a_non_incremental_table_returning_none_is_refused(monkeypatch):
     )
     table = _customer(None, incremental=False)
 
-    with pytest.raises(LoadError, match="cannot return None"):
+    with pytest.raises(LoadError, match="returned None for a non-incremental table"):
         table(MockSpark(), lakehouse=LAKEHOUSE).with_catalogue(
             never("Sales.Customer")
         ).load()
@@ -517,7 +517,7 @@ def test_a_non_incremental_folder_returning_none_is_refused(tmp_path):
     lakehouse = mounted_lakehouse("Sales_LH", tmp_path)
     folder = _export(None, incremental=False)
 
-    with pytest.raises(LoadError, match="cannot return None"):
+    with pytest.raises(LoadError, match="returned None for a non-incremental folder"):
         folder(MockSpark(), lakehouse=lakehouse).with_catalogue(
             never("Raw.Export", files=True)
         ).load()

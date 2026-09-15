@@ -10,16 +10,7 @@ from .result import RunError
 
 @dataclass(frozen=True)
 class RunState:
-    """The catalogue snapshot handed to a Runner.
-
-    One catalogue, carrying whatever the run needs of it: the Installation and
-    Registry rows the graph is built from, and the bookmarks its loads read and
-    advance. Read once, because a run of two hundred objects would otherwise be
-    two hundred round trips for one table's contents.
-
-    Nothing beside it. A bookmark is a catalogue row, so it travels the way every
-    other catalogue row travels.
-    """
+    """The catalogue snapshot read once for a Runner."""
 
     catalogue: Catalogue
 
@@ -34,26 +25,26 @@ class RunState:
         version = mapping.get("format_version")
         if version != 1:
             raise RunError(
-                f"unsupported run state format_version {version!r}; expected 1"
+                f"Run state version {version!r} is unsupported; this Weaver version "
+                "supports version 1. Recreate the run state with this Weaver version."
             )
         return cls(catalogue=Catalogue.from_mapping(mapping["catalogue"]))
 
 
 def read_installed_catalogue(*, session, workspace=None, tables=None) -> Catalogue:
-    """The installed catalogue a run plans against, and records itself in.
+    """Read the installed catalogue used for planning and recording.
 
-    Readable and writable: one catalogue answers what is installed and how far
-    each object has been loaded, and carries the run's own rows back.
-
-    ``tables`` widens the read where an operation needs more of the catalogue in
-    the same round trip. With none, what an ordinary run consults.
+    ``tables`` widens the default read without adding another round trip.
     """
 
     from ..catalogue.state import READABLE_TABLES, catalogue_for
 
     workspace = workspace if workspace is not None else session.workspace
     if workspace is None or not workspace.catalogue:
-        raise RunError("a run needs a Workspace with a Weaver catalogue")
+        raise RunError(
+            "This run needs a Workspace with a Weaver catalogue. Pass a Workspace "
+            "that names its catalogue Warehouse."
+        )
     return catalogue_for(
         session, workspace, tables=READABLE_TABLES if tables is None else tuple(tables)
     )

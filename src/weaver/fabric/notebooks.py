@@ -63,7 +63,7 @@ def push_notebook(
     description: str | None = None,
     client: FabricClient | None = None,
 ) -> NotebookPushResult:
-    """Create or update one Notebook definition; Resources are not transported."""
+    """Create or update a Notebook definition without transporting its Resources."""
 
     source_path = Path(source).expanduser()
     if not source_path.is_file():

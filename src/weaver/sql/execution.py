@@ -14,12 +14,7 @@ SqlRow = dict[str, Any]
 
 @dataclass(frozen=True)
 class ProcedureResult:
-    """What one procedure execution produced: its rows, and its outputs.
-
-    Apart because they are transported differently: the rows come back as
-    result sets, the outputs as a projection Weaver appended. A caller wanting
-    only the numbers asks :meth:`PooledSqlExecutor.call_procedure`.
-    """
+    """A procedure's result sets and output parameters."""
 
     outputs: "SqlRow"
     result_sets: tuple[tuple["SqlRow", ...], ...]
@@ -82,15 +77,7 @@ class PooledSqlExecutor:
     def query_result_sets(
         self, statement: str, parameters: Sequence[object] | None = None
     ) -> tuple[tuple[SqlRow, ...], ...]:
-        """Every result set a batch produced, in order.
-
-        :meth:`query` reads the first and stops, which is right for a statement
-        that answers one question. A batch that returns evidence and then a
-        projection, which is what a validation run directly from source is, needs
-        both, and reading only the first silently answers with the wrong
-        one: a diagnostic row has no count column, so the counts read as zero
-        and a failing Test reports as passed.
-        """
+        """Return every result set in order; :meth:`query` returns only the first."""
 
         sets = self._run(
             statement,
@@ -108,18 +95,10 @@ class PooledSqlExecutor:
         inputs: Sequence[tuple[str, object]] = (),
         outputs: Sequence[tuple[str, str]] = (),
     ) -> SqlRow:
-        """Call a procedure and read back the values it set on its outputs.
+        """Return a procedure's outputs from Weaver's final result set.
 
-        ``mssql-python`` does not bind output parameters, since ``callproc`` is
-        declared and raises ``NotSupportedError``, so they are marshalled in
-        T-SQL instead: locals are declared, passed as ``output``, and projected
-        by a ``select`` this method writes.
-
-        That last detail is the point. The projection is the final statement of
-        a batch Weaver composed, so the row read back is Weaver's own however many
-        result sets the procedure emitted on the way, which is why the load result
-        stopped being one of them. Anything the
-        procedure's authored setup returned is passed over, not parsed.
+        ``mssql-python`` cannot bind output parameters, so Weaver declares and
+        projects them in T-SQL. Earlier result sets are ignored.
         """
 
         if not outputs:
@@ -135,8 +114,8 @@ class PooledSqlExecutor:
         )
         if not row:
             raise SqlExecutionError(
-                f"{procedure} returned no output row. It may have been altered "
-                "outside Weaver, or replaced by a version without these outputs"
+                f"{procedure} returned no output row. Rebuild its item to restore "
+                "the Weaver procedure"
             )
         return row[0]
 
@@ -147,17 +126,10 @@ class PooledSqlExecutor:
         inputs: Sequence[tuple[str, object]] = (),
         outputs: Sequence[tuple[str, str]] = (),
     ) -> "ProcedureResult":
-        """Call a procedure and keep both its result sets and its outputs.
+        """Return a procedure's result sets and final output projection together.
 
-        :meth:`call_procedure` reads the last result set, Weaver's own output
-        projection, and passes over everything the procedure emitted on the way.
-        That is right for a load, whose evidence is entirely in its counts.
-        It is wrong for a Test: the counts say how much disagreed and the rows
-        say what, and a caller wanting both must not run the Test twice, because
-        the data could change in between and the cost could be large.
-
-        So this keeps everything, splits the last set off as the outputs, and
-        hands back the rest in the order the procedure produced them.
+        Keeping both from one execution ensures Test rows and counts describe
+        the same data.
         """
 
         if not outputs:
@@ -173,8 +145,8 @@ class PooledSqlExecutor:
         )
         if not sets or not sets[-1]:
             raise SqlExecutionError(
-                f"{procedure} returned no output row. It may have been altered "
-                "outside Weaver, or replaced by a version without these outputs"
+                f"{procedure} returned no output row. Rebuild its item to restore "
+                "the Weaver procedure"
             )
         return ProcedureResult(
             outputs=sets[-1][0],
@@ -250,13 +222,9 @@ def _output_parameter_batch(
     inputs: Sequence[tuple[str, object]],
     outputs: Sequence[tuple[str, str]],
 ) -> str:
-    """A batch that calls ``procedure`` and hands its outputs back as a row.
+    """Build a parameterised batch whose final row contains procedure outputs.
 
-    The locals are prefixed so they cannot collide with a parameter name, since
-    ``@rows_read = @rows_read output`` would be legal and unreadable.
-
-    Input values are placeholders rather than literals. They come from a caller
-    and are the one part of this text that is not Weaver's own.
+    Output locals are prefixed to avoid parameter-name collisions.
     """
 
     declares = "\n".join(
@@ -278,12 +246,7 @@ def _rows(cursor) -> list[SqlRow]:
 
 
 def _final_rows(cursor) -> list[SqlRow]:
-    """The last result set the batch produced, and only it.
-
-    For a batch whose own trailing ``select`` is the answer: everything before
-    it belongs to whatever the batch called, and has to be consumed to be got
-    past rather than interpreted.
-    """
+    """Consume preceding result sets and return only the last."""
 
     latest: list[SqlRow] = []
     while True:
@@ -296,10 +259,7 @@ def _final_rows(cursor) -> list[SqlRow]:
 def _every_result_set(cursor) -> list[list[SqlRow]]:
     """Every result set the batch produced, in order.
 
-    A set with no description is one a statement produced without returning
-    columns, and is skipped rather than recorded as empty. Otherwise a
-    procedure's internal work would appear as result sets a caller has to know
-    to ignore.
+    Statements without columns do not produce result sets.
     """
 
     sets: list[list[SqlRow]] = []

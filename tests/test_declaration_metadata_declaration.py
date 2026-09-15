@@ -321,7 +321,7 @@ def test_not_null_repeating_the_primary_key_is_refused():
 
 @weaver_test()
 def test_comparison_columns_may_not_include_the_key():
-    with pytest.raises(MetadataError, match="equal keys by definition"):
+    with pytest.raises(MetadataError, match="must not include Primary key"):
         parse(TABLE_YAML + "\nComparison columns: Order id, Amount")
 
 
@@ -393,7 +393,7 @@ def test_identity_must_not_be_declared_in_schema():
     separate rule that the primary key may not be the identity.
     """
 
-    with pytest.raises(MetadataError, match="must not appear in Schema"):
+    with pytest.raises(MetadataError, match="remove it from Schema"):
         parse(TABLE_YAML + "\nIdentity: Amount", language=SQL)
 
 
@@ -406,7 +406,9 @@ def test_the_primary_key_may_not_be_the_identity_column():
     at install, which says nothing about what the declaration got wrong.
     """
 
-    with pytest.raises(MetadataError, match="Primary key names the Identity column"):
+    with pytest.raises(
+        MetadataError, match="Primary key must not name Identity column"
+    ):
         parse(
             "Table ID: Sales.Order\nDescription: x\nLineage: y\n"
             "Primary key: OrderKey\nIdentity: OrderKey\n"
@@ -426,7 +428,7 @@ def test_a_delta_table_may_not_declare_identity(language):
     promise to keep unique.
     """
 
-    with pytest.raises(MetadataError, match="Warehouse tables only"):
+    with pytest.raises(MetadataError, match="only for Warehouse tables"):
         parse(
             "Table ID: Sales.Order\nDescription: x\nLineage: y\nDependencies: []\n"
             "Primary key: OrderKey\nIdentity: OrderKey\n"
@@ -940,7 +942,7 @@ def test_a_test_may_declare_no_primary_key():
 @weaver_test()
 def test_an_assumption_may_not_declare_a_primary_key():
     """There is one side to pair, so a key would have nothing to correlate."""
-    with pytest.raises(MetadataError, match="must not declare a Primary key"):
+    with pytest.raises(MetadataError, match="must not declare Primary key"):
         parse(ASSUMPTION_YAML + "\nPrimary key: Order id")
 
 
@@ -1023,7 +1025,7 @@ def test_data_object_metadata_is_refused_on_an_assumption(key):
 
 @weaver_test()
 def test_refusing_a_data_key_on_a_validation_explains_why():
-    with pytest.raises(MetadataError, match="declares no data of its own"):
+    with pytest.raises(MetadataError, match="produces no data"):
         parse(TEST_YAML + "\nLineage: Sales system order export.")
 
 

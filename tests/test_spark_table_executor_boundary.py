@@ -338,9 +338,7 @@ def test_declared_table_uses_declared_types_and_nullability_not_the_query():
 @weaver_test()
 def test_column_names_are_case_sensitive_against_the_declaration():
     capability = _Capability([("customerid", "int")])
-    with pytest.raises(
-        BuildError, match="not returned by the query under the same case"
-    ):
+    with pytest.raises(BuildError, match="does not return these declared columns"):
         _run(
             capability,
             _payload(
@@ -358,7 +356,7 @@ def test_column_names_are_case_sensitive_against_the_declaration():
 def test_a_declared_column_missing_from_the_query_fails_install():
     capability = _Capability([("CustomerId", "int")])
     with pytest.raises(
-        BuildError, match="not returned by the query under the same case: CustomerName"
+        BuildError, match="does not return these declared columns.*CustomerName"
     ):
         _run(
             capability,
@@ -390,7 +388,7 @@ def test_an_undeclared_extra_query_column_fails_install():
 @weaver_test()
 def test_case_colliding_query_output_names_fail_install():
     capability = _Capability([("CustomerId", "int"), ("customerid", "bigint")])
-    with pytest.raises(BuildError, match="collide by name"):
+    with pytest.raises(BuildError, match="ambiguous when compared case-insensitively"):
         _run(capability, _payload(references=[]))
 
 

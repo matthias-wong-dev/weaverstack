@@ -1,18 +1,8 @@
-"""Where a catalogue's runtime writes go.
+"""Route runtime catalogue writes through per-table Warehouse flushers.
 
-The ``_`` schema's runtime tables are written as work happens: ``_.Log`` appended
-as each unit settles, ``_.Bookmark`` merged as each clean load finishes. Both go
-through one boundary, so a caller says what it recorded and never how.
-
-Underneath is :class:`~weaver.catalogue.flusher.WarehouseFlusher`, one per table:
-rows are queued, batched and written on a worker, and a failure is surfaced by
-:meth:`CatalogueWriter.flush`. Whether a lost row matters is the caller's
-judgement, a lost ``_.Log`` row loses evidence, a lost bookmark makes the next
-load read a window it has already read, so this raises and lets them decide.
-
-:meth:`CatalogueWriter.delete` removes named rows. It runs its statement and
-waits, because a caller removing rows is about to do the work that removal
-precedes.
+``_.Log`` rows append and ``_.Bookmark`` rows merge. ``flush`` surfaces worker
+failures. Deletes drain queued writes first and complete synchronously because
+they precede the caller's next state transition.
 """
 
 from __future__ import annotations
@@ -21,12 +11,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 
 class CatalogueWriter:
-    """One catalogue's runtime writes, by table.
-
-    ``flusher_for`` is asked for a table's write stream on first use, so a
-    catalogue nothing writes to opens no connection and starts no worker.
-    ``execute`` runs one statement against the same Warehouse and waits.
-    """
+    """One catalogue's lazy per-table runtime write streams."""
 
     def __init__(
         self,
@@ -39,21 +24,13 @@ class CatalogueWriter:
         self._flushers: dict[str, Any] = {}
 
     def submit(self, table, row: Mapping[str, Any]) -> None:
-        """Append one row."""
-
         self._flusher(table).submit(row)
 
     def update(self, table, row: Mapping[str, Any]) -> None:
-        """Merge one row on the table's own key."""
-
         self._flusher(table).update(row)
 
     def delete(self, table, rows: Sequence[Mapping[str, Any]]) -> None:
-        """Remove the named rows, and wait for the removal.
-
-        Each row carries the table's key. Queued rows are drained first, so a
-        merge already in flight cannot land behind the removal.
-        """
+        """Drain queued writes, then synchronously remove rows by key."""
 
         from ..errors import CommandError
         from .render import render_delete_rows
@@ -63,14 +40,14 @@ class CatalogueWriter:
             return
         if self._execute is None:
             raise CommandError(
-                f"{table.qualified} cannot be deleted from here: this catalogue "
-                "was built without a connection to run a statement through"
+                f"Cannot delete from {table.qualified}: this catalogue has no "
+                "connection for executing statements"
             )
         self.flush()
         self._execute(statement)
 
     def flush(self) -> None:
-        """Wait for every queued row, and surface the first failure."""
+        """Wait for queued writes and surface the first failure."""
 
         for flusher in list(self._flushers.values()):
             flusher.flush()
@@ -84,11 +61,7 @@ class CatalogueWriter:
 
 
 class RefusingWriter:
-    """A catalogue that can be read but not written, saying so when asked.
-
-    What a catalogue reconstructed from a payload has: it crossed a boundary as
-    data, and the connection it was read through did not come with it.
-    """
+    """Reject writes to a catalogue reconstructed without its connection."""
 
     def __init__(self, why: str) -> None:
         self._why = why
@@ -112,12 +85,7 @@ class RefusingWriter:
 
 
 def writer_for(session, workspace=None) -> CatalogueWriter:
-    """Where a Session sends the catalogue's runtime writes.
-
-    One flusher per table, opened on first use, so a catalogue nothing writes to
-    starts no worker and opens no connection. A removal runs over the Session's
-    TDS against the same Warehouse.
-    """
+    """Create lazy runtime writers for the Session's catalogue Warehouse."""
 
     from ..targets import WarehouseTarget
 

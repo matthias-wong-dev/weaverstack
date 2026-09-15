@@ -205,7 +205,7 @@ def test_invalid_request_fails_before_target_state_is_read(tmp_path, monkeypatch
         lambda *_args, **_kwargs: pytest.fail("target state was contacted"),
     )
 
-    with pytest.raises(BuildError, match="absent from the repository"):
+    with pytest.raises(BuildError, match="not found in the project"):
         build_item_repository_source(
             Location(str(_estate(tmp_path))),
             source_store=FilesystemStore(),

@@ -10,8 +10,6 @@ from .telemetry import SessionTelemetry
 
 
 class SessionSqlExecutor:
-    """Record every TDS operation made through a Session capability."""
-
     def __init__(self, executor: SqlExecutor, telemetry: SessionTelemetry) -> None:
         self._executor = executor
         self._telemetry = telemetry

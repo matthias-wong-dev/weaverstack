@@ -103,11 +103,23 @@ def test_a_workflow_resolves_to_the_commands_it_lists(tmp_path):
 
 
 @weaver_test()
-def test_a_missing_file_says_so_and_names_the_flag(tmp_path):
+def test_a_missing_file_says_so_and_names_the_flag(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(CommandError) as raised:
+        load_workflow("dev")
+
+    message = str(raised.value)
+    assert "Workflow file not found" in message
+    assert "--file" in message
+
+
+@weaver_test()
+def test_a_missing_named_file_says_to_check_the_flag(tmp_path):
     with pytest.raises(CommandError) as raised:
         load_workflow("dev", file=str(tmp_path / "nowhere.yml"))
 
-    assert "no workflow file" in str(raised.value)
+    assert "Check --file" in str(raised.value)
 
 
 @weaver_test()

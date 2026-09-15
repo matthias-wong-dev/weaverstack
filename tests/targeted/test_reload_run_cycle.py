@@ -207,7 +207,7 @@ def test_a_node_the_run_never_reached_keeps_its_state(catalogue):
 def test_a_reload_that_selected_a_folder_is_refused(catalogue):
     runner = _runner(catalogue, items=(RAW,))
 
-    with pytest.raises(CommandError, match="reload covers tables") as raised:
+    with pytest.raises(CommandError, match="reload supports tables only") as raised:
         _refuse_unsupported_reload(runner.plan())
 
     assert EXPORT in str(raised.value)

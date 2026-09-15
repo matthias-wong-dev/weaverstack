@@ -377,7 +377,7 @@ def test_an_unknown_status_is_refused_rather_than_written():
 
     from weaver.run.result import RunError
 
-    with pytest.raises(RunError, match="public Result vocabulary"):
+    with pytest.raises(RunError, match="unsupported status"):
         result_for(_node(status="reticulating"))
 
 
@@ -413,7 +413,7 @@ def test_a_write_that_did_not_land_says_what_it_cost():
     )
     record.settled(_node())
 
-    with pytest.raises(RunError, match="was not recorded"):
+    with pytest.raises(RunError, match="catalogue record could not be written"):
         record.flush()
 
 

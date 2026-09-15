@@ -284,7 +284,7 @@ def test_a_fork_is_refused_without_confirmation(monkeypatch, capsys):
 
     assert main(["mirror", "--no-item", "--workspace", "Analytics"]) == 1
     printed = capsys.readouterr()
-    assert "Refusing to empty Warehouse/Weaver_Dev" in printed.err
+    assert "Confirmation required to empty Warehouse/Weaver_Dev" in printed.err
     # The pair it names is the resolved one, not a second answer to the question.
     assert "  Warehouse/Weaver_Dev  <- Warehouse/Weaver" in printed.out
 

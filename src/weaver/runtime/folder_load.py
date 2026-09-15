@@ -51,11 +51,7 @@ def load_folder(
     deletes=(),
     fault_tolerant: bool = False,
 ) -> LoadResult:
-    """Reconcile one folder's staged files into its destination.
-
-    Validation runs to completion before the first copy, so a folder that is
-    going to be refused is refused with its destination exactly as it was.
-    """
+    """Validate all staged files before modifying the destination."""
 
     destination_path, staging_path = _validate_paths(destination, staging)
     staged, rejected = _classify(staging_path, contract)
@@ -98,11 +94,7 @@ def load_folder(
 
 @dataclass(frozen=True)
 class StagingFolder:
-    """The staging directory issued for one folder load.
-
-    Folder loading accepts only this instance, preventing object code from
-    returning an unprepared directory.
-    """
+    """A staging directory issued for one folder load."""
 
     path: Path
 
@@ -114,8 +106,6 @@ class StagingFolder:
 
 
 def new_staging_folder(destination: str | Path, staging: str | Path) -> StagingFolder:
-    """Reset and issue the object-local staging directory."""
-
     _destination_path, staging_path = _validate_paths(destination, staging)
     reset_staging(staging_path)
     return StagingFolder(path=staging_path)
@@ -138,8 +128,6 @@ def reset_staging(path: Path) -> None:
 
 
 def remove_staging(path: Path) -> None:
-    """Remove staging after a load has published from it, tolerating a race."""
-
     _with_retry(lambda: shutil.rmtree(path) if path.exists() else None)
 
 
@@ -160,42 +148,29 @@ def _with_retry(action) -> None:
 
 
 def _validate_paths(destination: str | Path, staging: str | Path) -> tuple[Path, Path]:
-    """The exact destination/staging relationship, refusing anything else.
-
-    Staging must be the sibling Weaver names: the only directory the object was
-    given, and the only one a load reads from. Anything else would publish a
-    tree nothing validated.
-    """
-
     destination_path = Path(destination)
     staging_path = Path(staging)
     if destination_path == staging_path:
-        raise LoadError("a folder's staging path must not be its destination")
+        raise LoadError(f"staging path is the destination folder: {destination_path}")
     if staging_path.parent != destination_path.parent:
         raise LoadError(
-            "a folder's staging directory must be a sibling of its destination, "
-            f"and {staging_path} is not beside {destination_path}"
+            f"staging directory {staging_path} is not beside destination folder "
+            f"{destination_path}; return self.staging_folder()"
         )
     expected = f"{destination_path.name}{STAGING_SUFFIX}"
     if staging_path.name != expected:
         raise LoadError(
-            f"a folder's staging directory must be named {expected!r}, not "
-            f"{staging_path.name!r}. Return self.staging_folder()"
+            f"staging directory {staging_path} must be named {expected!r}; return "
+            "self.staging_folder()"
         )
     return destination_path, staging_path
 
 
 def _classify(staging_path: Path, contract) -> tuple[list[str], list[str]]:
-    """Split the staged tree into what may be published and what may not.
-
-    A file the key does not claim is a rejection rather than a quiet skip: the
-    author staged it.
-    """
-
     if not staging_path.is_dir():
         raise LoadError(
-            f"a folder's staging directory does not exist: {staging_path}. "
-            "Write files into self.staging_folder() and return it"
+            f"staging directory not found: {staging_path}; write files into "
+            "self.staging_folder() and return it"
         )
     staged, rejected = [], []
     for relative in _relative_files(staging_path):
@@ -214,8 +189,6 @@ def _classify(staging_path: Path, contract) -> tuple[list[str], list[str]]:
 def _validate_deletes(
     deletes, staged, destination: Path, *, contract
 ) -> tuple[str, ...]:
-    """Every delete entry, checked to be an exact file this folder may remove."""
-
     if isinstance(deletes, (str, bytes)):
         raise LoadError(
             f"{contract.qualified}: read() must return a sequence of relative "
@@ -224,9 +197,8 @@ def _validate_deletes(
     entries = list(deletes or ())
     if entries and contract.replaces_wholesale:
         raise LoadError(
-            f"{contract.qualified}: a non-incremental folder cannot name explicit "
-            "deletes. It is replaced whole, so absence from staging is what "
-            "retires a file"
+            f"{contract.qualified}: read() returned explicit deletes for a "
+            "non-incremental folder; return only staging or declare Incremental: true"
         )
 
     staged_set = set(staged)
@@ -288,12 +260,7 @@ def _validate_deletes(
 def _publish(
     staged, staging_path: Path, destination: Path
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Copy the staged files into place, distinguishing arrival from replacement.
-
-    A file whose bytes already match is neither inserted nor updated and is not
-    rewritten, so a folder restaged with identical content reports no change
-    rather than a full rewrite.
-    """
+    """Do not rewrite byte-identical files or report them as updated."""
 
     destination.mkdir(parents=True, exist_ok=True)
     inserted: list[str] = []
@@ -340,15 +307,11 @@ def _reconcile_deletes(
 
 
 def _reset_reject_evidence(path: Path) -> None:
-    """Remove evidence from the preceding Folder load."""
-
     if path.exists():
         shutil.rmtree(path)
 
 
 def _keep_reject_evidence(rejected, staging: Path, destination: Path) -> None:
-    """Preserve rejected files beneath the Folder's sibling evidence root."""
-
     for relative in rejected:
         _safe_replace(staging / relative, destination / relative)
 
@@ -360,8 +323,6 @@ def _write_change_document(
     updated: tuple[str, ...],
     deleted: tuple[str, ...],
 ) -> None:
-    """Append one immutable document after a Folder mutation succeeds."""
-
     if not (inserted or updated or deleted):
         return
     changes = destination / CHANGES_DIRECTORY
@@ -380,14 +341,7 @@ def _write_change_document(
 
 
 def _has_change_history(root: Path) -> bool:
-    """Whether anything is recorded beneath ``_changes``.
-
-    Tolerant where reading history is strict. Reading it parses every document,
-    because incremental semantics rest on the instants they carry; the question
-    here is only whether Weaver has written any, and a directory may hold a file
-    Weaver did not write. An empty directory is no history, so a Folder whose
-    directory exists and records nothing is still adopted.
-    """
+    """Treat any recorded file as history; validate documents only when reading."""
 
     changes = root / CHANGES_DIRECTORY
     if not changes.is_dir():
@@ -396,24 +350,7 @@ def _has_change_history(root: Path) -> bool:
 
 
 def adopt_existing_files(destination: str | Path) -> tuple[str, ...]:
-    """Record what a Folder already holds as this installation's first insert.
-
-    A managed Folder may hold files that arrived before the Folder was declared:
-    a migration copies a retained estate into place, and the directory then holds
-    state no change document records. ``_changes`` is the whole of
-    managed history, so without this a Folder with files and no history has
-    nothing for an incremental read to start from.
-
-    Every file is adopted, whatever the File key claims. From the Folder's side
-    these files are physically there and were therefore inserted, exactly as a
-    row adopted into a table was inserted whether or not it satisfies a declared
-    key. History records physical reality; logical constraints are decided
-    elsewhere.
-
-    Returns what was adopted, and nothing when history already exists or the
-    Folder holds no files. The written document is itself history, so a second
-    load adopts nothing.
-    """
+    """Record every existing file once when the Folder has no change history."""
 
     root = Path(destination)
     if not root.is_dir():
@@ -506,12 +443,7 @@ def _change_documents(destination: str | Path) -> list[tuple[datetime, Path]]:
 def _available_change_documents(
     destination: str | Path,
 ) -> list[tuple[datetime, Path]]:
-    """The Folder's change history, empty when Weaver has never written it.
-
-    ``_changes`` is the whole of managed history. A file the Folder holds that
-    no document records is one Weaver never saw arrive, so it takes no part in
-    an incremental read.
-    """
+    """Return recorded change history, or empty when none exists."""
 
     try:
         return _change_documents(destination)
@@ -532,8 +464,6 @@ def _change_documents_since(
 
 
 def _collapse_change_events(documents) -> dict[str, tuple[str, datetime]]:
-    """Each file's latest operation and the datetime it was recorded."""
-
     latest: dict[str, tuple[str, datetime]] = {}
     for changed_at, path in documents:
         document = _read_change_document(path)
@@ -636,8 +566,6 @@ def _match_parts(path_parts, pattern_parts) -> bool:
 
 
 def managed_relative_files(root: Path, patterns) -> list[str]:
-    """The files beneath ``root`` the file key claims, as sorted POSIX paths."""
-
     root = Path(root)
     if not root.is_dir():
         return []
@@ -649,8 +577,6 @@ def managed_relative_files(root: Path, patterns) -> list[str]:
 
 
 def _relative_files(root: Path, *, excluded_roots=frozenset()) -> list[str]:
-    """Every leaf file beneath ``root``. Directories are not CRUD units."""
-
     files: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
         if Path(dirpath) == root:
@@ -688,8 +614,6 @@ def _safe_replace(source: Path, target: Path) -> None:
 
 
 def _safe_write_text(target: Path, content: str) -> None:
-    """Write text through a temporary sibling and one atomic rename."""
-
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.parent / f"{_TMP_PREFIX}{uuid.uuid4().hex}"
     try:

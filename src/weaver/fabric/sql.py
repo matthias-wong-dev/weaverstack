@@ -27,8 +27,6 @@ def desktop_sql_pool(
     max_connections: int = DEFAULT_MAX_CONNECTIONS,
     connection_factory=None,
 ) -> SqlConnectionPool:
-    """Cross from a desktop caller into a resolved Fabric Warehouse."""
-
     from ..resolution import resolver_for
     from ..sql.connection import connect
 
@@ -44,8 +42,6 @@ def desktop_sql_pool(
 
 
 def desktop_sql_executor(target, workspace, **kwargs) -> PooledSqlExecutor:
-    """An explicitly cross-boundary desktop executor."""
-
     return PooledSqlExecutor(
         desktop_sql_pool(target, workspace, **kwargs),
         owns_pool=True,
@@ -63,7 +59,7 @@ def fabric_sql_pool(
     max_connections: int = DEFAULT_MAX_CONNECTIONS,
     connection_factory=None,
 ) -> SqlConnectionPool:
-    """SQL access using the identity made available by a Fabric session."""
+    """Use the Fabric session identity for SQL access."""
 
     from ..sql.connection import connect
     from .session import FabricSessionResolver
@@ -108,8 +104,6 @@ def fabric_sql_pool(
 
 
 def fabric_sql_executor(target, workspace, **kwargs) -> PooledSqlExecutor:
-    """An explicitly within-Fabric executor."""
-
     return PooledSqlExecutor(
         fabric_sql_pool(target, workspace, **kwargs),
         owns_pool=True,

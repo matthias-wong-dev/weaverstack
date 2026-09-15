@@ -1,9 +1,6 @@
-"""Name one Fabric Lakehouse in a Spark session.
+"""Render a Fabric Lakehouse's four-part Spark names.
 
-Fabric addresses a Lakehouse object by its four-part name,
-``workspace.lakehouse.schema.object``. Rendering that is this module's whole
-responsibility: a build freezes final names into its payloads, so nothing below
-the Builder decides what an object is called.
+Builds freeze ``workspace.lakehouse.schema.object`` names into their payloads.
 """
 
 from __future__ import annotations
@@ -27,12 +24,9 @@ def escaped(value: str) -> str:
 
 @dataclass(frozen=True)
 class FabricSparkTarget:
-    """One Fabric Lakehouse, as Fabric Spark addresses it.
+    """A Fabric Lakehouse as Spark addresses it.
 
-    Both names are display names: that is what Fabric's Spark namespace is
-    spelled with, and what a reviewer reading a frozen statement can recognise.
-    The workspace and item ids stay in resolution and in the bundle's target
-    block.
+    Spark namespaces use Workspace and Lakehouse display names, not IDs.
     """
 
     workspace: str
@@ -48,14 +42,10 @@ class FabricSparkTarget:
 
     @property
     def item(self) -> str:
-        """The Lakehouse's name, which is what a message calls this."""
-
         return self.lakehouse
 
     @property
     def namespace(self) -> tuple[str, str]:
-        """What sits above the schema: the workspace and the Lakehouse."""
-
         return (self.workspace, self.lakehouse)
 
     def qualified_schema(self, schema: str) -> str:
@@ -91,19 +81,10 @@ class FabricSparkTarget:
 
 
 def _checked(value: object, *, what: str) -> str:
-    """One name part, checked for what rendering here actually requires.
+    """Require a non-empty name part.
 
-    Only that it is a non-empty string. Every part is back-tick quoted by
-    :func:`identifier`, which doubles any back-tick, so a dot or a space inside
-    a name is unambiguous, and a Fabric workspace name may contain both.
-    Path-unsafe characters are refused where they matter, by
-    :func:`weaver.targets.validate_name`, before a name reaches this.
-
-    Fabric's own rule for a new Lakehouse is stricter still: begin with a
-    letter, then alphanumerics and underscores, up to 123 characters
-    (Microsoft 2026). It is not repeated here, because this names Lakehouses
-    that already exist and refusing to address one Fabric is serving would be
-    worse than rendering it.
+    Backtick quoting makes dots and spaces unambiguous. Creation-time and path
+    restrictions do not apply when addressing an existing Lakehouse.
     """
 
     if not isinstance(value, str):

@@ -16,8 +16,6 @@ _URL_MARKER = "://"
 
 @dataclass(frozen=True)
 class Location:
-    """One resolved location: a filesystem path or a URL."""
-
     value: str
 
     def __post_init__(self) -> None:
@@ -28,16 +26,8 @@ class Location:
         value = self.value.strip()
         if not value:
             raise IdentityError("location must not be empty")
-        # One separator, everywhere. A Windows caller reaches this with
-        # backslashes, since a filesystem root normalises through `Path` and
-        # `str()` of a `WindowsPath` uses them, while everything downstream
-        # treats "/" as the only separator: `join`, `name`, and the segment
-        # splitting in the Weaver document reader. Left alone, a repository read from a
-        # Windows checkout takes its whole path as its catalogue name.
-        #
-        # Safe against real names: "\" is rejected in object and schema names
-        # (see targets._ILLEGAL_IN_NAME), so a backslash here is always a
-        # separator. URLs never carry one either.
+        # Downstream readers split only on "/". Backslashes cannot occur in
+        # object or schema names, so Windows path separators are safe to normalise.
         value = value.replace("\\", "/")
         if len(value) > 1:
             value = value.rstrip("/")
@@ -59,7 +49,7 @@ class Location:
         return Path(self.value)
 
     def join(self, *parts: str) -> "Location":
-        """Append path segments. Always a string join, never ``Path``."""
+        """Append segments without applying filesystem semantics to URLs."""
 
         joined = self.value
         for part in parts:
@@ -76,8 +66,6 @@ class Location:
 
     @property
     def name(self) -> str:
-        """The final segment."""
-
         return self.value.rstrip("/").rsplit("/", 1)[-1]
 
     def __str__(self) -> str:
@@ -86,43 +74,22 @@ class Location:
 
 @dataclass(frozen=True)
 class LakehouseSparkLocation:
-    """One destination Lakehouse's physical roots, resolved once.
+    """Explicit roots let one Spark session address multiple Lakehouses.
 
-    A Spark session is attached to some Lakehouse, because Fabric creates one
-    against a Lakehouse. Which one carries no meaning: destination Lakehouses
-    are reached through explicit roots instead, and never by making the session
-    point somewhere else.
-
-    That is what lets one session build several Lakehouses: switching the
-    current catalogue between targets would make two destinations sharing a
-    schema name indistinguishable.
-
-    Roots are plain strings rather than :class:`Location` values because this is
-    what Spark addresses: an ``abfss://`` URL.
-
-    A resolved location is never carried in a build bundle. It embeds workspace
-    and item ids, which the installer resolves for itself, so a bundle names the
-    item and lets resolution answer where it is (how-does-build-work §15).
+    Roots remain strings because Spark addresses them as ``abfss://`` URLs.
     """
 
-    #: The Lakehouse this resolves, by its logical name.
     item: str
     tables_root: str
     files_root: str
 
     def schema_root(self, schema: str) -> str:
-        """Where a schema's managed tables live."""
-
         return f"{self.tables_root.rstrip('/')}/{_segment(schema)}"
 
     def table_path(self, schema: str, name: str) -> str:
-        """Where one managed Delta table lives."""
-
         return f"{self.schema_root(schema)}/{_segment(name)}"
 
     def folder_path(self, schema: str, name: str) -> str:
-        """Where one managed folder lives, under the Files area."""
-
         return f"{self.files_root.rstrip('/')}/{_segment(schema)}/{_segment(name)}"
 
     def __str__(self) -> str:
@@ -130,11 +97,7 @@ class LakehouseSparkLocation:
 
 
 def _segment(value: str) -> str:
-    """One path segment, checked rather than trusted.
-
-    These strings are concatenated into paths Spark writes through, so a segment
-    that escaped its parent would write outside the Lakehouse it names.
-    """
+    """Reject segments that could escape the Lakehouse root."""
 
     segment = value.strip().strip("/")
     if not segment or segment in (".", ".."):

@@ -19,8 +19,6 @@ def _iso(value: datetime | None) -> str | None:
 
 @dataclass(frozen=True)
 class ActionResult:
-    """The outcome of one action."""
-
     action_id: str
     resource_node_id: str | None
     target_id: str
@@ -32,8 +30,7 @@ class ActionResult:
     error_type: str | None = None
     error_message: str | None = None
     details: dict[str, Any] | None = None
-    #: The authored repository file this action came from, where it has one, so
-    #: a failure can name the file to open rather than the artefact it became.
+    #: Authored repository file to report when the action fails.
     source_path: str | None = None
 
     def to_mapping(self) -> dict[str, Any]:

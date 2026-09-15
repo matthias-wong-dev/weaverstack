@@ -163,7 +163,7 @@ def test_schema_underscore_itself_belongs_to_weaver(tmp_path):
 def test_a_misnamed_object_file_is_an_error_not_quietly_demoted(tmp_path):
     # No leading underscore, so it is judged an object file on its suffix and its
     # stem is then reported as wrong. Demoting it to support would hide a typo.
-    with pytest.raises(DiscoveryError, match="separates schema and object"):
+    with pytest.raises(DiscoveryError, match="must be Schema__Object.py"):
         _repo(tmp_path, {"Sales.Order.py": "class X: pass\n"}, schemas=("Sales",))
 
 

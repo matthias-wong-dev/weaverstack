@@ -166,19 +166,19 @@ def test_unbind_preserves_the_catalogue_and_names_the_claims():
 
 @weaver_test()
 def test_unbind_without_a_catalogue_is_refused_before_anything_is_emptied():
-    with pytest.raises(CommandError, match="resolved none"):
+    with pytest.raises(CommandError, match="requires a catalogue"):
         _plan("Lakehouse/Landing", catalogue=None, unbind=True)
 
 
 @weaver_test()
 def test_unbind_naming_the_catalogue_itself_is_refused():
-    with pytest.raises(CommandError, match="also names it as a target"):
+    with pytest.raises(CommandError, match="cannot also be a target"):
         _plan("Warehouse/Weaver", unbind=True)
 
 
 @weaver_test()
 def test_unbind_with_no_target_selection_is_refused():
-    with pytest.raises(CommandError, match="needs them named"):
+    with pytest.raises(CommandError, match="requires named targets"):
         _plan(unbind=True)
 
 
@@ -196,21 +196,21 @@ UNBIND_ROUTES = ({"unbind": True}, {"catalogue_action": UNBIND})
 def test_unbind_never_includes_the_resolved_catalogue_as_a_target(route):
     """Emptying a catalogue and preserving it are two different plans."""
 
-    with pytest.raises(CommandError, match="also names it as a target"):
+    with pytest.raises(CommandError, match="cannot also be a target"):
         _plan("Warehouse/Weaver", **route)
 
 
 @pytest.mark.parametrize("route", UNBIND_ROUTES, ids=("flag", "named"))
 @weaver_test()
 def test_unbind_needs_a_resolved_catalogue(route):
-    with pytest.raises(CommandError, match="resolved none"):
+    with pytest.raises(CommandError, match="requires a catalogue"):
         _plan("Lakehouse/Landing", catalogue=None, **route)
 
 
 @pytest.mark.parametrize("route", UNBIND_ROUTES, ids=("flag", "named"))
 @weaver_test()
 def test_unbind_needs_named_targets(route):
-    with pytest.raises(CommandError, match="needs them named"):
+    with pytest.raises(CommandError, match="requires named targets"):
         _plan(**route)
 
 
@@ -236,13 +236,13 @@ def test_leave_over_a_resolved_catalogue_is_refused():
     that are gone.
     """
 
-    with pytest.raises(CommandError, match="no catalogue resolved"):
+    with pytest.raises(CommandError, match="requires no resolved catalogue"):
         _plan(catalogue_action=LEAVE)
 
 
 @weaver_test()
 def test_leave_over_a_resolved_catalogue_is_refused_with_targets_too():
-    with pytest.raises(CommandError, match="no catalogue resolved"):
+    with pytest.raises(CommandError, match="requires no resolved catalogue"):
         _plan("Lakehouse/Landing", catalogue_action=LEAVE)
 
 
@@ -262,7 +262,7 @@ def test_leave_discovers_no_estate_before_it_is_refused(monkeypatch):
         lambda *_a, **_k: pytest.fail("a refused plan read the catalogue"),
     )
 
-    with pytest.raises(CommandError, match="no catalogue resolved"):
+    with pytest.raises(CommandError, match="requires no resolved catalogue"):
         _plan(catalogue_action=LEAVE)
 
 
@@ -450,7 +450,7 @@ def test_an_unscoped_wipe_reads_installations_and_not_configuration(
 
 @weaver_test()
 def test_a_wipe_with_no_targets_and_no_catalogue_says_what_it_needs():
-    with pytest.raises(CommandError, match="needs targets or a Weaver catalogue"):
+    with pytest.raises(CommandError, match="needs named targets or a Weaver catalogue"):
         plan_wipe(workspace="Analytics", session=_session())
 
 
@@ -512,7 +512,7 @@ def test_a_planning_argument_beside_a_plan_is_refused(given):
     plan = _plan("Warehouse/Curated")
     targets = given.pop("targets", ())
 
-    with pytest.raises(CommandError, match="a settled plan or the arguments"):
+    with pytest.raises(CommandError, match="a settled plan or planning arguments"):
         public_wipe(targets, plan=plan, session=_session(), **given)
 
 

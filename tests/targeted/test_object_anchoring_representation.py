@@ -90,7 +90,7 @@ def test_a_freestanding_object_has_no_place_in_the_catalogue(lakehouse):
     assert table.installed is None
     with pytest.raises(LoadError) as raised:
         table.bookmark()
-    assert "cannot read its bookmark or record one" in str(raised.value)
+    assert "not anchored to the Weaver catalogue" in str(raised.value)
 
 
 @weaver_test()
@@ -114,9 +114,7 @@ def test_anchoring_resolves_the_identity_at_construction(lakehouse):
     with pytest.raises(ConfigError) as raised:
         DWG__Order(object(), lakehouse=lakehouse).with_catalogue(never("DWG.Customer"))
 
-    assert "not an object the Weaver catalogue records as installed" in str(
-        raised.value
-    )
+    assert "not recorded as an installed object" in str(raised.value)
 
 
 @weaver_test()
@@ -182,7 +180,7 @@ def test_anchoring_by_name_outside_a_fabric_session_says_so(lakehouse):
     with pytest.raises(ConfigError) as raised:
         DWG__Customer(object(), lakehouse=lakehouse, catalogue="Warehouse/Weaver")
 
-    assert "not in one" in str(raised.value)
+    assert "outside a Fabric session" in str(raised.value)
     assert "weaver load" in str(raised.value)
 
 
@@ -480,7 +478,7 @@ def test_a_freestanding_object_does_not_load(monkeypatch, lakehouse):
     with pytest.raises(LoadError) as raised:
         _loaded(monkeypatch, table)
 
-    assert "cannot read its bookmark or record one" in str(raised.value)
+    assert "not anchored to the Weaver catalogue" in str(raised.value)
     assert "catalogue=" in str(raised.value)
 
 

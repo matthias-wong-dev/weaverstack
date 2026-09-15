@@ -43,10 +43,8 @@ class SparkSqlBatchExecutor:
             raise InstallError(
                 f"spark_sql_batch action {action.id!r} must contain SQL strings"
             )
-        # The build_datetime first: it is scoped to this installation rather than to a
-        # destination, and ``expand`` rejects every token it does not itself
-        # resolve, so one left behind here would be reported as an unresolvable
-        # name instead of reaching the engine.
+        # The publication instant belongs to this installation, not a target, and
+        # must be substituted before target expansion rejects unknown tokens.
         resolved = [
             substitute_build_datetime(statement.strip(), context.build_datetime)
             for statement in statements

@@ -1,9 +1,4 @@
-"""Generate a self-contained T-SQL build script for a Warehouse object.
-
-The script materialises query shape, validates metadata, and creates the main
-table in one server-side execution. Declared and inferred schemas share the
-same shape validation path.
-"""
+"""Generate a self-contained T-SQL build script for a Warehouse object."""
 
 from __future__ import annotations
 
@@ -28,18 +23,11 @@ from .tsql_program import parse_tsql_program, validate_query_contract
 TYPE_MAPPING_PATH = Path(__file__).resolve().parent / "warehouse_type_mapping.yml"
 
 
-# --- entry points -----------------------------------------------------------
-
-
 def generate_tsql_table_script(document: SesDocument, body: str) -> str:
-    """A self-contained T-SQL script that builds ``document``'s main table.
+    """Generate a script that builds the main table from its staging-query shape.
 
-    The table's shape comes from the staging query and only from it. A body that
-    also names the keys to delete describes two things, what the object holds and
-    which rows are leaving, and only the first is the table. The
-    second is still materialised, but into a temp table of its own, so the build
-    can say now that it names the primary key and nothing else rather than
-    leaving the load to discover it.
+    A delete query is materialised separately and validated against the primary
+    key; it never contributes to table shape.
     """
 
     mapping = _load_type_mapping()
@@ -91,21 +79,13 @@ def _materialise_shapes(
     *,
     what: str,
 ) -> str:
-    """The whole body in shape-only form, each query diverted to its temp table.
+    """Divert each result query in the shape-only body to its temp table.
 
-    Guarded first and re-read afterwards, because guarding rewrites the text:
-    the spans are recomputed over what will actually run, so the ``INTO`` lands
-    in the query the server will see rather than in the one the author wrote.
+    Guarding changes offsets, so spans are recomputed afterwards. Insertions run
+    from the later query backwards so earlier offsets remain valid.
 
-    Later query first. Inserting text moves everything after it, and going
-    backwards means no offset needs adjusting for an edit that has already
-    happened.
-
-    **The guard reaches only what it can see.** A body whose setup builds its
-    working table through ``EXEC`` or ``sp_executesql`` runs that setup for
-    real, because the alternative is reading the SQL inside a string literal,
-    which Weaver does not do. Shape-only is a promise about the queries Weaver
-    interprets, not about statements it passes on.
+    Dynamic SQL inside ``EXEC`` or ``sp_executesql`` remains opaque and runs
+    unchanged; shape-only guards apply only to parsed queries.
     """
 
     guarded = insert_where_one_eq_zero(body)
@@ -114,9 +94,8 @@ def _materialise_shapes(
     )
     if len(spans) != query_count:
         raise DiscoveryError(
-            f"{what}: the shape-only form of this body has {len(spans)} result "
-            f"queries where the body has {query_count}. The build and the load "
-            "would stage different statements, so neither is generated."
+            f"{what}: shape-only conversion changes the result-query count from "
+            f"{query_count} to {len(spans)}, so the table cannot be generated."
         )
 
     shaped = guarded
@@ -134,16 +113,9 @@ def _drop_temp_tables(*names: str | None) -> str:
 
 
 def _render_delete_shape_validation(document: SesDocument, temp_table: str) -> str:
-    """Refuse a delete query that does not name exactly the primary key.
+    """Validate that a delete query returns exactly the primary key.
 
-    The load deletes target rows by key, so a delete query producing anything
-    else is either missing part of the key, in which case it retires rows it never
-    named, or carrying columns that mean nothing to a deletion. Both
-    are authoring mistakes, and both are cheaper to state here than to discover
-    in a load that has already begun.
-
-    Case-exact, under a binary collation, like every other column-name contract
-    in a Weaver build.
+    Column names are compared case-exactly under a binary collation.
     """
 
     columns = _leading_comma_list(
@@ -167,15 +139,10 @@ def _render_delete_shape_validation(document: SesDocument, temp_table: str) -> s
 
 
 def generate_tsql_view_script(document: SesDocument, body: str) -> str:
-    """A strict ``CREATE VIEW`` over the validated query body."""
-
     return (
         f"create view {_quote_multipart(document.qualified)} as\n"
         f"{_normalise_view_body(body)}\n"
     )
-
-
-# --- inferred path ----------------------------------------------------------
 
 
 def _render_inferred_create(
@@ -203,14 +170,10 @@ def _render_inferred_create(
 
 
 def _render_identity_union(column) -> str:
-    """A leading ``all_columns`` entry (ordinal 0) for the identity column."""
-
     if column is None:
         return ""
     definition = _column_definition(column)
-    # This is the leading SELECT of the all_columns CTE, so it must name both
-    # columns. A CTE takes its column names from its first SELECT, and an unnamed
-    # literal there is a T-SQL error ("No column name was specified").
+    # The leading SELECT defines both CTE column names.
     return (
         f"    select 0 as column_ordinal, {_sql_literal(definition)} as column_definition\n"
         "    union all\n\n"
@@ -218,11 +181,7 @@ def _render_identity_union(column) -> str:
 
 
 def _render_signature_union(column) -> str:
-    """A trailing ``all_columns`` entry for the row-signature column.
-
-    Ordinal 1000004, after the audit columns the template names directly, so a
-    keyed table's physical shape is business columns then Weaver's own.
-    """
+    """Append the row signature after the template's audit columns."""
 
     if column is None:
         return ""
@@ -233,11 +192,7 @@ def _render_signature_union(column) -> str:
 
 
 def _render_identity_guard(column, temp_literal: str) -> str:
-    """Refuse an inferred query that already produces the identity column's name.
-
-    The identity column is Weaver's own; if the query also produces it the create
-    would carry two same-named columns. Checked case-insensitively, like Spark.
-    """
+    """Guard the managed identity name case-insensitively, as Spark does."""
 
     if column is None:
         return ""
@@ -245,11 +200,7 @@ def _render_identity_guard(column, temp_literal: str) -> str:
 
 
 def _render_internal_guard(column, temp_literal: str, what: str | None = None) -> str:
-    """Refuse an inferred query that produces one of Weaver's own column names.
-
-    Two same-named columns would otherwise reach the create. Checked
-    case-insensitively, like Spark.
-    """
+    """Guard a managed column name case-insensitively, as Spark does."""
 
     if column is None:
         return ""
@@ -264,9 +215,6 @@ def _render_internal_guard(column, temp_literal: str, what: str | None = None) -
         f"    throw 51006, {_sql_literal(f'{subject} collides with a query column')}, 1;\n"
         "end;\n"
     )
-
-
-# --- declared path ----------------------------------------------------------
 
 
 def _render_declared_create(document: SesDocument, temp_table: str) -> str:
@@ -285,8 +233,6 @@ def _render_declared_create(document: SesDocument, temp_table: str) -> str:
 
 
 def _render_declared_definitions(document: SesDocument) -> str:
-    """Static column definitions: identity, declared business, then audit columns."""
-
     lines = [_column_definition(column) for column in document.effective_schema]
     return _leading_comma_list(lines, first_indent="        ", comma_indent="      ")
 
@@ -316,21 +262,11 @@ def _render_declared_pk(document: SesDocument, target: str) -> str:
     )
 
 
-# --- shared rendering -------------------------------------------------------
-
-
 def _column_definition(column) -> str:
-    """One column's physical definition, identity included.
+    """Render a column definition, including a bare Fabric identity clause.
 
-    The identity column is the only one whose type is not simply what it
-    declares: the Warehouse generates its values, so the definition carries
-    ``identity`` and a load never names the column in an insert. Nullability
-    still comes from the column, as it does for every other definition here.
-
-    Bare ``identity``, with no seed and increment: Fabric does not let either be
-    chosen and refuses the parenthesised form even where it would spell Fabric's
-    own behaviour. So the values a load sees are the engine's to decide, and
-    nothing may assume they start at one or rise by one.
+    Fabric does not accept a seed or increment. Identity values are therefore
+    engine-defined and must not be assumed to start at one or increase by one.
     """
 
     identity = " identity" if column.is_identity else ""
@@ -353,13 +289,7 @@ def _render_metadata_validation(document: SesDocument, temp_literal: str) -> str
 
 
 def _render_identity_available(identity: str | None) -> str:
-    """Make the identity column an available column for the metadata check.
-
-    The identity is Weaver's own column, not one the query produces, so the
-    primary key may name it, and the query-shape temp table does not contain it.
-    Union it into the ``described`` set so a primary key on the surrogate resolves
-    (mirrors the Python validator's available-set in ``weaver.ses.columns``).
-    """
+    """Include the managed identity in metadata-reference validation."""
 
     if identity is None:
         return ""
@@ -403,8 +333,6 @@ def _render_primary_key_cte(primary_key: tuple[str, ...]) -> str:
 
 
 def _render_name_only_cte(names: tuple[str, ...]) -> str:
-    """A single-column ``(column_name)`` CTE, empty when there are no names."""
-
     if not names:
         return "    select convert(nvarchar(128), null) as column_name\n    where 1 = 0"
     values = _leading_comma_list(
@@ -418,9 +346,6 @@ def _render_name_only_cte(names: tuple[str, ...]) -> str:
         f"{values}\n"
         "    ) as names(column_name)"
     )
-
-
-# --- type mapping (ported) --------------------------------------------------
 
 
 def _load_type_mapping() -> dict:
@@ -494,9 +419,6 @@ def _length_expression(source_type: str, value) -> str:
             "end"
         )
     return f"N'{value}'"
-
-
-# --- identifiers and literals -----------------------------------------------
 
 
 def _normalise_view_body(body: str) -> str:

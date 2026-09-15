@@ -1,10 +1,10 @@
-"""The installed validation estate, and the order it runs in.
+"""Select installed validations and order their execution.
 
 Selection from the installed managed graph, whose validation nodes come from
 ``_.TestDictionary`` and whose runnable artefacts come from ``_.Registry``.
 
-A validation dispatches a compiled procedure or module that reports counts. It is
-selected by name and by item, and it is never ordered against another validation.
+Validations are selected by name and item. They are not ordered against one
+another. Each dispatches an installed procedure or module that reports counts.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class InstalledValidation:
-    """One logical validation, and the primitive that runs it.
+    """A logical validation and its installed primitive.
 
     ``logical`` is what the estate calls it and what a caller names; ``artefact``
     is where the runnable thing is. Both are kept because the two questions have
@@ -51,8 +51,6 @@ class InstalledValidation:
 
     @classmethod
     def of(cls, node: InstalledNode) -> "InstalledValidation":
-        """One validation node of the installed graph, as dispatch reads it."""
-
         return cls(
             logical=node.identity,
             kind=node.artefact_kind,
@@ -76,7 +74,7 @@ class InstalledValidation:
         return self.logical.object_id.qualified
 
     def require_installed(self) -> None:
-        """Refuse a declared validation whose primitive is not there.
+        """Refuse a declared validation whose primitive is not registered.
 
         Reported rather than skipped, and reported as an execution failure
         rather than as a pass. A Test that could not be run is not a Test that
@@ -86,18 +84,15 @@ class InstalledValidation:
         if self.is_installed:
             return
         raise ValidationError(
-            f"{self.logical} is declared in {TEST_DICTIONARY.name} but its "
+            f"{self.logical} is declared in {TEST_DICTIONARY.name}, but its "
             f"installed primitive {self.artefact} is not registered. Build the "
             "item before running its validation"
         )
 
     def to_mapping(self) -> dict:
-        """Everything a dispatcher needs, as plain data.
+        """Return the settled dispatch contract as plain data.
 
-        A validation crosses the host boundary as the description the estate
-        gave of it, which is what it is here: a Registry row saying where the
-        primitive lives and what it compares. Nothing is derived on the far side
-        that was not derived here.
+        Dispatch uses this mapping without deriving additional state.
         """
 
         return {
@@ -146,8 +141,6 @@ class ValidationEstate:
 
     @classmethod
     def of(cls, dag) -> "ValidationEstate":
-        """The validation nodes of one installed graph, keyed by logical identity."""
-
         return cls(
             validations=MappingProxyType(
                 {
@@ -160,8 +153,6 @@ class ValidationEstate:
     def for_items(
         self, items: Sequence[WeaverItemId]
     ) -> tuple[InstalledValidation, ...]:
-        """Every validation the named items own, in ID order."""
-
         wanted = set(items)
         return tuple(
             validation
@@ -172,11 +163,7 @@ class ValidationEstate:
         )
 
     def named(self, name: str, items: Sequence[WeaverItemId]) -> InstalledValidation:
-        """One validation by its ``Schema.Object``, within the named items.
-
-        A miss is an error rather than an empty run: reporting nothing would
-        answer a question nobody asked.
-        """
+        """Resolve only within the selected items; never widen the scope for a match."""
 
         candidates = [
             validation
@@ -189,7 +176,7 @@ class ValidationEstate:
             )
             raise ValidationError(
                 f"no validation named {name!r} is installed in the requested "
-                f"item(s). Installed: {known or 'none'}"
+                f"items. Installed: {known or 'none'}"
             )
         if len(candidates) > 1:
             found = ", ".join(str(validation.logical) for validation in candidates)

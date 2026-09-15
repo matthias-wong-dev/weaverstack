@@ -105,7 +105,7 @@ def test_unique_keys_must_not_repeat_a_key():
 
 @weaver_test()
 def test_a_unique_key_must_not_repeat_the_primary_key():
-    with pytest.raises(MetadataError, match="already unique"):
+    with pytest.raises(MetadataError, match="repeats Primary key"):
         parse(TABLE, "\nUnique keys:\n  - Order id\n")
 
 

@@ -16,30 +16,21 @@ from .sql_shaping import (
 from .tsql_program import parse_tsql_program
 from .validation_program import validate_validation_contract
 
-#: The diagnostic columns, ahead of the validation's own. Snake case and
-#: reserved, matching what :mod:`weaver.runtime.test_compare` adds on the Spark
-#: side. One vocabulary, whichever engine produced the rows.
+#: Match the reserved Spark diagnostic columns.
 SIDE_COLUMN = "_weaver_side"
 SK_COLUMN = "_weaver_sk"
 EXPECTED = "expected"
 ACTUAL = "actual"
 
-#: The output parameters each kind exposes, and their T-SQL types. One
-#: definition, read from both ends: the generator writes the signature from it
-#: and the caller declares locals to match, so a parameter cannot be added to
-#: one and forgotten in the other.
+#: Shared by generated signatures and caller-local declarations.
 TEST_PARAMETERS = (("missing_count", "bigint"), ("unexpected_count", "bigint"))
 ASSUMPTION_PARAMETERS = (("violation_count", "bigint"),)
 RESULT_PARAMETERS = {TEST: TEST_PARAMETERS, ASSUMPTION: ASSUMPTION_PARAMETERS}
 
-#: The flag every validation procedure carries, defaulting to returning the
-#: diagnostics. A person running one by hand needs the evidence; orchestration
-#: is the caller that has to ask for silence, and it knows to.
+#: Direct calls return diagnostics unless orchestration suppresses them.
 SUPPRESS_PARAMETER = "suppress_result_set"
 
-#: Banners marking where the author's own code sits in the generated procedure,
-#: so authored text is distinguishable from what Weaver added. The same two
-#: words a generated load procedure uses.
+#: Keep authored SQL identifiable inside generated procedures.
 SETUP_BANNER = "/*-- Pre-processing --*/"
 POSTPROCESSING_BANNER = "/*-- Post-processing --*/"
 
@@ -47,11 +38,9 @@ POSTPROCESSING_BANNER = "/*-- Post-processing --*/"
 def generate_tsql_validation_script(
     document: SesDocument, body: str, *, procedure_name: str
 ) -> str:
-    """The installable procedure for one Warehouse validation."""
 
     core = validation_body(document, body)
-    # The counts first and the flag last, because that is the order the
-    # meets them in: what the validation found, then how much of it to return.
+    # Result counts precede the suppression flag in the public procedure contract.
     declared = [
         f"@{name} {type_name} = null output"
         for name, type_name in RESULT_PARAMETERS[document.kind]
@@ -73,11 +62,9 @@ def generate_tsql_validation_script(
 
 
 def generate_tsql_validation_batch(document: SesDocument, body: str) -> str:
-    """The same body, runnable directly, without installing anything.
+    """Render the validation body as a directly runnable batch.
 
-    What ``weaver test --file`` executes. The locals stand in for the
-    procedure's output parameters and are projected at the end, so a file run
-    gives the same counts from the same SQL a build installs.
+    Locals replace procedure output parameters and are projected at the end.
     """
 
     parameters = RESULT_PARAMETERS[document.kind]
@@ -96,12 +83,7 @@ def generate_tsql_validation_batch(document: SesDocument, body: str) -> str:
 
 
 def validation_body(document: SesDocument, body: str) -> str:
-    """The core SQL both the procedure and the direct batch run.
-
-    Everything between ``set nocount on`` and the procedure's ``end``: the
-    author's setup, their contract queries captured into temp tables, the
-    comparison, the counts, and the diagnostics behind the suppression flag.
-    """
+    """Render the SQL shared by installed and direct validation runs."""
 
     what = document.qualified
     program = parse_tsql_program(body, what=what, error=DiscoveryError)
@@ -111,9 +93,6 @@ def validation_body(document: SesDocument, body: str) -> str:
     if document.kind == ASSUMPTION:
         return _assumption_body(document, body)
     return _test_body(document, body)
-
-
-# --- Assumption ---------------------------------------------------------------
 
 
 def _assumption_body(document: SesDocument, body: str) -> str:
@@ -136,15 +115,10 @@ def _assumption_body(document: SesDocument, body: str) -> str:
     )
 
 
-# --- Test ---------------------------------------------------------------------
-
-
 def _test_body(document: SesDocument, body: str) -> str:
-    """Capture both sides, difference them both ways, then correlate.
+    """Materialise both sides before computing either difference.
 
-    The same order the Spark comparison uses: both relations are materialised
-    first, so the two ``EXCEPT``s read one snapshot of each rather than
-    differencing data that moved between two runs of the author's queries.
+    Both ``EXCEPT`` operations therefore compare the same snapshots.
     """
 
     qualified = document.qualified
@@ -180,11 +154,7 @@ def _test_body(document: SesDocument, body: str) -> str:
 
 
 def _difference(into: str, left: str, right: str) -> str:
-    """One side of the symmetric difference, as a set.
-
-    A derived table rather than ``select … into … except …``, which avoids the
-    placement rules for ``INTO`` inside a set operation.
-    """
+    """Use a derived table to avoid ``INTO`` placement inside a set operation."""
 
     return (
         f"select * into {into} from (\n"
@@ -198,11 +168,7 @@ def _difference(into: str, left: str, right: str) -> str:
 def _diagnostics(
     document: SesDocument, missing: str, unexpected: str, qualified: str
 ) -> str:
-    """The discrepancy rows, keyed so the two sides pair.
-
-    Returned only when the caller needs them, because they may be large and may
-    carry sensitive business data.
-    """
+    """Render discrepancy rows only when the caller has not suppressed them."""
 
     if document.primary_key:
         return _correlated_diagnostics(document, missing, unexpected, qualified)
@@ -212,12 +178,10 @@ def _diagnostics(
 def _correlated_diagnostics(
     document: SesDocument, missing: str, unexpected: str, qualified: str
 ) -> str:
-    """Rank the distinct key values once, then join both sides to them.
+    """Rank distinct keys separately from each side's complete rows.
 
-    Ranking over a union of the rows does not work: they are projected with
-    ``*``, since Weaver does not know a Test's columns, so a ``_weaver_side``
-    added to the union would appear twice. Ranking the keys needs only the
-    declared key names and leaves ``d.*`` to carry the Test's own columns.
+    Weaver does not know the Test's columns, so ranking a union of complete rows
+    would duplicate the added diagnostic column.
     """
 
     keys = temp_table_name("#weaver_keys", qualified)
@@ -252,11 +216,9 @@ def _correlated_diagnostics(
 
 
 def _unpaired_diagnostics(missing: str, unexpected: str) -> str:
-    """No key, so nothing is paired and every row is keyed on its own.
+    """Give each unpaired row a unique diagnostic key.
 
-    Each side is numbered within itself and the actual side offset past the
-    known missing count: distinct keys throughout, and no claim that two rows
-    describe one entity.
+    Actual-side numbering starts after the missing count.
     """
 
     numbered = "row_number() over (order by (select null))"
@@ -273,15 +235,10 @@ def _unpaired_diagnostics(missing: str, unexpected: str) -> str:
     )
 
 
-# --- guards, which are execution failures rather than evidence -----------------
-
-
 def _shape_guard(expected: str, actual: str, qualified: str) -> str:
-    """Two sides that cannot be compared are a broken Test, not a failing one.
+    """Treat incompatible relation shapes as execution failure, not evidence.
 
-    ``EXCEPT`` would report it as a query-plan error, while the mistake is about
-    two relations the author believes are the same shape. The column counts come
-    from ``tempdb.sys.columns``, once both sides are materialised.
+    Compare column counts after both sides are materialised.
     """
 
     return (
@@ -303,11 +260,7 @@ def _shape_guard(expected: str, actual: str, qualified: str) -> str:
 
 
 def _key_guard(table: str, side: str, document: SesDocument, qualified: str) -> str:
-    """A declared key that does not identify rows cannot correlate them.
-
-    Blank, null and duplicate keys are refused on the same terms a load refuses
-    them: a Test whose key repeats would pair rows arbitrarily.
-    """
+    """Reject blank, null or duplicate keys that cannot correlate rows."""
 
     columns = document.primary_key
     blank = " or ".join(
@@ -332,20 +285,11 @@ def _key_guard(table: str, side: str, document: SesDocument, qualified: str) -> 
     )
 
 
-# --- capturing the authored queries -------------------------------------------
-
-
 def _capture_contract_queries(body: str, into: tuple[str, ...]) -> str:
-    """The authored body, with each contract query diverted into a temp table.
+    """Divert contract queries while preserving all other source text.
 
-    A single pass over the original text, so everything other than the contract
-    queries travels verbatim and in place. Setup, comments, formatting,
-    separators. That is why this splices offsets rather than reassembling
-    statements.
-
-    The ``INTO`` is placed by the same offset-exact transform the shape-only
-    build uses, so a CTE gets it on the body ``SELECT`` and a set operation on
-    its first branch.
+    Offset splicing keeps setup, comments, formatting and separators unchanged.
+    The shared ``INTO`` transform handles CTEs and set operations.
     """
 
     contract = [span for span in query_spans(body) if not selects_into(body, span)]

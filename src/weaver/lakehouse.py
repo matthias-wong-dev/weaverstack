@@ -1,8 +1,4 @@
-"""Resolved Lakehouse destinations for authored objects.
-
-Notebook code can infer an attached default Lakehouse. Orchestration resolves an
-explicit destination so a session can address multiple Lakehouses.
-"""
+"""Resolved Lakehouse destinations for authored objects."""
 
 from __future__ import annotations
 
@@ -40,14 +36,10 @@ _CONTEXT_LAKEHOUSE_NAME_KEYS = ("defaultLakehouseName",)
 
 @dataclass(frozen=True)
 class Lakehouse:
-    """One destination Lakehouse, resolved once, as authored code reaches it.
+    """A resolved destination Lakehouse for authored code.
 
-    ``destination`` is how a statement names this Lakehouse, needed only by
-    objects with no path of their own, since a view exists as a catalogue name and
-    nothing else. It has no default, because a bare ``Schema.Object`` resolves
-    through whatever the session is attached to. The one Lakehouse that may be
-    named that way is the session's own attachment, via
-    :func:`default_lakehouse`.
+    ``destination`` is required to name catalogue-only objects such as views.
+    Only :func:`default_lakehouse` may use the session's attached catalogue.
     """
 
     name: str
@@ -63,55 +55,29 @@ class Lakehouse:
 
     @property
     def location(self) -> LakehouseSparkLocation:
-        """The two areas this Lakehouse presents, joined by one arithmetic."""
-
         return _areas(self.name, self.spark_root)
 
     def table_path(self, schema: str, name: str) -> str:
-        """Where one table's Delta files live.
-
-        The Spark root, because Spark reads ``abfss://`` natively and a table is
-        only ever reached through it.
-        """
+        """Return the table's ``abfss://`` Delta path."""
 
         return self.location.table_path(schema, name)
 
     def files_root(self) -> str:
         """The ``Files`` area as Python can address it, resolved on use.
 
-        Two roots, because Spark takes ``abfss://`` while ``open()`` and
-        ``pathlib`` cannot parse a URL, and a Folder's authored code is ordinary
-        Python that writes files. Weaver mounts its own root and
-        returns the mount path; a write through it is a write to OneLake,
-        visible at once at the ``abfss://`` address.
-
-        Session-scoped and never to be stored: Fabric spells it
-        ``/synfs/notebook/<session id>/…``, valid only inside the session that
-        made it. Durable identity is ``spark_root``.
+        The returned mount path is session-scoped and must not be stored;
+        ``spark_root`` is the durable identity.
         """
 
         return _join(_mounted(self.name, self.spark_root), FILES_AREA)
 
     def folder_path(self, schema: str, name: str) -> Path:
-        """Where one folder object's files live, as Python addresses them.
-
-        A real :class:`pathlib.Path`, because a Folder's authored code globs,
-        opens and writes files: Weaver's mount of the resolved OneLake root, so
-        a write through it is a write to OneLake.
-
-        Session-scoped like :meth:`files_root`, and never to be stored.
-        """
+        """Return the folder's session-scoped :class:`pathlib.Path`."""
 
         return Path(_join(self.files_root(), schema, name))
 
     def folder_spark_path(self, schema: str, name: str) -> str:
-        """The same folder, as Spark addresses it.
-
-        What one object hands another when an engine does the reading. A table
-        reads a folder's files with ``spark.read``, which needs the ``abfss://``
-        form: given a mount path it resolves against its own default filesystem
-        and asks for a path that does not exist.
-        """
+        """Return the folder's ``abfss://`` path for Spark reads."""
 
         return self.location.folder_path(schema, name)
 
@@ -154,12 +120,7 @@ class AttachedLakehouse:
 
 
 def lakehouse_for(resolver: Any, item: ItemRef | str) -> Lakehouse:
-    """Resolve a Lakehouse by name, through a workspace resolver.
-
-    The orchestrator's path, and how a caller reaches a Lakehouse that is not
-    the attached default. Name resolution stays outside the authored object: an
-    object is given a resolved Lakehouse, never a name to look up.
-    """
+    """Resolve a named Lakehouse outside an authored object."""
 
     reference = ItemRef(item) if isinstance(item, str) else item
     return Lakehouse(
@@ -170,12 +131,7 @@ def lakehouse_for(resolver: Any, item: ItemRef | str) -> Lakehouse:
 
 
 def default_lakehouse(spark: Any) -> Lakehouse:
-    """The Lakehouse this Fabric session has attached, or fail saying so.
-
-    Only ever the default attachment. A session with none, or a host that is
-    not Fabric, raises rather than answering: a wrong answer would write a build
-    into whichever Lakehouse happened to be first.
-    """
+    """Return the Lakehouse attached to this Fabric session."""
 
     workspace, item, name = _attached_from_settings(spark)
     if not (workspace and item):
@@ -189,13 +145,13 @@ def default_lakehouse(spark: Any) -> Lakehouse:
     if not item:
         raise LoadError(
             "no Lakehouse is attached to this Spark session, so there is no "
-            "destination to infer. Attach a default Lakehouse to the notebook, or "
+            "destination to infer. Attach a Lakehouse to the notebook, or "
             "construct the object with lakehouse=<resolved Lakehouse>"
         )
     if not workspace:
         raise LoadError(
-            "this session reports an attached Lakehouse but no workspace, so its "
-            "storage root cannot be composed. Construct the object with "
+            "no workspace is available for the attached Lakehouse, so its OneLake address "
+            "is unavailable. Construct the object with "
             "lakehouse=<resolved Lakehouse>"
         )
     return Lakehouse(
@@ -237,17 +193,7 @@ MOUNT_OPTIONS = {"fileCacheTimeout": 0}
 
 @contextmanager
 def _quiet_mount():
-    """Swallow what ``fs.mount`` writes, and nothing else.
-
-    The mount writes a sentinel-wrapped JSON table to ``sys.stdout``, which a
-    Fabric notebook renders as a table of the mount it just made. Weaver mounts
-    for the side effect, so ``redirect_stdout`` is enough and covers a Livy
-    statement, where ``get_ipython()`` is None. IPython's capture also takes the
-    rich display channel, for a notebook that publishes there instead.
-
-    ``stderr`` stays open: a mount that failed for a real reason reports there,
-    and so does :meth:`weaver.sessions.base.Session.warn`.
-    """
+    """Suppress mount output while leaving errors and warnings visible."""
 
     try:
         from IPython.utils.capture import capture_output
@@ -261,16 +207,7 @@ def _quiet_mount():
 
 
 def _mounted(name: str, spark_root: str) -> str:
-    """Mount this Lakehouse's OneLake root, or reuse the mount already made.
-
-    A mount turns the remote root into a local address; writes through it go
-    straight to OneLake, so nothing is copied or flushed. Scoped to the job,
-    which is why it is resolved on use rather than carried on the
-    :class:`Lakehouse`.
-
-    The root is one Weaver resolved by name, so this works detached, unlike the
-    ``/lakehouse/default`` attachment.
-    """
+    """Return a session mount for this resolved OneLake root."""
 
     cached = _MOUNTS.get(spark_root)
     if cached:
@@ -279,10 +216,8 @@ def _mounted(name: str, spark_root: str) -> str:
     utils = _notebook_utils()
     if utils is None:
         raise LoadError(
-            f"Lakehouse {name!r} is in OneLake, and reaching its Files area as a "
-            "filesystem needs the Fabric notebook utilities, which are not "
-            "available here. A Folder's authored code writes ordinary files, so "
-            "there is no way to address them from outside a Fabric session."
+            f"Lakehouse {name!r} Files are unavailable outside a Fabric session. "
+            "Run this Folder load in Fabric."
         )
 
     point = _MOUNT_POINT.format(item=_item_of(spark_root))
@@ -290,18 +225,16 @@ def _mounted(name: str, spark_root: str) -> str:
         with _quiet_mount():
             utils.fs.mount(spark_root, point, MOUNT_OPTIONS)
     except Exception:
-        # Already mounted, by us in a path that did not reach the cache or by the
-        # host itself. Mounting twice is an error, so the useful move is to ask
-        # where it landed and carry on.
+        # The host may already hold the mount even when this cache does not.
         pass
     try:
         local = utils.fs.getMountPath(point)
     except Exception as exc:
         raise LoadError(
-            f"Lakehouse {name!r} could not be mounted at {point!r}: {exc}"
+            f"Lakehouse {name!r} Files could not be mounted: {exc}"
         ) from exc
     if not local:
-        raise LoadError(f"Lakehouse {name!r} mounted at {point!r} reports no path")
+        raise LoadError(f"Lakehouse {name!r} mount returned no filesystem path")
     _MOUNTS[spark_root] = local
     return local
 
@@ -316,8 +249,6 @@ def _notebook_utils() -> Any:
 
 
 def _item_of(spark_root: str) -> str:
-    """The item id in an ``abfss://ws@host/item`` root, which the mount uses."""
-
     return spark_root.rstrip("/").rsplit("/", 1)[-1]
 
 
@@ -332,8 +263,6 @@ def _join(root: str, *parts: str) -> str:
 
 
 def _attached_from_settings(spark: Any) -> tuple[str, str, str]:
-    """What the Spark session's own settings say. Silent when it says nothing."""
-
     def setting(key: str) -> str:
         try:
             return _text(spark.conf.get(key, None))
@@ -348,8 +277,6 @@ def _attached_from_settings(spark: Any) -> tuple[str, str, str]:
 
 
 def _attached_from_runtime_context() -> tuple[str, str, str]:
-    """What the notebook runtime says. Silent when it is not present."""
-
     context: Any = None
     for module_name in ("notebookutils", "mssparkutils"):
         try:
@@ -385,12 +312,7 @@ def _text(value: Any) -> str:
 
 
 def _root(value: Any, *, what: str) -> str:
-    """A Lakehouse root is a OneLake address, because a Lakehouse is in OneLake.
-
-    Checked here so a path that looks like storage cannot stand in for
-    one: everything below assumes a mount is available for the Files area and an
-    ``abfss://`` URL is what Spark reads.
-    """
+    """Require the OneLake ``abfss://`` address used by Spark and mounts."""
 
     if not isinstance(value, str) or not value.strip():
         raise LoadError(f"a Lakehouse {what} must be a non-empty string, got {value!r}")
@@ -403,8 +325,6 @@ def _root(value: Any, *, what: str) -> str:
 
 
 def _areas(name: str, root: str) -> LakehouseSparkLocation:
-    """One root, split into the two areas a Lakehouse presents."""
-
     return LakehouseSparkLocation(
         item=name,
         tables_root=f"{root}/{TABLES_AREA}",

@@ -1,22 +1,7 @@
-"""Which rows one settled unit of work leaves in the catalogue.
+"""Build and write catalogue evidence for settled runtime work.
 
-.. code-block:: text
-
-    every settled node       _.Log                append
-    a load about an object   _.LoadStatus         merge on the object's identity
-    a load that executed     _.LoadStatistic      append
-    a clean load             _.Bookmark           merge, to the instant it began
-    a validation             _.TestStatus         merge on the validation's identity
-
-A blocked node has a status and no statistics: it did nothing, and a row of
-zeroes for it would read as a load that moved nothing. A node about no object at
-all, such as an endpoint refresh, has evidence and no state.
-
-A reload writes a Pending status and removes the bookmark row before the load
-runs. See :meth:`RunRecord.reset`.
-
-Row construction, writing and flushing stay three things. See
-``design/catalogue.md`` for the operational-state model these rows belong to.
+Blocked nodes have status but no statistics. Reload state is reset durably before
+execution, and row construction remains separate from writing and flushing.
 """
 
 from __future__ import annotations
@@ -48,7 +33,6 @@ from .result import RunError
 if TYPE_CHECKING:  # pragma: no cover - for type readers only
     from .result import RunNodeResult
 
-#: The task types a run records under.
 LOAD_TASK = "load"
 TEST_TASK = "test"
 
@@ -76,21 +60,13 @@ RESULT_FOR_STATUS = {
 
 
 def result_for(node, *, task_type: str = LOAD_TASK) -> str:
-    """How one settled node's outcome is spelled in the ``_`` schema.
-
-    Failed and Error part company differently for the two kinds of work, and the
-    generated ``_.Load`` and ``_.Test`` draw the same lines from
-    ``error_number()``. See the result vocabulary in ``design/catalogue.md``.
-    """
+    """Map a node outcome to the catalogue's frozen Result vocabulary."""
 
     status = node.status
     try:
         result = RESULT_FOR_STATUS[status]
     except KeyError:
-        raise RunError(
-            f"{status!r} has no place in the public Result vocabulary; add one "
-            "rather than letting a run write an unknown value"
-        ) from None
+        raise RunError(f"Cannot record unsupported status {status!r}") from None
     if result != FAILED or not getattr(node, "raised", False):
         return result
     if task_type == TEST_TASK:
@@ -102,7 +78,6 @@ def result_for(node, *, task_type: str = LOAD_TASK) -> str:
 
 
 def log_row(node, *, workflow_id: str, task_type: str) -> dict:
-    """The ``_.Log`` row one settled node produces."""
 
     target_type, target_name = _target_of(node)
     schema, name = _object_of(node)
@@ -125,11 +100,7 @@ def log_row(node, *, workflow_id: str, task_type: str) -> dict:
 
 
 def load_status_row(node, identity, *, workflow_id: str) -> dict:
-    """The ``_.LoadStatus`` row one settled load leaves behind.
-
-    Logical identity only: where the object is physically installed is the
-    Installation's to say.
-    """
+    """Build a LoadStatus row keyed by logical identity."""
 
     started, completed = _instants(node)
     return {
@@ -145,13 +116,10 @@ def load_status_row(node, identity, *, workflow_id: str) -> dict:
 def load_statistic_row(
     node, identity, *, workflow_id: str, reload: bool = False
 ) -> dict:
-    """The ``_.LoadStatistic`` row one executed load appends.
+    """Build statistics for an executed load.
 
-    The counts describe the target rather than the source, so ``rows_read`` need
-    not equal the sum of the others.
-
-    ``reload`` is the mode the caller asked for. A load that raised leaves no
-    result to read it from.
+    Counts describe the target, so ``rows_read`` need not equal their sum.
+    ``reload`` comes from the request because a raised load may have no result.
     """
 
     started, completed = _instants(node)
@@ -174,12 +142,7 @@ def load_statistic_row(
 
 
 def reset_load_status_row(identity, *, workflow_id: str, started) -> dict:
-    """The ``_.LoadStatus`` row a reload writes before it clears the target.
-
-    ``Pending`` is the vocabulary's "current state not yet established". The row
-    stays: it is the lifecycle state health reads, and an absent row states
-    nothing.
-    """
+    """Build the Pending status written before a reload clears its target."""
 
     return {
         **_identity(identity),
@@ -192,7 +155,6 @@ def reset_load_status_row(identity, *, workflow_id: str, started) -> dict:
 
 
 def test_status_row(node, identity, *, workflow_id: str) -> dict:
-    """The ``_.TestStatus`` row one settled validation leaves behind."""
 
     started, completed = _instants(node)
     return {
@@ -208,19 +170,15 @@ def test_status_row(node, identity, *, workflow_id: str) -> dict:
 
 
 def _identity(identity) -> dict:
-    """One installed object's four-part identity, as every table keys it."""
-
     return bookmark_key(identity)
 
 
 def bookmark_key(identity) -> dict:
-    """One ``_.Bookmark`` row's key, without its instant."""
 
     return bookmark_row(identity)
 
 
 def _test_type(node) -> str | None:
-    """Whether this validation is a Test or an Assumption, as stored."""
 
     from ..catalogue.tables import ROLE_ASSUMPTION, ROLE_TEST
     from ..declaration.metadata import ASSUMPTION, TEST
@@ -229,7 +187,6 @@ def _test_type(node) -> str | None:
 
 
 def _failure_count(node) -> int | None:
-    """How much a validation found, or None where it found nothing at all."""
 
     result = node.result
     if result is None or getattr(node, "raised", False):
@@ -250,12 +207,7 @@ def _count(result, name: str) -> int:
 
 @dataclass
 class RunRecord:
-    """One workflow's operational record, written through its catalogue.
-
-    Downstream of the Runner by construction: a run is correct without one, and
-    the operation that needs a durable record opens it. One object, because it is
-    one catalogue, one connection and one flush.
-    """
+    """One workflow's buffered operational record."""
 
     workflow_id: str
     task_type: str
@@ -265,7 +217,6 @@ class RunRecord:
     reloaded: set = field(default_factory=set)
 
     def settled(self, node) -> None:
-        """Record one settled node: its evidence, and the state it left."""
 
         self.catalogue.submit(
             LOG,
@@ -306,16 +257,10 @@ class RunRecord:
         self._bookmark(node, identity)
 
     def reset(self, identity) -> None:
-        """Invalidate this object's load state before it is reconstructed.
+        """Durably invalidate status and bookmark before reconstruction.
 
-        ``_.LoadStatus`` goes to Pending and the ``_.Bookmark`` goes to the
-        sentinel. Both are durable before this returns, so a failed reload
-        cannot retain the previous cursor over a cleared target.
-
-        Each object keeps exactly one bookmark row for as long as it is
-        installed. The sentinel is what says no clean load has established a
-        cursor for the current incarnation, so the next load reads the whole
-        source.
+        The sentinel preserves one bookmark row while forcing the next load to
+        read the complete source.
         """
 
         started = datetime.now(timezone.utc)
@@ -332,12 +277,7 @@ class RunRecord:
         self.flush()
 
     def _bookmark(self, node, identity) -> None:
-        """Advance the bookmark, for a clean load that established an instant.
-
-        Two conditions, each ruling out a case the other does not: a clean
-        success, so a rejecting load keeps the bookmark it had; and an instant
-        reported, so a Static skip moves nothing.
-        """
+        """Advance only after a clean load establishes a new instant."""
 
         if node.status != "succeeded":
             return
@@ -347,7 +287,6 @@ class RunRecord:
         self.catalogue.update(BOOKMARK, bookmark_row(identity, at))
 
     def flush(self) -> None:
-        """Wait for what this run recorded, and say what did not land."""
 
         from ..catalogue.flusher import FlushError
 
@@ -355,9 +294,9 @@ class RunRecord:
             self.catalogue.flush()
         except FlushError as exc:
             raise RunError(
-                f"the {self.task_type} ran but what it did was not recorded, so "
-                "the estate's account of itself is behind what happened: "
-                f"{exc}"
+                f"The {self.task_type} completed, but its catalogue record could "
+                f"not be written: {exc}. Check catalogue connectivity before "
+                "running it again."
             ) from exc
 
 
@@ -374,13 +313,7 @@ def settled_load(
     raised: bool = False,
     refused: bool = False,
 ) -> "RunNodeResult":
-    """One standalone load, in the terms every runtime table records.
-
-    A direct call settles one object as a run settles a graph node, so both build
-    their rows through one implementation and a column added to a table reaches
-    both. ``raised`` and ``refused`` carry what a dispatched node's outcome
-    carries. See :func:`result_for`.
-    """
+    """Represent a standalone load in the shared runtime-table vocabulary."""
 
     from .outcome import status_of
     from .result import FAILED, RunNodeResult
@@ -414,11 +347,7 @@ def settled_validation(
     completed,
     raised: bool = False,
 ) -> "RunNodeResult":
-    """One standalone validation, in the same terms.
-
-    ``kind`` is Test or Assumption, as the declaration says; ``raised`` says it
-    could not be evaluated.
-    """
+    """Represent a standalone Test or Assumption for runtime recording."""
 
     from .outcome import status_of
     from .result import FAILED, RunNodeResult
@@ -449,11 +378,7 @@ def _isoformat(at) -> str | None:
 
 
 def _installed(node):
-    """The installed object this settled node was about, or None if it was none.
-
-    A settled node carries its identity as the text a row is keyed by, which is
-    what this reads. A graph node carries the identity itself.
-    """
+    """Recover the installed identity carried by a settled node."""
 
     from ..declaration.model import WeaverDocumentId, parse_installed_identity
 
@@ -480,14 +405,7 @@ def _object_of(node) -> tuple[str | None, str | None]:
 
 
 def _object_parts(logical_id: str | None) -> tuple[str | None, str | None]:
-    """The schema and object a node's logical id names, if it names one.
-
-    Keyed as every other table keys it, area and all, so a Folder and a table of
-    one ``Schema.Object`` are two rows in the log as they are two rows in
-    Registry. A node such as an endpoint refresh names no object and says so
-    with nulls, and so does anything whose logical id is not a document
-    identity.
-    """
+    """Return catalogue object keys, preserving area distinctions."""
 
     from ..catalogue.claims import catalogue_columns
     from ..declaration.model import WeaverDocumentId
@@ -526,12 +444,7 @@ def _duration(started: datetime | None, completed: datetime | None) -> int | Non
 
 
 def _message(node) -> str | None:
-    """One concise line: the node's own messages, or the result's own error.
-
-    The fallback is what a standalone call has. A dispatched node carries the
-    messages the run composed; a direct call carries only the result, and a
-    recorded failure with no message says nothing about what failed.
-    """
+    """Prefer the run's message, then a standalone result's error."""
 
     for message in getattr(node, "messages", ()):
         text = getattr(message, "message", None) or str(message)
@@ -542,11 +455,7 @@ def _message(node) -> str | None:
 
 
 def _details(node) -> str | None:
-    """The node's own mapping, as JSON.
-
-    The mapping rather than the node, so diagnostic rows a check selected cannot
-    reach the estate's evidence.
-    """
+    """Serialise the node without persisting validation diagnostics."""
 
     try:
         mapping = node.to_mapping()
@@ -558,7 +467,6 @@ def _details(node) -> str | None:
 
 
 def new_workflow_id() -> str:
-    """One correlation identity for a whole workflow."""
 
     return uuid.uuid4().hex
 
@@ -566,10 +474,9 @@ def new_workflow_id() -> str:
 def open_run_record(
     catalogue, *, workspace=None, task_type: str, workflow_id=None, session=None
 ) -> RunRecord:
-    """Where this run's operational record goes, the catalogue that owns ``_``."""
 
     if workspace is not None and not workspace.catalogue:
-        raise RunError("recording what a run did needs a Workspace with a catalogue")
+        raise RunError("Recording this run needs a Workspace with a Weaver catalogue")
     return RunRecord(
         workflow_id=workflow_id
         or (session.workflow_id if session is not None else None)

@@ -276,7 +276,7 @@ def test_an_external_reference_contributes_only_to_its_own_item_signature(tmp_pa
 def test_user_authored_init_is_rejected_outside_ignore(tmp_path):
     root = _estate(tmp_path)
     _write(root, "Lakehouse/Raw/lib/__init__.py", "")
-    with pytest.raises(DiscoveryError, match="user-authored __init__.py"):
+    with pytest.raises(DiscoveryError, match="must not include __init__.py"):
         parse_item_repository(Location(str(root)))
 
 
@@ -387,7 +387,9 @@ def test_an_external_destination_belongs_to_the_item_declaring_it(tmp_path):
         "  Warehouse/Audit/Sales.PortableCustomer: "
         "Lakehouse/Curated/Tables/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="declares Warehouse/Reporting's own"):
+    with pytest.raises(
+        DiscoveryError, match="belongs to Warehouse/Audit, not Warehouse/Reporting"
+    ):
         parse_item_repository(Location(str(root)))
 
 
@@ -523,7 +525,7 @@ def test_generated_weaver_item_is_composed_without_mutating_authored_tree(tmp_pa
 def test_authored_weaver_item_is_rejected(tmp_path):
     root = _estate(tmp_path)
     _write(root, "Warehouse/_weaver/schemas/_.yml", _schema("_"))
-    with pytest.raises(DiscoveryError, match="package-owned"):
+    with pytest.raises(DiscoveryError, match="reserved by Weaver"):
         parse_item_repository(Location(str(root)))
 
 
@@ -549,7 +551,7 @@ def test_short_metadata_reference_is_item_relative_and_exact_case(tmp_path):
         "Description: A declared table.", "Description: $sales.Missing"
     )
     _write(root, "Lakehouse/Raw/Tables/Sales__Customer.py", source)
-    with pytest.raises(DiscoveryError, match="does not resolve exactly"):
+    with pytest.raises(DiscoveryError, match="does not identify exactly one"):
         parse_item_repository(Location(str(root)))
 
 
@@ -601,7 +603,7 @@ def test_a_shortcut_destination_must_not_collide_with_a_native_document(tmp_path
         "logical:\n"
         "  Warehouse/Reporting/Sales.Customer: Lakehouse/Curated/Tables/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="the repository already declares"):
+    with pytest.raises(DiscoveryError, match="conflicts with project object"):
         parse_item_repository(Location(str(root)))
 
 
@@ -619,7 +621,7 @@ def test_a_logical_shortcut_may_not_name_its_own_item(tmp_path):
         "  Warehouse/Reporting/Sales.PortableCustomer: "
         "Warehouse/Reporting/Sales.Customer\n",
     )
-    with pytest.raises(DiscoveryError, match="which is the item declaring it"):
+    with pytest.raises(DiscoveryError, match="points into its declaring item"):
         parse_item_repository(Location(str(root)))
 
 

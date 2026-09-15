@@ -1,7 +1,4 @@
-"""Manage Weaver execution inside Fabric Spark sessions.
-
-Livy sessions are reused across related work to avoid repeated startup cost.
-"""
+"""Run Weaver work in reusable Fabric Spark sessions through Livy."""
 
 from __future__ import annotations
 
@@ -24,9 +21,7 @@ DEFAULT_LIVY_API_VERSION = "2023-12-01"
 DEFAULT_POLL_INTERVAL = 3.0
 DEFAULT_SESSION_TIMEOUT = 600.0
 DEFAULT_STATEMENT_TIMEOUT = 900.0
-#: How long a close waits for the session to actually release its capacity slot.
-#: Shorter than a start, because a session being torn down has no work to finish
-#: and a caller should not be held up by one that will not admit it has gone.
+#: A close waits for Fabric to release the session's capacity slot.
 DEFAULT_CLOSE_TIMEOUT = 120.0
 
 #: Wrapped around returned values so a result can be told from printed output.
@@ -34,31 +29,20 @@ RESULT_PREFIX = "__weaver_result__"
 
 
 class LivyError(WeaverError):
-    """Raised when a Livy session fails: it would not start, or it has died."""
+    """A Livy session could not start or has died."""
 
 
 class LivyStatementError(LivyError):
-    """Raised when a statement failed. The session that ran it is fine.
-
-    A remote ``ModuleNotFoundError`` says the submitted program was wrong and
-    nothing about the Spark session, which is still up and still costs a minute
-    to replace. Treating the two alike is how one bad command ends a console.
-
-    A subclass, so every existing ``except LivyError`` still catches it.
-    """
+    """A statement failed, but its Spark session remains usable."""
 
     def __init__(self, message: str, *, ename=None, evalue=None) -> None:
         super().__init__(message)
-        #: The remote exception's class name, where Livy reported one.
         self.ename = ename
-        #: Its message, likewise.
         self.evalue = evalue
 
 
 @dataclass(frozen=True)
 class StatementResult:
-    """What one submitted statement produced."""
-
     text: str
     payload: Any = None
 
@@ -69,8 +53,6 @@ class StatementResult:
 
 @dataclass(frozen=True)
 class LivySessionInfo:
-    """One entry returned by Fabric's Lakehouse sessions collection."""
-
     id: str
     name: str | None = None
     submitter_id: str | None = None
@@ -127,8 +109,6 @@ class LivySessionInfo:
 
 @dataclass(frozen=True)
 class WorkspaceLivySession:
-    """A Livy collection entry with the Lakehouse whose collection owns it."""
-
     lakehouse_id: str
     lakehouse_name: str
     session: LivySessionInfo
@@ -139,13 +119,7 @@ class WorkspaceLivySession:
 
 
 def _spark_home(workspace):
-    """The Lakehouse a Spark session attaches to, from the workspace's own.
-
-    The fallback for a caller that named none. The first configured one, by
-    name, so a workspace answers the same way twice. Which it is does not affect
-    where work lands, because every generated statement names its Lakehouse, so
-    a stable answer is all that is wanted.
-    """
+    """Choose a stable attachment when the caller names no Lakehouse."""
 
     from ..errors import CommandError
     from ..targets import ItemRef
@@ -247,8 +221,8 @@ def _call(
 ) -> dict:
     import requests
 
-    # Livy runs over the same REST front door, and it refuses a call the same way
-    # while a capacity is busy. Polling a statement for minutes meets that often.
+    # Long polls encounter the same transient capacity responses as other Fabric
+    # REST calls.
     for attempt in range(1, CONNECTION_ATTEMPTS + 1):
         try:
             response = send(
@@ -276,7 +250,7 @@ def _call(
 
 
 class LivySession:
-    """One Fabric Spark session, held open for a batch of statements."""
+    """A Fabric Spark session held open for a batch of statements."""
 
     def __init__(
         self,
@@ -317,28 +291,11 @@ class LivySession:
     def for_workspace(
         cls, workspace, *, resolver=None, lakehouse=None, **kwargs
     ) -> "LivySession":
-        """A session attached to one of the workspace's Lakehouses.
+        """Create a session attached to a workspace Lakehouse.
 
-        Fabric creates a Spark session against a Lakehouse, whose id is in the
-        Livy URL, so a session needs one to live in. Which one does not affect
-        where work lands: every statement Weaver generates names the Lakehouse
-        it is about, in full. The attachment is a home, not a destination.
-
-        The home is named by the caller, from the physical Lakehouses the
-        operation was actually asked for, and falls back to the workspace's own
-        configured Lakehouses. An operation that names neither is Warehouse-only
-        and has no reason to start Spark at all, which is what the error says.
-
-        The workspace's ``environment`` is attached where it names one, so a
-        body that imports Weaver finds what ``weaver fabric environment publish`` published.
-        Nothing is copied into the workspace.
-
-        An Environment is not required to start a session. Submitting Spark
-        to a workspace and running the installed package are two different
-        needs, and only the second waits on a wheel publish: a build's
-        statements are Spark SQL that imports nothing, so it runs on the
-        workspace's default runtime. :meth:`ensure_weaver` is where the other
-        need is stated, and where a missing Environment is refused.
+        The attachment hosts the session; fully qualified statements still name
+        their destinations. An Environment is attached when configured but is
+        required only by work that imports Weaver.
         """
 
         from ..targets import ItemRef
@@ -358,8 +315,7 @@ class LivySession:
         if environment_reference is None and getattr(workspace, "environment", None):
             environment_reference = str(workspace.environment)
 
-        # A caller supplying its own start-up code carries `emit` in it, because
-        # every submitted body returns through `emit`.
+        # Custom start-up code must provide `emit` for returned values.
         kwargs.setdefault("bootstrap", emit_source())
         return cls(
             resolver.workspace.id,
@@ -371,21 +327,10 @@ class LivySession:
         )
 
     def ensure_weaver(self) -> None:
-        """Assert this session can ``import weaver``, once.
+        """Verify once that the session can import Weaver.
 
-        Called by whatever submits a body that imports Weaver, so a session that
-        only carries Spark SQL never waits on a wheel publish. The import stays
-        loaded afterwards, so the cost is one statement per session.
-
-        This is also where a missing Environment is refused, because this is
-        where one is needed: an installed Weaver is what an Environment carries,
-        and a session without one runs the default runtime perfectly well until
-        something tries to import from it.
-
-        ``weaver_bootstrap`` supplies that import instead. The pytest harness
-        passes one that puts a wheel built from the checkout on ``sys.path``, so
-        a source change reaches Fabric without an Environment publish. The
-        Environment still carries the dependencies.
+        Spark SQL does not require an Environment. Imported Weaver does, unless
+        ``weaver_bootstrap`` supplies the package, as the pytest harness does.
         """
 
         if self._weaver_asserted:
@@ -413,9 +358,8 @@ class LivySession:
         self._weaver_asserted = False
         payload: dict[str, Any] = {"name": "weaver"}
         if self.environment_id:
-            # Fabric attaches an Environment to a Livy session through a Spark
-            # conf, not a top-level field. The published libraries, Weaver and its
-            # dependencies, are loaded only when this is set.
+            # Fabric attaches published Environment libraries through Spark
+            # configuration, not a top-level Livy field.
             payload["conf"] = {
                 "spark.fabric.environmentDetails": json.dumps(
                     {"id": self.environment_id}
@@ -487,16 +431,10 @@ class LivySession:
         raise LivyError(f"Livy statement did not finish within {int(timeout)}s")
 
     def close(self, *, timeout: float = DEFAULT_CLOSE_TIMEOUT) -> None:
-        """Ask Fabric to end the session, and wait until it has.
+        """End the session and wait for Fabric to release its capacity slot.
 
-        The waiting matters: a capacity limits concurrent Spark sessions, often
-        to one, and `DELETE` returns when the request is accepted rather than
-        when the slot is released. Closing and immediately opening another would
-        queue the new session behind the old one's slot.
-
-        A close that cannot be confirmed is reported rather than raised: the
-        session is abandoned either way, and a teardown problem must not mask
-        what the caller was doing.
+        ``DELETE`` returns before the slot is released. An unconfirmed close is
+        reported rather than raised so teardown does not mask the caller's work.
         """
 
         if self.session_url is None:
@@ -514,9 +452,9 @@ class LivySession:
         while time.time() < deadline:
             try:
                 state = _call("GET", url, self.token, expected=(200, 404))
-            except LivyError:  # gone, or no longer ours to ask about
+            except LivyError:  # Gone, or no longer ours to query.
                 return
-            if not state:  # 404, so the session is no longer there
+            if not state:  # 404: the session no longer exists.
                 return
             if (state.get("state") or "").lower() in {
                 "dead",
@@ -575,12 +513,7 @@ def _payload(text: str) -> Any:
 
 
 def _session_state_detail(state: Mapping[str, Any]) -> str:
-    """What Fabric said about a session that did not start, as one clause.
-
-    A capacity refusal and a bad Environment both end as ``dead``. The session
-    record carries the reason, so it is read here and an operator is told which
-    one happened.
-    """
+    """Distinguish capacity and Environment failures that both end as ``dead``."""
 
     info = state.get("fabricSessionStateInfo") or {}
     message = str(info.get("errorMessage") or "").strip()
@@ -588,8 +521,6 @@ def _session_state_detail(state: Mapping[str, Any]) -> str:
 
 
 def emit_source() -> str:
-    """The helper a submitted program uses to return a value."""
-
     return (
         "import json as _json\n"
         f"def emit(value):\n"
@@ -598,10 +529,9 @@ def emit_source() -> str:
 
 
 def _resolve_environment_id(workspace, resolver) -> str:
-    """The item ID of the workspace's Environment reference.
+    """Resolve the workspace's Environment without changing the Livy workspace.
 
-    A qualified reference resolves its owning workspace through the same REST
-    client. The Livy session remains attached to the workload workspace.
+    A qualified Environment may belong to another workspace.
     """
 
     from ..workspaces import EnvironmentRef
@@ -625,8 +555,6 @@ def _resolve_environment_id(workspace, resolver) -> str:
 
 
 def missing_environment(workspace=None) -> str:
-    """Explain how to configure the Environment required by a Fabric run."""
-
     name = getattr(workspace, "workspace", None)
     where = f" for workspace {name!r}" if name else ""
     return (
@@ -638,12 +566,7 @@ def missing_environment(workspace=None) -> str:
 
 
 def environment_bootstrap() -> str:
-    """The bootstrap for a body whose Weaver comes from an Environment.
-
-    A plain ``import weaver``: no source copied, no ``sys.path`` change. An
-    Environment with no usable Weaver fails naming the fix rather than falling
-    back to a shipped copy.
-    """
+    """Import Weaver from the Environment without a source-copy fallback."""
 
     return (
         "try:\n"

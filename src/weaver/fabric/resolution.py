@@ -36,8 +36,6 @@ from .resources import (
 
 
 class FabricResolver:
-    """Resolves level-three names against one Fabric workspace."""
-
     def __init__(
         self,
         workspace: Workspace,
@@ -50,10 +48,7 @@ class FabricResolver:
         self.base_url = base_url.rstrip("/")
         self._workspace: Workspace | None = None
         self._items: dict[str, Item] = {}
-        #: Answers this resolver gave without asking the workspace. A Session
-        #: owns one resolver for its lifetime, so this is what a reused item
-        #: cache is worth, and a hit is the absence of a call, which nothing
-        #: above the cache can observe for itself.
+        # Cache hits are recorded because they avoid an otherwise invisible REST call.
         self.cache_hits = 0
 
     def discover(self, *, workspaces=None, client=None):
@@ -68,8 +63,6 @@ class FabricResolver:
         self._items.update({f"{item.name}:{item.type}": item for item in items})
         return items
 
-    # --- level four -------------------------------------------------------
-
     @property
     def workspace(self) -> Workspace:
         if self._workspace is None:
@@ -80,11 +73,7 @@ class FabricResolver:
 
     @property
     def root(self) -> Location:
-        """The workspace root. Everything resolved sits beneath it."""
-
         return Location(f"{self.base_url}/{self.workspace.id}")
-
-    # --- level three ------------------------------------------------------
 
     def resolve(self, item: ItemRef, *, item_type: str) -> Item:
         """The workspace item of this name and type. Cached.
@@ -135,8 +124,6 @@ class FabricResolver:
 
         return abfss_root(self.workspace.id, self.resolve(item, item_type=LAKEHOUSE).id)
 
-    # --- targets ----------------------------------------------------------
-
     def folder_root(self, target: FolderTarget) -> Location:
         return self.files_root(target.lakehouse)
 
@@ -161,14 +148,8 @@ class FabricResolver:
 
         return self.resolve(target.warehouse, item_type=WAREHOUSE)
 
-    # --- what a Fabric workspace can do that a filesystem cannot -----------
-    #
-    # Two operations an installed bundle needs that are neither path arithmetic
-    # nor a SQL statement: pointing one Lakehouse at another's data, and asking a
-    # Lakehouse's SQL analytics endpoint to catch up. Both are REST, so they
-    # belong to the adapter that already reaches this workspace. A
-    # resolver inside a Fabric session offers neither, and an action that needs
-    # one is recorded as skipped rather than failed.
+    # These REST operations belong to the desktop workspace adapter. An
+    # in-Fabric resolver records them as skipped.
 
     def create_onelake_shortcuts(self, item: ItemRef, shortcuts) -> tuple[dict, ...]:
         """Point each shortcut's ``path/name`` at its source, in one request.
@@ -202,8 +183,6 @@ class FabricResolver:
         ).created
 
     def _shortcut_source(self, source: "ItemRef | Item", source_kind: str | None):
-        """A shortcut's source item, resolved here unless it already was."""
-
         if getattr(source, "id", None) and getattr(source, "workspace_id", None):
             return source
         return self.resolve(
@@ -212,14 +191,7 @@ class FabricResolver:
         )
 
     def external_item(self, name: str, *, item_type: str, workspace: str | None = None):
-        """One item, in this workspace or a named one, resolved by its type.
-
-        For a shortcut's source, which may sit outside the workspace the build
-        is bound to. Nothing binds it and nothing builds into it.
-
-        A Warehouse resolves here as well as a Lakehouse, because a Fabric
-        Warehouse publishes its tables into OneLake.
-        """
+        """Resolve a typed shortcut source, including a Warehouse in OneLake."""
 
         if workspace is None or workspace == self.workspace.name:
             return self.resolve(ItemRef(name), item_type=item_type)
@@ -234,20 +206,12 @@ class FabricResolver:
         )
 
     def external_root(self, item) -> Location:
-        """The root of an already-resolved item, as this host addresses one.
-
-        The same spelling :meth:`lakehouse` gives for an item of this workspace,
-        so what reads it is the store this host already has.
-        """
-
         return Location(
             f"{self.base_url}/{item.workspace_id}/"
             + lakehouse_artifact_segment(item.id)
         )
 
     def onelake_shortcuts(self, item: ItemRef) -> tuple:
-        """Every shortcut a Lakehouse holds. Scoping is the caller's business."""
-
         from .shortcuts import list_shortcuts
 
         return list_shortcuts(
@@ -270,8 +234,6 @@ class FabricResolver:
         )
 
     def sql_endpoint(self, target: WarehouseTarget):
-        """Resolve a typed Warehouse to the common SQL endpoint record."""
-
         from ..sql import SqlEndpoint
 
         warehouse = self.warehouse(target)
@@ -292,11 +254,7 @@ class FabricResolver:
             warehouse_name=warehouse.name,
         )
 
-    # --- the weaver catalogue ---------------------------------------------
-
     def _catalogue(self) -> ItemRef:
-        """The item the catalogue lives in, from the workspace's typed value."""
-
         if self.configuration.catalogue is None:
             raise CommandError(
                 "A catalogue is required for this Workspace. Set "
@@ -306,12 +264,7 @@ class FabricResolver:
         return self.configuration.catalogue_item
 
     def lakehouse_spark_location(self, item: ItemRef) -> LakehouseSparkLocation:
-        """One destination Lakehouse's ``abfss://`` roots, for Spark to address.
-
-        Built from :meth:`spark_root`, which exists precisely so a session never
-        needs the item attached. A session's own attachment carries no meaning,
-        and destinations are reached explicitly.
-        """
+        """Return explicit ``abfss://`` roots without using session attachments."""
 
         root = self.spark_root(item).rstrip("/")
         return LakehouseSparkLocation(
@@ -321,16 +274,10 @@ class FabricResolver:
         )
 
     def spark_destination(self, item: ItemRef) -> FabricSparkTarget:
-        """One Lakehouse, as Fabric's Spark catalogue names it.
+        """Return Fabric's ``workspace.lakehouse`` Spark catalogue identity.
 
-        Fabric's namespace is the fundamental representation:
-        ``workspace.lakehouse.schema.object``. One session addresses every
-        Lakehouse in the workspace through it, so nothing has to be attached and
-        nothing has to be switched, and a schema-enabled Lakehouse pins its own
-        managed tables, which is why no path appears in the destination.
-
-        Display names, because that is what the namespace is spelled with. The
-        ids stay in resolution and in the bundle's target block.
+        Fabric spells the namespace with display names. IDs remain in resolution
+        and the bundle's target block.
         """
 
         return FabricSparkTarget(

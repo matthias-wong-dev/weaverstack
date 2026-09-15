@@ -1,4 +1,4 @@
-"""Item-owned dependency resolution and sparse logical projection."""
+"""Resolve dependencies among an item's declarations."""
 
 from __future__ import annotations
 
@@ -20,15 +20,12 @@ from .model import (
 from .shortcuts import LAKEHOUSE_FILE
 from .source import SourceDocument
 
-#: How a program imports its item's declarations.
 SHORTCUTS_MODULE = LAKEHOUSE_FILE.removesuffix(".py")
 
 
 def _declared_references(
     source: SourceDocument, consumer: WeaverDocumentId
 ) -> tuple[tuple[str, WeaverDocumentId], ...]:
-    """What the document's ``Dependencies:`` header names."""
-
     return tuple(
         (dependency.qualified, WeaverDocumentId(consumer.item, dependency))
         for dependency in source.document.dependencies
@@ -41,11 +38,10 @@ def _inferred_references(
     edges: list[ItemDependency],
     shortcuts: Mapping[WeaverItemId, Mapping[str, object]] | None = None,
 ) -> tuple[tuple[str, WeaverDocumentId], ...]:
-    """What the document's own source says it reads.
+    """Infer dependencies from Python imports or SQL relations.
 
-    Python imports, or the relations a SQL body names. A fully qualified SQL
-    reference names something outside the item namespace, so it is appended to
-    ``edges`` as a physical edge here rather than returned for resolution.
+    Qualified SQL names are physical dependencies and need no project
+    resolution.
     """
 
     if source.language == "python":
@@ -78,45 +74,35 @@ def _reject_validation_producer(
     consumer: WeaverDocumentId,
     written: str,
 ) -> None:
-    """Nothing depends on a validation.
+    """Validations read objects but produce no dependency target.
 
-    A Test and an Assumption read the estate and produce nothing, so there is
-    nothing for anything else to read. Worth refusing rather than letting resolve,
-    because two things downstream rest on it. Installation puts
-    validation artefacts at the end, with the load artefacts, on the strength of
-    validation never being something another declaration waits for. And the
-    reason a validation need not declare its dependencies exhaustively is that
-    the objects it reads were put in place before it ran; a validation-to-
-    validation edge would make that ordering matter, silently.
+    Installation ordering and non-exhaustive validation dependencies rely on
+    this invariant.
     """
 
     upstream = native.get(producer)
     if upstream is None or not upstream.is_validation:
         return
     raise DiscoveryError(
-        f"{consumer}: {written!r} names {upstream.document.kind} {producer}, and "
-        "nothing depends on a validation. It reads the estate and produces "
-        "nothing to read. Depend on the object it inspects instead."
+        f"{consumer}: dependency {written!r} points to "
+        f"{upstream.document.kind} {producer}. Tests and assumptions cannot be "
+        "dependency targets. Depend on the object the validation checks instead."
     )
 
 
 def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
-    """Return ``repository`` with exact item-owned edges and a global DAG."""
-
     native = repository.source_documents
     logical_pairs = {
         pair.destination: pair.source for pair in repository.logical_shortcuts
     }
-    #: Each item's shortcut declarations by authored symbol, which is the name a
-    #: program imports them under.
     shortcuts: dict[WeaverItemId, dict[str, object]] = {}
     for declaration in repository.shortcuts:
         shortcuts.setdefault(declaration.owner, {})[declaration.name] = declaration
     folded_native = {str(identity).casefold(): identity for identity in native}
     folded_logical = {str(identity).casefold(): identity for identity in logical_pairs}
     edges: list[ItemDependency] = []
-    #: Graph edges, kept separately from ``edges`` because the two answer
-    #: different questions. See :func:`_document_graph`.
+    # Dependency records name the resolved producer. Ordering retains the
+    # shortcut destination as a separate hop.
     graph_edges: set[tuple[str, str]] = set()
 
     for consumer, source in native.items():
@@ -148,10 +134,6 @@ def resolve_item_dependencies(repository: WeaverRepository) -> WeaverRepository:
                     is_within_item=producer.item == consumer.item,
                 )
             )
-            # ``destination`` is what the consumer named in its own namespace: the
-            # producer itself when that resolved natively, and the item's shortcut
-            # destination when it resolved through one. The edge above records the
-            # producer either way; the graph records the hop actually taken.
             graph_edges.add((str(destination), str(consumer)))
 
     unique = {
@@ -187,22 +169,17 @@ def _document_graph(
     logical_pairs: Mapping[WeaverDocumentId, WeaverDocumentId],
     graph_edges: set[tuple[str, str]],
 ) -> Graph:
-    """The graph incremental selection is planned against.
+    """Build the document graph used for ordering and incremental selection.
 
-    Not a projection of :attr:`dependency_edges`. An edge records where a
-    reference resolved to, so a shortcut edge names the source document as the
-    producer. This graph answers what must be built, where the shortcut
-    destination is a shortcut or view in its own right:
+    A shortcut remains a distinct hop even though the dependency record names
+    its resolved source:
 
     .. code-block:: text
 
         source document → shortcut destination → consumer document
 
-    Three hops rather than two, so impact propagates across items with the shortcut
-    as an ordinary node rather than a planner special case.
-
-    Every shortcut contributes its ``source → destination`` edge whether or not a
-    document consumes it: it still has to be materialised after its source.
+    Every shortcut contributes its edge even when no document consumes it, so it
+    is materialised after its source.
     """
 
     edges = set(graph_edges)
@@ -210,10 +187,8 @@ def _document_graph(
         edges.add((str(source), str(destination)))
     nodes = [str(identity) for identity in native]
     nodes.extend(str(destination) for destination in logical_pairs)
-    # A logical shortcut may read a physical shortcut declared by another item.
-    # Its destination is a managed, registered object even though no source
-    # document declares it, so it must be present for the source → destination
-    # edge to participate in ordering and impact propagation.
+    # A logical shortcut can read a physical shortcut with no source document;
+    # include that source so its ordering edge remains active.
     nodes.extend(str(source) for source in logical_pairs.values())
     return Graph(nodes, sorted(edges))
 
@@ -221,21 +196,11 @@ def _document_graph(
 def _item_graph(
     repository: WeaverRepository, resolved: tuple[ItemDependency, ...]
 ) -> Graph:
-    """The acyclic item-level graph a multi-item build is planned against.
+    """Build the acyclic item order for a multi-item build.
 
-    One item depends on another when it reaches into it: either a document
-    resolves to a document that other item owns, or this item declares a shortcut
-    whose source lives there. The shortcut edge matters on its own, because a
-    shortcut with no consumer yet is still materialised after its source exists,
-    so it is not left to be implied by the dependency edges.
-
-    Within-item edges are absent by construction: the document graph already
-    orders those, and an item cannot wait for itself.
-
-    A circular item graph is a **repository** fault. It is rejected here, while
-    the whole declaration is in view, rather than at the point some incremental
-    selection happens to exercise it. A repository whose items cannot be ordered
-    has no correct build.
+    Shortcut sources create item dependencies even without a consumer. Internal
+    item edges stay in the document graph. A project with an item cycle has no
+    valid build order.
     """
 
     edges: set[tuple[str, str]] = set()
@@ -250,7 +215,10 @@ def _item_graph(
     try:
         return Graph((str(item.identity) for item in repository.items), sorted(edges))
     except GraphError as exc:
-        raise GraphError(f"item {exc}") from exc
+        raise GraphError(
+            f"Project items cannot be built in dependency order: {exc}. "
+            "Remove one of the dependencies in the cycle."
+        ) from exc
 
 
 def _resolve_destination(
@@ -267,8 +235,7 @@ def _resolve_destination(
         return destination, "native"
     if destination in logical_pairs:
         return logical_pairs[destination], "shortcut"
-    # A Lakehouse relation names the Tables area, so a bare name that matches a
-    # validation is answered by the rule that put them in separate namespaces.
+    # Validations and Lakehouse relations have separate namespaces.
     validation = WeaverDocumentId.validation(destination.item, destination.object_id)
     _reject_validation_producer(
         validation, native=native, consumer=consumer, written=written
@@ -276,9 +243,14 @@ def _resolve_destination(
     case_match = folded_native.get(str(destination).casefold()) or folded_logical.get(
         str(destination).casefold()
     )
-    detail = f"; declared spelling is {case_match}" if case_match else ""
+    if case_match:
+        raise DiscoveryError(
+            f"{consumer}: dependency {written!r} uses the wrong spelling. "
+            f"Change it to {str(case_match.object_id)!r}."
+        )
     raise DiscoveryError(
-        f"{consumer}: dependency {written!r} does not resolve in item namespace{detail}"
+        f"{consumer}: dependency {written!r} does not match an object or shortcut "
+        f"in {consumer.item}. Add it to that item or correct the dependency."
     )
 
 
@@ -308,15 +280,15 @@ def _python_references(
                 continue
             if len(components) == 1:
                 raise DiscoveryError(
-                    f"{source.relative_path}: import {written!r} names no Lakehouse "
-                    f"area. A Table or View module sits under {TABLES}/ and a "
-                    f"Folder module under {FILES}/, so import "
+                    f"{source.relative_path}: import {written!r} does not say whether "
+                    f"{object_module!r} is a Table or File. Import "
                     f"{TABLES}.{object_module} or {FILES}.{object_module}."
                 )
             if len(components) != 2 or components[0] not in AREAS:
                 raise DiscoveryError(
-                    f"{source.relative_path}: import {written!r} does not resolve to an "
-                    "item object or lib module"
+                    f"{source.relative_path}: import {written!r} does not name an item "
+                    f"object. Use {TABLES}.<Schema__Object>, "
+                    f"{FILES}.<Schema__Object>, or lib.<module>."
                 )
             references.append(
                 (
@@ -338,32 +310,29 @@ def _shortcut_reference(
     consumer: WeaverDocumentId,
     edges: list[ItemDependency],
 ):
-    """What importing one shortcut symbol makes this document depend on.
+    """Resolve a named shortcut as a logical or physical dependency.
 
-    A logical shortcut names a Weaver document, so it resolves and orders like
-    any other logical reference. A physical one names something Weaver does not
-    manage, which may have no producer in this repository at all, so it is
-    recorded as a physical edge and given no graph edge: there is nothing here to
-    order it against.
-
-    A schema shortcut is always physical, and stays a dependency on the schema
-    rather than on whatever a program later reads through it. What appears
-    inside it belongs to the item it points at and can change without a build.
+    Physical shortcuts have no project producer to order. A schema shortcut
+    remains a dependency on the schema, whose contents can change independently.
     """
 
     written = f"{SHORTCUTS_MODULE}.{name}"
     if name in (SHORTCUTS_MODULE, "*"):
         raise DiscoveryError(
-            f"{source.relative_path}: import each shortcut by name, as "
-            f"'from {SHORTCUTS_MODULE} import <Name>'. Discovery reads the "
-            "imports to learn what this document depends on."
+            f"{source.relative_path}: import each shortcut by name. Use "
+            f"'from {SHORTCUTS_MODULE} import <Name>'."
         )
     declaration = declared.get(name)
     if declaration is None:
-        known = ", ".join(sorted(declared)) or "nothing"
+        known = ", ".join(sorted(declared))
+        next_action = (
+            f"Import one of: {known}."
+            if known
+            else f"Declare it in {consumer.item}/{SHORTCUTS_MODULE}.py first."
+        )
         raise DiscoveryError(
-            f"{source.relative_path}: import {written!r} names no shortcut. "
-            f"{source.logical_id.item}/{SHORTCUTS_MODULE}.py declares {known}."
+            f"{source.relative_path}: shortcut {name!r} is not declared for "
+            f"{consumer.item}. {next_action}"
         )
     if declaration.is_logical:
         return (written, declaration.destination)
@@ -383,16 +352,14 @@ def _resolved_python_modules(
 ) -> list[tuple[str, tuple[str, ...]]]:
     module = tuple(imported.module.split(".")) if imported.module else ()
     if imported.level:
-        # A program's package under the deployed runtime tree, which is the area
-        # it was authored in. A validation is authored outside both areas and
-        # has none, so a relative import from one names no object and is
-        # reported against the explicit spelling.
+        # Relative imports begin in the authored area. Validations have no area.
         area = logical_id.area
         base = (area,) if area else ()
         parents = imported.level - 1
         if parents > len(base):
             raise DiscoveryError(
-                f"{logical_id}: import {imported} escapes the owning Weaver item"
+                f"{logical_id}: import {imported} goes above the item root. "
+                "Use an import path within the item."
             )
         resolved = base[: len(base) - parents] + module
     else:
@@ -411,17 +378,16 @@ def project_bound_documents(
     repository: WeaverRepository,
     bound_items: Iterable[WeaverItemId],
 ) -> tuple[SourceDocument, ...]:
-    """Select physical work by exact item only; do not pull in unbound ancestors."""
+    """Select work for the named items without including their dependencies."""
 
     selected_items = set(bound_items)
     if not selected_items:
-        raise BuildError("at least one Weaver item must be bound")
+        raise BuildError("Select at least one project item to build")
     known_items = {item.identity for item in repository.items}
     unknown = selected_items - known_items
     if unknown:
         raise BuildError(
-            "binding names item(s) absent from the repository: "
-            + ", ".join(sorted(map(str, unknown)))
+            "Item(s) not found in the project: " + ", ".join(sorted(map(str, unknown)))
         )
     selected = {
         str(identity): source

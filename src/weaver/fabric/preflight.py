@@ -1,17 +1,6 @@
-"""Proving a desktop build's Fabric targets exist before a session is started.
+"""Validate a desktop build's Fabric items before starting a Livy session.
 
-A Livy session costs tens of seconds and a slice of a capacity, and a missing
-item discovered inside one surfaces as a Spark failure about a catalogue rather
-than a sentence about the item. So a desktop Fabric build asks the workspace
-what it holds first, and starts nothing until every required item is found with
-the type its binding implies.
-
-Preflight reads and never creates: a missing catalogue Warehouse is a failure here,
-because creating a workspace item is provisioning rather than building.
-
-The workspace's items are listed once and every target resolved from that one
-result, and every missing item is reported together, because a build stopped twice
-has paid two round trips to learn one thing.
+Preflight lists each workspace once and never creates Fabric items.
 """
 
 from __future__ import annotations
@@ -31,9 +20,7 @@ from .resources import (
     list_items,
 )
 
-#: A binding's target kind, as the Fabric item type the workspace must hold it
-#: as. Two vocabularies that happen to name the same two things, so the mapping
-#: is written out rather than left to a spelling coincidence.
+# Keep binding kinds and Fabric item types as separate vocabularies.
 _ITEM_TYPE_FOR_BINDING = {
     LAKEHOUSE_TARGET: LAKEHOUSE,
     WAREHOUSE_TARGET: WAREHOUSE,
@@ -41,18 +28,11 @@ _ITEM_TYPE_FOR_BINDING = {
 
 
 class PreflightError(BuildError):
-    """Raised when a required Fabric item is missing, mistyped or ambiguous."""
+    """A required Fabric item is missing, mistyped or ambiguous."""
 
 
 @dataclass(frozen=True)
 class RequiredItem:
-    """One item a build needs, and what it needs it to be.
-
-    ``role`` is what the item is to this build: the Weaver catalogue, a bound
-    target, the Environment. It exists so the report says why the item was
-    wanted, which is the part needed to act on it.
-    """
-
     name: str
     item_type: str
     role: str
@@ -63,8 +43,6 @@ class RequiredItem:
 
 @dataclass(frozen=True)
 class Preflight:
-    """What the workspace holds, and the resolved identity of each requirement."""
-
     workspace: WorkspaceItem
     resolved: dict[str, Item]
 
@@ -78,12 +56,9 @@ def required_items(
     control_item: str,
     environment=None,
 ) -> tuple[RequiredItem, ...]:
-    """Everything a desktop build must find, deduplicated and ordered.
+    """Derive requirements from bindings.
 
-    Derived from the bindings rather than from configuration, so a target a
-    binding names is checked even when nothing in the workspace file mentions
-    it. The catalogue's Warehouse is included as a Warehouse like any other, being
-    special only in what it holds.
+    Targets need not appear in workspace configuration.
     """
 
     wanted: list[RequiredItem] = [
@@ -114,11 +89,7 @@ def preflight_fabric_targets(
     environment=None,
     client=None,
 ) -> Preflight:
-    """Resolve every required item from one workspace listing, or fail saying why.
-
-    Returns the resolved items so a caller need not look them up again. Reading
-    only: a successful preflight leaves the workspace exactly as it found it.
-    """
+    """Resolve all requirements without modifying a workspace."""
 
     from ..workspaces import EnvironmentRef
 
@@ -175,12 +146,7 @@ def preflight_fabric_targets(
 
 
 def _missing(required: RequiredItem, inventory) -> str:
-    """One missing item, and the type confusion behind it when there is one.
-
-    A name that exists as the wrong type is the common mistake, such as a Lakehouse
-    bound where a Warehouse was meant. Reporting it as a plain absence sends the
-    search after something that is already there.
-    """
+    """Distinguish a type mismatch from an absent item."""
 
     others = sorted(
         {

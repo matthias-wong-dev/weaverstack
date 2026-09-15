@@ -23,8 +23,6 @@ def lakehouse_schema_stage(
     inventory,
     extra_schemas=(),
 ) -> PlannedStage | None:
-    """Plan missing schemas for one Lakehouse item."""
-
     return _schema_stage(
         selected_ids,
         item=item,
@@ -49,8 +47,6 @@ def warehouse_schema_stage(
     inventory,
     extra_schemas=(),
 ) -> PlannedStage | None:
-    """Plan missing schemas for one Warehouse item."""
-
     return _schema_stage(
         selected_ids,
         item=item,

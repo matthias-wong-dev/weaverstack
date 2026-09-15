@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prompt a review of the register checks in CLAUDE.md, over changed lines."""
+"""Prompt a review of the prose checks in PROSE.md over changed lines."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import re
 import subprocess
 import sys
 
-# The register checks from CLAUDE.md. Phrase bans alone do not hold: "this is not
-# X; it is Y" was banned and the same move reappeared 870 times as "X rather than
-# Y". These check the constructions instead.
+# High-signal constructions from PROSE.md. Phrase bans alone do not hold:
+# "this is not X; it is Y" was banned and the same move reappeared 870 times as
+# "X rather than Y". These check the constructions instead.
 PATTERNS = {
     "em dash": re.compile(r"\u2014"),
     "contrastive definition": re.compile(r"\b(rather than|instead of)\b", re.I),
@@ -29,8 +29,8 @@ PATTERNS = {
         r"\b(a reader|the reader|someone reading)\b", re.I
     ),
 }
-# CLAUDE.md quotes these constructions to ban them.
-SKIP = {"CLAUDE.md", ".claude/prose_tripwire.py"}
+# PROSE.md names constructions that the tripwire detects.
+SKIP = {"PROSE.md", ".claude/prose_tripwire.py"}
 
 
 def changed_lines() -> list[tuple[str, int, str]]:

@@ -163,7 +163,7 @@ def test_a_configured_catalogue_alone_is_never_the_destination(monkeypatch):
 
     _given(monkeypatch, Workspace(workspace=WORKSPACE, catalogue="Warehouse/Catalogue"))
 
-    with pytest.raises(CommandError, match="needs the catalogue to fork into"):
+    with pytest.raises(CommandError, match="needs a destination catalogue"):
         weaver.plan_mirror(no_item=True, session=_never())
 
 
@@ -175,7 +175,7 @@ def test_naming_a_source_does_not_make_a_configured_catalogue_the_destination(
 
     _given(monkeypatch, Workspace(workspace=WORKSPACE, catalogue="Warehouse/Catalogue"))
 
-    with pytest.raises(CommandError, match="needs the catalogue to fork into"):
+    with pytest.raises(CommandError, match="needs a destination catalogue"):
         weaver.plan_mirror(no_item=True, mirror="Warehouse/Other", session=_never())
 
 
@@ -199,7 +199,7 @@ def test_a_named_destination_outranks_the_configured_one(monkeypatch):
 def test_a_workspace_naming_neither_side_says_what_to_set(monkeypatch):
     _given(monkeypatch, Workspace(workspace=WORKSPACE))
 
-    with pytest.raises(CommandError, match="needs the catalogue to fork"):
+    with pytest.raises(CommandError, match="needs a source catalogue"):
         weaver.plan_mirror(no_item=True, session=_never())
 
 
@@ -216,7 +216,7 @@ def test_a_source_in_another_workspace_is_refused(monkeypatch):
 
     _given(monkeypatch, _workspace(mirror="Production/Warehouse/Weaver"))
 
-    with pytest.raises(CommandError, match="must be in the workspace"):
+    with pytest.raises(CommandError, match="Source catalogue .* must be in workspace"):
         weaver.plan_mirror(no_item=True, session=_never())
 
 
@@ -226,7 +226,9 @@ def test_a_destination_in_another_workspace_is_refused(monkeypatch):
 
     _given(monkeypatch, _workspace())
 
-    with pytest.raises(CommandError, match="A fork writes the catalogue"):
+    with pytest.raises(
+        CommandError, match="destination catalogue must be in workspace"
+    ):
         weaver.plan_mirror(
             no_item=True, catalogue="Production/Warehouse/Weaver_Dev", session=_never()
         )
@@ -238,7 +240,7 @@ def test_forking_a_catalogue_into_itself_is_refused(monkeypatch):
 
     _given(monkeypatch, _workspace(catalogue="Warehouse/Weaver"))
 
-    with pytest.raises(CommandError, match="would empty the catalogue it copies"):
+    with pytest.raises(CommandError, match="both the source and destination catalogue"):
         weaver.plan_mirror(no_item=True, session=_never())
 
 
@@ -477,7 +479,7 @@ def test_rebinding_an_item_out_of_a_mirrored_catalogue_is_refused(monkeypatch):
     plan = _plan(monkeypatch, _with_targets(), ["Warehouse/Model"])
     installed = _installed({"Warehouse/Model": "Model"})
 
-    with pytest.raises(CommandError, match="itself a mirror"):
+    with pytest.raises(CommandError, match="already a mirrored catalogue"):
         resolve_mirror(plan, installed, borrowed=True)
 
     assert (

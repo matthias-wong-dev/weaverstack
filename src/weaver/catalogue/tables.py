@@ -1,19 +1,9 @@
 """The physical contract of the Weaver catalogue's ``_`` schema.
 
-Catalogue rows belong to a logical Item, keyed first by ``item_type`` and
-``item_name``. ``Installation`` maps that Item to its current physical target;
-the target name is an attribute, not identity. The package-owned ``_weaver``
-Item may share its Warehouse with ordinary Items because their logical scopes
-remain distinct.
-
-Dictionary and Registry rows add object identity within the Item scope. Their
-signatures drive incremental comparison. The ordinary build appends Weaver's
-audit columns to every table.
-
-The ``_`` schema is the Weaver catalogue, and every table in it is a catalogue
-table. There are two kinds: :data:`PROJECTED_TABLES` are maintained from
-repository and build state and reconciled against it, and :data:`RUNTIME_TABLES`
-are maintained during execution. :data:`CATALOGUE_TABLES` is both.
+Every row starts with the logical ``(item_type, item_name)`` scope.
+``Installation`` maps that identity to a physical target; Dictionary and
+Registry rows add object identity. :data:`PROJECTED_TABLES` are reconciled from
+repository state, while :data:`RUNTIME_TABLES` record execution state.
 """
 
 from __future__ import annotations
@@ -24,16 +14,11 @@ from typing import Mapping
 
 from ..declaration.metadata import AUDIT_COLUMNS, SPARK_SQL, audit_column_name
 
-#: The schema the Weaver catalogue lives in, inside its Warehouse.
-#: One character, reserved, and never touched by an application build's prune.
+#: Reserved for the catalogue and never pruned by an application build.
 CATALOGUE_SCHEMA = "_"
 
-#: Installed-object vocabulary used for runtime addressing.
-#: ``file`` and ``stored_procedure`` are what a load layer installs, being a
-#: deployed module or generated statement and a generated load procedure. They are
-#: ordinary managed objects rather than infrastructure exempt from the lifecycle.
-#: ``schema`` is what a schema shortcut is: a namespace this item presents and
-#: whose contents belong to the item it points at.
+#: Installed-object vocabulary used for runtime addressing. Files, stored
+#: procedures and shortcut schemas are managed objects subject to the lifecycle.
 OBJECT_TYPES = ("folder", "table", "view", "file", "stored_procedure", "schema")
 
 #: What an object is for, independent of its physical shape.
@@ -41,13 +26,9 @@ ROLE_DATA = "data"
 ROLE_LOAD = "load"
 ROLE_TEST = "test"
 ROLE_ASSUMPTION = "assumption"
-#: A pointer this item declares at something another item owns. Recorded as a
-#: role rather than a type, because what it physically is still varies: a
-#: table, a folder, a view, or the schema a schema shortcut presents.
+#: A pointer to an object another item owns; its physical type varies.
 ROLE_SHORTCUT = "shortcut"
-#: A stored procedure an item manages. Weaver creates, replaces and prunes it,
-#: and nothing schedules it: it runs when a person or another system calls it.
-#: ``_.Load``, ``_.Test`` and authored content all carry this.
+#: A managed stored procedure invoked outside Weaver's scheduler.
 ROLE_PROGRAMMABLE = "programmable"
 OBJECT_ROLES = (
     ROLE_DATA,
@@ -58,8 +39,7 @@ OBJECT_ROLES = (
     ROLE_PROGRAMMABLE,
 )
 
-#: The roles a runtime artefact carries, being everything installed to be run
-#: rather than to hold rows. Asked where a selection has to be partitioned.
+#: Roles installed to run rather than hold rows.
 RUNTIME_ROLES = (ROLE_LOAD, ROLE_TEST, ROLE_ASSUMPTION, ROLE_PROGRAMMABLE)
 
 #: The roles a validation carries, by the kind that declares it.
@@ -70,8 +50,7 @@ KEY_PRIMARY = "primary_key"
 KEY_UNIQUE = "unique"
 KEY_TYPES = (KEY_PRIMARY, KEY_UNIQUE)
 
-#: The public spelling of every stored vocabulary. Internal Python keeps its
-#: snake-case values; the persistence boundary writes and reads these.
+#: Public spellings written and read at the persistence boundary.
 OBJECT_TYPE_VOCABULARY = {
     "folder": "Folder",
     "table": "Table",
@@ -92,9 +71,6 @@ OBJECT_ROLE_VOCABULARY = {
 
 KEY_TYPE_VOCABULARY = {KEY_PRIMARY: "Primary key", KEY_UNIQUE: "Unique"}
 
-#: What a shortcut is, and how its target is read. Internal Python keeps the
-#: lowercase values the declaration model uses; the persistence boundary writes
-#: and reads these, exactly as Registry does for object type and role.
 SHORTCUT_TYPE_VOCABULARY = {
     "table": "Table",
     "schema": "Schema",
@@ -111,9 +87,7 @@ BOOLEAN = "boolean"
 TIMESTAMP = "timestamp"
 BIGINT = "bigint"
 
-#: How each logical type is spelled in the Warehouse the catalogue lives in.
-#: A string defaults to an identifier's width; a column holding prose or a list
-#: says so with :attr:`CatalogueColumn.sql_type`.
+#: Warehouse types. Strings default to identifier width; wider columns override it.
 WAREHOUSE_TYPES = {
     STRING: "varchar(128)",
     BOOLEAN: "bit",
@@ -128,18 +102,12 @@ LIST_TYPE = "varchar(1000)"
 #: The signature column, on every table.
 SIGNATURE = "signature"
 
-#: Words the public spelling keeps in upper case. Everything else in a column
-#: name is an ordinary word: capitalised when it leads, lower case after.
+#: Initialisms preserved when internal column names become public names.
 INITIALISMS = {"id": "ID", "sql": "SQL", "url": "URL", "sk": "SK"}
 
 
 def public_column_name(name: str) -> str:
-    """The public Warehouse spelling of an internal column name.
-
-    Internal keys are snake case and the persistence boundary maps them to the
-    sentence-case names the ``_`` schema publishes: first word capitalised,
-    ordinary words after it in lower case, established initialisms upper.
-    """
+    """Convert an internal snake-case name to its public Warehouse spelling."""
 
     words = [INITIALISMS.get(word, word) for word in name.split("_")]
     first = words[0]
@@ -152,10 +120,7 @@ def public_column_name(name: str) -> str:
 #: after success; unchanged rows retain their value.
 BUILD_DATETIME = "build_datetime"
 
-#: Weaver's audit columns, as internal keys. They are not business columns. The
-#: build appends them to every table it creates, and the catalogue writes them,
-#: so it has to know them. The ``_`` schema spells them like any other column,
-#: through :func:`public_column_name`.
+#: Audit columns appended to every built table, under their internal keys.
 AUDIT_COLUMN_NAMES = tuple(
     audit_column_name(logical, SPARK_SQL) for logical in AUDIT_COLUMNS
 )
@@ -164,7 +129,7 @@ AUDIT_INSERT_COLUMN, AUDIT_UPDATE_COLUMN, AUDIT_DELETE_COLUMN = AUDIT_COLUMN_NAM
 
 @dataclass(frozen=True)
 class CatalogueColumn:
-    """One internal column and its public Warehouse representation."""
+    """An internal column and its public Warehouse representation."""
 
     name: str
     type: str = STRING
@@ -190,8 +155,6 @@ class CatalogueColumn:
         return self.sql_type or WAREHOUSE_TYPES[self.type]
 
     def to_public(self, value: object) -> object:
-        """One projected value as the ``_`` schema stores it."""
-
         if self.vocabulary is None or value is None:
             return value
         try:
@@ -203,8 +166,6 @@ class CatalogueColumn:
             ) from None
 
     def from_public(self, value: object) -> object:
-        """One stored value as internal Python spells it."""
-
         if self.vocabulary is None or value is None:
             return value
         for internal, public in self.vocabulary.items():
@@ -230,7 +191,7 @@ def _public_name(qualified: str, columns, name: str) -> str:
 
 @dataclass(frozen=True)
 class CatalogueTable:
-    """One reconciled catalogue table."""
+    """A projected catalogue table."""
 
     name: str
     description: str
@@ -268,49 +229,34 @@ class CatalogueTable:
 
     @property
     def column_names(self) -> tuple[str, ...]:
-        """The business columns, in order, being those a projection supplies."""
-
         return tuple(column.name for column in self.columns if not column.published)
 
     @property
     def published_column_names(self) -> tuple[str, ...]:
-        """Columns the installer supplies when it writes the row."""
-
         return tuple(column.name for column in self.columns if column.published)
 
     @property
     def comparison_columns(self) -> tuple[str, ...]:
-        """Non-key columns, whose change makes a matched row an update.
+        """Non-key projected columns whose change updates a matched row.
 
-        ``signature`` is one of them: a row whose source file
-        changed differs here even when every projected value happens to match.
-
-        A published column is absent. One that compared would differ
-        on every build by construction, its value being new each time, so every
-        row would update every build and the no-op that makes an unchanged
-        installation cheap would be gone.
+        Published columns are excluded because their new value would make every
+        build update every row.
         """
 
         return tuple(name for name in self.column_names if name not in self.key)
 
     @property
     def physical_columns(self) -> tuple[str, ...]:
-        """Every column the built table has: business, published, audit trio."""
-
         return self.column_names + self.published_column_names + AUDIT_COLUMN_NAMES
 
     def column(self, name: str) -> CatalogueColumn:
         return _column(self.qualified, self.columns, name)
 
     def public_name_of(self, name: str) -> str:
-        """The public spelling of one column, audit columns included."""
-
         return _public_name(self.qualified, self.columns, name)
 
     @property
     def public_columns(self) -> tuple[str, ...]:
-        """Every physical column as the ``_`` schema spells it, in order."""
-
         return tuple(self.public_name_of(name) for name in self.physical_columns)
 
 
@@ -354,13 +300,7 @@ def _signature(what: str) -> CatalogueColumn:
 
 
 def _described(*, what: str) -> tuple[CatalogueColumn, ...]:
-    """A description and the pointer it was copied from, if it was copied.
-
-    A Weaver document ``Description`` is either prose or exactly one ``$Schema.Object``
-    reference. When it is a reference the prose is copied from the target and the
-    pointer is kept, so both what it says and where it came
-    from.
-    """
+    """A description and its source when copied from ``$Schema.Object``."""
 
     return (
         CatalogueColumn(
@@ -370,10 +310,7 @@ def _described(*, what: str) -> tuple[CatalogueColumn, ...]:
         ),
         CatalogueColumn(
             "description_reference",
-            description=(
-                "The $Schema.Object the description was copied from, when it was "
-                "declared as a reference rather than written here."
-            ),
+            description="The $Schema.Object this description was copied from, if any.",
         ),
     )
 
@@ -417,8 +354,8 @@ def _behaviour() -> tuple[CatalogueColumn, ...]:
 INSTALLATION = CatalogueTable(
     name="Installation",
     description=(
-        "One row per logical Item, recording its current physical target and the "
-        "Weaver version and source signature that installed it."
+        "The physical target, Weaver version and source signature of each logical "
+        "item installation."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME),
     columns=(
@@ -440,10 +377,8 @@ INSTALLATION = CatalogueTable(
 REGISTRY = CatalogueTable(
     name="Registry",
     description=(
-        "Objects Weaver currently certifies as installed. A physical table may "
-        "exist without a row here, and Weaver then does not treat it as valid. "
-        "Written last in a build, so its presence means everything the object "
-        "needed succeeded."
+        "Objects certified as installed. Registry is written last, after each "
+        "object and its dependencies succeed."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     columns=(
@@ -453,18 +388,13 @@ REGISTRY = CatalogueTable(
             "object_type",
             not_null=True,
             vocabulary=OBJECT_TYPE_VOCABULARY,
-            description=(
-                "What was installed: Folder, Table, View, File or Stored procedure."
-            ),
+            description="The installed physical type.",
         ),
         CatalogueColumn(
             "object_role",
             not_null=True,
             vocabulary=OBJECT_ROLE_VOCABULARY,
-            description=(
-                "What the object is for: Data holds or shapes rows; Load does "
-                "the work that fills one."
-            ),
+            description="The object's role.",
         ),
         _signature("the object's source file"),
         CatalogueColumn(
@@ -494,15 +424,14 @@ SCHEMA_DICTIONARY = CatalogueTable(
 TABLE_DICTIONARY = CatalogueTable(
     name="TableDictionary",
     description=(
-        "Tables and views together, described the same way, and a "
-        "reader asks the same questions of both. Everything here is declared in "
-        "Weaver document; nothing is read back from the physical object."
+        "Declared tables and views. This describes authored documents, not their "
+        "physical objects."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     columns=(
         *_scope(),
         *_object(),
-        CatalogueColumn("object_type", not_null=True, description="table or view."),
+        CatalogueColumn("object_type", not_null=True, description="Table or View."),
         *_described(what="object"),
         *_lineage(),
         CatalogueColumn(
@@ -532,9 +461,8 @@ TABLE_DICTIONARY = CatalogueTable(
 FOLDER_DICTIONARY = CatalogueTable(
     name="FolderDictionary",
     description=(
-        "Managed folders. A folder keeps its two-part Weaver document identity rather than "
-        "being reduced to a path, and its file key is the scope of what Weaver "
-        "manages inside it, so reconciliation deletes nothing outside that."
+        "Managed folders under their Weaver document identity. The file key limits "
+        "which files reconciliation may delete."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     columns=(
@@ -555,11 +483,8 @@ FOLDER_DICTIONARY = CatalogueTable(
 COLUMN_DICTIONARY = CatalogueTable(
     name="ColumnDictionary",
     description=(
-        "What an author said about a column, plus Weaver's own surrogate. "
-        "Purely descriptive: it holds the columns that carry a note, not every "
-        "column of every object. Ordinals, types and nullability are physical "
-        "and are recorded separately, so nothing here depends on reading a "
-        "built table."
+        "Authored column descriptions and Weaver-managed surrogate columns. It "
+        "does not inventory every physical column."
     ),
     key=(
         SCOPE_ITEM_TYPE,
@@ -585,9 +510,8 @@ COLUMN_DICTIONARY = CatalogueTable(
 KEY_DICTIONARY = CatalogueTable(
     name="KeyDictionary",
     description=(
-        "Declared logical keys, the primary key and any alternate keys. Neither "
-        "is built and neither is enforced; they say which column sets identify a "
-        "row. A key is identified by its own columns, so it needs no name."
+        "Declared primary and alternate keys. They identify rows logically but "
+        "are not built or enforced."
     ),
     key=(
         SCOPE_ITEM_TYPE,
@@ -619,12 +543,8 @@ KEY_DICTIONARY = CatalogueTable(
 FOREIGN_KEY_DICTIONARY = CatalogueTable(
     name="ForeignKeyDictionary",
     description=(
-        "Declared relationships to primary objects, an ER model rather than "
-        "database constraints. Nothing is enforced. Because a relationship has "
-        "no name, the row is the edge: every column is part of the key, so two "
-        "objects may be related several times over and an object may reference "
-        "itself. The owning item scopes the foreign side; the primary side "
-        "carries item identity because it may cross items."
+        "Declared relationships, not database constraints. Each row is an unnamed "
+        "edge; the primary side carries item identity because it may cross items."
     ),
     key=(
         SCOPE_ITEM_TYPE,
@@ -681,12 +601,8 @@ FOREIGN_KEY_DICTIONARY = CatalogueTable(
 TEST_DICTIONARY = CatalogueTable(
     name="TestDictionary",
     description=(
-        "Tests and Assumptions, the estate's declared validation. It describes "
-        "the logical authored declaration, not the procedure or module the "
-        "validation compiles to: that is a physical artefact and Registry "
-        "certifies it. One table for both kinds because the same questions are "
-        "questions of each, and because Tests and Assumptions share one logical "
-        "namespace within an item and so cannot both claim a key."
+        "Declared Tests and Assumptions, not the procedures or modules they compile "
+        "to. Both share one logical namespace within an item."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     columns=(
@@ -706,10 +622,8 @@ TEST_DICTIONARY = CatalogueTable(
             "primary_key",
             sql_type=LIST_TYPE,
             description=(
-                "A Test's declared key, comma-separated in declared order. It "
-                "correlates the two sides of the comparison and does not change "
-                "what is counted. Null for a Test that declares none, and always "
-                "null for an Assumption, which has one side to correlate."
+                "A Test's correlation key, comma-separated in declared order. "
+                "Null when undeclared and for every Assumption."
             ),
         ),
         _signature("the validation's source file"),
@@ -719,10 +633,8 @@ TEST_DICTIONARY = CatalogueTable(
 DEPENDENCY = CatalogueTable(
     name="Dependency",
     description=(
-        "One row per resolved dependency edge, scoped to the referencing item. "
-        "The referenced side is the edge Weaver resolved; the authored spelling "
-        "is kept alongside it. Crossing items or engines is a shortcut, recorded "
-        "separately, not a dependency that changes namespace."
+        "Resolved dependency edges and their authored references, scoped to the "
+        "referencing item. Cross-item and cross-engine edges are Shortcuts."
     ),
     key=(
         SCOPE_ITEM_TYPE,
@@ -772,13 +684,8 @@ DEPENDENCY = CatalogueTable(
 SHORTCUT = CatalogueTable(
     name="Shortcut",
     description=(
-        "Every shortcut an item declares, reproduced from its own "
-        "shortcuts.py or shortcuts.yml. This is where the estate's graph "
-        "crosses items, engines and workspaces, so it is kept apart from "
-        "Dependency: composing Dependency, Shortcut and Registry is what yields "
-        "the whole DAG, and only that composition may cross. It records what "
-        "was declared, so where a logical target is physically installed stays "
-        "Installation's answer."
+        "Declared cross-item, cross-engine and cross-workspace edges. Logical "
+        "targets remain logical; Installation records their physical binding."
     ),
     # Keyed by the shortcut's own id, because a schema shortcut presents a
     # namespace and so names no object, and a merge key cannot be null.
@@ -814,10 +721,7 @@ SHORTCUT = CatalogueTable(
         CatalogueColumn(
             "target_type",
             not_null=True,
-            description=(
-                "How the target is read: a Weaver item Weaver binds, or the "
-                "Fabric item itself."
-            ),
+            description="Whether the target is a logical item or a physical item.",
             vocabulary=TARGET_TYPE_VOCABULARY,
         ),
         CatalogueColumn(
@@ -834,10 +738,8 @@ SHORTCUT = CatalogueTable(
         CatalogueColumn(
             "target_object_name",
             description=(
-                "The object the target names. Null where it names a schema or a "
-                "path rather than an object. For a logical target these four "
-                "target columns give the producer's identity whole, so nothing "
-                "rebuilds it without joining Installation or splitting an id."
+                "The target object. Null for a schema or path. Together, the four "
+                "target columns preserve a logical producer's identity."
             ),
         ),
         CatalogueColumn(
@@ -852,8 +754,7 @@ SHORTCUT = CatalogueTable(
 )
 
 
-#: Every dictionary table, in the order a build reconciles them. Order is fixed
-#: so a bundle's payloads and a report's actions read the same way every time.
+#: Dictionary reconciliation order, kept stable for payloads and reports.
 DICTIONARY_TABLES = (
     SCHEMA_DICTIONARY,
     FOLDER_DICTIONARY,
@@ -866,35 +767,22 @@ DICTIONARY_TABLES = (
     SHORTCUT,
 )
 
-#: The catalogue tables projected from repository state, dictionaries first, then
-#: Installation, then Registry. The order is the reconciliation order:
-#: dictionaries describe, Installation records the binding, and Registry
-#: certifies, so Registry is last.
+#: Reconciliation order: descriptions, binding, then certification.
 PROJECTED_TABLES = DICTIONARY_TABLES + (INSTALLATION, REGISTRY)
 
 
 # --- the catalogue tables maintained at runtime -------------------------------
 
-#: How a settled unit of work ended. One vocabulary across every runtime table
-#: that records an outcome, so comparing a load's result with a
-#: validation's is comparing the same words.
-#:
-#: The distinctions are the ones an operator acts on. Failed is work that ran
-#: under Weaver's control and produced an unacceptable result: a validation
-#: found discrepancies, a load refused a change larger than its declared
-#: threshold. Error is work that could not be evaluated at all, which is not a
-#: judgement about the data and must never be read as one. Blocked is work that
-#: did not happen because something upstream prevented it, and Skipped work
-#: not done. Pending is a current state not yet established for
-#: this incarnation.
+#: Shared runtime outcomes. Failed means an unacceptable evaluated result; Error
+#: means the work could not be evaluated; Blocked means an upstream dependency
+#: prevented it; Pending means no outcome for the current incarnation.
 PENDING = "pending"
 SKIPPED = "skipped"
 SUCCEEDED = "succeeded"
 FAILED = "failed"
 ERROR = "error"
 BLOCKED = "blocked"
-#: A load that completed with rejected rows. Valid rows may still have landed, so
-#: it is neither a success nor a failure, and only a load can be one.
+#: A completed load with rejected rows; valid rows may still have landed.
 REJECTED = "rejected"
 
 RESULT_VOCABULARY = {
@@ -909,23 +797,13 @@ RESULT_VOCABULARY = {
 #: The same vocabulary plus ``Rejected``, for the tables a load writes.
 LOAD_RESULT_VOCABULARY = {**RESULT_VOCABULARY, REJECTED: "Rejected"}
 
-#: The bookmark of an object that has never had a clean load. A sentinel rather
-#: than a null, so the Static gate and an incremental read are one comparison
-#: rather than a comparison and a null check. Rendered text and Python value are
-#: the same instant, and ``tests/test_bookmark_declaration.py`` asserts it.
+#: Bookmark before any clean load. The text and Python value are the same instant.
 BOOKMARK_SENTINEL_TEXT = "1900-01-01 00:00:00.000000"
 BOOKMARK_SENTINEL = datetime(1900, 1, 1, tzinfo=timezone.utc)
 
 
-#: How a runtime table's rows are maintained, which is the difference the whole
-#: operational model turns on.
-#:
-#: History is appended: a row records that something happened, and nothing that
-#: happens later makes it not have happened. Current state is merged on the
-#: table's own key: there is one row per object per incarnation, and when a build
-#: ends that incarnation the row goes with it. Borrowed is merged on the key too
-#: and outlives an incarnation: what ends the row is the object becoming locally
-#: owned.
+#: Runtime maintenance modes. History is appended; current state is merged per
+#: object incarnation; borrowed state is merged until the object becomes local.
 HISTORY = "history"
 CURRENT_STATE = "current_state"
 BORROWED = "borrowed"
@@ -942,21 +820,11 @@ INVALIDATED_BY = (BY_DATA_NODE, BY_LOADABLE, BY_VALIDATION)
 
 @dataclass(frozen=True)
 class RuntimeTable:
-    """A catalogue table maintained during execution rather than by projection.
+    """A catalogue table maintained by execution rather than projection.
 
-    Declared and built like any other, and reconciled against nothing: its rows
-    come from what Weaver did, not from what a repository declares.
-
-    ``key`` is the identity the table is declared with. ``_.Log`` and
-    ``_.LoadStatistic`` carry a surrogate, because a settled unit of work is only
-    ever appended; the current-state tables carry the same logical identity the
-    Registry does, so a status row and a Registry row are the same object seen
-    twice.
-
-    ``maintenance`` says whether rows are appended or merged, and it is read
-    rather than inferred: an appended table has a key too, so the presence of one
-    settles nothing. ``invalidated_by`` names the population whose rebuild ends a
-    current-state row, and is None for history, which nothing invalidates.
+    ``maintenance`` explicitly selects append, current-state merge or borrowed
+    merge semantics. ``invalidated_by`` names the population whose rebuild ends
+    current state; history and borrowed state are not tied to an incarnation.
     """
 
     name: str
@@ -968,20 +836,14 @@ class RuntimeTable:
 
     @property
     def is_current_state(self) -> bool:
-        """Whether one row stands for one object's state now."""
-
         return self.maintenance == CURRENT_STATE
 
     @property
     def is_history(self) -> bool:
-        """Whether rows are appended and never revisited."""
-
         return self.maintenance == HISTORY
 
     @property
     def is_borrowed(self) -> bool:
-        """Whether one row says an object's data is supplied from elsewhere."""
-
         return self.maintenance == BORROWED
 
     def __post_init__(self) -> None:
@@ -1029,26 +891,18 @@ class RuntimeTable:
 
     @property
     def column_names(self) -> tuple[str, ...]:
-        """The declared columns, being those a caller supplies."""
-
         return tuple(column.name for column in self.columns)
 
     @property
     def comparison_columns(self) -> tuple[str, ...]:
-        """The non-key columns a keyed write updates when the row already exists."""
-
         return tuple(name for name in self.column_names if name not in self.key)
 
     @property
     def published_column_names(self) -> tuple[str, ...]:
-        """Empty: nothing here is supplied at publication."""
-
         return ()
 
     @property
     def physical_columns(self) -> tuple[str, ...]:
-        """Every column the built table has: declared, then the audit trio."""
-
         return self.column_names + AUDIT_COLUMN_NAMES
 
     def column(self, name: str) -> CatalogueColumn:
@@ -1067,18 +921,16 @@ LOG = RuntimeTable(
     key=("log_sk",),
     maintenance=HISTORY,
     description=(
-        "One row per settled unit of Weaver work. Operational evidence rather "
-        "than installed state, so it is appended as work settles and no "
-        "declaration is reconciled against it."
+        "One appended row per settled unit of Weaver work. This is operational "
+        "history, not installed state."
     ),
     columns=(
         CatalogueColumn(
             "log_sk",
             not_null=True,
             description=(
-                "A meaningless immutable surrogate row key. Generated where the "
-                "row is, because a Fabric Warehouse has no identity column and "
-                "several sessions may append at once."
+                "An immutable surrogate generated by the writer. Fabric Warehouse "
+                "tables have no identity columns, and sessions may append concurrently."
             ),
         ),
         CatalogueColumn(
@@ -1119,7 +971,7 @@ LOG = RuntimeTable(
         CatalogueColumn(
             "message",
             sql_type=PROSE_TYPE,
-            description="Concise human-readable information.",
+            description="Human-readable task summary.",
         ),
         CatalogueColumn(
             "details",
@@ -1133,11 +985,8 @@ LOG = RuntimeTable(
 BOOKMARK = RuntimeTable(
     name="Bookmark",
     description=(
-        "Where the next incremental load starts: the UTC instant immediately "
-        "before each loadable object's most recent clean load began. A clean "
-        "load advances it, and rebuilding or reloading the object returns it to "
-        "the sentinel. A Static object uses it to tell whether it has loaded "
-        "before. One row per installed loadable; a View has none."
+        "The UTC instant immediately before each loadable object's latest clean "
+        "load began. Rebuild and reload reset it to the sentinel; Views have no row."
     ),
     # The Registry's identity exactly, and for the reason a shared key exists at
     # all: a bookmark row and a Registry row describe the same installed object.
@@ -1162,11 +1011,7 @@ BOOKMARK = RuntimeTable(
 
 
 def _outcome(*, vocabulary) -> tuple[CatalogueColumn, ...]:
-    """What a settled unit of work reports about itself, in one shape.
-
-    The same four columns wherever an outcome is recorded, so comparing
-    a load's with a validation's is comparing the same measurements.
-    """
+    """The shared result and timing columns for settled work."""
 
     return (
         CatalogueColumn(
@@ -1192,11 +1037,8 @@ def _outcome(*, vocabulary) -> tuple[CatalogueColumn, ...]:
 LOAD_STATUS = RuntimeTable(
     name="LoadStatus",
     description=(
-        "The current load state of each table, folder and View Weaver manages. "
-        "A rebuilt table or folder is Pending until it loads, and a "
-        "successfully built View is Succeeded. Loading a table or folder "
-        "replaces the row with the result of that load. Logical identity only, "
-        "because where it is physically installed is the Installation's to say."
+        "Current load state for each managed table, folder and View. Rebuilt "
+        "tables and folders are Pending until loaded; built Views are Succeeded."
     ),
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
     maintenance=CURRENT_STATE,
@@ -1219,9 +1061,7 @@ LOAD_STATUS = RuntimeTable(
 LOAD_STATISTIC = RuntimeTable(
     name="LoadStatistic",
     description=(
-        "What each load did, as counts. Appended: a load's statistics are a "
-        "fact about a moment, so a later rebuild does not remove them and the "
-        "history of an object's loads accumulates."
+        "Append-only counts for each load. Rebuilds do not remove this history."
     ),
     key=("load_statistic_sk",),
     maintenance=HISTORY,
@@ -1230,9 +1070,8 @@ LOAD_STATISTIC = RuntimeTable(
             "load_statistic_sk",
             not_null=True,
             description=(
-                "A meaningless immutable surrogate row key. Generated where the "
-                "row is, because a Fabric Warehouse has no identity column and "
-                "several sessions may append at once."
+                "An immutable surrogate generated by the writer. Fabric Warehouse "
+                "tables have no identity columns, and sessions may append concurrently."
             ),
         ),
         CatalogueColumn(
@@ -1316,9 +1155,8 @@ TEST_STATUS = RuntimeTable(
             "failure_count",
             BIGINT,
             description=(
-                "How much disagreed: discrepancy rows for a Test, contradicting "
-                "rows for an Assumption. Meaningful only for a validation that "
-                "was evaluated."
+                "Discrepancy rows for a Test or contradicting rows for an "
+                "Assumption. Set only when evaluated."
             ),
         ),
     ),
@@ -1328,11 +1166,8 @@ TEST_STATUS = RuntimeTable(
 MIRROR = RuntimeTable(
     name="Mirror",
     description=(
-        "Installed objects whose data is supplied by another physical target. "
-        "One row per mirrored object, written when a mirror is created and "
-        "removed when the object is built locally. Registry says what the "
-        "object is; this says where its rows come from and what stands at its "
-        "address."
+        "Source and local physical type for installed objects whose data comes "
+        "from another target. Removed when the object is built locally."
     ),
     # The Registry's identity exactly: both rows describe one installed object.
     key=(SCOPE_ITEM_TYPE, SCOPE_ITEM_NAME, "schema_name", "object_name"),
@@ -1365,9 +1200,8 @@ MIRROR = RuntimeTable(
             not_null=True,
             vocabulary=OBJECT_TYPE_VOCABULARY,
             description=(
-                "What physically stands at this object's address while it "
-                "mirrors that source: a View over the source relation in a "
-                "Warehouse, a Table or Folder shortcut in a Lakehouse."
+                "What stands at the local address: a Warehouse View or a "
+                "Lakehouse Table or Folder shortcut."
             ),
         ),
     ),
@@ -1377,13 +1211,8 @@ MIRROR = RuntimeTable(
 #: The catalogue tables maintained during execution.
 RUNTIME_TABLES = (LOG, BOOKMARK, LOAD_STATUS, LOAD_STATISTIC, TEST_STATUS)
 
-#: The standard Weaver catalogue surface every normal bound item presents.
-#:
-#: A built target is given each of these under its own name, a view in a
-#: Warehouse and a OneLake shortcut in a Lakehouse, so a generated procedure,
-#: authored Spark SQL, ``_.Load`` and ``_.Test`` reach Weaver's operational
-#: state. ``_.Installation`` is here because ``_.Load`` and ``_.Test`` recover
-#: their logical item from it when a caller omits ``@item_name``.
+#: Catalogue views in Warehouses and OneLake shortcuts in Lakehouses.
+#: Installation lets ``_.Load`` and ``_.Test`` recover an omitted item name.
 STANDARD_SURFACE_TABLES = (INSTALLATION,) + RUNTIME_TABLES
 
 #: The runtime tables describing one object's state now. A build ends the
@@ -1395,24 +1224,15 @@ CURRENT_STATE_TABLES = tuple(
 #: The runtime tables recording what happened. Never invalidated.
 HISTORY_TABLES = tuple(table for table in RUNTIME_TABLES if table.is_history)
 
-#: The tables saying an object's data is supplied from elsewhere, and the one
-#: part of the catalogue no document declares. The mirror operation creates
-#: ``_.Mirror`` when it first writes a row, so a catalogue only ever reached by
-#: ``weaver build`` has none and a read of an absent one is nothing borrowed.
+#: Runtime tables created on first borrowed-state write, not by catalogue documents.
 BORROWED_TABLES = (MIRROR,)
 
 #: Every catalogue table the ``_weaver`` item declares, however it is
 #: maintained. ``_.Mirror`` is not one: see :data:`BORROWED_TABLES`.
 CATALOGUE_TABLES = PROJECTED_TABLES + RUNTIME_TABLES
 
-#: What a run reads. The projected tables, which say what is installed and
-#: where, ``_.Mirror``, which says which nodes a load may write, and
-#: ``_.Bookmark``, which says how far each object has been loaded.
-#:
-#: The other current-state tables are absent, and that is the asymmetry worth
-#: knowing: a run writes a load status and a test status and never asks what
-#: they were, while a build reads all three to decide which rows its own work has
-#: made obsolete. See :data:`weaver.catalogue.state.READ_FOR_BUILD`.
+#: Projected state, borrowed nodes and bookmarks read by a run. Status tables are
+#: written by runs but only read by builds; see ``state.READ_FOR_BUILD``.
 READABLE_TABLES = PROJECTED_TABLES + BORROWED_TABLES + (BOOKMARK,)
 
 TABLES_BY_NAME = {table.name: table for table in CATALOGUE_TABLES + BORROWED_TABLES}
@@ -1432,14 +1252,10 @@ _PROTECTED = frozenset(
 
 
 def is_protected(schema: str, name: str) -> bool:
-    """Whether ``schema.name`` is a catalogue table a build must not drop."""
-
     return f"{schema}.{name}".casefold() in _PROTECTED
 
 
 def table(name: str) -> CatalogueTable | RuntimeTable:
-    """One catalogue table by its object name, projected or runtime."""
-
     try:
         return TABLES_BY_NAME[name]
     except KeyError:

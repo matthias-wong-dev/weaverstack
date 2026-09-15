@@ -1,12 +1,4 @@
-"""T-SQL execution: run a generated Warehouse script through the SQL stack.
-
-The payload is a finished, self-contained T-SQL script (built by
-:mod:`weaver.declaration.tsql_ddl`): a table build materialises and inspects its own
-query shape server-side and creates only its main table; a view is a
-strict ``CREATE VIEW``. The executor runs it as one multi-statement script
-through the pooled SQL executor the environment supplies. It adds no logic of its
-own, which is the mechanical executor the build philosophy calls for.
-"""
+"""Run finished Warehouse T-SQL payloads through the supplied SQL executor."""
 
 from __future__ import annotations
 
@@ -43,18 +35,10 @@ class TSqlExecutor:
 
 
 class TSqlBatchExecutor:
-    """Ordered T-SQL statements, each run as its own batch, as one action.
+    """Run an ordered array as separate T-SQL batches within one action.
 
-    The T-SQL twin of ``spark_sql_batch``, and it exists for a reason the Spark
-    side does not have: several statements cannot share a batch when any of them
-    is a ``CREATE VIEW``, because T-SQL requires that to be the first statement in
-    its batch. ``execute_script`` sends what it is given as one batch, so a script
-    holding two ``CREATE OR ALTER VIEW`` statements is rejected outright with
-    *Incorrect syntax near the keyword 'create'*.
-
-    So the payload is an ordered array rather than one script, and each element is
-    submitted on its own. The action stays one action: it is one decision, reported
-    once, and the batching is transport.
+    ``CREATE VIEW`` must be the first statement in a batch, so view statements
+    cannot share one ``execute_script`` call.
     """
 
     name = "tsql_batch"
@@ -77,10 +61,8 @@ class TSqlBatchExecutor:
             raise InstallError(
                 f"tsql_batch action {action.id!r} payload must be an array of statements"
             )
-        # The build datetime is scoped to this installation rather than to a
-        # target, so it is the one value a frozen payload cannot carry and is
-        # resolved here. A statement that names it and gets none is refused
-        # rather than reaching the engine with the token still in it.
+        # The publication instant is installation-scoped and cannot be frozen
+        # into the payload generated earlier.
         for statement in statements:
             context.sql.execute_script(
                 substitute_build_datetime(statement, context.build_datetime)

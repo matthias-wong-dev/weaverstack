@@ -19,11 +19,10 @@ TABLES_AREA = "Tables"
 
 
 def resolver_for(workspace):
-    """The resolver for a workspace in the current host.
+    """Return the resolver for the current execution environment.
 
-    Inside Fabric, resolution goes through NotebookUtils. From a desktop it is
-    the REST-backed resolver, and that cross-boundary caller supplies its DFS
-    store explicitly.
+    Inside Fabric, resolution uses NotebookUtils. Desktop resolution uses the
+    Fabric REST API.
     """
 
     try:
@@ -41,11 +40,10 @@ def resolver_for(workspace):
 
 
 def store_for(workspace):
-    """The **within-workspace** default store, which needs a Fabric session.
+    """Return the in-Fabric store.
 
-    ``FabricStore`` goes through NotebookUtils and therefore works only inside
-    Fabric. A desktop caller crossing in constructs ``OneLakeDfsClient`` and
-    injects it explicitly, so DFS is never mistaken for the default.
+    ``FabricStore`` uses NotebookUtils. Desktop callers must inject an
+    ``OneLakeDfsClient`` instead.
     """
 
     from .fabric.store import FabricStore

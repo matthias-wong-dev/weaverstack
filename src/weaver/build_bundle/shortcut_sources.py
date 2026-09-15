@@ -1,18 +1,9 @@
-"""Resolve what a physical shortcut points at, before a bundle is generated.
+"""Resolve physical shortcut sources before bundle generation.
 
-A logical shortcut names a Weaver document, so the installer addresses it exactly
-as it addresses every other target of the build. A physical one names a Fabric
-item, possibly in another workspace, which is not a target of anything and which
-the installer has no reason to be able to find.
-
-So it is resolved here, where the estate can be read, and frozen into the bundle:
-workspace id, item id, and the source path spelled as storage spells it. Fabric
-validates a shortcut's target when it is created and its paths are
-case-sensitive, so an address guessed later is a 400 rather than a wrong answer.
-
-A physical target may be a Warehouse as well as a Lakehouse: a Fabric Warehouse
-publishes each table as a Delta directory under ``Tables/<schema>/<table>``. Only
-a Files shortcut is Lakehouse-specific, because a Warehouse has no Files area.
+Physical sources are not build targets, so their workspace, item and case-exact
+storage path are frozen while the source inventory is available. Warehouse
+tables are published under ``Tables/<schema>/<table>``; Files sources require a
+Lakehouse.
 """
 
 from __future__ import annotations
@@ -26,15 +17,9 @@ TABLES_AREA = "Tables"
 
 
 def physical_shortcuts(shortcuts, *, bindings):
-    """The declarations a build has to resolve an address for.
+    """Return physical shortcuts owned by items bound for this build.
 
-    Only the items this build binds. A physical target Weaver cannot reach is a
-    fault in the item that declares it, and an item nobody is building has no
-    business failing someone else's build.
-
-    Separate from :func:`read_shortcut_sources` so every caller that assembles
-    build state applies one rule. ``tests/fabric`` builds its own state in the
-    session and would otherwise drift from what :func:`read_build_state` does.
+    An unreachable source fails only the build that includes its owning item.
     """
 
     return tuple(
@@ -52,8 +37,6 @@ def read_shortcut_sources(
     resolver,
     store,
 ) -> dict[str, ResolvedShortcutSource]:
-    """The physical address behind every physical shortcut, by declaration."""
-
     resolved: dict[str, ResolvedShortcutSource] = {}
     for declaration in shortcuts:
         if declaration.is_logical:
@@ -69,8 +52,8 @@ def _resolve(declaration, *, resolver, store) -> ResolvedShortcutSource:
     if declaration.is_files and target.item_type != LAKEHOUSE:
         raise BuildError(
             f"shortcut {declaration.name} in {declaration.owner} points at "
-            f"{declaration.target}. A Files shortcut reads a Lakehouse's Files "
-            f"area, and a {target.item_type} has none."
+            f"{declaration.target}, but Files shortcuts require a Lakehouse source; "
+            f"a {target.item_type} has no Files area"
         )
     try:
         item = resolver.external_item(
@@ -81,8 +64,8 @@ def _resolve(declaration, *, resolver, store) -> ResolvedShortcutSource:
     except Exception as exc:
         where = declaration.workspace or "this workspace"
         raise BuildError(
-            f"shortcut {declaration.name} in {declaration.owner} points at "
-            f"{target.item_name} in {where}, which did not resolve: "
+            f"could not resolve shortcut {declaration.name} in {declaration.owner} "
+            f"source {target.item_name} in {where}: "
             f"{type(exc).__name__}: {exc}"
         ) from exc
 
@@ -97,14 +80,6 @@ def _resolve(declaration, *, resolver, store) -> ResolvedShortcutSource:
 
 
 def _source_path(declaration, *, root: Location, store) -> str:
-    """Where the source sits, spelled as storage spells it.
-
-    Weaver's identities are exact-case, but a Fabric estate may materialise an
-    authored ``Customer`` table directory as ``customer``. The authored spelling
-    is preferred where it exists; failing that one case-insensitive match is
-    taken, and anything else is refused here rather than at install time.
-    """
-
     tail = declaration.target_tail
     if declaration.shortcut_type == SCHEMA_SHORTCUT:
         components = [TABLES_AREA, tail]
@@ -126,14 +101,10 @@ def _source_path(declaration, *, root: Location, store) -> str:
 
 
 def stored_path(root: Location, components, *, store, what: str) -> str:
-    """One item-relative source path, spelled as storage spells it.
+    """Resolve an item-relative path to its unambiguous storage spelling.
 
-    Weaver's identities are exact-case, and a Fabric estate may materialise an
-    authored ``Customer`` directory as ``customer``. The authored spelling is
-    preferred where it exists; failing that one case-insensitive match is taken,
-    and anything else is refused here rather than at install time.
-
-    ``what`` names the caller's subject, so a refusal says whose path it is.
+    Exact authored spelling wins; otherwise one case-insensitive match is
+    accepted. ``what`` identifies the subject in failures.
     """
 
     settled: list[str] = []
@@ -150,7 +121,7 @@ def _stored_name(what: str, parent: Location, wanted: str, *, store) -> str:
         entries = store.list(parent)
     except Exception as exc:
         raise BuildError(
-            f"{what}, and {parent.value} could not be read: {type(exc).__name__}: {exc}"
+            f"{what}; could not read {parent.value}: {type(exc).__name__}: {exc}"
         ) from exc
     matches = sorted(
         entry.location.name
@@ -160,8 +131,8 @@ def _stored_name(what: str, parent: Location, wanted: str, *, store) -> str:
     if len(matches) == 1:
         return matches[0]
     if not matches:
-        raise BuildError(f"{what}, and {wanted!r} is not in {parent.value}")
+        raise BuildError(f"{what}; {wanted!r} is not in {parent.value}")
     raise BuildError(
-        f"{what}, and {wanted!r} matches more than one entry in "
+        f"{what}; {wanted!r} matches more than one entry in "
         f"{parent.value}: " + ", ".join(matches)
     )

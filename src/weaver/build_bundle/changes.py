@@ -1,24 +1,8 @@
-"""What a build intends each target to look like afterwards.
+"""Describe the target state a build intends to leave.
 
-A plan says what will run. This says what it will mean: for each bound
-target, the objects a build adds and the objects it removes. The two are written
-side by side, and a test holds them to each other.
-
-Declared where the action is rendered rather than inferred from the action
-kind: an inference would be a model of what executors do, living where no
-executor can correct it.
-
-What makes it load-bearing is :data:`action_id`. Every physical action must be
-named by exactly one change and every change must name a real action, so adding
-an artefact type means emitting both. Forget either and the bijection breaks.
-
-That is also why the identity lives here. A prune action carries no
-``resource_node_id``, because a pruned object has no node in the repository, so
-what a prune removes has nowhere else to be written down.
-
-Applying these to a :class:`~weaver.build_bundle.prune.TargetInventory` gives the
-state a build is aiming at, which is what lets "a build converges on what the
-source declares" be asserted without installing anything.
+Changes are declared beside actions; executor behaviour is not modelled here.
+Every physical action is paired with exactly one change by ``action_id``. Pruned
+objects keep their identity here because they have no repository node.
 """
 
 from __future__ import annotations
@@ -68,18 +52,16 @@ _COLLECTION = {
 
 @dataclass(frozen=True, order=True)
 class TargetChange:
-    """One object a build will add to, or remove from, one target.
+    """One object a build will add to or remove from a target.
 
-    ``name`` is spelled exactly as the inventory spells it, ``DWG.Customer``,
-    ``_/Load/lib/dates.py``, because it is compared against a real read. A
-    change whose name did not match what a target reports would apply cleanly and
-    describe nothing.
+    ``name`` must match inventory spelling, such as ``DWG.Customer`` or
+    ``_/Load/lib/dates.py``, because changes are applied to a physical read.
     """
 
     effect: str
     object_kind: str
     name: str
-    #: The action that brings this about. What makes the summary checkable.
+    #: The action that makes this change.
     action_id: str
 
     def __post_init__(self) -> None:
@@ -134,17 +116,9 @@ def merge(
 
 
 def apply_to(inventory, changes: Iterable[TargetChange]):
-    """The inventory a target would hold once these changes have been made.
+    """Return a new inventory with these changes applied.
 
-    Pure, and returns a new inventory: the point is to compare a predicted
-    state against a declared one, and mutating the input would make the two
-    comparable only once.
-
-    Folder schemas are derived rather than declared where they can be. Adding
-    ``Raw.CustomerCsv`` implies the ``Raw`` area exists, and a target reports it
-    that way; requiring a build to say so separately would be a second thing to
-    keep in step for no gain. Removing a whole area is declared, because that is
-    a decision rather than a consequence.
+    Folder additions imply their schema; whole-schema removals remain explicit.
     """
 
     from dataclasses import replace

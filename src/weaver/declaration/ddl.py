@@ -1,8 +1,4 @@
-"""Generate one source's create definition against its bound destination.
-
-Build definitions create structures; load definitions populate tables. Every
-managed name is rendered here, so an executor runs the statement as written.
-"""
+"""Generate a source's create definition for its bound destination."""
 
 from __future__ import annotations
 
@@ -18,36 +14,21 @@ from .metadata import SPARK_SQL, SQL, TABLE, VIEW
 if TYPE_CHECKING:
     from .source import SourceDocument
 
-#: The bundle format version this generator targets. A change to the generated
-#: shape is a change to this number. Version 2 dropped the ``spark_table``
-#: payload's identity column: a Delta table no longer has one to carry.
+#: Increment when the generated bundle shape changes.
 BUILD_FORMAT_VERSION = 2
 
-#: The version of the physical shape Weaver gives a keyed table, salted into
-#: :attr:`~weaver.declaration.source.SourceDocument.physical_signature`. It is
-#: what makes a change to that shape rebuild the tables it changed even though no
-#: authored source moved. Version 1 added the row-signature column.
-#:
-#: Keyed only, so an unkeyed table, which gains nothing, is not rebuilt for a
-#: change it does not carry.
+#: Salt for keyed-table physical signatures; increment when their shape changes.
 KEYED_TABLE_VERSION = 1
 
-#: The executor a concrete Spark statement runs through. It names a runtime
-#: dispatch key, not an engine: a Fabric Spark session and a local one both use
-#: ``spark_sql``.
+#: Runtime dispatch key shared by local and Fabric Spark sessions.
 SPARK_SQL_EXECUTOR = "spark_sql"
 SPARK_SQL_EXTENSION = ".spark.sql"
 
-#: The executor that completes a Spark SQL table's build: it runs the query,
-#: reads the resulting ``DataFrame`` schema, validates, and creates the table.
-#: Its payload is JSON, not SQL, because the DDL cannot be finished until the
-#: query's shape is known in the session.
+#: The JSON payload defers DDL until the session reports the query shape.
 SPARK_TABLE_EXECUTOR = "spark_table"
 SPARK_TABLE_EXTENSION = ".spark-table.json"
 
-#: The executor that runs a T-SQL script against the Warehouse. Its payload is a
-#: finished, self-contained script. A table build materialises and inspects its
-#: own query shape server-side, so no round-trip is needed.
+#: Runs a complete T-SQL script against a Warehouse.
 TSQL_EXECUTOR = "tsql"
 TSQL_EXTENSION = ".sql"
 
@@ -58,30 +39,25 @@ _COLUMN_MAPPING = "TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
 
 @dataclass(frozen=True)
 class GeneratedDdl:
-    """One source's generated, installable create definition."""
-
     executor: str
     content: str
     extension: str
 
 
 def generate_ddl(document: "SourceDocument", *, destination=None) -> GeneratedDdl:
-    """The installable create definition for one validated source.
+    """Generate an installable create definition.
 
     ``destination`` is the Spark destination the object is bound to, and every
     managed name in the result is rendered against it. A Warehouse object needs
     none: its script is T-SQL, addressed by the connection it runs on.
-
-    Folders have no create DDL. A Folder is a directory, created by the installer
-    rather than by a statement, so this is never called for one.
     """
 
     if document.language == SQL:
         return _tsql_ddl(document)
     if destination is None:
         raise DiscoveryError(
-            f"{document.relative_path}: a Spark object needs a bound destination "
-            "before its create definition can be generated"
+            f"{document.relative_path}: the Spark object has no bound destination. "
+            "Bind it to a Lakehouse before generating its create definition."
         )
     if document.kind == TABLE:
         if document.language == SPARK_SQL:
@@ -118,19 +94,11 @@ def _tsql_ddl(document: "SourceDocument") -> GeneratedDdl:
 
 
 def _object_name(document: "SourceDocument", destination) -> str:
-    """How a payload names the object it builds."""
-
     return destination.qualify(document.object_id.schema, document.object_id.object)
 
 
 def _python_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
-    """A Delta table from its declared columns, plus the audit columns.
-
-    A Python-backed table has no query to infer from, so the reader requires a
-    declared schema. The build is an empty table of that shape with Weaver's
-    audit columns appended. The concrete statement is known now, so it is frozen
-    directly rather than deferred to an executor.
-    """
+    """Create an empty Delta table from declared and audit columns."""
 
     columns = document.document.effective_schema
     if not document.document.schema:  # pragma: no cover - the reader requires it
@@ -145,15 +113,10 @@ def _python_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
 
 
 def _spark_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
-    """A Spark SQL table's deferred, deterministic build instruction.
+    """Freeze the inputs needed to build a Spark SQL table in its session.
 
-    Declared or inferred, its shape is only settled by running the query in the
-    session, so the payload is not finished SQL. It is a JSON instruction the
-    ``spark_table`` executor completes in one self-contained action: run the
-    query, read the ``DataFrame`` schema, validate the columns (the same guards a
-    declared schema passes at parse), choose the physical business columns,
-    append the audit columns, and create the table. Everything the executor needs
-    is frozen here, so it never reopens the Weaver document source (how-does-build-work §2).
+    The query shape is unavailable until execution, so this payload is JSON rather
+    than finished SQL. It contains every input needed without reopening the source.
     """
 
     ses = document.document
@@ -165,18 +128,15 @@ def _spark_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
         "declared_columns": (
             [_column_entry(column) for column in ses.schema] if declared else None
         ),
-        # The statements that must run first, such as a temporary view the query
-        # reads, and the one query whose shape is the table's. A body may hold two
-        # queries (staging, then the keys to delete), and only the first says
-        # what the table looks like.
+        # Only the first result query determines table shape; preceding setup must
+        # run first, while a later delete query is irrelevant here.
         "setup": [
             address_managed_references(statement, destination) for statement in setup
         ],
         "source_query": address_managed_references(query, destination),
         "references": [list(pair) for pair in metadata_column_references(ses)],
         "audit_columns": [_column_entry(column) for column in ses.audit_columns],
-        # Weaver's other own columns, after the audit ones. Empty unless the
-        # table is keyed, which is the only kind that carries a row signature.
+        # Keyed tables append the row signature after audit columns.
         "internal_columns": [
             _column_entry(column)
             for column in ses.internal_columns
@@ -191,14 +151,7 @@ def _spark_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
 
 
 def _shape_program(document: "SourceDocument") -> tuple[tuple[str, ...], str]:
-    """The setup a shape inference must run, and the query whose shape it reads.
-
-    A Spark SQL table's body may set a temporary view up before selecting from
-    it, and may carry a second query naming the keys to delete. Neither is the
-    table's shape: the first query is, and the setup before it is what has to
-    have run for that query to resolve. Handing the whole body to one
-    ``spark.sql`` call would fail on the first semicolon.
-    """
+    """Return setup before the first result query and that query."""
 
     from .spark_sql_program import parse_spark_sql_program
 
@@ -212,21 +165,17 @@ def _shape_program(document: "SourceDocument") -> tuple[tuple[str, ...], str]:
         if statement.produces_result:
             return tuple(setup), statement.sql
         setup.append(statement.sql)
-    # Unreachable for a validated document, since parsing already refused a body
-    # with no query, and a build must not depend on that having happened.
+    # Keep generation safe when called with a document that bypassed validation.
     raise DiscoveryError(
-        f"{document.relative_path}: a Spark SQL table must end in a query that "
-        "produces its rows, and this body has none"
+        f"{document.relative_path}: the Spark SQL table has no query that "
+        "produces rows. Add a staging query."
     )
 
 
 def _view_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
-    """A persistent view over the validated body, its managed names addressed.
+    """Create a view with every managed reference bound to its Lakehouse.
 
-    The body is otherwise untouched. What changes is that every reference to
-    another managed object now says which Lakehouse it means. Without that, a
-    view built in one destination would read its inputs from whichever Lakehouse
-    the session happened to be attached to.
+    The body is otherwise unchanged.
     """
 
     body = address_managed_references((document.sql_body or "").rstrip(), destination)
@@ -237,19 +186,10 @@ def _view_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
 
 
 def _column_entry(column) -> list:
-    """A payload column triple ``[name, type, not_null]``.
-
-    Nullability travels with the column so the executor emits the same
-    constraint. The audit columns are always not null, and a declared primary key
-    or ``Not null`` column carries its constraint through too.
-    """
-
     return [column.name, column.type, column.not_null]
 
 
 def _create_table_sql(qualified: str, columns) -> str:
-    """A strict ``CREATE TABLE`` over concrete columns."""
-
     column_lines = ",\n".join(
         f"    {_ident(c.name)} {c.type}{' NOT NULL' if c.not_null else ''}"
         for c in columns
@@ -264,6 +204,4 @@ def _create_table_sql(qualified: str, columns) -> str:
 
 
 def _ident(name: str) -> str:
-    """Back-tick quote a column identifier so spaces and keywords are safe."""
-
     return "`" + name.replace("`", "``") + "`"

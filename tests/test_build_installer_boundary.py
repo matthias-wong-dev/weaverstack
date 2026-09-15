@@ -161,7 +161,7 @@ def test_preflight_rejects_a_corrupt_bundle_before_running(tmp_path):
     recorder = Recorder()
     installer = given_installer(store=store, executors={"spark_sql": recorder})
 
-    with pytest.raises(BuildError, match="hash mismatch"):
+    with pytest.raises(BuildError, match="does not match its checksum"):
         installer.install(bundle)
     assert recorder.calls == []  # nothing ran
 

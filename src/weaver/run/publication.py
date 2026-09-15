@@ -1,23 +1,8 @@
-"""Wait for a Warehouse's OneLake publication to reach its Lakehouse consumers.
+"""Wait for Warehouse data to become readable through Lakehouse shortcuts.
 
-A Warehouse table settles over TDS, and Fabric then publishes the table's Delta
-log in the background. Until that publication lands and its Parquet files can be
-opened through the consuming shortcut, a Lakehouse consumer reading the same
-table sees either the previous snapshot or a snapshot whose files it cannot read.
-
-This is the Warehouse-side counterpart of the Lakehouse SQL analytics endpoint
-refresh: the producer has finished writing, and the surface the consumer reads
-has not caught up yet. The proof has two parts, because the two lags are
-different failures:
-
-* a commit that was not there before the load, so the consumer's snapshot is the
-  one this load produced;
-* an opened read of each Parquet file that commit added, through the consuming
-  shortcut, so the snapshot's files are addressable from where they are needed.
-
-The second part opens the files rather than counting rows. Delta answers
-``count(*)`` from the commit's own statistics, so a count can succeed against a
-snapshot whose files are not readable yet.
+Require a new Delta commit and open every added Parquet file through each
+consumer. A row count is insufficient because Delta may answer it from commit
+statistics before the files are readable.
 """
 
 from __future__ import annotations
@@ -33,7 +18,6 @@ PUBLICATION_POLL_INTERVAL = 5.0
 
 
 def published_commits(target_name, object_id, session, workspace) -> frozenset[str]:
-    """The commit files published for one Warehouse table at this instant."""
 
     store = session.transport_store(workspace)
     log = _commit_log(target_name, object_id, session, workspace)
@@ -56,7 +40,6 @@ def await_publication(
     timeout: float = PUBLICATION_TIMEOUT,
     poll: float = PUBLICATION_POLL_INTERVAL,
 ) -> None:
-    """Block until this load's publication is readable at every consuming path."""
 
     object_id = node.publication_of.object_id
     store = session.transport_store(workspace)
@@ -67,8 +50,7 @@ def await_publication(
     last_error: Exception | None = None
     while True:
         try:
-            # Every attempt re-lists, so a second publication arriving during
-            # the wait is covered by the same interval.
+            # Re-list on every attempt so concurrent commits join the same wait.
             commits = _new_commits(store, log, before) or commits
             if commits:
                 statements = _probe_statements(_added_files(store, log, commits), roots)
@@ -83,7 +65,6 @@ def await_publication(
 
 
 def _commit_log(target_name, object_id, session, workspace):
-    """Where OneLake holds this Warehouse table's Delta log."""
 
     from ..fabric.resources import WAREHOUSE
     from ..resolution import TABLES_AREA
@@ -96,7 +77,6 @@ def _commit_log(target_name, object_id, session, workspace):
 
 
 def _shortcut_root(readiness, session, workspace) -> str:
-    """The destination path a downstream Lakehouse primitive will read."""
 
     from ..targets import ItemRef
 
@@ -106,7 +86,6 @@ def _shortcut_root(readiness, session, workspace) -> str:
 
 
 def _new_commits(store, log, before: frozenset[str]) -> tuple[str, ...]:
-    """The commit files published since the load began, oldest first."""
 
     if not store.exists(log):
         return ()
@@ -122,11 +101,7 @@ def _new_commits(store, log, before: frozenset[str]) -> tuple[str, ...]:
 
 
 def _added_files(store, log, commits) -> tuple[str, ...]:
-    """The Parquet files these commits add and do not go on to remove.
-
-    Paths are relative to the table root and percent-encoded in the log, so they
-    are decoded here into the spelling a path expression needs.
-    """
+    """Return live added files, decoding their log paths for Spark."""
 
     added: list[str] = []
     removed: set[str] = set()
@@ -145,7 +120,6 @@ def _added_files(store, log, commits) -> tuple[str, ...]:
 
 
 def _probe_statements(paths, roots) -> list[str]:
-    """One opened read per newly published file, per consuming shortcut."""
 
     return [
         f"select * from parquet.`{root}/{path}` limit 1"
@@ -155,33 +129,27 @@ def _probe_statements(paths, roots) -> list[str]:
 
 
 def _not_published(node, commits, last_error, timeout: float) -> RunError:
-    """The error for a publication that did not settle within the wait."""
 
     table = f"{node.physical_target.name}/{node.publication_of.object_id.qualified}"
     waited = int(timeout)
     if not commits:
         return RunError(
-            f"Warehouse table {table} changed over TDS, and OneLake published no "
-            f"new Delta commit for it within {waited}s. The Lakehouse consumers "
-            "that read it through a shortcut would see the previous snapshot."
+            f"No new OneLake Delta commit appeared for Warehouse table {table} "
+            f"within {waited}s. Retry after publication completes."
         )
     detail = f": {type(last_error).__name__}: {last_error}" if last_error else ""
     return RunError(
-        f"Warehouse table {table} published a Delta commit, and the Parquet files "
-        f"it added were not readable through its Lakehouse shortcuts within "
-        f"{waited}s{detail}"
+        f"The new Parquet files for Warehouse table {table} were not readable "
+        f"through its Lakehouse shortcuts within {waited}s{detail}. Retry after "
+        "publication completes."
     )
 
 
 class PublicationLedger:
-    """What each publication barrier needs from the load it waits on.
+    """Publication baselines and movement for loads followed by barriers.
 
-    A barrier runs after its producer, so it cannot see what OneLake had published
-    before the load began. The producer records that here and the barrier reads it.
-    Held for the run, and threaded into dispatch as the runtime scope is.
-
-    Only the producers a barrier follows are recorded, so a Warehouse-only load
-    reads no Delta log.
+    Capture each baseline before its load because the later barrier cannot
+    reconstruct it. Loads without barriers do not read a Delta log.
     """
 
     def __init__(self, awaited: frozenset[str]) -> None:
@@ -190,12 +158,10 @@ class PublicationLedger:
         self._moved: set[str] = set()
 
     def awaits(self, node_id: str) -> bool:
-        """Whether a barrier follows this load."""
 
         return node_id in self._awaited
 
     def observe(self, node, session, workspace) -> None:
-        """Record what was published before this load ran."""
 
         if not self.awaits(node.node_id):
             return
@@ -204,7 +170,6 @@ class PublicationLedger:
         )
 
     def settled(self, node_id: str, result) -> None:
-        """Record whether the load moved any rows."""
 
         if result.rows_inserted or result.rows_updated or result.rows_deleted:
             self._moved.add(node_id)

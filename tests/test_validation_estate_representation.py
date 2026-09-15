@@ -292,7 +292,7 @@ def test_a_validation_with_no_installation_row_is_refused(catalogue):
         }
     )
 
-    with pytest.raises(CatalogueStateError, match="has no installation row"):
+    with pytest.raises(CatalogueStateError, match="does not identify a target"):
         ValidationEstate.from_catalogue(unbound)
 
 
@@ -310,7 +310,7 @@ def test_an_unknown_test_type_is_refused_rather_than_guessed(catalogue):
         }
     )
 
-    with pytest.raises(CatalogueStateError, match="unsupported test_type"):
+    with pytest.raises(CatalogueStateError, match="unsupported validation kind"):
         ValidationEstate.from_catalogue(broken)
 
 

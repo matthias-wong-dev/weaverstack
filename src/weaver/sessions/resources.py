@@ -19,8 +19,6 @@ T = TypeVar("T")
 
 
 class ResourceState(str, Enum):
-    """Where one resource is in its life."""
-
     NOT_STARTED = "not_started"
     STARTING = "starting"
     READY = "ready"
@@ -29,11 +27,11 @@ class ResourceState(str, Enum):
 
 
 class ResourceError(WeaverError):
-    """A resource could not be acquired, or is no longer usable."""
+    pass
 
 
 class Resource(Generic[T]):
-    """A lazily acquired, shared, closable thing owned by a Session.
+    """A lazily acquired, shared resource owned by a Session.
 
     ``acquire`` is called at most once per attempt and never concurrently.
     ``release`` is called only for a value this resource actually acquired, so a
@@ -79,8 +77,6 @@ class Resource(Generic[T]):
 
     @property
     def acquired(self) -> bool:
-        """Whether this Session actually holds the thing, so must close it."""
-
         return self.state in {ResourceState.READY, ResourceState.STARTING}
 
     @property
@@ -93,21 +89,18 @@ class Resource(Generic[T]):
     def start(self, *, speculative: bool = False) -> Future:
         """Begin acquiring without waiting, returning the one acquisition.
 
-        Called again while an acquisition is in flight, this returns that
-        acquisition rather than starting another, so a background warm-up and a
-        foreground caller share one Livy session.
+        Concurrent callers receive the same in-flight acquisition.
 
-        ``speculative`` marks an acquisition nobody asked for. One that fails
-        leaves the resource unstarted rather than failed, so the first caller
-        that needs it tries again and reports in its own terms.
+        A failed ``speculative`` acquisition leaves the resource unstarted. The
+        first required acquisition retries and reports any failure.
         """
 
         with self._lock:
             if self._state is ResourceState.CLOSED:
-                raise ResourceError(f"the {self.name} resource is closed")
+                raise ResourceError(f"The {self.name} resource is closed.")
             if self._state is ResourceState.FAILED:
                 raise ResourceError(
-                    f"the {self.name} resource failed and has not been "
+                    f"The {self.name} resource failed and has not been "
                     f"reacquired: {self._error}"
                 ) from self._error
             if self._future is None:
@@ -124,8 +117,6 @@ class Resource(Generic[T]):
             return self._future
 
     def get(self, *, timeout: float | None = None) -> T:
-        """The resource, waiting for whichever acquisition is under way."""
-
         return self.start().result(timeout)
 
     def _acquire_once(
@@ -155,21 +146,19 @@ class Resource(Generic[T]):
                 self._error = exc
             raise
         with self._lock:
-            # A close that landed while this was still starting wins: the value
-            # is released rather than handed to a caller of a closed Session.
+            # A concurrent close owns the acquired value and releases it.
             if self._state is ResourceState.CLOSED:
                 self._release_value(value)
                 raise ResourceError(
-                    f"the {self.name} resource was closed while starting"
+                    f"The {self.name} resource was closed while starting."
                 )
             self._state = ResourceState.READY
         return value
 
     def fail(self, error: BaseException | None = None) -> None:
-        """Declare the resource dead, the caller has seen it is unusable.
+        """Mark an acquisition or transport failure for later reacquisition.
 
-        For a resource fault, not a statement fault: a failed SQL statement
-        leaves a healthy connection.
+        A failed SQL statement does not imply a failed connection.
         """
 
         with self._lock:
@@ -183,7 +172,7 @@ class Resource(Generic[T]):
         self._close_future(future)
 
     def reacquire(self) -> None:
-        """Permit one further acquisition of a failed resource.
+        """Permit another acquisition within the configured attempt limit.
 
         Bounded: a resource that has exhausted its attempts stays failed and
         says so.
@@ -191,13 +180,13 @@ class Resource(Generic[T]):
 
         with self._lock:
             if self._state is ResourceState.CLOSED:
-                raise ResourceError(f"the {self.name} resource is closed")
+                raise ResourceError(f"The {self.name} resource is closed.")
             if self._state is not ResourceState.FAILED:
                 return
             if self._attempts >= self._max_attempts:
                 raise ResourceError(
-                    f"the {self.name} resource failed {self._attempts} times and "
-                    f"will not be acquired again: {self._error}"
+                    f"The {self.name} resource failed {self._attempts} times and "
+                    f"cannot be acquired again: {self._error}"
                 ) from self._error
             self._state = ResourceState.NOT_STARTED
             self._future = None
@@ -206,15 +195,14 @@ class Resource(Generic[T]):
     # --- teardown -----------------------------------------------------------
 
     def close(self) -> None:
-        """Release what this resource acquired, if it acquired anything.
+        """Wait for an in-flight acquisition, then release its value.
 
         A close arriving mid-acquisition waits for it. A small capacity permits
         one Spark session, and an abandoned starting one holds that slot until
         Fabric reaps it, so the next run queues behind a session nobody is
         using.
 
-        The wait is bounded: a resource that never finishes starting is
-        abandoned rather than holding the process open.
+        The wait is bounded by ``close_timeout``.
         """
 
         with self._lock:
@@ -231,14 +219,13 @@ class Resource(Generic[T]):
         try:
             value = future.result(self._close_timeout)
         except TimeoutError:
-            # Still starting, and out of patience. Abandoned: an
-            # exit that cannot complete is worse than a resource the platform
-            # will reap on its own.
+            # Fabric will eventually reap an acquisition that outlives the
+            # bounded close wait.
             if self._telemetry is not None:
                 self._telemetry.count(f"{self.name}.abandoned")
             return
         except BaseException:
-            return  # never acquired, so there is nothing to release
+            return  # acquisition failed; there is no value to release
         self._release_value(value)
 
     def _release_value(self, value: T) -> None:

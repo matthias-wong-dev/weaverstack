@@ -35,8 +35,6 @@ AREAS = (TABLES_AREA, FILES_AREA)
 
 
 def is_validation_kind(kind: str) -> bool:
-    """Whether this kind declares a validation rather than a data object."""
-
     return kind in VALIDATION_KINDS
 
 
@@ -224,12 +222,6 @@ _SIGNATURE_TYPES = {PYTHON: "string", SPARK_SQL: "string", SQL: "varbinary(32)"}
 
 
 def signature_column_name(language: str) -> str:
-    """The physical spelling of the row-signature column for a representation.
-
-    Delta gets lower snake case (``row_signature``), a Warehouse the spaced form
-    (``Row signature``), the same rule the audit columns follow.
-    """
-
     if language in DELTA_LANGUAGES:
         return SIGNATURE_COLUMN.replace(" ", "_").lower()
     return SIGNATURE_COLUMN
@@ -255,20 +247,12 @@ IDENTITY_TYPE = "bigint"
 IDENTITY_LANGUAGES = frozenset({SQL})
 
 _IDENTITY_UNSUPPORTED = (
-    "Identity is supported for Warehouse tables only. A Delta table has no "
-    "engine-generated identity to sit behind the column, and Spark and Delta "
-    "offer none Weaver can rely on. Remove the Identity header and use the "
-    "business key, or declare the object in a Warehouse item."
+    "Identity is supported only for Warehouse tables. Remove Identity and use "
+    "the business key, or declare the table in a Warehouse item."
 )
 
 
 def audit_column_name(logical: str, language: str) -> str:
-    """The physical spelling of one logical audit column for a representation.
-
-    Delta gets lower snake case (``row_insert_datetime``); a Warehouse keeps the
-    spaced form (``Row insert datetime``) the SQL backend has always used.
-    """
-
     if language in DELTA_LANGUAGES:
         return logical.replace(" ", "_").lower()
     return logical
@@ -304,8 +288,6 @@ def _audit_columns(language: str) -> tuple["Column", ...]:
 
 @dataclass(frozen=True)
 class ObjectId:
-    """Levels two and one: ``Schema.Object`` within a repository."""
-
     schema: str
     object: str
 
@@ -380,11 +362,7 @@ class Reference:
 
 @dataclass(frozen=True)
 class MetadataText:
-    """Either literal prose or one reference, never a mix.
-
-    ``See $Sales.Order`` is refused: mixed content cannot be resolved
-    mechanically. Write ``$$`` for a literal dollar sign.
-    """
+    """Literal prose or one metadata reference; ``$$`` represents a dollar sign."""
 
     literal: str | None = None
     reference: Reference | None = None
@@ -399,8 +377,6 @@ class MetadataText:
 
 @dataclass(frozen=True)
 class Revision:
-    """One dated entry in the object's revision history."""
-
     date: str
     note: str
 
@@ -410,13 +386,7 @@ class Revision:
 
 @dataclass(frozen=True)
 class ForeignKey:
-    """One declared relationship to a parent object.
-
-    Semantic rather than physical: nothing is enforced by the engine and no
-    index follows, so a key has no name, two objects may be related several
-    times over, and an object may reference itself. The parent is a two-part
-    ``Schema.Object``, a logical name in the same repository.
-    """
+    """A logical relationship; it creates no engine constraint or index."""
 
     columns: tuple[str, ...]
     reference: ObjectId
@@ -436,8 +406,6 @@ class ForeignKey:
 
 @dataclass(frozen=True)
 class Column:
-    """One column of a table or view."""
-
     name: str
     type: str | None = None
     note: MetadataText | None = None
@@ -494,12 +462,6 @@ class WeaverDocument:
 
     @property
     def is_validation(self) -> bool:
-        """Whether this declaration is a Test or an Assumption.
-
-        Asked wherever a collection holds both, so the distinction is answered
-        from the declaration rather than by inferring it from a physical shape.
-        """
-
         return is_validation_kind(self.kind)
 
     @property
@@ -512,30 +474,17 @@ class WeaverDocument:
 
     @property
     def defers_column_validation(self) -> bool:
-        """True when column references cannot be checked until build.
-
-        A SQL object infers its shape from its query, so its `Primary key`,
-        `Not null`, `Identity`, `Comparison columns` and `Column notes` are
-        validated against the built table rather than here.
-        """
+        """Whether query-derived columns must be validated during build."""
 
         return self.kind in (TABLE, VIEW) and not self.has_declared_schema
 
     @property
     def audit_columns(self) -> tuple[Column, ...]:
-        """The architectural columns, spelled for this representation."""
-
         return _audit_columns(self.language) if self.kind == TABLE else ()
 
     @property
     def identity_column(self) -> Column | None:
-        """The engine-generated surrogate column, when Identity names one.
-
-        A not-null ``bigint`` the Warehouse generates: build declares it
-        ``identity`` and every insert leaves it out. Weaver's own column, so it
-        stands outside the business schema, though the primary key may name it.
-        Only a Warehouse table has one. See :data:`IDENTITY_LANGUAGES`.
-        """
+        """The Warehouse-generated bigint outside the authored schema."""
 
         if self.identity is None or self.kind != TABLE:
             return None
@@ -545,16 +494,7 @@ class WeaverDocument:
 
     @property
     def signature_column(self) -> Column | None:
-        """The row-signature column, on a keyed table that a load populates.
-
-        Weaver's own column, so it stands outside the business schema and no
-        query produces it.
-
-        Two tables have none. An unkeyed one, because its load replaces the
-        target wholesale and no row is ever compared with a stored one. And one
-        declaring ``Has load procedure: false``, because the signature exists to
-        serve a load it does not have.
-        """
+        """The Weaver-managed signature on a keyed table with a load procedure."""
 
         if self.kind != TABLE or not self.has_primary_key:
             return None
@@ -639,8 +579,6 @@ _UniqueKeyLoader.add_constructor(
 
 
 def extract_python_metadata(source: str) -> str:
-    """The metadata YAML from a Python object file's module docstring."""
-
     try:
         module = ast.parse(source)
     except SyntaxError as exc:
@@ -654,8 +592,6 @@ def extract_python_metadata(source: str) -> str:
 
 
 def extract_sql_metadata_and_body(source: str) -> tuple[str, str]:
-    """Split a SQL object file into (metadata text, executable body)."""
-
     match = re.match(r"\s*/\*(.*?)\*/(.*)\Z", source, flags=re.DOTALL)
     if not match:
         raise MetadataError(
@@ -677,8 +613,6 @@ def parse_sql_document(source: str) -> tuple[SesDocument, str]:
 
 
 def parse_document(text: str, *, language: str) -> SesDocument:
-    """Parse and exhaustively validate one metadata block."""
-
     if language not in LANGUAGES:
         raise MetadataError(f"language must be one of {', '.join(sorted(LANGUAGES))}")
 
@@ -711,9 +645,8 @@ def parse_document(text: str, *, language: str) -> SesDocument:
     dependencies = _parse_dependencies(loaded.get("Dependencies"), object_id)
     if language == SPARK_SQL and not declares_dependencies:
         raise MetadataError(
-            "a Spark SQL object must declare Dependencies, because a query may "
-            "read by path and a path cannot be resolved back to a managed "
-            "object. Write `Dependencies: []` if it depends on nothing."
+            "a Spark SQL object must declare Dependencies. Write "
+            "`Dependencies: []` if it depends on nothing."
         )
 
     description = _parse_text(loaded, "Description")
@@ -737,10 +670,7 @@ def parse_document(text: str, *, language: str) -> SesDocument:
 
     declared_columns = _parse_schema(loaded.get("Schema"))
     if kind == TABLE and language == PYTHON and not declared_columns:
-        raise MetadataError(
-            "a Python-backed Delta table must declare Schema: it has no query "
-            "to infer a shape from, and is created before it is loaded."
-        )
+        raise MetadataError("a Python table must declare Schema")
 
     primary_key = _parse_column_set(loaded.get("Primary key"), "Primary key")
     unique_keys = _parse_unique_keys(loaded.get("Unique keys"), primary_key)
@@ -778,8 +708,8 @@ def parse_document(text: str, *, language: str) -> SesDocument:
             raise MetadataError("Incremental: true requires a Primary key")
         if comparison and not primary_key:
             raise MetadataError(
-                "Comparison columns require a Primary key. They drive upsert "
-                "comparison, which only happens when rows can be matched"
+                "Comparison columns require a Primary key. Declare Primary key or "
+                "remove Comparison columns"
             )
         # A Python table's authored module is its load, so there is no separate
         # artefact to decline. Declaring a table only something else populates
@@ -827,18 +757,10 @@ def parse_document(text: str, *, language: str) -> SesDocument:
 def _parse_validation(
     raw: dict[str, Any], *, kind: str, language: str, object_id: ObjectId
 ) -> WeaverDocument:
-    """Parse a Test or Assumption header.
-
-    A separate path rather than a branch through the object parser: a validation
-    has no schema, lineage, build behaviour or shortcut. What the two share,
-    being description, notes, revisions and dependencies, goes through the same
-    helpers, so they cannot drift.
-    """
-
     if kind == ASSUMPTION and "Primary key" in raw:
         raise MetadataError(
-            "an Assumption must not declare a Primary key. A key correlates "
-            "the two sides of a Test; an Assumption has one side."
+            "an Assumption must not declare Primary key. Remove Primary key or "
+            "declare a Test"
         )
 
     _reject_unknown_keys(raw, kind)
@@ -892,8 +814,6 @@ def _parse_id(raw: dict[str, Any]) -> tuple[str, ObjectId]:
 
 
 def _listed(items: list[str]) -> str:
-    """``a``, ``a and b``, ``a, b and c``: a list a sentence can contain."""
-
     if len(items) < 3:
         return " and ".join(items)
     return ", ".join(items[:-1]) + " and " + items[-1]
@@ -924,16 +844,8 @@ def _reject_unknown_keys(raw: dict[str, Any], kind: str) -> None:
             )
             + ")"
         )
-    # A validation declaration is the one place a correctly spelled key is
-    # commonly wrong, because everything describing materialised data behaviour
-    # reads as plausible on a Test until you ask what it would do. Say so rather
-    # than reporting a typo.
     if is_validation_kind(kind) and known:
-        detail += (
-            f". {article.capitalize()} {kind} declares no data of its own, so "
-            "metadata describing how data is materialised, keyed or rebuilt has "
-            "nothing to apply to"
-        )
+        detail += f". {article.capitalize()} {kind} produces no data, so these keys do not apply"
     raise MetadataError(
         f"unknown metadata key(s) for {article} {kind} {what}: "
         + ", ".join(sorted(unknown))
@@ -972,8 +884,6 @@ def _parse_text_value(value: str, key: str) -> MetadataText:
 def _parse_logical_reference(
     target: str, *, column: str | None = None, key: str
 ) -> Reference:
-    """Parse the shared short/canonical logical-reference grammar."""
-
     parts = target.split("/")
     item_type: str | None = None
     item_name: str | None = None
@@ -1066,11 +976,7 @@ def _parse_dependencies(value: Any, object_id: ObjectId) -> tuple[ObjectId, ...]
 
 
 def _parse_notes(value: Any) -> str | None:
-    """Free-range commentary. Deliberately unpoliced.
-
-    No reference parsing and no placeholder check: this is where an author
-    writes whatever helps, including a dollar sign.
-    """
+    """Notes allow arbitrary text, including literal dollar signs."""
 
     if value is None:
         return None
@@ -1203,16 +1109,7 @@ def _parse_column_set(value: Any, key: str) -> tuple[str, ...]:
 def _parse_unique_keys(
     value: Any, primary_key: tuple[str, ...]
 ) -> tuple[tuple[str, ...], ...]:
-    """Alternate keys: a YAML list, one comma-separated column set per entry.
-
-    Two levels, matching ``Primary key``: independent keys are a list, and one
-    key's columns are a comma-separated set whose order is preserved. A key has
-    no name, because nothing physical is created from it::
-
-        Unique keys:
-          - Order number
-          - Customer id, Order date
-    """
+    """A YAML list of comma-separated column sets, preserving authored order."""
 
     if value is None:
         return ()
@@ -1236,10 +1133,9 @@ def _parse_unique_keys(
             raise MetadataError("Unique keys repeats the key " + ", ".join(columns))
         if primary_key and columns == primary_key:
             raise MetadataError(
-                "a Unique keys entry repeats the Primary key ("
+                "a Unique keys entry repeats Primary key ("
                 + ", ".join(columns)
-                + "). The primary key is already unique, so remove it from "
-                "Unique keys"
+                + "); remove it from Unique keys"
             )
         keys.append(columns)
     return tuple(keys)
@@ -1251,19 +1147,7 @@ _FOREIGN_KEY_PARENT = re.compile(r"^([^\[\]]+)\[([^\[\]]+)\]$")
 
 
 def _parse_foreign_keys(value: Any, object_id: ObjectId) -> tuple[ForeignKey, ...]:
-    """Declared relationships to parent objects, as an ER model rather than DDL.
-
-    Each entry is a one-entry mapping from this object's column set to the
-    parent's::
-
-        Foreign keys:
-          - Customer id: Sales.Customer[Customer id]
-          - Region, Country: Sales.Territory[Region, Country]
-          - Parent order id: Sales.Order[Order id]
-
-    Several entries may name the same parent, and the parent may be this object
-    itself: a hierarchy in one table is an ordinary shape.
-    """
+    """Logical parent relationships; several may share a parent or reference self."""
 
     if value is None:
         return ()
@@ -1335,8 +1219,6 @@ def _parse_foreign_keys(value: Any, object_id: ObjectId) -> tuple[ForeignKey, ..
 
 
 def _parse_column_list(value: Any, key: str) -> tuple[str, ...]:
-    """Independent columns are a YAML list."""
-
     if value is None:
         return ()
     if not isinstance(value, list):
@@ -1361,9 +1243,7 @@ def _parse_file_keys(value: Any, *, kind: str) -> tuple[str, ...]:
         return ()
     if value is None:
         raise MetadataError(
-            "a Folder must declare File key. It is the scope of what Weaver "
-            "manages, "
-            "and reconciliation deletes nothing outside it"
+            "a Folder must declare File key to identify the files Weaver manages"
         )
 
     values = [value] if isinstance(value, str) else value
@@ -1442,8 +1322,6 @@ def _validate_columns(
     comparison: tuple[str, ...],
     notes: dict[str, MetadataText],
 ) -> None:
-    """Cross-field column guards, where a declared schema makes them possible."""
-
     redundant = [column for column in declared_not_null if column in primary_key]
     if redundant:
         raise MetadataError(
@@ -1454,8 +1332,8 @@ def _validate_columns(
     overlapping = [column for column in comparison if column in primary_key]
     if overlapping:
         raise MetadataError(
-            "Comparison columns must not include primary key columns. A matched row "
-            "has equal keys by definition: " + ", ".join(overlapping)
+            "Comparison columns must not include Primary key columns; remove: "
+            + ", ".join(overlapping)
         )
 
     colliding = [
@@ -1494,9 +1372,8 @@ def _validate_columns(
     # column name" at install says nothing about the declaration.
     if identity is not None and identity in primary_key:
         raise MetadataError(
-            f"Primary key names the Identity column {identity!r}. The engine "
-            "assigns an identity on insert, so a load cannot match on it. Key "
-            "on the business column that identifies a row across loads."
+            f"Primary key must not name Identity column {identity!r}. Key on the "
+            "business column that identifies a row across loads."
         )
 
     if not declared_columns:
@@ -1510,8 +1387,7 @@ def _validate_columns(
         column.name for column in declared_columns
     }:
         raise MetadataError(
-            f"Identity {identity} names a declared column; the identity column is "
-            "Weaver-managed and must not appear in Schema"
+            f"Identity {identity} also appears in Schema; remove it from Schema"
         )
     known = {column.name for column in declared_columns}
     if identity is not None:

@@ -174,7 +174,7 @@ def test_folder_claims_do_not_infer_ownership_of_table_dictionary_rows():
 
 @weaver_test()
 def test_registry_rejects_an_unsupported_installed_object_type():
-    with pytest.raises(BuildError, match="unsupported object_type 'procedure'"):
+    with pytest.raises(BuildError, match="unsupported object type 'procedure'"):
         reconcile_catalogue_state(
             _state(_row("Load", object_type="procedure")),
             inventories={ITEM: _inventory()},

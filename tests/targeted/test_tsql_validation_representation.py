@@ -236,7 +236,7 @@ select OrderId from Sales.Orders;
 
 @weaver_test()
 def test_a_wrong_result_count_is_refused():
-    with pytest.raises(DiscoveryError, match="must produce exactly 2 result sets"):
+    with pytest.raises(DiscoveryError, match="requires exactly 2 result sets"):
         _script(
             TEST_SOURCE + "\nselect 1 as Extra;\n",
             "Warehouse/Reporting/tests/Sales.OrdersReconcile.sql",

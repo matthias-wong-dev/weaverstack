@@ -1,15 +1,7 @@
-"""Serialisable physical target descriptors.
+"""Define serialisable physical target descriptors and planner bindings.
 
-A build request supplies live workspace objects; a bundle must not. The planner
-converts each supplied binding into a :class:`BoundTarget`, a flat and stable
-descriptor carrying exactly what an installer needs to resolve the physical
-destination, and nothing that ties the bundle to the process that wrote it.
-
-There is no workspace kind here. Weaver has one workspace, Fabric. A target names
-an item, a Lakehouse or a Warehouse, by the identifiers the installer resolves it
-with, and by the display names Fabric Spark spells a four-part object name
-with. Where the installer runs is supplied by its Session, not frozen into the
-bundle.
+Bundles contain flat identifiers and display names, not live workspace objects
+or host information. The installer's Session supplies where execution runs.
 """
 
 from __future__ import annotations
@@ -27,32 +19,22 @@ from ..targets import (
     physical_kind,
 )
 
-if TYPE_CHECKING:  # names used only in annotations
+if TYPE_CHECKING:
     from ..spark import FabricSparkTarget
 
 
 @dataclass(frozen=True)
 class BoundTarget:
-    """One physical destination, as flat serialisable data.
+    """A physical destination as flat serialisable data.
 
-    ``id`` is the manifest-local identifier a batch names. ``kind`` says whether
-    it is a Lakehouse or a Warehouse. ``item_id`` names the item, with the
-    Fabric identifiers alongside; the installer resolves the item through its
-    own environment.
-
-    Both halves of the workspace identity are carried, and both are used. The
-    id resolves the item over REST and OneLake; the display name is what Fabric
-    Spark spells a four-part object name with, so a build cannot render a
-    statement without it.
+    ``id`` is local to the manifest. Fabric ids resolve items through REST and
+    OneLake; display names render Spark's four-part object names.
     """
 
     id: str
     kind: str
     item_id: str
-    #: The item's resolved display name. Carried alongside ``item_id`` because on
-    #: Fabric the id is a GUID: the catalogue records which item an installation is
-    #: bound to, and a GUID would make that record unreadable. It is a record,
-    #: never identity, because resolution goes through ``item_id``.
+    #: Resolved display name for readable catalogue records; identity remains item_id.
     item_name: str | None = None
     workspace_id: str | None = None
     workspace_name: str | None = None
@@ -76,28 +58,17 @@ class BoundTarget:
             )
         if not self.workspace_name:
             raise BuildError(
-                f"{self.display} carries no workspace name, so a Fabric Spark "
-                "statement for it cannot be named"
+                f"cannot render a Fabric Spark statement for {self.display} "
+                "without a workspace display name"
             )
         return FabricSparkTarget(workspace=self.workspace_name, lakehouse=self.name)
 
     @property
     def name(self) -> str:
-        """The readable name, falling back to the id when none was carried."""
-
         return self.item_name or self.item_id
 
     @property
     def display(self) -> str:
-        """What to call this target on screen: ``Lakehouse/Sales``.
-
-        The physical item, always. A logical name is the estate's own vocabulary
-        and some of it is internal: the catalogue Warehouse is the
-        logical item ``_weaver``, which means nothing to somebody watching a
-        build write to a Lakehouse they know as ``Weaver``. ``id`` is worse
-        still: ``Lakehouse-_weaver--lakehouse-Weaver``.
-        """
-
         kind = (self.kind or "").strip()
         return f"{kind.title()}/{self.name}" if kind else str(self.name)
 
@@ -136,19 +107,11 @@ class BoundTarget:
         )
 
 
-# --- input bindings ----------------------------------------------------------
-#
-# What a caller supplies to the planner. These carry a live identity (an
-# ItemRef, and for Fabric the workspace/item ids); the planner converts them into
-# the flat BoundTarget above so no live workspace object is serialised into a bundle.
+# Planner inputs, converted to flat BoundTarget values before serialisation.
 
 
 @dataclass(frozen=True)
 class LakehouseBinding:
-    """A bound destination Lakehouse for Folder and Delta materialisation."""
-
-    #: Which of the two a caller is holding, declared rather than inferred from
-    #: whichever item field the class happens to carry.
     kind = LAKEHOUSE_TARGET
 
     lakehouse: ItemRef
@@ -160,14 +123,10 @@ class LakehouseBinding:
 
     @property
     def item(self) -> ItemRef:
-        """The bound item, under a name that does not presume its kind."""
-
         return self.lakehouse
 
     @property
     def physical_kind(self) -> str:
-        """The kind as the target grammar spells it, for a message or a lookup."""
-
         return LAKEHOUSE
 
     def to_bound_target(self) -> BoundTarget:
@@ -199,14 +158,10 @@ class WarehouseBinding:
 
     @property
     def item(self) -> ItemRef:
-        """The bound item, under a name that does not presume its kind."""
-
         return self.warehouse
 
     @property
     def physical_kind(self) -> str:
-        """The kind as the target grammar spells it, for a message or a lookup."""
-
         return WAREHOUSE
 
     def to_bound_target(self) -> BoundTarget:
@@ -223,16 +178,14 @@ class WarehouseBinding:
 
 @dataclass(frozen=True)
 class ItemBinding:
-    """One Weaver item bound to one typed physical target."""
-
     item: WeaverItemId
     target: LakehouseBinding | WarehouseBinding
 
     def __post_init__(self) -> None:
         if self.item.item_type != self.target.physical_kind:
             raise BuildError(
-                f"{self.item} requires a {self.item.item_type} binding, "
-                f"not a {self.target.physical_kind} one"
+                f"{self.item} must target a {self.item.item_type}, not a "
+                f"{self.target.physical_kind}. Update its targets: entry."
             )
 
     def to_bound_target(self) -> BoundTarget:
@@ -264,7 +217,9 @@ class ItemBindings:
         physical: set[tuple[str, str]] = set()
         for binding in self.entries:
             if binding.item in seen:
-                raise BuildError(f"item is bound more than once: {binding.item}")
+                raise BuildError(
+                    f"{binding.item} is selected more than once. Remove the duplicate."
+                )
             seen.add(binding.item)
             if binding.item == BUILTIN_ITEM:
                 continue
@@ -272,9 +227,8 @@ class ItemBindings:
             key = (target.physical_kind, target.item.name)
             if key in physical:
                 raise BuildError(
-                    f"{key[0]}/{key[1]} cannot hold two items. A build "
-                    "diffs one item's declarations against everything the target "
-                    "holds, so give each item a physical target of its own"
+                    f"{key[0]}/{key[1]} cannot be used by more than one Weaver "
+                    "item. Bind each item to a different physical target."
                 )
             physical.add(key)
 
@@ -288,20 +242,14 @@ def effective_item_bindings(
 ) -> ItemBindings:
     """Add the mandatory package-owned catalogue item binding.
 
-    ``control_item`` is the Warehouse the catalogue lives in, the item itself
-    rather than the workspace's typed ``catalogue`` value, because what a
-    binding needs is a name it can resolve.
-
-    ``workspace_name`` is required rather than optional, because the binding
-    this adds is the one every build renders its catalogue statements against.
-    A caller that omitted it produced a catalogue target that could not name an
-    object, and the failure surfaced inside Fabric several steps later.
+    ``control_item`` is the catalogue Warehouse item. ``workspace_name`` is
+    required to render its four-part object names.
     """
 
     if not workspace_name:
         raise BuildError(
-            "the catalogue binding needs the workspace's display name, "
-            "which four-part naming is spelled with"
+            "The catalogue Warehouse cannot be named because the Workspace name is "
+            "missing. Set the Workspace name and rebuild."
         )
 
     from ..catalogue.builtin import BUILTIN_ITEM
@@ -309,7 +257,8 @@ def effective_item_bindings(
     builtin = BUILTIN_ITEM
     if builtin in bindings.by_item:
         raise BuildError(
-            "Warehouse/_weaver is bound implicitly and must not be selected"
+            "The Weaver catalogue item is selected automatically. Remove it from "
+            "the selected items."
         )
     return ItemBindings(
         bindings.entries
@@ -377,8 +326,6 @@ _BUILD_ITEM_GRAMMAR = (
 
 
 def _parse_logical_item(text: str) -> WeaverItemId:
-    """The logical half, through the one logical identity parser."""
-
     from ..errors import IdentityError
 
     try:
@@ -391,12 +338,6 @@ def _parse_logical_item(text: str) -> WeaverItemId:
 
 
 def _parse_physical_target(text: str) -> tuple[str, ItemRef]:
-    """The physical half, through the grammar every operation shares.
-
-    The logical item types and the grammar's spellings are the same two words,
-    so the kind is used directly rather than translated.
-    """
-
     from ..targets import parse_physical_target
 
     target = parse_physical_target(

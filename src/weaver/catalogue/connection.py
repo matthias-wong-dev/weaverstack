@@ -1,14 +1,4 @@
-"""Reading the Weaver catalogue over TDS.
-
-One object, bound to the Warehouse the catalogue lives in, through which every
-catalogue read goes. It exists to hold two things a bare query callable cannot:
-the shape of the ``_`` schema, read once, and the judgement about what an absent
-table means.
-
-The shape matters for cost. A build reads eleven tables, and asking the engine
-what columns each one has would double the round trips to answer a question one
-query over ``INFORMATION_SCHEMA`` answers for the whole schema.
-"""
+"""Read the Weaver catalogue over TDS with one cached schema inventory."""
 
 from __future__ import annotations
 
@@ -20,12 +10,7 @@ from .tsql import literal
 
 
 class CatalogueConnection:
-    """Catalogue reads against one Warehouse, over TDS.
-
-    ``query`` runs one T-SQL question and returns its rows as mappings. Nothing
-    here holds a connection: the Session owns transport lifetime, and this owns
-    only what the catalogue means.
-    """
+    """Catalogue access for one Warehouse; the Session owns transport lifetime."""
 
     def __init__(
         self,
@@ -39,12 +24,7 @@ class CatalogueConnection:
     # --- the shape of `_` ----------------------------------------------------
 
     def shape(self) -> Mapping[str, Mapping[str, str]]:
-        """Every ``_`` table this Warehouse holds, and the columns it has.
-
-        Keyed by casefolded table name, then by casefolded column name, so a
-        lookup never depends on the engine's collation. Read once per
-        connection: the catalogue does not change shape underneath a build.
-        """
+        """Return the cached ``_`` schema under casefolded table and column keys."""
 
         if self._shape is None:
             found: dict[str, dict[str, str]] = {}
@@ -61,13 +41,7 @@ class CatalogueConnection:
         return self._shape
 
     def columns_of(self, table) -> dict[str, str] | None:
-        """This table's columns, or None when the Warehouse does not hold it.
-
-        None is the bootstrap answer and is data: the build that writes the
-        catalogue is the build that creates it. It is distinguished by asking
-        the schema rather than by reading a failure, so a permission error
-        cannot be mistaken for an empty catalogue.
-        """
+        """Return columns, or ``None`` when schema inventory shows no table."""
 
         return self.shape().get(table.name.casefold())
 
@@ -82,28 +56,16 @@ class CatalogueConnection:
         return self._query(statement)
 
     def execute(self, statement: str) -> None:
-        """Run one catalogue statement that returns nothing.
-
-        Reading is always available; writing is not. A connection made only to
-        read says so here rather than letting a caller discover it from the
-        transport.
-        """
-
         if self._execute is None:
             raise CommandError(
-                "this catalogue connection can read but not write; it was made "
-                "without a way to execute statements"
+                "this catalogue connection is read-only; no statement executor "
+                "was provided"
             )
         self._execute(statement)
 
 
 def catalogue_connection(session, workspace=None) -> CatalogueConnection:
-    """The catalogue connection for a Session's configured catalogue Warehouse.
-
-    The one construction, both positions: inside Fabric the query runs on the
-    session's own identity, from a desktop it crosses over TDS. Nothing above
-    can tell, and neither needs Spark.
-    """
+    """Connect to a Session's configured catalogue Warehouse without Spark."""
 
     from ..targets import WarehouseTarget
 

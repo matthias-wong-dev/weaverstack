@@ -116,7 +116,7 @@ def test_dispatching_into_a_run_with_no_scope_is_diagnosed():
         session_scopes.get_scope("run-a")
 
     assert "run-a" in str(raised.value)
-    assert "open_scope" in str(raised.value)
+    assert "rerun the load" in str(raised.value)
 
 
 # --- the handle, as the desktop submits it -----------------------------------
@@ -616,5 +616,5 @@ def test_a_live_session_that_could_not_release_a_scope_is_reported():
     scope.close()  # does not raise: the run is finished
 
     assert len(session.warnings) == 1
-    assert "not released" in session.warnings[0]
+    assert "left imported modules in the Fabric session" in session.warnings[0]
     assert "TypeError" in session.warnings[0]

@@ -1,13 +1,4 @@
-"""First-class Warehouse stored-procedure declarations.
-
-A Programmable is a managed stored procedure, whether authored under
-``Warehouse/<Item>/programmables/<Schema>.<Procedure>.sql``, generated from a
-logical declaration, or supplied by a Weaver fragment. One representation and
-one lifecycle: discover, validate, sign, select, install, register, prune.
-
-Identity is the ``PROCEDURE_SHAPE`` document identity, an ordinary schema and an
-object name carrying what the procedure is for.
-"""
+"""Warehouse stored-procedure declarations."""
 
 from __future__ import annotations
 
@@ -19,11 +10,9 @@ from .metadata import ObjectId
 from .model import PROCEDURE_SHAPE, WAREHOUSE, WeaverDocumentId, WeaverItemId
 from .source import content_hash
 
-#: Where an item authors its stored procedures.
 PROGRAMMABLES_DIRECTORY = "programmables"
 
-#: What authored content carries in the Registry. Managed structure rather than
-#: scheduled work: nothing runs a Programmable but a caller.
+#: Programmables are managed structure; only their callers execute them.
 ROLE_PROGRAMMABLE = "programmable"
 
 #: The installer runs a Programmable's text verbatim, and a plain ``CREATE``
@@ -39,16 +28,14 @@ _CREATE_PATTERN = re.compile(
 
 @dataclass(frozen=True)
 class Programmable:
-    """One managed stored procedure declaration, whatever its provenance.
+    """A managed stored procedure declaration.
 
     ``identity`` is the catalogue key, ``text`` the complete statement the
     installer runs, ``signature`` what incremental selection compares, and
     ``role`` what the procedure is for.
 
-    ``relative_path`` marks authored item source and records where it was
-    written; ``origin`` marks generated content and records the declaration it
-    was derived from. Weaver's own fragments carry neither, so they sign
-    themselves and no item signature moves when one changes.
+    Authored procedures have ``relative_path``; generated procedures have
+    ``origin``. Weaver fragments have neither and sign themselves independently.
     """
 
     identity: WeaverDocumentId
@@ -61,8 +48,8 @@ class Programmable:
     def __post_init__(self) -> None:
         if self.identity.shape != PROCEDURE_SHAPE:
             raise DiscoveryError(
-                f"{self.identity}: a Programmable is a stored procedure, so its "
-                f"identity has the {PROCEDURE_SHAPE} shape"
+                f"{self.identity}: a Programmable identity must have the "
+                f"{PROCEDURE_SHAPE} shape"
             )
         if self.identity.item.item_type != WAREHOUSE:
             raise DiscoveryError(
@@ -70,7 +57,7 @@ class Programmable:
             )
         if self.relative_path is not None and self.origin is not None:
             raise DiscoveryError(
-                f"{self.identity}: a Programmable is authored or generated, never both"
+                f"{self.identity}: a Programmable cannot be both authored and generated"
             )
 
     @property
@@ -85,13 +72,9 @@ def read_programmable(
     owner: WeaverItemId,
     weaver_owned: bool = False,
 ) -> Programmable:
-    """One stored procedure from a ``.sql`` file, validated against its name.
+    """Read a stored procedure whose statement matches its file name.
 
-    The file lives at ``programmables/<Schema>.<Procedure>.sql`` and its SQL
-    creates that exact procedure, so the identity the catalogue registers and
-    the object the statement creates cannot drift apart. ``weaver_owned`` reads
-    a Weaver fragment, which may claim the reserved ``_`` schema and is not item
-    source.
+    ``weaver_owned`` permits a Weaver fragment to use the reserved ``_`` schema.
     """
 
     if owner.item_type != WAREHOUSE:
@@ -100,12 +83,13 @@ def read_programmable(
         )
     stem = relative_path.rsplit("/", 1)[-1]
     if not stem.endswith(".sql"):
-        raise DiscoveryError(f"{relative_path}: a programmable is a .sql file")
+        raise DiscoveryError(
+            f"{relative_path}: a programmable must be a .sql file. Rename the file."
+        )
     parts = stem[: -len(".sql")].split(".")
     if len(parts) != 2 or not all(parts):
         raise DiscoveryError(
-            f"{relative_path}: name it <Schema>.<Procedure>.sql, one dot between "
-            "the schema and the procedure"
+            f"{relative_path}: name the programmable <Schema>.<Procedure>.sql"
         )
     object_id = ObjectId(schema=parts[0], object=parts[1])
 
@@ -117,9 +101,8 @@ def read_programmable(
     declared = _CREATE_PATTERN.findall(text)
     if len(declared) != 1:
         raise DiscoveryError(
-            f"{relative_path}: must contain exactly one 'create or alter "
-            "procedure <Schema>.<Procedure>' statement, so what Weaver installs "
-            "is what it registers and prunes"
+            f"{relative_path}: the programmable must contain exactly one 'create "
+            "or alter procedure <Schema>.<Procedure>' statement"
         )
     created = ObjectId(
         schema=_unbracket(declared[0][0]), object=_unbracket(declared[0][1])
@@ -155,7 +138,6 @@ def generated_programmable(
     role: str,
     origin: WeaverDocumentId | None = None,
 ) -> Programmable:
-    """One Programmable Weaver generated from a logical declaration."""
 
     return Programmable(
         identity=identity,

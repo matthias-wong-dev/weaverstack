@@ -1,20 +1,13 @@
-"""Offset-exact T-SQL text transforms for shape-only query materialisation.
+"""Offset-exact T-SQL transforms for shape-only query materialisation.
 
 A Warehouse table's inferred build runs its query in *shape-only* form: every
 ``SELECT`` is guarded to return its columns and no rows, and the final result is
-diverted into a temp table whose metadata the generated script then reads. Those
-two rewrites, :func:`insert_where_one_eq_zero` and :func:`insert_select_into`,
-work over a flattened, offset-carrying token stream rather than by string
-munging, so nested queries, CTEs, set operations and existing ``WHERE`` clauses
-are handled correctly.
+diverted into a temp table whose metadata the generated script then reads. The
+transforms use a flattened token stream whose offsets still refer to the original
+text, preserving untouched SQL byte for byte.
 
-Everything here is T-SQL's: the keyword sets, the ``GO`` boundary, the
-``SELECT INTO`` placement and the shape-only guard. Flattening text into
-offset-carrying tokens, and finding where a statement ends, are not
-dialect-specific and live in :mod:`weaver.sql_statements`, because Spark SQL
-needs the same answer.
-
-:func:`render_sql_template` fills the T-SQL DDL templates in ``ses/templates``.
+Keyword boundaries, ``GO``, ``SELECT INTO`` placement and shape guards are
+T-SQL-specific. Token offsets and statement boundaries are shared with Spark SQL.
 """
 
 from __future__ import annotations
@@ -79,13 +72,10 @@ class _Replacement:
 
 @dataclass(frozen=True)
 class QuerySpan:
-    """Where one top-level result-producing query sits in a body.
+    """Offsets for one top-level result query in the original body.
 
-    ``start`` and ``end`` are offsets into the original text, so the query can
-    be sliced back out byte-identical rather than reassembled from tokens.
-    ``select_index`` is where its ``SELECT`` is in the flattened token stream,
-    which is what an ``INTO`` placement needs and a caller outside this module
-    does not.
+    ``select_index`` locates its ``SELECT`` in the flattened token stream for
+    ``INTO`` placement.
     """
 
     start: int
@@ -117,10 +107,7 @@ def insert_select_into(
 ) -> str:
     """Insert ``INTO <table_name>`` into one standalone SELECT query.
 
-    The last query by default, which is where a single-query body's result is.
-    A body that produces its rows and then names the keys to delete has two,
-    and the caller says which, so ``span`` is how a build diverts the staging
-    query rather than whichever query happens to come last.
+    The last query is used unless ``span`` identifies another one.
     """
 
     query_span = span if span is not None else _find_last_standalone_query(sql_text)
@@ -134,15 +121,11 @@ def insert_select_into(
 
 
 def get_sql_template(template_name: str) -> str:
-    """Fetch a SQL template from ``source/sql_templates``."""
-
     template_path = _sql_template_path(template_name)
     return template_path.read_text(encoding="utf-8")
 
 
 def render_sql_template(template_name: str, **values: object) -> str:
-    """Fetch and populate a SQL template with ``string.Template`` values."""
-
     template = Template(get_sql_template(template_name))
     return template.substitute({key: str(value) for key, value in values.items()})
 
@@ -189,19 +172,11 @@ def _collect_replacements(sql_text: str) -> list[_Replacement]:
 
 
 def query_spans(sql_text: str) -> tuple[QuerySpan, ...]:
-    """Every top-level standalone query in ``sql_text``, in source order.
+    """Return top-level standalone queries in source order.
 
-    Standalone is the whole difficulty, and it is why this cannot be answered by
-    splitting on semicolons: T-SQL does not require them, so a ``SELECT`` that
-    begins a query and a ``SELECT`` that is the tail of an ``INSERT``, a branch
-    of a ``UNION``, the body of a ``WITH`` or a subquery inside a predicate all
-    have to be told apart from where they sit rather than from a separator. A
-    ``WITH`` leads its own span, because the query is the whole of it and an
-    ``INTO`` still belongs on the ``SELECT`` inside.
-
-    What a caller does with the spans is the caller's: the build places one
-    ``INTO``, and :mod:`weaver.declaration.tsql_program` reads the same list as
-    an authoring contract. Both get the same answer because there is only one.
+    T-SQL does not require semicolons. Position distinguishes result queries from
+    ``SELECT`` inside inserts, set branches, CTEs and subqueries. A CTE span starts
+    at ``WITH``, while its ``select_index`` points to the body ``SELECT``.
     """
 
     tokens = _flatten_with_offsets(sql_text)
@@ -230,12 +205,9 @@ def query_spans(sql_text: str) -> tuple[QuerySpan, ...]:
 
 
 def temp_table_name(prefix: str, qualified: str) -> str:
-    """A session temp table named after the object it is working for.
+    """Return an object-specific temp-table name within identifier limits.
 
-    Named rather than anonymous so that two objects loading in one session
-    cannot collide, and so that a person looking at a failed run can tell which
-    object left what behind. Long names are truncated onto a digest of the
-    original, because the identifier limit is shorter than some qualified names.
+    Long names retain a digest of the full qualified name.
     """
 
     normalised_prefix = prefix if prefix.startswith("#") else f"#{prefix}"
@@ -248,11 +220,9 @@ def temp_table_name(prefix: str, qualified: str) -> str:
 
 
 def top_level_go(sql_text: str) -> int | None:
-    """Where a ``GO`` batch separator sits in ``sql_text``, if one does.
+    """Return the offset of an outermost bare ``GO``, if present.
 
-    Only a bare keyword at the outermost depth: ``[go]`` and ``t.go`` tokenise
-    as a name and a member, so a column called ``go`` is not mistaken for a
-    batch boundary.
+    Bracketed and qualified uses of ``go`` are identifiers, not separators.
     """
 
     for token in _flatten_with_offsets(sql_text):
@@ -262,16 +232,9 @@ def top_level_go(sql_text: str) -> int | None:
 
 
 def selects_into(sql_text: str, span: QuerySpan) -> bool:
-    """Whether this span's query diverts its result with ``SELECT … INTO``.
+    """Return whether this query diverts its result with ``SELECT … INTO``.
 
-    A query that names its own destination has stopped being a result: it is
-    working, and the rows land in the table it names rather than coming back to
-    whoever ran it. So the build cannot put its shape ``INTO`` on one, and the
-    authoring contract does not count one as a query the object produces.
-
-    ``INTO`` at the span's own depth, which is what separates
-    ``select … into #Working`` from the ``insert into`` of a nested statement or
-    an ``into`` buried in a subquery.
+    Only ``INTO`` at the query's depth counts; nested uses do not.
     """
 
     tokens = _flatten_with_offsets(sql_text)

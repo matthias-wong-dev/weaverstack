@@ -1,7 +1,6 @@
-"""Transport-neutral scalar results for validation runs.
+"""Validation counts and errors that can cross runtime boundaries.
 
-Diagnostic rows remain with interactive callers; durable reports carry counts
-and an error when a validation could not be evaluated.
+Diagnostic rows remain with interactive callers and are not persisted.
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class TestResult:
-    """One Test's outcome: how much disagreed, and whether it ran at all."""
+    """A Test's discrepancy counts or execution error."""
 
     #: Not a pytest test class. Weaver's Test is a data validation, and pytest's
     #: collector recognises only the name, so it would warn about every module
@@ -25,7 +24,6 @@ class TestResult:
 
     @property
     def failure_count(self) -> int:
-        """Return the number of physical discrepancy rows."""
 
         return self.missing_count + self.unexpected_count
 
@@ -35,7 +33,6 @@ class TestResult:
 
     @classmethod
     def failed_to_run(cls, message: str) -> "TestResult":
-        """A Test that could not be evaluated, which is not a Test that passed."""
 
         return cls(error_message=message)
 
@@ -49,7 +46,6 @@ class TestResult:
 
     @classmethod
     def from_mapping(cls, mapping) -> "TestResult":
-        """Rebuild a result from its serialised counts and error."""
 
         return cls(
             missing_count=mapping.get("missing_count", 0),
@@ -60,7 +56,7 @@ class TestResult:
 
 @dataclass(frozen=True)
 class AssumptionResult:
-    """One Assumption's outcome: how many rows contradicted it."""
+    """An Assumption's violation count or execution error."""
 
     violation_count: int = 0
     error_message: str | None = None
@@ -88,19 +84,10 @@ class AssumptionResult:
 
 
 def result_from_rows(frame, *, kind: str, collect: bool = False):
-    """One validation's judgement, from the rows its ``read()`` returned.
+    """Build a validation result without evaluating its rows twice.
 
-    One implementation, because "what a validation found" must mean the same
-    thing wherever the validation ran: an orchestrated run and a direct call
-    both reach here.
-
-    Evaluated once either way. A collected run counts rows it already has; a
-    suppressed one aggregates by side in a single action. Two counts would be two
-    evaluations of the comparison, between which the tables can move.
-
-    Returns the result and the diagnostic rows the caller asked for, or None for
-    the rows when it did not: they carry whatever the validation selected, and a
-    durable record of them would put data into the estate's own evidence.
+    Return diagnostics only when requested; they may contain selected data and
+    must not enter durable evidence.
     """
 
     from ..declaration.metadata import ASSUMPTION

@@ -1,8 +1,4 @@
-"""Common result, status, and message types for runtime operations.
-
-Run results record whether each node succeeded. Operation-specific report
-renderers project the common model into their own public output.
-"""
+"""Shared result, status and message types for runtime operations."""
 
 from __future__ import annotations
 
@@ -15,10 +11,7 @@ from ..errors import WeaverError
 
 
 class RunError(WeaverError):
-    """An error raised when a run cannot proceed.
-
-    ``result`` retains operation-specific evidence when it is available.
-    """
+    """A run failure, with operation-specific evidence when available."""
 
     def __init__(self, message: str, *, result: object | None = None) -> None:
         super().__init__(message)
@@ -26,17 +19,12 @@ class RunError(WeaverError):
 
 
 def reports_outcome(result: object) -> bool:
-    """Return whether a result reports a success outcome."""
 
     return hasattr(result, "succeeded")
 
 
 def represent(result: object) -> dict | None:
-    """Serialise a result without requiring an operation-specific type.
-
-    All results report ``succeeded``; richer result types provide their own
-    mapping or row representation.
-    """
+    """Serialise any result that follows the runtime result contract."""
 
     if result is None:
         return None
@@ -52,7 +40,7 @@ def represent(result: object) -> dict | None:
 
 @dataclass(frozen=True)
 class RunFailure:
-    """Represent a dispatch failure that has no operation-specific result."""
+    """A dispatch failure without an operation-specific result."""
 
     error_message: str
     succeeded: bool = False
@@ -72,27 +60,16 @@ SEVERITY_INFO = "info"
 
 # --- what a run can find ------------------------------------------------------
 
-#: The primitive ran and refused rows.
 PRIMITIVE_REJECTS = "primitive_rejects"
-#: The primitive ran and reported failure in its own result.
 PRIMITIVE_FAILURE = "primitive_failure"
-#: Dispatch raised something the primitive did not normalise.
 DISPATCH_EXCEPTION = "dispatch_exception"
-#: The installed primitive could not be located.
 DISPATCH_LOCATION_MISSING = "dispatch_location_missing"
-#: A deployed Python module could not be imported, or carries no expected class.
 MODULE_IMPORT_FAILURE = "module_import_failure"
-#: A primitive returned something that does not report whether it succeeded.
 RESULT_CONTRACT_INVALID = "result_contract_invalid"
-#: The endpoint refresh could not be performed.
 ENDPOINT_REFRESH_FAILURE = "endpoint_refresh_failure"
-#: An upstream node failed or could not be resolved, so this one may not run.
 DEPENDENCY_BLOCKED = "dependency_blocked"
-#: The catalogue's physical binding is missing, ambiguous or malformed.
 CATALOGUE_BINDING_INVALID = "catalogue_binding_invalid"
-#: The planned graph contains a cycle.
 DAG_CYCLE = "dag_cycle"
-#: A dependency named in the catalogue could not be resolved to anything.
 DEPENDENCY_UNRESOLVED = "dependency_unresolved"
 #: A reference Weaver does not follow: a fully qualified physical read that names
 #: something outside the estate's own logical graph.
@@ -101,7 +78,7 @@ DEPENDENCY_EXTERNAL = "dependency_external"
 
 @dataclass(frozen=True)
 class RunMessage:
-    """One finding about one node, or about the run as a whole."""
+    """A finding about one node or the run as a whole."""
 
     severity: str
     code: str
@@ -152,8 +129,7 @@ FAILED = "failed"
 BLOCKED = "blocked"
 SKIPPED = "skipped"
 PENDING = "pending"
-#: The node could not be resolved, so nothing ran. Not the same as a primitive
-#: that ran and reported failure, and this is what tells them apart.
+#: Resolution failed before dispatch; the primitive did not run.
 INVALID = "invalid"
 #: A dry run's outcome: resolved and ready, having executed nothing.
 VALIDATED = "validated"
@@ -172,12 +148,10 @@ RUN_INVALID = "invalid"
 
 @dataclass(frozen=True)
 class RunNodeResult:
-    """What became of one node of the graph.
+    """A node outcome.
 
-    ``executed`` is separate from ``status`` and has to be: a dry run reports
-    ``validated`` having executed nothing, and a real run reports ``blocked``
-    having executed nothing either. A reader asking "did this touch the target?"
-    is asking about ``executed``, and no status answers it on its own.
+    ``executed`` is independent of status because validated and blocked nodes do
+    not touch their targets.
     """
 
     node_id: str
@@ -189,12 +163,9 @@ class RunNodeResult:
     #: What this node was for, where one graph carries more than one kind. A Test
     #: and an Assumption are both validations and are reported apart.
     role: str | None = None
-    #: Whether the dispatch threw rather than producing a result. A node that
-    #: raised was never evaluated, which "did this check run?"
-    #: needs to know.
+    #: Distinguishes a check that could not run from one that found a failure.
     raised: bool = False
-    #: Whether this outcome is Weaver's own decision about the work rather than
-    #: the dispatch coming apart. What tells a refused breach from a crash.
+    #: Distinguishes a named refusal from an unexpected dispatch error.
     refused: bool = False
     executed: bool = False
     messages: tuple = ()
@@ -224,13 +195,9 @@ class RunNodeResult:
             "status": self.status,
             "role": self.role,
             "executed": self.executed,
-            # Whether anything was evaluated at all. Without it nothing can
-            # tell a check that could not run from one that ran and failed.
             "raised": self.raised,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
-            # As narrow as the contract that admitted it: a result describes
-            # itself if it can, and otherwise answers only what every result must.
             "rows": represent(self.result),
             "messages": [
                 message.to_mapping() if hasattr(message, "to_mapping") else str(message)
@@ -241,16 +208,10 @@ class RunNodeResult:
 
 @dataclass(frozen=True)
 class RunResult:
-    """One Runner execution, whole.
+    """A run outcome, whether planned or executed.
 
-    The same shape whether or not anything ran, which is what lets a dry run be
-    inspected exactly as a real run is.
-
-    **Where the evidence was written is not here.** A run is correct without a
-    log, which is what lets a whole Runner execute in a test with no storage at
-    all. So the location of a physical record belongs to the sink that wrote it
-    and to the public report that points at it, not to the canonical
-    in-memory result. Production still writes one.
+    The recording sink owns the location of durable evidence; this in-memory
+    result remains independent of storage.
     """
 
     kind: str
@@ -308,10 +269,7 @@ class RunResult:
 
 
 def run_status(nodes, *, dry_run: bool = False) -> str:
-    """Return the overall run status from node statuses.
-
-    A rejection result has its own status and does not make the run fail.
-    """
+    """Derive the run status from node statuses."""
 
     statuses = {node.status for node in nodes}
     if not statuses:

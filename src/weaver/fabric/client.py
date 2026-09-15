@@ -1,8 +1,4 @@
-"""Fabric REST transport.
-
-Thin on purpose: a token, a base URL, and enough error translation that a
-failure says what failed rather than surfacing a bare HTTP status.
-"""
+"""Fabric REST transport with authentication and error translation."""
 
 from __future__ import annotations
 
@@ -14,7 +10,6 @@ from typing import Any
 from ..errors import WeaverError
 from .auth import FABRIC_SCOPE, token_source
 
-#: Generic technical defaults, not environment-specific.
 FABRIC_API = "https://api.fabric.microsoft.com/v1"
 ONELAKE_DFS = "https://onelake.dfs.fabric.microsoft.com"
 DEFAULT_TIMEOUT = 60.0
@@ -36,8 +31,6 @@ TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
 
 
 class FabricError(WeaverError):
-    """Raised when a Fabric API call fails."""
-
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -76,8 +69,6 @@ def never_sent(exc: BaseException) -> bool:
 
 
 def retry_delay(response, attempt: int) -> float:
-    """How long to wait: what ``Retry-After`` asked for, or a widening gap."""
-
     asked = response.headers.get("Retry-After")
     if asked:
         try:
@@ -109,8 +100,6 @@ def send(method: str, url: str, **kwargs):
 
 
 class FabricClient:
-    """Authenticated access to the Fabric REST API."""
-
     def __init__(
         self,
         *,
@@ -134,11 +123,7 @@ class FabricClient:
 
     @property
     def token(self) -> str:
-        """A currently-valid bearer, renewed when it is close to expiring.
-
-        Read per request rather than cached: a client outlives its token, and a
-        stale one surfaces as ``401`` in whatever call happens to be next.
-        """
+        """Return a current bearer token; a client can outlive one token."""
 
         return self._token_source()
 
@@ -230,8 +215,6 @@ class FabricClient:
         timeout: float = DEFAULT_OPERATION_TIMEOUT,
         poll_interval: float = DEFAULT_OPERATION_POLL_INTERVAL,
     ) -> dict:
-        """Wait for a Fabric long-running-operation response to settle."""
-
         if response.status_code != 202:
             return response.json() if response.content else {}
 

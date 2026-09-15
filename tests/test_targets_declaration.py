@@ -46,7 +46,7 @@ def test_folder_target_refuses_anything_beneath_the_files_area():
     offer one, authored code composes this path from identity alone.
     """
 
-    with pytest.raises(IdentityError, match="nothing to configure"):
+    with pytest.raises(IdentityError, match="must be '<Lakehouse>/Files'"):
         FolderTarget.parse("Sales/Files/Extracts")
 
 

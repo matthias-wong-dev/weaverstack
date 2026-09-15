@@ -101,11 +101,10 @@ class BuildSelection:
 
 
 def _as_instant(value) -> datetime | None:
-    """One build datetime as something comparable, whatever the reader returned.
+    """Return a comparable build datetime from a native or serialised value.
 
     Spark hands back a ``datetime``; a hand-built catalogue or a JSON round trip
-    hands back the string that was written. Anything else reads as no build datetime
-    rather than being guessed at.
+    hands back its string. Other values mean no build datetime.
     """
 
     if isinstance(value, datetime):
@@ -124,29 +123,16 @@ def stale_through_shortcuts(
     *,
     bound_items: Iterable[WeaverItemId],
 ) -> tuple[WeaverDocumentId, ...]:
-    """Nodes on a logical shortcut's chain that something above them outran.
+    """Return bound shortcut nodes older than the upstream node they depend on.
 
-    The half of cross-item freshness the graph cannot answer. A descendant walk
-    carries impact only from a producer whose declaration changed; a producer
-    rebuilt by an earlier build looks unchanged to this one, and the only
-    surviving evidence is its Registry row's build datetime.
+    Registry timestamps carry cross-item freshness across separate builds, where
+    declaration signatures no longer reveal an earlier producer rebuild. For
+    ``source <= pointer <= consumer``, a stale pointer or consumer becomes an
+    impact root. Missing rows remain new-installation cases.
 
-    The chain is ``source <= pointer <= consumer``. A pointer dated before its
-    source is named, and the descendant walk carries the rebuild on to what
-    reads it. A consumer dated before a current pointer is named directly, which
-    is the estate a build that refreshed the pointer and then stopped leaves.
-
-    ``bound_items`` scopes it to what this build could act on. An absent row is
-    a missing installation, which signature classification calls new.
-
-    Only the first comparison is skipped for ``Warehouse/_weaver``. Every build
-    binds the catalogue item, so a changed catalogue table is classified by
-    signature and the descendant walk carries it from there, and it is the one
-    row a fork writes for itself: a forked catalogue holds this destination's
-    own build instant there beside the source estate's everywhere else, so
-    comparing a surface pointer against it reads two clocks. What the pointer's
-    own instant says about the objects below it is unaffected, and a build that
-    refreshed the surface and then stopped is recovered from there.
+    Skip the source comparison for ``Warehouse/_weaver`` because a fork records
+    its own catalogue-item time alongside source catalogue times. Pointer-to-consumer
+    comparisons remain valid.
     """
 
     from ..catalogue.builtin import BUILTIN_ITEM
@@ -199,18 +185,10 @@ def declared_signatures(
     repository: WeaverRepository,
     selected: Iterable[WeaverDocumentId],
 ) -> dict[WeaverDocumentId, str]:
-    """What each selected node's Registry signature should be, from the source.
+    """Return each selected node's source-derived Registry signature.
 
-    Three kinds of node are selectable, signed differently. A document is signed
-    by its source file. A shortcut destination by the pair it declares. This
-    destination, that source (see
-    :attr:`~weaver.declaration.model.RepositoryShortcut.signature`). A load artefact
-    by what it is rendered from: a deployed module by its own bytes, a generated
-    body by its document plus the generator's version (see :mod:`weaver.etl`).
-
-    A document's own signature is its
-    :attr:`~weaver.declaration.source.SourceDocument.physical_signature`, which
-    carries the version of the shape Weaver gives it as well as the source.
+    Documents use their physical signatures, shortcuts sign the destination and
+    source pair, and runtime artefacts sign their rendered content.
     """
 
     from ..etl import artefacts_by_identity, runtime_artefacts
@@ -240,16 +218,10 @@ def declared_signatures(
 def _artefacts_standing_for_their_origin(
     repository: WeaverRepository, selected: set[WeaverDocumentId]
 ) -> dict[WeaverDocumentId, "RuntimeArtefact"]:
-    """Each selected declaration whose artefact is its whole physical form.
+    """Return declarations represented physically only by a runtime artefact.
 
-    One general relationship: a declaration compiles to a separately installed
-    artefact, nothing is materialised under the declaration's own identity, and so
-    the artefact's row is the only record of it. What kinds of declaration those
-    are is the artefact producer's to know, see
-    :attr:`~weaver.etl.RuntimeArtefact.stands_for_origin`.
-
-    A load artefact is absent: a table and the module that loads it are both
-    installed and both signed, and the table carries a shape version of its own.
+    The artefact's Registry row is their installation record. Load artefacts do
+    not qualify because both the table and its loader are installed and signed.
     """
 
     from ..etl import runtime_artefacts
@@ -271,21 +243,11 @@ def determine_impact(
     physical_types: Mapping[WeaverDocumentId, str],
     stale_consumers: Iterable[WeaverDocumentId] = (),
 ) -> Impact:
-    """Classify bound nodes and expand changed roots across the whole graph.
+    """Classify selected nodes and propagate changed roots through the whole graph.
 
-    Propagation is not confined to one item: the graph carries logical shortcut
-    destinations as nodes, so ``source → shortcut destination → consumer`` is an
-    ordinary walk. Items not in the build are deferred by construction. They
-    are not in ``selected``, so nothing reaches them.
-
-    A changed identity carries impact only where the graph holds it. More is
-    selectable than the graph holds, and the graph is the only thing that can
-    say which.
-
-    ``stale_consumers`` are objects the catalogue already proved out of date,
-    built before the source they stand on (see
-    :func:`stale_through_shortcuts`). Their declarations are what they were, so
-    they are impacted, and the same walk carries impact on from them.
+    Logical shortcut destinations carry impact across items. Unselected items are
+    deferred, and selected identities absent from the graph end propagation.
+    ``stale_consumers`` join changed identities as impact roots.
     """
 
     selected_set = set(selected)
@@ -329,17 +291,9 @@ def determine_impact(
     if graph is not None:
         by_text = {str(identity): identity for identity in selected_set}
         for root in roots:
-            # Impact propagates through the graph, so a changed identity carries
-            # it only where the graph holds that identity. Membership is asked of
-            # the graph rather than derived from a list of exceptions: several
-            # kinds of identity are selected, signed and registered without being
-            # a node, and each ends a walk rather than starting one.
-            #
-            # A runtime artefact is signed by its own content and nothing
-            # declares against it. A schema shortcut presents a namespace whose
-            # contents belong to the item it points at. A physical shortcut
-            # destination names a Fabric item this repository does not manage,
-            # so it has no producer here to order it against.
+            # Some selected identities are not graph nodes: runtime
+            # artefacts, schema shortcuts and physical shortcut destinations end
+            # propagation because nothing declares a dependency on them here.
             if str(root) not in graph:
                 continue
             for node in graph.descendants(str(root)):
@@ -355,11 +309,10 @@ def determine_impact(
 
 
 def installed_as_pointer(registered, mirrored, identity) -> bool:
-    """Whether what is installed at this identity holds none of its own data.
+    """Return whether the installed identity holds none of its own data.
 
-    Two sources, because a pointer and an owned object share one identity: a
-    shortcut destination says so in its Registry role, and a mirror in
-    ``_.Mirror``, Registry still recording what the object logically is.
+    Shortcut roles identify ordinary pointers; ``_.Mirror`` identifies mirrors
+    whose Registry row still records the logical object role.
     """
 
     document = registered.get(identity)
@@ -390,9 +343,7 @@ def select_build(
         stale_consumers=stale_consumers,
         physical_types=physical_types,
     )
-    # ``prohibit_rebuild`` protects landed data, and a pointer holds none: a
-    # shortcut and a mirror both read another target's rows, so replacing one
-    # with an owned object destroys nothing.
+    # ``prohibit_rebuild`` protects owned data, not pointers to another target.
     prohibited = {
         identity
         for identity in impact.impacted
@@ -400,12 +351,8 @@ def select_build(
         and repository.source_documents[identity].document.prohibit_rebuild
         and not installed_as_pointer(registered, mirrored, identity)
     }
-    # A pointer impacted through the graph is refreshed over its own address and
-    # never dropped to do it: `CreateOrOverwrite` for a Lakehouse shortcut and
-    # `create or alter view` for a Warehouse one both stand on the address
-    # already there, and Fabric holds a deleted shortcut's name for tens of
-    # seconds. A pointer whose declared pair changed is classified, not
-    # propagated, and is replaced like any other changed node.
+    # Impacted descendants are refreshed in place. A pointer whose declared pair
+    # changed is replaced like any other changed node.
     pointers = shortcut_destinations(repository)
     untouched = set(impact.impacted_descendants) & pointers
     selected_for_drop = set(impact.impacted) - prohibited - untouched
@@ -419,8 +366,6 @@ def select_build(
 
 
 def _physical_types(repository, *, selected, inventories) -> dict:
-    """The selected identities physically present in prepared target state."""
-
     missing = {
         identity.item for identity in selected if identity.item not in inventories
     }

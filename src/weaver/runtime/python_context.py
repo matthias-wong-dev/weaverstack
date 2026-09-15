@@ -1,9 +1,4 @@
-"""Isolate deployed Python modules by target and run.
-
-RuntimeScope imports each deployed tree under a unique package namespace. This
-prevents ``sys.modules`` collisions across targets and stale modules after a
-rebuild while preserving authored import names inside each tree.
-"""
+"""Isolate deployed Python modules by target and run."""
 
 from __future__ import annotations
 
@@ -18,17 +13,12 @@ from pathlib import Path
 
 from ..errors import LoadError
 
-#: The synthetic package every runtime tree hangs under. Leading underscore
-#: because it is Weaver's, and no authored name can collide with it: an item that
-#: deployed a top-level ``_weaver_runtime`` would have had to declare a schema
-#: Weaver already reserves.
+#: Reserved root package for isolated runtime trees.
 ROOT_PACKAGE = "_weaver_runtime"
 
 
 @dataclass(frozen=True)
 class PythonRuntimeContext:
-    """One deployed runtime tree, and the package name it is imported under."""
-
     context_id: str
     runtime_root: Path
     #: The top-level names this tree defines, and therefore the only names an
@@ -41,19 +31,11 @@ class PythonRuntimeContext:
         return f"{ROOT_PACKAGE}.{self.context_id}"
 
     def qualified(self, name: str) -> str:
-        """``lib.dates`` as this context imports it."""
-
         return f"{self.package}.{name}"
 
 
 class RuntimeScope:
-    """One ``weaver.load()``'s worth of runtime contexts.
-
-    Created per run and torn down with it. Within one, a logical item in a
-    physical target maps to one context however many of its objects are
-    dispatched, so they share their ``lib/`` and ``Files/`` modules. Across runs
-    nothing is shared, so a rebuilt module takes effect on the next load.
-    """
+    """Share modules within one item and run, never across runs."""
 
     def __init__(self) -> None:
         self._contexts: dict[tuple[str, str], PythonRuntimeContext] = {}
@@ -66,8 +48,6 @@ class RuntimeScope:
     def context_for(
         self, *, logical_item, physical_target, runtime_root: str | Path
     ) -> PythonRuntimeContext:
-        """This run's context for one item deployed into one target."""
-
         key = (str(logical_item), str(physical_target))
         with self._lock:
             known = self._contexts.get(key)
@@ -86,13 +66,7 @@ class RuntimeScope:
             return context
 
     def close(self) -> None:
-        """Drop every module this run imported.
-
-        The whole namespace goes. Keeping some would mean deciding which modules
-        a later run may keep, and that depends on whether a build has rewritten
-        them since, which nothing here can see.
-        """
-
+        """Drop every module this run imported so rebuilds take effect next run."""
         with self._lock:
             contexts = list(self._contexts.values())
             self._contexts.clear()
@@ -110,13 +84,6 @@ class RuntimeScope:
 def import_deployed_module(
     context: PythonRuntimeContext, relative: str, *, expected: str, node_id: str
 ):
-    """One deployed module, imported inside its context, with its class present.
-
-    ``relative`` is the module's path within the tree, as
-    ``Files/Sales__Seed.py``, and it also names it: a module is imported as its
-    position, so one file never becomes two module objects.
-    """
-
     _install_finder()
     _FINDER.register(context)
     # A build may have added files since anything last looked at this directory,
@@ -138,37 +105,34 @@ def import_deployed_module(
         missing = exc.name or ""
         if missing and (name == missing or name.startswith(f"{missing}.")):
             raise LoadError(
-                f"{node_id}: no deployed module at {context.runtime_root}/{relative}"
+                f"{node_id}: deployed module not found: "
+                f"{context.runtime_root}/{relative}; rebuild the object"
             ) from exc
         raise LoadError(
-            f"{node_id}: importing {context.runtime_root}/{relative} raised "
+            f"{node_id}: deployed module {context.runtime_root}/{relative} failed "
+            f"during import with "
             f"{type(exc).__name__}: {exc}"
         ) from exc
     except FileNotFoundError as exc:
         raise LoadError(
-            f"{node_id}: no deployed module at {context.runtime_root}/{relative}"
+            f"{node_id}: deployed module not found: "
+            f"{context.runtime_root}/{relative}; rebuild the object"
         ) from exc
     except Exception as exc:  # noqa: BLE001 - authored code, any failure is data
         raise LoadError(
-            f"{node_id}: importing {context.runtime_root}/{relative} raised "
+            f"{node_id}: deployed module {context.runtime_root}/{relative} failed "
+            f"during import with "
             f"{type(exc).__name__}: {exc}"
         ) from exc
     if not hasattr(module, expected):
         raise LoadError(
-            f"{node_id}: {context.runtime_root}/{relative} defines no class "
-            f"{expected!r}. A deployed object module names its class for its file"
+            f"{node_id}: deployed module {context.runtime_root}/{relative} does not "
+            f"define class {expected!r}; rebuild the object"
         )
     return module
 
 
 def forget(context: PythonRuntimeContext) -> None:
-    """Drop one context's modules, its finder entry and its builtins.
-
-    Called by :meth:`RuntimeScope.close` when a run ends. The package name is
-    never minted again, so anything left behind would be unreachable memory
-    rather than a cache.
-    """
-
     _forget_modules(context.package)
     _FINDER.unregister(context.package)
 
@@ -185,13 +149,7 @@ def _forget_modules(package: str) -> None:
 
 
 def _context_builtins(context: PythonRuntimeContext) -> dict:
-    """A builtins mapping whose ``__import__`` reaches one tree.
-
-    Every deployed module executes with this in place of the real builtins, so
-    the redirection reaches only what Weaver deployed. A name the tree does not
-    define, such as ``weaver``, ``pyspark`` or ``json``, goes to the ordinary
-    import.
-    """
+    """Redirect only names defined by this deployed tree."""
 
     real = builtins.__import__
 
@@ -222,17 +180,7 @@ def _context_builtins(context: PythonRuntimeContext) -> dict:
 
 
 class _ContextLoader:
-    """Runs a deployed module with its context's builtins, from source.
-
-    From source, because Python decides whether its bytecode cache is current
-    from the source's size and its mtime to the second. A build rewrites a
-    deployed module in place, so a rebuild that changes it without changing its
-    length can land inside the same second and be taken for no change at all, and
-    the next load runs the previous build's code.
-
-    It also keeps ``__pycache__`` out of the deployed tree, which in Fabric is a
-    folder Weaver manages and prunes.
-    """
+    """Load from source so same-second, same-size rebuilds cannot reuse stale bytecode."""
 
     def __init__(self, inner, builtins_mapping: dict) -> None:
         self._inner = inner
@@ -258,28 +206,13 @@ class _ContextLoader:
 
 
 class _WeaverRuntimeFinder:
-    """Resolves ``_weaver_runtime.<context>.…`` against that context's tree.
-
-    **Every read and write of the registry is under one lock, and no read walks
-    it.** Loads are sequential today and the design exists so they need not stay
-    that way, so the registry has to survive one thread registering while
-    another resolves. A scan would be both the slower answer and the unsafe one:
-    a module's own name already carries its context, so the entry can be looked
-    up directly.
-    """
+    """Resolve each runtime package against its tree under one registry lock."""
 
     def __init__(self) -> None:
         self._contexts: dict[str, _Bound] = {}
         self._lock = threading.Lock()
 
     def register(self, context: PythonRuntimeContext) -> None:
-        """Bind a context so its package resolves against its own tree.
-
-        No rebinding case to handle: an id is minted once, by one scope, and is
-        never seen again, so a package name cannot come to mean a second tree, and
-        there are no modules under it left over from anything earlier.
-        """
-
         with self._lock:
             if context.package not in self._contexts:
                 self._contexts[context.package] = _Bound(
@@ -287,8 +220,6 @@ class _WeaverRuntimeFinder:
                 )
 
     def unregister(self, package: str) -> None:
-        """Drop a context's binding. The counterpart of :meth:`register`."""
-
         with self._lock:
             self._contexts.pop(package, None)
 
@@ -315,12 +246,6 @@ class _WeaverRuntimeFinder:
         return spec
 
     def _bound(self, fullname: str) -> "_Bound | None":
-        """The binding this module name belongs to, by direct lookup.
-
-        ``_weaver_runtime.<context>.lib.dates`` names its own context in its
-        second component, so there is nothing to search for.
-        """
-
         parts = fullname.split(".", 2)
         if len(parts) < 2 or parts[0] != ROOT_PACKAGE:
             return None
@@ -330,12 +255,6 @@ class _WeaverRuntimeFinder:
 
 @dataclass(frozen=True)
 class _Bound:
-    """One registered context and the builtins its modules execute with.
-
-    Held together so registering is one insertion under one lock, rather than
-    two mappings that could disagree.
-    """
-
     context: PythonRuntimeContext
     builtins: dict
 
@@ -355,8 +274,6 @@ def _install_finder() -> None:
 
 
 def _top_level_names(root: Path) -> frozenset:
-    """What this tree defines at its root, being the redirectable names."""
-
     if not root.is_dir():
         return frozenset()
     names = set()

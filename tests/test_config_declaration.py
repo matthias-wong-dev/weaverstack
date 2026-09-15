@@ -89,7 +89,7 @@ def test_a_logical_item_with_no_entry_says_what_to_add():
         {"workspace": "Analytics", "targets": {"Lakehouse/Sales": "Dev_Data"}}
     )
 
-    with pytest.raises(ConfigError, match="no physical target"):
+    with pytest.raises(ConfigError, match="No target is configured"):
         workspace.target_for(_item("Lakehouse/Inventory"))
 
 
