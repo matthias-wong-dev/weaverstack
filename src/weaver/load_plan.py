@@ -90,9 +90,10 @@ class LoadNode:
 class LoadDag:
     """The selected physical load graph: nodes, edges and what was requested.
 
-    An edge means the upstream node must complete successfully before the
-    downstream node may execute, and nothing else. It is not a data-flow
-    statement, and not a claim about what the downstream node reads.
+    An edge means the upstream node settles before the downstream node may
+    execute, and nothing else. Execution policy decides whether an upstream
+    failure stops the downstream node. An edge is not a data-flow statement or
+    a claim about what the downstream node reads.
     """
 
     nodes: tuple[LoadNode, ...]
@@ -130,7 +131,7 @@ class LoadDag:
         return frozenset(self.topology.upstream_of(node_id))
 
     def descendants(self, node_id: str) -> frozenset[str]:
-        """Every node that may not run once ``node_id`` has failed."""
+        """Every node ordered after ``node_id`` through dependency edges."""
 
         return frozenset(self.topology.descendants(node_id))
 

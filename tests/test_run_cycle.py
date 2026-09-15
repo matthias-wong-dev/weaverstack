@@ -10,6 +10,7 @@ from weaver.run.graph import RunGraph, RunNode
 from weaver.run.result import (
     BLOCKED,
     FAILED,
+    INVALID,
     PENDING,
     RUN_FAILED,
     RUN_PARTIALLY_SUCCEEDED,
@@ -264,7 +265,7 @@ def test_fault_tolerance_lets_an_independent_branch_finish():
 
 
 @weaver_test()
-def test_fault_tolerance_does_not_run_what_the_failure_blocked():
+def test_fault_tolerance_runs_a_descendant_after_its_upstream_settles_failed():
     dispatch = controlled({"a": Outcome(status=FAILED)})
 
     result = runner(
@@ -273,8 +274,24 @@ def test_fault_tolerance_does_not_run_what_the_failure_blocked():
         fault_tolerant=True,
     ).run(dispatch=dispatch)
 
-    assert result.by_node["b"].status == BLOCKED
+    assert dispatch.seen == ["a", "b", "c"]
+    assert result.by_node["b"].status == SUCCEEDED
     assert result.by_node["c"].status == SUCCEEDED
+
+
+@weaver_test()
+def test_fault_tolerance_keeps_structurally_unresolved_descendants_blocked():
+    dispatch = controlled({})
+
+    result = runner(
+        nodes=[node("a", primitive_object=None), node("b"), node("c")],
+        edges=[("a", "b")],
+        fault_tolerant=True,
+    ).run(dispatch=dispatch)
+
+    assert result.by_node["a"].status == INVALID
+    assert result.by_node["b"].status == BLOCKED
+    assert dispatch.seen == ["c"]
 
 
 # --- resolution and dispatch --------------------------------------------------
