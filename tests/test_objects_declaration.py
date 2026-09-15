@@ -296,6 +296,12 @@ def test_an_empty_dataframe_is_the_existing_table_with_no_rows(spark):
 # --- the authored shape of a table ------------------------------------------
 
 
+def _quoted(*names: str) -> tuple[str, ...]:
+    """What a projection hands Spark: back-tick quoted, embedded ones doubled."""
+
+    return tuple("`" + name.replace("`", "``") + "`" for name in names)
+
+
 def _table(document, *, physical=PHYSICAL_COLUMNS):
     """One table with a given declaration over a given installed shape."""
 
@@ -353,7 +359,7 @@ def test_an_unkeyed_table_reports_no_primary_key():
 def test_a_dataframe_returns_the_business_columns(spark):
     frame = Sales__Order(spark, lakehouse=LAKEHOUSE).dataframe()
 
-    assert frame.columns == ("order_id", "order_date", "amount")
+    assert frame.columns == _quoted("order_id", "order_date", "amount")
     assert spark.read.calls == [
         ("delta", "abfss://ws@onelake.dfs.fabric.microsoft.com/lh/Tables/Sales/Order")
     ]
@@ -363,7 +369,42 @@ def test_a_dataframe_returns_the_business_columns(spark):
 def test_row_audits_are_opt_in_and_follow_the_business_columns(spark):
     frame = Sales__Order(spark, lakehouse=LAKEHOUSE).dataframe(row_audit_columns=True)
 
-    assert frame.columns == ("order_id", "order_date", "amount") + AUDIT_COLUMNS
+    assert frame.columns == _quoted("order_id", "order_date", "amount", *AUDIT_COLUMNS)
+
+
+@weaver_test()
+def test_opting_into_audits_asks_for_all_three(spark):
+    """The opt-in is a promised shape, not whatever the table happens to hold.
+
+    So a table missing an audit column fails the projection rather than
+    returning a narrower frame than the caller asked for.
+    """
+
+    order = _table(
+        _declared("Sales.Order"), physical=("order_id", "row_update_datetime")
+    )
+
+    assert order.dataframe(row_audit_columns=True).columns == _quoted(
+        "order_id", "order_date", "amount", *AUDIT_COLUMNS
+    )
+
+
+@weaver_test()
+def test_a_column_name_spark_would_misparse_is_quoted():
+    """Weaver's parser accepts a dotted name, so the projection must quote it.
+
+    Unquoted, Spark reads `Order.Id` as field `Id` of a struct called `Order`.
+    A back tick in the name is doubled, as Spark's identifier syntax requires.
+    """
+
+    document = _declared(
+        "Sales.Order", primary_key="", schema=("Order.Id: string", "we`ird: string")
+    )
+    order = _table(document, physical=("Order.Id", "we`ird"))
+
+    # Reported to the author as written; quoted only where Spark parses it.
+    assert order.columns() == ("Order.Id", "we`ird")
+    assert order.dataframe().columns == ("`Order.Id`", "`we``ird`")
 
 
 @pytest.mark.parametrize("audits", [False, True])
@@ -400,7 +441,7 @@ def test_a_declared_column_is_named_even_where_the_frame_lacks_it():
 
     assert order.columns() == ("order_id", "order_date", "amount")
     # Asked for in full, so Spark refuses rather than returning a narrower frame.
-    assert order.dataframe().columns == ("order_id", "order_date", "amount")
+    assert order.dataframe().columns == _quoted("order_id", "order_date", "amount")
 
 
 def _inferred(identifier: str):
@@ -434,20 +475,27 @@ def test_an_inferred_table_reports_the_columns_the_installed_table_holds():
     summary = _table(_inferred("Sales.OrderSummary"))
 
     assert summary.columns() == ("order_id", "order_date", "amount")
-    assert summary.dataframe().columns == ("order_id", "order_date", "amount")
+    assert summary.dataframe().columns == _quoted("order_id", "order_date", "amount")
 
 
 @weaver_test()
 def test_an_inferred_table_keeps_its_physical_column_order():
-    physical = ("amount", "row_insert_datetime", "order_id", "row_signature")
+    """Business columns as the table holds them, Weaver's own left out."""
+
+    physical = (
+        "amount",
+        "row_insert_datetime",
+        "order_id",
+        "row_signature",
+        "row_update_datetime",
+        "row_delete_datetime",
+    )
 
     summary = _table(_inferred("Sales.OrderSummary"), physical=physical)
 
     assert summary.columns() == ("amount", "order_id")
-    assert summary.dataframe(row_audit_columns=True).columns == (
-        "amount",
-        "order_id",
-        "row_insert_datetime",
+    assert summary.dataframe(row_audit_columns=True).columns == _quoted(
+        "amount", "order_id", *AUDIT_COLUMNS
     )
 
 

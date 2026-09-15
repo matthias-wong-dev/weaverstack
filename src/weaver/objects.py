@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from .errors import LoadError, WeaverError
 from .lakehouse import Lakehouse, default_lakehouse
+from .spark import identifier
 
 if TYPE_CHECKING:  # pragma: no cover - for type readers only
     from .catalogue.state import Catalogue
@@ -568,7 +569,13 @@ class Table(WeaverObject):
         """
 
         frame = self._physical_dataframe()
-        return frame.select(*self._projection(frame, row_audit_columns))
+        # Quoted here rather than in columns(), which reports the names the
+        # author wrote. Spark splits an unquoted dotted identifier, so a
+        # declared `A.B` would resolve as field B of a column A.
+        projected = (
+            identifier(name) for name in self._projection(frame, row_audit_columns)
+        )
+        return frame.select(*projected)
 
     def _physical_dataframe(self) -> Any:
         """The stored table as it is, Weaver's own columns included."""
@@ -591,13 +598,17 @@ class Table(WeaverObject):
         return _business_names(physical.columns)
 
     def _projection(self, frame, row_audit_columns: bool) -> tuple[str, ...]:
-        """The author-facing column list for a frame already read."""
+        """The author-facing column list for a frame already read.
+
+        Opting in asks for all three audit columns, so a table missing one
+        fails the same way a missing business column does, rather than
+        quietly returning a narrower frame than the caller asked for.
+        """
 
         business = self._business_columns(frame)
         if not row_audit_columns:
             return business
-        carried = set(frame.columns)
-        return business + tuple(name for name in _audit_names() if name in carried)
+        return business + _audit_names()
 
     def _staged(self, contract) -> tuple[Any, Any]:
         """Return staging and any permitted delete claim from ``read()``.
