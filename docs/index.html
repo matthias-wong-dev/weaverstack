@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
-    <title>Weaver: one project for your Fabric data estate</title>
-    <meta name="description" content="Engineer Lakehouses, Warehouses, Python, T-SQL, shortcuts and operational state as one Microsoft Fabric estate.">
+    <title>Weaver: making Fabric easier to use</title>
+    <meta name="description" content="Write ordinary Python and SQL across Fabric Lakehouses and Warehouses. Weaver works out dependencies, creates objects, runs the work and records what happened.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <meta name="author" content="Weaver contributors">
     <link rel="canonical" href="https://weaverstack.dev/">
@@ -13,15 +13,15 @@
     <meta property="og:url" content="https://weaverstack.dev/">
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
-    <meta property="og:title" content="Weaver: one project for your Fabric data estate">
-    <meta property="og:description" content="One project, dependency graph and operational model across Microsoft Fabric.">
+    <meta property="og:title" content="Weaver: making Fabric easier to use">
+    <meta property="og:description" content="Write Python and SQL across Fabric Lakehouses and Warehouses without repeating the work in another pipeline.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta property="og:image:width" content="1536">
     <meta property="og:image:height" content="1024">
-    <meta property="og:image:alt" content="The Weaver home page: one project for your Fabric data estate.">
+    <meta property="og:image:alt" content="The Weaver home page: making Fabric easier to use.">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="Weaver: one project for your Fabric data estate">
-    <meta name="twitter:description" content="One project, dependency graph and operational model across Microsoft Fabric.">
+    <meta name="twitter:title" content="Weaver: making Fabric easier to use">
+    <meta name="twitter:description" content="Write Python and SQL across Fabric Lakehouses and Warehouses without repeating the work in another pipeline.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="icon" type="image/png" sizes="128x128" href="favicon.png">
     <link rel="manifest" href="site.webmanifest">
@@ -37,7 +37,7 @@
             "url": "https://weaverstack.dev/",
             "name": "Weaver",
             "alternateName": "weaverstack",
-            "description": "A data-engineering framework for Microsoft Fabric, built around a central catalogue.",
+            "description": "Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.",
             "inLanguage": "en-AU"
           },
           {
@@ -79,8 +79,8 @@
     <main id="main">
       <section class="page-head">
         <div class="wrap">
-          <h1>One project for your Fabric data estate.</h1>
-          <p class="lead">Weaver brings Lakehouses, Warehouses, Python, T-SQL, shortcuts and operational state into one engineered system. It derives dependencies from your code and runs the estate in order, so crossing a Fabric item or engine does not require another layer of orchestration.</p>
+          <h1>Making Fabric easier to use</h1>
+          <p class="lead">Write normal Python and SQL across your Lakehouses and Warehouses. Weaver works out the dependencies, creates the Fabric objects, runs the data work in the right order and records what happened.</p>
           <p style="margin-top: 26px;">
             <a class="button blue" href="get-started/index.html">Try the Sales example</a>
             <a class="button ghost" href="https://github.com/matthias-wong-dev/weaverstack" style="margin-left: 8px;">View on GitHub <span class="arrow" aria-hidden="true">↗</span></a>
@@ -90,24 +90,23 @@
 
       <section class="section">
         <div class="wrap">
-          <h2>Fabric does not stop at the item boundary</h2>
-          <p class="lede">A Fabric data path rarely stops at one notebook or table. Files land in a Lakehouse, Python shapes them, a Warehouse reads them through a shortcut, and T-SQL carries the work on. Weaver keeps that chain together.</p>
+          <h2>What Weaver makes easier</h2>
           <div class="cards two">
             <div class="card">
-              <h3>One graph across Fabric</h3>
-              <p>Dependencies cross Lakehouses, Warehouses, Python, Spark SQL and T-SQL without becoming a second orchestration model. Weaver reads the graph from imports, SQL references and shortcut declarations.</p>
+              <h3>Work across Lakehouses and Warehouses as one project</h3>
+              <p>Weaver works out the order between your Python and SQL, including dependencies that cross Fabric items. You do not need another pipeline simply because the next table uses a different engine.</p>
             </div>
             <div class="card">
-              <h3>Structure apart from data</h3>
-              <p><code>weaver build</code> deploys schemas, tables, views, shortcuts and load code. <code>weaver load</code> moves data. Structure can be deployed without moving rows in the same operation.</p>
+              <h3>Write Python and SQL without repeating the dependencies</h3>
+              <p>Your Python imports and SQL references already say what depends on what. Weaver uses them directly instead of making you declare the same order in a separate orchestration layer.</p>
             </div>
             <div class="card">
-              <h3>Projects that move</h3>
-              <p>Your source names logical items. A small workspace configuration binds them to physical development or production targets, so object references do not change between environments.</p>
+              <h3>Change Fabric structure without loading data</h3>
+              <p><code>weaver build</code> creates or changes tables, views, shortcuts and other Fabric objects. <code>weaver load</code> runs the data work, so the two jobs do not have to happen together.</p>
             </div>
             <div class="card">
-              <h3>Runs you can recover</h3>
-              <p>The Catalogue records what is installed, how far each object loaded, and what failed or was blocked. The next run starts from known state rather than a reconstruction from logs.</p>
+              <h3>Know what happened after a run</h3>
+              <p>Weaver records what loaded, what failed, what was blocked and how far each object got. The next run can use that state instead of starting again or relying on logs.</p>
             </div>
           </div>
         </div>
@@ -115,8 +114,8 @@
 
       <section class="section">
         <div class="wrap">
-          <h2>The project does not repeat the execution order</h2>
-          <p class="lede">The generated Sales example crosses a Lakehouse and a Warehouse without declaring execution order in a separate pipeline.</p>
+          <h2>A Weaver project looks like the Fabric work it contains</h2>
+          <p class="lede">The generated Sales example has Python in a Lakehouse, T-SQL in a Warehouse, a shortcut between them and a check on each side.</p>
 
           <div class="code plain" style="max-width: 640px;">
             <div class="code-bar"><span>Analytics/</span></div>
@@ -141,9 +140,9 @@ workflow.yml
             <!-- /example-tree -->
           </div>
 
-          <p>Each file sits under the logical Fabric item that owns it. The Python import, SQL references and shortcut declaration are the dependency definitions.</p>
+          <p>Each file sits under the Lakehouse or Warehouse that owns it. A small configuration file says which real Fabric items those names refer to, so the project files stay the same in development and production.</p>
 
-          <h3>One graph, including the item boundary</h3>
+          <h3>Weaver works out the order</h3>
           <figure>
             <svg class="dag" viewBox="0 0 850 336" role="img" aria-labelledby="home-dag-title home-dag-desc">
               <title id="home-dag-title">The Sales example as one dependency graph</title>
@@ -215,38 +214,25 @@ workflow.yml
             <figcaption>The dependency graph places the Warehouse join after the Lakehouse table it reads, even though the objects are in different Fabric items.</figcaption>
           </figure>
 
-          <p>The edge into <code>CustomerByRegion</code> crosses from a Lakehouse table, through a Warehouse shortcut, into T-SQL. Weaver still treats it as one dependency.</p>
+          <p>The Warehouse join reads a Lakehouse table through a shortcut. Weaver sees that dependency in the project and runs the Lakehouse work first.</p>
           <p><a class="text-link" href="get-started/index.html">Build this example in your own workspace <span class="arrow" aria-hidden="true">→</span></a></p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>Branch an estate without copying all its data</h2>
-          <p class="lede">Mirror gives a development workspace the installed state of an existing estate, then lets you choose which Fabric items to materialise locally.</p>
-          <div class="cards two">
-            <div class="card">
-              <h3>Borrow what has not changed</h3>
-              <p>A mirrored Warehouse reads source rows through views; a mirrored Lakehouse uses OneLake shortcuts. The project code and Catalogue are local, while unchanged data stays where it is.</p>
-            </div>
-            <div class="card">
-              <h3>Diverge one item at a time</h3>
-              <p>Build an item into a development target when you need to change it. Other items remain mirrored, and Weaver keeps their dependencies and operational state visible in the fork.</p>
-            </div>
-          </div>
-          <div class="code" style="max-width: 720px;">
-            <div class="code-bar"><span>terminal</span></div>
-            <pre>weaver mirror --no-item --yes
-weaver mirror --item Warehouse/Model=Warehouse/Model_Dev --yes</pre>
-          </div>
-          <p class="small muted">These commands use the source and destination catalogues named by <code>mirror:</code> and <code>catalogue:</code> in the development workspace configuration.</p>
+          <h2>Branch your data as well as your code</h2>
+          <p class="lede">A Git branch gives you another version of the project files. Weaver Mirror gives you a development branch of the actual Fabric estate.</p>
+          <p>Your development estate can start from current production data without copying every table. Lakehouse data can remain behind OneLake shortcuts and Warehouse data behind views.</p>
+          <p>When you need to change part of the estate, build that part in development and leave the rest mirrored. The code and the data can branch together.</p>
+          <p><a class="text-link" href="scale/index.html">See how Mirror works as the project grows <span class="arrow" aria-hidden="true">→</span></a></p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>Run the Sales example</h2>
-          <p class="lede">Install Weaver, initialise the Sales project, then build, load, test and check its health. The walkthrough names the prerequisites and every command.</p>
+          <h2>Try it on a small Fabric project</h2>
+          <p class="lede">Install Weaver, choose the Sales example, then build, load and test it in your own workspace.</p>
           <div class="code" style="max-width: 540px;">
             <div class="code-bar"><span>terminal</span></div>
             <pre>pip install weaverstack
@@ -262,7 +248,7 @@ weaver initialise --workspace Analytics</pre>
       <div class="wrap footer-grid">
         <div class="footer-note">
           <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
-          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.</p>
           <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
           <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
         </div>

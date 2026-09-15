@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
     <title>Weaver vs dbt</title>
-    <meta name="description" content="Compare Weaver and dbt on the engineering work that changes: Fabric engines, dependencies, build and load, operational state, Mirror and identity columns.">
+    <meta name="description" content="Compare how Weaver and dbt use Python and SQL, work across Lakehouses and Warehouses, build objects, record runs, mirror data and declare identity columns.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/vs-dbt/">
     <meta property="og:type" content="article">
@@ -13,11 +13,11 @@
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="Weaver vs dbt">
-    <meta property="og:description" content="dbt centres the transformation model. Weaver centres the operable Fabric estate.">
+    <meta property="og:description" content="dbt models transformations. Weaver brings the wider Microsoft Fabric project together.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Weaver vs dbt">
-    <meta name="twitter:description" content="dbt centres the transformation model. Weaver centres the operable Fabric estate.">
+    <meta name="twitter:description" content="dbt models transformations. Weaver brings the wider Microsoft Fabric project together.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
     <link rel="manifest" href="../site.webmanifest">
@@ -44,82 +44,57 @@
     <main id="main">
       <section class="page-head">
         <div class="wrap">
-          <h1>dbt models transformations. Weaver operates the Fabric estate.</h1>
-          <p class="lead">dbt centres the transformation model. Weaver centres the operable Fabric estate: its Lakehouses, Warehouses, physical structure, loading, dependencies and state between runs.</p>
+          <h1>Weaver vs dbt</h1>
+          <p class="lead">dbt is a strong choice when the main job is modelling transformations. Weaver is aimed at Fabric projects where Python, files, Lakehouses, Warehouses, loading and recovery all need to work together.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>The practical differences</h2>
+          <h2>Differences that change the work</h2>
           <div class="cards two">
             <div class="card">
-              <h3>One graph across Fabric engines</h3>
-              <p>A Weaver project can place Python and Delta work in a Lakehouse, T-SQL in a Warehouse, and the shortcut between them in the same dependency graph.</p>
-              <p>dbt uses separate Fabric adapters for Warehouse and Spark work. A project runs through one adapter target, so the boundary between those engines remains outside that project's graph.</p>
+              <h3>Lakehouse and Warehouse in one project</h3>
+              <p>Weaver can put Python and Delta work in a Lakehouse, T-SQL in a Warehouse and the shortcut between them in the same project.</p>
+              <p>dbt uses separate Fabric adapters for Warehouse and Spark work. The order between the two has to be managed elsewhere.</p>
             </div>
             <div class="card">
-              <h3>Dependencies stay in the code</h3>
-              <p>Weaver reads Python imports and ordinary SQL relation references. The code itself establishes the order.</p>
-              <p>dbt uses <code>ref()</code> and <code>source()</code>. That is a coherent model, but it means SQL references are written in dbt's templating vocabulary.</p>
+              <h3>Dependencies from ordinary Python and SQL</h3>
+              <p>Weaver reads Python imports and SQL table references. You do not repeat them in another pipeline or replace the SQL references with framework-specific syntax.</p>
+              <p>dbt uses <code>ref()</code> and <code>source()</code> to declare those relationships.</p>
             </div>
             <div class="card">
-              <h3>Build is not load</h3>
-              <p><code>weaver build</code> deploys schemas, tables, views, shortcuts and runnable load code without moving data. <code>weaver load</code> runs the installed data work later.</p>
-              <p>A dbt model is materialised and populated by the same run. Weaver lets you deploy the structure and run its data load separately.</p>
+              <h3>Build the structure without loading the data</h3>
+              <p><code>weaver build</code> creates or changes tables, views, shortcuts and load code. <code>weaver load</code> runs the data work separately.</p>
+              <p>A dbt model is created and populated by the same run.</p>
             </div>
             <div class="card">
-              <h3>Operational state stays with the estate</h3>
-              <p>Weaver records installed objects, bookmarks, load and validation outcomes and row-change counts in the Weaver Catalogue.</p>
-              <p>dbt Core writes artefacts such as <code>manifest.json</code> and <code>run_results.json</code>. Weaver's next command reads its state from Fabric rather than requiring a previous artefact to be supplied.</p>
+              <h3>Run results stay in Fabric</h3>
+              <p>Weaver records what was built, what loaded, what failed and where each load should continue in a Fabric Warehouse.</p>
+              <p>dbt Core writes files such as <code>manifest.json</code> and <code>run_results.json</code>. State comparison uses a previous manifest.</p>
             </div>
             <div class="card">
-              <h3>Mirror branches an estate</h3>
-              <p>Weaver can fork an installed Catalogue and let development targets borrow unchanged Warehouse and Lakehouse data through views and OneLake shortcuts.</p>
-              <p>dbt-fabric documents table cloning within a Warehouse. Mirror operates across the installed multi-item estate and lets each item be borrowed or materialised separately.</p>
-            </div>
-            <div class="card">
-              <h3>Warehouse identity is declared with the table</h3>
-              <p>In Weaver, <code>Identity: Customer key</code> adds a Fabric-managed <code>bigint IDENTITY</code> column and keeps it out of load inserts. The model author does not write surrogate-key allocation logic.</p>
-              <p>The current dbt-fabric model configuration reference documents no equivalent identity-column setting. Existing identity properties can be preserved during some adapter operations, but they are not declared as part of a dbt model contract.</p>
+              <h3>Branch the Fabric data with Mirror</h3>
+              <p>Weaver can give a development project the current production data without copying every table. Build the parts you need to change and leave the rest behind views or OneLake shortcuts.</p>
+              <p>dbt-fabric documents table cloning within one Warehouse. Mirror works across the Lakehouses and Warehouses in the Weaver project.</p>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <h2>The identity declaration</h2>
-          <p class="lede">One line removes the need to generate surrogate keys in model SQL.</p>
-          <div class="code" style="max-width: 680px;">
-            <div class="code-bar"><span>Warehouse/Curated/Sales.Customer.sql</span></div>
-            <pre>/*
-Table ID: Sales.Customer
-Primary key: Customer id
-Identity: Customer key
-
-Schema:
-  Customer id: varchar(50)
-  Customer name: varchar(200)
-*/</pre>
-          </div>
-          <p>Fabric generates the identity value when Weaver inserts a new row. Weaver supports this for Warehouse tables today. Delta identity is planned, but Microsoft currently lists identity-column writing as unsupported across Fabric's Delta Lake experiences.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
           <h2>Feature comparison</h2>
-          <p class="small muted"><span class="mark yes">✓</span> yes &nbsp; <span class="mark part">◐</span> partly, see the note &nbsp; <span class="mark no">✕</span> no &nbsp; <span class="mark soon">Coming</span> planned</p>
+          <p class="small muted"><span class="mark yes">✓</span> yes &nbsp; <span class="mark part">◐</span> partly, see the note &nbsp; <span class="mark no">✕</span> no</p>
           <div class="table-scroll">
             <table class="matrix">
               <thead>
                 <tr><th scope="col">Capability</th><th scope="col"><span class="who weaver"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span></th><th scope="col"><span class="who dbt">dbt on Fabric</span></th></tr>
               </thead>
               <tbody>
-                <tr class="group"><th scope="row" colspan="3">Estate model</th></tr>
+                <tr class="group"><th scope="row" colspan="3">Fabric projects</th></tr>
                 <tr>
-                  <th scope="row">One project and graph spanning a Fabric Lakehouse and Warehouse</th>
+                  <th scope="row">One project containing both a Fabric Lakehouse and Warehouse</th>
                   <td class="v-yes"><span class="mark yes">✓</span></td>
                   <td class="v-no"><span class="mark no">✕</span> <span class="note">Warehouse and Spark use separate adapters and targets</span></td>
                 </tr>
@@ -129,12 +104,12 @@ Schema:
                   <td class="v-no"><span class="mark no">✕</span> <span class="note">not graph resources</span></td>
                 </tr>
                 <tr>
-                  <th scope="row">Logical items bound to physical Fabric targets</th>
+                  <th scope="row">Same project files used with different development and production items</th>
                   <td class="v-yes"><span class="mark yes">✓</span></td>
                   <td class="v-part"><span class="mark part">◐</span> <span class="note">targets and database configuration change relation locations</span></td>
                 </tr>
                 <tr>
-                  <th scope="row">Fork installed state and mirror selected Fabric items</th>
+                  <th scope="row">Create a development branch of Fabric data with Mirror</th>
                   <td class="v-yes"><span class="mark yes">✓</span></td>
                   <td class="v-part"><span class="mark part">◐</span> <span class="note">table clone is documented within a Warehouse</span></td>
                 </tr>
@@ -151,39 +126,34 @@ Schema:
                   <td class="v-no"><span class="mark no">✕</span> <span class="note">Python models use <code>dbt.ref()</code></span></td>
                 </tr>
                 <tr>
-                  <th scope="row">Python loaders that write folders and files as graph objects</th>
+                  <th scope="row">Python loaders for APIs, SFTP, archives and files</th>
                   <td class="v-yes"><span class="mark yes">✓</span></td>
                   <td class="v-no"><span class="mark no">✕</span> <span class="note">Python models produce relations</span></td>
                 </tr>
                 <tr>
-                  <th scope="row">Fabric Warehouse identity column declared in the model</th>
+                  <th scope="row">Warehouse identity column declared with the table</th>
                   <td class="v-yes"><span class="mark yes">✓</span></td>
                   <td class="v-no"><span class="mark no">✕</span> <span class="note">no documented model configuration</span></td>
                 </tr>
-                <tr>
-                  <th scope="row">Delta identity column</th>
-                  <td class="v-soon"><span class="mark soon">Coming</span> <span class="note">after Fabric supports interoperable writing</span></td>
-                  <td class="v-no"><span class="mark no">✕</span> <span class="note">Fabric currently does not support writing it</span></td>
-                </tr>
 
-                <tr class="group"><th scope="row" colspan="3">Lifecycle and state</th></tr>
+                <tr class="group"><th scope="row" colspan="3">Build and runs</th></tr>
                 <tr>
                   <th scope="row">Deploy physical structure without loading data</th>
                   <td class="v-yes"><span class="mark yes">✓</span></td>
                   <td class="v-no"><span class="mark no">✕</span> <span class="note">model materialisation creates and populates the relation</span></td>
                 </tr>
                 <tr>
-                  <th scope="row">Installed and operational state persisted in Fabric</th>
+                  <th scope="row">Build and run results kept in Fabric for later commands</th>
                   <td class="v-yes"><span class="mark yes">✓</span></td>
-                  <td class="v-part"><span class="mark part">◐</span> <span class="note">dbt Core state is carried in run artefacts</span></td>
+                  <td class="v-part"><span class="mark part">◐</span> <span class="note">dbt Core carries state in run files</span></td>
                 </tr>
                 <tr>
-                  <th scope="row">Load position recorded per object between runs</th>
+                  <th scope="row">Remember where each incremental load should continue</th>
                   <td class="v-yes"><span class="mark yes">✓</span> <span class="note">bookmarks</span></td>
                   <td class="v-part"><span class="mark part">◐</span> <span class="note">incremental models usually query the target</span></td>
                 </tr>
                 <tr>
-                  <th scope="row">Estate health across load, validation, build and dependency state</th>
+                  <th scope="row">Report what is current, stale, failed, blocked or missing</th>
                   <td class="v-yes"><span class="mark yes">✓</span></td>
                   <td class="v-part"><span class="mark part">◐</span> <span class="note">source freshness covers declared sources</span></td>
                 </tr>
@@ -193,9 +163,9 @@ Schema:
                   <td class="v-yes"><span class="mark yes">✓</span> <span class="note">descendants are skipped</span></td>
                 </tr>
 
-                <tr class="group"><th scope="row" colspan="3">Change handling</th></tr>
+                <tr class="group"><th scope="row" colspan="3">Loading data</th></tr>
                 <tr>
-                  <th scope="row">Insert, update and delete classified before a keyed load writes</th>
+                  <th scope="row">Work out inserts, updates and deletes before writing</th>
                   <td class="v-yes"><span class="mark yes">✓</span></td>
                   <td class="v-part"><span class="mark part">◐</span> <span class="note">depends on incremental strategy</span></td>
                 </tr>
@@ -217,21 +187,21 @@ Schema:
 
       <section class="section">
         <div class="wrap">
-          <h2>Choose by the boundary you need</h2>
-          <p>For transformation modelling inside one supported engine, dbt has a large ecosystem and a familiar workflow. Weaver is for the point where the unit of engineering is the Fabric estate itself: Python acquisition, Lakehouse and Warehouse objects, cross-item dependencies, deployment and recovery.</p>
+          <h2>Where each tool fits</h2>
+          <p>dbt is built around transformation models across many data platforms. Weaver is built for Microsoft Fabric projects that include Python loaders, files, Lakehouses, Warehouses, cross-item dependencies, data loading and recovery.</p>
           <div class="cards two">
             <a class="card" href="../get-started/index.html">
               <h3>Run the Sales example</h3>
-              <p>Build and load one dependency chain across a Lakehouse and Warehouse.</p>
+              <p>Build and load one project across a Lakehouse and Warehouse.</p>
               <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
             </a>
             <a class="card" href="../how-it-works/index.html">
-              <h3>See the Weaver lifecycle</h3>
-              <p>How project, build, Catalogue, load, test and health fit together.</p>
+              <h3>See what each command does</h3>
+              <p>Build, load, test and health in plain language.</p>
               <span class="go">How it works <span class="arrow" aria-hidden="true">→</span></span>
             </a>
           </div>
-          <p class="small muted">Checked 15 September 2026 against the <a href="https://docs.getdbt.com/reference/resource-configs/fabric-configs">dbt-fabric configuration reference</a>, the <a href="https://docs.getdbt.com/reference/resource-configs/fabricspark-configs">dbt-fabricspark configuration reference</a>, the <a href="https://github.com/microsoft/dbt-fabric/blob/main/CHANGELOG.md">dbt-fabric changelog</a>, and Microsoft's documentation for <a href="https://learn.microsoft.com/en-us/fabric/data-warehouse/identity">Warehouse identity columns</a> and <a href="https://learn.microsoft.com/en-us/fabric/fundamentals/delta-lake-interoperability">Delta Lake interoperability</a>. If a capability has moved, <a href="https://github.com/matthias-wong-dev/weaverstack/issues">open an issue</a>.</p>
+          <p class="small muted">Sources: <a href="https://docs.getdbt.com/reference/resource-configs/fabric-configs">dbt-fabric</a>, <a href="https://docs.getdbt.com/reference/resource-configs/fabricspark-configs">dbt-fabricspark</a> and <a href="https://learn.microsoft.com/en-us/fabric/data-warehouse/identity">Microsoft Fabric</a> documentation.</p>
         </div>
       </section>
     </main>
@@ -240,7 +210,7 @@ Schema:
       <div class="wrap footer-grid">
         <div class="footer-note">
           <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
-          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.</p>
           <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
           <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
         </div>

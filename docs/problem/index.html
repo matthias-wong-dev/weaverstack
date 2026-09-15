@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
     <title>The problem Weaver solves</title>
-    <meta name="description" content="The engineering burden in Microsoft Fabric appears between items, engines, environments and runs. Weaver gives that estate one model.">
+    <meta name="description" content="Fabric has good individual tools. Weaver keeps files, Python, Delta, shortcuts and T-SQL working together as the project grows.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/problem/">
     <meta property="og:type" content="article">
@@ -13,11 +13,11 @@
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="The problem Weaver solves">
-    <meta property="og:description" content="The hard part begins between Fabric items, engines, environments and runs.">
+    <meta property="og:description" content="Fabric gives you the pieces. Weaver helps keep them working together.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="The problem Weaver solves">
-    <meta name="twitter:description" content="The hard part begins between Fabric items, engines, environments and runs.">
+    <meta name="twitter:description" content="Fabric gives you the pieces. Weaver helps keep them working together.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
     <link rel="manifest" href="../site.webmanifest">
@@ -45,14 +45,14 @@
       <section class="page-head">
         <div class="wrap">
           <p class="eyebrow">The problem</p>
-          <h1>The hard part begins between the Fabric items</h1>
-          <p class="lead">A Lakehouse table or Warehouse query can be straightforward on its own. The engineering burden appears when files, Python, Delta, shortcuts and T-SQL have to behave as one system across environments and across runs.</p>
+          <h1>Fabric gives you the pieces. Keeping them together is the hard part.</h1>
+          <p class="lead">A Lakehouse table or Warehouse query can be simple on its own. Keeping files, Python, Delta, shortcuts and T-SQL in sync gets harder as the project grows.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>The data path is one chain</h2>
+          <h2>One data path crosses several Fabric tools</h2>
           <div class="flow">
             <div class="flow-step"><b>Files</b><small>Lakehouse</small></div>
             <span class="flow-arrow" aria-hidden="true">→</span>
@@ -60,53 +60,27 @@
             <span class="flow-arrow" aria-hidden="true">→</span>
             <div class="flow-step"><b>Delta</b><small>Lakehouse table</small></div>
             <span class="flow-arrow" aria-hidden="true">→</span>
-            <div class="flow-step"><b>Shortcut</b><small>item boundary</small></div>
+            <div class="flow-step"><b>Shortcut</b><small>between Fabric items</small></div>
             <span class="flow-arrow" aria-hidden="true">→</span>
             <div class="flow-step"><b>T-SQL</b><small>Warehouse</small></div>
           </div>
-          <p>Fabric exposes capable surfaces for each step. It does not give the whole chain one dependency model. Without one, execution order is repeated in pipelines, triggers or local conventions, especially where the engine or Fabric item changes.</p>
-          <div class="keyline"><p>The dependency is still a dependency when it crosses from Python to T-SQL or from one Fabric item to another. Only the coordination becomes harder.</p></div>
+          <p>Fabric has good tools for each step. The Warehouse query still has to wait for the Lakehouse table, and the Lakehouse table still has to wait for the files. Someone has to keep that order correct.</p>
+          <p>Without Weaver, the same dependencies often appear again in pipelines, triggers or local conventions.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>The estate exists in more than one environment</h2>
-          <p class="lede">Development and production usually contain the same logical objects under different physical Fabric item names.</p>
+          <h2>Development and production add another set of names</h2>
+          <p class="lede">The code describes the same customers and orders in both environments, but the real Lakehouses and Warehouses usually have different names.</p>
           <div class="cards two">
             <div class="card">
-              <h3>References drift into deployment detail</h3>
-              <p>If object code names physical Lakehouses and Warehouses, moving between workspaces means rewriting references or carrying environment logic through the source.</p>
+              <h3>References need to point to the right place</h3>
+              <p>Hard-code the Fabric item names and the source changes between environments. Put the mapping elsewhere and that mapping has to remain clear and reviewable.</p>
             </div>
             <div class="card">
-              <h3>Structure and data move on different clocks</h3>
-              <p>Schemas, tables, views, shortcuts and Environment packages change independently from source data. Coupling deployment to loading turns a structural change into a data event.</p>
-            </div>
-          </div>
-          <p>The more Fabric items an estate gains, the more places there are to keep bindings, structure and execution order in agreement.</p>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <h2>A run ending is not the same as the estate being current</h2>
-          <p class="lede">Production work carries state between runs. Logs tell you what was printed; they do not by themselves tell the next run what remains safe to do.</p>
-          <div class="cards two">
-            <div class="card">
-              <h3>Incremental position</h3>
-              <p>Each load needs a trustworthy point to continue from. Advancing it after a partial run risks skipped data; losing it turns recovery into a full reload.</p>
-            </div>
-            <div class="card">
-              <h3>Partial failure</h3>
-              <p>Some objects succeed, one fails, its descendants are blocked, and independent branches may still finish. Recovery depends on knowing which condition applies to each object.</p>
-            </div>
-            <div class="card">
-              <h3>Staleness</h3>
-              <p>A table can have succeeded yesterday and still be behind its sources today. Current state depends on both run outcomes and the dependency graph.</p>
-            </div>
-            <div class="card">
-              <h3>Validation</h3>
-              <p>A completed query establishes that code ran, not that its output is acceptable. Validation results have to remain attached to the objects they describe.</p>
+              <h3>Fabric objects and data change separately</h3>
+              <p>A new table, column or shortcut may need to be deployed before its data is ready to load. Treating both as one job makes every structural change harder to control.</p>
             </div>
           </div>
         </div>
@@ -114,24 +88,47 @@
 
       <section class="section">
         <div class="wrap">
-          <h2>Weaver removes the parallel model</h2>
-          <p class="lede">The project supplies the objects and their dependencies. Workspace configuration supplies the physical bindings. The Catalogue carries installed and operational state. Weaver uses the three together for build, load, test and health.</p>
+          <h2>One failed object leaves several questions</h2>
+          <div class="cards two">
+            <div class="card">
+              <h3>What finished?</h3>
+              <p>A run may load several tables before one fails. Rerunning everything wastes time and may repeat work that already completed.</p>
+            </div>
+            <div class="card">
+              <h3>What can still run?</h3>
+              <p>The failed object's dependants must wait, but an independent branch may be safe to continue.</p>
+            </div>
+            <div class="card">
+              <h3>Where should the next load resume?</h3>
+              <p>Each incremental load needs a trustworthy position. Moving it after a partial run can skip data; losing it forces the load to start again.</p>
+            </div>
+            <div class="card">
+              <h3>What is now stale?</h3>
+              <p>A downstream table can have succeeded yesterday and still be out of date after an upstream table loads today.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Weaver keeps the answers with the project</h2>
           <ul>
-            <li>One dependency graph crosses Lakehouses, Warehouses and engines.</li>
-            <li>Logical object references stay the same between environments.</li>
-            <li>Build deploys structure without forcing data movement.</li>
-            <li>Loads leave bookmarks and outcomes for recovery and health.</li>
+            <li>It reads dependencies from the Python imports, SQL references and shortcut declarations.</li>
+            <li>It maps the same project names to the right Fabric items in each environment.</li>
+            <li>It creates or changes Fabric objects separately from loading their data.</li>
+            <li>It records what loaded, failed or was blocked, and where each load should continue.</li>
           </ul>
-          <p>Weaver replaces those separate descriptions with one model to reconcile when the estate changes.</p>
+          <p>You maintain the Python, SQL and Fabric choices. Weaver handles the repeated work of keeping them in order.</p>
           <div class="cards two">
             <a class="card" href="../how-it-works/index.html">
-              <h3>See the product model</h3>
-              <p>Project, build, Catalogue, load, test and health.</p>
+              <h3>See what each command does</h3>
+              <p>Project, build, Catalogue, load, test and health in plain language.</p>
               <span class="go">How Weaver works <span class="arrow" aria-hidden="true">→</span></span>
             </a>
             <a class="card" href="../get-started/index.html">
               <h3>Run the Sales example</h3>
-              <p>See the cross-item graph and operational state in a small Fabric project.</p>
+              <p>Try the whole path in a small Fabric project.</p>
               <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
             </a>
           </div>
@@ -143,7 +140,7 @@
       <div class="wrap footer-grid">
         <div class="footer-note">
           <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
-          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.</p>
           <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
           <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
         </div>

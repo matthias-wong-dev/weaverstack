@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
-    <title>Get started with Weaver on Microsoft Fabric</title>
-    <meta name="description" content="Install Weaver and run a small Lakehouse and Warehouse estate in your own Microsoft Fabric workspace.">
+    <title>Try Weaver on Microsoft Fabric</title>
+    <meta name="description" content="Install Weaver and run a small example across a Lakehouse and Warehouse in your own Microsoft Fabric workspace.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/get-started/">
     <meta property="og:type" content="article">
@@ -45,40 +45,47 @@
     <main id="main">
       <section class="page-head">
         <div class="wrap">
-          <h1>Run Weaver on a small Fabric estate</h1>
-          <p class="lead">The Sales example gives you a Lakehouse table, a Warehouse table, a shortcut between them and two checks. Weaver builds, loads and tests the chain in your own workspace.</p>
+          <h1>Try Weaver on a small Fabric project</h1>
+          <p class="lead">The Sales example creates a Lakehouse table, a Warehouse table, a shortcut between them and two checks. You can see the whole path without designing a project first.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>Before you begin</h2>
+          <h2>1. Check the prerequisites</h2>
           <ul>
-            <li><strong>A Microsoft Fabric workspace</strong> on a running capacity. You need permission to use its existing items or create the ones you name.</li>
+            <li><strong>A Microsoft Fabric workspace</strong> on a running capacity.</li>
+            <li><strong>Permission to use or create</strong> the Lakehouse, Warehouse and Environment named during setup.</li>
             <li><strong>Python 3.11 or later</strong> when working from your own machine. Fabric notebooks already provide Python.</li>
             <li><strong>A Fabric sign-in.</strong> The desktop CLI can use Azure CLI credentials, a configured service principal or Microsoft sign-in in a browser.</li>
           </ul>
-          <p>If you are working from your own machine, this checks the sign-in and the workspace before setup:</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>2. Install Weaver</h2>
           <div class="code" style="max-width: 560px;">
             <div class="code-bar"><span>terminal</span></div>
             <pre>pip install weaverstack
 weaver doctor --workspace Analytics</pre>
           </div>
+          <p><code>doctor</code> checks your sign-in and access to the workspace before setup.</p>
+          <p>Inside a Fabric notebook, install the same package with <code>%pip install weaverstack</code> and use the Python functions instead of the CLI.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>Initialise the project</h2>
-          <p class="lede">The shortest path is the desktop wizard. It asks for a project folder, a Catalogue Warehouse, an Environment and at least one destination item. Choose the Sales example when prompted.</p>
+          <h2>3. Create the example project</h2>
+          <p class="lede">Run the setup wizard and choose the Sales example. It asks where to write the project and which Lakehouse, Warehouse, Environment and Catalogue Warehouse to use.</p>
           <div class="code" style="max-width: 560px;">
             <div class="code-bar"><span>terminal</span></div>
             <pre>weaver initialise --workspace Analytics</pre>
           </div>
-          <p><code>initialise</code> writes the project and creates or reuses the Catalogue, Environment, Lakehouse and Warehouse you select. It does not build the project or load data.</p>
+          <p><code>initialise</code> writes the project and creates or reuses the Fabric items you select. It does not build the objects or load data yet.</p>
 
-          <h3>Supply every choice</h3>
-          <p>For a repeatable setup, name the project folder and Fabric items explicitly. <code>--non-interactive</code> refuses missing input or authorisation rather than opening a prompt or browser.</p>
+          <h3>Repeat the setup without prompts</h3>
           <div class="code">
             <div class="code-bar"><span>terminal</span></div>
             <pre>weaver initialise --workspace Analytics \
@@ -94,34 +101,8 @@ weaver doctor --workspace Analytics</pre>
 
       <section class="section">
         <div class="wrap">
-          <h2>Or start inside Fabric</h2>
-          <p class="lede">The Python package exposes the same operations in a Fabric notebook. The notebook supplies the workspace it is already running in.</p>
-          <div class="code">
-            <div class="code-bar"><span>notebook cell</span></div>
-            <pre>%pip install weaverstack</pre>
-          </div>
-          <div class="code">
-            <div class="code-bar"><span>notebook cell</span></div>
-            <pre><span class="c-key">from</span> pathlib <span class="c-key">import</span> Path
-<span class="c-key">import</span> weaver
-
-project_folder = Path(<span class="c-str">"builtin"</span>) / <span class="c-str">"Analytics"</span>
-weaver.<span class="c-fn">initialise</span>(
-    project_folder,
-    catalogue=<span class="c-str">"Catalogue"</span>,
-    environment=<span class="c-str">"Weaver"</span>,
-    lakehouse=<span class="c-str">"Landing"</span>,
-    warehouse=<span class="c-str">"Curated"</span>,
-    example=<span class="c-key">True</span>,
-)</pre>
-          </div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="wrap">
-          <h2>Look at what Weaver wrote</h2>
-          <p class="lede">The project keeps each object under the logical Fabric item that owns it. Python imports, SQL references and shortcut declarations provide the dependencies.</p>
+          <h2>4. Look at the project</h2>
+          <p class="lede">The files are grouped by the Lakehouse or Warehouse that owns them. Python imports, SQL references and the shortcut declaration tell Weaver what order to use.</p>
 
           <div class="code plain" style="max-width: 640px;">
             <div class="code-bar"><span>Analytics/</span></div>
@@ -146,7 +127,7 @@ Environment/Weaver.Environment/
     └── <span class="c-fn">Sales.CustomerByRegionValid.sql</span></pre>
           </div>
 
-          <p>The workspace configuration carries the physical bindings:</p>
+          <p>This small file maps the project names to real Fabric items:</p>
           <div class="code">
             <div class="code-bar"><span>workspace-config.yml</span></div>
             <!-- example:workspace-config.yml -->
@@ -159,22 +140,22 @@ targets:
   Warehouse/Curated: Curated</pre>
             <!-- /example -->
           </div>
-          <p>Copy that file and change the physical names to use the same project in another workspace. The source still refers to <code>Lakehouse/Landing</code> and <code>Warehouse/Curated</code>.</p>
+          <p>Use another copy of this configuration for production. The Python and SQL still refer to <code>Lakehouse/Landing</code> and <code>Warehouse/Curated</code>.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>Publish, then run</h2>
-          <p>The generated Environment carries Weaver and the Python packages used by your project. Publish it before the first Python load and after changing its packages.</p>
+          <h2>5. Publish and run it</h2>
+          <p>Publish the generated Environment before the first Python load:</p>
           <div class="code">
             <div class="code-bar"><span>terminal</span></div>
             <pre>cd Analytics
 weaver fabric environment publish --path Environment/Weaver.Environment
 weaver workflow full</pre>
           </div>
-          <p>The generated <code>full</code> workflow runs <code>build</code>, <code>load</code>, <code>test</code> and <code>health</code> in one session. Build creates the Fabric structure; load runs the data work in dependency order; test runs the two checks; health reports whether the installed estate is current.</p>
-          <p>You can run the stages separately when that is the point:</p>
+          <p>The <code>full</code> workflow creates the Fabric objects, loads the data in the right order, runs the two checks and reports the result.</p>
+          <p>You can also run each step separately:</p>
           <div class="code" style="max-width: 420px;">
             <div class="code-bar"><span>terminal</span></div>
             <pre>weaver build
@@ -182,24 +163,19 @@ weaver load
 weaver test
 weaver health</pre>
           </div>
-          <p><a class="text-link" href="../how-it-works/index.html">See why Weaver keeps these stages apart <span class="arrow" aria-hidden="true">→</span></a></p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>One run, one graph and durable state</h2>
-          <div class="cards two">
-            <div class="card">
-              <h3>The item boundary disappeared from orchestration</h3>
-              <p>The Warehouse join waited for the Lakehouse table because Weaver read both into one graph. You did not write a second pipeline to coordinate the two engines.</p>
-            </div>
-            <div class="card">
-              <h3>The run left state behind</h3>
-              <p>The Catalogue now holds the installed graph, load positions and current outcomes. A later command starts from that state rather than rediscovering it from logs.</p>
-            </div>
-          </div>
-          <p><a class="text-link" href="https://github.com/matthias-wong-dev/weaverstack">Read the source on GitHub <span class="arrow" aria-hidden="true">↗</span></a></p>
+          <h2>What you should see</h2>
+          <ul>
+            <li>The customer file lands in the Lakehouse.</li>
+            <li>The Delta table loads from that file.</li>
+            <li>The Warehouse reads the table through a shortcut and runs the regional join afterwards.</li>
+            <li>The two checks pass, and health reports the project as current.</li>
+          </ul>
+          <p><a class="text-link" href="../how-it-works/index.html">See what each Weaver command does <span class="arrow" aria-hidden="true">→</span></a></p>
         </div>
       </section>
     </main>
@@ -208,7 +184,7 @@ weaver health</pre>
       <div class="wrap footer-grid">
         <div class="footer-note">
           <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
-          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.</p>
           <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
           <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
         </div>

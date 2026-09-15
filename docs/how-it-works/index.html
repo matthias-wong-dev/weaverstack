@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
     <title>How Weaver works</title>
-    <meta name="description" content="A Weaver project becomes an installed Fabric estate through build; the Catalogue then gives load, test and health durable state to work from.">
+    <meta name="description" content="You write the project files. Weaver creates the Fabric objects, runs the data work and remembers what happened.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/how-it-works/">
     <meta property="og:type" content="article">
@@ -13,11 +13,11 @@
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="How Weaver works">
-    <meta property="og:description" content="Project, build, Catalogue, load, test and health: one lifecycle for an operable Fabric estate.">
+    <meta property="og:description" content="Project, build, Catalogue, load, test and health in plain language.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="How Weaver works">
-    <meta name="twitter:description" content="Project, build, Catalogue, load, test and health: one lifecycle for an operable Fabric estate.">
+    <meta name="twitter:description" content="Project, build, Catalogue, load, test and health in plain language.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
     <link rel="manifest" href="../site.webmanifest">
@@ -44,31 +44,31 @@
     <main id="main">
       <section class="page-head">
         <div class="wrap">
-          <h1>From project to an operable Fabric estate</h1>
-          <p class="lead">A Weaver project describes the estate you want. Build installs it and records what exists. Load, test and health then work from that installed state.</p>
+          <h1>How Weaver works</h1>
+          <p class="lead">You write the project files. Weaver creates the Fabric objects, runs the data work and remembers what happened.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>One lifecycle, with the stages kept distinct</h2>
+          <h2>The whole path</h2>
           <div class="flow">
-            <div class="flow-step"><b>project</b><small>the estate in source</small></div>
+            <div class="flow-step"><b>project</b><small>the files you write</small></div>
             <span class="flow-arrow" aria-hidden="true">&#8594;</span>
-            <div class="flow-step"><b>build</b><small>install its structure</small></div>
+            <div class="flow-step"><b>build</b><small>create or change Fabric objects</small></div>
             <span class="flow-arrow" aria-hidden="true">&#8594;</span>
-            <div class="flow-step"><b>Catalogue</b><small>record installed state</small></div>
+            <div class="flow-step"><b>Catalogue</b><small>remember what exists</small></div>
             <span class="flow-arrow" aria-hidden="true">&#8594;</span>
-            <div class="flow-step"><b>load · test · health</b><small>operate what is installed</small></div>
+            <div class="flow-step"><b>load · test · health</b><small>run, check and report</small></div>
           </div>
-          <p>Separate stages let you deploy a schema change without loading data, run data work without parsing a changing source tree, and ask what is current after the command that created it has finished.</p>
+          <p>Build and load are separate. You can create or change the Fabric structure first, then move data when you are ready.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>1. The project names the estate logically</h2>
-          <p class="lede">Each object lives under the Lakehouse or Warehouse that owns it. A separate workspace configuration maps those logical items to physical Fabric targets.</p>
+          <h2>1. Your project is the files you write</h2>
+          <p class="lede">Put each Python or SQL object under the Lakehouse or Warehouse that owns it. The folder structure makes the Fabric project visible in source control.</p>
           <div class="code" style="max-width: 620px;">
             <div class="code-bar"><span>workspace-config.yml</span></div>
             <pre>workspace: Analytics
@@ -78,63 +78,63 @@ targets:
   Lakehouse/Landing: Landing_Dev
   Warehouse/Curated: Curated_Dev</pre>
           </div>
-          <p>The project continues to refer to <code>Lakehouse/Landing</code> and <code>Warehouse/Curated</code>. Change the configuration to point at production; do not rewrite the objects or their references.</p>
+          <p>Your code still uses <code>Lakehouse/Landing</code> and <code>Warehouse/Curated</code>. Change this file to point the same project at production.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>2. Build installs structure, not data</h2>
-          <p class="lede"><code>weaver build</code> compares the project with Fabric and applies the structural difference.</p>
-          <p>It creates and maintains schemas, folders, Delta tables, Warehouse tables and views, shortcuts, validations and the code each load will run. It also records the installed objects and their dependencies in the Catalogue.</p>
-          <div class="keyline"><p>A fresh workspace can receive the whole platform shape before a row moves. A later column or shortcut change can deploy without turning into an accidental reload.</p></div>
-          <p>Build limits its work to the selected change and affected downstream objects. It leaves unrelated parts of the estate untouched.</p>
+          <h2>2. Build creates or changes the Fabric objects</h2>
+          <p class="lede"><code>weaver build</code> compares the project with Fabric and makes the required changes.</p>
+          <p>It creates schemas, folders, Delta tables, Warehouse tables and views, shortcuts, checks and the code used by later loads. It does not load the data.</p>
+          <div class="keyline"><p>You can set up a new workspace or deploy a structural change without automatically running every load.</p></div>
+          <p>When one object changes, Weaver also rebuilds the downstream objects affected by that change. It leaves unrelated work alone.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>3. The Catalogue makes the installed estate durable</h2>
-          <p class="lede">The Catalogue is a Fabric Warehouse containing Weaver's view of what is installed and how it is running.</p>
+          <h2>3. Weaver records what exists and what happened</h2>
+          <p class="lede">Weaver stores this information in a Catalogue Warehouse in Fabric.</p>
           <div class="cards two">
             <div class="card">
-              <h3>Installed state</h3>
-              <p>Objects, physical bindings, dependencies, shortcuts, columns and keys. Load and test operate on this installed model rather than whatever happens to be in a developer's checkout.</p>
+              <h3>What exists</h3>
+              <p>The objects Weaver built, where they live and what depends on what. Load and test use this record even while someone is editing the project files.</p>
             </div>
             <div class="card">
-              <h3>Operational state</h3>
-              <p>Bookmarks, load and validation outcomes, row-change counts and history. A failed run leaves enough state to distinguish what succeeded, failed and was blocked.</p>
+              <h3>What happened</h3>
+              <p>What loaded, what failed, what was blocked, how many rows changed and where each load should continue.</p>
             </div>
           </div>
-          <p>Because the Catalogue persists, later runs know what they are acting on and where the previous clean load stopped.</p>
+          <p>After a failure, the next run can see which work finished and which work still needs attention.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>4. Load, test and health use the same estate</h2>
+          <h2>4. Load, test and health use that record</h2>
           <div class="cards three">
             <div class="card">
               <h3>Load</h3>
-              <p>Runs installed objects in dependency order across Fabric items. Bookmarks keep each object's position, and independent branches can continue when fault-tolerant loading is appropriate.</p>
+              <p>Runs the data work in dependency order across the selected Lakehouses and Warehouses.</p>
             </div>
             <div class="card">
               <h3>Test</h3>
-              <p>Runs the Tests and Assumptions installed beside the objects they validate, then records their current outcomes in the Catalogue.</p>
+              <p>Runs the checks you wrote beside the tables they validate and records the result.</p>
             </div>
             <div class="card">
               <h3>Health</h3>
-              <p>Reports current estate state: failed or blocked loads, stale objects, failing validations and installed objects missing from Fabric.</p>
+              <p>Tells you what is current, stale, failed, blocked or missing from Fabric.</p>
             </div>
           </div>
-          <p>A table can load successfully and become stale when an upstream object loads again. Health can see that because it reads outcomes and dependencies together.</p>
+          <p>If an upstream table loads again, Weaver can tell that downstream data is now stale even when its previous load succeeded.</p>
         </div>
       </section>
 
       <section class="section" id="dependencies">
         <div class="wrap">
-          <h2>The code supplies the graph</h2>
-          <p class="lede">Weaver reads Python imports, SQL references and shortcut declarations. It does not ask you to repeat those dependencies in a separate orchestration file.</p>
+          <h2>Weaver reads dependencies from the code</h2>
+          <p class="lede">Your imports and SQL references already describe the order. Weaver uses them instead of asking you to repeat it in another pipeline.</p>
           <h3>Python</h3>
           <div class="code">
             <div class="code-bar"><span>Sales__Customer.py</span></div>
@@ -151,7 +151,7 @@ targets:
             .dropDuplicates([<span class="c-str">"Customer id"</span>])
         )</pre>
           </div>
-          <p>The import places the table after the file acquisition.</p>
+          <p>The import tells Weaver to load the customer files before the Delta table.</p>
 
           <h3>T-SQL</h3>
           <div class="code">
@@ -163,8 +163,7 @@ targets:
   <span class="c-key">join</span> [Sales].[Region] r
     <span class="c-key">on</span> r.[Region code] = c.[Region code];</pre>
           </div>
-          <p>The query places the Warehouse table after both relations it reads.</p>
-          <p>When one relation is a shortcut to another Fabric item, the same graph crosses that boundary. Load order, affected-change selection and staleness all use it.</p>
+          <p>The query tells Weaver to load both Warehouse relations before the join. If one comes from a Lakehouse shortcut, Weaver still puts the work in the right order.</p>
         </div>
       </section>
 
@@ -174,12 +173,12 @@ targets:
           <div class="cards two">
             <a class="card" href="../get-started/index.html">
               <h3>Build the Sales example</h3>
-              <p>Run a Lakehouse-to-Warehouse project through build, load, test and health.</p>
+              <p>Run one project across a Lakehouse and Warehouse.</p>
               <span class="go">Get started <span class="arrow" aria-hidden="true">→</span></span>
             </a>
             <a class="card" href="../scale/index.html">
-              <h3>Follow the model as it grows</h3>
-              <p>See how graph selection, state, recovery and Mirror limit the coordination cost of a larger estate.</p>
+              <h3>Add more Fabric work</h3>
+              <p>See what Weaver saves you from maintaining as the project grows.</p>
               <span class="go">Built for scale <span class="arrow" aria-hidden="true">→</span></span>
             </a>
           </div>
@@ -191,7 +190,7 @@ targets:
       <div class="wrap footer-grid">
         <div class="footer-note">
           <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
-          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.</p>
           <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
           <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
         </div>
