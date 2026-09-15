@@ -223,7 +223,7 @@ def test_a_statement_needing_an_epoch_without_one_says_so():
 
     capability = _Capability()
 
-    with pytest.raises(InstallError, match="supplied none"):
+    with pytest.raises(InstallError, match="has no build datetime"):
         SparkSqlBatchExecutor().execute(
             _batch_action(),
             b"[\"INSERT INTO `Demo`.`Weaver`.`_`.`Registry` VALUES ('{{build_datetime}}')\"]",

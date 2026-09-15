@@ -484,7 +484,7 @@ def test_a_reset_that_did_not_land_clears_nothing():
     catalogue = loaded("DWG.Customer", writer=writer)
     table = _table()(_Spark(events=events), lakehouse=_lakehouse(), catalogue=catalogue)
 
-    with pytest.raises(RunError, match="not recorded"):
+    with pytest.raises(RunError, match="catalogue record could not be written"):
         table.load(reload=True)
 
     assert "clear" not in _kinds(events)

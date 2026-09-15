@@ -180,7 +180,7 @@ def test_anchoring_by_name_outside_a_fabric_session_says_so(lakehouse):
     with pytest.raises(ConfigError) as raised:
         DWG__Customer(object(), lakehouse=lakehouse, catalogue="Warehouse/Weaver")
 
-    assert "not in one" in str(raised.value)
+    assert "outside a Fabric session" in str(raised.value)
     assert "weaver load" in str(raised.value)
 
 
