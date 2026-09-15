@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
-    <title>Built for scale</title>
-    <meta name="description" content="Weaver uses one dependency and operational model across the estate, whether a project holds a few objects or many Fabric items and dependency layers.">
+    <title>Weaver as your Fabric project grows</title>
+    <meta name="description" content="Add more Fabric tables, Lakehouses and Warehouses without adding another set of pipelines to keep them in order.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/scale/">
     <meta property="og:type" content="article">
@@ -13,11 +13,11 @@
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="Built for scale">
-    <meta property="og:description" content="One dependency and operational model, from a few objects to many Fabric items.">
+    <meta property="og:description" content="More Fabric work without another set of pipelines to maintain.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Built for scale">
-    <meta name="twitter:description" content="One dependency and operational model, from a few objects to many Fabric items.">
+    <meta name="twitter:description" content="More Fabric work without another set of pipelines to maintain.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
     <link rel="manifest" href="../site.webmanifest">
@@ -44,30 +44,22 @@
     <main id="main">
       <section class="page-head">
         <div class="wrap">
-          <h1>Built for scale</h1>
-          <p class="lead">Weaver uses the same model for a handful of objects or many Fabric items and dependency layers. It builds only what changed and records each object's load position, so a large estate does not require a large rebuild or a full reload.</p>
+          <h1>Add more Fabric work without adding more pipelines</h1>
+          <p class="lead">More tables, Lakehouses and Warehouses bring more dependencies and more ways for a run to fail halfway through. Weaver keeps using the same project files and the same commands as the work grows.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>How the model scales</h2>
+          <h2>More objects, the same way of working</h2>
           <div class="cards two">
             <div class="card">
-              <h3>One dependency graph</h3>
-              <p>Weaver keeps every object in one graph, across Lakehouses, Warehouses, Python, Spark SQL and T-SQL. The same dependency and operating model extends across additional Fabric items.</p>
+              <h3>Weaver keeps working out the order</h3>
+              <p>Add Python, SQL or another Fabric item. Weaver reads the new dependencies from the code, so you do not need another set of pipelines to connect the new work to the old.</p>
             </div>
             <div class="card">
-              <h3>Incremental builds</h3>
-              <p>Build compares your project against what is already installed and applies the difference. When you change one object, Weaver un-certifies it and everything downstream of it, and leaves the rest of the estate alone.</p>
-            </div>
-            <div class="card">
-              <h3>Loads sized by the change</h3>
-              <p>Bookmarks and incremental loading can limit the source data processed on each run, while keyed loads classify the incoming change before writing.</p>
-            </div>
-            <div class="card">
-              <h3>Persistent operational state</h3>
-              <p>Weaver records how far each object loaded, what failed and what is now behind its sources. On a large estate that is what lets you rerun the part that broke instead of the whole thing.</p>
+              <h3>Change one part without rebuilding everything</h3>
+              <p>Weaver rebuilds the selected objects and the downstream work affected by them. It leaves independent parts of the project alone.</p>
             </div>
           </div>
         </div>
@@ -75,9 +67,32 @@
 
       <section class="section">
         <div class="wrap">
-          <h2>Performance testing</h2>
-          <p class="lede">We are preparing large-estate performance and incremental-build benchmarks, and will publish them here.</p>
-          <p><a class="text-link" href="../get-started/index.html">Start with the small example <span class="arrow" aria-hidden="true">→</span></a></p>
+          <h2>Rerun the work that needs it</h2>
+          <p class="lede">When one part fails, you should not have to rerun everything.</p>
+          <div class="cards three">
+            <div class="card">
+              <h3>Continue from the last clean load</h3>
+              <p>Weaver records how far each object loaded, so incremental work can resume from a known position.</p>
+            </div>
+            <div class="card">
+              <h3>Keep independent work running</h3>
+              <p>If one object fails, its dependants wait. Other branches can continue when you choose fault-tolerant loading.</p>
+            </div>
+            <div class="card">
+              <h3>See what still needs attention</h3>
+              <p>Health reports what failed, what was blocked and what became stale after an upstream load.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Branch the data as well as the code</h2>
+          <p class="lede">A Git branch gives you another version of the project files. Weaver Mirror gives you a development branch of the Fabric data too.</p>
+          <p>The development project can start from current production data without copying every table. Lakehouse data can remain behind OneLake shortcuts and Warehouse data behind views.</p>
+          <p>Build the parts you need to change in development. Leave the rest mirrored until they need to diverge.</p>
+          <p><a class="text-link" href="../get-started/index.html">Start with the small Sales project <span class="arrow" aria-hidden="true">→</span></a></p>
         </div>
       </section>
     </main>
@@ -86,7 +101,7 @@
       <div class="wrap footer-grid">
         <div class="footer-note">
           <span class="brand"><span class="weave-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Weaver</span>
-          <p>A data-engineering framework for Microsoft Fabric, built around a central catalogue.</p>
+          <p>Weaver helps Python, SQL, Lakehouses and Warehouses work together in Microsoft Fabric.</p>
           <p>Free and open source under the <a href="https://github.com/matthias-wong-dev/weaverstack/blob/main/LICENSE">Mozilla Public License 2.0</a>.</p>
           <p class="small">Developer documentation is coming. For now, the design notes live on GitHub.</p>
         </div>
