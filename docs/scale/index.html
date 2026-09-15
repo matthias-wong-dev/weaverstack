@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#f7f7f6">
-    <title>Built for scale</title>
-    <meta name="description" content="Weaver uses one dependency and operational model across the estate, whether a project holds a few objects or many Fabric items and dependency layers.">
+    <title>Weaver for larger Fabric estates</title>
+    <meta name="description" content="As a Fabric estate grows, Weaver keeps dependencies, physical bindings and operational state in one model.">
     <meta name="robots" content="index, follow, max-image-preview:large">
     <link rel="canonical" href="https://weaverstack.dev/scale/">
     <meta property="og:type" content="article">
@@ -13,11 +13,11 @@
     <meta property="og:site_name" content="Weaver">
     <meta property="og:locale" content="en_AU">
     <meta property="og:title" content="Built for scale">
-    <meta property="og:description" content="One dependency and operational model, from a few objects to many Fabric items.">
+    <meta property="og:description" content="More Fabric objects and items without a matching growth in orchestration and recovery bookkeeping.">
     <meta property="og:image" content="https://weaverstack.dev/og.png">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="Built for scale">
-    <meta name="twitter:description" content="One dependency and operational model, from a few objects to many Fabric items.">
+    <meta name="twitter:description" content="More Fabric objects and items without a matching growth in orchestration and recovery bookkeeping.">
     <meta name="twitter:image" content="https://weaverstack.dev/og.png">
     <link rel="icon" type="image/png" sizes="128x128" href="../favicon.png">
     <link rel="manifest" href="../site.webmanifest">
@@ -44,30 +44,45 @@
     <main id="main">
       <section class="page-head">
         <div class="wrap">
-          <h1>Built for scale</h1>
-          <p class="lead">Weaver uses the same model for a handful of objects or many Fabric items and dependency layers. It builds only what changed and records each object's load position, so a large estate does not require a large rebuild or a full reload.</p>
+          <h1>More objects should not mean more coordination models</h1>
+          <p class="lead">As a Fabric estate grows, Weaver keeps dependencies, physical bindings and operational state in the same model. The graph gets larger; the number of orchestration systems you maintain does not.</p>
         </div>
       </section>
 
       <section class="section">
         <div class="wrap">
-          <h2>How the model scales</h2>
+          <h2>Growth follows the dependency graph</h2>
+          <p class="lede">Adding another Lakehouse, Warehouse or branch of work adds nodes and edges to the estate Weaver already understands.</p>
           <div class="cards two">
             <div class="card">
-              <h3>One dependency graph</h3>
-              <p>Weaver keeps every object in one graph, across Lakehouses, Warehouses, Python, Spark SQL and T-SQL. The same dependency and operating model extends across additional Fabric items.</p>
+              <h3>One graph across items</h3>
+              <p>Python, Spark SQL and T-SQL objects remain in one graph even when they occupy different Fabric items. A new item does not require a parallel schedule to connect it to the old ones.</p>
             </div>
             <div class="card">
-              <h3>Incremental builds</h3>
-              <p>Build compares your project against what is already installed and applies the difference. When you change one object, Weaver un-certifies it and everything downstream of it, and leaves the rest of the estate alone.</p>
+              <h3>Work follows the affected subgraph</h3>
+              <p>A build applies the selected structural change and follows its downstream impact. A load runs objects in dependency order. Neither operation pulls in unrelated branches.</p>
+            </div>
+          </div>
+          <p>The operating model does not become more complicated in proportion to the number of Fabric items.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>State narrows recovery</h2>
+          <p class="lede">Running everything again is an expensive recovery policy for a large estate. Weaver records enough state to identify the work that remains.</p>
+          <div class="cards three">
+            <div class="card">
+              <h3>Bookmarks</h3>
+              <p>Each loadable object keeps its position after a clean run. Incremental work can resume from that point rather than reading the whole source again.</p>
             </div>
             <div class="card">
-              <h3>Loads sized by the change</h3>
-              <p>Bookmarks and incremental loading can limit the source data processed on each run, while keyed loads classify the incoming change before writing.</p>
+              <h3>Independent branches</h3>
+              <p>A failed object blocks its descendants. Other branches can continue when you choose fault-tolerant loading, without pretending the failed branch succeeded.</p>
             </div>
             <div class="card">
-              <h3>Persistent operational state</h3>
-              <p>Weaver records how far each object loaded, what failed and what is now behind its sources. On a large estate that is what lets you rerun the part that broke instead of the whole thing.</p>
+              <h3>Estate health</h3>
+              <p>Current outcomes and dependencies reveal what failed, what was blocked and what has fallen behind a source that loaded later.</p>
             </div>
           </div>
         </div>
@@ -75,9 +90,32 @@
 
       <section class="section">
         <div class="wrap">
-          <h2>Performance testing</h2>
-          <p class="lede">We are preparing large-estate performance and incremental-build benchmarks, and will publish them here.</p>
-          <p><a class="text-link" href="../get-started/index.html">Start with the small example <span class="arrow" aria-hidden="true">→</span></a></p>
+          <h2>Development can branch without cloning the data</h2>
+          <p class="lede">Mirror forks the installed Catalogue, then lets a development workspace borrow source data for the items it does not need to rebuild.</p>
+          <div class="cards two">
+            <div class="card">
+              <h3>Keep unchanged data in place</h3>
+              <p>Warehouse relations appear through views and Lakehouse relations through OneLake shortcuts. A development estate can be complete without making a second physical copy of every table and folder.</p>
+            </div>
+            <div class="card">
+              <h3>Materialise only where work diverges</h3>
+              <p>Build a selected item into its own development target. The rest of the estate remains mirrored, with logical dependencies and load state still visible to Weaver.</p>
+            </div>
+          </div>
+          <div class="code" style="max-width: 720px;">
+            <div class="code-bar"><span>terminal</span></div>
+            <pre>weaver mirror --no-item --yes
+weaver build --item Warehouse/Model=Warehouse/Model_Dev</pre>
+          </div>
+          <p class="small muted">The development workspace configuration names the source catalogue as <code>mirror:</code> and the fork as <code>catalogue:</code>.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="wrap">
+          <h2>Scale here means coordination</h2>
+          <p>This is a claim about engineering work, not Fabric capacity or runtime performance. Increasing object and item counts need not produce the same increase in hand-maintained orchestration, environment bindings and recovery bookkeeping.</p>
+          <p><a class="text-link" href="../get-started/index.html">Start with the small estate <span class="arrow" aria-hidden="true">→</span></a></p>
         </div>
       </section>
     </main>
