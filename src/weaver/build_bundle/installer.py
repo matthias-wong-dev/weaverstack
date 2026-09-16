@@ -110,6 +110,29 @@ class Installer:
 
         return run
 
+    def delta_table_creator(self):
+        session = self.session
+        workspace = self.workspace
+
+        def create(
+            qualified_name,
+            columns,
+            *,
+            identity_column=None,
+            column_mapping=True,
+            validate_only=False,
+        ):
+            return session.create_delta_table(
+                qualified_name,
+                columns,
+                identity_column=identity_column,
+                column_mapping=column_mapping,
+                validate_only=validate_only,
+                workspace=workspace,
+            )
+
+        return create
+
     def sql_for(self, bound: BoundTarget) -> Any:
         """Return a deferred Warehouse connection, or ``None`` for a Lakehouse."""
 
@@ -143,6 +166,43 @@ class Installer:
             return None
         return resolve(item)
 
+    def _validate_delta_identity_support(self, bundle: BuildBundle) -> None:
+        """Refuse unsupported identity builds before any install action runs."""
+
+        import json
+
+        store = bundle.store or self.store
+        requested: dict[str, tuple[str, bool]] = {}
+        for sequence in bundle.plan.sequences:
+            for batch in sequence.batches:
+                for action in batch.actions:
+                    if action.executor != "spark_table" or action.payload is None:
+                        continue
+                    payload = store.read(
+                        bundle.location.join(*action.payload.split("/"))
+                    )
+                    instruction = json.loads(payload.decode("utf-8"))
+                    identity = instruction.get("identity_column")
+                    if identity is None:
+                        continue
+                    requested[instruction["object"]] = (
+                        identity[0],
+                        instruction.get("column_mapping", True),
+                    )
+        if not requested:
+            return
+
+        creator = self.delta_table_creator()
+        with self.session.substep("Check Delta identity support"):
+            for qualified, (identity_name, column_mapping) in requested.items():
+                creator(
+                    qualified,
+                    (),
+                    identity_column=identity_name,
+                    column_mapping=column_mapping,
+                    validate_only=True,
+                )
+
     def install(self, bundle: BuildBundle | Location) -> InstallationReport:
         if isinstance(bundle, Location):
             bundle = load_bundle(bundle, store=self.store)
@@ -154,6 +214,7 @@ class Installer:
 
         plan = bundle.plan
         resolved = {target.id: self.resolve_target(target) for target in plan.targets}
+        self._validate_delta_identity_support(bundle)
 
         started = _now()
         # All Registry rows from one build share an instant so shortcut freshness
@@ -243,6 +304,7 @@ def _run_sequence(
         for batch in sequence.batches:
             target = resolved[batch.target_id]
             context = InstallationContext(
+                create_delta_table=installer.delta_table_creator(),
                 spark_sql=installer.spark_sql(),
                 spark_sql_batch=installer.spark_sql_batch(),
                 resolver=installer.resolver,

@@ -112,6 +112,31 @@ class TestSession(Session):
             store=self._store,
         )
 
+    def create_delta_table(
+        self,
+        qualified_name: str,
+        columns: Sequence[Sequence[Any]],
+        *,
+        identity_column: str | None = None,
+        column_mapping: bool = True,
+        validate_only: bool = False,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        self._record(
+            "delta_table",
+            {
+                "object": qualified_name,
+                "columns": [list(column) for column in columns],
+                "identity_column": identity_column,
+                "column_mapping": column_mapping,
+                "validate_only": validate_only,
+            },
+            workspace,
+            timeout=timeout,
+        )
+        return None
+
     def execute_python(
         self,
         program: str,

@@ -111,6 +111,26 @@ Lakehouse/Raw/Tables/DWG.Customer.sql   Spark SQL
 Warehouse/Reporting/DWG.Customer.sql    T-SQL
 ```
 
+## Generated identity columns
+
+A Table may declare a managed surrogate outside its authored schema:
+
+```yaml
+Table ID: Sales.Customer
+Primary key: CustomerId
+Identity: CustomerKey
+
+Schema:
+  CustomerId: string
+  CustomerName: string
+```
+
+`CustomerId` remains the business key used by loads. `CustomerKey` is a generated,
+not-null bigint and must not appear in `Schema` or source rows. Warehouse identity
+uses the Warehouse engine. Lakehouse identity uses Delta TableBuilder and requires
+an identity-capable Fabric Runtime 2.0 session. Ordinary Lakehouse tables remain
+supported on Runtime 1.3 and 2.0.
+
 ## Shortcuts
 
 An item reaches outside itself by declaring what it wants to see. A Lakehouse

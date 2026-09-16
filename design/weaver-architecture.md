@@ -386,14 +386,20 @@ return staged, existing.where(F.col("source_filename").isin(*withdrawn)).select(
 )
 ```
 
-The row audit datetimes and the row signature are Weaver's, not the table's, so
-neither `columns()` nor `dataframe()` reports them. The audits are readable on
-request because they answer a question about the data; the signature is load
-bookkeeping and has no author-facing opt-in.
+The identity column, row audit datetimes and row signature are Weaver's, not the
+table's, so neither `columns()` nor `dataframe()` reports them. The audits are
+readable on request because they answer a question about the data; the identity
+and signature remain managed columns.
 
 A table that leaves its schema to be inferred, which only a Spark SQL table
 does, has no declared columns to read, so `columns()` reports what the installed
 table holds, less Weaver's own, in physical order.
+
+`Identity:` names a generated bigint distinct from the business primary key.
+Delta loads omit it from staging, comparisons, signatures, updates and inserts.
+An ordinary keyed update therefore keeps the existing value. An inserted row,
+including one deleted and later reinserted, receives a new value. A full
+replacement and a table rebuild also generate new values.
 
 ## Folder loads and changes
 

@@ -6,7 +6,7 @@ dependency graph and persistent operational state.
 
 ## Installation
 
-Weaver requires Python 3.11 or later.
+Weaver requires Python 3.11 or later and is tested on Python 3.11 and 3.13.
 
 ```bash
 python -m pip install weaverstack

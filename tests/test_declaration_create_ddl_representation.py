@@ -1,10 +1,11 @@
 """``SourceDocument.create_ddl``, the generated create DDL per source.
 
 Build creates structure, not data. A Delta table (Python or Spark SQL) becomes a
-``CREATE TABLE`` over its declared columns; a view becomes strict ``CREATE
-VIEW`` over its query body. A Folder has no DDL (it is a directory). T-SQL
-generation has its own test module (``test_declaration_tsql_ddl``); here we only assert a
-SQL object routes to the ``tsql`` executor. Nothing here runs ``read()``.
+structured table payload resolved and created through TableBuilder; a view becomes
+strict ``CREATE VIEW`` over its query body. A Folder has no DDL (it is a
+directory). T-SQL generation has its own test module
+(``test_declaration_tsql_ddl``); here we only assert a SQL object routes to the
+``tsql`` executor. Nothing here runs ``read()``.
 
 Every Spark object is named in full, and so is every managed reference in a
 body. That is not decoration: a bare two-part name resolves through whatever
@@ -146,6 +147,10 @@ PY_TABLE_SOURCE = """
 
     Lineage: $Raw.CustomerCsv
 
+    Primary key: CustomerId
+
+    Identity: CustomerKey
+
     Schema:
       CustomerId: integer
       CustomerName: string
@@ -170,6 +175,8 @@ Lineage: $DWG.Customer
 Dependencies:
   - DWG.Customer
 
+Identity: CustomerKey
+
 Schema:
   CustomerCount: bigint
 */
@@ -178,22 +185,25 @@ select count(*) as CustomerCount from DWG.Customer;
 
 
 @weaver_test()
-def test_python_delta_table_is_a_create_table_over_declared_and_audit_columns():
+def test_python_delta_table_uses_the_structured_table_payload():
     ddl = _doc("DWG__Customer.py", PY_TABLE_SOURCE).create_ddl(destination=SALES)
 
-    assert (ddl.executor, ddl.extension) == (SPARK_SQL_EXECUTOR, SPARK_SQL_EXTENSION)
-    assert ddl.content.startswith("CREATE TABLE `Demo`.`Sales_LH`.`DWG`.`Customer` (\n")
-    assert "`CustomerId` integer" in ddl.content
-    assert "`CustomerName` string" in ddl.content
-    assert "`IsActive` boolean" in ddl.content
-    # Every built table carries the audit columns, in the Delta (underscored)
-    # spelling, as not-null timestamps (how-does-build-work §2, plan "Audit
-    # columns"); Weaver populates all three on every loaded row.
-    assert "`row_insert_datetime` timestamp NOT NULL" in ddl.content
-    assert "`row_update_datetime` timestamp NOT NULL" in ddl.content
-    assert "`row_delete_datetime` timestamp NOT NULL" in ddl.content
-    assert "USING delta" in ddl.content
-    assert "delta.columnMapping.mode" in ddl.content
+    assert (ddl.executor, ddl.extension) == (
+        SPARK_TABLE_EXECUTOR,
+        SPARK_TABLE_EXTENSION,
+    )
+    payload = json.loads(ddl.content)
+    assert payload["object"] == "`Demo`.`Sales_LH`.`DWG`.`Customer`"
+    assert payload["schema_mode"] == "declared"
+    assert payload["declared_columns"] == [
+        ["CustomerId", "integer", True],
+        ["CustomerName", "string", False],
+        ["IsActive", "boolean", False],
+    ]
+    assert payload["source_query"] is None
+    assert payload["setup"] == []
+    assert payload["identity_column"] == ["CustomerKey", "bigint", True]
+    assert ["row_insert_datetime", "timestamp", True] in payload["audit_columns"]
 
 
 @weaver_test()
@@ -217,6 +227,7 @@ def test_spark_sql_table_defers_its_build_to_the_spark_table_executor():
     # [name, type, not_null]; CustomerCount has no primary key here, so it is
     # nullable, while every audit column is not null.
     assert payload["declared_columns"] == [["CustomerCount", "bigint", False]]
+    assert payload["identity_column"] == ["CustomerKey", "bigint", True]
     assert payload["source_query"] == (
         "select count(*) as CustomerCount from `Demo`.`Sales_LH`.`DWG`.`Customer`"
     )
@@ -269,6 +280,18 @@ def test_an_inferred_spark_sql_table_carries_no_declared_columns():
     payload = json.loads(ddl.content)
     assert payload["schema_mode"] == "inferred"
     assert payload["declared_columns"] is None
+    assert payload["identity_column"] == ["CustomerKey", "bigint", True]
+
+
+@weaver_test()
+def test_a_table_without_identity_carries_no_identity_marker():
+    source = SPARK_TABLE_SOURCE.replace("\nIdentity: CustomerKey\n", "")
+
+    payload = json.loads(
+        _doc("DWG.CustomerCount.sql", source).create_ddl(destination=SALES).content
+    )
+
+    assert payload["identity_column"] is None
 
 
 # --- folders and T-SQL: no create DDL ---------------------------------------

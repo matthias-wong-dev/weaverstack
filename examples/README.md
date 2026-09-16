@@ -155,6 +155,21 @@ authored SQL. Nothing about loading it differs, which is the point: the
 whole Delta load lifecycle lives in one place, so a table authored in SQL
 and one authored in Python cannot come to behave differently.
 
+A Runtime 2.0 Lakehouse table may also declare a generated surrogate:
+
+```yaml
+Primary key: Customer id
+Identity: Customer key
+
+Schema:
+  Customer id: string
+  Customer name: string
+```
+
+The source returns the schema columns and never supplies `Customer key`. New rows
+receive a generated bigint. Keyed updates keep it; replacement or recreation
+assigns new values.
+
 Or orchestrate the lot, in dependency order, from either mode:
 
 ``` bash

@@ -39,26 +39,17 @@ class SparkTableExecutor:
     ) -> dict[str, Any] | None:
         if payload is None:
             raise InstallError(f"spark_table action {action.id!r} has no payload")
-        if context.spark_sql is None or context.spark_sql_batch is None:
+        if context.create_delta_table is None:
             raise InstallError(
-                f"spark_table action {action.id!r} has no way to run a Spark "
-                "statement: this context offers no Spark SQL capability"
+                f"spark_table action {action.id!r} has no Delta table creation "
+                "capability"
             )
 
         instruction = json.loads(payload.decode("utf-8"))
         # Both the query and table are fully qualified for the batch target;
         # session catalogue defaults must not influence inferred shape.
         qualified = instruction["object"]
-        query = instruction["source_query"]
-
-        # Setup and describe share one submission so temporary views remain visible.
-        setup = list(instruction.get("setup") or ())
-        query_columns, query_types = self._query_shape(
-            [*setup, f"DESCRIBE QUERY {query}"],
-            context,
-            action=action,
-            qualified=qualified,
-        )
+        query = instruction.get("source_query")
 
         declared = instruction["declared_columns"]
         declared_names = (
@@ -69,28 +60,58 @@ class SparkTableExecutor:
         references = tuple(
             (label, column) for label, column in instruction["references"]
         )
-        business_columns = validate_build_columns(
-            qualified,
-            query_columns,
-            declared_columns=declared_names,
-            references=references,
-        )
+        if query is None:
+            if declared_names is None:
+                raise InstallError(
+                    f"spark_table action {action.id!r} has neither a declared "
+                    f"schema nor a source query for {qualified}"
+                )
+            business_columns = declared_names
+            query_types = {}
+        else:
+            if context.spark_sql_batch is None:
+                raise InstallError(
+                    f"spark_table action {action.id!r} cannot read the query shape: "
+                    "this context offers no Spark SQL capability"
+                )
+            # Setup and describe share one submission so temporary views remain visible.
+            setup = list(instruction.get("setup") or ())
+            query_columns, query_types = self._query_shape(
+                [*setup, f"DESCRIBE QUERY {query}"],
+                context,
+                action=action,
+                qualified=qualified,
+            )
+            business_columns = validate_build_columns(
+                qualified,
+                query_columns,
+                declared_columns=declared_names,
+                references=references,
+            )
 
+        identity = instruction.get("identity_column")
+        identity_name = identity[0] if identity is not None else None
         business = self._physical_columns(
-            qualified, business_columns, declared, query_types, references
+            qualified,
+            business_columns,
+            declared,
+            query_types,
+            references,
+            identity_name=identity_name,
         )
         physical = (
-            business
+            ([] if identity is None else [tuple(identity)])
+            + business
             + [tuple(entry) for entry in instruction["audit_columns"]]
             + [tuple(entry) for entry in instruction.get("internal_columns") or ()]
         )
 
-        statement = _create_table_sql(
+        context.create_delta_table(
             qualified,
             physical,
+            identity_column=identity_name,
             column_mapping=instruction.get("column_mapping", True),
         )
-        context.spark_sql(statement, exact_case=True)
         return {
             "object": qualified,
             "schema_mode": instruction["schema_mode"],
@@ -141,6 +162,8 @@ class SparkTableExecutor:
         declared: list | None,
         query_types: dict[str, str],
         references: tuple[tuple[str, str], ...],
+        *,
+        identity_name: str | None,
     ) -> list[tuple[str, str, bool]]:
         """Return business columns as ``(name, type, not_null)``.
 
@@ -162,6 +185,16 @@ class SparkTableExecutor:
                 f"{qualified}: the query produces column(s) reserved for Weaver's "
                 "row signature column: " + ", ".join(signature)
             )
+        identity = [
+            name
+            for name in business_columns
+            if identity_name is not None and name.lower() == identity_name.lower()
+        ]
+        if identity:
+            raise InstallError(
+                f"{qualified}: the query produces column(s) reserved for Weaver's "
+                "identity column: " + ", ".join(identity)
+            )
 
         if declared is not None:
             declared_by_name = {name: (type_, nn) for name, type_, nn in declared}
@@ -176,22 +209,3 @@ class SparkTableExecutor:
             (name, query_types[name], name in not_null_names)
             for name in business_columns
         ]
-
-
-def _create_table_sql(
-    qualified: str, columns: list[tuple[str, str, bool]], *, column_mapping: bool
-) -> str:
-    column_lines = ",\n".join(
-        f"    {_ident(name)} {type_}{' NOT NULL' if not_null else ''}"
-        for name, type_, not_null in columns
-    )
-    mapping = (
-        "\nTBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
-        if column_mapping
-        else ""
-    )
-    return f"CREATE TABLE {qualified} (\n{column_lines}\n)\nUSING delta{mapping}\n"
-
-
-def _ident(name: str) -> str:
-    return "`" + name.replace("`", "``") + "`"

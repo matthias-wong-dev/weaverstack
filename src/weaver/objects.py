@@ -591,11 +591,17 @@ class Table(WeaverObject):
         projection reads the table once.
         """
 
-        declared = self._document().schema
+        document = self._document()
+        declared = document.schema
         if declared:
             return tuple(column.name for column in declared)
         physical = self._physical_dataframe() if frame is None else frame
-        return _business_names(physical.columns)
+        business = _business_names(physical.columns)
+        if document.identity is None:
+            return business
+        return tuple(
+            name for name in business if name.lower() != document.identity.lower()
+        )
 
     def _projection(self, frame, row_audit_columns: bool) -> tuple[str, ...]:
         """The author-facing column list for a frame already read.

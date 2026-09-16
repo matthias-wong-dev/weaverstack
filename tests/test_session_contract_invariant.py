@@ -24,6 +24,7 @@ HOSTS = (ConsoleSession, NotebookSession, TestSession)
 #: The capabilities an operation reaches for. Every host answers all of them,
 #: and a caller may pass the same arguments to any of them.
 CAPABILITIES = (
+    "create_delta_table",
     "execute_python",
     "execute_spark_sql_batch",
     "execute_tsql",
@@ -90,3 +91,29 @@ def test_the_test_host_records_rather_than_interprets():
             f"TestSession mentions {forbidden!r}, which suggests it has started "
             "interpreting statements rather than recording them"
         )
+
+
+@weaver_test()
+def test_the_test_host_records_the_delta_table_specification():
+    from weaver.workspaces import Workspace
+
+    session = TestSession(workspace=Workspace(workspace="Demo"))
+    session.create_delta_table(
+        "`Demo`.`Sales`.`DWG`.`Customer`",
+        (("Customer key", "bigint", True), ("Customer id", "string", True)),
+        identity_column="Customer key",
+        column_mapping=True,
+    )
+
+    (call,) = session.calls
+    assert call.kind == "delta_table"
+    assert call.body == {
+        "object": "`Demo`.`Sales`.`DWG`.`Customer`",
+        "columns": [
+            ["Customer key", "bigint", True],
+            ["Customer id", "string", True],
+        ],
+        "identity_column": "Customer key",
+        "column_mapping": True,
+        "validate_only": False,
+    }
