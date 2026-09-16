@@ -1,4 +1,4 @@
-# CI checks the supported Python environment.
+# CI checks the primary Python desktop environment.
 #
 # Fabric tests are run explicitly when relevant rather than on every pull
 # request: they need a workspace, a running capacity and a credential.
@@ -19,8 +19,8 @@ concurrency:
 
 jobs:
   core:
-    name: core / macOS / py3.11
-    runs-on: macos-latest
+    name: core / Windows / py3.13
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
           cache: pip
 
       - run: pip install -r requirements-dev.txt
