@@ -344,16 +344,22 @@ def test_a_tolerant_run_continues_independent_branches(session, dispatched):
 
 
 @weaver_test()
-def test_a_tolerant_run_still_blocks_descendants(session, dispatched):
-    """Tolerance decides whether independent branches continue, never whether
-    a node may run on a dependency that did not."""
-
+def test_a_tolerant_run_attempts_refresh_and_warehouse_after_a_failed_load(
+    session, dispatched
+):
     dispatched.answers[ORDER] = RuntimeError("boom")
+    dispatched.answers[SUMMARY] = LoadResult.failure("the Warehouse load failed")
 
     report = _run(session, fault_tolerant=True)
 
-    assert SUMMARY not in dispatched.calls
-    assert report.by_node[SUMMARY].status == BLOCKED
+    assert dispatched.calls.index(ORDER) < dispatched.calls.index(REFRESH)
+    assert dispatched.calls.index(REFRESH) < dispatched.calls.index(SUMMARY)
+    assert report.by_node[ORDER].status == FAILED
+    assert report.by_node[REFRESH].status == SUCCEEDED
+    assert report.by_node[SUMMARY].status == FAILED
+    assert _result_for(session, ORDER) == "Error"
+    assert _result_for(session, REFRESH) == "Succeeded"
+    assert _result_for(session, SUMMARY) == "Failed"
 
 
 # --- the distinction rejects create -------------------------------------------
@@ -436,18 +442,6 @@ def test_a_record_says_what_became_of_the_node(session, dispatched):
     # node touched the target at all.
     statements = "\n".join(_log_statements(session))
     assert "executed" in statements
-
-
-@weaver_test()
-def test_a_blocked_node_receives_evidence_of_its_own(session, dispatched):
-    dispatched.answers[ORDER] = RuntimeError("boom")
-
-    report = _run(session, fault_tolerant=True)
-    blocked = [n.node_id for n in report.nodes if n.status == BLOCKED]
-
-    assert blocked
-    assert set(blocked) <= set(_recorded_nodes(session))
-    assert _result_for(session, blocked[0]) == "Blocked"
 
 
 @weaver_test()

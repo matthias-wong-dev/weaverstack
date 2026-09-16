@@ -81,7 +81,7 @@ class RunRequest:
     selected: tuple | None = None
     #: A source file compiled and run without being installed. ``test`` only.
     file: str | None = None
-    #: Continue independent branches after a node fails, and report.
+    #: Continue through settled dependency failures, and report each outcome.
     fault_tolerant: bool = False
     #: Plan, resolve and report without dispatching anything.
     dry_run: bool = False
@@ -307,7 +307,7 @@ class Runner:
                             messages=resolved.messages,
                             location=resolved.dispatch_location,
                         ),
-                        FAILED,
+                        INVALID,
                     )
                     if not self.request.fault_tolerant:
                         stopped = True
@@ -439,11 +439,16 @@ class Runner:
     _SATISFIED = (SUCCEEDED, SUCCEEDED_WITH_REJECTS, SKIPPED, VALIDATED)
 
     def _blocking(self, node, statuses) -> tuple[str, ...]:
+        satisfied = (
+            (*self._SATISFIED, FAILED)
+            if self.request.fault_tolerant
+            else self._SATISFIED
+        )
         return tuple(
             sorted(
                 upstream
                 for upstream in self.graph.upstream(node.node_id)
-                if statuses.get(upstream) not in self._SATISFIED
+                if statuses.get(upstream) not in satisfied
             )
         )
 

@@ -935,6 +935,13 @@ two items installed in one Lakehouse do not select each other's work. Crossing
 between named items inserts the endpoint-refresh and OneLake-publication barriers
 their targets require.
 
+Dependency edges order settlement. Without fault tolerance, an upstream failure
+stops scheduling and blocks its descendants. With fault tolerance, a failed node
+settles its edge and each descendant is attempted in graph order, including
+endpoint-refresh and OneLake-publication barriers. In a fault-tolerant run, a
+node is Blocked only when its prerequisites cannot be resolved into runnable
+work.
+
 `--name` narrows a load to named installed loadables, running only those and
 ordering nothing. A Lakehouse keeps a Folder and a table of one `Schema.Object`
 apart by area, so a Lakehouse selector is `Tables/Schema.Object` or
