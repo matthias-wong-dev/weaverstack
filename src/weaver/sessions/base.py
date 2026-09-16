@@ -257,7 +257,6 @@ class Session(ABC):
         *,
         identity_column: str | None = None,
         column_mapping: bool = True,
-        validate_only: bool = False,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:

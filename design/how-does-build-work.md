@@ -60,9 +60,9 @@ paths then pass one resolved physical schema to the Session's strict
 The physical order is an optional identity column, business columns, row audit
 columns and other internal columns. Ordinary tables use the same creator on
 Fabric Runtime 1.3 and 2.0. A Lakehouse `Identity:` declaration requires Runtime
-2.0 identity support and uses `IdentityGenerator`. Installation checks this
-before an affected rebuild removes the existing table. TableBuilder keeps the
-host's protocol and feature defaults.
+2.0 identity support and uses `IdentityGenerator`. If the active runtime does not
+provide that capability, table creation fails at the Session boundary. TableBuilder
+keeps the host's protocol and feature defaults.
 
 Every generated object reference is resolved against the action's bound target,
 producing the native workspace/Lakehouse/schema/object name. A bare

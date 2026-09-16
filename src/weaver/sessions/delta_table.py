@@ -25,7 +25,6 @@ def create_delta_table_in_session(
     *,
     identity_column: str | None,
     column_mapping: bool,
-    validate_only: bool,
 ):
     """Create one strict Delta table against an active Spark session."""
 
@@ -38,9 +37,6 @@ def create_delta_table_in_session(
             identity_generator = delta_tables.IdentityGenerator
         except AttributeError as exc:
             raise CommandError(_identity_error(qualified_name)) from exc
-
-    if validate_only:
-        return {"object": qualified_name, "identity_supported": True}
 
     previous = spark.conf.get(_CASE_SENSITIVE)
     restore = str(previous).lower() != "true"
@@ -68,7 +64,6 @@ def remote_delta_table_program(
     *,
     identity_column: str | None,
     column_mapping: bool,
-    validate_only: bool,
 ) -> str:
     """Return a self-contained program for the desktop Session's Livy crossing."""
 
@@ -78,7 +73,6 @@ def remote_delta_table_program(
             "columns": [list(column) for column in columns],
             "identity_column": identity_column,
             "column_mapping": bool(column_mapping),
-            "validate_only": bool(validate_only),
         },
         ensure_ascii=True,
         separators=(",", ":"),
@@ -99,28 +93,25 @@ def remote_delta_table_program(
         '            "delta.tables.IdentityGenerator on this Fabric runtime"\n'
         "        ) from _exc\n"
         "    _identity_factory = _IdentityGenerator\n"
-        "if _spec['validate_only']:\n"
-        "    emit({'object': _spec['object'], 'identity_supported': True})\n"
-        "else:\n"
-        f"    _case_key = {_CASE_SENSITIVE!r}\n"
-        "    _previous = spark.conf.get(_case_key)\n"
-        "    _restore = str(_previous).lower() != 'true'\n"
+        f"_case_key = {_CASE_SENSITIVE!r}\n"
+        "_previous = spark.conf.get(_case_key)\n"
+        "_restore = str(_previous).lower() != 'true'\n"
+        "if _restore:\n"
+        "    spark.conf.set(_case_key, 'true')\n"
+        "try:\n"
+        "    _builder = _DeltaTable.create(spark).tableName(_spec['object'])\n"
+        "    for _name, _type, _not_null in _spec['columns']:\n"
+        "        _options = {'nullable': not bool(_not_null)}\n"
+        "        if _name == _spec['identity_column']:\n"
+        "            _options['generatedAlwaysAs'] = _identity_factory()\n"
+        "        _builder = _builder.addColumn(_name, _type, **_options)\n"
+        "    if _spec['column_mapping']:\n"
+        "        _builder = _builder.property('delta.columnMapping.mode', 'name')\n"
+        "    _builder.execute()\n"
+        "finally:\n"
         "    if _restore:\n"
-        "        spark.conf.set(_case_key, 'true')\n"
-        "    try:\n"
-        "        _builder = _DeltaTable.create(spark).tableName(_spec['object'])\n"
-        "        for _name, _type, _not_null in _spec['columns']:\n"
-        "            _options = {'nullable': not bool(_not_null)}\n"
-        "            if _name == _spec['identity_column']:\n"
-        "                _options['generatedAlwaysAs'] = _identity_factory()\n"
-        "            _builder = _builder.addColumn(_name, _type, **_options)\n"
-        "        if _spec['column_mapping']:\n"
-        "            _builder = _builder.property('delta.columnMapping.mode', 'name')\n"
-        "        _builder.execute()\n"
-        "    finally:\n"
-        "        if _restore:\n"
-        "            spark.conf.set(_case_key, _previous)\n"
-        "    emit({'object': _spec['object'], 'created': True})\n"
+        "        spark.conf.set(_case_key, _previous)\n"
+        "emit({'object': _spec['object'], 'created': True})\n"
     )
 
 

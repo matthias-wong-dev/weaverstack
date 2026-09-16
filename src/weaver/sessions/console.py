@@ -297,7 +297,6 @@ class ConsoleSession(Session):
         *,
         identity_column: str | None = None,
         column_mapping: bool = True,
-        validate_only: bool = False,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
@@ -308,7 +307,6 @@ class ConsoleSession(Session):
             columns,
             identity_column=identity_column,
             column_mapping=column_mapping,
-            validate_only=validate_only,
         )
         scope = self.scope(workspace)
         livy = self._foreground_livy(scope)

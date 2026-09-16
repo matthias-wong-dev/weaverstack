@@ -119,7 +119,6 @@ class TestSession(Session):
         *,
         identity_column: str | None = None,
         column_mapping: bool = True,
-        validate_only: bool = False,
         workspace: Workspace | None = None,
         timeout: float | None = None,
     ) -> Any:
@@ -130,7 +129,6 @@ class TestSession(Session):
                 "columns": [list(column) for column in columns],
                 "identity_column": identity_column,
                 "column_mapping": column_mapping,
-                "validate_only": validate_only,
             },
             workspace,
             timeout=timeout,

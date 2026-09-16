@@ -115,5 +115,4 @@ def test_the_test_host_records_the_delta_table_specification():
         ],
         "identity_column": "Customer key",
         "column_mapping": True,
-        "validate_only": False,
     }

@@ -164,7 +164,6 @@ def test_an_unsupported_identity_names_the_target_before_creation(
             TARGET,
             COLUMNS,
             identity_column="Customer key",
-            validate_only=True,
         )
 
     assert _DeltaTable.builders == []
@@ -219,10 +218,28 @@ def test_console_program_restores_exact_case_after_a_create_error(delta_module):
         COLUMNS,
         identity_column="Customer key",
         column_mapping=True,
-        validate_only=False,
     )
 
     with pytest.raises(RuntimeError, match="create failed"):
         exec(source, {"spark": spark, "emit": lambda _value: None})
 
     assert spark.conf.get(CASE_KEY) == "false"
+
+
+@weaver_test()
+def test_console_program_names_the_target_when_identity_is_unsupported(delta_module):
+    from weaver.sessions.delta_table import remote_delta_table_program
+
+    del delta_module.IdentityGenerator
+    spark = SimpleNamespace(conf=_Conf())
+    source = remote_delta_table_program(
+        TARGET,
+        COLUMNS,
+        identity_column="Customer key",
+        column_mapping=True,
+    )
+
+    with pytest.raises(RuntimeError, match="Customer Order.*IdentityGenerator"):
+        exec(source, {"spark": spark, "emit": lambda _value: None})
+
+    assert _DeltaTable.builders == []

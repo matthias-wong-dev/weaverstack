@@ -71,14 +71,12 @@ class _Capability:
         *,
         identity_column=None,
         column_mapping=True,
-        validate_only=False,
     ):
         specification = {
             "object": qualified_name,
             "columns": [tuple(column) for column in columns],
             "identity_column": identity_column,
             "column_mapping": column_mapping,
-            "validate_only": validate_only,
         }
         self.creations.append(specification)
         if self._create_error is not None:
