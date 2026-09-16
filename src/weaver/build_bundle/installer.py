@@ -110,6 +110,27 @@ class Installer:
 
         return run
 
+    def delta_table_creator(self):
+        session = self.session
+        workspace = self.workspace
+
+        def create(
+            qualified_name,
+            columns,
+            *,
+            identity_column=None,
+            column_mapping=True,
+        ):
+            return session.create_delta_table(
+                qualified_name,
+                columns,
+                identity_column=identity_column,
+                column_mapping=column_mapping,
+                workspace=workspace,
+            )
+
+        return create
+
     def sql_for(self, bound: BoundTarget) -> Any:
         """Return a deferred Warehouse connection, or ``None`` for a Lakehouse."""
 
@@ -243,6 +264,7 @@ def _run_sequence(
         for batch in sequence.batches:
             target = resolved[batch.target_id]
             context = InstallationContext(
+                create_delta_table=installer.delta_table_creator(),
                 spark_sql=installer.spark_sql(),
                 spark_sql_batch=installer.spark_sql_batch(),
                 resolver=installer.resolver,

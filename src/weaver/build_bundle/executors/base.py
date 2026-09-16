@@ -49,6 +49,8 @@ class InstallationContext:
     spark_sql: Any = None
     #: Ordered Spark SQL statements in one submission and identifier-case scope.
     spark_sql_batch: Any = None
+    #: Strict Delta table creation through the Session-owned TableBuilder path.
+    create_delta_table: Any = None
     targets: Mapping[str, ResolvedTarget] = field(default_factory=dict)
     #: One publication instant for every Registry row in this installation.
     build_datetime: str | None = None

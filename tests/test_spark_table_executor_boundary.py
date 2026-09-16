@@ -7,9 +7,9 @@ executor's own logic cheaply: what it asks Spark, what SQL it
 generates, and that it surfaces every column violation the plan lists, without
 paying for a Spark session.
 
-The executor reaches Spark twice and only twice: once to describe the query's
-shape, once to create the table. Everything between is decided here, from the
-frozen payload.
+The executor reaches Spark twice for a Spark SQL declaration: once to describe the
+query's shape, then once through Session-owned TableBuilder creation. A Python
+declaration already has its shape and reaches Spark once.
 """
 
 from __future__ import annotations
@@ -49,9 +49,7 @@ class _Capability:
         self._create_error = create_error
         #: One entry per call: ``(statements, exact_case)``.
         self.calls: list[tuple[list[str], bool]] = []
-
-    def one(self, statement: str, *, exact_case: bool = False):
-        return self.many([statement], exact_case=exact_case)
+        self.creations: list[dict] = []
 
     def many(self, statements, *, exact_case: bool = False):
         ordered = list(statements)
@@ -64,9 +62,26 @@ class _Capability:
                 {"col_name": name, "data_type": simple, "comment": None}
                 for name, simple in self._fields
             ]
-        if last.upper().startswith("CREATE") and self._create_error is not None:
-            raise self._create_error
         return []
+
+    def create(
+        self,
+        qualified_name,
+        columns,
+        *,
+        identity_column=None,
+        column_mapping=True,
+    ):
+        specification = {
+            "object": qualified_name,
+            "columns": [tuple(column) for column in columns],
+            "identity_column": identity_column,
+            "column_mapping": column_mapping,
+        }
+        self.creations.append(specification)
+        if self._create_error is not None:
+            raise self._create_error
+        return {"created": qualified_name}
 
     @property
     def statements(self) -> list[str]:
@@ -75,12 +90,6 @@ class _Capability:
     @property
     def described(self) -> str:
         return next(one for one in self.statements if one.upper().startswith(DESCRIBE))
-
-    @property
-    def created(self) -> str:
-        return next(
-            one for one in self.statements if one.lstrip().upper().startswith("CREATE")
-        )
 
 
 AUDIT = [
@@ -108,6 +117,7 @@ def _payload(**overrides) -> bytes:
         "declared_columns": None,
         "source_query": f"select CustomerId, CustomerName from {RAW}",
         "references": [["Primary key", "CustomerId"]],
+        "identity_column": None,
         "audit_columns": AUDIT,
         "column_mapping": True,
     }
@@ -138,8 +148,8 @@ def _context(capability, destination):
         resolver=None,
         store=None,
         target=target,
-        spark_sql=None if capability is None else capability.one,
         spark_sql_batch=None if capability is None else capability.many,
+        create_delta_table=None if capability is None else capability.create,
     )
 
 
@@ -194,9 +204,9 @@ def test_a_table_is_built_in_exactly_two_reaches_for_spark():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(capability, _payload())
 
-    assert len(capability.calls) == 2
+    assert len(capability.calls) == 1
     assert capability.calls[0][0][-1].startswith(DESCRIBE)
-    assert capability.calls[1][0] == [capability.created]
+    assert len(capability.creations) == 1
 
 
 @pytest.mark.parametrize(
@@ -205,14 +215,13 @@ def test_a_table_is_built_in_exactly_two_reaches_for_spark():
     ids=["fabric", "local"],
 )
 @weaver_test()
-def test_the_shape_and_the_create_share_one_case_scope(destination):
-    """A table created as ``CustomerEnriched`` has to be readable by the next
-    action in the same build, so both halves are analysed the same way."""
+def test_the_shape_uses_exact_case_and_creation_uses_the_session(destination):
 
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(capability, _payload(), destination=destination)
 
-    assert [exact_case for _statements, exact_case in capability.calls] == [True, True]
+    assert [exact_case for _statements, exact_case in capability.calls] == [True]
+    assert capability.creations[0]["object"] == CUSTOMER
 
 
 @weaver_test()
@@ -233,19 +242,15 @@ def test_inferred_table_uses_query_types_and_appends_not_null_audit_columns():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     details = _run(capability, _payload())
 
-    statement = capability.created
-    assert statement.startswith(f"CREATE TABLE {CUSTOMER} (\n")
-    # CustomerId is the primary key, so it is not null even when inferred;
-    # CustomerName is not, so it stays nullable.
-    assert "`CustomerId` int NOT NULL" in statement
-    assert "`CustomerName` string,\n" in statement
-    assert "`CustomerName` string NOT NULL" not in statement
-    # Every audit column is not null.
-    assert "`row_insert_datetime` timestamp NOT NULL" in statement
-    assert "`row_update_datetime` timestamp NOT NULL" in statement
-    assert "`row_delete_datetime` timestamp NOT NULL" in statement
-    assert "USING delta" in statement
-    assert "delta.columnMapping.mode" in statement
+    created = capability.creations[0]
+    assert created["columns"] == [
+        ("CustomerId", "int", True),
+        ("CustomerName", "string", False),
+        ("row_insert_datetime", "timestamp", True),
+        ("row_update_datetime", "timestamp", True),
+        ("row_delete_datetime", "timestamp", True),
+    ]
+    assert created["column_mapping"] is True
     assert details["columns"][:2] == ["CustomerId", "CustomerName"]
 
 
@@ -254,7 +259,7 @@ def test_creation_names_the_destination_the_payload_was_addressed_to():
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(capability, _payload())
 
-    assert capability.created.startswith(f"CREATE TABLE {CUSTOMER}")
+    assert capability.creations[0]["object"] == CUSTOMER
 
 
 @weaver_test()
@@ -272,11 +277,13 @@ def test_a_complex_query_type_reaches_the_created_table_unchanged():
     )
     _run(capability, _payload(references=[]))
 
-    statement = capability.created
-    assert "`Balance` decimal(18,2)" in statement
-    assert "`SeenAt` timestamp" in statement
-    assert "`Lines` array<struct<amount:decimal(9,3)>>" in statement
-    assert "`Tags` map<string,int>" in statement
+    types = {
+        name: type_ for name, type_, _not_null in capability.creations[0]["columns"]
+    }
+    assert types["Balance"] == "decimal(18,2)"
+    assert types["SeenAt"] == "timestamp"
+    assert types["Lines"] == "array<struct<amount:decimal(9,3)>>"
+    assert types["Tags"] == "map<string,int>"
 
 
 @weaver_test()
@@ -290,30 +297,95 @@ def test_the_not_null_header_marks_inferred_columns_not_null():
             references=[["Primary key", "CustomerId"], ["Not null", "CustomerName"]],
         ),
     )
-    statement = capability.created
-    # The primary key and the Not null column are not null; Note is nullable.
-    assert "`CustomerId` int NOT NULL" in statement
-    assert "`CustomerName` string NOT NULL" in statement
-    assert "`Note` string,\n" in statement
-    assert "`Note` string NOT NULL" not in statement
+    columns = capability.creations[0]["columns"]
+    assert columns[:3] == [
+        ("CustomerId", "int", True),
+        ("CustomerName", "string", True),
+        ("Note", "string", False),
+    ]
 
 
 @weaver_test()
 def test_a_delta_table_is_built_with_no_identity_column():
-    """Identity is a Warehouse declaration, so nothing here materialises one.
-
-    The parser refuses ``Identity`` on a Delta table
-    (:data:`weaver.declaration.metadata.IDENTITY_LANGUAGES`), so the executor has
-    no identity case to handle: the created table is the business columns and the
-    audit columns, and nothing else.
-    """
-
     capability = _Capability([("CustomerId", "int"), ("CustomerName", "string")])
     _run(capability, _payload())
-    statement = capability.created
-    assert statement.startswith(f"CREATE TABLE {CUSTOMER} (\n    `CustomerId` int")
-    assert "identity" not in statement.lower()
-    assert "generated" not in statement.lower()
+    created = capability.creations[0]
+    assert created["identity_column"] is None
+    assert created["columns"][0] == ("CustomerId", "int", True)
+
+
+@weaver_test()
+def test_python_table_uses_declared_shape_without_query_inference():
+    capability = _Capability([])
+
+    _run(
+        capability,
+        _payload(
+            schema_mode="declared",
+            declared_columns=[
+                ["CustomerId", "string", True],
+                ["CustomerName", "string", False],
+            ],
+            source_query=None,
+            setup=[],
+        ),
+    )
+
+    assert capability.calls == []
+    assert capability.creations[0]["columns"][:2] == [
+        ("CustomerId", "string", True),
+        ("CustomerName", "string", False),
+    ]
+
+
+@weaver_test()
+def test_identity_leads_the_physical_shape_and_is_marked_for_creation():
+    capability = _Capability([("CustomerId", "string"), ("CustomerName", "string")])
+
+    details = _run(
+        capability,
+        _payload(identity_column=["CustomerKey", "bigint", True]),
+    )
+
+    created = capability.creations[0]
+    assert created["identity_column"] == "CustomerKey"
+    assert created["columns"][:3] == [
+        ("CustomerKey", "bigint", True),
+        ("CustomerId", "string", True),
+        ("CustomerName", "string", False),
+    ]
+    assert details["columns"][0] == "CustomerKey"
+
+
+@weaver_test()
+def test_inferred_identity_is_available_to_column_metadata_validation():
+    capability = _Capability([("CustomerId", "string"), ("CustomerName", "string")])
+
+    _run(
+        capability,
+        _payload(
+            identity_column=["CustomerKey", "bigint", True],
+            references=[
+                ["Primary key", "CustomerId"],
+                ["Column notes", "CustomerKey"],
+            ],
+        ),
+    )
+
+    assert capability.creations[0]["identity_column"] == "CustomerKey"
+
+
+@weaver_test()
+def test_inferred_query_output_may_not_collide_with_identity():
+    capability = _Capability([("CustomerId", "string"), ("CustomerKey", "bigint")])
+
+    with pytest.raises(BuildError, match="Identity 'CustomerKey' duplicates"):
+        _run(
+            capability,
+            _payload(identity_column=["CustomerKey", "bigint", True]),
+        )
+
+    assert capability.creations == []
 
 
 @weaver_test()
@@ -329,10 +401,10 @@ def test_declared_table_uses_declared_types_and_nullability_not_the_query():
             ],
         ),
     )
-    statement = capability.created
-    # The declaration asked for bigint NOT NULL; the query's int is ignored.
-    assert "`CustomerId` bigint NOT NULL" in statement
-    assert "`CustomerName` string,\n" in statement
+    assert capability.creations[0]["columns"][:2] == [
+        ("CustomerId", "bigint", True),
+        ("CustomerName", "string", False),
+    ]
 
 
 @weaver_test()
@@ -422,9 +494,7 @@ def test_a_query_that_does_not_resolve_names_the_action_and_carries_spark():
     assert "build-delta-Sales.Customer" in message
     assert CUSTOMER in message
     assert "UNRESOLVED_COLUMN" in message
-    assert not any(
-        one.lstrip().upper().startswith("CREATE") for one in capability.statements
-    )
+    assert capability.creations == []
 
 
 @weaver_test()
@@ -447,6 +517,6 @@ def test_a_failing_create_is_not_swallowed():
 
 
 @weaver_test()
-def test_no_way_to_run_a_statement_is_a_clear_install_error():
-    with pytest.raises(InstallError, match="no Spark SQL capability"):
+def test_no_way_to_create_a_table_is_a_clear_install_error():
+    with pytest.raises(InstallError, match="no Delta table creation capability"):
         _run(None, _payload())

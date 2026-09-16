@@ -290,6 +290,33 @@ class ConsoleSession(Session):
 
     # --- execution capabilities ---------------------------------------------
 
+    def create_delta_table(
+        self,
+        qualified_name: str,
+        columns: Sequence[Sequence[Any]],
+        *,
+        identity_column: str | None = None,
+        column_mapping: bool = True,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        from .delta_table import remote_delta_table_program
+
+        source = remote_delta_table_program(
+            qualified_name,
+            columns,
+            identity_column=identity_column,
+            column_mapping=column_mapping,
+        )
+        scope = self.scope(workspace)
+        livy = self._foreground_livy(scope)
+        return scope.livy_run(
+            source,
+            name="delta_table",
+            timeout=timeout,
+            livy=livy,
+        )
+
     def execute_python(
         self,
         program: RemoteProgram,

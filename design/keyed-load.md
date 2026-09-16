@@ -28,6 +28,11 @@ the stability gate               how much of the target is about to move
 delete, then write
 ```
 
+An `Identity:` column is managed by the engine and never enters raw staging or
+the settled change relation. The business primary key remains the merge key.
+Inserts omit identity so the engine generates it; updates omit identity so the
+stored value remains unchanged.
+
 Every gate is reached before anything is written, so refusing is a decision not
 to start rather than an unwind. Each phase is *settled* before the next reads it:
 that is what lets a gate read the size of a change before a row moves, and it is

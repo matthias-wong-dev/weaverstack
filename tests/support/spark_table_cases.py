@@ -3,7 +3,8 @@
 ``spark_table`` is the one build executor that cannot decide its work from the
 payload alone: a query's columns and their types are only known by asking Spark.
 It asks with ``DESCRIBE QUERY``, in the same submission as whatever setup the
-query needs, and then renders the ``CREATE TABLE`` here and sends that.
+query needs, and then hands the resolved schema to Session-owned TableBuilder
+creation.
 
 The cases below are what makes that answer trustworthy, and they are held in one
 place because both positions have to agree about them: Weaver running the
@@ -81,6 +82,7 @@ class TableCase:
             "setup": list(self.setup),
             "source_query": self.addressed_query(destination),
             "references": [list(pair) for pair in self.references],
+            "identity_column": None,
             "audit_columns": AUDIT_COLUMNS,
             "internal_columns": INTERNAL_COLUMNS,
             "column_mapping": True,
@@ -99,6 +101,7 @@ COMPLEX_TYPES = TableCase(
         "select cast(1 as int) as CustomerId, "
         "cast(1.50 as decimal(18,2)) as Balance, "
         "cast('2026-01-01 00:00:00' as timestamp) as SeenAt, "
+        "cast(2 as bigint) as `Mixed Id`, "
         "array(named_struct('amount', cast(1.500 as decimal(9,3)))) as Lines, "
         "map('north', cast(1 as int)) as Tags "
         "where 1 = 0"
@@ -108,6 +111,7 @@ COMPLEX_TYPES = TableCase(
         "CustomerId": "int",
         "Balance": "decimal(18,2)",
         "SeenAt": "timestamp",
+        "Mixed Id": "bigint",
         "Lines": "array<struct<amount:decimal(9,3)>>",
         "Tags": "map<string,int>",
     },

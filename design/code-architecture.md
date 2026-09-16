@@ -68,6 +68,7 @@ Callers ask for *capabilities*, never for transports:
 ```python
 session.execute_python(program)  # here, or across to Fabric
 session.execute_spark_sql(statement)  # this host's Spark, wherever it is
+session.create_delta_table(name, columns)  # strict TableBuilder creation
 session.execute_tsql(statement, target)  # a Warehouse, over TDS
 session.store(workspace)  # files
 session.resolver(workspace)  # names → physical items
@@ -291,14 +292,15 @@ performing it means:
 write_file            → OneLake        (the deployed Python tree; the bulk)
 build_procedure       → TDS
 refresh_sql_endpoint  → REST
-create_schema, build_table, build_view, shortcut
+create_schema, build_view, shortcut
                       → Session Spark SQL
+build_table           → Session DeltaTableBuilder
 ```
 
 So an action is not classified by where it has to run, and nothing on the far
-side of an install imports Weaver. Statements belonging to *one* action travel
-together — a `spark_sql_batch` payload, or the setup a `DESCRIBE QUERY` needs —
-because they are one piece of work rather than because a submission is expensive.
+side of an install imports Weaver. Statements belonging to one action travel
+together, including the setup a `DESCRIBE QUERY` needs. Delta table creation
+crosses as a serialised TableBuilder specification.
 
 ### Runtime scopes held by name
 

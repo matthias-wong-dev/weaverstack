@@ -419,22 +419,24 @@ def test_the_primary_key_may_not_be_the_identity_column():
 
 @pytest.mark.parametrize("language", [PYTHON, SPARK_SQL])
 @weaver_test()
-def test_a_delta_table_may_not_declare_identity(language):
-    """Identity is a Warehouse declaration.
+def test_a_lakehouse_table_may_declare_identity(language):
+    document = parse(
+        "Table ID: Sales.Order\nDescription: x\nLineage: y\nDependencies: []\n"
+        "Primary key: OrderId\nIdentity: OrderKey\n"
+        "Schema:\n  OrderId: string\n  Amount: decimal(18,2)\n",
+        language=language,
+    )
 
-    Native generation is the whole value of the column, and no Delta version
-    Weaver runs on provides it, so a Delta table declares none rather than
-    carrying a column Weaver would have to populate itself and could not
-    promise to keep unique.
-    """
-
-    with pytest.raises(MetadataError, match="only for Warehouse tables"):
-        parse(
-            "Table ID: Sales.Order\nDescription: x\nLineage: y\nDependencies: []\n"
-            "Primary key: OrderKey\nIdentity: OrderKey\n"
-            "Schema:\n  Amount: decimal(18,2)\n",
-            language=language,
-        )
+    assert document.identity == "OrderKey"
+    identity = document.identity_column
+    assert identity is not None
+    assert (identity.name, identity.type, identity.not_null, identity.is_identity) == (
+        "OrderKey",
+        "bigint",
+        True,
+        True,
+    )
+    assert document.primary_key == ("OrderId",)
 
 
 # --- defaults --------------------------------------------------------------

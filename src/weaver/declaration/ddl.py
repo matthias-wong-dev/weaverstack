@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from .source import SourceDocument
 
 #: Increment when the generated bundle shape changes.
-BUILD_FORMAT_VERSION = 2
+BUILD_FORMAT_VERSION = 3
 
 #: Salt for keyed-table physical signatures; increment when their shape changes.
 KEYED_TABLE_VERSION = 1
@@ -24,17 +24,13 @@ KEYED_TABLE_VERSION = 1
 SPARK_SQL_EXECUTOR = "spark_sql"
 SPARK_SQL_EXTENSION = ".spark.sql"
 
-#: The JSON payload defers DDL until the session reports the query shape.
+#: Structured Delta table payload resolved and created inside the Session boundary.
 SPARK_TABLE_EXECUTOR = "spark_table"
 SPARK_TABLE_EXTENSION = ".spark-table.json"
 
 #: Runs a complete T-SQL script against a Warehouse.
 TSQL_EXECUTOR = "tsql"
 TSQL_EXTENSION = ".sql"
-
-#: Delta column mapping keeps declared column names with spaces (``Order id``)
-#: legal without quoting them everywhere they later appear.
-_COLUMN_MAPPING = "TBLPROPERTIES ('delta.columnMapping.mode' = 'name')"
 
 
 @dataclass(frozen=True)
@@ -60,9 +56,7 @@ def generate_ddl(document: "SourceDocument", *, destination=None) -> GeneratedDd
             "Bind it to a Lakehouse before generating its create definition."
         )
     if document.kind == TABLE:
-        if document.language == SPARK_SQL:
-            return _spark_table_ddl(document, destination)
-        return _python_table_ddl(document, destination)
+        return _spark_table_ddl(document, destination)
     if document.kind == VIEW:
         return _view_ddl(document, destination)
     raise NotImplementedError(
@@ -97,31 +91,24 @@ def _object_name(document: "SourceDocument", destination) -> str:
     return destination.qualify(document.object_id.schema, document.object_id.object)
 
 
-def _python_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
-    """Create an empty Delta table from declared and audit columns."""
-
-    columns = document.document.effective_schema
-    if not document.document.schema:  # pragma: no cover - the reader requires it
-        raise NotImplementedError(
-            f"{document.relative_path}: a Python-backed Delta table must declare "
-            "its schema; schema inference needs a query"
-        )
-    content = _create_table_sql(_object_name(document, destination), columns)
-    return GeneratedDdl(
-        executor=SPARK_SQL_EXECUTOR, content=content, extension=SPARK_SQL_EXTENSION
-    )
-
-
 def _spark_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
-    """Freeze the inputs needed to build a Spark SQL table in its session.
+    """Freeze the inputs needed to build a Delta table in its session.
 
-    The query shape is unavailable until execution, so this payload is JSON rather
-    than finished SQL. It contains every input needed without reopening the source.
+    Spark SQL query shape remains deferred until execution. A Python table carries
+    its declared shape and no query. Neither path reopens or executes the source.
     """
 
     ses = document.document
     declared = ses.has_declared_schema
-    setup, query = _shape_program(document)
+    if document.language == SPARK_SQL:
+        setup, query = _shape_program(document)
+    else:
+        if not declared:  # pragma: no cover - parsing requires it
+            raise NotImplementedError(
+                f"{document.relative_path}: a Python-backed Delta table must "
+                "declare its schema"
+            )
+        setup, query = (), None
     payload = {
         "object": _object_name(document, destination),
         "schema_mode": "declared" if declared else "inferred",
@@ -133,8 +120,15 @@ def _spark_table_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
         "setup": [
             address_managed_references(statement, destination) for statement in setup
         ],
-        "source_query": address_managed_references(query, destination),
+        "source_query": (
+            address_managed_references(query, destination)
+            if query is not None
+            else None
+        ),
         "references": [list(pair) for pair in metadata_column_references(ses)],
+        "identity_column": (
+            _column_entry(ses.identity_column) if ses.identity_column else None
+        ),
         "audit_columns": [_column_entry(column) for column in ses.audit_columns],
         # Keyed tables append the row signature after audit columns.
         "internal_columns": [
@@ -187,21 +181,3 @@ def _view_ddl(document: "SourceDocument", destination) -> GeneratedDdl:
 
 def _column_entry(column) -> list:
     return [column.name, column.type, column.not_null]
-
-
-def _create_table_sql(qualified: str, columns) -> str:
-    column_lines = ",\n".join(
-        f"    {_ident(c.name)} {c.type}{' NOT NULL' if c.not_null else ''}"
-        for c in columns
-    )
-    return (
-        f"CREATE TABLE {qualified} (\n"
-        f"{column_lines}\n"
-        ")\n"
-        "USING delta\n"
-        f"{_COLUMN_MAPPING}\n"
-    )
-
-
-def _ident(name: str) -> str:
-    return "`" + name.replace("`", "``") + "`"

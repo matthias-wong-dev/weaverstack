@@ -250,6 +250,19 @@ class Session(ABC):
     # --- execution capabilities ---------------------------------------------
 
     @abstractmethod
+    def create_delta_table(
+        self,
+        qualified_name: str,
+        columns: Sequence[Sequence[Any]],
+        *,
+        identity_column: str | None = None,
+        column_mapping: bool = True,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        """Create one Delta table through this host's active Spark session."""
+
+    @abstractmethod
     def execute_python(
         self,
         program: str,

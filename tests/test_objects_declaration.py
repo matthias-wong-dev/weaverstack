@@ -444,7 +444,7 @@ def test_a_declared_column_is_named_even_where_the_frame_lacks_it():
     assert order.dataframe().columns == _quoted("order_id", "order_date", "amount")
 
 
-def _inferred(identifier: str):
+def _inferred(identifier: str, *, identity: str | None = None):
     """A Spark SQL table that leaves its shape to the query."""
 
     from weaver.declaration.metadata import SPARK_SQL, parse_document
@@ -460,6 +460,7 @@ def _inferred(identifier: str):
                 "",
                 "Primary key: order_id",
                 "",
+                *([f"Identity: {identity}", ""] if identity else []),
                 "Dependencies:",
                 "  - Sales.Order",
             ]
@@ -476,6 +477,17 @@ def test_an_inferred_table_reports_the_columns_the_installed_table_holds():
 
     assert summary.columns() == ("order_id", "order_date", "amount")
     assert summary.dataframe().columns == _quoted("order_id", "order_date", "amount")
+
+
+@weaver_test()
+def test_an_inferred_table_excludes_its_managed_identity_column():
+    summary = _table(
+        _inferred("Sales.OrderSummary", identity="order_key"),
+        physical=("order_key", *PHYSICAL_COLUMNS),
+    )
+
+    assert summary.columns() == ("order_id", "order_date", "amount")
+    assert "order_key" not in summary.dataframe().columns
 
 
 @weaver_test()

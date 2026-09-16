@@ -234,22 +234,15 @@ _RESERVED_SIGNATURE_NAMES = frozenset(
     for spelling in (SIGNATURE_COLUMN, SIGNATURE_COLUMN.replace(" ", "_"))
 )
 
-#: The identity column is a surrogate the engine generates: build declares it
-#: ``bigint identity not null`` and the Warehouse assigns a value to every
-#: inserted row. It is Weaver's column, so it is not part of the declared
-#: business schema or a query's output, and a load never inserts into it.
+#: The identity column is a surrogate the target engine generates. It is
+#: Weaver's column, so it is not part of the declared business schema or a
+#: query's output, and a load never inserts into it.
 IDENTITY_TYPE = "bigint"
 
-#: Which representations can carry an identity column: the Warehouse alone. A
-#: value Weaver computed would have to be unique across concurrent writers,
-#: which is what an engine's identity provides and neither Delta 3.2 nor
-#: Fabric's Spark runtime offers. So a Delta table declares no identity at all.
-IDENTITY_LANGUAGES = frozenset({SQL})
+#: Table representations whose engines generate identity values.
+IDENTITY_LANGUAGES = frozenset({PYTHON, SPARK_SQL, SQL})
 
-_IDENTITY_UNSUPPORTED = (
-    "Identity is supported only for Warehouse tables. Remove Identity and use "
-    "the business key, or declare the table in a Warehouse item."
-)
+_IDENTITY_UNSUPPORTED = "Identity is supported only for tables."
 
 
 def audit_column_name(logical: str, language: str) -> str:
@@ -484,7 +477,7 @@ class WeaverDocument:
 
     @property
     def identity_column(self) -> Column | None:
-        """The Warehouse-generated bigint outside the authored schema."""
+        """The engine-generated bigint outside the authored schema."""
 
         if self.identity is None or self.kind != TABLE:
             return None
@@ -1381,8 +1374,7 @@ def _validate_columns(
         return
 
     # The identity column is Weaver's, not the author's, so it must not be
-    # declared in Schema. The primary key may name it when the surrogate is the
-    # key, so it counts as a known column for the reference checks.
+    # declared in Schema. It counts as known for descriptive references.
     if identity is not None and identity in {
         column.name for column in declared_columns
     }:

@@ -119,6 +119,7 @@ class _Spark:
     """
 
     counts: dict = field(default_factory=dict)
+    target_columns: tuple = TARGET_COLUMNS
     #: A statement carrying this text fails, standing for an engine error the
     #: load has no outcome for. Raised before the statement is recorded, so what
     #: was recorded is what the session actually ran.
@@ -164,7 +165,7 @@ class _Spark:
                 raise _ViewNotFound(f"[TABLE_OR_VIEW_NOT_FOUND] {written}")
 
     def table(self, name: str):
-        return _Table(TARGET_COLUMNS)
+        return _Table(self.target_columns)
 
     def sql(self, text: str) -> _Frame:
         self.resolve(text)
@@ -498,6 +499,39 @@ def test_the_one_merge_leaves_the_deletes_out_of_what_it_writes():
     spark, _result = _load(BUSY)
 
     assert "WHERE `__weaver_operation` <> 'D'" in spark.mutations[1]
+
+
+@weaver_test()
+def test_identity_is_absent_from_every_delta_write_and_signature():
+    identity_columns = (("Customer key", "bigint"), *TARGET_COLUMNS)
+    spark = _Spark(counts=BUSY, target_columns=identity_columns)
+
+    load_table(
+        spark,
+        contract=_contract(identity_column="Customer key"),
+        lakehouse=_Lakehouse(),
+        staging_frame=_Staged(),
+    )
+
+    authored = "\n".join(spark.statements)
+    assert "Customer key" not in authored
+    assert "`Customer id`, `Customer name`, `Email`" in spark.mutations[1]
+
+
+@weaver_test()
+def test_a_source_supplying_the_managed_identity_is_refused_before_work():
+    identity_columns = (("Customer key", "bigint"), *TARGET_COLUMNS)
+    spark = _Spark(counts=BUSY, target_columns=identity_columns)
+
+    with pytest.raises(LoadError, match="managed identity.*Customer key"):
+        load_table(
+            spark,
+            contract=_contract(identity_column="Customer key"),
+            lakehouse=_Lakehouse(),
+            staging_frame=_Staged((*BUSINESS, "Customer key")),
+        )
+
+    assert spark.statements == []
 
 
 @weaver_test()

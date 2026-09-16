@@ -1,9 +1,9 @@
 """The ``spark_table`` executor, run from a desktop against a real Lakehouse.
 
-The whole action runs here. Two statements cross, the setup with its
-``DESCRIBE QUERY``, then the rendered ``CREATE TABLE``, and everything between
-them is decided in this process: column validation, the physical columns, the
-DDL. Nothing imports Weaver on the far side, which is why this is ``remote``.
+The whole action runs here. Two Spark calls cross: the setup with its
+``DESCRIBE QUERY``, then Session-owned TableBuilder creation. Everything between
+them is decided in this process: column validation and the physical columns.
+Nothing imports Weaver on the far side, which is why this is ``remote``.
 
 ``DESCRIBE QUERY`` replaced reading a ``DataFrame``'s schema, and the swap is
 only safe if Fabric answers it the same way. The cases live in
@@ -74,7 +74,8 @@ def spark_table_estate(
     )
     context = InstallationContext(
         # From the Installer, as every production context gets them. The executor
-        # stays here and only its statements cross.
+        # stays here and only its physical requests cross.
+        create_delta_table=installer.delta_table_creator(),
         spark_sql=installer.spark_sql(),
         spark_sql_batch=installer.spark_sql_batch(),
         resolver=resolver,

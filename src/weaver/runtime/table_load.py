@@ -111,7 +111,8 @@ def load_table(
             ("delete", DELETE_SUFFIX),
         )
     }
-    columns, types = _business_columns(spark, names["target"])
+    columns, types = _business_columns(spark, names["target"], contract)
+    _reject_supplied_identity(staging_frame, contract)
     _require_columns(staging_frame, contract, columns)
     deletes = _delete_driver(contract, deletes)
 
@@ -836,10 +837,14 @@ def _comparison_columns(contract: LoadContract, columns) -> tuple[str, ...]:
     return tuple(column for column in columns if column not in contract.primary_key)
 
 
-def _business_columns(spark, target: str) -> tuple[tuple[str, ...], dict[str, str]]:
+def _business_columns(
+    spark, target: str, contract: LoadContract
+) -> tuple[tuple[str, ...], dict[str, str]]:
     """Read current target business columns and signature-relevant Spark types."""
 
     reserved = {*delta_audit_names(), delta_signature_name()}
+    if contract.identity_column is not None:
+        reserved.add(contract.identity_column)
     fields = [
         field
         for field in spark.table(target).schema.fields
@@ -848,6 +853,18 @@ def _business_columns(spark, target: str) -> tuple[tuple[str, ...], dict[str, st
     names = tuple(field.name for field in fields)
     types = {field.name: field.dataType.simpleString() for field in fields}
     return names, types
+
+
+def _reject_supplied_identity(frame, contract: LoadContract) -> None:
+    identity = contract.identity_column
+    if identity is None:
+        return
+    supplied = [name for name in frame.columns if name.lower() == identity.lower()]
+    if supplied:
+        raise LoadError(
+            f"{contract.qualified}: source data supplies managed identity column "
+            f"{identity!r}; remove it from read() so Delta can generate the value"
+        )
 
 
 def _require_columns(frame, contract: LoadContract, columns) -> None:

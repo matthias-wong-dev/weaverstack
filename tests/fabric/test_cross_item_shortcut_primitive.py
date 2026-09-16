@@ -196,9 +196,10 @@ def run_from_here(
         payload,
         context=InstallationContext(
             # From the Installer, as every production context gets them. An
-            # executor stays on the desktop and only its statements cross, a
+            # executor stays on the desktop and only its physical requests cross, a
             # table shortcut asking whether it has become readable, a table build
             # asking what shape its query has.
+            create_delta_table=installer.delta_table_creator(),
             spark_sql=installer.spark_sql(),
             spark_sql_batch=installer.spark_sql_batch(),
             resolver=installer.resolver,

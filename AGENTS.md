@@ -196,9 +196,9 @@ There is one `build`, one `load` and one `test`. Every build action runs in the
 `Installer` wherever that is, and the state a build plans against is read the same
 way: the catalogue over TDS, a Lakehouse's views over Spark SQL, a Lakehouse's
 objects from storage, a Warehouse over TDS. A desktop `weaver build` therefore
-needs no published wheel, because nothing it submits imports Weaver, and no
-Fabric Environment either, because its Spark statements run on the workspace
-default. `load`, `test` and `install` ask for `--environment`.
+needs no published wheel, because its Spark SQL and TableBuilder submissions
+import no Weaver, and no Fabric Environment either, because they run on the
+workspace default. `load`, `test` and `install` ask for `--environment`.
 
 Because the catalogue is a Warehouse, a Warehouse-only workflow performs zero
 Livy submissions. Catalogue reads, publication, `_.Log` writes and `_.Bookmark`

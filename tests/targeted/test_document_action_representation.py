@@ -55,11 +55,11 @@ def lakehouse_customer(tmp_path):
 
 
 @weaver_test()
-def test_a_lakehouse_table_renders_a_spark_sql_build_action(lakehouse_customer):
+def test_a_lakehouse_table_renders_a_spark_table_build_action(lakehouse_customer):
     rendered = _render(lakehouse_customer, "DWG.Customer")
 
     assert rendered.action.kind == "build_table"
-    assert rendered.action.executor == "spark_sql"
+    assert rendered.action.executor == "spark_table"
     assert rendered.action.resource_node_id == "Lakehouse/Sales/Tables/DWG.Customer"
 
 
@@ -93,7 +93,9 @@ def test_the_payload_filename_carries_the_ddls_extension(lakehouse_customer):
 
     rendered = _render(lakehouse_customer, "DWG.Customer")
 
-    assert rendered.action.payload == "Lakehouse--Sales--Tables--DWG.Customer.spark.sql"
+    assert rendered.action.payload == (
+        "Lakehouse--Sales--Tables--DWG.Customer.spark-table.json"
+    )
 
 
 @weaver_test()

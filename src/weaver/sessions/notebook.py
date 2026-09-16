@@ -58,6 +58,28 @@ class NotebookSession(Session):
 
     # --- execution capabilities ---------------------------------------------
 
+    def create_delta_table(
+        self,
+        qualified_name: str,
+        columns: Sequence[Sequence[Any]],
+        *,
+        identity_column: str | None = None,
+        column_mapping: bool = True,
+        workspace: Workspace | None = None,
+        timeout: float | None = None,
+    ) -> Any:
+        from .delta_table import create_delta_table_in_session
+
+        spark = self.scope(workspace).spark()
+        with self.telemetry.timing("spark.delta_table"):
+            return create_delta_table_in_session(
+                spark,
+                qualified_name,
+                columns,
+                identity_column=identity_column,
+                column_mapping=column_mapping,
+            )
+
     def execute_python(
         self,
         program: RemoteProgram,
