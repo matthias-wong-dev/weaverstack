@@ -101,6 +101,7 @@ COMPLEX_TYPES = TableCase(
         "select cast(1 as int) as CustomerId, "
         "cast(1.50 as decimal(18,2)) as Balance, "
         "cast('2026-01-01 00:00:00' as timestamp) as SeenAt, "
+        "cast(2 as bigint) as `Mixed Id`, "
         "array(named_struct('amount', cast(1.500 as decimal(9,3)))) as Lines, "
         "map('north', cast(1 as int)) as Tags "
         "where 1 = 0"
@@ -110,6 +111,7 @@ COMPLEX_TYPES = TableCase(
         "CustomerId": "int",
         "Balance": "decimal(18,2)",
         "SeenAt": "timestamp",
+        "Mixed Id": "bigint",
         "Lines": "array<struct<amount:decimal(9,3)>>",
         "Tags": "map<string,int>",
     },
