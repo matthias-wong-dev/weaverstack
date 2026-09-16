@@ -67,13 +67,13 @@ def test_console_builds_python_and_sql_authored_identity_tables(
     weaver_session,
 ):
     from factories import bound_target
+    from support.weaver_test import register_session
 
     from weaver.build_bundle import Installer, execute_install_action
     from weaver.build_bundle.executors.base import InstallationContext, ResolvedTarget
-    from weaver.fabric.sql import desktop_sql_executor
-    from weaver.sessions.sql import SessionSqlExecutor
+    from weaver.sessions import ConsoleSession
     from weaver.sql import SqlEndpoint
-    from weaver.targets import ItemRef
+    from weaver.targets import ItemRef, WarehouseTarget
 
     resolver = weaver_session.resolver(fabric_workspace)
     item = ItemRef(fabric_target_lakehouse.name)
@@ -174,13 +174,16 @@ def test_console_builds_python_and_sql_authored_identity_tables(
             def sql_endpoint(self, _target):
                 return endpoint
 
-        sql = SessionSqlExecutor(
-            desktop_sql_executor(
-                object(), fabric_workspace, resolver=EndpointResolver()
-            ),
-            weaver_session.telemetry,
-        )
-        try:
+        with ConsoleSession(
+            workspace=fabric_workspace,
+            resolver=EndpointResolver(),
+            progress=False,
+        ) as endpoint_session:
+            register_session(endpoint_session)
+            sql = endpoint_session.sql_executor(
+                WarehouseTarget(ItemRef(physical_lakehouse.name)),
+                workspace=fabric_workspace,
+            )
             import time
 
             deadline = time.monotonic() + 180
@@ -200,8 +203,6 @@ def test_console_builds_python_and_sql_authored_identity_tables(
             assert endpoint_rows, last_error or "the SQL endpoint returned no rows"
             assert endpoint_rows[0]["CustomerId"] == "P"
             assert int(endpoint_rows[0]["CustomerKey"]) > 0
-        finally:
-            sql.close()
 
         with pytest.raises(Exception, match="EXPLICIT_INSERT|identity"):
             weaver_session.execute_spark_sql(
