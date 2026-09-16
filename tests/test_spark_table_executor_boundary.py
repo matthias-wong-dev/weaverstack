@@ -360,10 +360,28 @@ def test_identity_leads_the_physical_shape_and_is_marked_for_creation():
 
 
 @weaver_test()
+def test_inferred_identity_is_available_to_column_metadata_validation():
+    capability = _Capability([("CustomerId", "string"), ("CustomerName", "string")])
+
+    _run(
+        capability,
+        _payload(
+            identity_column=["CustomerKey", "bigint", True],
+            references=[
+                ["Primary key", "CustomerId"],
+                ["Column notes", "CustomerKey"],
+            ],
+        ),
+    )
+
+    assert capability.creations[0]["identity_column"] == "CustomerKey"
+
+
+@weaver_test()
 def test_inferred_query_output_may_not_collide_with_identity():
     capability = _Capability([("CustomerId", "string"), ("CustomerKey", "bigint")])
 
-    with pytest.raises(InstallError, match="reserved for Weaver's identity column"):
+    with pytest.raises(BuildError, match="Identity 'CustomerKey' duplicates"):
         _run(
             capability,
             _payload(identity_column=["CustomerKey", "bigint", True]),

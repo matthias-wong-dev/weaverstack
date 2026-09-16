@@ -50,6 +50,8 @@ class SparkTableExecutor:
         # session catalogue defaults must not influence inferred shape.
         qualified = instruction["object"]
         query = instruction.get("source_query")
+        identity = instruction.get("identity_column")
+        identity_name = identity[0] if identity is not None else None
 
         declared = instruction["declared_columns"]
         declared_names = (
@@ -87,10 +89,9 @@ class SparkTableExecutor:
                 query_columns,
                 declared_columns=declared_names,
                 references=references,
+                identity=identity_name,
             )
 
-        identity = instruction.get("identity_column")
-        identity_name = identity[0] if identity is not None else None
         business = self._physical_columns(
             qualified,
             business_columns,

@@ -14,6 +14,31 @@ AUDIT = (
     ("row_delete_datetime", "timestamp", True),
 )
 SIGNATURE = ("row_signature", "string", True)
+LIVE_DELETE_DATETIME = "9999-12-31 23:59:59.999999"
+
+PYTHON_IDENTITY_SOURCE = '''
+"""
+Table ID: DeltaIdentity.PythonIdentity
+
+Description: Identity table created from an authored Python declaration.
+
+Lineage: Fabric identity acceptance fixture.
+
+Primary key: CustomerId
+
+Identity: CustomerKey
+
+Schema:
+  CustomerId: string
+  Name: string
+"""
+from weaver import Table
+
+
+class DeltaIdentity__PythonIdentity(Table):
+    def read(self):
+        raise AssertionError("build must not execute a Python table read method")
+'''
 
 
 def _payload(target: str, *, source_query: str | None) -> bytes:
@@ -33,6 +58,25 @@ def _payload(target: str, *, source_query: str | None) -> bytes:
         "column_mapping": True,
     }
     return (json.dumps(instruction, sort_keys=True) + "\n").encode()
+
+
+def _authored_python_payload(destination) -> bytes:
+    from weaver.declaration import read_source_document
+    from weaver.declaration.ddl import SPARK_TABLE_EXECUTOR
+    from weaver.declaration.model import LAKEHOUSE
+
+    document = read_source_document(
+        "DeltaIdentity__PythonIdentity.py",
+        PYTHON_IDENTITY_SOURCE.lstrip().encode(),
+        LAKEHOUSE,
+    )
+    ddl = document.create_ddl(destination=destination)
+    instruction = json.loads(ddl.content)
+
+    assert ddl.executor == SPARK_TABLE_EXECUTOR
+    assert instruction["object"] == destination.qualify(SCHEMA, "PythonIdentity")
+    assert instruction["identity_column"] == ["CustomerKey", "bigint", True]
+    return ddl.content.encode()
 
 
 def _action(name: str):
@@ -56,7 +100,7 @@ def _insert_sql(target: str, customer: str) -> str:
     return (
         f"INSERT INTO {target} ({columns}) VALUES "
         f"('{customer}', '{customer}', current_timestamp(), current_timestamp(), "
-        "CAST(NULL AS timestamp), 'signature')"
+        f"CAST('{LIVE_DELETE_DATETIME}' AS timestamp), 'signature')"
     )
 
 
@@ -105,7 +149,7 @@ def test_console_builds_python_and_sql_authored_identity_tables(
     try:
         python_result = execute_install_action(
             _action("PythonIdentity"),
-            _payload(python_table, source_query=None),
+            _authored_python_payload(destination),
             context=context,
         )
         sql_result = execute_install_action(
@@ -211,7 +255,7 @@ def test_console_builds_python_and_sql_authored_identity_tables(
                     "(CustomerKey, CustomerId, Name, row_insert_datetime, "
                     "row_update_datetime, row_delete_datetime, row_signature) "
                     "VALUES (999, 'X', 'X', current_timestamp(), current_timestamp(), "
-                    "CAST(NULL AS timestamp), 'signature')"
+                    f"CAST('{LIVE_DELETE_DATETIME}' AS timestamp), 'signature')"
                 ),
                 exact_case=True,
                 workspace=fabric_workspace,
@@ -355,7 +399,7 @@ try:
         "(CustomerKey, CustomerId, Name, row_insert_datetime, "
         "row_update_datetime, row_delete_datetime, row_signature) "
         "VALUES (999, 'X', 'X', current_timestamp(), current_timestamp(), "
-        "CAST(NULL AS timestamp), 'signature')"
+        "CAST('9999-12-31 23:59:59.999999' AS timestamp), 'signature')"
     )
 except Exception as exc:
     explicit_error = str(exc)
