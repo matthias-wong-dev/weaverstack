@@ -42,6 +42,20 @@ def reported_message(value: object) -> str | None:
     return None
 
 
+def reported_executor(exc: BaseException) -> str | None:
+    """Return the executor attached at an exception boundary or its cause."""
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        executor = getattr(current, "executor", None)
+        if executor:
+            return str(executor)
+        current = current.__cause__ or current.__context__
+    return None
+
+
 class CommandError(WeaverError):
     """Raised when an explicitly requested operation is invalid."""
 
@@ -72,8 +86,9 @@ class LoadError(WeaverError):
         result: object | None = None,
         report: object | None = None,
         workflow_id: str | None = None,
+        executor: str | None = None,
     ) -> None:
-        super().__init__(message)
+        super().__init__(message, executor=executor)
         self.result = result
         self.report = report
         self.workflow_id = workflow_id

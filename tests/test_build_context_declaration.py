@@ -300,6 +300,30 @@ def test_build_reports_the_resolved_context_once(captured, repository):
 
 
 @weaver_test()
+def test_a_failed_build_result_marks_the_build_task_failed(repository, monkeypatch):
+    from weaver.operations.build import BuildResult
+    from weaver.sessions.testing import TestSession
+
+    workspace = Workspace(workspace="Analytics", catalogue="Warehouse/Weaver")
+    session = TestSession(workspace=workspace)
+    failed = BuildResult(
+        source=str(repository),
+        items=("Lakehouse/Sales",),
+        bundle_id="failed-bundle",
+        installation=True,
+        bundle_path=None,
+        status="failed",
+    )
+    monkeypatch.setattr(weaver.operations.build, "_preflight", lambda *a, **k: None)
+    monkeypatch.setattr(weaver.operations.build, "_run_build", lambda *_a, **_k: failed)
+
+    assert _build(repository, session=session) is failed
+
+    frame = next(frame for frame in session.timings if frame.name == "Build")
+    assert frame.failed
+
+
+@weaver_test()
 def test_build_reports_selection_after_the_bundle_and_before_installation(
     monkeypatch, tmp_path
 ):

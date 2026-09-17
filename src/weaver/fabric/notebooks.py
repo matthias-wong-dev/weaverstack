@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..errors import CommandError
+from ..errors import CommandError, reported_message
 from .client import FabricClient, FabricError
 from .resources import (
     ENVIRONMENT,
@@ -219,7 +219,8 @@ def run_notebook(
             reason = (
                 body.get("failureReason") or body.get("error") or "no reason returned"
             )
-            raise FabricError(f"Notebook {name!r} {status}: {reason}")
+            message = reported_message(reason) or "no reason returned"
+            raise FabricError(f"Notebook {name!r} {status}: {message}")
         return result
     raise FabricError(
         f"Notebook {name!r} did not finish within {int(timeout)} seconds."

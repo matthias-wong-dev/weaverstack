@@ -85,15 +85,19 @@ class RunMessage:
     message: str
     detail: str | None = None
     source: str | None = None
+    executor: str | None = None
 
     def to_mapping(self) -> dict[str, Any]:
-        return {
+        mapping = {
             "severity": self.severity,
             "code": self.code,
             "message": self.message,
             "detail": self.detail,
             "source": self.source,
         }
+        if self.executor is not None:
+            mapping["executor"] = self.executor
+        return mapping
 
     @classmethod
     def from_mapping(cls, payload: Mapping[str, Any]) -> "RunMessage":
@@ -103,6 +107,7 @@ class RunMessage:
             message=payload["message"],
             detail=payload.get("detail"),
             source=payload.get("source"),
+            executor=payload.get("executor"),
         )
 
 

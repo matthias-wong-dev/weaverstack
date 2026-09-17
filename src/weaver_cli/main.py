@@ -70,6 +70,10 @@ def _status_colour(status: str) -> str:
     return ""
 
 
+def _count_style(text: str, status: str, count: int) -> str:
+    return _style(text, _DIM if count == 0 else _status_colour(status))
+
+
 def _json_value(value):
     """Project provider values into stable JSON scalars."""
 
@@ -1354,8 +1358,16 @@ def _print_load_summary(report) -> None:
     if report.dry_run:
         print(f"\nPlan\n  {len(report.nodes):>3} selected")
         return
+
+    from weaver.load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
+
+    loaders = [
+        node
+        for node in report.nodes
+        if node.primitive_kind not in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION)
+    ]
     counts = {
-        status: sum(node.status == status for node in report.nodes)
+        status: sum(node.status == status for node in loaders)
         for status in (
             SUCCEEDED,
             SUCCEEDED_WITH_REJECTS,
@@ -1365,7 +1377,11 @@ def _print_load_summary(report) -> None:
         )
     }
     print("\nLoad summary")
-    print(_style(f"  {counts[SUCCEEDED]:>3} succeeded", _GREEN))
+    print(
+        _count_style(
+            f"  {counts[SUCCEEDED]:>3} succeeded", SUCCEEDED, counts[SUCCEEDED]
+        )
+    )
     if counts[SUCCEEDED_WITH_REJECTS]:
         print(
             _style(
@@ -1373,20 +1389,13 @@ def _print_load_summary(report) -> None:
                 _AMBER,
             )
         )
-    print(_style(f"  {counts[FAILED]:>3} failed", _RED))
-    print(_style(f"  {counts[BLOCKED]:>3} blocked", _AMBER))
+    print(_count_style(f"  {counts[FAILED]:>3} failed", FAILED, counts[FAILED]))
+    print(_count_style(f"  {counts[BLOCKED]:>3} blocked", BLOCKED, counts[BLOCKED]))
     if counts[SKIPPED]:
         print(f"  {counts[SKIPPED]:>3} skipped")
 
-    from weaver.load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
-
-    loaders = [
-        node
-        for node in report.nodes
-        if node.executed
-        and node.primitive_kind not in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION)
-    ]
-    if not loaders:
+    executed_loaders = [node for node in loaders if node.executed]
+    if not executed_loaders:
         return
     print("  Rows")
     for label, field in (
@@ -1398,7 +1407,7 @@ def _print_load_summary(report) -> None:
     ):
         values = [
             None if node.result is None else getattr(node.result, field, None)
-            for node in loaders
+            for node in executed_loaders
         ]
         rendered = (
             "unknown"
@@ -1513,8 +1522,8 @@ def _print_test(report) -> None:
 
     totals = report.totals()
     print("\nTest summary")
-    print(_style(f"  {totals['passed']:>3} passed", _GREEN))
-    print(_style(f"  {totals['failed']:>3} failed", _RED))
+    print(_count_style(f"  {totals['passed']:>3} passed", "passed", totals["passed"]))
+    print(_count_style(f"  {totals['failed']:>3} failed", "failed", totals["failed"]))
     if totals["invalid"]:
         print(_style(f"  {totals['invalid']:>3} could not run", _AMBER))
     if report.workflow_id:
@@ -1682,7 +1691,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
                 _render_error(
                     CommandError(
                         f"Confirmation required to empty {emptied} item(s). "
-                        "Pass --yes or --dry-run to preview."
+                        "Pass --yes to proceed, or --dry-run to preview."
                     ),
                     args=args,
                 )
@@ -1826,7 +1835,11 @@ def _action_counts(report) -> dict[str, int]:
 def _print_action_counts(report, *, indent: str = "  ") -> None:
     counts = _action_counts(report)
     for status in ("succeeded", "failed", "skipped"):
-        print(_style(f"{indent}{counts[status]:>3} {status}", _status_colour(status)))
+        print(
+            _count_style(
+                f"{indent}{counts[status]:>3} {status}", status, counts[status]
+            )
+        )
 
 
 def _print_build(result) -> None:
@@ -2014,15 +2027,9 @@ def _render_error(exc: BaseException, *, args=None, report=None) -> None:
 
 
 def _reported_executor(exc: BaseException) -> str | None:
-    seen: set[int] = set()
-    current: BaseException | None = exc
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        executor = getattr(current, "executor", None)
-        if executor:
-            return str(executor)
-        current = current.__cause__ or current.__context__
-    return None
+    from weaver.errors import reported_executor
+
+    return reported_executor(exc)
 
 
 def _indented(text: str, prefix: str = "  ") -> str:

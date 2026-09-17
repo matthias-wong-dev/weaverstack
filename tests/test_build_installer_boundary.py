@@ -9,6 +9,7 @@ persisted. Payload integrity and the real executors are covered elsewhere.
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timezone
 
 import pytest
 from support.sessions import given_installer
@@ -122,7 +123,57 @@ def test_successful_install_reports_every_action(tmp_path):
 
 
 @weaver_test()
-def test_operator_sequence_labels_are_aggregate_and_do_not_change_bundle_identity():
+def test_a_failed_install_report_marks_the_install_task_failed(tmp_path, monkeypatch):
+    from support.sessions import given_session
+
+    import weaver.build_bundle as build_bundle
+    from weaver.build_bundle.report import InstallationReport
+    from weaver.operations.install import install
+
+    location, store = _bundle(tmp_path)
+    bundle = load_bundle(location, store=store)
+    now = datetime.now(timezone.utc)
+    failed = InstallationReport(
+        bundle_id=bundle.bundle_id,
+        status=FAILED,
+        started_at=now,
+        finished_at=now,
+        sequences=(),
+    )
+
+    class FailedInstaller:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def install(self, loaded):
+            assert loaded.bundle_id == bundle.bundle_id
+            return failed
+
+    monkeypatch.setattr(build_bundle, "Installer", FailedInstaller)
+    session = given_session()
+
+    assert install(location, session=session) is failed
+
+    frame = next(frame for frame in session.timings if frame.name == "Install")
+    assert frame.failed
+
+
+@pytest.mark.parametrize(
+    ("description", "wording"),
+    [
+        ("build dependency layer", "Building objects"),
+        ("install runtime artefacts", "Installing load and test artefacts"),
+        (
+            "publish catalogue dictionaries and installations",
+            "Updating catalogue definitions",
+        ),
+        ("publish item registry last", "Finalising catalogue"),
+    ],
+)
+@weaver_test()
+def test_operator_sequence_labels_are_aggregate_and_do_not_change_bundle_identity(
+    description, wording
+):
     from types import SimpleNamespace
 
     from weaver.build_bundle.installer import _sequence_label
@@ -130,7 +181,7 @@ def test_operator_sequence_labels_are_aggregate_and_do_not_change_bundle_identit
     actions = (_action("customer"), _action("order"), _action("invoice"))
     sequence = BuildSequence(
         number=1,
-        description="build dependency layer",
+        description=description,
         batches=(BuildBatch(id="build", target_id=TARGET.id, actions=actions),),
     )
     plan = BuildPlan(
@@ -146,9 +197,9 @@ def test_operator_sequence_labels_are_aggregate_and_do_not_change_bundle_identit
 
     label = _sequence_label(sequence, {TARGET.id: SimpleNamespace(bound=TARGET)})
 
-    assert label == "Lakehouse/Sales_LH · Building objects · 3 actions"
+    assert label == f"Lakehouse/Sales_LH · {wording} · 3 actions"
     assert all(action.id not in label for action in actions)
-    assert sequence.description == "build dependency layer"
+    assert sequence.description == description
     assert compute_bundle_id(plan) == bundle_id
 
 

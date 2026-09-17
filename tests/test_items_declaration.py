@@ -317,15 +317,19 @@ def test_the_api_takes_one_item_a_sequence_or_none(
     """
 
     import importlib
+    from types import SimpleNamespace
 
     from support.sessions import given_session
     from support.workspaces import given_workspace
 
     module = importlib.import_module(f"weaver.operations.{operation}")
     seen = []
-    monkeypatch.setattr(
-        module, f"run_{operation}", lambda session, **asked: seen.append(asked["items"])
-    )
+
+    def capture(session, **asked):
+        seen.append(asked["items"])
+        return SimpleNamespace(succeeded=True)
+
+    monkeypatch.setattr(module, f"run_{operation}", capture)
 
     workspace = given_workspace()
     with given_session(workspace=workspace) as session:

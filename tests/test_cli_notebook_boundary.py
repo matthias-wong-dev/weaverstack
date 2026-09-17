@@ -66,3 +66,47 @@ def test_notebook_run_uses_one_configured_lakehouse(monkeypatch):
 
     assert handle_notebook_run(_args()) == 0
     assert seen[0]["lakehouse"] == "Sales"
+
+
+@weaver_test()
+def test_notebook_failure_extracts_the_structured_provider_message(monkeypatch):
+    module = importlib.import_module("weaver.fabric.notebooks")
+    workspace = SimpleNamespace(id="workspace-id", name="Analytics")
+
+    def find_item(owner, name, *, item_type, client):
+        return SimpleNamespace(
+            id=f"{item_type.lower()}-id",
+            name=name,
+            workspace_id=owner.id,
+        )
+
+    class Client:
+        def request(self, *args, **kwargs):
+            return SimpleNamespace(headers={"Location": "job/1"})
+
+        def get_json(self, url):
+            assert url == "job/1"
+            return {
+                "status": "Failed",
+                "failureReason": {
+                    "errorCode": "NotebookExecutionFailed",
+                    "message": "Spark session unavailable",
+                    "requestId": "request-1",
+                },
+            }
+
+    monkeypatch.setattr(module, "find_workspace", lambda *_a, **_k: workspace)
+    monkeypatch.setattr(module, "find_item", find_item)
+
+    with pytest.raises(module.FabricError) as raised:
+        module.run_notebook(
+            "Refresh",
+            workspace="Analytics",
+            lakehouse="Sales",
+            environment="Weaver",
+            poll_interval=0,
+            client=Client(),
+        )
+
+    assert str(raised.value) == "Notebook 'Refresh' Failed: Spark session unavailable"
+    assert "{" not in str(raised.value)

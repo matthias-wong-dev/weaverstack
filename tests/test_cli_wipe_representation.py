@@ -343,7 +343,7 @@ def test_json_wipe_without_yes_never_prompts(monkeypatch, capsys):
         "error": {
             "message": (
                 "Confirmation required to empty 2 item(s). "
-                "Pass --yes or --dry-run to preview."
+                "Pass --yes to proceed, or --dry-run to preview."
             )
         },
     }

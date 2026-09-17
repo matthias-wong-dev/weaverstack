@@ -228,9 +228,9 @@ _SEQUENCE_LABELS = {
     "reconcile runtime state before physical work": "Updating load and test state",
     "drop selected rebuild dependency layer": "Removing objects for rebuild",
     "build dependency layer": "Building objects",
-    "install runtime artefacts": "Installing project code",
+    "install runtime artefacts": "Installing load and test artefacts",
     "publish catalogue dictionaries and installations": "Updating catalogue definitions",
-    "publish item registry last": "Updating catalogue",
+    "publish item registry last": "Finalising catalogue",
     "refresh mutated lakehouse sql endpoints": "Refreshing SQL endpoint",
 }
 

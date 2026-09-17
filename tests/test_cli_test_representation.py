@@ -394,6 +394,24 @@ def test_json_has_no_terminal_styling_when_stdout_is_a_tty(captured, monkeypatch
 
 
 @weaver_test()
+def test_zero_failed_validation_count_is_not_red(captured, monkeypatch):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    assert _run("Lakehouse/Sales") == 0
+
+    failed = next(line for line in output.getvalue().splitlines() if "0 failed" in line)
+    assert "\x1b[31m" not in failed
+
+
+@weaver_test()
 @pytest.mark.parametrize(
     "selector",
     [

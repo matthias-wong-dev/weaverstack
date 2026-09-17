@@ -95,8 +95,8 @@ def load(
         with opened.task(
             "Load (dry run)" if dry_run else "Load",
             ", ".join(map(str, requested)) or "every installed item",
-        ):
-            return run_load(
+        ) as frame:
+            report = run_load(
                 opened,
                 workspace=resolved_workspace,
                 items=requested,
@@ -107,6 +107,8 @@ def load(
                 stale=stale,
                 as_of=threshold,
             )
+            frame.failed = not report.succeeded
+            return report
 
 
 def _refuse_conflicting_modes(*, stale: bool, reload: bool, as_of) -> None:
@@ -306,13 +308,16 @@ def _raise_for_failure(report: LoadRunReport) -> None:
     if not failed:
         return
     first = failed[0]
-    detail = next(
-        (
-            message.message
-            for message in first.messages
-            if message.severity == SEVERITY_ERROR
-        ),
-        first.result.error_message if first.result is not None else None,
+    finding = next(
+        (message for message in first.messages if message.severity == SEVERITY_ERROR),
+        None,
+    )
+    detail = (
+        finding.message
+        if finding is not None
+        else first.result.error_message
+        if first.result is not None
+        else None
     )
     blocked = sum(1 for node in report.nodes if node.status == BLOCKED)
     subject = first.logical_id or first.physical_target
@@ -324,6 +329,7 @@ def _raise_for_failure(report: LoadRunReport) -> None:
         result=first.result,
         report=report,
         workflow_id=report.workflow_id,
+        executor=None if finding is None else finding.executor,
     )
 
 

@@ -131,7 +131,7 @@ def build(
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
             # Fabric requires a Lakehouse attachment before Spark starts.
             opened.offer_spark_home(_bound_lakehouses(bindings))
-            arguments = dict(
+            arguments: dict[str, Any] = dict(
                 repository=prepared.repository,
                 source_store=prepared.store,
                 bindings=bindings,
@@ -142,8 +142,10 @@ def build(
                 source=source_location.value,
             )
             opened.report(_build_context_lines(resolved_workspace, selected))
-            with opened.task("Build", resolved_workspace.workspace):
-                return _run_build(resolved_workspace, session=opened, **arguments)
+            with opened.task("Build", resolved_workspace.workspace) as frame:
+                result = _run_build(resolved_workspace, session=opened, **arguments)
+                frame.failed = not result.succeeded
+                return result
 
 
 def _bound_lakehouses(bindings) -> tuple[str, ...]:

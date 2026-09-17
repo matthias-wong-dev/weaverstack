@@ -42,8 +42,10 @@ def install(
         )
         with use_or_create_session(session, workspace=resolved_workspace) as opened:
             opened.offer_spark_home(lakehouses)
-            with opened.task("Install", loaded.bundle_id):
-                return Installer(opened, workspace=resolved_workspace).install(loaded)
+            with opened.task("Install", loaded.bundle_id) as frame:
+                report = Installer(opened, workspace=resolved_workspace).install(loaded)
+                frame.failed = not report.succeeded
+                return report
 
     if location.name.endswith(ARCHIVE_SUFFIX):
         with materialise_bundle_archive(location, store=store) as loaded:

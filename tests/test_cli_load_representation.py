@@ -375,12 +375,40 @@ def test_load_rollup_sums_loaders_without_counting_publication_nodes(capsys):
     _cli_module()._print_load(report)
 
     output = capsys.readouterr().out
-    assert "2 succeeded" in output
+    assert "1 succeeded" in output
     assert "1 succeeded with rejects" in output
     assert "read                  12" in output
     assert "inserted               8" in output
     assert "999" in output  # still visible on the publication node's own line
     assert "read               1,011" not in output
+
+
+@weaver_test()
+def test_a_failed_helper_is_visible_but_not_counted_as_a_loaded_object(capsys):
+    from dataclasses import replace
+
+    from weaver.load_plan import ENDPOINT_REFRESH
+    from weaver.load_report import error
+
+    load = _report().nodes[0]
+    refresh = replace(
+        load,
+        node_id="refresh:Lakehouse/Sales",
+        logical_id=None,
+        primitive_kind=ENDPOINT_REFRESH,
+        status=FAILED,
+        result=None,
+        messages=(error("endpoint_refresh_failure", "endpoint refresh failed"),),
+    )
+    report = replace(_report(), status=TASK_FAILED, nodes=(load, refresh))
+
+    _cli_module()._print_load(report)
+
+    output = capsys.readouterr().out
+    assert "  1 succeeded" in output
+    assert "  0 failed" in output
+    assert "refresh:Lakehouse/Sales" in output
+    assert "endpoint refresh failed" in output
 
 
 @weaver_test()
@@ -429,6 +457,27 @@ def test_load_status_colour_is_semantic_on_a_terminal(monkeypatch):
     assert "\x1b[33msucceeded_with_rejects" in printed
     assert "\x1b[31mfailed" in printed
     assert "\x1b[33mblocked" in printed
+
+
+@weaver_test()
+def test_zero_failed_and_blocked_load_counts_are_not_attention_coloured(monkeypatch):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    _cli_module()._print_load(_report())
+
+    lines = output.getvalue().splitlines()
+    failed = next(line for line in lines if "0 failed" in line)
+    blocked = next(line for line in lines if "0 blocked" in line)
+    assert "\x1b[31m" not in failed
+    assert "\x1b[33m" not in blocked
 
 
 @weaver_test()

@@ -107,6 +107,31 @@ class _Result:
         return {"environment_name": "Runtime", "published": True, "timings": {}}
 
 
+@weaver_test()
+def test_zero_failed_install_actions_are_not_red(monkeypatch):
+    import io
+    import sys
+    from types import SimpleNamespace
+
+    cli = import_module("weaver_cli.main")
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    class Successful:
+        def action_results(self):
+            return iter((SimpleNamespace(status="succeeded"),))
+
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    cli._print_action_counts(Successful())
+
+    failed = next(line for line in output.getvalue().splitlines() if "0 failed" in line)
+    assert "\x1b[31m" not in failed
+
+
 class _RecordingSession:
     closed = False
 

@@ -952,7 +952,7 @@ def _copy_load_tree(workspace: Workspace, each: MirrorItem, *, session) -> int:
         for entry in store.list(source, recursive=True)
         if not entry.is_directory
     }
-    with session.step(f"Copying project code to {each.target}"):
+    with session.step(f"Copying load and test artefacts to {each.target}"):
         for relative, entry in sorted(held.items()):
             store.write(
                 destination.join(*relative.split("/")), store.read(entry.location)
@@ -1011,7 +1011,7 @@ def _copy_programmables(workspace: Workspace, each: MirrorItem, *, sql, session)
     statements = programmable_statements(str(row["definition"]) for row in rows)
     if not statements:
         return 0
-    with session.step(f"Copying project code to {each.target}"):
+    with session.step(f"Copying load and test artefacts to {each.target}"):
         # A schema containing only procedures has no borrowed relation to create it.
         for statement in schema_statements(str(row["schema_name"]) for row in rows):
             sql.execute(statement)
