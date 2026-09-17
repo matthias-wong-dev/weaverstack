@@ -96,12 +96,14 @@ runs `SELECT 1`, and Spark runs `SELECT 1` through the Session. Spark attaches t
 the selected Lakehouse and needs no Environment for this SQL probe.
 
 Each result contains a status, diagnostic detail and the physical item used.
-`OK` means success, `MISSING` means the resource is absent, `FAILED` means the
+`OK` means success. `NOT TESTED` means no applicable Lakehouse or Warehouse
+exists. `MISSING` means an applicable capability is absent. `FAILED` means the
 probe returned a negative result, and `ERROR` means it could not be evaluated.
-REST listing uses the same classification as endpoint probes: a 401, 403 or 404
-is `FAILED`; a transport or runtime failure is `ERROR`.
-Missing probe items do not fail the command. A missing workspace, authentication
-failure, empty workspace listing or failed probe produces a nonzero exit code.
+A 401, 403 or 409 is `FAILED`; a 404 is `MISSING`; a transport or runtime failure
+is `ERROR`.
+Checks with no applicable item do not fail the command. A missing workspace,
+authentication failure, empty workspace listing or failed probe produces a
+nonzero exit code.
 `--json` includes the authentication path, workspace listing and all checks.
 
 Use `weaver health` for installed state and `weaver check` for project syntax.
@@ -182,6 +184,11 @@ weaver initialise --workspace Analytics --project-folder ./Analytics --lakehouse
 `--example` writes source only. The wizard offers the same onboarding choice:
 `Add the Sales example to this project? [y/N]`. To explore the starter example
 later, initialise another project folder.
+
+Successful setup names `weaver workflow full` as the main next command. It also
+lists `weaver build`, `weaver load`, `weaver test` and `weaver health` for running
+the stages individually, followed by the reproducible non-interactive initialise
+command when the wizard collected the choices.
 
 From the project directory run:
 
@@ -431,7 +438,7 @@ Build
   Read target inventories                              8.4s
   Read catalogue                                       1.2s
   Prepare bundle                                       0.3s
-Build selection
+Install selection
   Lakehouse/Sales
     changed                 4
     dependency impacts      6

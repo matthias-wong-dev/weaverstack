@@ -799,19 +799,24 @@ _          + Load Sales.Customer  a generated procedure
 Nothing is encoded to fit table-style validation, so nothing has to be decoded to
 be used: the Registry stores what the target actually calls the object.
 
-**Signatures say what would make an artefact wrong.** A deployed module is signed
-by its own bytes. A generated body is signed by the document it renders *plus* the
-version of the generator that rendered it — `SPARK_LOAD_VERSION` and
-`TSQL_LOAD_VERSION`, separate because the two generators evolve separately.
-Raising one invalidates exactly the artefacts it renders. Neither
-reaches `repository.signature`, which describes authored content.
+**Signatures describe the installed physical content.** Every physical artefact
+has a source signature and an implementation version. Direct structures, files,
+programmables and shortcuts use implementation version 1. Generated bodies use
+the version of their generator: `SPARK_LOAD_VERSION` and `TSQL_LOAD_VERSION` are
+separate because the two generators evolve separately. The installed signature
+binds both values. Raising one generator version invalidates only the artefacts
+that generator renders. It does not change `repository.signature`, which
+describes authored content.
 
-Selection is per artefact and nothing else. Changing one module rebuilds that
-module; adding one creates a claim; deleting one prunes the target file; renaming
-one does both, with nothing needing to know the two are related. A load artefact
-is deliberately **not** a node in the authored dependency graph — nothing depends
-on a deployed module and it depends on nothing — so a changed upstream document
-never redeploys an unchanged one.
+Selection is per physical artefact and nothing else. A validation declaration
+is retained for its dictionary, dependencies and diagnostics; the compiled
+module or procedure is the identity compared with inventory and Registry. One
+declaration may therefore produce several independently selected physical
+artefacts. Changing one module rebuilds that module; adding one creates a claim;
+deleting one prunes the target file; renaming one does both. A load artefact is
+not a node in the authored dependency graph: nothing depends on a deployed module
+and it depends on nothing, so a changed upstream document never redeploys an
+unchanged one.
 
 **`_` is generated infrastructure, not a reserved word.** A Lakehouse item with
 load code declares a folder `Files/_/Load`; a Warehouse item with load procedures
@@ -856,8 +861,11 @@ The two populations are separate. A loadable object carries a bookmark and a loa
 status, and comes from the load artefacts the item installs — a Weaver-loadable
 Table or Folder, never a view, a table declaring `Has load procedure: false`, a
 runtime artefact, or a validation. A validation carries a test status, and comes
-from the validation artefacts. So rebuilding a table says nothing about a
-validation's status, and rebuilding the validation says nothing about a bookmark.
+from the validation artefacts. A selected validation artefact uses its source
+linkage to reset the logical Test or Assumption state. That linkage does not
+participate in physical existence or signature comparison. Rebuilding a table
+says nothing about a validation's status, and rebuilding the validation says
+nothing about a bookmark.
 
 The stage carries the decision as **structured intent** — which table, and which
 keyed rows — rather than as SQL. The installer renders one scoped DELETE per table

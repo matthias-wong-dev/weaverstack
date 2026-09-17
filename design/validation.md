@@ -338,10 +338,17 @@ it does from a load. One import root, and one copy of each object module. The
 folder is named `_/Load`; renaming it to `_/Runtime` is a cosmetic change outside
 this work.
 
-A generated validation's signature is salted with its generator version
-(`SPARK_VALIDATION_VERSION`, `TSQL_VALIDATION_VERSION`), so an edit to a
-renderer rebuilds exactly the artefacts it changed. A Python validation is
-deployed verbatim and signed by its own bytes, because nothing generated it.
+A validation artefact carries its own source signature and implementation
+version. Generated validations use `SPARK_VALIDATION_VERSION` or
+`TSQL_VALIDATION_VERSION`; a Python validation is deployed verbatim with
+implementation version 1. The installed signature binds the two values, so a
+renderer change selects its module or procedure while unchanged source stays
+unchanged.
+
+Incremental installation compares the compiled module or procedure with its own
+Registry row and physical inventory entry. The logical Test or Assumption remains
+the identity used by `_.TestDictionary`, dependencies, diagnostics and
+`_.TestStatus`. It is not treated as a second physical object.
 
 **An item that only validates still gets its infrastructure** — the generated
 `_` schema in a Warehouse, the runtime tree in a Lakehouse — or its primitive

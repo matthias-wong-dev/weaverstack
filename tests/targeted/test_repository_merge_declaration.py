@@ -37,7 +37,8 @@ def _part(label: str, schema: str, name: str) -> RepositoryPart:
             shape="procedure",
         ),
         text=f"create or alter procedure [{schema}].[{name}] as begin end;",
-        signature="sig",
+        source_signature="sig",
+        implementation_version=1,
         role="load",
     )
     return RepositoryPart(

@@ -30,8 +30,10 @@ Give it an identity, a signature and a place in the catalogue's vocabulary.
 - claim rules in [`claims.py`](../src/weaver/catalogue/claims.py), naming every
   catalogue table it may populate. The mapping is exhaustive on purpose: an
   unregistered type cannot reconcile at all;
-- a signature: whatever would make an installed copy *wrong*. Its own bytes, or
-  the document it renders plus the version of the generator that rendered it.
+- a source signature and an `implementation_version`: the values that identify
+  one physical implementation. Direct artefacts use version 1. Generated
+  artefacts use the version of the generator that rendered them. Incremental
+  installation compares the combined signature under the physical identity.
 
 **Fails until done:** `test_catalogue_from_repository_has_all_artefacts` —
 `OBJECT_TYPES` and the projection disagree.

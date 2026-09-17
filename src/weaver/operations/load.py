@@ -16,7 +16,9 @@ from ..load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
 from ..load_report import (
     BLOCKED,
     FAILED,
+    PENDING,
     SEVERITY_ERROR,
+    SKIPPED,
     SUCCEEDED,
     SUCCEEDED_WITH_REJECTS,
     LoadNodeReport,
@@ -319,13 +321,12 @@ def _raise_for_failure(report: LoadRunReport) -> None:
         if first.result is not None
         else None
     )
-    blocked = sum(1 for node in report.nodes if node.status == BLOCKED)
     subject = first.logical_id or first.physical_target
+    summaries = "; ".join(_status_summaries(report))
     raise LoadError(
-        f"Load failed for {subject}"
+        f"{_step_type(first).title()} failed for {subject}"
         + (f": {detail}" if detail else "")
-        + (f"; {len(failed)} loads failed" if len(failed) > 1 else "")
-        + (f", {blocked} loads blocked" if blocked else ""),
+        + (f"; {summaries}" if summaries else ""),
         result=first.result,
         report=report,
         workflow_id=report.workflow_id,
@@ -339,6 +340,44 @@ _STEP_TYPES = {ENDPOINT_REFRESH: "refresh", ONELAKE_PUBLICATION: "publication"}
 
 def _step_type(report: LoadNodeReport) -> str:
     return _STEP_TYPES.get(report.primitive_kind, "load")
+
+
+SUMMARY_STATUSES = (
+    SUCCEEDED,
+    SUCCEEDED_WITH_REJECTS,
+    FAILED,
+    BLOCKED,
+    PENDING,
+    SKIPPED,
+)
+
+
+def status_counts(report: LoadRunReport) -> dict[str, dict[str, int]]:
+    """Count detailed rows by step category and status."""
+
+    grouped = {"load": {status: 0 for status in SUMMARY_STATUSES}}
+    for node in report.nodes:
+        kind = _step_type(node)
+        counts = grouped.setdefault(kind, {status: 0 for status in SUMMARY_STATUSES})
+        if node.status in counts:
+            counts[node.status] += 1
+    return grouped
+
+
+def _status_summaries(report: LoadRunReport) -> tuple[str, ...]:
+    grouped = status_counts(report)
+    lines = []
+    for kind in ("load", "refresh", "publication"):
+        counts = grouped.get(kind)
+        if counts is None or not any(counts.values()):
+            continue
+        values = ", ".join(
+            f"{counts[status]} {status.replace('_', ' ')}"
+            for status in SUMMARY_STATUSES
+            if counts[status]
+        )
+        lines.append(f"{kind.title()} summary: {values}")
+    return tuple(lines)
 
 
 def _completion_document(report: LoadRunReport, timings=()) -> dict:
@@ -392,4 +431,4 @@ def _load_names(names: str | Sequence[str] | None) -> tuple[str, ...]:
     return tuple(str(value) for value in values)
 
 
-__all__ = ["TASK_TYPE", "load", "run_load"]
+__all__ = ["SUMMARY_STATUSES", "TASK_TYPE", "load", "run_load", "status_counts"]

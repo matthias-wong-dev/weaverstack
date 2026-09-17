@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from ..errors import DiscoveryError
 from .metadata import ObjectId
 from .model import PROCEDURE_SHAPE, WAREHOUSE, WeaverDocumentId, WeaverItemId
-from .source import content_hash
+from .source import content_hash, salted_signature
 
 PROGRAMMABLES_DIRECTORY = "programmables"
 
@@ -31,8 +31,7 @@ class Programmable:
     """A managed stored procedure declaration.
 
     ``identity`` is the catalogue key, ``text`` the complete statement the
-    installer runs, ``signature`` what incremental selection compares, and
-    ``role`` what the procedure is for.
+    installer runs, and ``role`` what the procedure is for.
 
     Authored procedures have ``relative_path``; generated procedures have
     ``origin``. Weaver fragments have neither and sign themselves independently.
@@ -40,8 +39,9 @@ class Programmable:
 
     identity: WeaverDocumentId
     text: str
-    signature: str
+    source_signature: str
     role: str
+    implementation_version: int = 1
     relative_path: str | None = None
     origin: WeaverDocumentId | None = None
 
@@ -63,6 +63,10 @@ class Programmable:
     @property
     def payload(self) -> bytes:
         return self.text.encode("utf-8")
+
+    @property
+    def signature(self) -> str:
+        return salted_signature(self.source_signature, self.implementation_version)
 
 
 def read_programmable(
@@ -124,7 +128,7 @@ def read_programmable(
     return Programmable(
         identity=WeaverDocumentId(owner, object_id, shape=PROCEDURE_SHAPE),
         text=text,
-        signature=content_hash(data),
+        source_signature=content_hash(data),
         role=ROLE_PROGRAMMABLE,
         relative_path=None if weaver_owned else relative_path,
     )
@@ -134,7 +138,8 @@ def generated_programmable(
     identity: WeaverDocumentId,
     *,
     text: str,
-    signature: str,
+    source_signature: str,
+    implementation_version: int,
     role: str,
     origin: WeaverDocumentId | None = None,
 ) -> Programmable:
@@ -142,8 +147,9 @@ def generated_programmable(
     return Programmable(
         identity=identity,
         text=text,
-        signature=signature,
+        source_signature=source_signature,
         role=role,
+        implementation_version=implementation_version,
         origin=origin,
     )
 

@@ -157,7 +157,13 @@ def _bookmark_state(repository, *, item, selected) -> list[dict]:
 
 def _test_status_state(repository, *, item, selected) -> list[dict]:
     from ..catalogue.projection import TEST_TYPE_FOR_KIND
+    from ..etl import item_runtime_artefacts
 
+    selected_origins = {
+        artefact.origin
+        for artefact in item_runtime_artefacts(repository, item=item)
+        if artefact.is_validation and artefact.identity in selected
+    }
     return [
         {
             **_identity_row(identity),
@@ -165,7 +171,7 @@ def _test_status_state(repository, *, item, selected) -> list[dict]:
             "result": PENDING,
         }
         for identity in item_validated_objects(repository, item=item)
-        if identity in selected
+        if identity in selected or identity in selected_origins
     ]
 
 

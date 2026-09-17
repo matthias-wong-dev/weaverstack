@@ -528,6 +528,12 @@ def test_moving_the_tsql_generator_version_rebuilds_procedures_and_no_tables(
     procedure = f"{WAREHOUSE_ITEM}/procedure:_/Load {CUSTOMER}"
     assert [str(value) for value in selection.selected_for_build] == [procedure]
     assert [str(value) for value in selection.selected_for_drop] == [procedure]
+    generated = next(
+        artefact
+        for artefact in item_load_artefacts(after, item=identity)
+        if str(artefact.identity) == procedure
+    )
+    assert generated.implementation_version == 99
     # The table the procedure loads, and the view over it, are not reached.
     assert f"{WAREHOUSE_ITEM}/{CUSTOMER}" not in [
         str(value) for value in selection.impact.impacted

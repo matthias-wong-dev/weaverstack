@@ -342,6 +342,8 @@ def _run_build(
 
 
 def _selection_lines(selection, bindings) -> tuple[str, ...]:
+    from ..catalogue.builtin import BUILTIN_ITEM
+
     categories = (
         ("new", selection.impact.new),
         ("changed", selection.impact.changed),
@@ -350,9 +352,14 @@ def _selection_lines(selection, bindings) -> tuple[str, ...]:
         ("selected for build", selection.selected_for_build),
         ("selected for removal", selection.selected_for_drop),
     )
-    lines = ["Build selection"]
+    lines = ["Install selection"]
     for binding in bindings.entries:
-        lines.append(f"  {binding.item}")
+        display = (
+            f"Catalogue {binding.target.physical_kind}/{binding.target.item.name}"
+            if binding.item == BUILTIN_ITEM
+            else str(binding.item)
+        )
+        lines.append(f"  {display}")
         for label, identities in categories:
             count = sum(identity.item == binding.item for identity in identities)
             if count:

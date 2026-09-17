@@ -341,12 +341,17 @@ def test_a_keyed_table_is_signed_by_its_shape_as_well_as_its_source(tmp_path):
 
 
 @weaver_test()
-def test_an_unkeyed_table_is_signed_by_its_source_alone(tmp_path):
-    """It gains no signature column, so it is not rebuilt for one."""
+def test_an_unkeyed_table_uses_the_direct_implementation_version(tmp_path):
+    """Direct physical artefacts use version 1 consistently."""
+
+    from weaver.declaration.source import salted_signature
 
     _keyed, unkeyed = _keyed_and_unkeyed(tmp_path)
 
-    assert unkeyed.physical_signature == unkeyed.effective_signature
+    assert unkeyed.implementation_version == 1
+    assert unkeyed.physical_signature == salted_signature(
+        unkeyed.effective_signature, unkeyed.implementation_version
+    )
 
 
 @weaver_test()

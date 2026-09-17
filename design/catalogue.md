@@ -416,10 +416,13 @@ item; the installer resolves it. That is why a payload says
 
 ## Incremental installation
 
-The reconciled Registry supplies the certified effective signatures used for
-incremental selection. New objects are created; changed objects and their
-same-item descendants are uncertified, dropped, and rebuilt; unchanged objects
-receive no physical action. `Prohibit Rebuild` suppresses only the physical
+The reconciled Registry supplies the certified implementation-versioned
+signatures used for incremental selection. Selection compares each desired
+physical identity with its own Registry row and target inventory entry. A logical
+validation has no Registry row; its compiled module or procedure does. New
+objects are created; changed objects and their same-item descendants are
+uncertified, dropped, and rebuilt; unchanged objects receive no physical action.
+`Prohibit Rebuild` suppresses only the physical
 replacement of an existing object, while the incoming catalogue projection still
 advances. Planned creates and managed drops are strict, so an unexpected physical
 collision fails rather than being hidden.

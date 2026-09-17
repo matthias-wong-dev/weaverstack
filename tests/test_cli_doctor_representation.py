@@ -33,7 +33,7 @@ def test_render_includes_all_statuses_and_resource_details(capsys):
             checks=(
                 Check("Authentication", "ok", "Azure CLI"),
                 Check("Fabric REST", "ok", "7 workspaces visible"),
-                Check("OneLake", "missing", "No Lakehouse"),
+                Check("OneLake", "not tested", "No Lakehouse"),
                 Check(
                     "Warehouse TDS", "failed", "Query rejected", via="Warehouse/Curated"
                 ),
@@ -47,18 +47,20 @@ def test_render_includes_all_statuses_and_resource_details(capsys):
         "7 workspaces visible",
         "via Warehouse/Curated",
         "OK",
-        "MISSING",
+        "NOT TESTED",
         "FAILED",
         "ERROR",
     ):
         assert phrase in text
     assert "Everything checked is reachable." not in text
+    statuses = ("OK", "NOT TESTED", "FAILED", "ERROR")
     lines = [
-        line
+        (line, status)
         for line in text.splitlines()
-        if line.rstrip().endswith(("OK", "MISSING", "FAILED", "ERROR"))
+        for status in statuses
+        if line.rstrip().endswith(status)
     ]
-    assert len({len(line) - len(line.split()[-1]) for line in lines}) == 1
+    assert len({len(line) - len(status) for line, status in lines}) == 1
 
 
 @pytest.mark.parametrize("status,exit_code", [("ok", 0), ("missing", 1), ("error", 1)])

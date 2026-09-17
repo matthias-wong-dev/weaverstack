@@ -388,12 +388,12 @@ def test_an_unchanged_validation_is_not_selected_again(repository):
     """The property the whole estate's convergence rests on."""
 
     from weaver.build_bundle.incremental import select_build
-    from weaver.build_bundle.planner import certifiable_identities
+    from weaver.build_bundle.planner import installable_identities
     from weaver.build_bundle.targets import LakehouseBinding
     from weaver.targets import ItemRef
 
     installed = _built(repository)
-    selectable = certifiable_identities(
+    selectable = installable_identities(
         repository,
         {ITEM: LakehouseBinding(ItemRef("Sales_LH"), workspace_name="Demo")},
     )
@@ -413,7 +413,7 @@ def test_an_edited_validation_is_selected(repository, tmp_path):
     """Guards the test above from passing by never selecting anything at all."""
 
     from weaver.build_bundle.incremental import select_build
-    from weaver.build_bundle.planner import certifiable_identities
+    from weaver.build_bundle.planner import installable_identities
     from weaver.build_bundle.targets import LakehouseBinding
     from weaver.targets import ItemRef
 
@@ -426,7 +426,7 @@ def test_an_edited_validation_is_selected(repository, tmp_path):
         ),
     )
     edited = parse_item_repository(Location(str(tmp_path)))
-    selectable = certifiable_identities(
+    selectable = installable_identities(
         edited, {ITEM: LakehouseBinding(ItemRef("Sales_LH"), workspace_name="Demo")}
     )
 

@@ -480,4 +480,6 @@ snake-case keys. The public sentence-case names and the stored vocabularies the
 
 The CLI resolves a workspace, calls the API, renders the result, and chooses an
 exit code. `tests/test_core_boundary.py` prevents it from acquiring core
-semantics.
+semantics. `weaver_cli.status` is the one terminal vocabulary for semantic status
+words. It maps health and run statuses to green, yellow or red independently of
+the symbols a report chooses, and suppresses ANSI outside a human TTY.

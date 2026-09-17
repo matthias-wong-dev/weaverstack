@@ -203,6 +203,94 @@ def test_the_status_words_are_the_contract(captured, capsys):
 
 
 @weaver_test()
+def test_health_statuses_and_findings_use_semantic_terminal_colours(
+    captured, monkeypatch
+):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    captured["report"] = _report(
+        load=HealthSection(
+            area="load",
+            findings=(
+                HealthFinding(
+                    area="load",
+                    code="load_pending",
+                    severity=AMBER,
+                    status="pending",
+                    message="no load has settled since this object was built",
+                    object_id="Lakehouse/Sales/Tables/Sales.Order",
+                ),
+            ),
+        ),
+        tests=HealthSection(
+            area="tests",
+            counts={
+                "succeeded": 31,
+                "failed": 2,
+                "pending": 2,
+                "blocked": 1,
+            },
+            findings=_failing_tests().findings,
+        ),
+    )
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    _run()
+
+    printed = output.getvalue()
+    assert "Weaver Health  \x1b[31mRed\x1b[0m" in printed
+    assert "Load    \x1b[33mAmber\x1b[0m" in printed
+    assert "Tests   \x1b[31mRed\x1b[0m" in printed
+    assert "Build   \x1b[32mGreen\x1b[0m" in printed
+    assert "\x1b[33mAmber  \x1b[0mLakehouse/Sales/Tables/Sales.Order" in printed
+    assert "\x1b[31mRed    \x1b[0mWarehouse/Curated/Sales.OrderTotals" in printed
+    assert (
+        "\x1b[33m1 blocked\x1b[0m · \x1b[31m2 failed\x1b[0m · "
+        "\x1b[33m2 pending\x1b[0m · \x1b[32m31 succeeded\x1b[0m"
+    ) in printed
+
+
+@weaver_test()
+def test_health_output_names_the_catalogue_without_its_internal_item(captured, capsys):
+    captured["report"] = _report(
+        build=HealthSection(
+            area="build",
+            findings=(
+                HealthFinding(
+                    area="build",
+                    code="catalogue_inconsistent",
+                    severity=RED,
+                    message="the catalogue registry is incomplete",
+                    object_id="Warehouse/_weaver/_/Registry",
+                    target="Warehouse/Weaver_Control",
+                ),
+                HealthFinding(
+                    area="build",
+                    code="catalogue_inconsistent",
+                    severity=RED,
+                    message="the catalogue bookmark is incomplete",
+                    object_id="Warehouse/_weaver/_/Bookmark",
+                    target="Warehouse/Weaver_Control",
+                ),
+            ),
+        )
+    )
+
+    _run()
+
+    printed = capsys.readouterr().out
+    assert "_weaver" not in printed
+    assert "Catalogue Warehouse/Weaver_Control / _.Registry" in printed
+    assert "Catalogue Warehouse/Weaver_Control / _.Bookmark" in printed
+
+
+@weaver_test()
 def test_a_failing_subject_is_named_with_its_message(captured, capsys):
     captured["report"] = _report(tests=_failing_tests())
     _run()

@@ -412,6 +412,95 @@ def test_a_failed_helper_is_visible_but_not_counted_as_a_loaded_object(capsys):
 
 
 @weaver_test()
+def test_load_output_does_not_expose_the_internal_catalogue_item(capsys):
+    from dataclasses import replace
+
+    report = replace(_report(), requested=("Warehouse/_weaver", "Lakehouse/Sales"))
+
+    _cli_module()._print_load(report)
+
+    printed = capsys.readouterr().out
+    assert "_weaver" not in printed
+    assert "Lakehouse/Sales" in printed
+
+
+@weaver_test()
+def test_failed_run_summary_counts_loads_by_the_same_statuses_as_rows(capsys):
+    from dataclasses import replace
+
+    from weaver.load_plan import ENDPOINT_REFRESH
+    from weaver.load_report import BLOCKED, PENDING
+
+    base = _report().nodes[0]
+    failed = replace(base, node_id="failed", status=FAILED, result=None)
+    blocked = replace(
+        base, node_id="blocked", status=BLOCKED, executed=False, result=None
+    )
+    pending = replace(
+        base, node_id="pending", status=PENDING, executed=False, result=None
+    )
+    refresh = replace(
+        base,
+        node_id="refresh:Lakehouse/Sales",
+        logical_id=None,
+        primitive_kind=ENDPOINT_REFRESH,
+        status=BLOCKED,
+        executed=False,
+        result=None,
+    )
+    report = replace(
+        _report(), status=TASK_FAILED, nodes=(base, failed, blocked, pending, refresh)
+    )
+
+    _cli_module()._print_load(report)
+
+    summary = capsys.readouterr().out.split("Load summary", 1)[1]
+    assert "1 succeeded" in summary
+    assert "1 failed" in summary
+    assert "1 blocked" in summary
+    assert "1 pending" in summary
+    assert "2 blocked" not in summary
+
+
+@weaver_test()
+def test_terminal_failure_summary_uses_load_and_helper_categories():
+    from dataclasses import replace
+
+    from weaver.load_plan import ENDPOINT_REFRESH
+    from weaver.load_report import BLOCKED, PENDING
+    from weaver.operations.load import _raise_for_failure
+
+    base = _report().nodes[0]
+    failed = replace(base, node_id="failed", status=FAILED, result=None)
+    blocked = replace(
+        base, node_id="blocked", status=BLOCKED, executed=False, result=None
+    )
+    pending = replace(
+        base, node_id="pending", status=PENDING, executed=False, result=None
+    )
+    refresh = replace(
+        base,
+        node_id="refresh:Lakehouse/Sales",
+        logical_id=None,
+        primitive_kind=ENDPOINT_REFRESH,
+        status=BLOCKED,
+        executed=False,
+        result=None,
+    )
+    report = replace(
+        _report(), status=TASK_FAILED, nodes=(base, failed, blocked, pending, refresh)
+    )
+
+    with pytest.raises(LoadError) as raised:
+        _raise_for_failure(report)
+
+    message = str(raised.value)
+    assert "Load summary: 1 succeeded, 1 failed, 1 blocked, 1 pending" in message
+    assert "Refresh summary: 1 blocked" in message
+    assert "2 loads blocked" not in message
+
+
+@weaver_test()
 def test_load_rollup_calls_missing_row_counts_unknown(capsys):
     from dataclasses import replace
 
@@ -457,6 +546,44 @@ def test_load_status_colour_is_semantic_on_a_terminal(monkeypatch):
     assert "\x1b[33msucceeded_with_rejects" in printed
     assert "\x1b[31mfailed" in printed
     assert "\x1b[33mblocked" in printed
+
+
+@weaver_test()
+def test_pending_and_blocked_are_yellow_without_success_ticks(monkeypatch):
+    import io
+    import sys
+    from dataclasses import replace
+
+    from weaver.load_report import BLOCKED, PENDING
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    base = _report().nodes[0]
+    report = replace(
+        _report(),
+        nodes=(
+            replace(
+                base, node_id="pending", status=PENDING, executed=False, result=None
+            ),
+            replace(
+                base, node_id="blocked", status=BLOCKED, executed=False, result=None
+            ),
+        ),
+    )
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    _cli_module()._print_load(report)
+
+    lines = output.getvalue().splitlines()
+    pending = next(line for line in lines if line.endswith("pending"))
+    blocked = next(line for line in lines if line.endswith("blocked"))
+    assert "\x1b[33mpending" in pending
+    assert "\x1b[33mblocked" in blocked
+    assert "✓" not in pending and "✗" not in pending
+    assert "✓" not in blocked and "✗" not in blocked
 
 
 @weaver_test()

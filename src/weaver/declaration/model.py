@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Mapping
 
 from ..errors import DiscoveryError, IdentityError
 from ..locations import Location
+from ..signatures import implementation_signature
 from .metadata import ObjectId
 
 if TYPE_CHECKING:
@@ -330,11 +331,17 @@ class RepositoryShortcut:
     source: WeaverDocumentId
 
     @property
+    def implementation_version(self) -> int:
+        return 1
+
+    @property
     def signature(self) -> str:
         """Hash the source/destination pair, excluding source content."""
 
         declaration = f"{self.destination}\0{self.source}".encode("utf-8")
-        return hashlib.sha256(declaration).hexdigest()
+        return implementation_signature(
+            hashlib.sha256(declaration).hexdigest(), self.implementation_version
+        )
 
     def __str__(self) -> str:
         return f"{self.destination}: {self.source}"
@@ -383,6 +390,10 @@ class ShortcutDeclaration:
     #: Package-owned declarations may already have an identity. Authored names
     #: leave this empty and are decoded from ``Schema__Object`` below.
     destination_identity: "WeaverDocumentId | WeaverSchemaId | None" = None
+
+    @property
+    def implementation_version(self) -> int:
+        return 1
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -564,7 +575,9 @@ class ShortcutDeclaration:
                 self.workspace or "",
             )
         ).encode("utf-8")
-        return hashlib.sha256(declaration).hexdigest()
+        return implementation_signature(
+            hashlib.sha256(declaration).hexdigest(), self.implementation_version
+        )
 
     def __str__(self) -> str:
         where = f" in {self.workspace}" if self.workspace else ""

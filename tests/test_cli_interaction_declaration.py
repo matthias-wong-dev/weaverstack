@@ -21,7 +21,7 @@ from weaver_cli.interaction import (
     confirm,
     non_interactive,
 )
-from weaver_cli.main import build_parser
+from weaver_cli.main import build_parser, main
 
 #: Every executable command, in the spelling §13 of the contract names.
 EXECUTABLE_COMMANDS = (
@@ -42,6 +42,15 @@ EXECUTABLE_COMMANDS = (
     ["fabric", "notebook", "run", "Notebook"],
     ["fabric", "capacity", "status", "--resource-group", "g", "--capacity-name", "c"],
 )
+
+
+@pytest.mark.parametrize("misspelling", ["initalise", "initailise"])
+@weaver_test()
+def test_obvious_initialise_misspellings_suggest_the_command(misspelling, capsys):
+    with pytest.raises(SystemExit):
+        main([misspelling])
+
+    assert "Did you mean 'initialise'?" in capsys.readouterr().err
 
 
 def _module(name: str):

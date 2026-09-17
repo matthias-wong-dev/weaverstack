@@ -285,7 +285,9 @@ def render(report):
         print(
             f"  weaver fabric environment publish --path {shlex.quote(environment_directory(name))}"
         )
-    for command in report.next_commands:
+    print(f"  {report.next_commands[0]}")
+    print("\nOr run individually:")
+    for command in report.next_commands[1:]:
         print(f"  {command}")
 
 

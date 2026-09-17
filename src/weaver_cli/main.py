@@ -24,50 +24,18 @@ from .interaction import (
     non_interactive,
     retry_wanted,
 )
+from .status import DIM as _DIM
+from .status import RED as _RED
+from .status import YELLOW as _AMBER
+from .status import semantic_colour as _status_colour
+from .status import status_symbol as _status_symbol
+from .status import style as _style
 
 # Keep parser construction independent of Fabric transports.
 CAPACITY_ACTIONS = ("status", "resume", "suspend")
 
 # Keep parser construction independent of workflow imports.
 WORKFLOW_DEFAULT_FILE = "workflow.yml"
-
-_RESET = "\x1b[0m"
-_GREEN = "\x1b[32m"
-_RED = "\x1b[31m"
-_AMBER = "\x1b[33m"
-_DIM = "\x1b[2m"
-
-
-def _colour_enabled(stream) -> bool:
-    import os
-
-    if "NO_COLOR" in os.environ:
-        return False
-    try:
-        return bool(stream.isatty())
-    except (AttributeError, ValueError):
-        return False
-
-
-def _style(text: str, colour: str, *, stream=None) -> str:
-    stream = sys.stdout if stream is None else stream
-    return f"{colour}{text}{_RESET}" if text and _colour_enabled(stream) else text
-
-
-def _status_colour(status: str) -> str:
-    folded = status.casefold()
-    if folded in {"failed", "invalid", "error"}:
-        return _RED
-    if folded in {
-        "blocked",
-        "partially_succeeded",
-        "succeeded_with_rejects",
-        "warning",
-    }:
-        return _AMBER
-    if folded in {"passed", "succeeded"}:
-        return _GREEN
-    return ""
 
 
 def _count_style(text: str, status: str, count: int) -> str:
@@ -1318,9 +1286,11 @@ def _run_load(
 def _print_load(report) -> None:
     mode = "plan" if report.dry_run else "load"
     reload = " (reload)" if getattr(report, "reload", False) else ""
-    print(f"{mode}{reload} {report.status}: {', '.join(report.requested)}\n")
+    report_status = _style(report.status, _status_colour(report.status))
+    requested = _public_requested(report.requested)
+    print(f"{mode}{reload} {report_status}: {', '.join(requested)}\n")
     for node in report.nodes:
-        mark = "✗" if node.status in ("failed", "blocked", "invalid") else "✓"
+        mark = _status_symbol(node.status)
         colour = _status_colour(node.status)
         counts = ""
         # Failures before row movement have no row-count fields.
@@ -1350,6 +1320,7 @@ def _print_load_summary(report) -> None:
     from weaver.load_report import (
         BLOCKED,
         FAILED,
+        PENDING,
         SKIPPED,
         SUCCEEDED,
         SUCCEEDED_WITH_REJECTS,
@@ -1366,16 +1337,9 @@ def _print_load_summary(report) -> None:
         for node in report.nodes
         if node.primitive_kind not in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION)
     ]
-    counts = {
-        status: sum(node.status == status for node in loaders)
-        for status in (
-            SUCCEEDED,
-            SUCCEEDED_WITH_REJECTS,
-            FAILED,
-            BLOCKED,
-            SKIPPED,
-        )
-    }
+    from weaver.operations.load import status_counts
+
+    counts = status_counts(report)["load"]
     print("\nLoad summary")
     print(
         _count_style(
@@ -1391,6 +1355,8 @@ def _print_load_summary(report) -> None:
         )
     print(_count_style(f"  {counts[FAILED]:>3} failed", FAILED, counts[FAILED]))
     print(_count_style(f"  {counts[BLOCKED]:>3} blocked", BLOCKED, counts[BLOCKED]))
+    if counts[PENDING]:
+        print(_style(f"  {counts[PENDING]:>3} pending", _AMBER))
     if counts[SKIPPED]:
         print(f"  {counts[SKIPPED]:>3} skipped")
 
@@ -1415,6 +1381,12 @@ def _print_load_summary(report) -> None:
             else f"{sum(int(value) for value in values if value is not None):,}"
         )
         print(f"    {label:<10}{rendered:>14}")
+
+
+def _public_requested(values) -> tuple[str, ...]:
+    internal = "Warehouse/_weaver"
+    visible = tuple(str(value) for value in values if str(value) != internal)
+    return visible or ("Catalogue",)
 
 
 def handle_test(args: argparse.Namespace) -> int:
@@ -1488,7 +1460,8 @@ def _run_test(
 
 
 def _print_test(report) -> None:
-    print(f"test {report.status}\n")
+    status = _style(report.status, _status_colour(report.status))
+    print(f"test {status}\n")
     for node in report.nodes:
         result = node.result
         found = ""
@@ -1569,13 +1542,13 @@ def handle_health(args: argparse.Namespace) -> int:
 
 
 def render_health(report) -> str:
-    """Render status without relying on terminal decoration."""
+    """Render health with the CLI's shared semantic status treatment."""
 
     from weaver.health import AREAS
 
-    lines = [f"Weaver Health  {_titled(report.status)}", ""]
+    lines = [f"Weaver Health  {_semantic_status(report.status)}", ""]
     for area, section in zip(AREAS, report.sections):
-        lines.append(f"{area.title():<8}{_titled(section.status)}")
+        lines.append(f"{area.title():<8}{_semantic_status(section.status)}")
         lines.extend(_health_section(area, section, report))
         lines.append("")
     lines.extend(_health_activity(report))
@@ -1592,15 +1565,16 @@ def _health_section(area: str, section, report) -> list[str]:
             f"  Last load activity   {_ago(current.completed_at, report.generated_at)}"
         )
     counts = " · ".join(
-        f"{count} {word}" for word, count in sorted(section.counts.items())
+        _count_style(f"{count} {word}", word, count)
+        for word, count in sorted(section.counts.items())
     )
     if counts:
         lines.append(f"  {counts}")
     if area == BUILD and not section.findings:
         lines.append(f"  Installed estate consistent ({section.subjects} objects)")
     for finding in section.findings:
-        where = finding.object_id or finding.target or ""
-        lines.append(f"  {_titled(finding.severity):<7}{where}")
+        where = _health_subject(finding)
+        lines.append(f"  {_semantic_status(finding.severity, width=7)}{where}")
         lines.append(f"          {finding.message}")
     return lines
 
@@ -1642,8 +1616,27 @@ def _health_row(object_id: str, value: str, among) -> str:
     return f"  {object_id:<{width}}  {value}"
 
 
+def _health_subject(finding) -> str:
+    object_id = str(finding.object_id or "")
+    catalogue_item = "Warehouse/_weaver"
+    if object_id == catalogue_item or object_id.startswith(f"{catalogue_item}/"):
+        subject = f"Catalogue {finding.target}" if finding.target else "Catalogue"
+        suffix = object_id.removeprefix(catalogue_item).lstrip("/")
+        if suffix:
+            subject = f"{subject} / {suffix.replace('/', '.', 1)}"
+        return subject
+    return object_id or finding.target or ""
+
+
 def _titled(word: str) -> str:
     return str(word).title()
+
+
+def _semantic_status(word: str, *, width: int = 0) -> str:
+    text = _titled(word)
+    if width:
+        text = f"{text:<{width}}"
+    return _style(text, _status_colour(word))
 
 
 def _ago(at, now) -> str:
@@ -2046,7 +2039,10 @@ def _group_help(group: argparse.ArgumentParser):
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    words = sys.argv[1:] if argv is None else argv
+    if words and words[0] in {"initalise", "initailise"}:
+        print("Did you mean 'initialise'?", file=sys.stderr)
+    args = parser.parse_args(words)
 
     handler = getattr(args, "handler", None)
     if handler is None:

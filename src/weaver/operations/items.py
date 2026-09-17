@@ -52,12 +52,16 @@ def run_scope(dag, items, *, what: str, catalogue: str | None = None):
 
 
 def run_context_lines(workspace, items, installed) -> tuple[str, ...]:
+    from ..catalogue.builtin import BUILTIN_ITEM
+
     lines = [
         f"Workspace  {workspace.workspace}",
         f"Catalogue  {workspace.catalogue}",
         "Targets",
     ]
     for item in items:
+        if item == BUILTIN_ITEM:
+            continue
         logical = str(item)
         physical = str(installed[item])
         lines.append(
