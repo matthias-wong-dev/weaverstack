@@ -21,6 +21,7 @@ def test_success_statuses_are_green(word):
         "warning",
         "pending",
         "blocked",
+        "rejected",
         "partially_succeeded",
         "succeeded_with_rejects",
     ],

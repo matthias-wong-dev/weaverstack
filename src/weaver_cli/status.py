@@ -18,6 +18,7 @@ _YELLOW_STATUSES = frozenset(
         "warning",
         "pending",
         "blocked",
+        "rejected",
         "partially_succeeded",
         "succeeded_with_rejects",
     }
