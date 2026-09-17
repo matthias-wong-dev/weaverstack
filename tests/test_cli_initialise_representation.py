@@ -197,18 +197,29 @@ def test_deferred_render_names_normal_publish_and_next_commands(capsys):
 
 
 @weaver_test()
-def test_cli_passes_source_and_publication_flags_to_core(monkeypatch, tmp_path, capsys):
+def test_json_initialise_is_machine_mode_without_prompts(monkeypatch, tmp_path, capsys):
     cli = importlib.import_module("weaver_cli.main")
+    prompts = importlib.import_module("weaver_cli.initialise")
     calls = []
+    asked = []
     monkeypatch.setattr(cli, "_prefer_desktop_credential", lambda *_args: None)
-    monkeypatch.setattr(
-        cli.weaver,
-        "initialise",
-        lambda path, **kwargs: (
-            calls.append((path, kwargs))
-            or InitialiseReport(project_folder=str(path), workspace="Analytics")
-        ),
-    )
+
+    def collect_workspace(args, *, ask=True, **kwargs):
+        asked.append(("workspace", ask))
+        return False
+
+    def collect(args, *, ask=True, **kwargs):
+        asked.append(("project", ask))
+        return False
+
+    monkeypatch.setattr(prompts, "collect_workspace", collect_workspace)
+    monkeypatch.setattr(prompts, "collect", collect)
+
+    def initialise(path, **kwargs):
+        calls.append((path, kwargs, kwargs["session"].machine_output))
+        return InitialiseReport(project_folder=str(path), workspace="Analytics")
+
+    monkeypatch.setattr(cli.weaver, "initialise", initialise)
     args = parse(
         "--project-folder",
         str(tmp_path),
@@ -217,11 +228,12 @@ def test_cli_passes_source_and_publication_flags_to_core(monkeypatch, tmp_path, 
         "--warehouse",
         "Curated",
         "--example",
-        "--non-interactive",
         "--json",
     )
     assert cli.handle_initialise(args) == 0
+    assert asked == [("workspace", False), ("project", False)]
     assert calls[0][1]["example"] and calls[0][1]["publish_environment"] is False
+    assert calls[0][2] is True
     assert json.loads(capsys.readouterr().out)["environment_publication"] == "deferred"
 
 

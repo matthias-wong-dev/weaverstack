@@ -259,3 +259,67 @@ def test_a_workspace_failure_is_not_a_build_failure(monkeypatch):
 
     with pytest.raises(ConfigError):
         _cli()._build_once(parsed)
+
+
+@weaver_test()
+def test_build_completion_distinguishes_installation_from_a_prepared_bundle(capsys):
+    from types import SimpleNamespace
+
+    from weaver.build_bundle import BuildSelection, Impact
+    from weaver.build_bundle.report import FAILED, SKIPPED, SUCCEEDED
+    from weaver.declaration.model import parse_installed_identity
+    from weaver.operations.build import BuildResult
+
+    identity = parse_installed_identity("Lakehouse/Sales/Tables/Sales.Customer")
+    selection = BuildSelection(
+        Impact(new=(identity,), changed=(), impacted_descendants=()),
+        prohibited=(),
+        selected_for_drop=(identity,),
+        selected_for_build=(identity,),
+    )
+    report = SimpleNamespace(
+        action_results=lambda: iter(
+            (
+                SimpleNamespace(status=SUCCEEDED),
+                SimpleNamespace(status=SUCCEEDED),
+                SimpleNamespace(status=FAILED),
+                SimpleNamespace(status=SKIPPED),
+            )
+        )
+    )
+
+    _cli()._print_build(
+        BuildResult(
+            source=".",
+            items=("Lakehouse/Sales",),
+            bundle_id="4d738abc",
+            installation=True,
+            bundle_path=None,
+            status=FAILED,
+            selection=selection,
+            installation_report=report,
+        )
+    )
+    installed = capsys.readouterr().out
+    assert "Installation" in installed
+    assert "2 succeeded" in installed
+    assert "1 failed" in installed
+    assert "1 skipped" in installed
+    assert "Bundle  4d738abc" in installed
+
+    _cli()._print_build(
+        BuildResult(
+            source=".",
+            items=("Lakehouse/Sales",),
+            bundle_id="4d738abc",
+            installation=False,
+            bundle_path="/tmp/bundle",
+            status=SUCCEEDED,
+            selection=selection,
+        )
+    )
+    prepared = capsys.readouterr().out
+    assert "Bundle prepared" in prepared
+    assert "selected for build" in prepared
+    assert "selected for removal" in prepared
+    assert "Installation" not in prepared

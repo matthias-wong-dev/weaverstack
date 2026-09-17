@@ -23,7 +23,7 @@ from ..load_report import (
     LoadRunReport,
 )
 from ..targets import lakehouse_names
-from .items import requested_items, run_scope
+from .items import requested_items, run_context_lines, run_scope
 
 #: Kept local to avoid importing ``weaver.run`` eagerly; must match ``LOAD_TASK``.
 TASK_TYPE = "load"
@@ -165,6 +165,7 @@ def run_load(
         items, installed = run_scope(
             catalogue.dag(), items, what="load", catalogue=workspace.catalogue
         )
+    session.report(run_context_lines(workspace, items, installed))
 
     selected = None
     if stale:

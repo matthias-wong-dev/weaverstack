@@ -7,7 +7,7 @@ import time
 from contextlib import nullcontext
 from typing import Any
 
-from ..errors import WeaverError
+from ..errors import WeaverError, reported_message
 from .auth import FABRIC_SCOPE, token_source
 
 FABRIC_API = "https://api.fabric.microsoft.com/v1"
@@ -31,9 +31,19 @@ TRANSIENT_STATUSES = frozenset({429, 502, 503, 504})
 
 
 class FabricError(WeaverError):
+    executor = "REST"
+
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+def _response_message(response) -> str:
+    try:
+        payload = response.json() if response.content else None
+    except (TypeError, ValueError):
+        payload = None
+    return reported_message(payload) or response.text.strip()[:400] or "no body"
 
 
 def never_sent(exc: BaseException) -> bool:
@@ -176,7 +186,7 @@ class FabricClient:
                     continue
                 raise FabricError(
                     f"{method} {url} returned {response.status_code}: "
-                    f"{response.text.strip()[:400] or 'no body'}",
+                    f"{_response_message(response)}",
                     status_code=response.status_code,
                 )
 

@@ -51,6 +51,21 @@ def run_scope(dag, items, *, what: str, catalogue: str | None = None):
     return selected, installed_targets(dag, selected, catalogue=catalogue)
 
 
+def run_context_lines(workspace, items, installed) -> tuple[str, ...]:
+    lines = [
+        f"Workspace  {workspace.workspace}",
+        f"Catalogue  {workspace.catalogue}",
+        "Targets",
+    ]
+    for item in items:
+        logical = str(item)
+        physical = str(installed[item])
+        lines.append(
+            f"  {logical}" if logical == physical else f"  {logical} → {physical}"
+        )
+    return tuple(lines)
+
+
 def installed_items(
     dag, *, what: str, catalogue: str | None = None
 ) -> tuple[WeaverItemId, ...]:
@@ -92,5 +107,6 @@ __all__ = [
     "installed_targets",
     "parse_run_item",
     "requested_items",
+    "run_context_lines",
     "run_scope",
 ]

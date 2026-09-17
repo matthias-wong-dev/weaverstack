@@ -193,7 +193,7 @@ def test_a_declined_wipe_empties_nothing(monkeypatch, capsys):
 
     assert main(["wipe", "Lakehouse/Sales"]) == 1
     assert executed == []
-    assert "Cancelled." in capsys.readouterr().out
+    assert "error: Cancelled." in capsys.readouterr().err
 
 
 # --- the interaction policy -----------------------------------------------------
@@ -358,8 +358,8 @@ def test_a_json_wipe_asks_on_stderr_and_leaves_stdout_parseable(monkeypatch, cap
 
 
 @weaver_test()
-def test_a_declined_json_wipe_leaves_stdout_empty(monkeypatch, capsys):
-    """Nothing was emptied, so there is no result document to print."""
+def test_a_declined_json_wipe_returns_one_failure_document(monkeypatch, capsys):
+    """Nothing was emptied, and the machine contract still reports why."""
 
     _cli, _planned, executed = _wired(monkeypatch, _plan("Lakehouse/Landing"))
     monkeypatch.setattr(sys, "stdin", _Terminal("n\n"))
@@ -367,8 +367,11 @@ def test_a_declined_json_wipe_leaves_stdout_empty(monkeypatch, capsys):
     assert main(["wipe", "--json"]) == 1
 
     printed = capsys.readouterr()
-    assert printed.out == ""
-    assert "Cancelled." in printed.err
+    assert json.loads(printed.out) == {
+        "status": "failed",
+        "error": {"message": "Cancelled."},
+    }
+    assert "Cancelled." not in printed.err
     assert executed == []
 
 

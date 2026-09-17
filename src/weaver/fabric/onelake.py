@@ -12,7 +12,7 @@ from ..errors import CommandError
 from ..locations import Location
 from ..store import Entry, StoreError
 from .auth import STORAGE_SCOPE, token_source
-from .client import ONELAKE_DFS
+from .client import ONELAKE_DFS, _response_message
 
 STORAGE_API_VERSION = "2023-11-03"
 DEFAULT_TIMEOUT = 120.0
@@ -115,13 +115,20 @@ class OneLakeDfsClient:
             else nullcontext()
         )
         with observation:
-            response = requests.request(
-                method, url, headers=merged, data=data, timeout=self.timeout
-            )
+            try:
+                response = requests.request(
+                    method, url, headers=merged, data=data, timeout=self.timeout
+                )
+            except requests.exceptions.RequestException as exc:
+                raise StoreError(
+                    f"{method} {url.split('?')[0]} could not be reached: {exc}",
+                    executor="OneLake",
+                ) from exc
             if response.status_code not in expected:
                 raise StoreError(
                     f"{method} {url.split('?')[0]} returned {response.status_code}: "
-                    f"{response.text.strip()[:300] or 'no body'}"
+                    f"{_response_message(response)}",
+                    executor="OneLake",
                 )
             return response
 
@@ -163,7 +170,10 @@ class OneLakeDfsClient:
         )
         response = self._request("GET", url, expected=(200, 404))
         if response.status_code == 404:
-            raise StoreError(f"cannot list a location that does not exist: {location}")
+            raise StoreError(
+                f"cannot list a location that does not exist: {location}",
+                executor="OneLake",
+            )
 
         # Never return a partial listing: callers use it for destructive and
         # reconciliation operations.

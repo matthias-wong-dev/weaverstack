@@ -499,11 +499,12 @@ def test_the_scope_names_the_catalogue_and_every_item_target(monkeypatch):
     resolved = resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
 
     assert resolved.wiped == ("Warehouse/Weaver_Dev", "Warehouse/Model_Dev")
-    # One list, the destination catalogue first, and the source of each row
-    # second. The item's source is the physical Warehouse its rows come from.
     assert resolved.describe() == (
-        "  Warehouse/Weaver_Dev  <- Warehouse/Weaver\n"
-        "  Warehouse/Model_Dev   <- Warehouse/Model"
+        "Workspace              Analytics\n"
+        "Source catalogue       Warehouse/Weaver\n"
+        "Destination catalogue  Warehouse/Weaver_Dev\n"
+        "Targets\n"
+        "  Warehouse/Model → Warehouse/Model_Dev"
     )
 
 

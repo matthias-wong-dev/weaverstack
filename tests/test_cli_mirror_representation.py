@@ -286,7 +286,8 @@ def test_a_fork_is_refused_without_confirmation(monkeypatch, capsys):
     printed = capsys.readouterr()
     assert "Confirmation required to empty Warehouse/Weaver_Dev" in printed.err
     # The pair it names is the resolved one, not a second answer to the question.
-    assert "  Warehouse/Weaver_Dev  <- Warehouse/Weaver" in printed.out
+    assert "Source catalogue       Warehouse/Weaver" in printed.out
+    assert "Destination catalogue  Warehouse/Weaver_Dev" in printed.out
 
 
 @weaver_test()
@@ -314,12 +315,10 @@ def test_the_question_names_every_warehouse_the_run_empties(monkeypatch, capsys)
     )
 
     printed = capsys.readouterr().out
-    # One list, target first, the catalogue leading, and each row spelled the
-    # same way.
-    assert (
-        "  Warehouse/Weaver_Dev  <- Warehouse/Weaver\n"
-        "  Warehouse/Sales_Dev   <- Warehouse/Sales\n"
-    ) in printed
+    assert "Source catalogue       Warehouse/Weaver" in printed
+    assert "Destination catalogue  Warehouse/Weaver_Dev" in printed
+    assert "Targets\n  Warehouse/Model → Warehouse/Sales_Dev" in printed
+    assert "<- Warehouse/Sales" not in printed
     assert "will be emptied and rebuilt" not in printed
     assert "will be mirrored into" not in printed
 
@@ -351,10 +350,11 @@ def test_an_authorised_fork_reports_the_targets_it_filled(monkeypatch, capsys):
     assert passed["session"].workspace is calls["plan"].workspace
     printed = capsys.readouterr().out
     # `--yes` authorises emptying these Warehouses. It does not hide which.
-    assert "Mirror on Demo" in printed
-    assert printed.endswith(
-        "mirror succeeded: Warehouse/Weaver_Dev, Lakehouse/Input_Dev\n"
-    )
+    assert "Workspace              Demo" in printed
+    assert "Mirror complete" in printed
+    assert "Catalogue  Warehouse/Weaver → Warehouse/Weaver_Dev" in printed
+    assert "1 item mirrored" in printed
+    assert "2 destinations emptied" in printed
 
 
 @weaver_test()
@@ -449,8 +449,8 @@ def test_a_json_fork_asks_on_stderr_and_leaves_stdout_parseable(monkeypatch, cap
 
 
 @weaver_test()
-def test_a_declined_json_fork_leaves_stdout_empty(monkeypatch, capsys):
-    """Nothing was emptied, so there is no result document to print."""
+def test_a_declined_json_fork_returns_one_failure_document(monkeypatch, capsys):
+    """Nothing was emptied, and the machine contract still reports why."""
 
     calls = _wired(monkeypatch)
     monkeypatch.setattr(sys, "stdin", _Terminal("n\n"))
@@ -458,6 +458,9 @@ def test_a_declined_json_fork_leaves_stdout_empty(monkeypatch, capsys):
     assert main(["mirror", "--no-item", "--workspace", "Analytics", "--json"]) == 1
 
     printed = capsys.readouterr()
-    assert printed.out == ""
-    assert "Cancelled." in printed.err
+    assert json.loads(printed.out) == {
+        "status": "failed",
+        "error": {"message": "Cancelled."},
+    }
+    assert "Cancelled." not in printed.err
     assert "mirrored" not in calls

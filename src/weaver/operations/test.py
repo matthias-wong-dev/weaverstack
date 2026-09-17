@@ -21,7 +21,7 @@ from ..test_report import (
     ValidationRunReport,
     run_status,
 )
-from .items import requested_items, run_scope
+from .items import requested_items, run_context_lines, run_scope
 from .workspace import operation_workspace
 
 #: Kept local to avoid importing ``weaver.run`` eagerly; must match ``TEST_TASK``.
@@ -117,6 +117,7 @@ def run_test(
         items, installed = run_scope(
             state.catalogue.dag(), items, what="test", catalogue=workspace.catalogue
         )
+    session.report(run_context_lines(workspace, items, installed))
     targets = tuple(installed[item] for item in items)
 
     _require_lakehouse_environment(
@@ -289,6 +290,7 @@ def _reported(
     if strict and status in (FAILED, INVALID):
         raise ValidationError(
             _failure_message(report),
+            report=report,
         )
     return report
 

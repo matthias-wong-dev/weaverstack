@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from shutil import copytree
 
@@ -54,6 +55,18 @@ def test_check_command_declares_no_fabric_resources_and_renders_success(
 
 
 @weaver_test()
+def test_check_json_returns_the_project_folder(tmp_path, capsys):
+    root = _project(tmp_path / "project")
+    args = build_parser().parse_args(["check", str(root), "--json"])
+
+    assert handle_check(args) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "succeeded",
+        "project_folder": root.as_posix(),
+    }
+
+
+@weaver_test()
 def test_check_command_adapts_parser_error_to_retry_status(tmp_path, capsys):
     root = _project(tmp_path / "project")
     (root / "Sales.Customer.sql").write_text(
@@ -63,6 +76,23 @@ def test_check_command_adapts_parser_error_to_retry_status(tmp_path, capsys):
 
     assert handle_check(args) == 1
     assert "error:" in capsys.readouterr().err
+
+
+@weaver_test()
+def test_check_json_keeps_an_expected_error_machine_readable(tmp_path, capsys):
+    root = _project(tmp_path / "project")
+    (root / "Sales.Customer.sql").write_text(
+        "/* Table ID: Sales.Customer */\nselect 1;\n", encoding="utf-8"
+    )
+    args = build_parser().parse_args(["check", str(root), "--json"])
+
+    assert handle_check(args) == 1
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["status"] == "failed"
+    assert payload["error"]["message"]
+    assert captured.err == ""
 
 
 @weaver_test()

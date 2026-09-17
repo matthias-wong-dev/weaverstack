@@ -223,16 +223,33 @@ def _epoch(started: datetime) -> str:
 _WHY_SERIAL = "concurrent T-SQL deadlocked a real Warehouse; see the note above"
 
 
+_SEQUENCE_LABELS = {
+    "reconcile and remove catalogue claims before physical work": "Removing superseded catalogue entries",
+    "reconcile runtime state before physical work": "Updating load and test state",
+    "drop selected rebuild dependency layer": "Removing objects for rebuild",
+    "build dependency layer": "Building objects",
+    "install runtime artefacts": "Installing project code",
+    "publish catalogue dictionaries and installations": "Updating catalogue definitions",
+    "publish item registry last": "Updating catalogue",
+    "refresh mutated lakehouse sql endpoints": "Refreshing SQL endpoint",
+}
+
+
 def _sequence_label(sequence: BuildSequence, resolved: dict) -> str:
     text = (sequence.description or "").strip()
-    said = text[:1].upper() + text[1:] if text else "Install"
+    said = _SEQUENCE_LABELS.get(text.casefold())
+    if said is None:
+        said = text[:1].upper() + text[1:] if text else "Install"
     names: list[str] = []
     for batch in sequence.batches:
         target = resolved.get(batch.target_id)
         name = target.bound.display if target is not None else batch.target_id
         if name not in names:
             names.append(name)
-    return f"{said}: {', '.join(names)}" if names else said
+    count = sum(len(batch.actions) for batch in sequence.batches)
+    actions = f"{count} {'action' if count == 1 else 'actions'}"
+    parts = [", ".join(names), said, actions]
+    return " · ".join(part for part in parts if part)
 
 
 def _run_batch(

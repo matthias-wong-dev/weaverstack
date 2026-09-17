@@ -19,9 +19,6 @@ from ..locations import Location
 from ..workspaces import CATALOGUE_KIND, CatalogueRef, Workspace
 from .workspace import operation_workspace
 
-#: Some Windows consoles use a non-Unicode code page.
-MIRRORS = "<-"
-
 
 @dataclass(frozen=True)
 class MirrorPlan:
@@ -103,11 +100,16 @@ class ResolvedMirror:
         return tuple(target for target, _source in self.mappings)
 
     def describe(self) -> str:
-        width = max(len(target) for target, _source in self.mappings)
-        return "\n".join(
-            f"  {target.ljust(width)}  {MIRRORS} {source}"
-            for target, source in self.mappings
-        )
+        lines = [
+            f"Workspace              {self.workspace.workspace}",
+            f"Source catalogue       {self.source}",
+            f"Destination catalogue  {self.destination}",
+            "Targets",
+        ]
+        lines.extend(f"  {item.item} → {item.target}" for item in self.items)
+        if not self.items:
+            lines.append("  none")
+        return "\n".join(lines)
 
     def __str__(self) -> str:
         return str(self.plan)
@@ -591,14 +593,13 @@ def _wipe_destination(
     from .wipe import PHYSICAL_ONLY, wipe
 
     target = f"{CATALOGUE_KIND}/{destination.name}"
-    with session.step(f"Empty {target}"):
-        wipe(
-            target,
-            session=session,
-            workspace=workspace.workspace,
-            catalogue=workspace.catalogue,
-            catalogue_action=PHYSICAL_ONLY,
-        )
+    wipe(
+        target,
+        session=session,
+        workspace=workspace.workspace,
+        catalogue=workspace.catalogue,
+        catalogue_action=PHYSICAL_ONLY,
+    )
     return target
 
 
@@ -625,7 +626,7 @@ def _rebuild_catalogue(workspace: Workspace, *, session) -> None:
         control_item=workspace.catalogue_item,
         workspace_name=workspace.workspace,
     )
-    with session.step("Build the catalogue"):
+    with session.step("Preparing destination catalogue"):
         with tempfile.TemporaryDirectory(prefix="weaver-fork-") as empty:
             location = Location(Path(empty).as_posix())
             with prepare_repository(location, source_store=FilesystemStore()) as ready:
@@ -642,6 +643,7 @@ def _rebuild_catalogue(workspace: Workspace, *, session) -> None:
                     bundle_only=False,
                     bundle_path=None,
                     source=location.value,
+                    present_selection=False,
                 )
     if not result.succeeded:
         raise CommandError(
@@ -662,11 +664,11 @@ def _copy_catalogue_state(
     from ..targets import WarehouseTarget
 
     sql = session.sql_executor(WarehouseTarget(destination.item), workspace=workspace)
-    with session.step(f"Copy catalogue state from {source}"):
+    with session.step("Forking catalogue"):
         sql.execute_script(
             "\n".join(fork_statements(source_catalogue=source.name, borrowed=borrowed))
         )
-    with session.step("Count what was copied"):
+    with session.step("Reading catalogue copy result"):
         rows = sql.query(_count_statement(borrowed=borrowed))
     counted = {str(row["Table"]): int(row["Rows"]) for row in rows}
     return {
@@ -694,14 +696,13 @@ def _wipe_target(workspace: Workspace, each: MirrorItem, *, session) -> str:
 
     from .wipe import PHYSICAL_ONLY, wipe
 
-    with session.step(f"Empty {each.target}"):
-        wipe(
-            each.target,
-            session=session,
-            workspace=workspace.workspace,
-            catalogue=workspace.catalogue,
-            catalogue_action=PHYSICAL_ONLY,
-        )
+    wipe(
+        each.target,
+        session=session,
+        workspace=workspace.workspace,
+        catalogue=workspace.catalogue,
+        catalogue_action=PHYSICAL_ONLY,
+    )
     return each.target
 
 
@@ -725,7 +726,7 @@ def _mirror_warehouse_item(
     sql = session.sql_executor(
         WarehouseTarget(ItemRef(each.destination)), workspace=workspace
     )
-    with session.step(f"Mirror {each.item} from {each.source}"):
+    with session.step(f"Mirroring {each.item}"):
         for statement in borrow_statements(
             each.relations,
             source_target=each.source_target,
@@ -735,7 +736,7 @@ def _mirror_warehouse_item(
 
     pointers = _recreatable(each, bindings=bindings)
     if pointers:
-        with session.step(f"Recreate {len(pointers)} shortcut(s) in {each.target}"):
+        with session.step(f"Recreating shortcuts in {each.target}"):
             for statement in schema_statements(schemas_of(pointers)):
                 sql.execute(statement)
             for pointer in pointers:
@@ -801,7 +802,7 @@ def _mirror_lakehouse_item(
         + _recreated_requests(workspace, each, pointers, session=session)
     )
     if shortcuts:
-        with session.step(f"Mirror {len(shortcuts)} object(s) from {each.source}"):
+        with session.step(f"Mirroring {each.item}"):
             resolver.create_onelake_shortcuts(ItemRef(each.destination), shortcuts)
         with session.step("Wait for the shortcuts to become readable"):
             # A table shortcut is ready only when its relation and Delta path read.
@@ -818,7 +819,7 @@ def _mirror_lakehouse_item(
         if not borrowed.is_pointer
     )
     if wrapped:
-        with session.step(f"Wrap {len(wrapped)} source view(s)"):
+        with session.step(f"Creating mirror views in {each.target}"):
             # A schema containing only views has no shortcut to create it.
             statements = [
                 destination.create_schema_statement(schema)
@@ -951,7 +952,7 @@ def _copy_load_tree(workspace: Workspace, each: MirrorItem, *, session) -> int:
         for entry in store.list(source, recursive=True)
         if not entry.is_directory
     }
-    with session.step(f"Copy {len(held)} deployed file(s)"):
+    with session.step(f"Copying project code to {each.target}"):
         for relative, entry in sorted(held.items()):
             store.write(
                 destination.join(*relative.split("/")), store.read(entry.location)
@@ -1010,7 +1011,7 @@ def _copy_programmables(workspace: Workspace, each: MirrorItem, *, sql, session)
     statements = programmable_statements(str(row["definition"]) for row in rows)
     if not statements:
         return 0
-    with session.step(f"Copy {len(statements)} programmable(s)"):
+    with session.step(f"Copying project code to {each.target}"):
         # A schema containing only procedures has no borrowed relation to create it.
         for statement in schema_statements(str(row["schema_name"]) for row in rows):
             sql.execute(statement)
@@ -1035,7 +1036,7 @@ def _record_borrowed(workspace: Workspace, each: MirrorItem, *, session) -> None
     sql = session.sql_executor(
         WarehouseTarget(workspace.catalogue_item), workspace=workspace
     )
-    with session.step("Record the mirror source"):
+    with session.step("Updating mirror records"):
         for statement in statements:
             sql.execute(statement)
 
@@ -1073,7 +1074,7 @@ def _switch_installation(workspace: Workspace, each: MirrorItem, *, session) -> 
     sql = session.sql_executor(
         WarehouseTarget(workspace.catalogue_item), workspace=workspace
     )
-    with session.step(f"Bind {item} to {each.destination}"):
+    with session.step(f"Updating the binding for {item}"):
         sql.execute(statement)
 
 

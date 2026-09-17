@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from ..errors import BuildError, CommandError
 from ..locations import Location
@@ -51,6 +51,8 @@ class BuildResult:
     bundle_path: str | None
     status: str
     errors: tuple[BuildFailure, ...] = ()
+    selection: Any = field(default=None, repr=False, compare=False)
+    installation_report: Any = field(default=None, repr=False, compare=False)
 
     @property
     def succeeded(self) -> bool:
@@ -133,11 +135,13 @@ def build(
                 repository=prepared.repository,
                 source_store=prepared.store,
                 bindings=bindings,
+                requested_bindings=selected,
                 catalogue_binding=control,
                 bundle_only=bundle_only,
                 bundle_path=bundle_path,
                 source=source_location.value,
             )
+            opened.report(_build_context_lines(resolved_workspace, selected))
             with opened.task("Build", resolved_workspace.workspace):
                 return _run_build(resolved_workspace, session=opened, **arguments)
 
@@ -150,6 +154,21 @@ def _bound_lakehouses(bindings) -> tuple[str, ...]:
         for binding in bindings.entries
         if binding.target.physical_kind == LAKEHOUSE
     )
+
+
+def _build_context_lines(workspace: Workspace, bindings) -> tuple[str, ...]:
+    lines = [
+        f"Workspace  {workspace.workspace}",
+        f"Catalogue  {workspace.catalogue}",
+        "Targets",
+    ]
+    for binding in bindings.entries:
+        logical = str(binding.item)
+        physical = f"{binding.target.physical_kind}/{binding.target.item.name}"
+        lines.append(
+            f"  {logical}" if logical == physical else f"  {logical} → {physical}"
+        )
+    return tuple(lines)
 
 
 def _preflight(workspace: Workspace, bindings, *, session) -> None:
@@ -223,6 +242,8 @@ def _result_from_item_build(source, bindings, result) -> BuildResult:
             for action in report.action_results()
             if action.status == "failed"
         ),
+        selection=result.plan.selection,
+        installation_report=report,
     )
 
 
@@ -237,9 +258,12 @@ def _run_build(
     bundle_only,
     bundle_path,
     source,
+    requested_bindings=None,
+    present_selection=True,
 ) -> BuildResult:
     from ..build_bundle import (
-        build_item_repository,
+        Installer,
+        build_repository_bundle,
         catalogue_items_for_build,
         read_build_state,
     )
@@ -253,11 +277,10 @@ def _run_build(
         workspace=workspace,
         shortcuts=repository.shortcuts,
     )
+    requested_bindings = requested_bindings or bindings
     if bundle_only:
-        from ..build_bundle import build_repository_bundle
-
         output = _bundle_output(bundle_path)
-        with session.step("Build bundle"):
+        with session.step("Prepare bundle"):
             bundle = build_repository_bundle(
                 repository,
                 bindings=bindings,
@@ -266,26 +289,73 @@ def _run_build(
                 catalogue_binding=catalogue_binding,
                 output=output,
             )
+        if present_selection:
+            session.report(_selection_lines(bundle.plan.selection, requested_bindings))
         return BuildResult(
             source=source,
-            items=tuple(str(binding.item) for binding in bindings.entries),
+            items=tuple(str(binding.item) for binding in requested_bindings.entries),
             bundle_id=bundle.bundle_id,
             installation=False,
             bundle_path=bundle.location.value,
             status="succeeded",
+            selection=bundle.plan.selection,
         )
 
-    with session.step("Build and install"):
-        result = build_item_repository(
-            repository,
-            bindings=bindings,
-            state=state,
-            session=session,
-            workspace=workspace,
-            source_store=source_store,
-            catalogue_binding=catalogue_binding,
+    with tempfile.TemporaryDirectory(prefix="weaver-build-") as temporary:
+        with session.step("Prepare bundle"):
+            bundle = build_repository_bundle(
+                repository,
+                bindings=bindings,
+                state=state,
+                source_store=source_store,
+                catalogue_binding=catalogue_binding,
+                output=Location((Path(temporary) / "bundle").as_posix()),
+            )
+        if present_selection:
+            session.report(_selection_lines(bundle.plan.selection, requested_bindings))
+        with session.step("Install"):
+            report = Installer(session, workspace=workspace).install(bundle)
+        result = BuildResult(
+            source=source,
+            items=tuple(str(binding.item) for binding in requested_bindings.entries),
+            bundle_id=bundle.bundle_id,
+            installation=True,
+            bundle_path=None,
+            status=report.status,
+            errors=tuple(
+                BuildFailure(
+                    action.action_id,
+                    action.error_type,
+                    action.error_message,
+                    artefact=action.resource_node_id,
+                    source_path=action.source_path,
+                )
+                for action in report.action_results()
+                if action.status == "failed"
+            ),
+            selection=bundle.plan.selection,
+            installation_report=report,
         )
-    return _result_from_item_build(source, bindings, result)
+    return result
+
+
+def _selection_lines(selection, bindings) -> tuple[str, ...]:
+    categories = (
+        ("new", selection.impact.new),
+        ("changed", selection.impact.changed),
+        ("dependency impacts", selection.impact.impacted_descendants),
+        ("prohibited", selection.prohibited),
+        ("selected for build", selection.selected_for_build),
+        ("selected for removal", selection.selected_for_drop),
+    )
+    lines = ["Build selection"]
+    for binding in bindings.entries:
+        lines.append(f"  {binding.item}")
+        for label, identities in categories:
+            count = sum(identity.item == binding.item for identity in identities)
+            if count:
+                lines.append(f"    {label:<24}{count}")
+    return tuple(lines)
 
 
 def _bundle_output(path: str | Path | None) -> Location:

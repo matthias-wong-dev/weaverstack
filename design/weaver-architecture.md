@@ -232,6 +232,11 @@ Because every deployment action exists explicitly within the bundle:
 - execution can be inspected
 - deployment is independent of source generation
 
+The bundle also freezes the completed build selection. A command can therefore
+report new, changed, dependency-impacted, prohibited, selected-for-build and
+selected-for-removal counts before installation without repeating selection or
+reading Fabric again.
+
 ---
 
 # Installation

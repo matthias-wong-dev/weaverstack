@@ -70,6 +70,13 @@ and its own `--yes` authorises each of them.
 
 `weaver session` is the interactive command and takes neither.
 
+Commands that accept `--json` write one JSON document to stdout. Machine mode
+does not prompt or offer an interactive retry. Expected failures use
+`{"status": "failed", "error": {"message": "..."}}`. A TDS, Livy, REST or
+OneLake failure adds the executor that reported it. An intolerant load failure
+also carries its completed partial report under `report`. `weaver check --json`
+returns `status` and `project_folder` on success.
+
 ## Checking that Weaver can connect
 
 ```bash
@@ -410,18 +417,29 @@ it, so output and prompt never share a line.
 ## Progress and timings
 
 Every command is a **Task**, made of **Steps**, and where it is useful, of
-**Sub-steps** — one per physical unit. Each frame reports what it cost as it
+**Sub-steps** for physical sequences. Each frame reports what it cost as it
 closes, on stderr, so stdout stays the command's answer:
 
 ```text
+Workspace  Analytics
+Catalogue  Warehouse/Weaver_Dev
+Targets
+  Lakehouse/Sales → Lakehouse/Sales_Dev
+
 Build
 
-  Read physical state                                  8.4s
-  Build bundle                                         0.3s
-    Sales.Customer                                     3.2s
-    Sales.Order                                        4.1s
+  Read target inventories                              8.4s
+  Read catalogue                                       1.2s
+  Prepare bundle                                       0.3s
+Build selection
+  Lakehouse/Sales
+    changed                 4
+    dependency impacts      6
+    selected for build     10
   Install                                             18.6s
-✓ Build                                               40.7s
+    Lakehouse/Sales_Dev · Building objects · 10 actions  12.1s
+    Warehouse/Weaver_Dev · Updating catalogue · 1 action  6.5s
+✓ Build                                               28.5s
 ```
 
 Children appear above their parent with the parent's own total underneath — a
@@ -440,6 +458,10 @@ It is erased before anything permanent is written, so it never lands in the
 transcript, and it needs a terminal to rewrite — piped, redirected or captured,
 the output is exactly the completed lines. The elapsed figure ticks, which is
 the half that says a two-minute wait is alive rather than hung.
+
+Terminal colour marks success, failure and outcomes needing attention. Symbols
+and status words carry the same meaning without colour. Styling is disabled for
+JSON, redirected output and terminals with `NO_COLOR` set.
 
 That is the *logical* ledger. The transport one is separate, and neither can be
 derived from the other — "the load took forty seconds" and "thirty-eight of them
@@ -749,6 +771,11 @@ that state. Every build action runs in the Installer, wherever that is. Weaver
 running inside Fabric prepares, plans and installs in the session it is already
 in.
 
+The completed bundle carries the `BuildSelection`. The CLI reports its counts by
+logical item after bundle preparation and before installation. Installation then
+reports aggregate sequence progress and action counts. Display labels do not
+change sequence descriptions or bundle identity.
+
 A build needs no `--environment`. What it submits to Spark is SQL that imports
 nothing, so it runs on the workspace's default runtime; `load`, `test` and the
 other commands that run Weaver inside Fabric name the Environment
@@ -765,7 +792,8 @@ weaver install ./dist/estate-bundle --workspace-config examples/weaver_example.y
 
 `weaver check [project-folder]` is also available for agents, CI and editor tooling
 that need to validate source without contacting Fabric. It is not a prerequisite
-for `weaver build`, which always checks source itself.
+for `weaver build`, which always checks source itself. Add `--json` for a stable
+status and project-folder result.
 
 ## Load
 
@@ -797,7 +825,10 @@ anything. `--dry-run` shows the selection without running it. `--as-of` requires
 `--stale`, and `--reload` and `--stale` cannot be used together.
 
 The named items bound the run, and the selected objects load in dependency
-order. See [Health](health.md) for what makes an object green.
+order. The command shows the installed logical-to-physical mappings read from the
+catalogue, then ends with node outcomes and row totals summed across loaders.
+Missing row counts are reported as unknown. A dry run reports a plan and no row
+statistics. See [Health](health.md) for what makes an object green.
 
 ## Test
 
@@ -807,11 +838,11 @@ Run the installed Tests and Assumptions the named items own:
 weaver test Lakehouse/Sales --workspace-config examples/weaver_example.yml
 ```
 
-The output is the verdict. A Test or an Assumption may pass, fail, or be unable
-to run, and none of those is a failure of the command: a run that produced a
-report exits zero, so a pasted block or a workflow carries on to the next
-command. A command that produced no report, an unusable `--name` or an estate it
-could not read, exits non-zero. `--json` emits the whole report.
+The output is the verdict. A passing or planned run exits zero. A failed Test,
+failed Assumption or validation that could not run exits one after rendering its
+completed report. The enclosing Test task therefore finishes as failed. A
+command that produced no report, an unusable `--name` or an estate it could not
+read also exits one.
 
 A whole-item run reports **counts only**. Diagnostic rows may be large and may
 carry sensitive business data, so they are never transferred and never logged;
@@ -824,7 +855,9 @@ Name one to see the rows:
 weaver test Lakehouse/Sales --name Sales.OrderSummaryReconciliation
 ```
 
-The counts and the rows come from **one** execution. A Test run twice would
+The counts and the rows come from **one** execution. Human output and targeted
+`--json` both include those rows for `--name` and `--file`. Estate-wide JSON
+retains the durable report shape and omits diagnostic rows. A Test run twice would
 compare data that could have changed in between, and could be expensive twice
 over.
 

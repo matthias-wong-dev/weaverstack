@@ -19,6 +19,7 @@ before any session starts, not a Py4J traceback from inside one.
 
 from __future__ import annotations
 
+import io
 import sys
 import types
 
@@ -280,6 +281,137 @@ def test_a_desktop_caller_needs_no_workspace_object(captured, repository, tmp_pa
     assert captured["mode"] == "build"
     assert captured["workspace"].workspace == "Analytics"
     assert captured["workspace"].catalogue == "Warehouse/Weaver"
+
+
+@weaver_test()
+def test_build_reports_the_resolved_context_once(captured, repository):
+    from weaver.sessions import ConsoleSession
+
+    output = io.StringIO()
+    workspace = Workspace(workspace="Analytics", catalogue="Warehouse/Weaver")
+    with ConsoleSession(workspace=workspace, progress=output) as session:
+        with pytest.raises(Halt):
+            _build(repository, session=session)
+
+    printed = output.getvalue()
+    assert printed.count("Workspace  Analytics") == 1
+    assert "Catalogue  Warehouse/Weaver" in printed
+    assert "Lakehouse/Sales → Lakehouse/Sales_LH" in printed
+
+
+@weaver_test()
+def test_build_reports_selection_after_the_bundle_and_before_installation(
+    monkeypatch, tmp_path
+):
+    from contextlib import contextmanager
+
+    from weaver.build_bundle import (
+        BuildSelection,
+        Impact,
+        ItemBinding,
+        ItemBindings,
+        LakehouseBinding,
+        WarehouseBinding,
+    )
+    from weaver.declaration.model import WeaverItemId, parse_installed_identity
+    from weaver.locations import Location
+    from weaver.targets import ItemRef
+
+    item = WeaverItemId.parse("Lakehouse/Sales")
+    identities = tuple(
+        parse_installed_identity(f"Lakehouse/Sales/Tables/{name}")
+        for name in ("Sales.New", "Sales.Changed", "Sales.Impact", "Sales.Blocked")
+    )
+    selection = BuildSelection(
+        impact=Impact(
+            new=(identities[0],),
+            changed=(identities[1],),
+            impacted_descendants=(identities[2],),
+        ),
+        prohibited=(identities[3],),
+        selected_for_drop=(identities[1], identities[3]),
+        selected_for_build=(identities[0], identities[1], identities[2]),
+    )
+    bundle = types.SimpleNamespace(
+        plan=types.SimpleNamespace(selection=selection),
+        bundle_id="bundle-1",
+        location=Location(str(tmp_path / "bundle")),
+    )
+    report = types.SimpleNamespace(status="succeeded", action_results=lambda: iter(()))
+    events = []
+
+    class Session:
+        @contextmanager
+        def step(self, name):
+            events.append(("step", name))
+            yield
+
+        def report(self, lines):
+            events.append(("report", tuple(lines)))
+
+    class Installer:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def install(self, received):
+            assert received is bundle
+            events.append(("install", received.bundle_id))
+            return report
+
+    import weaver.build_bundle as build_bundle
+
+    monkeypatch.setattr(build_bundle, "catalogue_items_for_build", lambda *_a: ())
+    monkeypatch.setattr(build_bundle, "read_build_state", lambda *_a, **_k: object())
+
+    def prepared(*_args, **_kwargs):
+        events.append(("bundle", bundle.bundle_id))
+        return bundle
+
+    monkeypatch.setattr(build_bundle, "build_repository_bundle", prepared)
+    monkeypatch.setattr(build_bundle, "Installer", Installer)
+    monkeypatch.setattr(
+        build_bundle,
+        "build_item_repository",
+        lambda *_a, **_k: pytest.fail("build and install remained one operation"),
+    )
+    bindings = ItemBindings(
+        (
+            ItemBinding(
+                item,
+                LakehouseBinding(ItemRef("Sales_LH"), workspace_name="Analytics"),
+            ),
+        )
+    )
+
+    result = weaver.operations.build._run_build(
+        Workspace(workspace="Analytics", catalogue="Warehouse/Weaver"),
+        session=Session(),
+        repository=types.SimpleNamespace(shortcuts=()),
+        source_store=object(),
+        bindings=bindings,
+        catalogue_binding=WarehouseBinding(
+            ItemRef("Weaver"), workspace_name="Analytics"
+        ),
+        bundle_only=False,
+        bundle_path=None,
+        source=".",
+    )
+
+    kinds = [event[0] for event in events]
+    assert kinds.index("bundle") < kinds.index("report") < kinds.index("install")
+    selection_lines = next(event[1] for event in events if event[0] == "report")
+    assert selection_lines == (
+        "Build selection",
+        "  Lakehouse/Sales",
+        "    new                     1",
+        "    changed                 1",
+        "    dependency impacts      1",
+        "    prohibited              1",
+        "    selected for build      3",
+        "    selected for removal    2",
+    )
+    assert result.selection is selection
+    assert result.installation_report is report
 
 
 # --- and missing context is a sentence ----------------------------------------

@@ -122,6 +122,37 @@ def test_successful_install_reports_every_action(tmp_path):
 
 
 @weaver_test()
+def test_operator_sequence_labels_are_aggregate_and_do_not_change_bundle_identity():
+    from types import SimpleNamespace
+
+    from weaver.build_bundle.installer import _sequence_label
+
+    actions = (_action("customer"), _action("order"), _action("invoice"))
+    sequence = BuildSequence(
+        number=1,
+        description="build dependency layer",
+        batches=(BuildBatch(id="build", target_id=TARGET.id, actions=actions),),
+    )
+    plan = BuildPlan(
+        format_version=SUPPORTED_FORMAT_VERSION,
+        bundle_id="",
+        repository_name="MyRepo",
+        repository_signature="sig",
+        targets=(TARGET,),
+        sequences=(sequence,),
+        selection=BuildSelection(Impact((), (), ()), (), (), ()),
+    )
+    bundle_id = compute_bundle_id(plan)
+
+    label = _sequence_label(sequence, {TARGET.id: SimpleNamespace(bound=TARGET)})
+
+    assert label == "Lakehouse/Sales_LH · Building objects · 3 actions"
+    assert all(action.id not in label for action in actions)
+    assert sequence.description == "build dependency layer"
+    assert compute_bundle_id(plan) == bundle_id
+
+
+@weaver_test()
 def test_a_failure_stops_later_sequences_and_is_reported(tmp_path):
     location, store = _bundle(tmp_path)
     recorder = Recorder(fail_on={"a2"})
