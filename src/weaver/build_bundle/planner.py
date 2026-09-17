@@ -84,9 +84,8 @@ def generate_item_build_bundle(
         selected_loads,
         selected_validations,
     ) = _selectable(repository, by_item)
-    selected_ids = (
-        selected_documents | selected_shortcuts | selected_loads | selected_validations
-    )
+    selected_ids = selected_documents | selected_shortcuts | selected_loads
+    certifiable_ids = selected_ids | selected_validations
 
     targets = tuple(
         by_item[item].to_bound_target() for item in sorted(by_item, key=str)
@@ -249,7 +248,7 @@ def generate_item_build_bundle(
     stages.extend(
         render_catalogue_after_build(
             repository,
-            selected_ids,
+            certifiable_ids,
             target_by_item,
             catalogue_target=catalogue_target,
             # Compare publication against the catalogue after claim deletion.
@@ -266,7 +265,7 @@ def generate_item_build_bundle(
             detail=f"item {identity.item} is not bound",
         )
         for identity in sorted(repository.source_documents, key=str)
-        if identity not in selected_ids
+        if identity not in certifiable_ids
     )
     plan = BuildPlan(
         format_version=SUPPORTED_FORMAT_VERSION,
@@ -355,6 +354,13 @@ def certifiable_identities(repository: WeaverRepository, by_item: Mapping) -> se
 
     documents, shortcuts, loads, validations = _selectable(repository, by_item)
     return documents | shortcuts | loads | validations
+
+
+def installable_identities(repository: WeaverRepository, by_item: Mapping) -> set:
+    """Return physical identities considered by incremental installation."""
+
+    documents, shortcuts, artefacts, _validations = _selectable(repository, by_item)
+    return documents | shortcuts | artefacts
 
 
 def _item_layers(

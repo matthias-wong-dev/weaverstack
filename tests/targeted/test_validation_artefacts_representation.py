@@ -20,6 +20,11 @@ from support.weaver_test import weaver_test
 
 from weaver.declaration import parse_item_repository
 from weaver.declaration.model import WeaverItemId
+from weaver.declaration.source import content_hash, salted_signature
+from weaver.declaration.validation import (
+    SPARK_VALIDATION_VERSION,
+    TSQL_VALIDATION_VERSION,
+)
 from weaver.etl import (
     ROLE_ASSUMPTION,
     ROLE_LOAD,
@@ -311,6 +316,23 @@ def test_an_untouched_validation_keeps_its_signature(tmp_path):
 
 
 @weaver_test()
+def test_generated_validations_carry_their_generator_implementation_version(estate):
+    warehouse = next(
+        artefact
+        for artefact in item_runtime_artefacts(estate, item=WAREHOUSE)
+        if artefact.role == ROLE_TEST
+    )
+    lakehouse = next(
+        artefact
+        for artefact in item_validation_artefacts(estate, item=LAKEHOUSE)
+        if artefact.role == ROLE_ASSUMPTION
+    )
+
+    assert warehouse.implementation_version == TSQL_VALIDATION_VERSION
+    assert lakehouse.implementation_version == SPARK_VALIDATION_VERSION
+
+
+@weaver_test()
 def test_the_generator_version_salts_a_generated_validation(tmp_path, monkeypatch):
     """Otherwise a changed generator leaves the old primitive installed, silently."""
 
@@ -327,9 +349,7 @@ def test_the_generator_version_salts_a_generated_validation(tmp_path, monkeypatc
 
 @weaver_test()
 def test_a_deployed_python_validation_is_signed_by_its_own_bytes(tmp_path):
-    """No salt: nothing generated it, so no generator version applies to it."""
-
-    from weaver.declaration.source import content_hash
+    """Its own bytes and direct implementation version define the signature."""
 
     artefact = next(
         artefact
@@ -339,7 +359,10 @@ def test_a_deployed_python_validation_is_signed_by_its_own_bytes(tmp_path):
         if artefact.role == ROLE_TEST
     )
 
-    assert artefact.signature == content_hash(PYTHON_TEST.encode("utf-8"))
+    assert artefact.implementation_version == 1
+    assert artefact.signature == salted_signature(
+        content_hash(PYTHON_TEST.encode("utf-8")), artefact.implementation_version
+    )
 
 
 # --- the infrastructure a validation needs ------------------------------------

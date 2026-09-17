@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from ..errors import DiscoveryError
 from ..objects import BASE_CLASS_NAMES, BASE_CLASSES
+from ..signatures import implementation_signature
 from .dependencies import (
     PythonImport,
     RelationReference,
@@ -59,13 +60,9 @@ def content_hash(data: bytes) -> str:
 
 
 def salted_signature(signature: str, version: int) -> str:
-    """Hash authored content with the version of the generator that renders it."""
+    """Hash source content with its physical implementation version."""
 
-    digest = hashlib.sha256()
-    digest.update(signature.encode("ascii"))
-    digest.update(b"\0")
-    digest.update(str(version).encode("ascii"))
-    return digest.hexdigest()
+    return implementation_signature(signature, version)
 
 
 def sql_dialect_for_item_type(item_type: str) -> str:
@@ -197,23 +194,28 @@ class SourceDocument:
         return self.build_signature or self.source_hash
 
     @property
-    def physical_signature(self) -> str:
-        """What the installed structure represents: the source, and its shape.
+    def implementation_version(self) -> int:
+        """Version of the implementation that materialises this declaration."""
 
-        Almost always the authored implementation alone. A keyed table is the
-        exception: Weaver gives it a row-signature column of its own, so a change
-        to that shape must rebuild the table even though nothing authored moved.
-        :data:`~weaver.declaration.ddl.KEYED_TABLE_VERSION` carries it.
+        from .ddl import KEYED_TABLE_VERSION
+
+        if self.document.signature_column is not None:
+            return KEYED_TABLE_VERSION
+        return 1
+
+    @property
+    def physical_signature(self) -> str:
+        """What the installed structure represents: source and implementation.
+
+        Direct structures use implementation version 1. A keyed table uses
+        :data:`~weaver.declaration.ddl.KEYED_TABLE_VERSION` so a change to its
+        Weaver-owned shape rebuilds the table when authored source is unchanged.
 
         Read by the desired catalogue and by incremental selection, which compare
         the two ends of the same value.
         """
 
-        from .ddl import KEYED_TABLE_VERSION
-
-        if self.document.signature_column is None:
-            return self.effective_signature
-        return salted_signature(self.effective_signature, KEYED_TABLE_VERSION)
+        return salted_signature(self.effective_signature, self.implementation_version)
 
     @property
     def node_id(self) -> str:

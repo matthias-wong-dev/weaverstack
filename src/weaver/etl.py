@@ -81,21 +81,22 @@ class RuntimeArtefact:
     ``origin`` is the declaration that produced it; helper modules have none.
 
     ``source_path`` retains the authored path for installation errors.
-
-    ``stands_for_origin`` marks an artefact as the declaration's complete
-    physical form. Table load modules do not stand for their tables.
     """
 
     identity: WeaverDocumentId
     object_type: str
-    signature: str
+    source_signature: str
     #: Generated modules have no payload until their Lakehouse destination is
     #: known.
     payload: bytes | None
     role: str = ROLE_LOAD
+    implementation_version: int = 1
     origin: WeaverDocumentId | None = None
     source_path: str | None = None
-    stands_for_origin: bool = False
+
+    @property
+    def signature(self) -> str:
+        return salted_signature(self.source_signature, self.implementation_version)
 
     @property
     def installed_bytes(self) -> bytes:
@@ -269,12 +270,11 @@ def item_validation_artefacts(
                 RuntimeArtefact(
                     identity=validation_artefact_id(item, kind, identity.object_id),
                     object_type=FILE_TYPE,
-                    signature=content_hash(payload),
+                    source_signature=content_hash(payload),
                     payload=payload,
                     role=role,
                     origin=identity,
                     source_path=source.relative_path,
-                    stands_for_origin=True,
                 )
             )
             continue
@@ -293,14 +293,12 @@ def item_validation_artefacts(
             RuntimeArtefact(
                 identity=validation_artefact_id(item, kind, identity.object_id),
                 object_type=object_type,
-                signature=salted_signature(
-                    source.effective_signature, template_version
-                ),
+                source_signature=source.effective_signature,
                 payload=None if generated is None else generated.payload,
                 role=role,
+                implementation_version=template_version,
                 origin=identity,
                 source_path=source.relative_path,
-                stands_for_origin=True,
             )
         )
     return tuple(artefacts)
@@ -350,9 +348,8 @@ def item_generated_programmables(
                 generated_programmable(
                     load_procedure_id(item, identity.object_id),
                     text=generated.payload.decode("utf-8"),
-                    signature=salted_signature(
-                        source.effective_signature, generated.template_version
-                    ),
+                    source_signature=source.effective_signature,
+                    implementation_version=generated.template_version,
                     role=ROLE_LOAD,
                     origin=identity,
                 )
@@ -367,9 +364,8 @@ def item_generated_programmables(
             generated_programmable(
                 validation_procedure_id(item, kind, identity.object_id),
                 text=generated.payload.decode("utf-8"),
-                signature=salted_signature(
-                    source.effective_signature, template_version
-                ),
+                source_signature=source.effective_signature,
+                implementation_version=template_version,
                 role=VALIDATION_ROLE[kind],
                 origin=identity,
             )
@@ -389,9 +385,10 @@ def _warehouse_artefacts(
             RuntimeArtefact(
                 identity=programmable.identity,
                 object_type=PROCEDURE_TYPE,
-                signature=programmable.signature,
+                source_signature=programmable.source_signature,
                 payload=programmable.payload,
                 role=programmable.role,
+                implementation_version=programmable.implementation_version,
                 origin=programmable.origin,
                 source_path=programmable.relative_path,
             )
@@ -417,7 +414,7 @@ def _lakehouse_artefacts(
                     item,
                     relative,
                     payload=source.text.encode("utf-8"),
-                    signature=content_hash(source.text.encode("utf-8")),
+                    source_signature=content_hash(source.text.encode("utf-8")),
                     origin=identity,
                     source_path=source.relative_path,
                 )
@@ -439,9 +436,8 @@ def _lakehouse_artefacts(
                     # All compiled tables use the same importable module path.
                     _deployed_module_relative(relative, identity.object_id),
                     payload=None if generated is None else generated.payload,
-                    signature=salted_signature(
-                        source.effective_signature, template_version
-                    ),
+                    source_signature=source.effective_signature,
+                    implementation_version=template_version,
                     origin=identity,
                     source_path=source.relative_path,
                 )
@@ -462,7 +458,7 @@ def _lakehouse_artefacts(
                 item,
                 SHORTCUTS_MODULE,
                 payload=payload,
-                signature=content_hash(payload),
+                source_signature=content_hash(payload),
                 source_path=declared[0].relative_path,
             )
         )
@@ -478,7 +474,7 @@ def _lakehouse_artefacts(
                 item,
                 _within_item(relative, item),
                 payload=content,
-                signature=content_hash(content),
+                source_signature=content_hash(content),
                 source_path=relative,
             )
         )
@@ -490,8 +486,9 @@ def _file_artefact(
     relative: str,
     *,
     payload: bytes,
-    signature: str,
+    source_signature: str,
     role: str = ROLE_LOAD,
+    implementation_version: int = 1,
     origin: WeaverDocumentId | None = None,
     source_path: str | None = None,
 ) -> RuntimeArtefact:
@@ -509,9 +506,10 @@ def _file_artefact(
             item, ObjectId(schema=directory, object=name), shape=FILE_SHAPE
         ),
         object_type=FILE_TYPE,
-        signature=signature,
+        source_signature=source_signature,
         payload=payload,
         role=role,
+        implementation_version=implementation_version,
         origin=origin,
         source_path=source_path,
     )

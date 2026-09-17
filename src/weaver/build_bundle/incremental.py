@@ -15,7 +15,6 @@ from ..declaration.model import (
     parse_installed_identity,
 )
 from ..errors import BuildError
-from ..etl import RuntimeArtefact
 
 
 def _ordered(values: Iterable[WeaverDocumentId]) -> tuple[WeaverDocumentId, ...]:
@@ -215,26 +214,6 @@ def declared_signatures(
     return signatures
 
 
-def _artefacts_standing_for_their_origin(
-    repository: WeaverRepository, selected: set[WeaverDocumentId]
-) -> dict[WeaverDocumentId, "RuntimeArtefact"]:
-    """Return declarations represented physically only by a runtime artefact.
-
-    The artefact's Registry row is their installation record. Load artefacts do
-    not qualify because both the table and its loader are installed and signed.
-    """
-
-    from ..etl import runtime_artefacts
-
-    return {
-        artefact.origin: artefact
-        for artefact in runtime_artefacts(repository)
-        if artefact.stands_for_origin
-        and artefact.origin is not None
-        and artefact.origin in selected
-    }
-
-
 def determine_impact(
     repository: WeaverRepository,
     registered: Mapping[WeaverDocumentId, RegisteredDocument],
@@ -258,22 +237,11 @@ def determine_impact(
         if identity in selected_set
     }
     declared = declared_signatures(repository, selected_set)
-    # A declaration whose artefact is its whole physical form is classified by
-    # that artefact's row, because that row is the only record of it. Nothing here
-    # names which declarations those are; the artefact says so.
-    standing_for = _artefacts_standing_for_their_origin(repository, selected_set)
-
     new: set[WeaverDocumentId] = set()
     changed: set[WeaverDocumentId] = set()
     for identity in selected_set:
-        artefact = standing_for.get(identity)
-        if artefact is not None:
-            recorded = registered.get(artefact.identity)
-            signature = None if recorded is None else recorded.signature
-            wanted = artefact.signature
-        else:
-            signature = installed.get(identity)
-            wanted = declared[identity]
+        signature = installed.get(identity)
+        wanted = declared[identity]
         if identity not in physical_types:
             new.add(identity)
         elif signature != wanted:
@@ -374,15 +342,12 @@ def _physical_types(repository, *, selected, inventories) -> dict:
             "impact classification requires prepared target inventory for: "
             + ", ".join(sorted(map(str, missing)))
         )
-    standing_for = _artefacts_standing_for_their_origin(repository, selected)
     present = {}
     for identity in selected:
         inventory = inventories.get(identity.item)
         if inventory is None:
             continue
-        artefact = standing_for.get(identity)
-        physical_identity = artefact.identity if artefact is not None else identity
-        object_type = inventory.physical_type(physical_identity)
+        object_type = inventory.physical_type(identity)
         if object_type is not None:
             present[identity] = object_type
     return present
