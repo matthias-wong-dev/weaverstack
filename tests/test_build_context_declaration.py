@@ -425,7 +425,7 @@ def test_build_reports_selection_after_the_bundle_and_before_installation(
     assert kinds.index("bundle") < kinds.index("report") < kinds.index("install")
     selection_lines = next(event[1] for event in events if event[0] == "report")
     assert selection_lines == (
-        "Build selection",
+        "Install selection",
         "  Lakehouse/Sales",
         "    new                     1",
         "    changed                 1",
@@ -436,6 +436,42 @@ def test_build_reports_selection_after_the_bundle_and_before_installation(
     )
     assert result.selection is selection
     assert result.installation_report is report
+
+
+@weaver_test()
+def test_install_selection_does_not_expose_the_internal_catalogue_item():
+    from weaver.build_bundle import (
+        BuildSelection,
+        Impact,
+        ItemBinding,
+        ItemBindings,
+        LakehouseBinding,
+        WarehouseBinding,
+    )
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+    from weaver.declaration.model import WeaverItemId
+    from weaver.operations.build import _selection_lines
+    from weaver.targets import ItemRef
+
+    bindings = ItemBindings(
+        (
+            ItemBinding(
+                WeaverItemId.parse("Lakehouse/Sales"),
+                LakehouseBinding(ItemRef("Sales_LH"), workspace_name="Analytics"),
+            ),
+            ItemBinding(
+                BUILTIN_ITEM,
+                WarehouseBinding(ItemRef("Weaver"), workspace_name="Analytics"),
+            ),
+        )
+    )
+    selection = BuildSelection(Impact((), (), ()), (), (), ())
+
+    rendered = "\n".join(_selection_lines(selection, bindings))
+
+    assert "_weaver" not in rendered
+    assert "Lakehouse/Sales" in rendered
+    assert "Catalogue Warehouse/Weaver" in rendered
 
 
 # --- and missing context is a sentence ----------------------------------------

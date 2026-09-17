@@ -617,8 +617,9 @@ only; build, load and test are subsequent operations.
 
 Doctor requires a workspace name and reads no project configuration. It reports
 authentication and REST independently, discovers one Lakehouse and Warehouse,
-and probes OneLake, TDS and Spark through the Session. Missing probe items are
-reported separately from rejected probes and transport errors.
+and probes OneLake, TDS and Spark through the Session. A probe with no applicable
+item is Not tested. A missing applicable capability, a rejected probe and a
+transport error remain separate outcomes.
 
 Provisioning belongs to `initialise` alone. A build's preflight reads the
 workspace and creates nothing, so a missing Catalogue, Lakehouse, Warehouse or

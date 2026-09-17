@@ -6,7 +6,7 @@ import pytest
 from support.weaver_test import weaver_test
 
 from weaver.errors import CommandError
-from weaver.operations.doctor import ERROR, FAILED, MISSING, OK, doctor
+from weaver.operations.doctor import ERROR, FAILED, MISSING, NOT_TESTED, OK, doctor
 from weaver.sessions.testing import TestSession
 
 
@@ -83,11 +83,16 @@ def test_discovery_probes_each_transport_once_without_project_or_environment(
 
 
 @weaver_test()
-def test_missing_probe_items_are_reported_without_failing_workspace():
+def test_inapplicable_probe_items_are_not_tested_without_failing_workspace():
     opened, files = session(Client())
     report = doctor(workspace="Analytics", session=opened)
     assert report.succeeded
-    assert [c.status for c in report.checks[-3:]] == [MISSING] * 3
+    assert [c.status for c in report.checks[-3:]] == [NOT_TESTED] * 3
+    assert [c.detail for c in report.checks[-3:]] == [
+        "No Lakehouse exists in this workspace.",
+        "No Warehouse exists in this workspace.",
+        "No Lakehouse exists in this workspace.",
+    ]
     assert not files and not opened.calls
 
 
@@ -179,7 +184,7 @@ def test_json_retains_workspace_listing_and_whole_result():
 
 @pytest.mark.parametrize(
     "code,status",
-    [(401, FAILED), (403, FAILED), (404, FAILED), (500, ERROR), (None, ERROR)],
+    [(401, FAILED), (403, FAILED), (404, MISSING), (500, ERROR), (None, ERROR)],
 )
 @weaver_test()
 def test_rest_listing_rejections_use_endpoint_classification(monkeypatch, code, status):

@@ -8,6 +8,7 @@ from typing import Any
 from ..errors import WeaverError
 
 OK = "ok"
+NOT_TESTED = "not tested"
 MISSING = "missing"
 FAILED = "failed"
 ERROR = "error"
@@ -54,7 +55,7 @@ class DoctorReport:
         return tuple(
             check
             for check in self.checks
-            if check.status in (FAILED, ERROR)
+            if check.status in (MISSING, FAILED, ERROR)
             or check.name.startswith("Workspace ")
             and not check.passed
         )
@@ -152,8 +153,8 @@ def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
             checks.append(
                 Check(
                     "OneLake",
-                    MISSING,
-                    "No Lakehouse exists in this workspace to test OneLake.",
+                    NOT_TESTED,
+                    "No Lakehouse exists in this workspace.",
                 )
             )
         if warehouse:
@@ -172,8 +173,8 @@ def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
             checks.append(
                 Check(
                     "Warehouse TDS",
-                    MISSING,
-                    "No Warehouse exists in this workspace to test TDS.",
+                    NOT_TESTED,
+                    "No Warehouse exists in this workspace.",
                 )
             )
         if lakehouse:
@@ -191,8 +192,8 @@ def doctor(*, workspace: str, session=None, client=None) -> DoctorReport:
             checks.append(
                 Check(
                     "Fabric Spark / Livy",
-                    MISSING,
-                    "No Lakehouse exists in this workspace to start a Fabric Spark session.",
+                    NOT_TESTED,
+                    "No Lakehouse exists in this workspace.",
                 )
             )
     return report()
@@ -210,7 +211,13 @@ def _attempt(name, work, *, via=None, remedy=None):
         if result is False:
             return Check(name, FAILED, "Probe returned a negative result.", remedy, via)
     except FabricError as exc:
-        status = FAILED if exc.status_code in (400, 401, 403, 404, 409) else ERROR
+        status = (
+            MISSING
+            if exc.status_code == 404
+            else FAILED
+            if exc.status_code in (400, 401, 403, 409)
+            else ERROR
+        )
         return Check(name, status, str(exc), remedy, via)
     except LivyStatementError as exc:
         return Check(name, FAILED, str(exc), remedy, via)

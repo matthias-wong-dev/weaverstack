@@ -1287,7 +1287,8 @@ def _print_load(report) -> None:
     mode = "plan" if report.dry_run else "load"
     reload = " (reload)" if getattr(report, "reload", False) else ""
     report_status = _style(report.status, _status_colour(report.status))
-    print(f"{mode}{reload} {report_status}: {', '.join(report.requested)}\n")
+    requested = _public_requested(report.requested)
+    print(f"{mode}{reload} {report_status}: {', '.join(requested)}\n")
     for node in report.nodes:
         mark = _status_symbol(node.status)
         colour = _status_colour(node.status)
@@ -1319,6 +1320,7 @@ def _print_load_summary(report) -> None:
     from weaver.load_report import (
         BLOCKED,
         FAILED,
+        PENDING,
         SKIPPED,
         SUCCEEDED,
         SUCCEEDED_WITH_REJECTS,
@@ -1335,16 +1337,9 @@ def _print_load_summary(report) -> None:
         for node in report.nodes
         if node.primitive_kind not in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION)
     ]
-    counts = {
-        status: sum(node.status == status for node in loaders)
-        for status in (
-            SUCCEEDED,
-            SUCCEEDED_WITH_REJECTS,
-            FAILED,
-            BLOCKED,
-            SKIPPED,
-        )
-    }
+    from weaver.operations.load import status_counts
+
+    counts = status_counts(report)["load"]
     print("\nLoad summary")
     print(
         _count_style(
@@ -1360,6 +1355,8 @@ def _print_load_summary(report) -> None:
         )
     print(_count_style(f"  {counts[FAILED]:>3} failed", FAILED, counts[FAILED]))
     print(_count_style(f"  {counts[BLOCKED]:>3} blocked", BLOCKED, counts[BLOCKED]))
+    if counts[PENDING]:
+        print(_style(f"  {counts[PENDING]:>3} pending", _AMBER))
     if counts[SKIPPED]:
         print(f"  {counts[SKIPPED]:>3} skipped")
 
@@ -1384,6 +1381,12 @@ def _print_load_summary(report) -> None:
             else f"{sum(int(value) for value in values if value is not None):,}"
         )
         print(f"    {label:<10}{rendered:>14}")
+
+
+def _public_requested(values) -> tuple[str, ...]:
+    internal = "Warehouse/_weaver"
+    visible = tuple(str(value) for value in values if str(value) != internal)
+    return visible or ("Catalogue",)
 
 
 def handle_test(args: argparse.Namespace) -> int:
@@ -1569,7 +1572,7 @@ def _health_section(area: str, section, report) -> list[str]:
     if area == BUILD and not section.findings:
         lines.append(f"  Installed estate consistent ({section.subjects} objects)")
     for finding in section.findings:
-        where = finding.object_id or finding.target or ""
+        where = _health_subject(finding)
         lines.append(f"  {_semantic_status(finding.severity, width=7)}{where}")
         lines.append(f"          {finding.message}")
     return lines
@@ -1610,6 +1613,13 @@ def _health_row(object_id: str, value: str, among) -> str:
 
     width = max(_ID_WIDTH, *(len(str(each.object_id)) for each in among))
     return f"  {object_id:<{width}}  {value}"
+
+
+def _health_subject(finding) -> str:
+    object_id = str(finding.object_id or "")
+    if object_id == "Warehouse/_weaver" or object_id.startswith("Warehouse/_weaver/"):
+        return f"Catalogue {finding.target}" if finding.target else "Catalogue"
+    return object_id or finding.target or ""
 
 
 def _titled(word: str) -> str:

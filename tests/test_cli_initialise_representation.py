@@ -193,7 +193,13 @@ def test_deferred_render_names_normal_publish_and_next_commands(capsys):
         in text
     )
     assert "--dev" not in text
-    assert all("weaver " + name in text for name in ("build", "load", "test"))
+    assert "\nNext:\n\n  cd project" in text
+    assert "  weaver workflow full" in text
+    assert "\nOr run individually:\n" in text
+    assert all(
+        "  weaver " + name in text for name in ("build", "load", "test", "health")
+    )
+    assert text.index("weaver workflow full") < text.index("Or run individually:")
 
 
 @weaver_test()

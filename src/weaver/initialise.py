@@ -87,7 +87,13 @@ class InitialiseReport:
 
     @property
     def next_commands(self) -> tuple[str, ...]:
-        return ("weaver build", "weaver load", "weaver test")
+        return (
+            "weaver workflow full",
+            "weaver build",
+            "weaver load",
+            "weaver test",
+            "weaver health",
+        )
 
     def to_mapping(self) -> dict[str, Any]:
         return {

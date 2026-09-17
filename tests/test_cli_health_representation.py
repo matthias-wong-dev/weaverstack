@@ -244,6 +244,31 @@ def test_health_statuses_and_findings_use_semantic_terminal_colours(
 
 
 @weaver_test()
+def test_health_output_names_the_catalogue_without_its_internal_item(captured, capsys):
+    captured["report"] = _report(
+        build=HealthSection(
+            area="build",
+            findings=(
+                HealthFinding(
+                    area="build",
+                    code="catalogue_inconsistent",
+                    severity=RED,
+                    message="the catalogue registry is incomplete",
+                    object_id="Warehouse/_weaver/_/Registry",
+                    target="Warehouse/Weaver_Control",
+                ),
+            ),
+        )
+    )
+
+    _run()
+
+    printed = capsys.readouterr().out
+    assert "_weaver" not in printed
+    assert "Catalogue Warehouse/Weaver_Control" in printed
+
+
+@weaver_test()
 def test_a_failing_subject_is_named_with_its_message(captured, capsys):
     captured["report"] = _report(tests=_failing_tests())
     _run()

@@ -175,6 +175,30 @@ def test_a_run_item_is_one_logical_identity(what, text):
     assert str(parse_run_item(text, what=what)) == text
 
 
+@weaver_test()
+def test_run_context_uses_the_catalogue_name_without_the_internal_item():
+    from types import SimpleNamespace
+
+    from weaver.catalogue.builtin import BUILTIN_ITEM
+    from weaver.declaration.model import WeaverItemId
+    from weaver.operations.items import run_context_lines
+
+    sales = WeaverItemId.parse("Lakehouse/Sales")
+    lines = run_context_lines(
+        SimpleNamespace(workspace="Analytics", catalogue="Warehouse/Weaver"),
+        (BUILTIN_ITEM, sales),
+        {
+            BUILTIN_ITEM: WeaverItemId.parse("Warehouse/Weaver"),
+            sales: WeaverItemId.parse("Lakehouse/Sales_LH"),
+        },
+    )
+
+    rendered = "\n".join(lines)
+    assert "Catalogue  Warehouse/Weaver" in rendered
+    assert "_weaver" not in rendered
+    assert "Lakehouse/Sales → Lakehouse/Sales_LH" in rendered
+
+
 @pytest.mark.parametrize("what", ["load", "test"])
 @weaver_test()
 def test_a_run_item_carrying_a_physical_half_is_refused(what):
