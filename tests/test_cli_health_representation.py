@@ -227,7 +227,16 @@ def test_health_statuses_and_findings_use_semantic_terminal_colours(
                 ),
             ),
         ),
-        tests=_failing_tests(),
+        tests=HealthSection(
+            area="tests",
+            counts={
+                "succeeded": 31,
+                "failed": 2,
+                "pending": 2,
+                "blocked": 1,
+            },
+            findings=_failing_tests().findings,
+        ),
     )
     output = Terminal()
     monkeypatch.setattr(sys, "stdout", output)
@@ -241,6 +250,10 @@ def test_health_statuses_and_findings_use_semantic_terminal_colours(
     assert "Build   \x1b[32mGreen\x1b[0m" in printed
     assert "\x1b[33mAmber  \x1b[0mLakehouse/Sales/Tables/Sales.Order" in printed
     assert "\x1b[31mRed    \x1b[0mWarehouse/Curated/Sales.OrderTotals" in printed
+    assert (
+        "\x1b[33m1 blocked\x1b[0m · \x1b[31m2 failed\x1b[0m · "
+        "\x1b[33m2 pending\x1b[0m · \x1b[32m31 succeeded\x1b[0m"
+    ) in printed
 
 
 @weaver_test()
@@ -257,6 +270,14 @@ def test_health_output_names_the_catalogue_without_its_internal_item(captured, c
                     object_id="Warehouse/_weaver/_/Registry",
                     target="Warehouse/Weaver_Control",
                 ),
+                HealthFinding(
+                    area="build",
+                    code="catalogue_inconsistent",
+                    severity=RED,
+                    message="the catalogue bookmark is incomplete",
+                    object_id="Warehouse/_weaver/_/Bookmark",
+                    target="Warehouse/Weaver_Control",
+                ),
             ),
         )
     )
@@ -265,7 +286,8 @@ def test_health_output_names_the_catalogue_without_its_internal_item(captured, c
 
     printed = capsys.readouterr().out
     assert "_weaver" not in printed
-    assert "Catalogue Warehouse/Weaver_Control" in printed
+    assert "Catalogue Warehouse/Weaver_Control / _.Registry" in printed
+    assert "Catalogue Warehouse/Weaver_Control / _.Bookmark" in printed
 
 
 @weaver_test()

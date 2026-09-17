@@ -1565,7 +1565,8 @@ def _health_section(area: str, section, report) -> list[str]:
             f"  Last load activity   {_ago(current.completed_at, report.generated_at)}"
         )
     counts = " · ".join(
-        f"{count} {word}" for word, count in sorted(section.counts.items())
+        _count_style(f"{count} {word}", word, count)
+        for word, count in sorted(section.counts.items())
     )
     if counts:
         lines.append(f"  {counts}")
@@ -1617,8 +1618,13 @@ def _health_row(object_id: str, value: str, among) -> str:
 
 def _health_subject(finding) -> str:
     object_id = str(finding.object_id or "")
-    if object_id == "Warehouse/_weaver" or object_id.startswith("Warehouse/_weaver/"):
-        return f"Catalogue {finding.target}" if finding.target else "Catalogue"
+    catalogue_item = "Warehouse/_weaver"
+    if object_id == catalogue_item or object_id.startswith(f"{catalogue_item}/"):
+        subject = f"Catalogue {finding.target}" if finding.target else "Catalogue"
+        suffix = object_id.removeprefix(catalogue_item).lstrip("/")
+        if suffix:
+            subject = f"{subject} / {suffix.replace('/', '.', 1)}"
+        return subject
     return object_id or finding.target or ""
 
 
