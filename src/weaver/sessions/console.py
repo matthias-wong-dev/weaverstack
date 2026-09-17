@@ -257,8 +257,7 @@ class ConsoleSession(Session):
         """Write a warning without colliding with the transient progress line."""
 
         if self.machine_output:
-            self.warnings.append(message)
-            return
+            return super().warn(message)
         stream = self._progress_stream()
         if stream is None:
             import sys

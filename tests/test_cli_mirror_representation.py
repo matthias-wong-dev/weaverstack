@@ -8,9 +8,7 @@ Warehouse the run empties.
 from __future__ import annotations
 
 import importlib
-import io
 import json
-import sys
 
 import pytest
 from support.weaver_test import weaver_test
@@ -418,49 +416,25 @@ def test_selecting_items_and_no_item_together_is_refused(monkeypatch):
 # --- one JSON document --------------------------------------------------------
 
 
-class _Terminal(io.StringIO):
-    """A stream that reports itself as a terminal, so a question is asked."""
-
-    def isatty(self) -> bool:
-        return True
-
-
 @weaver_test()
-def test_a_json_fork_asks_on_stderr_and_leaves_stdout_parseable(monkeypatch, capsys):
-    """Stdout carries one JSON document, question or no question.
-
-    The real ``confirm`` runs here: a terminal on stdin is what makes the
-    invocation interactive, and the answer it reads is the one typed.
-    """
-
+def test_json_fork_without_yes_never_prompts(monkeypatch, capsys):
+    cli = importlib.import_module("weaver_cli.main")
     calls = _wired(monkeypatch)
-    monkeypatch.setattr(sys, "stdin", _Terminal("y\n"))
-
-    assert main(["mirror", "--no-item", "--workspace", "Analytics", "--json"]) == 0
-
-    printed = capsys.readouterr()
-    assert "This cannot be undone" in printed.err
-    assert "This cannot be undone" not in printed.out
-    assert "Mirror on Demo" not in printed.out
-    payload = json.loads(printed.out)
-    # The same list, carried in the result.
-    assert payload["wiped"] == ["Warehouse/Weaver_Dev"]
-    assert "mirrored" in calls
-
-
-@weaver_test()
-def test_a_declined_json_fork_returns_one_failure_document(monkeypatch, capsys):
-    """Nothing was emptied, and the machine contract still reports why."""
-
-    calls = _wired(monkeypatch)
-    monkeypatch.setattr(sys, "stdin", _Terminal("n\n"))
+    monkeypatch.setattr(cli, "can_prompt", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        cli, "confirm", lambda *_a, **_k: pytest.fail("machine mode prompted")
+    )
 
     assert main(["mirror", "--no-item", "--workspace", "Analytics", "--json"]) == 1
 
     printed = capsys.readouterr()
     assert json.loads(printed.out) == {
         "status": "failed",
-        "error": {"message": "Cancelled."},
+        "error": {
+            "message": (
+                "Confirmation required to empty Warehouse/Weaver_Dev. Pass --yes."
+            )
+        },
     }
-    assert "Cancelled." not in printed.err
+    assert printed.err == ""
     assert "mirrored" not in calls

@@ -520,6 +520,8 @@ class Session(ABC):
         import sys
 
         self.warnings.append(message)
+        if self.machine_output:
+            return
         print(f"warning: {message}", file=sys.stderr)
 
     # --- teardown -----------------------------------------------------------

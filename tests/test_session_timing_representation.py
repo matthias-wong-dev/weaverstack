@@ -433,6 +433,19 @@ def test_machine_output_suppresses_human_progress_even_on_a_terminal():
 
 
 @weaver_test()
+def test_machine_output_retains_a_base_session_warning_without_rendering_it(capsys):
+    from weaver.sessions.testing import TestSession
+
+    session = TestSession()
+    session.machine_output = True
+
+    session.warn("human warning")
+
+    assert session.warnings == ["human warning"]
+    assert capsys.readouterr().err == ""
+
+
+@weaver_test()
 def test_closing_the_session_takes_the_live_line_down():
     out = _Tty()
     session = ConsoleSession(progress=out)

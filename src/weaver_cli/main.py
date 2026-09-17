@@ -1678,7 +1678,7 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
         if not authorised(args):
             emptied = len(plan.targets)
-            if not can_prompt(args):
+            if args.json or not can_prompt(args):
                 _render_error(
                     CommandError(
                         f"Confirmation required to empty {emptied} item(s). "
@@ -1687,12 +1687,9 @@ def handle_wipe(args: argparse.Namespace) -> int:
                     args=args,
                 )
                 return 1
-            # Keep stdout parseable under --json.
-            aside = sys.stderr if args.json else None
             if not confirm(
                 args,
                 f"Empty {emptied} item(s)? This cannot be undone. [y/N] ",
-                prompt_to=aside,
             ):
                 _render_error(CommandError("Cancelled."), args=args)
                 return 1
@@ -1735,14 +1732,12 @@ def handle_mirror(args: argparse.Namespace) -> int:
     with _running_session(args, plan.workspace) as opened:
         resolved = weaver.check_mirror(plan, session=opened)
 
-        # Keep stdout parseable under --json.
-        aside = sys.stderr if args.json else None
         if not args.json:
             print(f"Mirror\n\n{resolved.describe()}\n")
 
         if not authorised(args):
             emptied = ", ".join(resolved.wiped)
-            if not can_prompt(args):
+            if args.json or not can_prompt(args):
                 _render_error(
                     CommandError(
                         f"Confirmation required to empty {emptied}. Pass --yes."
@@ -1753,7 +1748,6 @@ def handle_mirror(args: argparse.Namespace) -> int:
             if not confirm(
                 args,
                 "Empty these targets? This cannot be undone. [y/N] ",
-                prompt_to=aside,
             ):
                 _render_error(CommandError("Cancelled."), args=args)
                 return 1
