@@ -203,6 +203,47 @@ def test_the_status_words_are_the_contract(captured, capsys):
 
 
 @weaver_test()
+def test_health_statuses_and_findings_use_semantic_terminal_colours(
+    captured, monkeypatch
+):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    captured["report"] = _report(
+        load=HealthSection(
+            area="load",
+            findings=(
+                HealthFinding(
+                    area="load",
+                    code="load_pending",
+                    severity=AMBER,
+                    status="pending",
+                    message="no load has settled since this object was built",
+                    object_id="Lakehouse/Sales/Tables/Sales.Order",
+                ),
+            ),
+        ),
+        tests=_failing_tests(),
+    )
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    _run()
+
+    printed = output.getvalue()
+    assert "Weaver Health  \x1b[31mRed\x1b[0m" in printed
+    assert "Load    \x1b[33mAmber\x1b[0m" in printed
+    assert "Tests   \x1b[31mRed\x1b[0m" in printed
+    assert "Build   \x1b[32mGreen\x1b[0m" in printed
+    assert "\x1b[33mAmber  \x1b[0mLakehouse/Sales/Tables/Sales.Order" in printed
+    assert "\x1b[31mRed    \x1b[0mWarehouse/Curated/Sales.OrderTotals" in printed
+
+
+@weaver_test()
 def test_a_failing_subject_is_named_with_its_message(captured, capsys):
     captured["report"] = _report(tests=_failing_tests())
     _run()

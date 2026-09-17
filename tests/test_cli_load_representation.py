@@ -460,6 +460,44 @@ def test_load_status_colour_is_semantic_on_a_terminal(monkeypatch):
 
 
 @weaver_test()
+def test_pending_and_blocked_are_yellow_without_success_ticks(monkeypatch):
+    import io
+    import sys
+    from dataclasses import replace
+
+    from weaver.load_report import BLOCKED, PENDING
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    base = _report().nodes[0]
+    report = replace(
+        _report(),
+        nodes=(
+            replace(
+                base, node_id="pending", status=PENDING, executed=False, result=None
+            ),
+            replace(
+                base, node_id="blocked", status=BLOCKED, executed=False, result=None
+            ),
+        ),
+    )
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    _cli_module()._print_load(report)
+
+    lines = output.getvalue().splitlines()
+    pending = next(line for line in lines if line.endswith("pending"))
+    blocked = next(line for line in lines if line.endswith("blocked"))
+    assert "\x1b[33mpending" in pending
+    assert "\x1b[33mblocked" in blocked
+    assert "✓" not in pending and "✗" not in pending
+    assert "✓" not in blocked and "✗" not in blocked
+
+
+@weaver_test()
 def test_zero_failed_and_blocked_load_counts_are_not_attention_coloured(monkeypatch):
     import io
     import sys
