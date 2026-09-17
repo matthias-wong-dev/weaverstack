@@ -2033,7 +2033,10 @@ def _group_help(group: argparse.ArgumentParser):
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    words = sys.argv[1:] if argv is None else argv
+    if words and words[0] in {"initalise", "initailise"}:
+        print("Did you mean 'initialise'?", file=sys.stderr)
+    args = parser.parse_args(words)
 
     handler = getattr(args, "handler", None)
     if handler is None:

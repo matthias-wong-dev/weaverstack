@@ -386,7 +386,7 @@ def test_prohibit_rebuild_retains_physical_object_but_builds_new_object(tmp_path
     registry_payload = store.read(
         bundle.location.join(*registry_action.payload.split("/"))
     ).decode()
-    assert repository.source_documents[existing].effective_signature in registry_payload
+    assert repository.source_documents[existing].physical_signature in registry_payload
 
 
 @pytest.mark.parametrize(
@@ -457,7 +457,7 @@ def test_uncertified_physical_protected_object_is_changed_retained_and_recertifi
         if action.kind == "publish_registry"
     )
     payload = store.read(bundle.location.join(*registry.payload.split("/"))).decode()
-    assert repository.source_documents[wanted].effective_signature in payload
+    assert repository.source_documents[wanted].physical_signature in payload
 
 
 @weaver_test()

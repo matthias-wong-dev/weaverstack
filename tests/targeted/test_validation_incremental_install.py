@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from factories import FixtureInventory, installed_catalogue, item_bindings, item_id
+from factories import (
+    FixtureCatalogue,
+    FixtureInventory,
+    installed_catalogue,
+    item_bindings,
+    item_id,
+)
 from support.weaver_test import weaver_test
 from support.workspaces import WORKSPACE
 
@@ -86,6 +92,7 @@ def _bundle(
     logical: str,
     physical: str,
     installed_repository=None,
+    catalogue=None,
 ):
     installed_repository = installed_repository or repository
     bindings = item_bindings((logical, physical))
@@ -115,7 +122,7 @@ def _bundle(
         output=Location(str(tmp_path / physical)),
         store=FilesystemStore(),
         target_inventories=inventories,
-        catalogue=installed_catalogue(installed_repository, bindings),
+        catalogue=catalogue or installed_catalogue(installed_repository, bindings),
         catalogue_binding=catalogue_binding,
     )
 
@@ -273,6 +280,76 @@ def test_a_validation_implementation_change_selects_the_generated_artefact(
 
 
 @weaver_test()
+def test_a_lakehouse_validation_implementation_change_selects_and_resets(
+    tmp_path, monkeypatch
+):
+    from weaver.declaration import validation
+    from weaver.etl import ROLE_ASSUMPTION, item_validation_artefacts
+
+    root = tmp_path / "repo"
+    before = _repository(root)
+    bindings = item_bindings((LAKEHOUSE, "Sales_LH"))
+    catalogue = installed_catalogue(before, bindings)
+    monkeypatch.setattr(
+        validation, "SPARK_VALIDATION_VERSION", validation.SPARK_VALIDATION_VERSION + 1
+    )
+    after = parse_item_repository(Location(str(root)))
+
+    bundle = _bundle(
+        after,
+        tmp_path / "bundle",
+        logical=LAKEHOUSE,
+        physical="Sales_LH",
+        installed_repository=before,
+        catalogue=catalogue,
+    )
+
+    assert [str(identity) for identity in bundle.plan.selection.selected_for_build] == [
+        "Lakehouse/Sales/file:_/Load/assumptions/Sales__NoOrphans.py"
+    ]
+    artefact = next(
+        artefact
+        for artefact in item_validation_artefacts(after, item=item_id(LAKEHOUSE))
+        if artefact.role == ROLE_ASSUMPTION
+    )
+    assert artefact.implementation_version == validation.SPARK_VALIDATION_VERSION
+    assert _test_state_rows(bundle)[0]["object_name"] == "NoOrphans"
+
+
+@weaver_test()
+def test_a_registered_validation_missing_physically_is_selected_as_new(tmp_path):
+    from dataclasses import replace
+
+    from weaver.build_bundle.incremental import select_build
+    from weaver.build_bundle.planner import installable_identities
+    from weaver.build_bundle.targets import LakehouseBinding
+
+    repository = _repository(tmp_path / "repo")
+    item = item_id(LAKEHOUSE)
+    binding = LakehouseBinding(ItemRef("Sales_LH"), workspace_name=WORKSPACE)
+    inventory = FixtureInventory.from_repository(repository, item=item)
+    missing = "_/Load/assumptions/Sales__NoOrphans.py"
+    inventory = replace(
+        inventory, files=tuple(path for path in inventory.files if path != missing)
+    )
+    expected = "Lakehouse/Sales/file:_/Load/assumptions/Sales__NoOrphans.py"
+    artefact_identity = next(
+        identity
+        for identity in installable_identities(repository, {item: binding})
+        if str(identity) == expected
+    )
+    selection = select_build(
+        repository,
+        FixtureCatalogue.from_repository(repository, item=item).registered,
+        selected={artefact_identity},
+        inventories={item: inventory},
+    )
+
+    assert [str(identity) for identity in selection.impact.new] == [expected]
+    assert [str(identity) for identity in selection.selected_for_build] == [expected]
+
+
+@weaver_test()
 def test_a_direct_artefact_at_implementation_version_one_is_stable(tmp_path):
     first = _repository(tmp_path / "one")
     second = _repository(tmp_path / "two")
@@ -287,3 +364,46 @@ def test_a_direct_artefact_at_implementation_version_one_is_stable(tmp_path):
         first.source_documents[identity].physical_signature
         == second.source_documents[identity].physical_signature
     )
+
+
+@weaver_test()
+def test_direct_signature_upgrade_converges_after_one_selection(tmp_path):
+    from dataclasses import replace
+
+    from weaver.build_bundle.incremental import select_build
+    from weaver.build_bundle.planner import installable_identities
+    from weaver.build_bundle.targets import WarehouseBinding as ItemWarehouseBinding
+
+    repository = _repository(tmp_path / "repo")
+    item = item_id(WAREHOUSE)
+    binding = ItemWarehouseBinding(ItemRef("Reporting_WH"), workspace_name=WORKSPACE)
+    installed = FixtureCatalogue.from_repository(repository, item=item)
+    identity = next(
+        identity
+        for identity in repository.source_documents
+        if str(identity) == "Warehouse/Reporting/Sales.Report"
+    )
+    assert identity in installable_identities(repository, {item: binding})
+    selected = {identity}
+    previous = dict(installed.registered)
+    previous[identity] = replace(
+        previous[identity],
+        signature=repository.source_documents[identity].effective_signature,
+    )
+    inventories = {
+        item: FixtureInventory.from_repository(
+            repository, item=item, kind="warehouse", target_name="Reporting_WH"
+        )
+    }
+
+    upgraded = select_build(
+        repository, previous, selected=selected, inventories=inventories
+    )
+    settled = select_build(
+        repository, installed.registered, selected=selected, inventories=inventories
+    )
+
+    assert identity in upgraded.impact.changed
+    assert identity in upgraded.selected_for_build
+    assert settled.impact.changed == ()
+    assert settled.selected_for_build == ()
