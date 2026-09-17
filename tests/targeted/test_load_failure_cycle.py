@@ -334,6 +334,44 @@ def test_a_tolerant_run_returns_its_report_rather_than_raising(session, dispatch
 
 
 @weaver_test()
+def test_a_tolerant_failed_report_marks_the_load_task_failed(
+    session, dispatched, monkeypatch
+):
+    import weaver.operations.load as operation
+
+    dispatched.answers[ORDER] = RuntimeError("boom")
+    report = _run(session, fault_tolerant=True)
+    monkeypatch.setattr(operation, "run_load", lambda *_a, **_k: report)
+
+    returned = operation.load(str(RAW), session=session.session, fault_tolerant=True)
+
+    assert returned is report
+    frame = next(frame for frame in session.session.timings if frame.name == "Load")
+    assert frame.failed
+
+
+@weaver_test()
+def test_tds_identity_survives_runner_failure_conversion(session, dispatched):
+    from weaver.sql import SqlExecutionError
+
+    dispatched.answers[SUMMARY] = SqlExecutionError("warehouse unavailable")
+
+    with pytest.raises(LoadError) as raised:
+        _run(session, targets=(REPORTING,))
+
+    assert raised.value.executor == "TDS"
+    failed = raised.value.report.by_node[SUMMARY]
+    assert (
+        next(
+            message.executor
+            for message in failed.messages
+            if message.severity == "error"
+        )
+        == "TDS"
+    )
+
+
+@weaver_test()
 def test_a_tolerant_run_continues_independent_branches(session, dispatched):
     dispatched.answers[ORDER] = RuntimeError("boom")
 

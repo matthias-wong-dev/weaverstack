@@ -19,6 +19,27 @@ from .base import TASK, Session, WorkspaceScope
 from .program import RemoteProgram
 from .resources import Resource
 
+RESET = "\x1b[0m"
+GREEN = "\x1b[32m"
+RED = "\x1b[31m"
+AMBER = "\x1b[33m"
+DIM = "\x1b[2m"
+
+
+def _colour_enabled(stream) -> bool:
+    import os
+
+    if "NO_COLOR" in os.environ:
+        return False
+    try:
+        return bool(stream.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
+def _styled(text: str, colour: str, stream) -> str:
+    return f"{colour}{text}{RESET}" if text and _colour_enabled(stream) else text
+
 
 def _duration(seconds: float | None) -> str:
     if seconds is None:
@@ -138,9 +159,12 @@ class ConsoleSession(Session):
                     mark = "✓"
                 else:
                     mark = " "
+                colour = RED if event == "failed" else GREEN if mark == "✓" else ""
+                label = f"{self._label(frame):<{self._width() - 2}}"
+                duration = f"{_duration(frame.elapsed):>{self.DURATION_WIDTH}}"
                 print(
-                    f"{mark} {self._label(frame):<{self._width() - 2}}"
-                    f"{_duration(frame.elapsed):>{self.DURATION_WIDTH}}",
+                    f"{_styled(mark, colour, stream)} {label}"
+                    f"{_styled(duration, DIM, stream)}",
                     file=stream,
                 )
                 if frame.kind == TASK:
@@ -175,7 +199,12 @@ class ConsoleSession(Session):
             f"⋯ {self._label(frame):<{self._width() - 2}}"
             f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
         )
-        stream.write("\r" + text)
+        label = f"{self._label(frame):<{self._width() - 2}}"
+        duration = f"{_duration(frame.age):>{self.DURATION_WIDTH}}"
+        rendered = (
+            f"{_styled('⋯', DIM, stream)} {label}{_styled(duration, DIM, stream)}"
+        )
+        stream.write("\r" + rendered)
         stream.flush()
         self._painted = len(text)
 
@@ -227,15 +256,35 @@ class ConsoleSession(Session):
     def warn(self, message: str) -> None:
         """Write a warning without colliding with the transient progress line."""
 
+        if self.machine_output:
+            return super().warn(message)
         stream = self._progress_stream()
-        if stream is not None:
-            with self._progress_lock:
-                self._erase(stream)
-                print(file=stream)
-        super().warn(message)
-        if stream is not None:
-            with self._progress_lock:
-                self._paint(stream)
+        if stream is None:
+            import sys
+
+            stream = sys.stderr
+            self.warnings.append(message)
+            print(f"{_styled('warning:', AMBER, stream)} {message}", file=stream)
+            return
+        with self._progress_lock:
+            self._erase(stream)
+            print(file=stream)
+            self.warnings.append(message)
+            print(f"{_styled('warning:', AMBER, stream)} {message}", file=stream)
+            self._paint(stream)
+
+    def report(self, lines: Sequence[str]) -> None:
+        """Write an untimed block without disturbing the live progress line."""
+
+        stream = self._progress_stream()
+        if stream is None:
+            return
+        with self._progress_lock:
+            self._erase(stream)
+            for line in lines:
+                print(line, file=stream)
+            print(file=stream)
+            self._paint(stream)
 
     def stop_presenting(self) -> None:
         self._ticking = False
@@ -246,7 +295,7 @@ class ConsoleSession(Session):
         self._ticker = None
 
     def _progress_stream(self):
-        if self._progress is False:
+        if self._progress is False or self.machine_output:
             return None
         if self._progress is not None:
             return self._progress

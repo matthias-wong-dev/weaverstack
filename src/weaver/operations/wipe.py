@@ -21,6 +21,7 @@ operation emptying one named item without reading it as a catalogue.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
@@ -462,16 +463,21 @@ def wipe(
     from ..sessions.host import use_or_create_session
 
     with use_or_create_session(session, workspace=resolved) as opened:
-        with opened.task(
-            "Wipe (dry run)" if dry_run else "Wipe",
-            ", ".join(str(target) for target in plan.targets),
-        ):
+        task = (
+            nullcontext()
+            if opened.frames
+            else opened.task(
+                "Wipe (dry run)" if dry_run else "Wipe",
+                ", ".join(str(target) for target in plan.targets),
+            )
+        )
+        with task:
             storage = any(target.item_type == LAKEHOUSE for target in plan.targets)
             store = opened.store(resolved) if storage else None
             items: list[WipeItemResult] = []
             reports: list[WipeReport] = []
             for target in plan.targets:
-                with opened.step(str(target)):
+                with opened.step(f"Emptying {target}"):
                     produced = _wipe_one(
                         target, resolved, store=store, dry_run=dry_run, session=opened
                     )

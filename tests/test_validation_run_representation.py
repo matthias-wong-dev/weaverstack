@@ -14,6 +14,8 @@ twice to get both counts and rows, so the fake executor counts its calls.
 
 from __future__ import annotations
 
+import io
+
 import pytest
 from support.weaver_test import weaver_test
 
@@ -172,6 +174,42 @@ def _ran(validation, executor=None, *, collect=False):
             finished_at=None,
         )
     )
+
+
+@weaver_test()
+def test_strict_failure_carries_the_completed_report_and_fails_the_test_task():
+    from datetime import datetime, timezone
+
+    from weaver.errors import ValidationError
+    from weaver.operations.test import _reported
+    from weaver.sessions import ConsoleSession
+
+    node = ValidationNodeReport(
+        logical_id="Warehouse/Reporting/Sales.OrdersReconcile",
+        kind="Test",
+        physical_target="Warehouse/Reporting_WH",
+        primitive_kind=WAREHOUSE_PROCEDURE,
+        dispatch_location="Sales.OrdersReconcile",
+        status=FAILED,
+        executed=True,
+        result=TestResult(missing_count=1),
+    )
+    progress = io.StringIO()
+
+    with ConsoleSession(progress=progress) as session:
+        with pytest.raises(ValidationError) as raised:
+            with session.task("Test"):
+                _reported(
+                    nodes=(node,),
+                    started=datetime.now(timezone.utc),
+                    strict=True,
+                    selection=None,
+                    workflow_id="workflow-1",
+                )
+
+    assert raised.value.report.status == FAILED
+    assert raised.value.report.nodes == (node,)
+    assert "✗ Test" in progress.getvalue()
 
 
 @weaver_test()

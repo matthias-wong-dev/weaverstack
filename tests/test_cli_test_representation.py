@@ -6,13 +6,16 @@ operation is faked, because what the operation does is proved where it is
 implemented and re-proving it here would put two copies of the claim in the
 suite.
 
-The report status is the validation verdict. It is not the process status: a run
-that produced a report exits zero.
+The report status is the validation verdict. A failed or invalid verdict also
+fails the process after the report has been rendered.
 """
 
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+from decimal import Decimal
+from uuid import UUID
 
 import pytest
 from support.weaver_test import weaver_test
@@ -58,7 +61,12 @@ def captured(monkeypatch, desktop_credential):
     def fake(items, **kwargs):
         seen["items"] = items
         seen.update(kwargs)
-        return seen.get("report", report)
+        returned = seen.get("report", report)
+        if kwargs.get("strict") and returned.status in (FAILED, INVALID):
+            from weaver.errors import ValidationError
+
+            raise ValidationError("validation failed", report=returned)
+        return returned
 
     monkeypatch.setattr(weaver, "test", fake)
     return seen
@@ -150,10 +158,11 @@ def test_dry_run_is_passed_through(captured, capsys):
 @weaver_test()
 def test_a_passing_run_exits_zero(captured, capsys):
     assert _run("Lakehouse/Sales") == 0
+    assert captured["strict"] is True
 
 
 @weaver_test()
-def test_a_failing_run_exits_zero(captured, capsys):
+def test_a_failing_run_exits_non_zero(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
         nodes=(
@@ -166,11 +175,14 @@ def test_a_failing_run_exits_zero(captured, capsys):
         ),
     )
 
-    assert _run("Lakehouse/Sales") == 0
+    assert _run("Lakehouse/Sales") == 1
+    printed = capsys.readouterr().out
+    assert "  0 passed" in printed
+    assert "  1 failed" in printed
 
 
 @weaver_test()
-def test_a_run_that_could_not_answer_exits_zero(captured, capsys):
+def test_a_run_that_could_not_answer_exits_non_zero(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=INVALID,
         nodes=(
@@ -183,11 +195,14 @@ def test_a_run_that_could_not_answer_exits_zero(captured, capsys):
         ),
     )
 
-    assert _run("Lakehouse/Sales") == 0
+    assert _run("Lakehouse/Sales") == 1
+    printed = capsys.readouterr().out
+    assert "  0 passed" in printed
+    assert "  1 could not run" in printed
 
 
 @weaver_test()
-def test_a_mixed_run_exits_zero_and_still_reports_what_it_found(captured, capsys):
+def test_a_mixed_run_exits_non_zero_and_still_reports_what_it_found(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
         nodes=(
@@ -208,10 +223,12 @@ def test_a_mixed_run_exits_zero_and_still_reports_what_it_found(captured, capsys
         ),
     )
 
-    assert _run("Lakehouse/Sales") == 0
+    assert _run("Lakehouse/Sales") == 1
 
     printed = capsys.readouterr().out
-    assert "1 passed, 1 failed, 1 could not run" in printed
+    assert "  1 passed" in printed
+    assert "  1 failed" in printed
+    assert "  1 could not run" in printed
     assert "2 violation(s)" in printed
     assert "not installed" in printed
 
@@ -258,7 +275,8 @@ def test_the_counts_are_rendered_per_validation(captured, capsys):
     printed = capsys.readouterr().out
     assert "2 missing, 1 unexpected" in printed
     assert "4 violation(s)" in printed
-    assert "0 passed, 2 failed, 0 could not run" in printed
+    assert "  0 passed" in printed
+    assert "  2 failed" in printed
 
 
 @weaver_test()
@@ -276,7 +294,7 @@ def test_an_invalid_validation_prints_its_error_without_counts(captured, capsys)
         ),
     )
 
-    assert _run("Lakehouse/Sales") == 0
+    assert _run("Lakehouse/Sales") == 1
 
     printed = capsys.readouterr().out
     assert "not installed" in printed
@@ -300,7 +318,7 @@ def test_a_generic_dispatch_failure_does_not_break_test_rendering(captured, caps
         ),
     )
 
-    assert _run("Lakehouse/Sales") == 0
+    assert _run("Lakehouse/Sales") == 1
 
     printed = capsys.readouterr().out
     assert "LivyError: session unavailable" in printed
@@ -356,6 +374,140 @@ def test_json_emits_the_whole_report(captured, capsys):
     assert payload["status"] == FAILED
     assert payload["totals"]["failed"] == 1
     assert payload["nodes"][0]["missing_count"] == 2
+
+
+@weaver_test()
+def test_json_has_no_terminal_styling_when_stdout_is_a_tty(captured, monkeypatch):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    assert _run("Lakehouse/Sales", "--json") == 0
+    assert "\x1b[" not in output.getvalue()
+    assert json.loads(output.getvalue())["status"] == PASSED
+
+
+@weaver_test()
+def test_zero_failed_validation_count_is_not_red(captured, monkeypatch):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    assert _run("Lakehouse/Sales") == 0
+
+    failed = next(line for line in output.getvalue().splitlines() if "0 failed" in line)
+    assert "\x1b[31m" not in failed
+
+
+@weaver_test()
+@pytest.mark.parametrize(
+    "selector",
+    [
+        ("--name", "Sales.OrdersReconcile"),
+        ("--file", "tests/Sales.OrdersReconcile.sql"),
+    ],
+)
+def test_targeted_json_carries_the_collected_diagnostic_rows(
+    captured, capsys, selector
+):
+    captured["report"] = ValidationRunReport(
+        status=FAILED,
+        nodes=(
+            _node(
+                "Sales.OrdersReconcile",
+                "Test",
+                FAILED,
+                TestResult(missing_count=1),
+                diagnostics=({"_weaver_sk": 1, "Id": 7},),
+            ),
+        ),
+    )
+
+    assert _run("Lakehouse/Sales", *selector, "--json") == 1
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["nodes"][0]["diagnostics"] == [{"_weaver_sk": 1, "Id": 7}]
+
+
+@weaver_test()
+def test_targeted_json_normalises_warehouse_values(captured, capsys):
+    captured["report"] = ValidationRunReport(
+        status=FAILED,
+        nodes=(
+            _node(
+                "Sales.OrdersReconcile",
+                "Test",
+                FAILED,
+                TestResult(missing_count=1),
+                diagnostics=(
+                    {
+                        "Amount": Decimal("12.30"),
+                        "ObservedAt": datetime(2026, 9, 17, 8, 30, tzinfo=timezone.utc),
+                        "RunId": UUID("12345678-1234-5678-1234-567812345678"),
+                    },
+                ),
+            ),
+        ),
+    )
+
+    assert (
+        _run(
+            "Lakehouse/Sales",
+            "--name",
+            "Sales.OrdersReconcile",
+            "--json",
+        )
+        == 1
+    )
+
+    diagnostic = json.loads(capsys.readouterr().out)["nodes"][0]["diagnostics"][0]
+    assert diagnostic == {
+        "Amount": "12.30",
+        "ObservedAt": "2026-09-17T08:30:00+00:00",
+        "RunId": "12345678-1234-5678-1234-567812345678",
+    }
+
+
+@weaver_test()
+def test_json_suppresses_test_progress_on_a_terminal(
+    captured, monkeypatch, desktop_credential
+):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    def run_with_progress(items, **kwargs):
+        with kwargs["session"].task("Test"):
+            pass
+        return ValidationRunReport(
+            status=PASSED,
+            nodes=(_node("Sales.OrdersReconcile", "Test", PASSED, TestResult()),),
+        )
+
+    output = Terminal()
+    progress = Terminal()
+    monkeypatch.setattr(weaver, "test", run_with_progress)
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setattr(sys, "stderr", progress)
+
+    assert _run("Lakehouse/Sales", "--json") == 0
+    assert json.loads(output.getvalue())["status"] == PASSED
+    assert progress.getvalue() == ""
 
 
 @weaver_test()
@@ -419,7 +571,7 @@ def test_a_planned_file_run_exits_zero(captured, capsys):
 
 
 @weaver_test()
-def test_a_failing_file_run_exits_zero(captured, capsys):
+def test_a_failing_file_run_exits_non_zero(captured, capsys):
     captured["report"] = ValidationRunReport(
         status=FAILED,
         nodes=(
@@ -432,7 +584,7 @@ def test_a_failing_file_run_exits_zero(captured, capsys):
         ),
     )
 
-    assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql") == 0
+    assert _run("Lakehouse/Sales", "--file", "tests/Sales.X.sql") == 1
 
 
 @weaver_test()

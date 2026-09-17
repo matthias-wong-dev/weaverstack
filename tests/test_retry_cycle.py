@@ -236,6 +236,17 @@ def test_without_a_terminal_nothing_is_ever_asked(args, monkeypatch):
 
 
 @weaver_test()
+def test_json_runs_once_even_at_an_interactive_terminal(args, monkeypatch):
+    terminal = _Terminal(monkeypatch, keys=[ENTER])
+    attempt = attempts(1, 0)
+    args.json = True
+
+    assert _until_fixed(args, attempt) == 1
+    assert len(attempt.calls) == 1
+    assert terminal.presses == 0
+
+
+@weaver_test()
 def test_a_non_interactive_run_opens_no_session_of_its_own(monkeypatch):
     """Nothing is retried, so nothing needs holding open, and resolving a
     workspace to hold it would make a failure happen in a new place."""

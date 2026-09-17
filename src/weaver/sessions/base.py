@@ -123,6 +123,8 @@ class Session(ABC):
         #: a worker or TDS connection.
         self._flushers: dict = {}
         self._workflow_id: str | None = None
+        #: Machine-readable CLI commands suppress human progress and styling.
+        self.machine_output = False
         self._closed = False
         #: True while flushers drain through an otherwise open Session.
         self._draining = False
@@ -502,6 +504,9 @@ class Session(ABC):
     ) -> None:
         """Present a reporting event. Silent by default."""
 
+    def report(self, lines: Sequence[str]) -> None:
+        """Present untimed operator information. Silent by default."""
+
     def stop_presenting(self) -> None:
         pass
 
@@ -515,6 +520,8 @@ class Session(ABC):
         import sys
 
         self.warnings.append(message)
+        if self.machine_output:
+            return
         print(f"warning: {message}", file=sys.stderr)
 
     # --- teardown -----------------------------------------------------------

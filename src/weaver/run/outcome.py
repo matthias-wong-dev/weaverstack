@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..errors import WeaverError
+from ..errors import WeaverError, reported_executor
 from .resolution import ENDPOINT_REFRESH
 from .result import (
     DISPATCH_EXCEPTION,
@@ -87,6 +87,7 @@ def _raised(node, exc: BaseException) -> Outcome:
                     else f"{node.node_id} raised {type(exc).__name__}: {exc}"
                 ),
                 source=node.primitive_kind if named else "run.dispatch",
+                executor=reported_executor(exc),
             ),
         ),
     )

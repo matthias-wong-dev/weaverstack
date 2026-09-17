@@ -31,6 +31,66 @@ CAPACITY_ACTIONS = ("status", "resume", "suspend")
 # Keep parser construction independent of workflow imports.
 WORKFLOW_DEFAULT_FILE = "workflow.yml"
 
+_RESET = "\x1b[0m"
+_GREEN = "\x1b[32m"
+_RED = "\x1b[31m"
+_AMBER = "\x1b[33m"
+_DIM = "\x1b[2m"
+
+
+def _colour_enabled(stream) -> bool:
+    import os
+
+    if "NO_COLOR" in os.environ:
+        return False
+    try:
+        return bool(stream.isatty())
+    except (AttributeError, ValueError):
+        return False
+
+
+def _style(text: str, colour: str, *, stream=None) -> str:
+    stream = sys.stdout if stream is None else stream
+    return f"{colour}{text}{_RESET}" if text and _colour_enabled(stream) else text
+
+
+def _status_colour(status: str) -> str:
+    folded = status.casefold()
+    if folded in {"failed", "invalid", "error"}:
+        return _RED
+    if folded in {
+        "blocked",
+        "partially_succeeded",
+        "succeeded_with_rejects",
+        "warning",
+    }:
+        return _AMBER
+    if folded in {"passed", "succeeded"}:
+        return _GREEN
+    return ""
+
+
+def _count_style(text: str, status: str, count: int) -> str:
+    return _style(text, _DIM if count == 0 else _status_colour(status))
+
+
+def _json_value(value):
+    """Project provider values into stable JSON scalars."""
+
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return bytes(value).hex()
+    return str(value)
+
+
+def _json_document(value) -> str:
+    import json
+
+    return json.dumps(value, indent=2, default=_json_value)
+
+
 INITIALISE_DESCRIPTION = """\
 Set up a Weaver project and its Fabric items.
 
@@ -360,6 +420,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         help="Project folder. Defaults to the current directory.",
     )
+    check.add_argument("--json", action="store_true", help="Emit the result as JSON.")
     add_non_interactive(check)
     check.set_defaults(handler=handle_check)
 
@@ -901,16 +962,16 @@ def handle_install(args: argparse.Namespace) -> int:
     from weaver.operations.install import install
 
     workspace = _resolve_workspace(args)
-    report = install(
-        args.bundle,
-        workspace=workspace.workspace,
-        session=_session(args),
-    )
+    with _running_session(args, workspace) as opened:
+        report = install(
+            args.bundle,
+            workspace=workspace.workspace,
+            session=opened,
+        )
     if args.json:
         print(json.dumps(report.to_mapping(), indent=2))
     else:
-        print(f"install {report.status}")
-        print(f"  bundle: {report.bundle_id}")
+        _print_install(report)
     return 0 if report.succeeded else 1
 
 
@@ -1113,9 +1174,24 @@ def _session(args: argparse.Namespace):
 
 
 def _running_session(args: argparse.Namespace, workspace):
+    from contextlib import contextmanager
+
     from weaver.sessions.host import use_or_create_session
 
-    return use_or_create_session(_session(args), workspace=workspace)
+    @contextmanager
+    def running():
+        with use_or_create_session(_session(args), workspace=workspace) as opened:
+            machine_output = hasattr(opened, "machine_output")
+            previous = getattr(opened, "machine_output", False)
+            if machine_output:
+                opened.machine_output = bool(getattr(args, "json", False))
+            try:
+                yield opened
+            finally:
+                if machine_output:
+                    opened.machine_output = previous
+
+    return running()
 
 
 def handle_session(args: argparse.Namespace) -> int:
@@ -1135,7 +1211,7 @@ SOURCE_ERRORS = (DiscoveryError, GraphError, IdentityError, MetadataError)
 
 
 def _retry_until_fixed(args: argparse.Namespace, attempt) -> int:
-    if not can_prompt(args):
+    if bool(getattr(args, "json", False)) or not can_prompt(args):
         return attempt()
     while True:
         status = attempt()
@@ -1148,7 +1224,7 @@ def _retry_until_fixed(args: argparse.Namespace, attempt) -> int:
 def _until_fixed(args: argparse.Namespace, attempt) -> int:
     """Retry with fresh inputs while keeping the Session open."""
 
-    if not can_prompt(args):
+    if bool(getattr(args, "json", False)) or not can_prompt(args):
         return attempt()
 
     from weaver.sessions.host import use_or_create_session
@@ -1182,23 +1258,24 @@ def _load_once(args: argparse.Namespace) -> int:
 
     workspace = _resolve_workspace(args)
     try:
-        report = _run_load(
-            workspace,
-            items=run_items(args) or None,
-            names=args.names,
-            fault_tolerant=args.fault_tolerant,
-            dry_run=args.dry_run,
-            reload=args.reload,
-            stale=args.stale,
-            as_of=args.as_of,
-            session=_session(args),
-        )
+        with _running_session(args, workspace) as opened:
+            report = _run_load(
+                workspace,
+                items=run_items(args) or None,
+                names=args.names,
+                fault_tolerant=args.fault_tolerant,
+                dry_run=args.dry_run,
+                reload=args.reload,
+                stale=args.stale,
+                as_of=args.as_of,
+                session=opened,
+            )
     except LoadError as exc:
         # Preserve the partial report carried by an intolerant failure.
-        if getattr(exc, "report", None) is not None:
+        if not args.json and getattr(exc, "report", None) is not None:
             _print_load(exc.report)
-        _render_error(exc)
-        if getattr(exc, "workflow_id", None):
+        _render_error(exc, args=args, report=getattr(exc, "report", None))
+        if not args.json and getattr(exc, "workflow_id", None):
             print(f"  Workflow: {exc.workflow_id}", file=sys.stderr)
         return 1
 
@@ -1244,6 +1321,7 @@ def _print_load(report) -> None:
     print(f"{mode}{reload} {report.status}: {', '.join(report.requested)}\n")
     for node in report.nodes:
         mark = "✗" if node.status in ("failed", "blocked", "invalid") else "✓"
+        colour = _status_colour(node.status)
         counts = ""
         # Failures before row movement have no row-count fields.
         if node.result is not None and hasattr(node.result, "rows_read"):
@@ -1254,12 +1332,89 @@ def _print_load(report) -> None:
                 f"-{node.result.rows_deleted} "
                 f"!{node.result.rows_rejected})"
             )
-        print(f"  {mark} {node.status:<24} {node.node_id}{counts}")
+        status = f"{node.status:<24}"
+        print(
+            f"  {_style(mark, colour)} {_style(status, colour)} {node.node_id}{counts}"
+        )
         for message in node.messages:
             if message.severity != "info":
-                print(f"      {message.severity}: {message.message}")
+                message_colour = _RED if message.severity == "error" else _AMBER
+                prefix = _style(f"{message.severity}:", message_colour)
+                print(f"      {prefix} {message.message}")
+    _print_load_summary(report)
     if report.workflow_id:
-        print(f"\n  Workflow: {report.workflow_id}")
+        print(f"\n  Workflow: {_style(report.workflow_id, _DIM)}")
+
+
+def _print_load_summary(report) -> None:
+    from weaver.load_report import (
+        BLOCKED,
+        FAILED,
+        SKIPPED,
+        SUCCEEDED,
+        SUCCEEDED_WITH_REJECTS,
+    )
+
+    if report.dry_run:
+        print(f"\nPlan\n  {len(report.nodes):>3} selected")
+        return
+
+    from weaver.load_plan import ENDPOINT_REFRESH, ONELAKE_PUBLICATION
+
+    loaders = [
+        node
+        for node in report.nodes
+        if node.primitive_kind not in (ENDPOINT_REFRESH, ONELAKE_PUBLICATION)
+    ]
+    counts = {
+        status: sum(node.status == status for node in loaders)
+        for status in (
+            SUCCEEDED,
+            SUCCEEDED_WITH_REJECTS,
+            FAILED,
+            BLOCKED,
+            SKIPPED,
+        )
+    }
+    print("\nLoad summary")
+    print(
+        _count_style(
+            f"  {counts[SUCCEEDED]:>3} succeeded", SUCCEEDED, counts[SUCCEEDED]
+        )
+    )
+    if counts[SUCCEEDED_WITH_REJECTS]:
+        print(
+            _style(
+                f"  {counts[SUCCEEDED_WITH_REJECTS]:>3} succeeded with rejects",
+                _AMBER,
+            )
+        )
+    print(_count_style(f"  {counts[FAILED]:>3} failed", FAILED, counts[FAILED]))
+    print(_count_style(f"  {counts[BLOCKED]:>3} blocked", BLOCKED, counts[BLOCKED]))
+    if counts[SKIPPED]:
+        print(f"  {counts[SKIPPED]:>3} skipped")
+
+    executed_loaders = [node for node in loaders if node.executed]
+    if not executed_loaders:
+        return
+    print("  Rows")
+    for label, field in (
+        ("read", "rows_read"),
+        ("inserted", "rows_inserted"),
+        ("updated", "rows_updated"),
+        ("deleted", "rows_deleted"),
+        ("rejected", "rows_rejected"),
+    ):
+        values = [
+            None if node.result is None else getattr(node.result, field, None)
+            for node in executed_loaders
+        ]
+        rendered = (
+            "unknown"
+            if any(value is None for value in values)
+            else f"{sum(int(value) for value in values if value is not None):,}"
+        )
+        print(f"    {label:<10}{rendered:>14}")
 
 
 def handle_test(args: argparse.Namespace) -> int:
@@ -1268,34 +1423,54 @@ def handle_test(args: argparse.Namespace) -> int:
 
 
 def _test_once(args: argparse.Namespace) -> int:
-    """A report is a successful command result regardless of its verdict."""
-
-    import json
+    """Render a completed validation report before returning its process status."""
 
     from weaver.errors import ValidationError
 
     workspace = _resolve_workspace(args)
     try:
-        report = _run_test(
-            workspace,
-            items=run_items(args) or None,
-            name=args.name,
-            file=args.file,
-            dry_run=args.dry_run,
-            session=_session(args),
-        )
+        with _running_session(args, workspace) as opened:
+            report = _run_test(
+                workspace,
+                items=run_items(args) or None,
+                name=args.name,
+                file=args.file,
+                dry_run=args.dry_run,
+                strict=True,
+                session=opened,
+            )
     except ValidationError as exc:
-        _render_error(exc)
+        if exc.report is None:
+            _render_error(exc, args=args)
+        elif args.json:
+            print(
+                _json_document(
+                    _test_mapping(
+                        exc.report,
+                        targeted=args.name is not None or args.file is not None,
+                    )
+                )
+            )
+        else:
+            _print_test(exc.report)
         return 1
 
     if args.json:
-        print(json.dumps(report.to_mapping(), indent=2))
+        print(
+            _json_document(
+                _test_mapping(
+                    report, targeted=args.name is not None or args.file is not None
+                )
+            )
+        )
     else:
         _print_test(report)
     return 0
 
 
-def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
+def _run_test(
+    workspace, *, items, name, file, dry_run: bool, strict: bool, session=None
+):
     """Dispatch Warehouse validations over TDS and Lakehouse modules in-session."""
 
     from weaver.sessions.host import use_or_create_session
@@ -1306,6 +1481,7 @@ def _run_test(workspace, *, items, name, file, dry_run: bool, session=None):
             name=name,
             file=file,
             dry_run=dry_run,
+            strict=strict,
             session=opened,
             **_command_context(workspace),
         )
@@ -1331,7 +1507,11 @@ def _print_test(report) -> None:
                 f"  ({result.missing_count} missing, "
                 f"{result.unexpected_count} unexpected)"
             )
-        print(f"  {node.status:<10} {node.kind:<11} {node.logical_id}{found}")
+        status = f"{node.status:<10}"
+        print(
+            f"  {_style(status, _status_colour(node.status))} "
+            f"{node.kind:<11} {node.logical_id}{found}"
+        )
         for message in node.messages:
             print(f"      {message}")
         error_message = (
@@ -1341,12 +1521,13 @@ def _print_test(report) -> None:
             print(f"      {error_message}")
 
     totals = report.totals()
-    print(
-        f"\n  {totals['passed']} passed, {totals['failed']} failed, "
-        f"{totals['invalid']} could not run"
-    )
+    print("\nTest summary")
+    print(_count_style(f"  {totals['passed']:>3} passed", "passed", totals["passed"]))
+    print(_count_style(f"  {totals['failed']:>3} failed", "failed", totals["failed"]))
+    if totals["invalid"]:
+        print(_style(f"  {totals['invalid']:>3} could not run", _AMBER))
     if report.workflow_id:
-        print(f"  Workflow: {report.workflow_id}")
+        print(f"  Workflow: {_style(report.workflow_id, _DIM)}")
 
     for node in report.nodes:
         if not node.diagnostics:
@@ -1354,6 +1535,16 @@ def _print_test(report) -> None:
         print(f"\n  {node.logical_id}:")
         for row in node.diagnostics:
             print(f"    {row}")
+
+
+def _test_mapping(report, *, targeted: bool) -> dict:
+    mapping = report.to_mapping()
+    if not targeted:
+        return mapping
+    for rendered, node in zip(mapping["nodes"], report.nodes, strict=True):
+        if node.diagnostics is not None:
+            rendered["diagnostics"] = node.diagnostics
+    return mapping
 
 
 def handle_health(args: argparse.Namespace) -> int:
@@ -1496,21 +1687,20 @@ def handle_wipe(args: argparse.Namespace) -> int:
 
         if not authorised(args):
             emptied = len(plan.targets)
-            if not can_prompt(args):
-                print(
-                    f"Confirmation required to empty {emptied} item(s). "
-                    "Pass --yes or --dry-run to preview.",
-                    file=sys.stderr,
+            if args.json or not can_prompt(args):
+                _render_error(
+                    CommandError(
+                        f"Confirmation required to empty {emptied} item(s). "
+                        "Pass --yes to proceed, or --dry-run to preview."
+                    ),
+                    args=args,
                 )
                 return 1
-            # Keep stdout parseable under --json.
-            aside = sys.stderr if args.json else None
             if not confirm(
                 args,
                 f"Empty {emptied} item(s)? This cannot be undone. [y/N] ",
-                prompt_to=aside,
             ):
-                print("Cancelled.", file=aside)
+                _render_error(CommandError("Cancelled."), args=args)
                 return 1
 
         result = weaver.wipe(plan=plan, session=opened)
@@ -1551,25 +1741,24 @@ def handle_mirror(args: argparse.Namespace) -> int:
     with _running_session(args, plan.workspace) as opened:
         resolved = weaver.check_mirror(plan, session=opened)
 
-        # Keep stdout parseable under --json.
-        aside = sys.stderr if args.json else None
         if not args.json:
-            print(f"Mirror on {plan.workspace.workspace}\n\n{resolved.describe()}\n")
+            print(f"Mirror\n\n{resolved.describe()}\n")
 
         if not authorised(args):
             emptied = ", ".join(resolved.wiped)
-            if not can_prompt(args):
-                print(
-                    f"Confirmation required to empty {emptied}. Pass --yes.",
-                    file=sys.stderr,
+            if args.json or not can_prompt(args):
+                _render_error(
+                    CommandError(
+                        f"Confirmation required to empty {emptied}. Pass --yes."
+                    ),
+                    args=args,
                 )
                 return 1
             if not confirm(
                 args,
                 "Empty these targets? This cannot be undone. [y/N] ",
-                prompt_to=aside,
             ):
-                print("Cancelled.", file=aside)
+                _render_error(CommandError("Cancelled."), args=args)
                 return 1
 
         result = weaver.mirror(plan=resolved, session=opened)
@@ -1577,9 +1766,18 @@ def handle_mirror(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(result.to_mapping(), indent=2))
         return 0
-    # Detailed counts remain available in --json.
-    print(f"mirror {result.status}: {', '.join(result.wiped)}")
+    _print_mirror(result)
     return 0
+
+
+def _print_mirror(result) -> None:
+    print("Mirror complete")
+    print(f"  Catalogue  {result.source_catalogue} → {result.destination_catalogue}")
+    if result.items:
+        noun = "item" if len(result.items) == 1 else "items"
+        print(f"  {len(result.items)} {noun} mirrored")
+    noun = "destination" if len(result.wiped) == 1 else "destinations"
+    print(f"  {len(result.wiped)} {noun} emptied")
 
 
 def handle_build(args: argparse.Namespace) -> int:
@@ -1611,22 +1809,56 @@ def _build_once(args: argparse.Namespace) -> int:
             )
     except SOURCE_ERRORS as exc:
         # Return a failed attempt so an interactive retry rereads the project.
-        _render_error(exc)
+        _render_error(exc, args=args)
         return 1
     payload = result.to_mapping()
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
-        print(f"build {result.status}: workspace declaration")
-        print(f"  bundle: {result.bundle_id}")
-        if result.bundle_path:
-            print(f"  path:   {result.bundle_path}")
-        print(f"  items:  {', '.join(result.items)}")
+        _print_build(result)
         for error in result.errors:
             # Show the operation and source before lower-level diagnostics.
             print()
             print(_indented(error.describe()), file=sys.stderr)
     return 0 if result.succeeded else 1
+
+
+def _action_counts(report) -> dict[str, int]:
+    statuses = ("succeeded", "failed", "skipped")
+    actions = tuple(report.action_results())
+    return {
+        status: sum(action.status == status for action in actions)
+        for status in statuses
+    }
+
+
+def _print_action_counts(report, *, indent: str = "  ") -> None:
+    counts = _action_counts(report)
+    for status in ("succeeded", "failed", "skipped"):
+        print(
+            _count_style(
+                f"{indent}{counts[status]:>3} {status}", status, counts[status]
+            )
+        )
+
+
+def _print_build(result) -> None:
+    if result.installation:
+        print("Installation")
+        _print_action_counts(result.installation_report)
+    else:
+        selection = result.selection
+        print("Bundle prepared")
+        print(f"  selected for build    {len(selection.selected_for_build):>4}")
+        print(f"  selected for removal  {len(selection.selected_for_drop):>4}")
+        if result.bundle_path:
+            print(f"  Path  {result.bundle_path}")
+    print(f"  Bundle  {_style(result.bundle_id, _DIM)}")
+
+
+def _print_install(report) -> None:
+    _print_action_counts(report, indent="")
+    print(f"Bundle  {_style(report.bundle_id, _DIM)}")
 
 
 def handle_initialise(args: argparse.Namespace) -> int:
@@ -1643,12 +1875,15 @@ def handle_initialise(args: argparse.Namespace) -> int:
         )
     _prefer_desktop_credential(args)
 
-    asked = collect_workspace(args)
-    if non_interactive(args):
+    asked = collect_workspace(args, ask=not args.json)
+    if non_interactive(args) or args.json:
         collect(args, ask=False)
-        return _report(
-            args, _initialise_once(args, session=_session(args)), asked=False
-        )
+        from weaver.config import resolve_workspace
+
+        workspace = resolve_workspace(workspace=args.workspace)
+        with _running_session(args, workspace) as opened:
+            report = _initialise_once(args, session=opened)
+        return _report(args, report, asked=False)
 
     from weaver.config import resolve_workspace
 
@@ -1747,19 +1982,54 @@ def handle_check(args: argparse.Namespace) -> int:
 
 
 def _check_once(args: argparse.Namespace) -> int:
+    import json
+
     from weaver.operations.check import check
 
     try:
-        check(args.project_folder)
+        result = check(args.project_folder)
     except WeaverError as exc:
-        _render_error(exc)
+        _render_error(exc, args=args)
         return 1
-    print("Project valid.")
+    if args.json:
+        print(
+            json.dumps(
+                {"status": "succeeded", "project_folder": result.project_folder},
+                indent=2,
+            )
+        )
+    else:
+        print("Project valid.")
     return 0
 
 
-def _render_error(exc: BaseException) -> None:
-    print(f"error: {exc}", file=sys.stderr)
+def _render_error(exc: BaseException, *, args=None, report=None) -> None:
+    import json
+
+    from weaver.errors import reported_message
+
+    message = reported_message(exc) or str(exc)
+    executor = _reported_executor(exc)
+    error = {"message": message}
+    if executor is not None:
+        error = {"executor": executor, **error}
+    if bool(getattr(args, "json", False)):
+        payload = {"status": "failed", "error": error}
+        if report is not None:
+            payload["report"] = report.to_mapping()
+        print(json.dumps(payload, indent=2))
+        return
+    source = f"{executor} reported: " if executor is not None else ""
+    print(
+        f"{_style('error:', _RED, stream=sys.stderr)} {source}{message}",
+        file=sys.stderr,
+    )
+
+
+def _reported_executor(exc: BaseException) -> str | None:
+    from weaver.errors import reported_executor
+
+    return reported_executor(exc)
 
 
 def _indented(text: str, prefix: str = "  ") -> str:
@@ -1786,7 +2056,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(handler(args))
     except WeaverError as exc:
-        _render_error(exc)
+        _render_error(exc, args=args)
         return 1
 
 

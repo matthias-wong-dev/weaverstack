@@ -37,6 +37,93 @@ def _workspace(**overrides) -> Workspace:
     return Workspace(**values)
 
 
+@weaver_test()
+def test_lakehouse_runtime_copy_names_load_and_test_artefacts(tmp_path):
+    from contextlib import contextmanager
+
+    from weaver.locations import Location
+    from weaver.operations.mirror import MirrorItem, _copy_load_tree
+    from weaver.store import FilesystemStore
+
+    source = tmp_path / "Input" / "Files" / "_" / "Load" / "Sales__Customer.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("runtime", encoding="utf-8")
+    labels = []
+    store = FilesystemStore()
+
+    class Resolver:
+        def external_item(self, name, **_kwargs):
+            return name
+
+        def external_root(self, item):
+            return Location(str(tmp_path / item))
+
+    class Session:
+        def resolver(self, workspace):
+            return Resolver()
+
+        def store(self, workspace):
+            return store
+
+        @contextmanager
+        def step(self, name):
+            labels.append(name)
+            yield
+
+    each = MirrorItem(
+        item=WeaverItemId.parse("Lakehouse/Input"),
+        source_target="Input",
+        destination="Input_Dev",
+    )
+
+    assert _copy_load_tree(_workspace(), each, session=Session()) == 1
+    assert labels == ["Copying load and test artefacts to Lakehouse/Input_Dev"]
+
+
+@weaver_test()
+def test_warehouse_runtime_copy_names_load_and_test_artefacts():
+    from contextlib import contextmanager
+
+    from weaver.operations.mirror import MirrorItem, _copy_programmables
+
+    labels = []
+
+    class SourceSql:
+        def query(self, statement):
+            return [
+                {
+                    "schema_name": "Rpt",
+                    "object_name": "Refresh",
+                    "definition": "CREATE PROCEDURE [Rpt].[Refresh] AS SELECT 1",
+                }
+            ]
+
+    class DestinationSql:
+        def execute(self, statement):
+            pass
+
+    class Session:
+        def sql_executor(self, target, *, workspace):
+            return SourceSql()
+
+        @contextmanager
+        def step(self, name):
+            labels.append(name)
+            yield
+
+    each = MirrorItem(
+        item=WeaverItemId.parse("Warehouse/Model"),
+        source_target="Model",
+        destination="Model_Dev",
+    )
+
+    assert (
+        _copy_programmables(_workspace(), each, sql=DestinationSql(), session=Session())
+        == 1
+    )
+    assert labels == ["Copying load and test artefacts to Warehouse/Model_Dev"]
+
+
 def _plan(monkeypatch, configured: Workspace, items=None, **named) -> MirrorPlan:
     _given(monkeypatch, configured)
     if items is not None:
@@ -499,11 +586,12 @@ def test_the_scope_names_the_catalogue_and_every_item_target(monkeypatch):
     resolved = resolve_mirror(plan, _installed({"Warehouse/Model": "Model"}))
 
     assert resolved.wiped == ("Warehouse/Weaver_Dev", "Warehouse/Model_Dev")
-    # One list, the destination catalogue first, and the source of each row
-    # second. The item's source is the physical Warehouse its rows come from.
     assert resolved.describe() == (
-        "  Warehouse/Weaver_Dev  <- Warehouse/Weaver\n"
-        "  Warehouse/Model_Dev   <- Warehouse/Model"
+        "Workspace              Analytics\n"
+        "Source catalogue       Warehouse/Weaver\n"
+        "Destination catalogue  Warehouse/Weaver_Dev\n"
+        "Targets\n"
+        "  Warehouse/Model → Warehouse/Model_Dev"
     )
 
 

@@ -393,6 +393,8 @@ def test_a_load_uses_the_installed_target_and_not_the_configured_one(tmp_path, r
         catalogue=_installed(root.repository, physical="Landing_Installed")
     )
     session = TestSession(workspace=workspace)
+    blocks = []
+    session.report = lambda lines: blocks.append(tuple(lines))
 
     report = run_load(
         session, workspace=workspace, state=state, items=(LANDING,), dry_run=True
@@ -405,6 +407,14 @@ def test_a_load_uses_the_installed_target_and_not_the_configured_one(tmp_path, r
         "Lakehouse/Landing_Installed"
     }
     assert session.scope(workspace).spark_home == "Landing_Installed"
+    assert blocks == [
+        (
+            "Workspace  Analytics",
+            "Catalogue  Warehouse/Weaver",
+            "Targets",
+            f"  {ITEM} → Lakehouse/Landing_Installed",
+        )
+    ]
 
 
 @weaver_test()
@@ -418,10 +428,20 @@ def test_a_test_uses_the_installed_target_and_not_the_configured_one(tmp_path, r
         catalogue=_installed(root.repository, physical="Landing_Installed")
     )
     session = TestSession(workspace=workspace)
+    blocks = []
+    session.report = lambda lines: blocks.append(tuple(lines))
 
     run_test(session, workspace=workspace, state=state, items=(LANDING,), dry_run=True)
 
     assert session.scope(workspace).spark_home == "Landing_Installed"
+    assert blocks == [
+        (
+            "Workspace  Analytics",
+            "Catalogue  Warehouse/Weaver",
+            "Targets",
+            f"  {ITEM} → Lakehouse/Landing_Installed",
+        )
+    ]
 
 
 @weaver_test()

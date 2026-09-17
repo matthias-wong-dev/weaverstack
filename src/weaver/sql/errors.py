@@ -8,6 +8,8 @@ from ..errors import WeaverError
 class SqlError(WeaverError):
     """Base class for SQL connection and execution failures."""
 
+    executor = "TDS"
+
 
 class SqlConnectionError(SqlError):
     """Raised when a physical SQL connection cannot be opened."""

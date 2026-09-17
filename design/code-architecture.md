@@ -144,6 +144,12 @@ the bundle, walks its sequences as barriers, calls the named executor for each
 action, and records one result per action. Repository reading and dependency
 resolution have already completed when installation begins.
 
+The build operation reports the bundle's completed `BuildSelection` before it
+hands that same frozen bundle to `Installer.install()`. Selection counts explain
+the planning decision. Installer progress reports sequence timing and action
+counts. Operator labels are derived at presentation time; stored sequence
+descriptions remain part of the canonical bundle and its identity.
+
 ### Runner
 
 ```text

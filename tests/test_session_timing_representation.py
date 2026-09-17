@@ -221,6 +221,25 @@ def test_progress_never_reaches_stdout(capsys):
     assert "Build" in captured.err
 
 
+@weaver_test()
+def test_an_untimed_report_prints_without_inventing_a_reporting_frame():
+    out = io.StringIO()
+    with ConsoleSession(progress=out) as session:
+        session.report(
+            (
+                "Workspace  Analytics",
+                "Catalogue  Warehouse/Weaver",
+                "Targets",
+                "  Lakehouse/Sales → Lakehouse/Sales_LH",
+            )
+        )
+
+    printed = out.getvalue()
+    assert "Workspace  Analytics" in printed
+    assert "Lakehouse/Sales → Lakehouse/Sales_LH" in printed
+    assert session.timings == []
+
+
 # --- what is happening now ----------------------------------------------------
 #
 # A completed frame says what a wait cost. It cannot say a wait is underway,
@@ -235,9 +254,16 @@ class _Tty(io.StringIO):
         return True
 
 
+def _plain(raw: str) -> str:
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", raw)
+
+
 def _screen(raw: str) -> list[str]:
     """What a terminal ends up showing, once carriage returns have overwritten."""
 
+    raw = _plain(raw)
     lines = []
     for chunk in raw.split("\n"):
         line = ""
@@ -257,7 +283,7 @@ def test_an_open_frame_is_named_while_it_is_still_running():
             with session.step("Unbind catalogue claims"):
                 during = out.getvalue()
 
-    assert "⋯ Unbind catalogue claims" in during
+    assert "⋯ Unbind catalogue claims" in _plain(during)
 
 
 @weaver_test()
@@ -272,7 +298,7 @@ def test_the_live_line_reports_the_innermost_open_frame():
                 with session.substep("Lakehouse/Sales/Tables/DWG.Customer"):
                     during = out.getvalue()
 
-    latest = during.rsplit("\r", 2)[-1]
+    latest = _plain(during).rsplit("\r", 2)[-1]
     assert latest.startswith("⋯")
     assert latest.split()[1] == "Lakehouse/Sales/Tables/DWG.Customer"
 
@@ -347,7 +373,7 @@ def test_the_elapsed_figure_moves_while_nothing_else_happens():
         with session.task("Wipe"):
             with session.step("Unbind catalogue claims"):
                 time.sleep(0.3)
-                repaints = out.getvalue().count("⋯ Unbind catalogue claims")
+                repaints = _plain(out.getvalue()).count("⋯ Unbind catalogue claims")
 
     assert repaints > 1
 
@@ -367,6 +393,56 @@ def test_a_stream_that_cannot_be_rewritten_gets_the_completed_lines_only():
     assert "⋯" not in printed
     assert "\r" not in printed
     assert "Unbind catalogue claims" in printed
+    assert "\x1b[" not in printed
+
+
+@weaver_test()
+def test_a_terminal_uses_restrained_semantic_colour():
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Build"):
+            with session.step("Prepare bundle"):
+                pass
+
+    printed = out.getvalue()
+    assert "\x1b[32m✓\x1b[0m" in printed
+    assert "\x1b[2m" in printed  # duration
+
+
+@weaver_test()
+def test_no_color_disables_terminal_styling(monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "")
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        with session.task("Build"):
+            pass
+
+    assert "\x1b[" not in out.getvalue()
+
+
+@weaver_test()
+def test_machine_output_suppresses_human_progress_even_on_a_terminal():
+    out = _Tty()
+    with ConsoleSession(progress=out) as session:
+        session.machine_output = True
+        with session.task("Build"):
+            pass
+        session.report(("Workspace  Analytics",))
+
+    assert out.getvalue() == ""
+
+
+@weaver_test()
+def test_machine_output_retains_a_base_session_warning_without_rendering_it(capsys):
+    from weaver.sessions.testing import TestSession
+
+    session = TestSession()
+    session.machine_output = True
+
+    session.warn("human warning")
+
+    assert session.warnings == ["human warning"]
+    assert capsys.readouterr().err == ""
 
 
 @weaver_test()

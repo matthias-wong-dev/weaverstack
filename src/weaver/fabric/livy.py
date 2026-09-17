@@ -13,6 +13,7 @@ from .client import (
     CONNECTION_ATTEMPTS,
     FABRIC_API,
     TRANSIENT_STATUSES,
+    _response_message,
     retry_delay,
     send,
 )
@@ -30,6 +31,8 @@ RESULT_PREFIX = "__weaver_result__"
 
 class LivyError(WeaverError):
     """A Livy session could not start or has died."""
+
+    executor = "Livy"
 
 
 class LivyStatementError(LivyError):
@@ -244,7 +247,7 @@ def _call(
             continue
         raise LivyError(
             f"{method} {url} returned {response.status_code}: "
-            f"{response.text.strip()[:400] or 'no body'}"
+            f"{_response_message(response)}"
         )
     raise LivyError(f"{method} {url} did not settle")
 

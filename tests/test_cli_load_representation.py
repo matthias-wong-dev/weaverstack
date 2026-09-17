@@ -69,25 +69,30 @@ def recorded(monkeypatch, desktop_credential):
 
 
 def _report(
-    *, status: str = TASK_SUCCEEDED, node_status: str = SUCCEEDED, **extra
+    *,
+    status: str = TASK_SUCCEEDED,
+    node_status: str = SUCCEEDED,
+    nodes=None,
+    **extra,
 ) -> LoadRunReport:
+    default_nodes = (
+        LoadNodeReport(
+            node_id="load:Lakehouse/Sales/Tables/Sales.Customer",
+            logical_id="Lakehouse/Sales/Tables/Sales.Customer",
+            physical_target="Lakehouse/Sales",
+            primitive_kind="python_table",
+            dispatch_location="/x/Sales__Customer.py",
+            status=node_status,
+            executed=True,
+            result=LoadResult(succeeded=True, rows_read=5, rows_inserted=5),
+        ),
+    )
     return LoadRunReport(
         requested=("Lakehouse/Sales",),
         status=status,
         dry_run=False,
         fault_tolerant=False,
-        nodes=(
-            LoadNodeReport(
-                node_id="load:Lakehouse/Sales/Tables/Sales.Customer",
-                logical_id="Lakehouse/Sales/Tables/Sales.Customer",
-                physical_target="Lakehouse/Sales",
-                primitive_kind="python_table",
-                dispatch_location="/x/Sales__Customer.py",
-                status=node_status,
-                executed=True,
-                result=LoadResult(succeeded=True, rows_read=5, rows_inserted=5),
-            ),
-        ),
+        nodes=default_nodes if nodes is None else nodes,
         **extra,
     )
 
@@ -331,6 +336,191 @@ def test_a_successful_run_renders_its_nodes_and_exits_zero(recorded, capsys):
     assert exit_code == 0
     assert "load:Lakehouse/Sales/Tables/Sales.Customer" in captured.out
     assert "succeeded" in captured.out
+    assert "1 succeeded" in captured.out
+    assert "Rows" in captured.out
+    assert "read" in captured.out and "5" in captured.out
+
+
+@weaver_test()
+def test_load_rollup_sums_loaders_without_counting_publication_nodes(capsys):
+    from dataclasses import replace
+
+    from weaver.load_plan import ENDPOINT_REFRESH
+    from weaver.load_report import SUCCEEDED_WITH_REJECTS
+
+    first = _report().nodes[0]
+    second = replace(
+        first,
+        node_id="load:Lakehouse/Sales/Tables/Sales.Order",
+        logical_id="Lakehouse/Sales/Tables/Sales.Order",
+        status=SUCCEEDED_WITH_REJECTS,
+        result=LoadResult(
+            succeeded=True,
+            rows_read=7,
+            rows_inserted=3,
+            rows_updated=2,
+            rows_deleted=1,
+            rows_rejected=1,
+        ),
+    )
+    refresh = replace(
+        first,
+        node_id="refresh:Lakehouse/Sales",
+        logical_id=None,
+        primitive_kind=ENDPOINT_REFRESH,
+        result=LoadResult(succeeded=True, rows_read=999, rows_inserted=999),
+    )
+    report = replace(_report(), nodes=(first, second, refresh))
+
+    _cli_module()._print_load(report)
+
+    output = capsys.readouterr().out
+    assert "1 succeeded" in output
+    assert "1 succeeded with rejects" in output
+    assert "read                  12" in output
+    assert "inserted               8" in output
+    assert "999" in output  # still visible on the publication node's own line
+    assert "read               1,011" not in output
+
+
+@weaver_test()
+def test_a_failed_helper_is_visible_but_not_counted_as_a_loaded_object(capsys):
+    from dataclasses import replace
+
+    from weaver.load_plan import ENDPOINT_REFRESH
+    from weaver.load_report import error
+
+    load = _report().nodes[0]
+    refresh = replace(
+        load,
+        node_id="refresh:Lakehouse/Sales",
+        logical_id=None,
+        primitive_kind=ENDPOINT_REFRESH,
+        status=FAILED,
+        result=None,
+        messages=(error("endpoint_refresh_failure", "endpoint refresh failed"),),
+    )
+    report = replace(_report(), status=TASK_FAILED, nodes=(load, refresh))
+
+    _cli_module()._print_load(report)
+
+    output = capsys.readouterr().out
+    assert "  1 succeeded" in output
+    assert "  0 failed" in output
+    assert "refresh:Lakehouse/Sales" in output
+    assert "endpoint refresh failed" in output
+
+
+@weaver_test()
+def test_load_rollup_calls_missing_row_counts_unknown(capsys):
+    from dataclasses import replace
+
+    node = replace(_report().nodes[0], status=FAILED, result=None)
+    _cli_module()._print_load(
+        _report(status=TASK_FAILED, node_status=FAILED, nodes=(node,))
+    )
+
+    assert "read             unknown" in capsys.readouterr().out
+
+
+@weaver_test()
+def test_load_status_colour_is_semantic_on_a_terminal(monkeypatch):
+    import io
+    import sys
+    from dataclasses import replace
+
+    from weaver.load_report import BLOCKED, SUCCEEDED_WITH_REJECTS
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    base = _report().nodes[0]
+    report = replace(
+        _report(),
+        nodes=(
+            base,
+            replace(base, node_id="rejects", status=SUCCEEDED_WITH_REJECTS),
+            replace(base, node_id="failed", status=FAILED, result=None),
+            replace(
+                base, node_id="blocked", status=BLOCKED, executed=False, result=None
+            ),
+        ),
+    )
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    _cli_module()._print_load(report)
+
+    printed = output.getvalue()
+    assert "\x1b[32m✓\x1b[0m" in printed
+    assert "\x1b[33msucceeded_with_rejects" in printed
+    assert "\x1b[31mfailed" in printed
+    assert "\x1b[33mblocked" in printed
+
+
+@weaver_test()
+def test_zero_failed_and_blocked_load_counts_are_not_attention_coloured(monkeypatch):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    _cli_module()._print_load(_report())
+
+    lines = output.getvalue().splitlines()
+    failed = next(line for line in lines if "0 failed" in line)
+    blocked = next(line for line in lines if "0 blocked" in line)
+    assert "\x1b[31m" not in failed
+    assert "\x1b[33m" not in blocked
+
+
+@weaver_test()
+def test_json_suppresses_load_progress_on_a_terminal(monkeypatch, desktop_credential):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    def run_with_progress(items, **kwargs):
+        with kwargs["session"].task("Load"):
+            pass
+        return _report()
+
+    output = Terminal()
+    progress = Terminal()
+    monkeypatch.setattr(weaver, "load", run_with_progress)
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setattr(sys, "stderr", progress)
+
+    assert main(_command("--json")) == 0
+    assert json.loads(output.getvalue())["status"] == TASK_SUCCEEDED
+    assert progress.getvalue() == ""
+
+
+@weaver_test()
+def test_no_color_disables_cli_status_styling(monkeypatch):
+    import io
+    import sys
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    output = Terminal()
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys, "stdout", output)
+
+    _cli_module()._print_load(_report())
+
+    assert "\x1b[" not in output.getvalue()
 
 
 @weaver_test()
@@ -392,6 +582,57 @@ def test_an_intolerant_failure_exits_non_zero_showing_what_it_carried(
     assert "load:Lakehouse/Sales/Tables/Sales.Customer" in captured.out
     assert "rows were rejected" in captured.err
     assert "Workflow: 0f8b2c1d" in captured.err
+
+
+@weaver_test()
+def test_an_intolerant_json_failure_is_one_document_with_its_partial_report(
+    monkeypatch, capsys, desktop_credential
+):
+    partial = _report(status=TASK_FAILED, node_status=FAILED, workflow_id="0f8b2c1d")
+
+    def raising(targets, **kwargs):
+        raise LoadError(
+            "rows were rejected",
+            report=partial,
+            workflow_id="0f8b2c1d",
+        )
+
+    monkeypatch.setattr(weaver, "load", raising)
+
+    assert main(_command("--json")) == 1
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["status"] == "failed"
+    assert payload["error"] == {"message": "rows were rejected"}
+    assert payload["report"]["workflow_id"] == "0f8b2c1d"
+    assert payload["report"]["nodes"][0]["status"] == FAILED
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@weaver_test()
+def test_an_executor_backed_error_names_the_executor(
+    monkeypatch, capsys, desktop_credential, as_json
+):
+    from weaver.sql import SqlExecutionError
+
+    def raising(targets, **kwargs):
+        raise SqlExecutionError("warehouse unavailable")
+
+    monkeypatch.setattr(weaver, "load", raising)
+
+    assert main(_command(*(["--json"] if as_json else []))) == 1
+
+    captured = capsys.readouterr()
+    if as_json:
+        assert json.loads(captured.out) == {
+            "status": "failed",
+            "error": {"executor": "TDS", "message": "warehouse unavailable"},
+        }
+        assert captured.err == ""
+    else:
+        assert "error: TDS reported: warehouse unavailable" in captured.err
 
 
 @weaver_test()

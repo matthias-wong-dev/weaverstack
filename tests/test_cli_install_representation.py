@@ -53,7 +53,7 @@ def test_environment_publish_accepts_a_qualified_reference_without_workspace():
 
 
 @weaver_test()
-def test_bundle_install_passes_the_resolved_workspace_to_core(monkeypatch):
+def test_bundle_install_passes_the_resolved_workspace_to_core(monkeypatch, capsys):
     cli = import_module("weaver_cli.main")
     import weaver.operations.install as install_operation
     from weaver.workspaces import Workspace
@@ -69,13 +69,32 @@ def test_bundle_install_passes_the_resolved_workspace_to_core(monkeypatch):
 
     args = build_parser().parse_args(["install", "handover", "--workspace", "Sales"])
     assert cli.handle_install(args) == 0
-    assert seen == {"bundle": "handover", "workspace": "Sales", "session": None}
+    assert seen["bundle"] == "handover"
+    assert seen["workspace"] == "Sales"
+    assert seen["session"].workspace is workspace
+    output = capsys.readouterr().out
+    assert "2 succeeded" in output
+    assert "1 failed" in output
+    assert "1 skipped" in output
+    assert "Bundle  bundle" in output
 
 
 class _Report:
     status = "succeeded"
     bundle_id = "bundle"
     succeeded = True
+
+    def action_results(self):
+        from types import SimpleNamespace
+
+        return iter(
+            (
+                SimpleNamespace(status="succeeded"),
+                SimpleNamespace(status="succeeded"),
+                SimpleNamespace(status="failed"),
+                SimpleNamespace(status="skipped"),
+            )
+        )
 
     def to_mapping(self):
         return {"status": self.status, "bundle_id": self.bundle_id}
@@ -86,6 +105,31 @@ class _Result:
 
     def as_dict(self):
         return {"environment_name": "Runtime", "published": True, "timings": {}}
+
+
+@weaver_test()
+def test_zero_failed_install_actions_are_not_red(monkeypatch):
+    import io
+    import sys
+    from types import SimpleNamespace
+
+    cli = import_module("weaver_cli.main")
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    class Successful:
+        def action_results(self):
+            return iter((SimpleNamespace(status="succeeded"),))
+
+    output = Terminal()
+    monkeypatch.setattr(sys, "stdout", output)
+
+    cli._print_action_counts(Successful())
+
+    failed = next(line for line in output.getvalue().splitlines() if "0 failed" in line)
+    assert "\x1b[31m" not in failed
 
 
 class _RecordingSession:

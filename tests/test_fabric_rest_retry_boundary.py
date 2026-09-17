@@ -88,6 +88,26 @@ def test_a_call_fabric_answered_is_not_repeated(monkeypatch):
 
 
 @weaver_test()
+def test_a_structured_fabric_error_uses_the_reported_message(monkeypatch):
+    response = _response(400)
+    response.content = b'{"error":{"message":"The item name is already in use."}}'
+    response.text = response.content.decode()
+    response.json = lambda: {
+        "error": {
+            "code": "ItemDisplayNameAlreadyInUse",
+            "message": "The item name is already in use.",
+        }
+    }
+    client, _sent = _client(monkeypatch, [response])
+
+    with pytest.raises(FabricError) as raised:
+        client.request("POST", "workspaces/w/items", expected=(201,))
+
+    assert str(raised.value).endswith("The item name is already in use.")
+    assert "{'error':" not in str(raised.value)
+
+
+@weaver_test()
 def test_a_refusal_that_never_clears_is_reported_with_its_status(monkeypatch):
     slept: list = []
     client, sent = _client(monkeypatch, [_response(503)] * 4, slept=slept)
