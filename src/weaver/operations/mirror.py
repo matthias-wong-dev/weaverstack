@@ -4,7 +4,7 @@
 destination. Weaver validates the plan, empties the destination targets, copies
 the catalogue state and mirrors the selected items.
 
-See ``design/catalogue.md``.
+See https://docs.weaverstack.dev/core-concepts/catalogue/.
 """
 
 from __future__ import annotations

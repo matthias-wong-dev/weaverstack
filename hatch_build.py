@@ -3,8 +3,6 @@
 `VERSION` is the authored base version. A clean checkout tagged `v<VERSION>`
 builds that version; anything else builds a deterministic
 `<VERSION>.dev<fingerprint>` covering the commit and the working source.
-
-See design/releasing.md.
 """
 
 from __future__ import annotations

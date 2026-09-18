@@ -100,8 +100,9 @@ signature and types.
 ### Comments
 
 Identify any invariant or constraint the code cannot express, then preserve its
-shortest direct statement. Delete comments that only narrate the code. Put
-system-wide reasoning in the relevant document under `design/`.
+shortest direct statement. Delete comments that only narrate the code. Public
+product behaviour belongs at `docs.weaverstack.dev`; implementation invariants
+belong in `AGENTS.md`, source or tests.
 
 ## Review
 

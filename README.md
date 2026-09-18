@@ -34,6 +34,7 @@ CLI sign-in and does not open a browser.
 ## Documentation
 
 - [Website](https://weaverstack.dev)
+- [Documentation](https://docs.weaverstack.dev)
 - [Source](https://github.com/matthias-wong-dev/weaverstack)
 
 ## Licence

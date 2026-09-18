@@ -7,7 +7,7 @@ build. ``_.Mirror`` moves only when present because no document declares it.
 The copy is server-side: Fabric spells another Warehouse in the same workspace
 three-part, so each table moves in one statement.
 
-See ``design/catalogue.md``.
+See https://docs.weaverstack.dev/core-concepts/catalogue/.
 """
 
 from __future__ import annotations

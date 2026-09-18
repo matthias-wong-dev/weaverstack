@@ -1148,7 +1148,7 @@ REPOSITORY_EDITS = (
     # Two changes to the protected table, both of the kind Prohibit rebuild
     # permits: a description, and load code for the loads still to come. Its
     # schema is left alone, because a declared column it does not have would
-    # need the physical table altered. See design/todo/preservative-build.md.
+    # need the physical table altered; the planner tests cover that boundary.
     (
         "Lakehouse/Curated/Tables/CUR__Customer.py",
         "Description: One row per current customer, kept up to date incrementally.",
