@@ -27,6 +27,7 @@ from .interaction import (
 from .status import DIM as _DIM
 from .status import RED as _RED
 from .status import YELLOW as _AMBER
+from .status import configure_stdio as _configure_stdio
 from .status import semantic_colour as _status_colour
 from .status import status_symbol as _status_symbol
 from .status import style as _style
@@ -2038,6 +2039,7 @@ def _group_help(group: argparse.ArgumentParser):
 
 
 def main(argv: list[str] | None = None) -> int:
+    _configure_stdio()
     parser = build_parser()
     words = sys.argv[1:] if argv is None else argv
     if words and words[0] in {"initalise", "initailise"}:

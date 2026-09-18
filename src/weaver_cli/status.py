@@ -1,4 +1,4 @@
-"""Semantic status styling shared by CLI reports."""
+"""Terminal output policy shared by CLI reports: encoding and styling."""
 
 from __future__ import annotations
 
@@ -24,6 +24,20 @@ _YELLOW_STATUSES = frozenset(
     }
 )
 _RED_STATUSES = frozenset({"red", "failed", "invalid", "error"})
+
+
+def configure_stdio() -> None:
+    """Put the CLI's own streams on UTF-8 so reports can carry their symbols.
+
+    An inherited stream may arrive on a legacy code page such as cp1252, which
+    cannot encode ``✓``. Streams a caller substituted, such as a ``StringIO``,
+    have no encoding to set and are left alone.
+    """
+
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
 
 
 def colour_enabled(stream) -> bool:
@@ -69,6 +83,7 @@ __all__ = [
     "RESET",
     "YELLOW",
     "colour_enabled",
+    "configure_stdio",
     "semantic_colour",
     "status_symbol",
     "style",
