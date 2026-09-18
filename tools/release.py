@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tag the version declared in `VERSION` and push the tag.
 
-GitHub Actions performs the build and publication. See design/releasing.md.
+GitHub Actions performs the build and publication.
 """
 
 from __future__ import annotations

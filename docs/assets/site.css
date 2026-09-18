@@ -332,11 +332,6 @@ table.matrix thead th { background: var(--ink); color: var(--white); font-size: 
 @media (max-width: 900px) {
   .cards.four { grid-template-columns: repeat(2, 1fr); }
   .cards.three { grid-template-columns: 1fr; }
-}
-
-@media (max-width: 720px) {
-  body { font-size: 16.5px; }
-  .wrap, .narrow { width: calc(100% - 32px); }
   .nav-toggle { display: block; }
   .nav-links {
     display: none; position: absolute; left: 0; right: 0; top: 100%;
@@ -346,6 +341,11 @@ table.matrix thead th { background: var(--ink); color: var(--white); font-size: 
   .nav-links.open { display: flex; }
   .nav-links a { padding: 11px 0; font-size: 16px; border-bottom: 1px solid var(--line); }
   .nav-links a.button { margin-top: 12px; border-bottom: 1px solid var(--blue); justify-content: center; }
+}
+
+@media (max-width: 720px) {
+  body { font-size: 16.5px; }
+  .wrap, .narrow { width: calc(100% - 32px); }
   .page-head { padding-top: 44px; }
   .section { padding: 46px 0; }
   .cards.two, .cards.four { grid-template-columns: 1fr; }

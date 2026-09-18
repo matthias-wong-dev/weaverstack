@@ -2,7 +2,8 @@
 
 Only changed catalogue rows produce statements. Catalogue reads are validated
 before planning. Dictionaries describe, Installation records bindings, and
-Registry certification is written last. See ``design/catalogue.md``.
+Registry certification is written last. See
+https://docs.weaverstack.dev/core-concepts/catalogue/.
 """
 
 from __future__ import annotations

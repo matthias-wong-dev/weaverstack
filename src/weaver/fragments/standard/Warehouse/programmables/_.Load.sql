@@ -16,7 +16,8 @@ the catalogue lives in these tables are views across databases, and Fabric
 refuses a plain INSERT through such a view while accepting a MERGE's. An
 appended row merges on a surrogate generated a moment ago, so it never matches.
 
-Weaver-owned content. See weaver/fragments and design/catalogue.md.
+Weaver-owned content. See src/weaver/fragments and the catalogue
+reconciliation tests.
 */
 create or alter procedure [_].[Load]
     @object_name varchar(261)

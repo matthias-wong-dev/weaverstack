@@ -13,7 +13,7 @@ the shared declaration:
 :func:`weaver.catalogue.borrow.surface_statements` and
 :func:`weaver.catalogue.borrow.surface_shortcuts`.
 
-See ``design/catalogue.md``.
+See https://docs.weaverstack.dev/core-concepts/catalogue/.
 """
 
 from __future__ import annotations

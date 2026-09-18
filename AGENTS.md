@@ -24,8 +24,9 @@ dwg-platform/
 
 Consult `weaver` for proven algorithms, Fabric/OneLake/Spark/Warehouse edge
 cases, Weaver document fixtures and behavioural intent. Never change it as part
-of weaverstack work, and never import from it. Where the two disagree,
-[design/weaver-architecture.md](design/weaver-architecture.md) is authoritative.
+of weaverstack work, and never import from it. Public behaviour is documented
+at [docs.weaverstack.dev](https://docs.weaverstack.dev); this repository's
+source and tests are authoritative for its implementation.
 
 Reference baseline: `a97ba8a0b00dd66dff1b2c5e818403694562fd30`, the plan's
 reviewed snapshot. The sibling checkout has since advanced. Confirm which
@@ -33,14 +34,11 @@ revision you are reading before treating it as the baseline.
 
 ## Implementation authority
 
-Two documents, answering different questions.
-[design/weaver-architecture.md](design/weaver-architecture.md) describes what
-Weaver is: repository structure, documents, build, bundle, installation, the
-Weaver catalogue, the command lifecycle.
-[design/code-architecture.md](design/code-architecture.md) describes how this
-repository is arranged to deliver it: the four doers, the representations they
-hand each other, and where anything physical happens. Read the first for
-behaviour, the second before moving code between layers.
+[The public documentation](https://docs.weaverstack.dev) owns supported product
+behaviour: Weaver documents, operations, catalogue state and command lifecycle.
+This file names the repository's implementation boundaries and invariants. The
+source and tests prove how those boundaries are delivered; keep them aligned
+when moving code between layers.
 
 The underlying system has run in production on SQL Server for years, and the
 sibling `weaver` implementation works on Fabric. Port the proven algorithms.
@@ -228,8 +226,7 @@ That is the product. The pytest suite reaches the same place by another route:
 it builds one wheel from the checkout, stages it in `PYTEST_STAGING` and puts it
 on the Livy session's `sys.path`, so a Python change reaches a hosted test
 without a publish. `WEAVER_PYTEST_INJECT_WEAVER=0` runs the published wheel
-instead, which is what holds the product route to account. See
-[fabric testing](design/fabric-testing.md).
+instead, which is what holds the product route to account.
 
 ### What this means when you add a feature
 
@@ -269,7 +266,7 @@ Enforceable as the corresponding code lands:
   nothing is installed yet. A file or a stored procedure does not imply a load
   artefact: a Test compiles to a module and a procedure of its own, and a Test
   that inferred its way into the load DAG would be run by `weaver load`. See
-  [validation](design/validation.md).
+  the [validation reference](https://docs.weaverstack.dev/reference/weaver-documents/test/).
 - **Validation declares. It does not materialise.** A Test and an Assumption
   carry an item's ordinary `Schema.Object` identity and are held apart from the
   documents an item materialises, so having an identity does not route one into
@@ -381,8 +378,6 @@ and `_.Test`. Nothing takes a parameter about it.
 
 Temporary compatibility while intermediate commits land is fine. Obsolete
 architecture left layered underneath the new architecture is not.
-
-See [the code architecture](design/code-architecture.md) for what replaced them.
 
 ## Environment neutrality
 
@@ -548,7 +543,7 @@ python tools/release.py
 It tags `v<VERSION>` and pushes. Pushing that tag is the release event, and
 GitHub Actions checks the tag against `VERSION`, builds, verifies both
 artefacts carry that exact version, publishes to PyPI and creates the GitHub
-Release. See [releasing](design/releasing.md).
+Release.
 
 ## Dependencies
 

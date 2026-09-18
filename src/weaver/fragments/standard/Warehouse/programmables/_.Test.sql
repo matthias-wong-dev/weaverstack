@@ -10,7 +10,8 @@ Every write is a MERGE, including the appends. In every Warehouse but the one
 the catalogue lives in these tables are views across databases, and Fabric
 refuses a plain INSERT through such a view while accepting a MERGE's.
 
-Weaver-owned content. See weaver/fragments and design/catalogue.md.
+Weaver-owned content. See src/weaver/fragments and the catalogue
+reconciliation tests.
 */
 create or alter procedure [_].[Test]
     @object_name varchar(261)

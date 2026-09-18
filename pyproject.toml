@@ -59,7 +59,7 @@ weaver = "weaver_cli:main"
 
 [project.urls]
 Homepage = "https://weaverstack.dev"
-Documentation = "https://weaverstack.dev/get-started/"
+Documentation = "https://docs.weaverstack.dev"
 Source = "https://github.com/matthias-wong-dev/weaverstack"
 Issues = "https://github.com/matthias-wong-dev/weaverstack/issues"
 

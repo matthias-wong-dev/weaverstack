@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check that the built wheel and sdist carry the expected version.
 
-Defaults to the version declared in `VERSION`. See design/releasing.md.
+Defaults to the version declared in `VERSION`.
 """
 
 from __future__ import annotations
