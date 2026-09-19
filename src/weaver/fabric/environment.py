@@ -29,6 +29,7 @@ from .environment_definition import (
     definition_payload,
     development_external_libraries,
     environment_name_from_path,
+    normalise_distribution,
     read_environment_definition,
     released_external_libraries,
     runtime_requirements,
@@ -57,14 +58,46 @@ UPDATED = "updated"
 UNCHANGED = "unchanged"
 
 
-def project_root() -> Path:
-    here = Path(__file__).resolve()
+def project_root(module: Path | str | None = None) -> Path:
+    """The Weaver source checkout this installation was imported from.
+
+    ``module`` is the installed Weaver module path the search walks up from.
+
+    A candidate ancestor is accepted only once its ``pyproject.toml`` names the
+    Weaver distribution. A virtual environment nested under an unrelated project
+    puts that project's ``pyproject.toml`` on the way up, and a ``--dev``
+    publication that built it would publish the wrong package.
+    """
+
+    here = Path(module or __file__).resolve()
     for parent in here.parents:
-        if (parent / "pyproject.toml").is_file():
+        candidate = parent / "pyproject.toml"
+        if candidate.is_file() and names_weaver(candidate):
             return parent
     raise CommandError(
-        "A Weaver project root was not found. Run `weaver fabric environment "
-        "publish --dev` from a checkout containing pyproject.toml."
+        f"Cannot publish with --dev: no {DISTRIBUTION} source checkout was "
+        f"found above {here}.\nInstall Weaver from the checkout in editable "
+        "mode, or publish the released package without --dev."
+    )
+
+
+def names_weaver(pyproject: Path) -> bool:
+    """Whether a ``pyproject.toml`` declares the Weaver distribution.
+
+    Unreadable or malformed metadata is not a Weaver checkout. Failing the
+    candidate keeps the search going instead of handing a build backend a
+    project Weaver cannot identify.
+    """
+
+    import tomllib
+
+    try:
+        payload = tomllib.loads(pyproject.read_text("utf-8"))
+    except (OSError, ValueError):
+        return False
+    declared = (payload.get("project") or {}).get("name")
+    return (
+        isinstance(declared, str) and normalise_distribution(declared) == DISTRIBUTION
     )
 
 
@@ -200,10 +233,88 @@ def library_wheels(libraries: dict) -> list[str]:
 staged_wheels = library_wheels
 
 
+def publishes_wheel(libraries: dict, wheel: str) -> bool:
+    """Whether the published custom libraries carry this Weaver wheel.
+
+    The filename carries the content-addressed version, so the name is the
+    whole comparison.
+    """
+
+    return wheel in library_wheels(libraries)
+
+
+def published_weaver_requirement(declaration: str) -> str | None:
+    """The Weaver requirement a published external-library declaration carries.
+
+    ``None`` where there is none, or where the published text does not parse:
+    content Weaver cannot read establishes nothing about what is installed.
+    """
+
+    try:
+        return weaver_requirement(
+            _pip_entries(declaration, source="the published Environment")
+        )
+    except CommandError:
+        return None
+
+
+def publishes_requirement(declaration: str, requirement: str) -> bool:
+    """Whether a published declaration carries this exact Weaver requirement.
+
+    Fabric returns the declaration as it was given it, so the published text
+    holds the requested specifier rather than a resolved version. The published
+    ``/libraries`` inventory is no use here: it splits a requirement on its
+    operator, reporting ``sqlparse>=0.6.0`` as ``sqlparse>`` at ``0.6.0``.
+    """
+
+    published = published_weaver_requirement(declaration)
+    return published is not None and same_requirement(published, requirement)
+
+
+def same_requirement(left: str, right: str) -> bool:
+    """Whether two requirement strings name the same installation.
+
+    Compared as requirements rather than as text, so spelling, spacing and
+    clause order do not decide whether a publication is needed.
+    """
+
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    try:
+        first, second = Requirement(left), Requirement(right)
+    except InvalidRequirement:
+        return False
+    return (
+        normalise_distribution(first.name) == normalise_distribution(second.name)
+        and set(first.specifier) == set(second.specifier)
+        and {normalise_distribution(extra) for extra in first.extras}
+        == {normalise_distribution(extra) for extra in second.extras}
+        and str(first.marker or "") == str(second.marker or "")
+        and (first.url or "") == (second.url or "")
+    )
+
+
 def read_staging_external_libraries(environment: Item, *, client: FabricClient) -> str:
     """Read published and pending external libraries from staging."""
 
-    path = f"{_staging_base(environment)}/libraries/exportExternalLibraries"
+    return _external_library_export(_staging_base(environment), client=client)
+
+
+def read_published_external_libraries(
+    environment: Item, *, client: FabricClient
+) -> str:
+    """Read the published external library declaration.
+
+    Fabric returns the file it was given, comments and specifiers intact, and
+    it does not follow staging: a declaration staged and not yet published is
+    absent from this one.
+    """
+
+    return _external_library_export(_environment_base(environment), client=client)
+
+
+def _external_library_export(base: str, *, client: FabricClient) -> str:
+    path = f"{base}/libraries/exportExternalLibraries"
     try:
         response = client.request("GET", path, expected=(200,))
     except FabricError as exc:
@@ -297,7 +408,8 @@ def delete_stale_wheels(
     return removed
 
 
-_TERMINAL_PUBLISH = frozenset({"success", "succeeded", "failed", "cancelled"})
+_SUCCEEDED = frozenset({"success", "succeeded"})
+_TERMINAL_PUBLISH = frozenset({*_SUCCEEDED, "failed", "cancelled"})
 
 
 @contextmanager
@@ -321,6 +433,20 @@ def publish_and_wait(
         f"{_staging_base(environment)}/publish?beta=false",
         expected=(200, 202),
     )
+    return wait_for_publish(
+        environment, client=client, timeout=timeout, poll_interval=poll_interval
+    )
+
+
+def wait_for_publish(
+    environment: Item,
+    *,
+    client: FabricClient,
+    timeout: float = 1800.0,
+    poll_interval: float = 15.0,
+) -> str:
+    """Poll a publication already under way until it reaches a terminal state."""
+
     deadline = time.time() + timeout
     seen = ""
     while time.time() < deadline:
@@ -331,6 +457,41 @@ def publish_and_wait(
     raise FabricError(
         "Environment publish did not finish within "
         f"{int(timeout)} seconds. Last state: {seen!r}."
+    )
+
+
+def already_published(
+    environment: Item,
+    *,
+    client: FabricClient,
+    wheel: str | None = None,
+    requirement: str | None = None,
+) -> bool:
+    """Whether Fabric has published the Weaver runtime this request wants.
+
+    A matching staged definition says the request was made. Only the published
+    state says a session starting now will import Weaver, and an Environment
+    that has never been published has none.
+
+    Development mode owns a custom wheel and released mode a PyPI requirement,
+    so exactly one of ``wheel`` and ``requirement`` decides, and each is read
+    from the published surface that carries it.
+
+    A publication under way settles first, so the answer is about a state Fabric
+    has finished reaching rather than one it is still leaving.
+    """
+
+    status = publish_state(environment, client=client)
+    if status and status.casefold() not in _TERMINAL_PUBLISH:
+        status = wait_for_publish(environment, client=client)
+    if status.casefold() not in _SUCCEEDED:
+        return False
+    if wheel is not None:
+        return publishes_wheel(read_published(environment, client=client), wheel)
+    if requirement is None:
+        return False
+    return publishes_requirement(
+        read_published_external_libraries(environment, client=client), requirement
     )
 
 
@@ -594,6 +755,23 @@ def publish_environment(
     )
 
 
+def _weaver_is_published(
+    item: Item, desired: EnvironmentDefinition, *, client: FabricClient, step
+) -> bool:
+    """Whether the definition's Weaver libraries are published, not just staged."""
+
+    wheels = [path.split("/")[-1] for path in _weaver_parts(desired)]
+    with step("Read the published Environment state"):
+        return already_published(
+            item,
+            client=client,
+            wheel=wheels[0] if wheels else None,
+            requirement=weaver_requirement(
+                _pip_entries(desired.external_libraries(), source="definition")
+            ),
+        )
+
+
 def _publish_definition(
     workspace_name: str | None,
     path: str | Path,
@@ -634,9 +812,9 @@ def _publish_definition(
     else:
         with step("Read the Environment definition"):
             current = read_definition(item, client=client)
-        if _comparable(current) == _comparable(desired) and publish_state(
-            item, client=client
-        ).casefold() in {"success", "succeeded"}:
+        if _comparable(current) == _comparable(desired) and _weaver_is_published(
+            item, desired, client=client, step=step
+        ):
             timings["send"] = round(time.perf_counter() - started, 2)
             return _result(
                 workspace,
@@ -717,24 +895,27 @@ def _publish_libraries(
             removed = delete_stale_wheels(item, keep, staged, client=client)
     timings["send"] = round(time.perf_counter() - started, 2)
 
-    if not changed and publish_state(item, client=client).casefold() in {
-        "success",
-        "succeeded",
-    }:
-        return _result(
-            workspace,
-            item,
-            source_path=None,
-            dev=dev,
-            desired=None,
-            removed=(),
-            action=UNCHANGED,
-            published=False,
-            status="AlreadyInstalled",
-            requirement=weaver_requirement(_pip_entries(wanted, source=source)),
-            wheel_filename=keep,
-            timings=timings,
-        )
+    requirement = weaver_requirement(_pip_entries(wanted, source=source))
+    if not changed:
+        with step("Read the published Environment state"):
+            settled = already_published(
+                item, client=client, wheel=keep, requirement=requirement
+            )
+        if settled:
+            return _result(
+                workspace,
+                item,
+                source_path=None,
+                dev=dev,
+                desired=None,
+                removed=(),
+                action=UNCHANGED,
+                published=False,
+                status="AlreadyInstalled",
+                requirement=requirement,
+                wheel_filename=keep,
+                timings=timings,
+            )
 
     started = time.perf_counter()
     with step("Publish", "Fabric resolves the staged libraries"):
@@ -751,7 +932,7 @@ def _publish_libraries(
         action=UPDATED,
         published=True,
         status=status,
-        requirement=weaver_requirement(_pip_entries(wanted, source=source)),
+        requirement=requirement,
         wheel_filename=keep,
         timings=timings,
     )

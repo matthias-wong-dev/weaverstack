@@ -74,7 +74,8 @@ def captured(monkeypatch, desktop_credential):
     def fake(items=None, **kwargs):
         seen["items"] = items
         seen.update(kwargs)
-        return seen.get("report", _report())
+        build = seen.get("build")
+        return build(items) if build else seen.get("report", _report())
 
     monkeypatch.setattr(weaver, "health", fake)
     return seen
@@ -455,3 +456,111 @@ def test_json_timestamps_are_utc_iso_8601(captured, capsys):
 
     assert payload["generated_at"] == NOW.isoformat()
     assert payload["as_of"].endswith("+00:00")
+
+
+# --- the item selection reaches both surfaces ----------------------------------
+#
+# The report is built by the real `weaver.health.assess` over rows written here,
+# so both output modes read one scoped `load_activity` rather than filtering
+# separately.
+
+SELECTED = "Warehouse/Reporting"
+UNSELECTED = "Warehouse/Inventory"
+
+
+def _estate() -> "object":
+    from factories import document_id, installation_row, registry_row
+
+    from weaver.catalogue.history import LoadHistory
+    from weaver.catalogue.state import Catalogue
+    from weaver.catalogue.tables import INSTALLATION, REGISTRY
+    from weaver.declaration.model import WeaverItemId
+
+    def _rows(item: str, target: str) -> dict:
+        return {
+            INSTALLATION.name: (installation_row(item, target),),
+            REGISTRY.name: (registry_row(document_id(f"{item}/Sales.Order")),),
+        }
+
+    def _statistic(item: str, duration: int) -> dict:
+        owner = WeaverItemId.parse(item)
+        return {
+            "load_statistic_sk": f"{item}/Sales.Order",
+            "workflow_id": "workflow-1",
+            "item_type": owner.item_type,
+            "item_name": owner.item_name,
+            "schema_name": "Sales",
+            "object_name": "Order",
+            "started_datetime": None,
+            "completed_datetime": None,
+            "duration_milliseconds": duration,
+            "rows_read": 400,
+            "rows_inserted": 7,
+            "rows_updated": 0,
+            "rows_deleted": 0,
+            "rows_rejected": 0,
+            "is_reload": False,
+            "is_static_skip": False,
+        }
+
+    return Catalogue(
+        rows={
+            WeaverItemId.parse(SELECTED): _rows(SELECTED, "Reporting_WH"),
+            WeaverItemId.parse(UNSELECTED): _rows(UNSELECTED, "Inventory_WH"),
+        },
+        load_history=LoadHistory(
+            workflow_ids=("workflow-1",),
+            statistics=(
+                _statistic(SELECTED, 1200),
+                _statistic(UNSELECTED, 98000),
+            ),
+        ),
+    )
+
+
+def _scoped(items):
+    """One real report, bounded by whatever the command line named."""
+
+    from weaver.health import assess
+    from weaver.operations.items import requested_items
+
+    return assess(
+        _estate(),
+        as_of=NOW - timedelta(hours=24),
+        generated_at=NOW,
+        items=requested_items(items, what="health") or None,
+    )
+
+
+@weaver_test()
+def test_the_printed_activity_is_only_the_selected_items(captured, capsys):
+    captured["build"] = _scoped
+    _run("--item", SELECTED)
+
+    printed = capsys.readouterr().out
+
+    assert f"{SELECTED}/Sales.Order" in printed
+    assert UNSELECTED not in printed
+
+
+@weaver_test()
+def test_the_json_activity_is_only_the_selected_items(captured, capsys):
+    captured["build"] = _scoped
+    _run("--item", SELECTED, "--json")
+
+    payload = json.loads(capsys.readouterr().out)
+
+    assert [each["object_id"] for each in payload["load_activity"]] == [
+        f"{SELECTED}/Sales.Order"
+    ]
+
+
+@weaver_test()
+def test_an_unscoped_report_still_shows_the_whole_estate(captured, capsys):
+    captured["build"] = _scoped
+    _run()
+
+    printed = capsys.readouterr().out
+
+    assert f"{SELECTED}/Sales.Order" in printed
+    assert f"{UNSELECTED}/Sales.Order" in printed
