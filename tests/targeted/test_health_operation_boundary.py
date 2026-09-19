@@ -19,7 +19,7 @@ from factories import document_id, installation_row, registry_row
 from support.weaver_test import weaver_test
 from support.workspaces import given_workspace
 
-from weaver.catalogue.history import read_load_history
+from weaver.catalogue.history import LoadHistory, read_load_history
 from weaver.catalogue.state import Catalogue
 from weaver.catalogue.tables import (
     INSTALLATION,
@@ -61,6 +61,36 @@ def _installed_catalogue() -> Catalogue:
     )
 
 
+def _two_item_catalogue() -> Catalogue:
+    """Two installed items, each with one load in the same window.
+
+    They share a schema and an object name, so activity that filtered on those
+    alone would carry both whichever item was selected.
+    """
+
+    return Catalogue(
+        rows={
+            WeaverItemId.parse(RAW): {
+                INSTALLATION.name: (installation_row(RAW, "Raw_LH"),),
+                REGISTRY.name: (
+                    registry_row(document_id(f"{RAW}/Tables/Sales.Order")),
+                ),
+            },
+            WeaverItemId.parse(REPORTING): {
+                INSTALLATION.name: (installation_row(REPORTING, "Reporting_WH"),),
+                REGISTRY.name: (registry_row(document_id(f"{REPORTING}/Sales.Order")),),
+            },
+        },
+        load_history=LoadHistory(
+            workflow_ids=("workflow-1",),
+            statistics=(
+                _statistic("Sales", "Order"),
+                _statistic("Sales", "Order", item=REPORTING),
+            ),
+        ),
+    )
+
+
 @weaver_test()
 def test_no_item_means_every_target_the_catalogue_binds():
     report = _health(_installed_catalogue())
@@ -75,6 +105,27 @@ def test_one_item_reports_on_the_target_it_is_installed_in():
     report = _health(_installed_catalogue(), items=(WeaverItemId.parse(RAW),))
 
     assert report.targets == (str(RAW_LH),)
+
+
+@weaver_test()
+def test_an_item_selection_bounds_the_activity_the_report_carries():
+    """`--item` scopes the whole report, so unselected activity is not in it."""
+
+    report = _health(_two_item_catalogue(), items=(WeaverItemId.parse(RAW),))
+
+    assert [each.object_id for each in report.load_activity] == [
+        f"{RAW}/Tables/Sales.Order"
+    ]
+
+
+@weaver_test()
+def test_no_item_selection_carries_every_items_activity():
+    report = _health(_two_item_catalogue())
+
+    assert {each.object_id for each in report.load_activity} == {
+        f"{RAW}/Tables/Sales.Order",
+        f"{REPORTING}/Sales.Order",
+    }
 
 
 @weaver_test()
@@ -310,20 +361,22 @@ def _statistic(
     schema,
     name,
     *,
+    item=RAW,
     workflow="workflow-1",
     read=0,
     duration=1200,
     started=None,
     completed=None,
 ):
-    """One ``_.LoadStatistic`` row, keyed as a Lakehouse table is keyed."""
+    """One ``_.LoadStatistic`` row, keyed as its item's catalogue keys it."""
 
-    schema = f"Tables/{schema}"
+    owner = WeaverItemId.parse(item)
+    schema = schema if owner.item_type == "Warehouse" else f"Tables/{schema}"
     return {
-        "load_statistic_sk": f"{schema}.{name}",
+        "load_statistic_sk": f"{item}/{schema}.{name}",
         "workflow_id": workflow,
-        "item_type": "Lakehouse",
-        "item_name": "Raw",
+        "item_type": owner.item_type,
+        "item_name": owner.item_name,
         "schema_name": schema,
         "object_name": name,
         "started_datetime": started,

@@ -473,20 +473,27 @@ def current_load(history) -> CurrentLoad | None:
     )
 
 
-def load_activity(history, *, targets=None) -> tuple[LoadActivity, ...]:
+def load_activity(history, *, targets=None, items=None) -> tuple[LoadActivity, ...]:
     """The window's ``_.LoadStatistic`` rows, with each object's target named.
 
     ``targets`` maps a logical item to the physical target it is bound to, which
     a statistic row does not carry: it holds logical identity, and where that
     object lives is the Installation's to say.
+
+    ``items`` bounds the rows to a selection of logical items. The selection
+    applies here rather than where activity is ranked, so a row an unselected
+    item contributed cannot displace a selected one out of a top-N list.
     """
 
     if history is None:
         return ()
     bound = dict(targets or {})
+    chosen = None if items is None else frozenset(items)
     found = []
     for row in history.statistics:
         identity = _row_identity(row)
+        if chosen is not None and identity.item not in chosen:
+            continue
         target = bound.get(identity.item)
         duration = row.get("duration_milliseconds")
         found.append(
@@ -849,6 +856,7 @@ def assess(
     as_of: datetime,
     generated_at: datetime,
     targets: Sequence[PhysicalTargetRef] | None = None,
+    items: Sequence[WeaverItemId] | None = None,
     inventories: Mapping[PhysicalTargetRef, object] | None = None,
     source: Catalogue | None = None,
 ) -> HealthReport:
@@ -860,6 +868,11 @@ def assess(
     ``targets`` restricts what is reported on. Ancestry outside it is still read,
     because whether a selected object is behind its sources is a question about
     the whole managed graph.
+
+    ``items`` is the logical selection those targets were resolved from, and it
+    bounds load activity. A physical target can hold more than one item, so
+    activity carries the selection the request named rather than the targets it
+    resolved to.
 
     ``inventories`` are read for the selected targets alone, so a certified
     object the target does not hold is reported. With none, Build health reports
@@ -889,7 +902,9 @@ def assess(
         build=evaluation.build(),
         targets=tuple(str(target) for target in (selected or dag.targets)),
         current_load=current_load(history),
-        load_activity=load_activity(history, targets=dag.installations),
+        load_activity=load_activity(
+            history, targets=dag.installations, items=items or None
+        ),
     )
 
 

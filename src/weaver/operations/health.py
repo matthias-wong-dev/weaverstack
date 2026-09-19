@@ -149,6 +149,7 @@ def run_health(
         as_of=as_of,
         generated_at=generated_at,
         targets=selected if items else None,
+        items=tuple(items) or None,
         inventories=read,
         source=source,
     )

@@ -1061,16 +1061,22 @@ def _window(*statistics) -> LoadHistory:
     return LoadHistory(workflow_ids=("workflow-1",), statistics=tuple(statistics))
 
 
-def _statistic(name: str, *, duration_ms=None, **counts) -> dict:
-    """One ``_.LoadStatistic`` row, keyed as a Lakehouse table is keyed."""
+def _statistic(name: str, *, item: str = RAW, duration_ms=None, **counts) -> dict:
+    """One ``_.LoadStatistic`` row, keyed as its item's catalogue keys it.
 
+    A Lakehouse relation carries its area in the stored schema and a Warehouse
+    relation does not.
+    """
+
+    owner = WeaverItemId.parse(item)
+    schema, _, object_name = name.partition(".")
     return {
-        "load_statistic_sk": name,
+        "load_statistic_sk": f"{item}/{name}",
         "workflow_id": "workflow-1",
-        "item_type": "Lakehouse",
-        "item_name": "Raw",
-        "schema_name": f"Tables/{name.split('.')[0]}",
-        "object_name": name.split(".")[1],
+        "item_type": owner.item_type,
+        "item_name": owner.item_name,
+        "schema_name": schema if owner.item_type == "Warehouse" else f"Tables/{schema}",
+        "object_name": object_name,
         "started_datetime": None,
         "completed_datetime": None,
         "duration_milliseconds": duration_ms,
@@ -1158,6 +1164,118 @@ def test_a_catalogue_read_without_a_window_reports_no_activity():
 
     assert report.current_load is None
     assert report.load_activity == ()
+
+
+# --- activity obeys the item selection ----------------------------------------
+#
+# A request naming items bounds the whole report, activity included. The
+# selection applies where activity is built, so a row an unselected item
+# contributed cannot rank above a selected one and take its place in a top-N
+# list that is then filtered.
+
+INVENTORY = "Lakehouse/Inventory"
+
+
+def _across_items() -> LoadHistory:
+    """One window's activity, contributed by three items."""
+
+    return _window(
+        _statistic("Sales.Order", duration_ms=800, rows_inserted=4),
+        _statistic("Sales.Order", item=CURATED, duration_ms=31200, rows_inserted=900),
+        _statistic("Sales.Order", item=REPORTING, duration_ms=9000, rows_inserted=50),
+    )
+
+
+@weaver_test()
+def test_one_selected_item_carries_its_own_activity_alone():
+    report = _Estate().report(
+        load_history=_across_items(), items=(WeaverItemId.parse(CURATED),)
+    )
+
+    assert [each.object_id for each in report.load_activity] == [
+        f"{CURATED}/Tables/Sales.Order"
+    ]
+
+
+@weaver_test()
+def test_several_selected_items_carry_all_of_theirs_and_nothing_else():
+    report = _Estate().report(
+        load_history=_across_items(),
+        items=(WeaverItemId.parse(RAW), WeaverItemId.parse(REPORTING)),
+    )
+
+    assert {each.object_id for each in report.load_activity} == {
+        f"{RAW}/Tables/Sales.Order",
+        f"{REPORTING}/Sales.Order",
+    }
+
+
+@weaver_test()
+def test_no_selection_carries_the_whole_estate():
+    report = _Estate().report(load_history=_across_items())
+
+    assert len(report.load_activity) == 3
+
+
+@weaver_test()
+def test_a_selected_item_with_no_activity_reports_none():
+    report = _Estate().report(
+        load_history=_across_items(), items=(WeaverItemId.parse(INVENTORY),)
+    )
+
+    assert report.load_activity == ()
+    assert report.slowest() == ()
+    assert report.moved() == ()
+
+
+@weaver_test()
+def test_the_same_object_name_under_another_item_is_not_this_items_activity():
+    """Identity is the item as well as the object, so the name is not enough."""
+
+    report = _Estate().report(
+        load_history=_across_items(), items=(WeaverItemId.parse(RAW),)
+    )
+
+    assert [each.object_id for each in report.load_activity] == [
+        f"{RAW}/Tables/Sales.Order"
+    ]
+
+
+@weaver_test()
+def test_unselected_activity_cannot_displace_a_selected_row_from_a_top_list():
+    """Ranking the estate and filtering afterwards loses the selected rows."""
+
+    report = _Estate().report(
+        load_history=_window(
+            *(
+                _statistic(
+                    f"Sales.Order{index}",
+                    item=CURATED,
+                    duration_ms=60000 + index,
+                    rows_inserted=1000,
+                )
+                for index in range(8)
+            ),
+            _statistic("Sales.Order", duration_ms=120, rows_inserted=1),
+        ),
+        items=(WeaverItemId.parse(RAW),),
+    )
+
+    assert [each.object_id for each in report.slowest()] == [
+        f"{RAW}/Tables/Sales.Order"
+    ]
+    assert [each.object_id for each in report.moved()] == [f"{RAW}/Tables/Sales.Order"]
+
+
+@weaver_test()
+def test_the_mapping_carries_the_same_bounded_activity():
+    report = _Estate().report(
+        load_history=_across_items(), items=(WeaverItemId.parse(RAW),)
+    )
+
+    assert [each["object_id"] for each in report.to_mapping()["load_activity"]] == [
+        f"{RAW}/Tables/Sales.Order"
+    ]
 
 
 # --- a mirrored estate --------------------------------------------------------
