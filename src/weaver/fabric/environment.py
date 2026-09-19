@@ -233,57 +233,88 @@ def library_wheels(libraries: dict) -> list[str]:
 staged_wheels = library_wheels
 
 
-def library_distributions(libraries: dict) -> dict[str, str]:
-    """External library distributions, folded the way PEP 503 compares them.
+def publishes_wheel(libraries: dict, wheel: str) -> bool:
+    """Whether the published custom libraries carry this Weaver wheel.
 
-    The value is the version Fabric resolved, which is empty where it reports
-    none.
+    The filename carries the content-addressed version, so the name is the
+    whole comparison.
     """
 
-    found: dict[str, str] = {}
-    for entry in libraries.get("libraries", ()):
-        if str(entry.get("libraryType") or "").casefold() != "external":
-            continue
-        name = str(entry.get("name") or "")
-        if name:
-            found[normalise_distribution(name)] = str(entry.get("version") or "")
-    return found
+    return wheel in library_wheels(libraries)
 
 
-def publishes_weaver(
-    libraries: dict, *, wheel: str | None, requirement: str | None
-) -> bool:
-    """Whether published libraries carry the Weaver runtime a request wants.
+def published_weaver_requirement(declaration: str) -> str | None:
+    """The Weaver requirement a published external-library declaration carries.
 
-    Development mode owns a custom wheel and released mode a PyPI requirement,
-    so exactly one of ``wheel`` and ``requirement`` decides. A session starting
-    now imports what is here; what is staged is a request, not evidence.
+    ``None`` where there is none, or where the published text does not parse:
+    content Weaver cannot read establishes nothing about what is installed.
     """
 
-    if wheel is not None:
-        return wheel in library_wheels(libraries)
-    if requirement is None:
-        return False
+    try:
+        return weaver_requirement(
+            _pip_entries(declaration, source="the published Environment")
+        )
+    except CommandError:
+        return None
+
+
+def publishes_requirement(declaration: str, requirement: str) -> bool:
+    """Whether a published declaration carries this exact Weaver requirement.
+
+    Fabric returns the declaration as it was given it, so the published text
+    holds the requested specifier rather than a resolved version. The published
+    ``/libraries`` inventory is no use here: it splits a requirement on its
+    operator, reporting ``sqlparse>=0.6.0`` as ``sqlparse>`` at ``0.6.0``.
+    """
+
+    published = published_weaver_requirement(declaration)
+    return published is not None and same_requirement(published, requirement)
+
+
+def same_requirement(left: str, right: str) -> bool:
+    """Whether two requirement strings name the same installation.
+
+    Compared as requirements rather than as text, so spelling, spacing and
+    clause order do not decide whether a publication is needed.
+    """
+
     from packaging.requirements import InvalidRequirement, Requirement
 
     try:
-        wanted = Requirement(requirement)
+        first, second = Requirement(left), Requirement(right)
     except InvalidRequirement:
         return False
-    version = library_distributions(libraries).get(normalise_distribution(wanted.name))
-    if version is None:
-        return False
-    if not version or not wanted.specifier:
-        # Fabric does not always report a resolved version. Presence is then
-        # all the published state says, and it says Weaver is there.
-        return True
-    return wanted.specifier.contains(version, prereleases=True)
+    return (
+        normalise_distribution(first.name) == normalise_distribution(second.name)
+        and set(first.specifier) == set(second.specifier)
+        and {normalise_distribution(extra) for extra in first.extras}
+        == {normalise_distribution(extra) for extra in second.extras}
+        and str(first.marker or "") == str(second.marker or "")
+        and (first.url or "") == (second.url or "")
+    )
 
 
 def read_staging_external_libraries(environment: Item, *, client: FabricClient) -> str:
     """Read published and pending external libraries from staging."""
 
-    path = f"{_staging_base(environment)}/libraries/exportExternalLibraries"
+    return _external_library_export(_staging_base(environment), client=client)
+
+
+def read_published_external_libraries(
+    environment: Item, *, client: FabricClient
+) -> str:
+    """Read the published external library declaration.
+
+    Fabric returns the file it was given, comments and specifiers intact, and
+    it does not follow staging: a declaration staged and not yet published is
+    absent from this one.
+    """
+
+    return _external_library_export(_environment_base(environment), client=client)
+
+
+def _external_library_export(base: str, *, client: FabricClient) -> str:
+    path = f"{base}/libraries/exportExternalLibraries"
     try:
         response = client.request("GET", path, expected=(200,))
     except FabricError as exc:
@@ -439,8 +470,12 @@ def already_published(
     """Whether Fabric has published the Weaver runtime this request wants.
 
     A matching staged definition says the request was made. Only the published
-    libraries say a session starting now will import Weaver, and an Environment
+    state says a session starting now will import Weaver, and an Environment
     that has never been published has none.
+
+    Development mode owns a custom wheel and released mode a PyPI requirement,
+    so exactly one of ``wheel`` and ``requirement`` decides, and each is read
+    from the published surface that carries it.
 
     A publication under way settles first, so the answer is about a state Fabric
     has finished reaching rather than one it is still leaving.
@@ -451,8 +486,13 @@ def already_published(
         status = wait_for_publish(environment, client=client)
     if status.casefold() not in _SUCCEEDED:
         return False
-    published = read_published(environment, client=client)
-    return publishes_weaver(published, wheel=wheel, requirement=requirement)
+    if wheel is not None:
+        return publishes_wheel(read_published(environment, client=client), wheel)
+    if requirement is None:
+        return False
+    return publishes_requirement(
+        read_published_external_libraries(environment, client=client), requirement
+    )
 
 
 def read_definition(

@@ -52,7 +52,7 @@ def test_publication_installs_a_runtime_and_settles_to_a_noop(
         find_workspace,
         library_wheels,
         publish_environment,
-        publishes_weaver,
+        publishes_wheel,
         read_published,
     )
     from weaver.fabric.resources import find_item
@@ -73,9 +73,7 @@ def test_publication_installs_a_runtime_and_settles_to_a_noop(
         client=fabric_client,
     )
     published = read_published(environment, client=fabric_client)
-    assert publishes_weaver(
-        published, wheel=first.wheel_filename, requirement=first.weaver_requirement
-    ), (
+    assert publishes_wheel(published, first.wheel_filename), (
         f"publication reported {first.publish_status!r}, and the Environment "
         f"has published {library_wheels(published)}"
     )

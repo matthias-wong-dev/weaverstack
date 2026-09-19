@@ -18,8 +18,11 @@ from weaver.fabric.client import FabricError
 from weaver.fabric.environment import (
     is_weaver_wheel,
     library_wheels,
-    publishes_weaver,
+    published_weaver_requirement,
+    publishes_requirement,
+    publishes_wheel,
     resolve_environment_owner,
+    same_requirement,
 )
 from weaver.fabric.environment_definition import (
     CUSTOM_LIBRARIES,
@@ -104,13 +107,23 @@ class _LibraryClient:
     """A Fabric client recording what a library-route publication asked for."""
 
     def __init__(
-        self, *, staged=(), installed=None, external="", state="Success", states=()
+        self,
+        *,
+        staged=(),
+        installed=None,
+        external="",
+        published_external=None,
+        state="Success",
+        states=(),
     ):
         self.staged = list(staged)
-        #: What Fabric has published. Defaults to the staged set, which is what
-        #: an Environment whose last publish settled actually holds.
+        #: What Fabric has published. Defaults to the staged state, which is
+        #: what an Environment whose last publish settled actually holds.
         self.installed = list(staged) if installed is None else list(installed)
         self.external = external
+        self.published_external = (
+            external if published_external is None else published_external
+        )
         self.state = state
         self.states = list(states)
         self.imported: list[str] = []
@@ -132,7 +145,8 @@ class _LibraryClient:
 
     def request(self, method, path, *, payload=None, expected=()):
         if method == "GET" and path.endswith("exportExternalLibraries"):
-            return _Response(200, content=self.external.encode("utf-8"))
+            text = self.external if "/staging/" in path else self.published_external
+            return _Response(200, content=text.encode("utf-8"))
         if method == "DELETE":
             self.deleted.append(path.rsplit("/", 1)[-1])
             return _Response(200)
@@ -275,12 +289,22 @@ def test_an_environment_already_carrying_weaver_is_a_noop(monkeypatch, tmp_path)
 
 # --- configured is not published ------------------------------------------------
 #
-# Staging is where a request is written and publishing is what installs it. The
-# no-op therefore reads the published libraries: `AlreadyInstalled` means a
-# session starting now imports Weaver.
+# Staging is where a request is written and publishing is what installs it, and
+# the two surfaces answer separately. The no-op therefore reads the published
+# state: `AlreadyInstalled` means a session starting now imports Weaver.
+#
+# Development mode reads the published custom wheels, whose filenames carry the
+# content-addressed version. Released mode reads the published external-library
+# declaration, which Fabric returns as it was given it, specifiers intact.
 
-WEAVER_PIP = "dependencies:\n  - pip:\n      - weaverstack\n"
-DEV_PIP = "dependencies:\n  - pip:\n      - pyyaml\n      - mssql-python\n"
+
+def _pip(*entries: str) -> str:
+    return "dependencies:\n  - pip:\n" + "".join(f"      - {e}\n" for e in entries)
+
+
+WEAVER_PIP = _pip(DISTRIBUTION)
+PINNED_PIP = _pip(f"{DISTRIBUTION}==0.9.0")
+DEV_PIP = _pip("pyyaml", "mssql-python")
 STALE_WHEEL = "weaverstack-0.1.2.dev1-py3-none-any.whl"
 
 
@@ -288,7 +312,9 @@ STALE_WHEEL = "weaverstack-0.1.2.dev1-py3-none-any.whl"
 def test_a_requirement_staged_but_never_published_is_published(monkeypatch):
     """The reported failure: a matching definition over an unpublished runtime."""
 
-    client = _LibraryClient(external=WEAVER_PIP, installed=[], states=[""])
+    client = _LibraryClient(
+        external=WEAVER_PIP, published_external="", installed=[], states=[""]
+    )
 
     result = _library_publication(monkeypatch, client)
 
@@ -300,15 +326,86 @@ def test_a_requirement_staged_but_never_published_is_published(monkeypatch):
 
 @weaver_test()
 def test_a_published_weaver_requirement_is_a_verified_noop(monkeypatch):
-    client = _LibraryClient(
-        external=WEAVER_PIP, installed=[_external(DISTRIBUTION, "0.9.0")]
-    )
+    client = _LibraryClient(external=WEAVER_PIP, published_external=WEAVER_PIP)
 
     result = _library_publication(monkeypatch, client)
 
     assert client.published == 0
     assert result.action == "unchanged"
     assert result.publish_status == "AlreadyInstalled"
+
+
+def _as_release(monkeypatch, version: str) -> None:
+    """Run as a released client, whose requirement pins its own version."""
+
+    import weaver
+
+    monkeypatch.setattr(weaver, "__version__", version)
+
+
+@weaver_test()
+def test_an_exact_published_pin_matching_the_request_is_a_noop(monkeypatch):
+    """`weaverstack==0.9.0` published against `weaverstack==0.9.0` requested."""
+
+    _as_release(monkeypatch, "0.9.0")
+    client = _LibraryClient(external=PINNED_PIP, published_external=PINNED_PIP)
+
+    result = _library_publication(monkeypatch, client)
+
+    assert client.published == 0
+    assert result.weaver_requirement == f"{DISTRIBUTION}==0.9.0"
+    assert result.publish_status == "AlreadyInstalled"
+
+
+@weaver_test()
+def test_a_published_pin_other_than_the_requested_one_is_published(monkeypatch):
+    """`weaverstack==0.9.0` published against `weaverstack==0.9.1` requested."""
+
+    _as_release(monkeypatch, "0.9.1")
+    client = _LibraryClient(
+        external=_pip(f"{DISTRIBUTION}==0.9.1"), published_external=PINNED_PIP
+    )
+
+    result = _library_publication(monkeypatch, client)
+
+    assert client.published == 1
+    assert result.action == "updated"
+    assert result.weaver_requirement == f"{DISTRIBUTION}==0.9.1"
+
+
+@weaver_test()
+def test_a_published_declaration_with_no_weaver_requirement_is_published(monkeypatch):
+    client = _LibraryClient(
+        external=WEAVER_PIP, published_external=_pip("pyyaml", "sqlparse")
+    )
+
+    _library_publication(monkeypatch, client)
+
+    assert client.published == 1
+
+
+@weaver_test()
+def test_a_published_declaration_that_does_not_parse_is_published(monkeypatch):
+    """Published content Weaver cannot read establishes nothing about it."""
+
+    client = _LibraryClient(
+        external=WEAVER_PIP, published_external="dependencies: [oh: no: ["
+    )
+
+    _library_publication(monkeypatch, client)
+
+    assert client.published == 1
+
+
+@weaver_test()
+def test_an_unpinned_request_is_not_met_by_a_published_pin(monkeypatch):
+    """Different requirements, so the published one is not what was asked for."""
+
+    client = _LibraryClient(external=WEAVER_PIP, published_external=PINNED_PIP)
+
+    _library_publication(monkeypatch, client)
+
+    assert client.published == 1
 
 
 @weaver_test()
@@ -386,54 +483,60 @@ def test_a_published_state_that_cannot_be_read_is_not_a_noop(monkeypatch):
     """An unresolved publication state surfaces; it does not read as success."""
 
     class _Unreadable(_LibraryClient):
-        def paged(self, path, *, key, not_found_empty=False):
-            if "/staging/" in path:
-                return list(self.staged)
-            raise FabricError("reading published libraries returned 500")
+        def request(self, method, path, *, payload=None, expected=()):
+            if path.endswith("exportExternalLibraries") and "/staging/" not in path:
+                raise FabricError("reading the published declaration returned 500")
+            return super().request(method, path, payload=payload, expected=expected)
 
     client = _Unreadable(external=WEAVER_PIP)
 
-    with pytest.raises(FabricError, match="published libraries"):
+    with pytest.raises(FabricError, match="published declaration"):
         _library_publication(monkeypatch, client)
 
     assert client.published == 0
 
 
-# --- what published libraries say about the runtime -----------------------------
+# --- what the published state says about the runtime ----------------------------
 
 
 @weaver_test()
-def test_a_published_version_outside_the_requirement_is_not_installed():
-    published = _libraries(_external(DISTRIBUTION, "0.8.0"))
-
-    assert not publishes_weaver(published, wheel=None, requirement="weaverstack==0.9.0")
-    assert publishes_weaver(published, wheel=None, requirement="weaverstack==0.8.0")
-    assert publishes_weaver(published, wheel=None, requirement="weaverstack")
-
-
-@weaver_test()
-def test_a_published_package_with_no_reported_version_counts_as_present():
-    """Fabric does not always resolve a version; presence is then what it says."""
-
-    published = _libraries(_external(DISTRIBUTION))
-
-    assert publishes_weaver(published, wheel=None, requirement="weaverstack==0.9.0")
-
-
-@weaver_test()
-def test_another_projects_libraries_do_not_stand_in_for_weaver():
-    published = _libraries(_external("fuzzywuzzy", "0.18.0"), _custom(OTHER_WHEEL))
-
-    assert not publishes_weaver(published, wheel=None, requirement="weaverstack")
-    assert not publishes_weaver(published, wheel=WHEEL, requirement=None)
-
-
-@weaver_test()
-def test_a_development_publication_is_read_from_the_custom_wheels():
+def test_a_development_publication_is_read_from_the_published_wheels():
     published = _libraries(_custom(WHEEL), _external(DISTRIBUTION))
 
-    assert publishes_weaver(published, wheel=WHEEL, requirement=None)
-    assert not publishes_weaver(published, wheel=STALE_WHEEL, requirement=None)
+    assert publishes_wheel(published, WHEEL)
+    assert not publishes_wheel(published, STALE_WHEEL)
+    assert not publishes_wheel(_libraries(_custom(OTHER_WHEEL)), WHEEL)
+
+
+@weaver_test()
+def test_a_released_publication_is_read_from_the_published_declaration():
+    assert publishes_requirement(PINNED_PIP, f"{DISTRIBUTION}==0.9.0")
+    assert not publishes_requirement(PINNED_PIP, f"{DISTRIBUTION}==0.9.1")
+    assert not publishes_requirement(PINNED_PIP, DISTRIBUTION)
+    assert not publishes_requirement(_pip("pyyaml"), DISTRIBUTION)
+    assert not publishes_requirement("", DISTRIBUTION)
+
+
+@weaver_test()
+def test_a_published_declaration_is_read_for_its_weaver_requirement():
+    assert published_weaver_requirement(PINNED_PIP) == f"{DISTRIBUTION}==0.9.0"
+    assert published_weaver_requirement(_pip("pyyaml", DISTRIBUTION)) == DISTRIBUTION
+    assert published_weaver_requirement(_pip("pyyaml")) is None
+    assert published_weaver_requirement("") is None
+    assert published_weaver_requirement("dependencies: [oh: no: [") is None
+
+
+@weaver_test()
+def test_requirements_are_compared_as_requirements_rather_than_as_text():
+    """The published file keeps the spelling it was given, which is not identity."""
+
+    assert same_requirement("weaverstack==0.9.0", "weaverstack == 0.9.0")
+    assert same_requirement("weaverstack>=0.9,<1.0", "weaverstack<1.0,>=0.9")
+    assert same_requirement("WeaverStack==0.9.0", "weaverstack==0.9.0")
+    assert not same_requirement("weaverstack==0.9.0", "weaverstack==0.9.1")
+    assert not same_requirement("weaverstack", "weaverstack==0.9.0")
+    assert not same_requirement("weaverstack==0.9.0", "pyyaml==0.9.0")
+    assert not same_requirement("weaverstack==0.9.0", "not a requirement ==")
 
 
 @weaver_test()
@@ -456,14 +559,25 @@ def test_a_missing_environment_says_how_to_get_one(monkeypatch):
 class _DefinitionClient:
     """A Fabric client recording what a definition-route publication sent."""
 
-    def __init__(self, *, current=None, installed=None, state="Success", missing=False):
+    def __init__(
+        self,
+        *,
+        current=None,
+        installed=None,
+        published_external=None,
+        state="Success",
+        missing=False,
+    ):
         self.current = current or {}
-        #: What Fabric has published. The default settles the definition tests
+        #: What Fabric has published. The defaults settle the definition tests
         #: that are about the definition rather than about the publication.
         self.installed = (
             [_external(DISTRIBUTION), _custom(WHEEL)]
             if installed is None
             else list(installed)
+        )
+        self.published_external = (
+            WEAVER_PIP if published_external is None else published_external
         )
         self.state = state
         self.components: dict = {}
@@ -485,6 +599,8 @@ class _DefinitionClient:
         return {"properties": {"publishDetails": details}}
 
     def request(self, method, path, *, payload=None, expected=()):
+        if method == "GET" and path.endswith("exportExternalLibraries"):
+            return _Response(200, content=self.published_external.encode("utf-8"))
         if path.endswith("/getDefinition"):
             return _Response(
                 200,
@@ -696,7 +812,9 @@ def test_an_identical_definition_with_nothing_published_is_still_published(
     path = _local(tmp_path, **{PLATFORM: PLATFORM_JSON})
     overlaid = b"dependencies:\n  - pip:\n      - weaverstack\n"
     client = _DefinitionClient(
-        current={PLATFORM: PLATFORM_JSON, EXTERNAL_LIBRARIES: overlaid}, installed=[]
+        current={PLATFORM: PLATFORM_JSON, EXTERNAL_LIBRARIES: overlaid},
+        installed=[],
+        published_external="",
     )
 
     result = _definition_publication(monkeypatch, client, path)
