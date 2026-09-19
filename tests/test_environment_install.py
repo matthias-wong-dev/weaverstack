@@ -22,6 +22,7 @@ from weaver.fabric.environment import (
 )
 from weaver.fabric.environment_definition import (
     CUSTOM_LIBRARIES,
+    DISTRIBUTION,
     EXTERNAL_LIBRARIES,
     PLATFORM,
     SPARK_COMPUTE,
@@ -101,25 +102,34 @@ def test_an_unqualified_environment_needs_a_workspace():
 class _LibraryClient:
     """A Fabric client recording what a library-route publication asked for."""
 
-    def __init__(self, *, staged=(), external="", state="Success"):
+    def __init__(
+        self, *, staged=(), installed=None, external="", state="Success", states=()
+    ):
         self.staged = list(staged)
+        #: What Fabric has published. Defaults to the staged set, which is what
+        #: an Environment whose last publish settled actually holds.
+        self.installed = list(staged) if installed is None else list(installed)
         self.external = external
         self.state = state
+        self.states = list(states)
         self.imported: list[str] = []
         self.uploaded: list[str] = []
         self.deleted: list[str] = []
         self.published = 0
+        self.reads: list[str] = []
         self.api_base_url = "https://api.invalid/v1"
         self.token = "token"
         self.timeout = 30
 
     def paged(self, path, *, key, not_found_empty=False):
-        return list(self.staged)
+        self.reads.append(path)
+        return list(self.staged if "/staging/" in path else self.installed)
 
     def get_json(self, path):
         if path.endswith("/sparkcompute?beta=false"):
             return {"runtimeVersion": "1.3"}
-        return {"properties": {"publishDetails": {"state": self.state}}}
+        state = self.states.pop(0) if self.states else self.state
+        return {"properties": {"publishDetails": {"state": state}}}
 
     def request(self, method, path, *, payload=None, expected=()):
         if method == "GET" and path.endswith("exportExternalLibraries"):
@@ -264,6 +274,177 @@ def test_an_environment_already_carrying_weaver_is_a_noop(monkeypatch, tmp_path)
     assert result.publish_status == "AlreadyInstalled"
 
 
+# --- configured is not published ------------------------------------------------
+#
+# Staging is where a request is written and publishing is what installs it. The
+# no-op therefore reads the published libraries: `AlreadyInstalled` means a
+# session starting now imports Weaver.
+
+WEAVER_PIP = "dependencies:\n  - pip:\n      - weaverstack\n"
+DEV_PIP = "dependencies:\n  - pip:\n      - pyyaml\n      - mssql-python\n"
+STALE_WHEEL = "weaverstack-0.1.2.dev1-py3-none-any.whl"
+
+
+@weaver_test()
+def test_a_requirement_staged_but_never_published_is_published(monkeypatch):
+    """The reported failure: a matching definition over an unpublished runtime."""
+
+    client = _LibraryClient(external=WEAVER_PIP, installed=[], states=[""])
+
+    result = _library_publication(monkeypatch, client)
+
+    assert client.published == 1
+    assert result.action == "updated"
+    assert result.published
+    assert result.publish_status == "Success"
+
+
+@weaver_test()
+def test_a_published_weaver_requirement_is_a_verified_noop(monkeypatch):
+    client = _LibraryClient(
+        external=WEAVER_PIP, installed=[_external(DISTRIBUTION, "0.9.0")]
+    )
+
+    result = _library_publication(monkeypatch, client)
+
+    assert client.published == 0
+    assert result.action == "unchanged"
+    assert result.publish_status == "AlreadyInstalled"
+
+
+@weaver_test()
+def test_an_environment_with_no_published_libraries_is_published(monkeypatch, tmp_path):
+    client = _LibraryClient(
+        staged=[_custom(WHEEL)], installed=[], external=DEV_PIP, states=[""]
+    )
+
+    _library_publication(monkeypatch, client, dev=True, wheel=_built_wheel(tmp_path))
+
+    assert client.published == 1
+
+
+@weaver_test()
+def test_a_published_wheel_other_than_the_staged_one_is_published(
+    monkeypatch, tmp_path
+):
+    """Published state differs from what is staged, so the request is not met."""
+
+    client = _LibraryClient(
+        staged=[_custom(WHEEL)], installed=[_custom(STALE_WHEEL)], external=DEV_PIP
+    )
+
+    result = _library_publication(
+        monkeypatch, client, dev=True, wheel=_built_wheel(tmp_path)
+    )
+
+    assert client.published == 1
+    assert result.action == "updated"
+
+
+@weaver_test()
+def test_a_publication_under_way_settles_before_the_decision(monkeypatch):
+    """A running publish is neither a success to report nor one to restart."""
+
+    client = _LibraryClient(
+        external=WEAVER_PIP,
+        installed=[_external(DISTRIBUTION)],
+        states=["Running", "Success"],
+    )
+
+    result = _library_publication(monkeypatch, client)
+
+    assert client.published == 0
+    assert result.publish_status == "AlreadyInstalled"
+
+
+@weaver_test()
+def test_a_publication_under_way_that_fails_is_not_already_installed(monkeypatch):
+    client = _LibraryClient(
+        external=WEAVER_PIP,
+        installed=[_external(DISTRIBUTION)],
+        states=["Running", "Failed"],
+        state="Failed",
+    )
+
+    with pytest.raises(FabricError, match="finished with status"):
+        _library_publication(monkeypatch, client)
+
+    assert client.published == 1
+
+
+@weaver_test()
+def test_a_failed_publication_is_never_reported_as_already_installed(monkeypatch):
+    client = _LibraryClient(
+        external=WEAVER_PIP, installed=[_external(DISTRIBUTION)], state="Failed"
+    )
+
+    with pytest.raises(FabricError, match="finished with status 'Failed'"):
+        _library_publication(monkeypatch, client)
+
+
+@weaver_test()
+def test_a_published_state_that_cannot_be_read_is_not_a_noop(monkeypatch):
+    """An unresolved publication state surfaces; it does not read as success."""
+
+    class _Unreadable(_LibraryClient):
+        def paged(self, path, *, key, not_found_empty=False):
+            if "/staging/" in path:
+                return list(self.staged)
+            raise FabricError("reading published libraries returned 500")
+
+    client = _Unreadable(external=WEAVER_PIP)
+
+    with pytest.raises(FabricError, match="published libraries"):
+        _library_publication(monkeypatch, client)
+
+    assert client.published == 0
+
+
+# --- what published libraries say about the runtime -----------------------------
+
+
+@weaver_test()
+def test_a_published_version_outside_the_requirement_is_not_installed():
+    from weaver.fabric.environment import publishes_weaver
+
+    published = _libraries(_external(DISTRIBUTION, "0.8.0"))
+
+    assert not publishes_weaver(published, wheel=None, requirement="weaverstack==0.9.0")
+    assert publishes_weaver(published, wheel=None, requirement="weaverstack==0.8.0")
+    assert publishes_weaver(published, wheel=None, requirement="weaverstack")
+
+
+@weaver_test()
+def test_a_published_package_with_no_reported_version_counts_as_present():
+    """Fabric does not always resolve a version; presence is then what it says."""
+
+    from weaver.fabric.environment import publishes_weaver
+
+    published = _libraries(_external(DISTRIBUTION))
+
+    assert publishes_weaver(published, wheel=None, requirement="weaverstack==0.9.0")
+
+
+@weaver_test()
+def test_another_projects_libraries_do_not_stand_in_for_weaver():
+    from weaver.fabric.environment import publishes_weaver
+
+    published = _libraries(_external("fuzzywuzzy", "0.18.0"), _custom(OTHER_WHEEL))
+
+    assert not publishes_weaver(published, wheel=None, requirement="weaverstack")
+    assert not publishes_weaver(published, wheel=WHEEL, requirement=None)
+
+
+@weaver_test()
+def test_a_development_publication_is_read_from_the_custom_wheels():
+    from weaver.fabric.environment import publishes_weaver
+
+    published = _libraries(_custom(WHEEL), _external(DISTRIBUTION))
+
+    assert publishes_weaver(published, wheel=WHEEL, requirement=None)
+    assert not publishes_weaver(published, wheel=STALE_WHEEL, requirement=None)
+
+
 @weaver_test()
 def test_a_missing_environment_says_how_to_get_one(monkeypatch):
     def missing(workspace, name, item_type=None, client=None):
@@ -284,8 +465,15 @@ def test_a_missing_environment_says_how_to_get_one(monkeypatch):
 class _DefinitionClient:
     """A Fabric client recording what a definition-route publication sent."""
 
-    def __init__(self, *, current=None, state="Success", missing=False):
+    def __init__(self, *, current=None, installed=None, state="Success", missing=False):
         self.current = current or {}
+        #: What Fabric has published. The default settles the definition tests
+        #: that are about the definition rather than about the publication.
+        self.installed = (
+            [_external(DISTRIBUTION), _custom(WHEEL)]
+            if installed is None
+            else list(installed)
+        )
         self.state = state
         self.components: dict = {}
         self.missing = missing
@@ -295,6 +483,9 @@ class _DefinitionClient:
         self.api_base_url = "https://api.invalid/v1"
         self.token = "token"
         self.timeout = 30
+
+    def paged(self, path, *, key, not_found_empty=False):
+        return list(self.installed)
 
     def get_json(self, path):
         details = {"state": self.state}
@@ -503,6 +694,47 @@ def test_a_rebuilt_wheel_with_the_same_version_is_not_a_change(monkeypatch, tmp_
 
     assert client.sent == []
     assert result.action == "unchanged"
+
+
+@weaver_test()
+def test_an_identical_definition_with_nothing_published_is_still_published(
+    monkeypatch, tmp_path
+):
+    """The definition matches, and Fabric has published none of it."""
+
+    path = _local(tmp_path, **{PLATFORM: PLATFORM_JSON})
+    overlaid = b"dependencies:\n  - pip:\n      - weaverstack\n"
+    client = _DefinitionClient(
+        current={PLATFORM: PLATFORM_JSON, EXTERNAL_LIBRARIES: overlaid}, installed=[]
+    )
+
+    result = _definition_publication(monkeypatch, client, path)
+
+    assert client.sent, "an unpublished definition was left staged"
+    assert client.published == 1
+    assert result.action == "updated"
+    assert result.published
+
+
+@weaver_test()
+def test_a_definition_whose_wheel_is_not_the_published_one_is_published(
+    monkeypatch, tmp_path
+):
+    path = _local(tmp_path)
+    client = _DefinitionClient(
+        current={
+            EXTERNAL_LIBRARIES: b"dependencies:\n  - pip:\n      - pyyaml\n",
+            f"{CUSTOM_LIBRARIES}{WHEEL}": b"same version, different bytes",
+        },
+        installed=[_custom(STALE_WHEEL)],
+    )
+
+    result = _definition_publication(
+        monkeypatch, client, path, dev=True, wheel=_built_wheel(tmp_path)
+    )
+
+    assert client.published == 1
+    assert result.action == "updated"
 
 
 @weaver_test()

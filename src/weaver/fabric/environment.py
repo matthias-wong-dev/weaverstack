@@ -233,6 +233,53 @@ def library_wheels(libraries: dict) -> list[str]:
 staged_wheels = library_wheels
 
 
+def library_distributions(libraries: dict) -> dict[str, str]:
+    """External library distributions, folded the way PEP 503 compares them.
+
+    The value is the version Fabric resolved, which is empty where it reports
+    none.
+    """
+
+    found: dict[str, str] = {}
+    for entry in libraries.get("libraries", ()):
+        if str(entry.get("libraryType") or "").casefold() != "external":
+            continue
+        name = str(entry.get("name") or "")
+        if name:
+            found[normalise_distribution(name)] = str(entry.get("version") or "")
+    return found
+
+
+def publishes_weaver(
+    libraries: dict, *, wheel: str | None, requirement: str | None
+) -> bool:
+    """Whether published libraries carry the Weaver runtime a request wants.
+
+    Development mode owns a custom wheel and released mode a PyPI requirement,
+    so exactly one of ``wheel`` and ``requirement`` decides. A session starting
+    now imports what is here; what is staged is a request, not evidence.
+    """
+
+    if wheel is not None:
+        return wheel in library_wheels(libraries)
+    if requirement is None:
+        return False
+    from packaging.requirements import InvalidRequirement, Requirement
+
+    try:
+        wanted = Requirement(requirement)
+    except InvalidRequirement:
+        return False
+    version = library_distributions(libraries).get(normalise_distribution(wanted.name))
+    if version is None:
+        return False
+    if not version or not wanted.specifier:
+        # Fabric does not always report a resolved version. Presence is then
+        # all the published state says, and it says Weaver is there.
+        return True
+    return wanted.specifier.contains(version, prereleases=True)
+
+
 def read_staging_external_libraries(environment: Item, *, client: FabricClient) -> str:
     """Read published and pending external libraries from staging."""
 
@@ -330,7 +377,8 @@ def delete_stale_wheels(
     return removed
 
 
-_TERMINAL_PUBLISH = frozenset({"success", "succeeded", "failed", "cancelled"})
+_SUCCEEDED = frozenset({"success", "succeeded"})
+_TERMINAL_PUBLISH = frozenset({*_SUCCEEDED, "failed", "cancelled"})
 
 
 @contextmanager
@@ -354,6 +402,20 @@ def publish_and_wait(
         f"{_staging_base(environment)}/publish?beta=false",
         expected=(200, 202),
     )
+    return wait_for_publish(
+        environment, client=client, timeout=timeout, poll_interval=poll_interval
+    )
+
+
+def wait_for_publish(
+    environment: Item,
+    *,
+    client: FabricClient,
+    timeout: float = 1800.0,
+    poll_interval: float = 15.0,
+) -> str:
+    """Poll a publication already under way until it reaches a terminal state."""
+
     deadline = time.time() + timeout
     seen = ""
     while time.time() < deadline:
@@ -365,6 +427,32 @@ def publish_and_wait(
         "Environment publish did not finish within "
         f"{int(timeout)} seconds. Last state: {seen!r}."
     )
+
+
+def already_published(
+    environment: Item,
+    *,
+    client: FabricClient,
+    wheel: str | None = None,
+    requirement: str | None = None,
+) -> bool:
+    """Whether Fabric has published the Weaver runtime this request wants.
+
+    A matching staged definition says the request was made. Only the published
+    libraries say a session starting now will import Weaver, and an Environment
+    that has never been published has none.
+
+    A publication under way settles first, so the answer is about a state Fabric
+    has finished reaching rather than one it is still leaving.
+    """
+
+    status = publish_state(environment, client=client)
+    if status and status.casefold() not in _TERMINAL_PUBLISH:
+        status = wait_for_publish(environment, client=client)
+    if status.casefold() not in _SUCCEEDED:
+        return False
+    published = read_published(environment, client=client)
+    return publishes_weaver(published, wheel=wheel, requirement=requirement)
 
 
 def read_definition(
@@ -627,6 +715,23 @@ def publish_environment(
     )
 
 
+def _weaver_is_published(
+    item: Item, desired: EnvironmentDefinition, *, client: FabricClient, step
+) -> bool:
+    """Whether the definition's Weaver libraries are published, not just staged."""
+
+    wheels = [path.split("/")[-1] for path in _weaver_parts(desired)]
+    with step("Read the published Environment state"):
+        return already_published(
+            item,
+            client=client,
+            wheel=wheels[0] if wheels else None,
+            requirement=weaver_requirement(
+                _pip_entries(desired.external_libraries(), source="definition")
+            ),
+        )
+
+
 def _publish_definition(
     workspace_name: str | None,
     path: str | Path,
@@ -667,9 +772,9 @@ def _publish_definition(
     else:
         with step("Read the Environment definition"):
             current = read_definition(item, client=client)
-        if _comparable(current) == _comparable(desired) and publish_state(
-            item, client=client
-        ).casefold() in {"success", "succeeded"}:
+        if _comparable(current) == _comparable(desired) and _weaver_is_published(
+            item, desired, client=client, step=step
+        ):
             timings["send"] = round(time.perf_counter() - started, 2)
             return _result(
                 workspace,
@@ -750,24 +855,27 @@ def _publish_libraries(
             removed = delete_stale_wheels(item, keep, staged, client=client)
     timings["send"] = round(time.perf_counter() - started, 2)
 
-    if not changed and publish_state(item, client=client).casefold() in {
-        "success",
-        "succeeded",
-    }:
-        return _result(
-            workspace,
-            item,
-            source_path=None,
-            dev=dev,
-            desired=None,
-            removed=(),
-            action=UNCHANGED,
-            published=False,
-            status="AlreadyInstalled",
-            requirement=weaver_requirement(_pip_entries(wanted, source=source)),
-            wheel_filename=keep,
-            timings=timings,
-        )
+    requirement = weaver_requirement(_pip_entries(wanted, source=source))
+    if not changed:
+        with step("Read the published Environment state"):
+            settled = already_published(
+                item, client=client, wheel=keep, requirement=requirement
+            )
+        if settled:
+            return _result(
+                workspace,
+                item,
+                source_path=None,
+                dev=dev,
+                desired=None,
+                removed=(),
+                action=UNCHANGED,
+                published=False,
+                status="AlreadyInstalled",
+                requirement=requirement,
+                wheel_filename=keep,
+                timings=timings,
+            )
 
     started = time.perf_counter()
     with step("Publish", "Fabric resolves the staged libraries"):
@@ -784,7 +892,7 @@ def _publish_libraries(
         action=UPDATED,
         published=True,
         status=status,
-        requirement=weaver_requirement(_pip_entries(wanted, source=source)),
+        requirement=requirement,
         wheel_filename=keep,
         timings=timings,
     )
